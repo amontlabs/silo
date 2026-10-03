@@ -329,7 +329,8 @@ pub(crate) fn prepare_as<R: RuntimeRunner + ?Sized>(
             ],
             Duration::from_secs(300),
         )
-        .map_err(|_| {
+        .map_err(|error| {
+            eprintln!("Silo could not load its VM image into the runtime: {error}");
             RuntimeError::Unavailable(
                 "Silo could not prepare its VM image. Check disk space and retry.".into(),
             )
