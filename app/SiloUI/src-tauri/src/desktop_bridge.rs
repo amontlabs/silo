@@ -24,6 +24,9 @@ pub(crate) const ROUTE_PREFIX: &str = "/__silo/v1/";
 const REPLY_GRACE: Duration = Duration::from_secs(5);
 /// Longest wait a caller can request for the page's answer.
 const MAX_WAIT: Duration = Duration::from_secs(10);
+/// How long a send waits for the page to say the socket took its frames.
+const SEND_WAIT: Duration = Duration::from_secs(3);
+const NOT_CONNECTED: &str = "The desktop is not connected.";
 
 /// Largest text Silo writes into a computer's clipboard.
 pub(crate) const MAX_TEXT_BYTES: usize = 1024 * 1024;
@@ -44,12 +47,15 @@ const KEYSYM_V: u32 = b'v' as u32;
 pub(crate) enum Op {
     Clipboard,
     Capabilities,
+    /// The page's acknowledgement that it sent (or could not send) frames.
+    Sent,
 }
 impl Op {
     fn parse(name: &str) -> Option<Self> {
         match name {
             "clipboard" => Some(Self::Clipboard),
             "capabilities" => Some(Self::Capabilities),
+            "sent" => Some(Self::Sent),
             _ => None,
         }
     }
@@ -57,6 +63,7 @@ impl Op {
         match self {
             Self::Clipboard => "clipboard",
             Self::Capabilities => "capabilities",
+            Self::Sent => "sent",
         }
     }
     /// Largest request body Rust accepts for this operation.
@@ -64,9 +71,17 @@ impl Op {
         match self {
             Self::Clipboard => 24 * 1024 * 1024,
             Self::Capabilities => 4 * 1024,
+            Self::Sent => 0,
         }
     }
+    /// Acknowledgements for several sends can be outstanding together; every
+    /// other operation has one request at a time, and a newer one supersedes it.
+    fn concurrent(self) -> bool {
+        self == Self::Sent
+    }
 }
+/// Most acknowledgements awaited at once.
+const MAX_PENDING_SENT: usize = 16;
 
 /// What the page posted: a short content kind (a MIME type, `none` or
 /// `application/json`) and the raw body.
@@ -93,7 +108,7 @@ struct Pending {
 /// Pending single-use nonces for one viewer connection.
 #[derive(Default)]
 pub(crate) struct Inbox {
-    pending: Mutex<HashMap<Op, Pending>>,
+    pending: Mutex<HashMap<Op, Vec<Pending>>>,
     rejected: AtomicU64,
 }
 
@@ -136,14 +151,21 @@ impl Inbox {
         let nonce = uuid::Uuid::new_v4().simple().to_string();
         let (sender, receiver) = mpsc::sync_channel(1);
         if let Ok(mut pending) = self.pending.lock() {
-            pending.insert(
-                op,
-                Pending {
-                    nonce: nonce.clone(),
-                    expires: Instant::now() + ttl,
-                    sender,
-                },
-            );
+            let now = Instant::now();
+            let entries = pending.entry(op).or_default();
+            if op.concurrent() {
+                entries.retain(|entry| entry.expires > now);
+                if entries.len() >= MAX_PENDING_SENT {
+                    entries.remove(0);
+                }
+            } else {
+                entries.clear();
+            }
+            entries.push(Pending {
+                nonce: nonce.clone(),
+                expires: now + ttl,
+                sender,
+            });
         }
         Expectation { nonce, receiver }
     }
@@ -153,17 +175,19 @@ impl Inbox {
     /// cancel a request by guessing.
     pub(crate) fn claim(&self, op: Op, nonce: &str, now: Instant) -> Result<Claim, Rejection> {
         let mut pending = self.pending.lock().map_err(|_| Rejection::Unsolicited)?;
-        let Some(entry) = pending.get(&op) else {
-            return Err(Rejection::Unsolicited);
+        let entries = pending.entry(op).or_default();
+        let Some(index) = entries.iter().position(|entry| entry.nonce == nonce) else {
+            entries.retain(|entry| entry.expires > now);
+            return Err(if entries.is_empty() {
+                Rejection::Unsolicited
+            } else {
+                Rejection::WrongNonce
+            });
         };
+        let entry = entries.remove(index);
         if entry.expires <= now {
-            pending.remove(&op);
             return Err(Rejection::Expired);
         }
-        if entry.nonce != nonce {
-            return Err(Rejection::WrongNonce);
-        }
-        let entry = pending.remove(&op).ok_or(Rejection::Unsolicited)?;
         Ok(Claim {
             max_bytes: op.max_bytes(),
             sender: entry.sender,
@@ -397,7 +421,34 @@ impl<R: tauri::Runtime> Page for tauri::Webview<R> {
 pub(crate) enum GuestClipboard {
     Empty,
     Text(String),
-    Image { mime: String, bytes: Vec<u8> },
+    Image {
+        mime: String,
+        bytes: Vec<u8>,
+    },
+    /// The computer announced a selection above the page's cap.
+    TooLarge,
+}
+
+/// Selkies' multi-flavour clipboard payload (input_handler.py
+/// `CLIPBOARD_FLAVOURS_MIME`): a JSON object of MIME type to text.
+const FLAVOURS_MIME: &str = "application/x-selkies-clipboard-flavours";
+
+#[derive(Deserialize)]
+struct Flavours {
+    #[serde(rename = "text/plain", default)]
+    plain: Option<String>,
+}
+
+/// The plain text of a flavours payload; markup and any other flavour are
+/// ignored. `None` when the payload is not a JSON object.
+fn flavours_text(body: &[u8]) -> Option<String> {
+    // A struct would also accept a JSON array.
+    if body.trim_ascii_start().first() != Some(&b'{') {
+        return None;
+    }
+    serde_json::from_slice::<Flavours>(body)
+        .ok()
+        .map(|flavours| flavours.plain.unwrap_or_default())
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Deserialize)]
@@ -410,6 +461,52 @@ pub(crate) struct Capabilities {
     /// The Selkies WebSocket transport exists and is open. It is absent when
     /// the client runs in WebRTC mode, where none of the bridge's frames work.
     pub transport: bool,
+}
+
+/// What the Selkies server's settings, as the client mirrors them, allow for the
+/// clipboard. Each field is `None` until the settings have arrived.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub(crate) struct ClipboardPolicy {
+    /// The transport is open.
+    pub transport: bool,
+    /// The server has clipboard transfer turned on at all.
+    pub clipboard: Option<bool>,
+    /// The server accepts clipboard writes from the client (Paste).
+    #[serde(rename = "clipboardIn")]
+    pub clipboard_in: Option<bool>,
+    /// The server sends its clipboard to the client (Copy).
+    #[serde(rename = "clipboardOut")]
+    pub clipboard_out: Option<bool>,
+}
+
+/// Whether one clipboard direction is available on the computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClipboardSupport {
+    Supported,
+    /// The server has it turned off, as on a desktop older than recipe 3.
+    Unsupported,
+    /// The server allows the clipboard but not this direction.
+    Disabled,
+    /// The page has not reported the server settings (or is not connected).
+    Unknown,
+}
+
+impl ClipboardPolicy {
+    /// The state of Paste (`writing`) or Copy.
+    pub(crate) fn support(self, writing: bool) -> ClipboardSupport {
+        let direction = if writing {
+            self.clipboard_in
+        } else {
+            self.clipboard_out
+        };
+        match (self.clipboard, direction) {
+            (Some(false), _) => ClipboardSupport::Unsupported,
+            (Some(true), Some(false)) => ClipboardSupport::Disabled,
+            (Some(true), Some(true)) if self.transport => ClipboardSupport::Supported,
+            _ => ClipboardSupport::Unknown,
+        }
+    }
 }
 
 /// Silo's operations on one viewer's guest page.
@@ -477,7 +574,19 @@ impl Bridge<'_> {
     }
 
     fn send_frames(&self, frames: &[String]) -> Result<(), String> {
-        self.invoke("sendFrames", json!([frames]))
+        self.send_acknowledged("sendFrames", frames)
+    }
+
+    /// Runs the page's `method` (`sendFrames` or `sendShortcut`) and waits for
+    /// its acknowledgement, which says whether the socket took every frame.
+    fn send_acknowledged(&self, method: &str, frames: &[String]) -> Result<(), String> {
+        let expectation = self.inbox.expect(Op::Sent, SEND_WAIT + REPLY_GRACE);
+        self.invoke(method, json!([frames, expectation.nonce]))?;
+        match expectation.wait(SEND_WAIT)?.kind.as_str() {
+            "ok" => Ok(()),
+            "closed" => Err(NOT_CONNECTED.into()),
+            _ => Err("The computer's display refused the request.".into()),
+        }
     }
 
     /// Sets the computer's clipboard to `text` (Selkies `cw`, or `cws`/`cwd`/`cwe`
@@ -503,14 +612,15 @@ impl Bridge<'_> {
         self.send_frames(&image_frames(mime, bytes, &id))
     }
 
-    /// Presses Ctrl+V in the computer.
+    /// Presses Ctrl+V in the computer, with the modifiers the page holds down
+    /// released first.
     pub(crate) fn press_guest_paste(&self) -> Result<(), String> {
-        self.send_frames(&chord(KEYSYM_V))
+        self.send_acknowledged("sendShortcut", &chord(KEYSYM_V))
     }
 
     /// Presses Ctrl+C in the computer, without reading the result.
     pub(crate) fn press_guest_copy(&self) -> Result<(), String> {
-        self.send_frames(&chord(KEYSYM_C))
+        self.send_acknowledged("sendShortcut", &chord(KEYSYM_C))
     }
 
     /// Reads the computer's clipboard: waits up to `timeout` for the next
@@ -528,11 +638,24 @@ impl Bridge<'_> {
         frames.push("REQUEST_CLIPBOARD".into());
         self.invoke(
             "requestClipboard",
-            json!([expectation.nonce, timeout.as_millis() as u64, frames]),
+            json!([
+                expectation.nonce,
+                timeout.as_millis() as u64,
+                frames,
+                press_copy
+            ]),
         )?;
         let reply = expectation.wait(wait)?;
         match reply.kind.as_str() {
             "none" => Ok(GuestClipboard::Empty),
+            "too-large" => Ok(GuestClipboard::TooLarge),
+            "disconnected" => Err(NOT_CONNECTED.into()),
+            "refused" => Err("The computer's display refused the request.".into()),
+            FLAVOURS_MIME => match flavours_text(&reply.body) {
+                Some(text) if text.is_empty() => Ok(GuestClipboard::Empty),
+                Some(text) => Ok(GuestClipboard::Text(text)),
+                None => Err("The computer's clipboard has content Silo cannot copy.".into()),
+            },
             "text/plain" if reply.body.is_empty() => Ok(GuestClipboard::Empty),
             "text/plain" => String::from_utf8(reply.body)
                 .map(GuestClipboard::Text)
@@ -547,6 +670,15 @@ impl Bridge<'_> {
 
     /// Asks the page which media features this web engine has.
     pub(crate) fn capabilities(&self, timeout: Duration) -> Result<Capabilities, String> {
+        let wait = timeout.min(MAX_WAIT);
+        let expectation = self.inbox.expect(Op::Capabilities, wait + REPLY_GRACE);
+        self.invoke("capabilities", json!([expectation.nonce]))?;
+        let reply = expectation.wait(wait)?;
+        serde_json::from_slice(&reply.body).map_err(|_| "Unreadable desktop capabilities.".into())
+    }
+
+    /// Reads the clipboard settings the Selkies server announced to the page.
+    pub(crate) fn clipboard_policy(&self, timeout: Duration) -> Result<ClipboardPolicy, String> {
         let wait = timeout.min(MAX_WAIT);
         let expectation = self.inbox.expect(Op::Capabilities, wait + REPLY_GRACE);
         self.invoke("capabilities", json!([expectation.nonce]))?;
@@ -584,8 +716,70 @@ impl Bridge<'_> {
     }
 }
 
+/// Fake pages for tests of the bridge and the code built on it.
+#[cfg(test)]
+pub(crate) mod test_page {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    /// The method and arguments of a script the bridge evaluates.
+    pub(crate) fn invocation(script: &str) -> (String, Vec<Value>) {
+        let call = script
+            .strip_prefix("window.__silo&&window.__silo.invoke(")
+            .and_then(|rest| rest.strip_suffix(");"))
+            .expect("a bridge script");
+        let (method, args) = call.split_once(',').expect("a method and arguments");
+        (
+            serde_json::from_str(method).unwrap(),
+            serde_json::from_str(args).unwrap(),
+        )
+    }
+
+    /// Answers a `sendFrames` or `sendShortcut` script the way the page does, with `outcome`.
+    /// Returns whether the script was a send.
+    pub(crate) fn acknowledge_send(inbox: &Inbox, script: &str, outcome: &str) -> bool {
+        let (method, args) = invocation(script);
+        if method != "sendFrames" && method != "sendShortcut" {
+            return false;
+        }
+        let nonce = args[1].as_str().expect("a nonce");
+        inbox
+            .claim(Op::Sent, nonce, Instant::now())
+            .expect("a pending acknowledgement")
+            .deliver(Reply {
+                kind: outcome.to_string(),
+                body: vec![],
+            });
+        true
+    }
+
+    /// Records scripts and acknowledges sends with a configurable outcome.
+    pub(crate) struct AckingPage<'a> {
+        pub inbox: &'a Inbox,
+        pub outcome: Cell<&'static str>,
+        pub scripts: RefCell<Vec<String>>,
+    }
+    impl<'a> AckingPage<'a> {
+        pub(crate) fn new(inbox: &'a Inbox) -> Self {
+            Self {
+                inbox,
+                outcome: Cell::new("ok"),
+                scripts: RefCell::default(),
+            }
+        }
+    }
+    impl Page for AckingPage<'_> {
+        fn eval(&self, script: &str) -> Result<(), String> {
+            self.scripts.borrow_mut().push(script.to_string());
+            acknowledge_send(self.inbox, script, self.outcome.get());
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::test_page::*;
     use super::*;
     use std::cell::RefCell;
 
@@ -737,11 +931,8 @@ mod tests {
             serde_json::from_str(include_str!("desktop_bridge_contract.json")).unwrap();
         assert!(!cases.is_empty());
         for case in cases {
-            let op = if case.url.contains("/clipboard?") {
-                Op::Clipboard
-            } else {
-                Op::Capabilities
-            };
+            let name = case.url[ROUTE_PREFIX.len()..].split('?').next().unwrap();
+            let op = Op::parse(name).expect("a known operation");
             let inbox = Inbox::default();
             let expectation = inbox.expect(op, Duration::from_secs(5));
             let target = case.url.replace("abc123", &expectation.nonce);
@@ -878,8 +1069,8 @@ mod tests {
 
     #[test]
     fn payloads_reach_the_page_only_as_json() {
-        let page = FakePage::default();
         let inbox = Inbox::default();
+        let page = AckingPage::new(&inbox);
         let bridge = Bridge {
             page: &page,
             inbox: &inbox,
@@ -893,10 +1084,10 @@ mod tests {
         // The text is base64 inside a JSON array; nothing of it appears raw.
         assert!(!scripts[0].contains("alert"));
         assert!(scripts[0].starts_with("window.__silo&&window.__silo.invoke(\"sendFrames\",[["));
-        assert_eq!(
-            scripts[1],
-            "window.__silo&&window.__silo.invoke(\"sendFrames\",[[\"kd,65507\",\"kd,118\",\"ku,118\",\"ku,65507\"]]);"
-        );
+        let (method, args) = invocation(&scripts[1]);
+        assert_eq!(method, "sendShortcut");
+        assert_eq!(args[0], json!(["kd,65507", "kd,118", "ku,118", "ku,65507"]));
+        assert!(args[1].as_str().is_some());
         assert_eq!(
             scripts[2],
             "window.__silo&&window.__silo.invoke(\"setMute\",[true]);"
@@ -905,8 +1096,8 @@ mod tests {
 
     #[test]
     fn oversize_text_images_and_bad_formats_are_refused_locally() {
-        let page = FakePage::default();
         let inbox = Inbox::default();
+        let page = AckingPage::new(&inbox);
         let bridge = Bridge {
             page: &page,
             inbox: &inbox,
@@ -1019,6 +1210,139 @@ mod tests {
                 transport: true
             }
         );
+    }
+
+    #[test]
+    fn a_send_succeeds_only_when_the_page_says_the_socket_took_it() {
+        let inbox = Inbox::default();
+        let page = AckingPage::new(&inbox);
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        assert_eq!(bridge.send_guest_text("hi"), Ok(()));
+        page.outcome.set("closed");
+        assert_eq!(
+            bridge.send_guest_text("hi"),
+            Err("The desktop is not connected.".to_string())
+        );
+        assert_eq!(
+            bridge.press_guest_paste(),
+            Err("The desktop is not connected.".to_string())
+        );
+        page.outcome.set("refused");
+        assert!(bridge.press_guest_copy().is_err());
+    }
+
+    #[test]
+    fn a_send_the_page_never_acknowledges_fails() {
+        let page = FakePage::default();
+        let inbox = Inbox::default();
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        let started = Instant::now();
+        assert!(bridge.send_guest_text("hi").is_err());
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn acknowledgements_for_several_sends_can_be_pending_together() {
+        let inbox = Inbox::default();
+        let first = inbox.expect(Op::Sent, Duration::from_secs(5));
+        let second = inbox.expect(Op::Sent, Duration::from_secs(5));
+        let target = |nonce: &str| format!("{ROUTE_PREFIX}sent?nonce={nonce}&kind=ok");
+        assert_eq!(post(&inbox, &target(&second.nonce), b""), Status::Accepted);
+        assert_eq!(post(&inbox, &target(&first.nonce), b""), Status::Accepted);
+        assert_eq!(post(&inbox, &target(&first.nonce), b""), Status::Forbidden);
+        assert_eq!(first.wait(Duration::from_secs(1)).unwrap().kind, "ok");
+        assert_eq!(second.wait(Duration::from_secs(1)).unwrap().kind, "ok");
+        // An acknowledgement carries no body.
+        let third = inbox.expect(Op::Sent, Duration::from_secs(5));
+        assert_eq!(post(&inbox, &target(&third.nonce), b"x"), Status::TooLarge);
+    }
+
+    #[test]
+    fn clipboard_answers_cover_flavours_oversize_and_a_closed_transport() {
+        let html_and_text = br#"{"text/html":"<b>hi</b>","text/plain":"hi","other":1}"#;
+        let html_only = br#"{"text/html":"<b>hi</b>"}"#;
+        let cases: [(&str, &[u8], Result<GuestClipboard, ()>); 7] = [
+            (
+                FLAVOURS_MIME,
+                html_and_text,
+                Ok(GuestClipboard::Text("hi".into())),
+            ),
+            (FLAVOURS_MIME, html_only, Ok(GuestClipboard::Empty)),
+            (FLAVOURS_MIME, b"not json", Err(())),
+            (FLAVOURS_MIME, b"[\"text/plain\"]", Err(())),
+            ("too-large", b"", Ok(GuestClipboard::TooLarge)),
+            ("disconnected", b"", Err(())),
+            ("refused", b"", Err(())),
+        ];
+        for (kind, body, expected) in cases {
+            let inbox = Inbox::default();
+            let page = AnsweringPage {
+                inbox: &inbox,
+                op: Op::Clipboard,
+                kind,
+                body,
+                seen: RefCell::default(),
+            };
+            let bridge = Bridge {
+                page: &page,
+                inbox: &inbox,
+            };
+            let result = bridge.request_guest_clipboard(Duration::from_millis(500), false);
+            assert_eq!(result.map_err(|_| ()), expected, "{kind}");
+        }
+        let inbox = Inbox::default();
+        let page = AnsweringPage {
+            inbox: &inbox,
+            op: Op::Clipboard,
+            kind: "disconnected",
+            body: b"",
+            seen: RefCell::default(),
+        };
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        assert_eq!(
+            bridge
+                .request_guest_clipboard(Duration::from_millis(500), true)
+                .unwrap_err(),
+            "The desktop is not connected."
+        );
+    }
+
+    #[test]
+    fn the_clipboard_policy_distinguishes_off_unknown_and_supported() {
+        let policy = |json: &str| serde_json::from_str::<ClipboardPolicy>(json).unwrap();
+        let supported =
+            policy(r#"{"transport":true,"clipboard":true,"clipboardIn":true,"clipboardOut":true}"#);
+        assert_eq!(supported.support(true), ClipboardSupport::Supported);
+        assert_eq!(supported.support(false), ClipboardSupport::Supported);
+        let off = policy(
+            r#"{"transport":true,"clipboard":false,"clipboardIn":false,"clipboardOut":false}"#,
+        );
+        assert_eq!(off.support(true), ClipboardSupport::Unsupported);
+        assert_eq!(off.support(false), ClipboardSupport::Unsupported);
+        let one_way = policy(
+            r#"{"transport":true,"clipboard":true,"clipboardIn":false,"clipboardOut":true}"#,
+        );
+        assert_eq!(one_way.support(true), ClipboardSupport::Disabled);
+        assert_eq!(one_way.support(false), ClipboardSupport::Supported);
+        // Settings the page has not received, or a closed transport, are unknown.
+        let pending =
+            policy(r#"{"transport":true,"clipboard":null,"clipboardIn":null,"clipboardOut":null}"#);
+        assert_eq!(pending.support(true), ClipboardSupport::Unknown);
+        assert_eq!(pending.support(false), ClipboardSupport::Unknown);
+        assert_eq!(policy("{}").support(true), ClipboardSupport::Unknown);
+        let closed = policy(
+            r#"{"transport":false,"clipboard":true,"clipboardIn":true,"clipboardOut":true}"#,
+        );
+        assert_eq!(closed.support(true), ClipboardSupport::Unknown);
     }
 
     #[test]

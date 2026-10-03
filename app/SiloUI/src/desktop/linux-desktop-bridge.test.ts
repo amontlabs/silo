@@ -11,6 +11,7 @@ const script = readFileSync(resolve(native, "src/desktop_viewer_bridge.js"), "ut
 const contract = JSON.parse(readFileSync(resolve(native, "src/desktop_bridge_contract.json"), "utf8")) as Array<{ name: string; url: string; body: string; kind: string }>
 
 class FakeSocket {
+  readyState?: number
   sent: string[] = []
   listeners: Array<(event: { data: unknown }) => void> = []
   send = (frame: string) => { this.sent.push(frame) }
@@ -28,6 +29,14 @@ const fetchMock = vi.fn(async (..._args: unknown[]) => ({}))
 const posted = () => fetchMock.mock.calls.map(([url, init]) => ({ url: new URL(String(url), location.origin), init: init as RequestInit }))
 const b64 = (text: string) => btoa(text)
 const body = (init: RequestInit) => new TextDecoder().decode(init.body as Uint8Array)
+
+const SHIFT_L = 65505
+const CONTROL_L = 65507
+const SUPER_L = 65515
+const CHORD = ["kd,65507", "kd,118", "ku,118", "ku,65507"]
+const MiB = 1024 * 1024
+const flush = () => new Promise(resolve => setTimeout(resolve, 20))
+const requestKinds = () => posted().map(request => request.url.searchParams.get("kind"))
 
 let socket: FakeSocket
 beforeAll(() => {
@@ -62,7 +71,7 @@ describe("host bridge page helper", () => {
   it("reports an unavailable transport instead of pretending to send", async () => {
     setTransport(null)
     expect(call("sendFrames", ["REQUEST_CLIPBOARD"])).toBe(false)
-    const closed = new FakeSocket() as FakeSocket & { readyState: number }
+    const closed = new FakeSocket()
     closed.readyState = 3
     setTransport(closed)
     expect(call("sendFrames", ["REQUEST_CLIPBOARD"])).toBe(false)
@@ -70,7 +79,7 @@ describe("host bridge page helper", () => {
     vi.stubGlobal("AudioDecoder", undefined)
     call("capabilities", "nonce-0")
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
-    expect(JSON.parse(body(posted()[0].init))).toEqual({ audioDecoder: false, opus: false, transport: false })
+    expect(JSON.parse(body(posted()[0].init))).toEqual({ audioDecoder: false, opus: false, transport: false, clipboard: null, clipboardIn: null, clipboardOut: null })
   })
 
   it("never posts clipboard content to the host unprompted", async () => {
@@ -149,7 +158,7 @@ describe("host bridge page helper", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
     const [request] = posted()
     expect(request.url.pathname).toBe("/__silo/v1/capabilities")
-    expect(JSON.parse(body(request.init))).toEqual({ audioDecoder: true, opus: true, transport: true })
+    expect(JSON.parse(body(request.init))).toEqual({ audioDecoder: true, opus: true, transport: true, clipboard: null, clipboardIn: null, clipboardOut: null })
   })
 
   it("posts the Selkies same-origin verbs for mute, volume and resolution", async () => {
@@ -200,6 +209,18 @@ describe("host bridge page helper", () => {
     await run("clipboard empty", () => call("requestClipboard", "abc123", 10, []))
     vi.stubGlobal("AudioDecoder", undefined)
     await run("capabilities", () => call("capabilities", "abc123"))
+    socket.receive(`clipboard_start,text/plain,${31 * 1024 * 1024}`)
+    await run("clipboard too large", () => call("requestClipboard", "abc123", 10, []))
+    setTransport(null)
+    await run("clipboard disconnected", () => call("requestClipboard", "abc123", 10, []))
+    const flavoured = new FakeSocket()
+    setTransport(flavoured)
+    const envelope = JSON.stringify({ "text/html": "<b>hi</b>", "text/plain": "hi" })
+    flavoured.receive(`clipboard_binary,application/x-selkies-clipboard-flavours,${b64(envelope)}`)
+    await run("clipboard flavours", () => call("requestClipboard", "abc123", 10, []))
+    await run("sent ok", () => call("sendFrames", ["kd,65"], "abc123"))
+    flavoured.readyState = 3
+    await run("sent closed", () => call("sendFrames", ["kd,65"], "abc123"))
     expect(Object.keys(sent).sort()).toEqual(contract.map(entry => entry.name).sort())
     for (const entry of contract) expect(sent[entry.name], entry.name).toEqual({ url: entry.url, body: entry.body })
   })
@@ -209,6 +230,191 @@ describe("host bridge page helper", () => {
     call("requestClipboard", "abc123", 10, [])
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("acknowledges a send under its nonce with ok, closed or refused", async () => {
+    expect(call("sendFrames", ["kd,65"], "ack-1")).toBe(true)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const [ok] = posted()
+    expect(ok.url.pathname).toBe("/__silo/v1/sent")
+    expect(ok.url.searchParams.get("nonce")).toBe("ack-1")
+    expect(ok.url.searchParams.get("kind")).toBe("ok")
+    expect(ok.init.body).toHaveLength(0)
+
+    expect(call("sendFrames", ["cmd,rm -rf /"], "ack-2")).toBe(false)
+    socket.readyState = 3
+    expect(call("sendFrames", ["kd,65"], "ack-3")).toBe(false)
+    expect(call("sendShortcut", CHORD, "ack-4")).toBe(false)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    expect(requestKinds()).toEqual(["ok", "refused", "closed", "closed"])
+    expect(socket.sent).toEqual(["kd,65"])
+    setTransport(null)
+    expect(call("sendFrames", ["kd,65"], "ack-5")).toBe(false)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5))
+    expect(requestKinds()[4]).toBe("closed")
+  })
+
+  it("releases the modifiers the page holds before a shortcut chord and leaves them released", () => {
+    // What Selkies sends while the user holds Ctrl+Shift+C or Command+V.
+    for (const frame of [`kd,${CONTROL_L}`, `kd,${SHIFT_L}`, `kd,${SUPER_L}`, "kd,65", "ku,65", `kh,${CONTROL_L},${SHIFT_L}`]) socket.send(frame)
+    socket.sent.length = 0
+    expect(call("sendShortcut", CHORD, "chord-1")).toBe(true)
+    expect(socket.sent).toEqual([`ku,${SHIFT_L}`, `ku,${CONTROL_L}`, `ku,${SUPER_L}`, ...CHORD])
+
+    socket.sent.length = 0
+    expect(call("sendShortcut", CHORD, "chord-2")).toBe(true)
+    expect(socket.sent).toEqual(CHORD)
+
+    // A key the page presses again after the chord is held again.
+    socket.send(`kd,${SHIFT_L}`)
+    socket.sent.length = 0
+    call("sendShortcut", CHORD, "chord-3")
+    expect(socket.sent).toEqual([`ku,${SHIFT_L}`, ...CHORD])
+  })
+
+  it("forgets modifiers the page released, and all of them on a keyboard reset or a new socket", () => {
+    socket.send(`kd,${SHIFT_L}`)
+    socket.send(`ku,${SHIFT_L}`)
+    socket.send(`kd,${SUPER_L}`)
+    socket.send("kr")
+    socket.sent.length = 0
+    call("sendShortcut", CHORD, "chord-4")
+    expect(socket.sent).toEqual(CHORD)
+
+    socket.send(`kd,${SHIFT_L}`)
+    const replacement = new FakeSocket()
+    setTransport(replacement)
+    call("sendShortcut", CHORD, "chord-5")
+    expect(replacement.sent).toEqual(CHORD)
+  })
+
+  it("does not treat other keys or malformed frames as modifiers", () => {
+    for (const frame of ["kd,65", "kd,65506x", "kd,-1", "kd,", "kd,99999999999999999999", "m,1,2,0,0", `ku,${CONTROL_L}`]) socket.send(frame)
+    socket.sent.length = 0
+    call("sendShortcut", CHORD, "chord-6")
+    expect(socket.sent).toEqual(CHORD)
+  })
+
+  it("releases held modifiers around the Ctrl+C of a clipboard request too", async () => {
+    socket.send(`kd,${SHIFT_L}`)
+    socket.sent.length = 0
+    call("requestClipboard", "copy-1", 20, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    expect(socket.sent).toEqual([`ku,${SHIFT_L}`, ...CHORD, "REQUEST_CLIPBOARD"])
+    socket.sent.length = 0
+    call("requestClipboard", "copy-2", 20, [...CHORD, "REQUEST_CLIPBOARD"], false)
+    expect(socket.sent).toEqual([...CHORD, "REQUEST_CLIPBOARD"])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("keeps waiting when the first reply repeats the cached clipboard, and answers once the content changes", async () => {
+    socket.receive(`clipboard,${b64("old")}`)
+    call("requestClipboard", "stale-1", 2000, ["REQUEST_CLIPBOARD"])
+    socket.receive(`clipboard,${b64("old")}`)
+    socket.receive(`clipboard_binary,text/plain,${b64("old")}`)
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
+    socket.receive(`clipboard,${b64("new")}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("new")
+  })
+
+  it("falls back to the cached clipboard when only repeats arrive before the deadline", async () => {
+    socket.receive(`clipboard,${b64("old")}`)
+    call("requestClipboard", "stale-2", 60, ["REQUEST_CLIPBOARD"])
+    socket.receive(`clipboard,${b64("old")}`)
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("old")
+  })
+
+  it("answers at once when the first announcement differs from the cached one", async () => {
+    socket.receive(`clipboard,${b64("old")}`)
+    call("requestClipboard", "stale-3", 5000, [])
+    socket.receive(`clipboard_binary,image/png,${b64("PNG")}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(posted()[0].url.searchParams.get("kind")).toBe("image/png")
+  })
+
+  it("reports a selection above the cap as too large instead of an older copy", async () => {
+    socket.receive(`clipboard,${b64("older")}`)
+    socket.receive(`clipboard_start,text/plain,${30 * MiB}`)
+    call("requestClipboard", "big-1", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["too-large"])
+    expect(posted()[0].init.body).toHaveLength(0)
+
+    // An oversized announcement that arrives during the request answers at once.
+    fetchMock.mockClear()
+    socket.receive(`clipboard,${b64("older")}`)
+    call("requestClipboard", "big-2", 5000, [])
+    socket.receive(`clipboard_start,image/png,${30 * MiB}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["too-large"])
+
+    // A later normal copy replaces the marker.
+    fetchMock.mockClear()
+    socket.receive(`clipboard,${b64("fresh")}`)
+    call("requestClipboard", "big-3", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("fresh")
+  })
+
+  it("reports an oversized single-frame announcement too", async () => {
+    socket.receive(`clipboard,${b64("older")}`)
+    socket.receive(`clipboard,${"QUJD".repeat(9 * MiB)}`)
+    call("requestClipboard", "big-4", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["too-large"])
+  })
+
+  it("never answers a clipboard request from the cache while disconnected", async () => {
+    socket.receive(`clipboard,${b64("cached")}`)
+    setTransport(null)
+    call("requestClipboard", "gone-1", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["disconnected"])
+
+    fetchMock.mockClear()
+    const closing = new FakeSocket()
+    setTransport(closing)
+    closing.receive(`clipboard,${b64("cached")}`)
+    call("requestClipboard", "gone-2", 40, ["REQUEST_CLIPBOARD"])
+    closing.readyState = 3
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["disconnected"])
+    await flush()
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it("passes a Selkies flavours envelope through under its own kind", async () => {
+    const envelope = JSON.stringify({ "text/html": "<b>hi</b>", "text/plain": "hi" })
+    socket.receive(`clipboard_binary,application/x-selkies-clipboard-flavours,${b64(envelope)}`)
+    call("requestClipboard", "flavours-1", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["application/x-selkies-clipboard-flavours"])
+    expect(body(posted()[0].init)).toBe(envelope)
+  })
+
+  it("reports the clipboard settings Selkies mirrored onto the page", async () => {
+    const page = window as unknown as Record<string, unknown>
+    try {
+      page.clipboard_enabled = true
+      page.clipboard_in_enabled = true
+      page.clipboard_out_enabled = false
+      call("capabilities", "caps-1")
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+      expect(JSON.parse(body(posted()[0].init))).toMatchObject({ transport: true, clipboard: true, clipboardIn: true, clipboardOut: false })
+      fetchMock.mockClear()
+      page.clipboard_enabled = "yes"
+      call("capabilities", "caps-2")
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+      expect(JSON.parse(body(posted()[0].init))).toMatchObject({ clipboard: null })
+    } finally {
+      delete page.clipboard_enabled
+      delete page.clipboard_in_enabled
+      delete page.clipboard_out_enabled
+    }
   })
 
   it("keeps working after the page tampers with the built-ins it relies on", () => {

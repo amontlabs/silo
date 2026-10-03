@@ -20,7 +20,37 @@
   {
     "name": "capabilities",
     "url": "/__silo/v1/capabilities?nonce=abc123&kind=application%2Fjson",
-    "body": "{\"audioDecoder\":false,\"opus\":false,\"transport\":true}",
+    "body": "{\"audioDecoder\":false,\"opus\":false,\"transport\":true,\"clipboard\":null,\"clipboardIn\":null,\"clipboardOut\":null}",
     "kind": "application/json"
+  },
+  {
+    "name": "clipboard too large",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=too-large",
+    "body": "",
+    "kind": "too-large"
+  },
+  {
+    "name": "clipboard disconnected",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=disconnected",
+    "body": "",
+    "kind": "disconnected"
+  },
+  {
+    "name": "clipboard flavours",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=application%2Fx-selkies-clipboard-flavours",
+    "body": "{\"text/html\":\"<b>hi</b>\",\"text/plain\":\"hi\"}",
+    "kind": "application/x-selkies-clipboard-flavours"
+  },
+  {
+    "name": "sent ok",
+    "url": "/__silo/v1/sent?nonce=abc123&kind=ok",
+    "body": "",
+    "kind": "ok"
+  },
+  {
+    "name": "sent closed",
+    "url": "/__silo/v1/sent?nonce=abc123&kind=closed",
+    "body": "",
+    "kind": "closed"
   }
 ]

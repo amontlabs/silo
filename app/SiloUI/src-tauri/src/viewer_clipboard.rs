@@ -4,12 +4,14 @@
 //! toolbar button) and never touch the device clipboard otherwise. The orchestration is written
 //! against two small seams, [`Guest`] and [`DeviceClipboard`], so it is tested without a webview.
 use crate::clipboard::{ClipboardError, DeviceClipboard, ImageLimits};
-use crate::desktop_bridge::{Bridge, GuestClipboard, MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
+use crate::desktop_bridge::{
+    Bridge, ClipboardSupport, GuestClipboard, MAX_IMAGE_BYTES, MAX_TEXT_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter};
 
@@ -42,6 +44,8 @@ pub(crate) enum Status {
     ComputerEmpty,
     TooLarge,
     NotConnected,
+    /// The computer's desktop has clipboard transfer turned off and needs an update.
+    Unsupported,
     Busy,
     Failed,
 }
@@ -85,13 +89,31 @@ impl Report {
 
 /// The computer's side of a transfer.
 pub(crate) trait Guest {
+    /// Whether the computer's desktop takes part in clipboard transfer in this direction.
+    fn clipboard_support(&self, writing: bool) -> Result<ClipboardSupport, String>;
     fn send_text(&self, text: &str) -> Result<(), String>;
     fn send_image(&self, mime: &str, bytes: &[u8]) -> Result<(), String>;
     fn press_paste(&self) -> Result<(), String>;
     fn request_clipboard(&self, timeout: Duration) -> Result<GuestClipboard, String>;
 }
 
+/// How long to wait for the page to report the server's clipboard settings after it connects.
+const SETTINGS_WAIT: Duration = Duration::from_secs(4);
+const SETTINGS_POLL: Duration = Duration::from_millis(500);
+
 impl Guest for Bridge<'_> {
+    fn clipboard_support(&self, writing: bool) -> Result<ClipboardSupport, String> {
+        let deadline = Instant::now() + SETTINGS_WAIT;
+        loop {
+            let support = self
+                .clipboard_policy(Duration::from_secs(2))?
+                .support(writing);
+            if support != ClipboardSupport::Unknown || Instant::now() >= deadline {
+                return Ok(support);
+            }
+            std::thread::sleep(SETTINGS_POLL);
+        }
+    }
     fn send_text(&self, text: &str) -> Result<(), String> {
         self.send_guest_text(text)
     }
@@ -113,10 +135,28 @@ fn device_error(action: Action, content: Content, error: ClipboardError) -> Repo
     }
 }
 
+/// Ends a transfer the computer's desktop cannot take part in, or `None` when it can. This runs
+/// before the device clipboard is read or any key is sent.
+fn refuse_unsupported(guest: &dyn Guest, action: Action) -> Option<Report> {
+    match guest.clipboard_support(action == Action::Paste) {
+        Ok(ClipboardSupport::Supported) => None,
+        Ok(ClipboardSupport::Unsupported) => Some(Report::new(action, Status::Unsupported, None)),
+        Ok(ClipboardSupport::Disabled) => Some(Report::failed(
+            action,
+            "The desktop's clipboard is turned off for this direction.",
+        )),
+        Ok(ClipboardSupport::Unknown) => Some(Report::new(action, Status::NotConnected, None)),
+        Err(message) => Some(Report::failed(action, message)),
+    }
+}
+
 /// Paste into Computer: text if the device clipboard holds any, otherwise an image, then Ctrl+V
 /// in the computer.
 pub(crate) fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
     let action = Action::Paste;
+    if let Some(refusal) = refuse_unsupported(guest, action) {
+        return refusal;
+    }
     let text = match device.read_text(MAX_TEXT_BYTES) {
         Ok(text) => text,
         Err(error) => return device_error(action, Content::Text, error),
@@ -140,8 +180,12 @@ pub(crate) fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
 /// device clipboard. An empty answer leaves the device clipboard unchanged.
 pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
     let action = Action::Copy;
+    if let Some(refusal) = refuse_unsupported(guest, action) {
+        return refusal;
+    }
     match guest.request_clipboard(COPY_WAIT) {
         Err(message) => Report::failed(action, message),
+        Ok(GuestClipboard::TooLarge) => Report::new(action, Status::TooLarge, None),
         Ok(GuestClipboard::Empty) => Report::new(action, Status::ComputerEmpty, None),
         Ok(GuestClipboard::Text(text)) => {
             if text.len() > MAX_TEXT_BYTES {
@@ -215,6 +259,7 @@ pub(crate) fn spawn(app: &AppHandle, label: &str, action: Action) {
 mod tests {
     use super::*;
     use crate::clipboard::fake::FakeClipboard;
+    use crate::desktop_bridge::test_page::{acknowledge_send, invocation};
     use crate::desktop_bridge::{Inbox, Op, Page, Reply};
     use std::{cell::RefCell, time::Instant};
 
@@ -223,6 +268,7 @@ mod tests {
         calls: RefCell<Vec<String>>,
         answer: RefCell<Option<Result<GuestClipboard, String>>>,
         send_error: RefCell<Option<String>>,
+        support: RefCell<Option<Result<ClipboardSupport, String>>>,
     }
     impl FakeGuest {
         fn answering(answer: Result<GuestClipboard, String>) -> Self {
@@ -239,6 +285,13 @@ mod tests {
         }
     }
     impl Guest for FakeGuest {
+        fn clipboard_support(&self, writing: bool) -> Result<ClipboardSupport, String> {
+            self.calls.borrow_mut().push(format!("support:{writing}"));
+            self.support
+                .borrow()
+                .clone()
+                .unwrap_or(Ok(ClipboardSupport::Supported))
+        }
         fn send_text(&self, text: &str) -> Result<(), String> {
             self.record(format!("text:{text}"))
         }
@@ -276,7 +329,10 @@ mod tests {
         let report = paste(&guest, &device);
         assert_eq!(report.status, Status::Pasted);
         assert_eq!(report.content, Some(Content::Text));
-        assert_eq!(*guest.calls.borrow(), ["text:hello", "paste"]);
+        assert_eq!(
+            *guest.calls.borrow(),
+            ["support:true", "text:hello", "paste"]
+        );
     }
 
     #[test]
@@ -286,8 +342,8 @@ mod tests {
         assert_eq!(report.status, Status::Pasted);
         assert_eq!(report.content, Some(Content::Image));
         let calls = guest.calls.borrow();
-        assert!(calls[0].starts_with("image:image/png:"));
-        assert_eq!(calls[1], "paste");
+        assert!(calls[1].starts_with("image:image/png:"));
+        assert_eq!(calls[2], "paste");
     }
 
     #[test]
@@ -295,7 +351,7 @@ mod tests {
         let (guest, device) = (FakeGuest::default(), FakeClipboard::default());
         let report = paste(&guest, &device);
         assert_eq!(report.status, Status::DeviceEmpty);
-        assert!(guest.calls.borrow().is_empty());
+        assert_eq!(*guest.calls.borrow(), ["support:true"]);
     }
 
     #[test]
@@ -307,7 +363,7 @@ mod tests {
             (report.status, report.content),
             (Status::TooLarge, Some(Content::Text))
         );
-        assert!(guest.calls.borrow().is_empty());
+        assert_eq!(*guest.calls.borrow(), ["support:true"]);
     }
 
     #[test]
@@ -315,7 +371,7 @@ mod tests {
         let (guest, device) = (FakeGuest::default(), FakeClipboard::default());
         device.set_unavailable(true);
         assert_eq!(paste(&guest, &device).status, Status::Failed);
-        assert!(guest.calls.borrow().is_empty());
+        assert_eq!(*guest.calls.borrow(), ["support:true"]);
 
         device.set_unavailable(false);
         device.set_raw_text("x");
@@ -413,15 +469,29 @@ mod tests {
         inbox: &'a Inbox,
         kind: &'static str,
         body: Vec<u8>,
+        policy: &'static str,
         scripts: RefCell<Vec<String>>,
     }
+    const SUPPORTED: &str =
+        r#"{"transport":true,"clipboard":true,"clipboardIn":true,"clipboardOut":true}"#;
     impl Page for AnsweringPage<'_> {
         fn eval(&self, script: &str) -> Result<(), String> {
             self.scripts.borrow_mut().push(script.to_string());
-            if let Some(start) = script.find("requestClipboard") {
-                let rest = &script[start..];
-                let from = rest.find("[\"").unwrap() + 2;
-                let nonce: String = rest[from..].chars().take_while(|c| *c != '"').collect();
+            if acknowledge_send(self.inbox, script, "ok") {
+                return Ok(());
+            }
+            let (method, args) = invocation(script);
+            if method == "capabilities" {
+                self.inbox
+                    .claim(Op::Capabilities, args[0].as_str().unwrap(), Instant::now())
+                    .unwrap()
+                    .deliver(Reply {
+                        kind: "application/json".into(),
+                        body: self.policy.as_bytes().to_vec(),
+                    });
+            }
+            if method == "requestClipboard" {
+                let nonce = args[0].as_str().unwrap().to_string();
                 self.inbox
                     .claim(Op::Clipboard, &nonce, Instant::now())
                     .unwrap()
@@ -441,6 +511,7 @@ mod tests {
             inbox: &inbox,
             kind: "image/png",
             body: png(3, 3),
+            policy: SUPPORTED,
             scripts: RefCell::default(),
         };
         let bridge = Bridge {
@@ -451,8 +522,9 @@ mod tests {
         assert_eq!(paste(&bridge, &device).status, Status::Pasted);
         {
             let scripts = page.scripts.borrow();
-            assert!(scripts[0].contains("\"cb,image/png,"));
-            assert!(scripts[1].contains("\"kd,118\""));
+            assert!(scripts[0].contains("\"capabilities\""));
+            assert!(scripts[1].contains("\"cb,image/png,"));
+            assert!(scripts[2].contains("\"sendShortcut\"") && scripts[2].contains("\"kd,118\""));
         }
         let report = copy(&bridge, &device);
         assert_eq!(
@@ -460,6 +532,97 @@ mod tests {
             (Status::Copied, Some(Content::Image))
         );
         assert_eq!(device.image_rgba().unwrap().0, 3);
+    }
+
+    #[test]
+    fn a_desktop_without_clipboard_support_is_refused_before_anything_is_read_or_sent() {
+        let device = FakeClipboard::default();
+        device.set_raw_text("device");
+        let guest = FakeGuest::answering(Ok(GuestClipboard::Text("stale".into())));
+        *guest.support.borrow_mut() = Some(Ok(ClipboardSupport::Unsupported));
+        assert_eq!(paste(&guest, &device).status, Status::Unsupported);
+        assert_eq!(copy(&guest, &device).status, Status::Unsupported);
+        assert_eq!(*guest.calls.borrow(), ["support:true", "support:false"]);
+        assert_eq!(device.text().as_deref(), Some("device"));
+
+        *guest.support.borrow_mut() = Some(Ok(ClipboardSupport::Unknown));
+        assert_eq!(paste(&guest, &device).status, Status::NotConnected);
+        *guest.support.borrow_mut() = Some(Ok(ClipboardSupport::Disabled));
+        assert_eq!(paste(&guest, &device).status, Status::Failed);
+        *guest.support.borrow_mut() = Some(Err("The desktop is not connected.".into()));
+        assert_eq!(copy(&guest, &device).status, Status::Failed);
+        assert!(!guest.calls.borrow().iter().any(|call| call == "paste"));
+    }
+
+    #[test]
+    fn the_real_bridge_refuses_a_recipe_2_desktop_without_pressing_keys() {
+        let inbox = Inbox::default();
+        let page = AnsweringPage {
+            inbox: &inbox,
+            kind: "text/plain",
+            body: b"stale guest text".to_vec(),
+            policy: r#"{"transport":true,"clipboard":false,"clipboardIn":false,"clipboardOut":false}"#,
+            scripts: RefCell::default(),
+        };
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        let device = FakeClipboard::default();
+        device.set_raw_text("device text");
+        assert_eq!(paste(&bridge, &device).status, Status::Unsupported);
+        assert_eq!(copy(&bridge, &device).status, Status::Unsupported);
+        let scripts = page.scripts.borrow();
+        assert!(scripts
+            .iter()
+            .all(|script| script.contains("\"capabilities\"")));
+        assert_eq!(device.text().as_deref(), Some("device text"));
+    }
+
+    #[test]
+    fn paste_does_not_report_success_when_the_transport_is_closed() {
+        let inbox = Inbox::default();
+        let page = crate::desktop_bridge::test_page::AckingPage::new(&inbox);
+        page.outcome.set("closed");
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        struct Supported<'a>(Bridge<'a>);
+        impl Guest for Supported<'_> {
+            fn clipboard_support(&self, _: bool) -> Result<ClipboardSupport, String> {
+                Ok(ClipboardSupport::Supported)
+            }
+            fn send_text(&self, text: &str) -> Result<(), String> {
+                self.0.send_text(text)
+            }
+            fn send_image(&self, mime: &str, bytes: &[u8]) -> Result<(), String> {
+                self.0.send_image(mime, bytes)
+            }
+            fn press_paste(&self) -> Result<(), String> {
+                self.0.press_paste()
+            }
+            fn request_clipboard(&self, timeout: Duration) -> Result<GuestClipboard, String> {
+                self.0.request_clipboard(timeout)
+            }
+        }
+        let device = FakeClipboard::default();
+        device.set_raw_text("x");
+        let report = paste(&Supported(bridge), &device);
+        assert_eq!(report.status, Status::Failed);
+        assert_eq!(
+            report.message.as_deref(),
+            Some("The desktop is not connected.")
+        );
+    }
+
+    #[test]
+    fn an_oversized_computer_selection_is_too_large_not_a_cached_copy() {
+        let device = FakeClipboard::default();
+        device.set_raw_text("keep");
+        let report = copy(&FakeGuest::answering(Ok(GuestClipboard::TooLarge)), &device);
+        assert_eq!(report.status, Status::TooLarge);
+        assert_eq!(device.text().as_deref(), Some("keep"));
     }
 
     #[test]
@@ -477,6 +640,11 @@ mod tests {
         assert_eq!(
             serde_json::to_value(report).unwrap(),
             serde_json::json!({"action":"copy","status":"computer-empty","content":"image","message":null})
+        );
+        assert_eq!(
+            serde_json::to_value(Report::new(Action::Paste, Status::Unsupported, None)).unwrap()
+                ["status"],
+            "unsupported"
         );
     }
 }

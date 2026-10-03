@@ -3,7 +3,8 @@
 // user gesture, so they must not reach this device's clipboard or microphone.
 // The top frame also gets `__silo`, the page half of the host bridge: Rust
 // drives it through `Webview::eval` and it answers Rust only by posting to the
-// proxy's reserved `/__silo/v1/<op>` route with a single-use nonce.
+// proxy's reserved `/__silo/v1/<op>` route with a single-use nonce: clipboard
+// content, capabilities, and an acknowledgement for every send.
 (() => {
   // Everything below runs before the page's scripts; the intrinsics it relies
   // on are captured now so later tampering with prototypes cannot redirect it.
@@ -15,6 +16,10 @@
   const toLower = String.prototype.toLowerCase
   const arrayIsArray = Array.isArray
   const regexTest = RegExp.prototype.test
+  const toNumber = Number
+  const isSafeInteger = Number.isSafeInteger
+  const objectKeys = Object.keys
+  const stringSlice = String.prototype.slice
   const refuse = () => Promise.reject(new DOMException("Computer desktops cannot use this device's clipboard.", "NotAllowedError"))
   const refuseCapture = () => Promise.reject(new DOMException("Computer desktops cannot use this device's microphone or screen.", "NotAllowedError"))
   const lock = (target, name, value) => {
@@ -83,7 +88,9 @@
   const ALLOWED_FRAME = /^(?:cw,[A-Za-z0-9+/=]*|cws,[^,]+,\d+|cwd,[^,]+,[A-Za-z0-9+/=]*|cwe,[^,]+|cb,[^,]+,[A-Za-z0-9+/=]*|cbs,[^,]+,[^,]+,\d+|cbd,[^,]+,[A-Za-z0-9+/=]*|cbe,[^,]+|kd,\d+|ku,\d+|r,\d+x\d+,primary|REQUEST_CLIPBOARD)$/
 
   // The last clipboard payload the guest announced, kept as base64 so nothing
-  // is decoded or sent anywhere until Rust asks for it.
+  // is decoded or sent anywhere until Rust asks for it. An announcement above
+  // the cap replaces it with an `oversized` marker, so a later copy never
+  // answers with older content.
   let latest = null
   let assembly = null
   let sequence = 0
@@ -93,10 +100,14 @@
     const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0
     return Math.floor(encoded.length * 3 / 4) - padding
   }
-  const record = (mime, encoded) => {
-    if (base64Size(encoded) > MAX_CLIPBOARD_BYTES) return
-    latest = { mime, encoded, sequence: ++sequence }
+  const publish = payload => {
+    latest = payload
     for (const waiter of [...waiters]) waiter(latest)
+  }
+  const recordOversized = () => publish({ mime: "", encoded: "", oversized: true, sequence: ++sequence })
+  const record = (mime, encoded) => {
+    if (base64Size(encoded) > MAX_CLIPBOARD_BYTES) recordOversized()
+    else publish({ mime, encoded, oversized: false, sequence: ++sequence })
   }
   // Selkies websockets_mode.py `send_ws_clipboard_data`: `clipboard,<b64>` and
   // `clipboard_binary,<mime>,<b64>` below 16 KiB; otherwise `clipboard_start,<mime>,<size>`,
@@ -113,8 +124,10 @@
     } else if (data.startsWith("clipboard_start,")) {
       const [, mime, size] = data.split(",")
       const declared = Number(size)
-      assembly = mime && Number.isSafeInteger(declared) && declared >= 0 && declared <= MAX_CLIPBOARD_BYTES
-        ? { mime, declared, chunks: [], length: 0 } : null
+      assembly = null
+      if (!mime || !Number.isSafeInteger(declared) || declared < 0) return
+      if (declared > MAX_CLIPBOARD_BYTES) recordOversized()
+      else assembly = { mime, declared, chunks: [], length: 0 }
     } else if (data.startsWith("clipboard_data,")) {
       if (!assembly) return
       const chunk = data.slice(15)
@@ -129,12 +142,52 @@
       if (base64Size(encoded) === done.declared) record(done.mime, encoded)
     }
   }
+
+  // X11 modifier keysyms: Shift, Control, Meta, Alt, Super and Hyper (left and
+  // right), ISO_Level3_Shift and Mode_switch.
+  const isModifierKeysym = keysym => (keysym >= 0xffe1 && keysym <= 0xffe4) || (keysym >= 0xffe7 && keysym <= 0xffee)
+    || keysym === 0xfe03 || keysym === 0xff7e
+  // The modifiers the guest holds down, learned from the frames that go through
+  // the socket (`kd,<keysym>`, `ku,<keysym>`, `kr`). The `kh` heartbeat only
+  // refreshes keys the server already holds, so it never presses one again
+  // after a release.
+  let heldModifiers = Object.create(null)
+  const track = frame => {
+    if (typeof frame !== "string") return
+    if (frame === "kr") { heldModifiers = Object.create(null); return }
+    const kind = apply(stringSlice, frame, [0, 3])
+    if (kind !== "kd," && kind !== "ku,") return
+    const keysym = toNumber(apply(stringSlice, frame, [3]))
+    if (!isSafeInteger(keysym) || !isModifierKeysym(keysym)) return
+    if (kind === "kd,") heldModifiers[keysym] = true
+    else delete heldModifiers[keysym]
+  }
+  const releaseHeldModifiers = () => objectKeys(heldModifiers).map(keysym => `ku,${keysym}`)
+
   const watching = new WeakSet()
+  // Each socket's own `send`. The socket is wrapped so the frames Selkies sends
+  // keep `heldModifiers` current; Rust's frames go to the original.
+  const senders = new WeakMap()
   const watch = socket => {
     if (!socket || typeof socket.addEventListener !== "function" || watching.has(socket)) return
     watching.add(socket)
     latest = null
     assembly = null
+    heldModifiers = Object.create(null)
+    const original = socket.send
+    if (typeof original === "function") {
+      senders.set(socket, original)
+      try {
+        defineProperty(socket, "send", {
+          configurable: true,
+          writable: true,
+          value: function (data) {
+            track(data)
+            return apply(original, this, [data])
+          },
+        })
+      } catch { /* a socket that cannot be wrapped leaves the held modifiers unknown */ }
+    }
     socket.addEventListener("message", event => observe(event && event.data))
   }
   // Selkies assigns `window.selkiesTransport = websocket` for every connection
@@ -158,6 +211,7 @@
       await nativeFetch(`${ROUTE}${op}?${query}`, { method: "POST", body, cache: "no-store", credentials: "same-origin" })
     } catch { /* Rust times out on its own */ }
   }
+  const NO_BODY = () => new Uint8Array(0)
   const decode = encoded => {
     const text = atob(encoded)
     const bytes = new Uint8Array(text.length)
@@ -167,31 +221,70 @@
   // Absent in WebRTC mode; the socket silently drops sends unless it is open.
   const socketReady = () => Boolean(transport) && typeof transport.send === "function"
     && (transport.readyState === undefined || transport.readyState === 1)
-  const sendFrames = frames => {
-    if (!arrayIsArray(frames) || !socketReady()) return false
+  const wellFormed = frames => {
+    if (!arrayIsArray(frames)) return false
     const count = frames.length
     for (let i = 0; i < count; i++) {
       if (typeof frames[i] !== "string" || !apply(regexTest, ALLOWED_FRAME, [frames[i]])) return false
     }
-    for (let i = 0; i < count; i++) transport.send(frames[i])
     return true
   }
-  // Answers with the next announcement after the request, or after the timeout
-  // with the last one announced earlier (kind `none` when there is none).
-  const requestClipboard = (nonce, timeoutMs, frames) => {
+  // `refused` for frames the helper will not send, `closed` for a transport
+  // that is not open, `ok` once every frame went to the socket. With `release`
+  // every modifier the guest holds is released first.
+  const deliver = (frames, release) => {
+    if (!wellFormed(frames)) return "refused"
+    if (!socketReady()) return "closed"
+    const send = senders.get(transport) || transport.send
+    const all = release ? releaseHeldModifiers().concat(frames) : frames
+    const count = all.length
+    for (let i = 0; i < count; i++) {
+      track(all[i])
+      apply(send, transport, [all[i]])
+    }
+    return "ok"
+  }
+  // Rust waits for this answer under `nonce`; without one the outcome is only
+  // the return value.
+  const acknowledge = (nonce, outcome) => {
+    if (typeof nonce === "string") void post("sent", nonce, outcome, NO_BODY())
+    return outcome === "ok"
+  }
+  const sendFrames = (frames, nonce) => acknowledge(nonce, deliver(frames, false))
+  // A shortcut chord goes out with the modifiers the guest holds released first,
+  // so Ctrl+Shift+C or Command+V arrives as a bare Ctrl+C or Ctrl+V.
+  const sendShortcut = (frames, nonce) => acknowledge(nonce, deliver(frames, true))
+  // Answers with the next announcement that differs from the one cached when the
+  // request started, or after the timeout with the last one announced (kind
+  // `none` when there is none). Selkies answers REQUEST_CLIPBOARD at once, so a
+  // repeat of the cached content can arrive before the application publishes the
+  // new selection. Kinds `too-large` (an announcement above the cap), `disconnected`
+  // and `refused` carry no content.
+  const requestClipboard = (nonce, timeoutMs, frames, shortcut) => {
+    const baseline = latest
     const started = sequence
     let settled = false
-    const waiter = payload => { if (payload.sequence > started) finish(payload) }
-    const finish = payload => {
+    const answer = (kind, body) => {
       if (settled) return
       settled = true
       waiters.delete(waiter)
       clearTimeout(timer)
-      void (payload ? post("clipboard", nonce, payload.mime, decode(payload.encoded)) : post("clipboard", nonce, "none", new Uint8Array(0)))
+      void post("clipboard", nonce, kind, body)
     }
-    const timer = setTimeout(() => finish(latest), Math.max(0, Math.min(Number(timeoutMs) || 0, 10000)))
+    const finish = payload => {
+      if (!payload) answer("none", NO_BODY())
+      else if (payload.oversized) answer("too-large", NO_BODY())
+      else answer(payload.mime, decode(payload.encoded))
+    }
+    const changed = payload => payload.sequence > started
+      && (payload.oversized || !baseline || baseline.oversized || payload.mime !== baseline.mime || payload.encoded !== baseline.encoded)
+    const waiter = payload => { if (changed(payload)) finish(payload) }
+    const timer = setTimeout(() => { if (socketReady()) finish(latest); else answer("disconnected", NO_BODY()) },
+      Math.max(0, Math.min(Number(timeoutMs) || 0, 10000)))
+    if (!socketReady()) { answer("disconnected", NO_BODY()); return }
     waiters.add(waiter)
-    sendFrames(frames)
+    const outcome = deliver(frames, shortcut === true)
+    if (outcome !== "ok") answer(outcome === "closed" ? "disconnected" : "refused", NO_BODY())
   }
   const capabilities = async nonce => {
     let opus = false
@@ -201,7 +294,17 @@
         opus = Boolean(support && support.supported)
       }
     } catch { /* unsupported */ }
-    const report = { audioDecoder: typeof AudioDecoder !== "undefined", opus, transport: socketReady() }
+    // Selkies mirrors its server settings onto `window` once the connection
+    // reports them; `null` means they have not arrived.
+    const setting = name => typeof window[name] === "boolean" ? window[name] : null
+    const report = {
+      audioDecoder: typeof AudioDecoder !== "undefined",
+      opus,
+      transport: socketReady(),
+      clipboard: setting("clipboard_enabled"),
+      clipboardIn: setting("clipboard_in_enabled"),
+      clipboardOut: setting("clipboard_out_enabled"),
+    }
     await post("capabilities", nonce, "application/json", encoder.encode(JSON.stringify(report)))
   }
   // Selkies applies mute and volume to a gain node that exists only once audio
@@ -216,6 +319,7 @@
   })
   const methods = {
     sendFrames,
+    sendShortcut,
     requestClipboard,
     capabilities,
     setMute: muted => { audio.muted = muted === true; applyAudio() },
