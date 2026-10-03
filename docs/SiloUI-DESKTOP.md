@@ -47,6 +47,61 @@ as the previous boot's (boots are nearly deterministic) made PulseAudio exit wit
 computer use reported "The Linux desktop was not running". Reproduced on the first
 restart of a built-in computer; intermittent on restart and on import.
 
+## Selkies settings, screen size and recipe 3
+
+`launch_selkies_streamer` in `guest/desktop-service.py` starts Selkies 2.0.0 with
+these settings. Syntax is from `src/selkies/settings.py` at tag 2.0.0: a bool is on
+for `true` or `1` (case-insensitive) and everything else is off, and a `|locked`
+suffix stops the client changing it. `enable_clipboard` is a string
+(`true`, `in`, `out`, `false`).
+
+| Setting | Value | Effect |
+|---|---|---|
+| `--enable-clipboard`, `--enable-binary-clipboard` | `true`, `true` | Text and image clipboard messages are accepted in both directions. Nothing syncs on its own: `--clipboard-seamless=false` is the unlocked server default, and the host also seeds the client setting. |
+| `--file-transfers` | `none` | Selkies' own upload and download stay off. |
+| `--audio-enabled`, `--audio-bitrate` | `true`, `64000` | Opus playback at 64 kbit/s, small enough to share one TCP tunnel with video on a remote computer. |
+| `--microphone-enabled` | `false\|locked` | The server answers microphone data with `MICROPHONE_DISABLED` (`websockets_mode.py`). |
+| `--ui-sidebar-show-audio-settings` | `false` | The guest sidebar shows no audio section. |
+| `--enable-resize` | `true` | The screen follows the viewer window. |
+| `--use-css-scaling` | `true\|locked` | The client sends the window size in logical pixels and stretches the canvas, so a Retina window does not multiply the pixels the guest encodes. |
+| `--mode`, `--enable-dual-mode` | `websockets`, `false\|locked` | The client cannot switch to WebRTC. |
+
+**Screen size.** Xvfb 21.1 caps RandR at the size it was started with, so it starts
+as `Xvfb :1 -screen 0 4096x4096x24 +extension RANDR -noreset` (the upstream native
+command uses 8192x4096; Selkies limits client requests to 4080 pixels).
+`-noreset` keeps a resized screen when the last X client disconnects. Right after
+Xvfb starts, `set_desktop_start_size` runs `xrandr` as the `silo` account: it
+adds a 1440x900 mode (`--newmode` with CVT reduced-blanking timings, then
+`--addmode screen`) when Xvfb lists none, and applies it with
+`--output screen --mode 1440x900 --fb 1440x900`, the same arguments Selkies'
+`display_utils_xrandr.py` uses. If `xrandr` is missing, no output appears or the
+size does not take effect, the attempt fails like any session start failure: the
+session is torn down and retried up to three times, then reported `failed`, with
+the reason in `/var/log/silo-desktop.log`. A computer with no viewer attached
+therefore still has a 1440x900 desktop, which is what computer-use agents
+expect. The streamer receipt's `resolution` (and the lock's) is the start size,
+not the current size; a desktop resized by a viewer is healthy, and the
+receipt check never compares against the live screen.
+
+**Recipe 3.** `recipeVersion` in `desktop-streamer-lock.json` is 3. The service
+accepts receipts 1, 2 and 3 and reports `updateRequired` for anything older than 3.
+
+**Existing computers.** The host only installs `silo-desktop` when it adds a
+desktop or runs `update-streamer`; starting or attaching a desktop never replaces
+it. A computer with a recipe 2 receipt therefore keeps its old service and old
+Selkies flags (no clipboard, no resize, default audio) until its owner updates it.
+After the desktop is stopped, its status reports `updateRequired`, the viewer shows
+"Update desktop", and that runs `setup-desktop.sh update-streamer`. This is the
+recipe 1 to 2 path: it reinstalls the pinned Selkies package, keeps the viewer
+credentials, rewrites the receipt as recipe 3 and installs the new service. It
+does not rebuild the computer, touch files or restart a running desktop (it
+refuses to run while the session is up). It needs network access for the pinned
+package download, even on a v4 image that already contains it. New computers get
+recipe 3 from the install or preinstalled-image path. Packages are unchanged, so
+no guest image bump is needed; `xrandr` (`x11-xserver-utils`) is not listed in
+`desktop-packages.txt`; it is expected through `xfce4-session`'s dependencies and
+must be confirmed on a live v4 computer.
+
 ## Guest image v4: the desktop is part of the computer
 
 Guest images from v4 on (published and pinned in the image lock; see
@@ -300,7 +355,7 @@ guest runtime. Existing verification below explicitly excludes browser workloads
 - KasmVNC is pinned to 1.5.0, with separate SHA-256-verified Noble packages for
   ARM64 and AMD64. [Release assets](https://github.com/kasmtech/KasmVNC/releases/expanded_assets/v1.5.0).
 - Configuration follows the [versioned defaults](https://github.com/kasmtech/KasmVNC/blob/v1.5.0/unix/kasmvnc_defaults.yaml).
-- The viewer opens with `resize=scale`, selecting client-side local scaling while
+- (KasmVNC, superseded by Selkies recipe 3.) The viewer opens with `resize=scale`, selecting client-side local scaling while
   the guest keeps its fixed 1440×900 display (`allow_resize: false`). Window
   resizing must not change the guest screen or pointer coordinate space. See
   [KasmVNC local-scaling configuration](https://github.com/kasmtech/KasmVNC/discussions/249).

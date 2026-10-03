@@ -195,7 +195,7 @@ class DesktopRecipe(unittest.TestCase):
         self.assertEqual(receipt_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(receipt_path.read_text()), {
             'schemaVersion': 1, 'state': 'ready', 'backend': 'selkies',
-            'version': '2.0.0', 'recipeVersion': 2, 'architecture': 'arm64',
+            'version': '2.0.0', 'recipeVersion': 3, 'architecture': 'arm64',
             'packageSha256': self.env['EXPECTED_STREAMER_SHA'],
             'resolution': {'width': 1440, 'height': 900},
         })
@@ -229,7 +229,7 @@ class DesktopRecipe(unittest.TestCase):
         self.assertIn('https://github.com/selkies-project/selkies/releases/download/2.0.0/selkies-2.0.0-ubuntu24.04-amd64.deb', curl)
         receipt = json.loads((self.state / 'streamer.json').read_text())
         self.assertEqual(receipt['architecture'], 'amd64')
-        self.assertEqual(receipt['recipeVersion'], 2)
+        self.assertEqual(receipt['recipeVersion'], 3)
         self.assertEqual(receipt['packageSha256'], digest)
         self.assertIn(['python3', [str(self.fixture / 'patch-selkies-web-client.py'), 'amd64']], calls)
 
@@ -275,7 +275,7 @@ class DesktopRecipe(unittest.TestCase):
         calls = self.run_recipe('update-streamer')
         receipt = json.loads((self.state / 'streamer.json').read_text())
         self.assertEqual(receipt['backend'], 'selkies')
-        self.assertEqual(receipt['recipeVersion'], 2)
+        self.assertEqual(receipt['recipeVersion'], 3)
         self.assertEqual(receipt['packageSha256'], self.env['EXPECTED_STREAMER_SHA'])
         self.assertEqual((self.state / 'streamer.json').stat().st_mode & 0o777, 0o600)
         self.assertTrue(any(name == 'apt-get' and any('selkies.deb' in arg for arg in args)
@@ -295,7 +295,7 @@ class DesktopRecipe(unittest.TestCase):
         connection_path.write_text(json.dumps(connection))
         connection_path.chmod(0o600)
         old_receipt = {'schemaVersion': 1, 'state': 'ready', 'backend': 'selkies',
-                       'version': '2.0.0', 'recipeVersion': 1, 'architecture': 'arm64',
+                       'version': '2.0.0', 'recipeVersion': 2, 'architecture': 'arm64',
                        'packageSha256': self.env['EXPECTED_STREAMER_SHA'],
                        'resolution': {'width': 1440, 'height': 900}}
         receipt_path = self.state / 'streamer.json'
