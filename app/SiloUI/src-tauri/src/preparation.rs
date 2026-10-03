@@ -441,8 +441,7 @@ fn download_and_publish(
         fs::rename(&part, &file)?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o444))?;
         remove_tree(&target);
-        // macOS 15 refuses to rename a directory the user cannot write to, so the folder is
-        // moved into place first and made read-only afterwards.
+        // The folder is moved into place while writable, then made read-only.
         fs::rename(&staging, &target)?;
         moved.set(true);
         fs::set_permissions(&target, fs::Permissions::from_mode(0o555))
