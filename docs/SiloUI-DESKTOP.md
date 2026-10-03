@@ -475,35 +475,75 @@ swift -module-cache-path /private/tmp/silo-desktop-input-swift-cache app/SiloUI/
 node app/SiloUI/src-tauri/target/verification/desktop-input/reproduce.mjs
 ```
 
-### Clipboard fix
+### Clipboard and the host bridge (Selkies)
 
-The native viewer now explicitly opens KasmVNC with
-`resize=scale&clipboard_seamless=false` on initial attachment and reconnect,
-for both local and remote desktops. This applies the supported client setting
-without relying on browser identification or updating existing guest packages.
-KasmVNC's [settings parser](https://github.com/kasmtech/noVNC/blob/475ecfa5356579ef222983c7ce4619a7576a3bce/app/ui.js)
-gives URL settings precedence over saved preferences. Manual clipboard upload
-and download remain enabled; users transfer text through the viewer's Clipboard
-panel, as described in [upstream's clipboard documentation](https://kasmweb.com/kasmvnc/docs/latest/clientside.html#clipboard-seamless).
+The 2026-09-22 investigation above described the KasmVNC client, which the
+viewer no longer runs; the viewer now loads Selkies 2.0.0. KasmVNC's URL
+parameters (`resize=scale&clipboard_seamless=false`) mean nothing to Selkies,
+which reads only `token`, `offscreen_worker` and `socket_worker` from the URL.
+Every other client setting comes from `localStorage` under the key
+`<origin and path, with characters outside [a-zA-Z0-9._-] replaced by _>_<name>`
+(`getStorageAppName` in the client's `lib/util.js`), with booleans stored as
+`"true"` or `"false"`. The viewer URL is now the bare origin, and the
+initialization script writes `<prefix>_clipboard_seamless = "false"` before the
+client reads its settings. The prefix is computed from `location` at run time
+because the proxy port changes on every attach. Clipboard transfer is currently
+off in the guest (`--enable-clipboard=false`); the seeded setting keeps the
+guest page from writing this device's clipboard on its own once it is turned on.
 
-Verification uses the real production URL and the pinned client's settings
-parser, checkbox conversion, clipboard reader and manual-send functions, with
-mocked DOM controls, clipboard and transport. Before the fix, three simulated
-focus changes caused three clipboard reads. After the fix, there were zero
-reads with either clean settings or a previously saved `clipboard_seamless=true`;
-manual transfer still delivered the supplied Unicode text. Evidence and the
-one-command reproducer are in `target/verification/desktop-input/verify-url.mjs`,
-`client-red.log` and `url-verification.json` under `app/SiloUI/src-tauri/`.
+**Host bridge** (`desktop_bridge.rs`, `desktop_viewer_bridge.js`). The guest
+serves both the Selkies server and the client JavaScript in the viewer, so the
+page is untrusted and the bridge is shaped so that only Silo's own window, menus
+and Rust code can start a transfer:
 
-The native regression asserts the navigation contract for fresh loopback origins,
-including preserved scaling and manual clipboard defaults. It failed before the
-fix; all four viewer tests passed afterward with:
+- *Host to page.* Rust calls `Webview::eval` on the unprivileged
+  `guest-desktop-shell-<uuid>` child with
+  `window.__silo.invoke(<method>, <args>)`. The method and arguments are
+  serialized with `serde_json`; no payload is concatenated into script. The
+  child keeps no Tauri capabilities. `__silo` is a frozen, non-configurable
+  property that dispatches only to a fixed method list.
+- *Page to host.* The proxy answers `/__silo/v1/<op>` itself and never forwards
+  anything under `/__silo` to the guest. A request needs the viewer's cookie, the
+  `POST` method, and a single-use nonce that Rust issued for that viewer and
+  operation (`clipboard`, `capabilities`). Nonces expire after the requested
+  wait plus 5 seconds, a wrong nonce neither succeeds nor cancels the real one,
+  and each operation has a byte cap (24 MiB clipboard, 4 KiB capabilities)
+  checked against `Content-Length` before the body is read. Rejections are
+  logged with rate limiting. The accepted body goes to the waiting Rust caller.
+- *Page helper.* The script wraps `window.selkiesTransport` (the
+  WebSocket-mode transport, absent in WebRTC mode; the helper reports that in
+  `capabilities` and refuses to send), caches the last `clipboard,`,
+  `clipboard_binary,` or chunked `clipboard_start`/`clipboard_data`/
+  `clipboard_finish` payload without ever forwarding it unprompted, sends only
+  allow-listed Selkies frames (`cw`, `cws`/`cwd`/`cwe`, `cb`, `cbs`/`cbd`/`cbe`,
+  `kd`/`ku`, `r,WxH,primary`, `REQUEST_CLIPBOARD`), and posts the same-origin
+  `setMute`, `setVolume`, `resetResolutionToWindow` and `pipelineControl`
+  messages. Mute and volume are re-applied when Selkies reports a pipeline
+  change, because its gain node exists only once audio flows. The script still
+  locks the web clipboard APIs and now also makes `getUserMedia` and
+  `getDisplayMedia` always reject.
+- *Rust API for later phases* (`desktop_viewer::with_bridge(app, label, |bridge| ...)`,
+  from a worker thread and never the main thread): `send_guest_text`,
+  `send_guest_image`, `press_guest_paste`, `press_guest_copy`,
+  `request_guest_clipboard(timeout, press_copy) -> Empty | Text | Image`,
+  `set_audio_muted`, `set_audio_volume`, `set_audio_active`,
+  `reset_resolution(w, h)`, `reset_resolution_to_window`, `capabilities(timeout)`.
 
-```sh
-cargo test --manifest-path app/SiloUI/src-tauri/Cargo.toml --target-dir app/SiloUI/src-tauri/target/local-signing --release --offline --quiet desktop_viewer::
-node app/SiloUI/src-tauri/target/verification/desktop-input/verify-url.mjs
-```
+**Native shortcuts** (`viewer_shortcuts.rs`). Triggers never come from in-page key
+events. On macOS an `NSEvent` local monitor, scoped to viewer windows by their
+`NSWindow`, consumes Command+C and Command+V before WKWebView sees them, and the
+Edit menu has matching *Paste into Computer* and *Copy from Computer* items that
+are enabled only while a viewer has focus. On Linux a GTK key handler on the
+viewer window handles Ctrl+Shift+V and Ctrl+Shift+C (plain Ctrl+C and Ctrl+V stay
+guest shortcuts); the viewer window has no native menu bar, so the toolbar
+buttons planned for the clipboard phase are its menu equivalent. Other windows
+keep their normal Copy and Paste. Until the clipboard phase supplies a device
+clipboard (`host_clipboard()`), the monitor, handlers and menu items stay inert
+and nothing changes for users.
 
-These checks do not replace packaged-app or live guest input acceptance; no
-bundle was launched for this change. The change takes effect when the updated
-application opens or reconnects a desktop viewer.
+Probe items remaining (need a live Dev build): whether `Webview::eval` reaches
+the `add_child` webview once its page has loaded on both engines; whether the
+macOS local monitor sees Command+V while the guest webview is first responder
+(expected, since local monitors run before `sendEvent:` dispatch); whether the
+GTK handler precedes WebKitGTK key handling; and whether Selkies applies the
+seeded `clipboard_seamless` when the server also pushes a default.

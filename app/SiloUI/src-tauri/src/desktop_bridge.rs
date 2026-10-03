@@ -1,0 +1,832 @@
+//! Rust half of the bridge between Silo and the guest desktop page.
+//!
+//! The guest serves the page, so everything the page says is untrusted. Rust
+//! drives the page with `Webview::eval` (payloads are always JSON-encoded) and
+//! accepts an answer only on the proxy's reserved `/__silo/v1/<op>` route, and
+//! only for a single-use nonce that Rust issued for that operation moments
+//! earlier. See `desktop_viewer_bridge.js` for the page half.
+// The audio, resize and image operations have no caller until their phases land.
+#![allow(dead_code)]
+use base64::{engine::general_purpose::STANDARD, Engine};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+
+pub(crate) const ROUTE_PREFIX: &str = "/__silo/v1/";
+/// How long a nonce stays valid beyond the wait the caller asked for.
+const REPLY_GRACE: Duration = Duration::from_secs(5);
+/// Longest wait a caller can request for the page's answer.
+const MAX_WAIT: Duration = Duration::from_secs(10);
+
+/// Largest text Silo writes into a computer's clipboard.
+pub(crate) const MAX_TEXT_BYTES: usize = 1024 * 1024;
+/// Largest encoded image Silo writes into a computer's clipboard.
+pub(crate) const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+/// Selkies' own chunk size for clipboard transfers (`CLIPBOARD_CHUNK_SIZE`,
+/// websockets_mode.py): 16 KiB rounded down to a multiple of three bytes so
+/// every chunk is independently valid base64.
+const CHUNK_BYTES: usize = 16 * 1024 / 3 * 3;
+
+const MAX_SCREEN_EDGE: u32 = 4080;
+const KEYSYM_CONTROL_L: u32 = 0xffe3;
+const KEYSYM_C: u32 = b'c' as u32;
+const KEYSYM_V: u32 = b'v' as u32;
+
+/// Operations the page may answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Op {
+    Clipboard,
+    Capabilities,
+}
+impl Op {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "clipboard" => Some(Self::Clipboard),
+            "capabilities" => Some(Self::Capabilities),
+            _ => None,
+        }
+    }
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Clipboard => "clipboard",
+            Self::Capabilities => "capabilities",
+        }
+    }
+    /// Largest request body Rust accepts for this operation.
+    pub(crate) fn max_bytes(self) -> usize {
+        match self {
+            Self::Clipboard => 24 * 1024 * 1024,
+            Self::Capabilities => 4 * 1024,
+        }
+    }
+}
+
+/// What the page posted: a short content kind (a MIME type, `none` or
+/// `application/json`) and the raw body.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Reply {
+    pub kind: String,
+    pub body: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Rejection {
+    /// Rust has not asked this operation of the page.
+    Unsolicited,
+    WrongNonce,
+    Expired,
+}
+
+struct Pending {
+    nonce: String,
+    expires: Instant,
+    sender: mpsc::SyncSender<Reply>,
+}
+
+/// Pending single-use nonces for one viewer connection.
+#[derive(Default)]
+pub(crate) struct Inbox {
+    pending: Mutex<HashMap<Op, Pending>>,
+    rejected: AtomicU64,
+}
+
+/// The caller's side of an issued nonce.
+pub(crate) struct Expectation {
+    pub nonce: String,
+    receiver: mpsc::Receiver<Reply>,
+}
+impl Expectation {
+    /// Waits for the page's answer. `Err` means the page never answered with the
+    /// nonce, or its answer was refused.
+    pub(crate) fn wait(self, timeout: Duration) -> Result<Reply, String> {
+        self.receiver
+            .recv_timeout(timeout)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => "The computer did not answer.".to_string(),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    "The computer's answer was not accepted.".to_string()
+                }
+            })
+    }
+}
+
+/// A validated, consumed nonce: the right to deliver one body of up to
+/// `max_bytes`.
+pub(crate) struct Claim {
+    pub max_bytes: usize,
+    sender: mpsc::SyncSender<Reply>,
+}
+impl Claim {
+    pub(crate) fn deliver(self, reply: Reply) {
+        let _ = self.sender.send(reply);
+    }
+}
+
+impl Inbox {
+    /// Issues a nonce for `op`, valid for `ttl`. A newer request for the same
+    /// operation supersedes an older one.
+    pub(crate) fn expect(&self, op: Op, ttl: Duration) -> Expectation {
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.insert(
+                op,
+                Pending {
+                    nonce: nonce.clone(),
+                    expires: Instant::now() + ttl,
+                    sender,
+                },
+            );
+        }
+        Expectation { nonce, receiver }
+    }
+
+    /// Consumes the pending nonce for `op` when `nonce` matches and has not
+    /// expired. A wrong nonce leaves the real one in place, so the page cannot
+    /// cancel a request by guessing.
+    pub(crate) fn claim(&self, op: Op, nonce: &str, now: Instant) -> Result<Claim, Rejection> {
+        let mut pending = self.pending.lock().map_err(|_| Rejection::Unsolicited)?;
+        let Some(entry) = pending.get(&op) else {
+            return Err(Rejection::Unsolicited);
+        };
+        if entry.expires <= now {
+            pending.remove(&op);
+            return Err(Rejection::Expired);
+        }
+        if entry.nonce != nonce {
+            return Err(Rejection::WrongNonce);
+        }
+        let entry = pending.remove(&op).ok_or(Rejection::Unsolicited)?;
+        Ok(Claim {
+            max_bytes: op.max_bytes(),
+            sender: entry.sender,
+        })
+    }
+
+    fn log_rejection(&self, what: &str) {
+        let count = self.rejected.fetch_add(1, Ordering::Relaxed);
+        if count < 5 || count.is_multiple_of(100) {
+            eprintln!("Silo desktop bridge: rejected request ({what}); {count} earlier");
+        }
+    }
+}
+
+/// HTTP status for a request on the reserved route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Status {
+    Accepted,
+    BadRequest,
+    Forbidden,
+    NotFound,
+    TooLarge,
+}
+impl Status {
+    pub(crate) fn line(self) -> &'static str {
+        match self {
+            Self::Accepted => "204 No Content",
+            Self::BadRequest => "400 Bad Request",
+            Self::Forbidden => "403 Forbidden",
+            Self::NotFound => "404 Not Found",
+            Self::TooLarge => "413 Content Too Large",
+        }
+    }
+}
+
+/// True for every target the proxy must answer itself and never forward.
+pub(crate) fn is_reserved(target: &str) -> bool {
+    let path = target.split(['?', '#']).next().unwrap_or(target);
+    path == "/__silo" || path.starts_with("/__silo/")
+}
+
+struct Route<'a> {
+    op: Op,
+    nonce: &'a str,
+    kind: &'a str,
+}
+fn parse_route(target: &str) -> Result<Route<'_>, Status> {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let name = path.strip_prefix(ROUTE_PREFIX).ok_or(Status::NotFound)?;
+    let op = Op::parse(name).ok_or(Status::NotFound)?;
+    let (mut nonce, mut kind) = (None, None);
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("nonce", value)) if nonce.is_none() => nonce = Some(value),
+            Some(("kind", value)) if kind.is_none() => kind = Some(value),
+            _ => return Err(Status::BadRequest),
+        }
+    }
+    let nonce = nonce
+        .filter(|n| !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .ok_or(Status::BadRequest)?;
+    let kind = kind
+        .filter(|k| {
+            !k.is_empty()
+                && k.len() <= 64
+                && k.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'+' | b'-'))
+        })
+        .ok_or(Status::BadRequest)?;
+    Ok(Route { op, nonce, kind })
+}
+
+/// Handles one authenticated request on the reserved route. `read_body` reads
+/// exactly the requested number of body bytes and is called only after the
+/// nonce is accepted and the declared length is within the operation's cap.
+pub(crate) fn serve_route(
+    inbox: &Inbox,
+    method: &str,
+    target: &str,
+    content_length: Option<u64>,
+    read_body: impl FnOnce(usize) -> std::io::Result<Vec<u8>>,
+    now: Instant,
+) -> Status {
+    let route = match parse_route(target) {
+        Ok(route) => route,
+        Err(status) => {
+            inbox.log_rejection("unknown route");
+            return status;
+        }
+    };
+    if method != "POST" {
+        inbox.log_rejection("method");
+        return Status::BadRequest;
+    }
+    let claim = match inbox.claim(route.op, route.nonce, now) {
+        Ok(claim) => claim,
+        Err(reason) => {
+            inbox.log_rejection(&format!("{} {reason:?}", route.op.name()));
+            return Status::Forbidden;
+        }
+    };
+    let Some(length) = content_length else {
+        inbox.log_rejection("missing length");
+        return Status::BadRequest;
+    };
+    if length > claim.max_bytes as u64 {
+        inbox.log_rejection("oversize");
+        return Status::TooLarge;
+    }
+    match read_body(length as usize) {
+        Ok(body) => {
+            claim.deliver(Reply {
+                kind: route.kind.to_string(),
+                body,
+            });
+            Status::Accepted
+        }
+        Err(_) => Status::BadRequest,
+    }
+}
+
+/// Anything that can run script in the guest page.
+pub(crate) trait Page {
+    fn eval(&self, script: &str) -> Result<(), String>;
+}
+impl<R: tauri::Runtime> Page for tauri::Webview<R> {
+    fn eval(&self, script: &str) -> Result<(), String> {
+        tauri::Webview::eval(self, script).map_err(|_| "The desktop display is unavailable.".into())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GuestClipboard {
+    Empty,
+    Text(String),
+    Image { mime: String, bytes: Vec<u8> },
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub(crate) struct Capabilities {
+    #[serde(rename = "audioDecoder")]
+    pub audio_decoder: bool,
+    /// The web engine can decode 48 kHz stereo Opus, which Selkies audio needs.
+    pub opus: bool,
+    /// The Selkies WebSocket transport exists and is open. It is absent when
+    /// the client runs in WebRTC mode, where none of the bridge's frames work.
+    pub transport: bool,
+}
+
+/// Silo's operations on one viewer's guest page.
+pub(crate) struct Bridge<'a> {
+    pub page: &'a dyn Page,
+    pub inbox: &'a Inbox,
+}
+
+fn script(method: &str, args: Value) -> String {
+    format!(
+        "window.__silo&&window.__silo.invoke({},{});",
+        json!(method),
+        args
+    )
+}
+
+fn text_frames(text: &str, id: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    if bytes.len() <= CHUNK_BYTES {
+        return vec![format!("cw,{}", STANDARD.encode(bytes))];
+    }
+    let mut frames = vec![format!("cws,{id},{}", bytes.len())];
+    frames.extend(
+        bytes
+            .chunks(CHUNK_BYTES)
+            .map(|chunk| format!("cwd,{id},{}", STANDARD.encode(chunk))),
+    );
+    frames.push(format!("cwe,{id}"));
+    frames
+}
+
+fn image_frames(mime: &str, bytes: &[u8], id: &str) -> Vec<String> {
+    if bytes.len() <= CHUNK_BYTES {
+        return vec![format!("cb,{mime},{}", STANDARD.encode(bytes))];
+    }
+    let mut frames = vec![format!("cbs,{id},{mime},{}", bytes.len())];
+    frames.extend(
+        bytes
+            .chunks(CHUNK_BYTES)
+            .map(|chunk| format!("cbd,{id},{}", STANDARD.encode(chunk))),
+    );
+    frames.push(format!("cbe,{id}"));
+    frames
+}
+
+fn chord(key: u32) -> Vec<String> {
+    vec![
+        format!("kd,{KEYSYM_CONTROL_L}"),
+        format!("kd,{key}"),
+        format!("ku,{key}"),
+        format!("ku,{KEYSYM_CONTROL_L}"),
+    ]
+}
+
+fn image_mime(mime: &str) -> bool {
+    matches!(
+        mime,
+        "image/png" | "image/jpeg" | "image/webp" | "image/bmp"
+    )
+}
+
+impl Bridge<'_> {
+    fn invoke(&self, method: &str, args: Value) -> Result<(), String> {
+        self.page.eval(&script(method, args))
+    }
+
+    fn send_frames(&self, frames: &[String]) -> Result<(), String> {
+        self.invoke("sendFrames", json!([frames]))
+    }
+
+    /// Sets the computer's clipboard to `text` (Selkies `cw`, or `cws`/`cwd`/`cwe`
+    /// above one chunk). The server awaits the write before the next frame.
+    pub(crate) fn send_guest_text(&self, text: &str) -> Result<(), String> {
+        if text.len() > MAX_TEXT_BYTES {
+            return Err("That text is too large to paste into the computer.".into());
+        }
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        self.send_frames(&text_frames(text, &id))
+    }
+
+    /// Sets the computer's clipboard to an encoded image (Selkies `cb`, or
+    /// `cbs`/`cbd`/`cbe` above one chunk).
+    pub(crate) fn send_guest_image(&self, mime: &str, bytes: &[u8]) -> Result<(), String> {
+        if !image_mime(mime) {
+            return Err("That image format cannot be pasted into the computer.".into());
+        }
+        if bytes.len() > MAX_IMAGE_BYTES {
+            return Err("That image is too large to paste into the computer.".into());
+        }
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        self.send_frames(&image_frames(mime, bytes, &id))
+    }
+
+    /// Presses Ctrl+V in the computer.
+    pub(crate) fn press_guest_paste(&self) -> Result<(), String> {
+        self.send_frames(&chord(KEYSYM_V))
+    }
+
+    /// Presses Ctrl+C in the computer, without reading the result.
+    pub(crate) fn press_guest_copy(&self) -> Result<(), String> {
+        self.send_frames(&chord(KEYSYM_C))
+    }
+
+    /// Reads the computer's clipboard: waits up to `timeout` for the next
+    /// announcement (optionally after pressing Ctrl+C), then falls back to the
+    /// last one the page saw. The guest page cannot send it unprompted.
+    pub(crate) fn request_guest_clipboard(
+        &self,
+        timeout: Duration,
+        press_copy: bool,
+    ) -> Result<GuestClipboard, String> {
+        let timeout = timeout.min(MAX_WAIT);
+        let wait = timeout + REPLY_GRACE;
+        let expectation = self.inbox.expect(Op::Clipboard, wait);
+        let mut frames = if press_copy { chord(KEYSYM_C) } else { vec![] };
+        frames.push("REQUEST_CLIPBOARD".into());
+        self.invoke(
+            "requestClipboard",
+            json!([expectation.nonce, timeout.as_millis() as u64, frames]),
+        )?;
+        let reply = expectation.wait(wait)?;
+        match reply.kind.as_str() {
+            "none" => Ok(GuestClipboard::Empty),
+            "text/plain" if reply.body.is_empty() => Ok(GuestClipboard::Empty),
+            "text/plain" => String::from_utf8(reply.body)
+                .map(GuestClipboard::Text)
+                .map_err(|_| "The computer's clipboard is not text.".into()),
+            mime if image_mime(mime) && !reply.body.is_empty() => Ok(GuestClipboard::Image {
+                mime: mime.to_string(),
+                bytes: reply.body,
+            }),
+            _ => Err("The computer's clipboard has content Silo cannot copy.".into()),
+        }
+    }
+
+    /// Asks the page which media features this web engine has.
+    pub(crate) fn capabilities(&self, timeout: Duration) -> Result<Capabilities, String> {
+        let wait = timeout.min(MAX_WAIT);
+        let expectation = self.inbox.expect(Op::Capabilities, wait + REPLY_GRACE);
+        self.invoke("capabilities", json!([expectation.nonce]))?;
+        let reply = expectation.wait(wait)?;
+        serde_json::from_slice(&reply.body).map_err(|_| "Unreadable desktop capabilities.".into())
+    }
+
+    /// Selkies `setMute` page message (silences playback, keeps the stream).
+    pub(crate) fn set_audio_muted(&self, muted: bool) -> Result<(), String> {
+        self.invoke("setMute", json!([muted]))
+    }
+
+    pub(crate) fn set_audio_volume(&self, volume: f64) -> Result<(), String> {
+        self.invoke("setVolume", json!([volume.clamp(0., 1.)]))
+    }
+
+    /// Starts or stops the audio stream through Selkies' `pipelineControl`
+    /// page message, so the client and server agree on the pipeline state.
+    pub(crate) fn set_audio_active(&self, active: bool) -> Result<(), String> {
+        self.invoke("setAudioActive", json!([active]))
+    }
+
+    /// Asks the server for a screen size (`r,WxH,primary`). Selkies wants even
+    /// dimensions of at most 4080.
+    pub(crate) fn reset_resolution(&self, width: u32, height: u32) -> Result<(), String> {
+        if !(16..=MAX_SCREEN_EDGE).contains(&width) || !(16..=MAX_SCREEN_EDGE).contains(&height) {
+            return Err("Invalid screen size.".into());
+        }
+        self.send_frames(&[format!("r,{}x{},primary", width & !1, height & !1)])
+    }
+
+    /// Selkies `resetResolutionToWindow` page message.
+    pub(crate) fn reset_resolution_to_window(&self) -> Result<(), String> {
+        self.invoke("resetResolutionToWindow", json!([]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    struct FakePage {
+        scripts: RefCell<Vec<String>>,
+    }
+    impl Page for FakePage {
+        fn eval(&self, script: &str) -> Result<(), String> {
+            self.scripts.borrow_mut().push(script.to_string());
+            Ok(())
+        }
+    }
+
+    fn post(inbox: &Inbox, target: &str, body: &[u8]) -> Status {
+        serve_route(
+            inbox,
+            "POST",
+            target,
+            Some(body.len() as u64),
+            |n| Ok(body[..n].to_vec()),
+            Instant::now(),
+        )
+    }
+
+    #[test]
+    fn unsolicited_requests_are_rejected() {
+        let inbox = Inbox::default();
+        let target = format!("{ROUTE_PREFIX}clipboard?nonce=abc&kind=text/plain");
+        assert_eq!(post(&inbox, &target, b"hi"), Status::Forbidden);
+        // A nonce for another operation does not open this one.
+        let other = inbox.expect(Op::Capabilities, Duration::from_secs(5));
+        let target = format!(
+            "{ROUTE_PREFIX}clipboard?nonce={}&kind=text/plain",
+            other.nonce
+        );
+        assert_eq!(post(&inbox, &target, b"hi"), Status::Forbidden);
+    }
+
+    #[test]
+    fn a_nonce_works_once() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let target = format!(
+            "{ROUTE_PREFIX}clipboard?nonce={}&kind=text/plain",
+            expectation.nonce
+        );
+        assert_eq!(post(&inbox, &target, b"hello"), Status::Accepted);
+        assert_eq!(post(&inbox, &target, b"again"), Status::Forbidden);
+        let reply = expectation.wait(Duration::from_secs(1)).unwrap();
+        assert_eq!(reply.kind, "text/plain");
+        assert_eq!(reply.body, b"hello");
+    }
+
+    #[test]
+    fn a_wrong_nonce_neither_succeeds_nor_cancels_the_request() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let wrong = format!("{ROUTE_PREFIX}clipboard?nonce=wrong&kind=text/plain");
+        assert_eq!(post(&inbox, &wrong, b"x"), Status::Forbidden);
+        let right = format!(
+            "{ROUTE_PREFIX}clipboard?nonce={}&kind=text/plain",
+            expectation.nonce
+        );
+        assert_eq!(post(&inbox, &right, b"x"), Status::Accepted);
+    }
+
+    #[test]
+    fn expired_nonces_are_rejected() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(10));
+        let target = format!(
+            "{ROUTE_PREFIX}clipboard?nonce={}&kind=text/plain",
+            expectation.nonce
+        );
+        assert_eq!(post(&inbox, &target, b"late"), Status::Forbidden);
+        assert!(expectation.wait(Duration::from_millis(50)).is_err());
+        assert_eq!(
+            inbox.claim(Op::Clipboard, "x", Instant::now()).err(),
+            Some(Rejection::Unsolicited)
+        );
+    }
+
+    #[test]
+    fn oversize_bodies_are_refused_before_they_are_read() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Capabilities, Duration::from_secs(5));
+        let target = format!(
+            "{ROUTE_PREFIX}capabilities?nonce={}&kind=application/json",
+            expectation.nonce
+        );
+        let status = serve_route(
+            &inbox,
+            "POST",
+            &target,
+            Some(Op::Capabilities.max_bytes() as u64 + 1),
+            |_| panic!("an oversize body must not be read"),
+            Instant::now(),
+        );
+        assert_eq!(status, Status::TooLarge);
+        assert!(expectation.wait(Duration::from_millis(50)).is_err());
+    }
+
+    #[test]
+    fn unknown_operations_methods_and_malformed_queries_are_rejected() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let nonce = &expectation.nonce;
+        let unknown = format!("{ROUTE_PREFIX}files?nonce={nonce}&kind=text/plain");
+        assert_eq!(post(&inbox, &unknown, b""), Status::NotFound);
+        assert_eq!(post(&inbox, "/__silo/v2/clipboard", b""), Status::NotFound);
+        for target in [
+            format!("{ROUTE_PREFIX}clipboard"),
+            format!("{ROUTE_PREFIX}clipboard?nonce={nonce}"),
+            format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&kind=a b"),
+            format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&kind=text/plain&extra=1"),
+            format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&nonce={nonce}&kind=text/plain"),
+        ] {
+            assert_eq!(post(&inbox, &target, b""), Status::BadRequest, "{target}");
+        }
+        let status = serve_route(
+            &inbox,
+            "GET",
+            &format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&kind=text/plain"),
+            None,
+            |_| Ok(vec![]),
+            Instant::now(),
+        );
+        assert_eq!(status, Status::BadRequest);
+        // None of those consumed the nonce.
+        let good = format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&kind=none");
+        assert_eq!(post(&inbox, &good, b""), Status::Accepted);
+    }
+
+    #[test]
+    fn every_reserved_path_is_recognised() {
+        for target in [
+            "/__silo",
+            "/__silo/",
+            "/__silo/v1/x?y=1",
+            "/__silo/../a",
+            "/__silo?x",
+        ] {
+            assert!(is_reserved(target), "{target}");
+        }
+        for target in ["/", "/__silox", "/a/__silo/v1/clipboard", "/websockify"] {
+            assert!(!is_reserved(target), "{target}");
+        }
+    }
+
+    #[test]
+    fn text_is_chunked_like_selkies() {
+        assert_eq!(text_frames("hi", "id"), ["cw,aGk="]);
+        let big = "é".repeat(CHUNK_BYTES);
+        let frames = text_frames(&big, "id");
+        assert_eq!(frames[0], format!("cws,id,{}", big.len()));
+        assert_eq!(frames.last().unwrap(), "cwe,id");
+        let mut joined = Vec::new();
+        for frame in &frames[1..frames.len() - 1] {
+            let data = frame.strip_prefix("cwd,id,").unwrap();
+            joined.extend(STANDARD.decode(data).unwrap());
+        }
+        assert_eq!(joined, big.as_bytes());
+        assert!(frames[1..frames.len() - 1].iter().all(|f| f.len() < 25_000));
+    }
+
+    #[test]
+    fn images_carry_their_mime_and_chunk_with_a_size_header() {
+        assert_eq!(
+            image_frames("image/png", b"abc", "id"),
+            ["cb,image/png,YWJj"]
+        );
+        let bytes = vec![7u8; CHUNK_BYTES * 2 + 1];
+        let frames = image_frames("image/png", &bytes, "id");
+        assert_eq!(frames[0], format!("cbs,id,image/png,{}", bytes.len()));
+        assert_eq!(frames.len(), 5);
+        assert_eq!(frames[4], "cbe,id");
+    }
+
+    #[test]
+    fn payloads_reach_the_page_only_as_json() {
+        let page = FakePage::default();
+        let inbox = Inbox::default();
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        let hostile = "\"); alert(1); (\"\u{2028}`${x}`\\";
+        bridge.send_guest_text(hostile).unwrap();
+        bridge.press_guest_paste().unwrap();
+        bridge.set_audio_muted(true).unwrap();
+        let scripts = page.scripts.borrow();
+        assert_eq!(scripts.len(), 3);
+        // The text is base64 inside a JSON array; nothing of it appears raw.
+        assert!(!scripts[0].contains("alert"));
+        assert!(scripts[0].starts_with("window.__silo&&window.__silo.invoke(\"sendFrames\",[["));
+        assert_eq!(
+            scripts[1],
+            "window.__silo&&window.__silo.invoke(\"sendFrames\",[[\"kd,65507\",\"kd,118\",\"ku,118\",\"ku,65507\"]]);"
+        );
+        assert_eq!(
+            scripts[2],
+            "window.__silo&&window.__silo.invoke(\"setMute\",[true]);"
+        );
+    }
+
+    #[test]
+    fn oversize_text_images_and_bad_formats_are_refused_locally() {
+        let page = FakePage::default();
+        let inbox = Inbox::default();
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        assert!(bridge
+            .send_guest_text(&"x".repeat(MAX_TEXT_BYTES + 1))
+            .is_err());
+        assert!(bridge
+            .send_guest_image("image/png", &vec![0; MAX_IMAGE_BYTES + 1])
+            .is_err());
+        assert!(bridge.send_guest_image("text/html", b"<b>").is_err());
+        assert!(bridge.send_guest_image("image/png,x", b"a").is_err());
+        assert!(bridge.reset_resolution(0, 900).is_err());
+        assert!(bridge.reset_resolution(1440, 100_000).is_err());
+        assert!(page.scripts.borrow().is_empty());
+        assert!(bridge.reset_resolution(4082, 900).is_err());
+        bridge.reset_resolution(1441, 901).unwrap();
+        bridge.set_audio_active(true).unwrap();
+        let scripts = page.scripts.borrow();
+        assert!(scripts[0].contains("\"r,1440x900,primary\""));
+        assert!(scripts[1].ends_with("invoke(\"setAudioActive\",[true]);"));
+    }
+
+    /// A page that answers the nonce in the eval'd call, like the real helper.
+    struct AnsweringPage<'a> {
+        inbox: &'a Inbox,
+        op: Op,
+        kind: &'a str,
+        body: &'a [u8],
+        seen: RefCell<Vec<String>>,
+    }
+    impl Page for AnsweringPage<'_> {
+        fn eval(&self, script: &str) -> Result<(), String> {
+            self.seen.borrow_mut().push(script.to_string());
+            let start = script.find("[\"").ok_or("no nonce")? + 2;
+            let nonce: String = script[start..].chars().take_while(|c| *c != '"').collect();
+            let target = format!(
+                "{ROUTE_PREFIX}{}?nonce={nonce}&kind={}",
+                self.op.name(),
+                self.kind
+            );
+            assert_eq!(post(self.inbox, &target, self.body), Status::Accepted);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn guest_clipboard_requests_decode_text_and_images_and_refuse_the_rest() {
+        let cases: [(&str, &[u8], Result<GuestClipboard, ()>); 6] = [
+            (
+                "text/plain",
+                "héllo".as_bytes(),
+                Ok(GuestClipboard::Text("héllo".into())),
+            ),
+            ("none", b"", Ok(GuestClipboard::Empty)),
+            ("text/plain", b"", Ok(GuestClipboard::Empty)),
+            (
+                "image/png",
+                b"\x89PNG",
+                Ok(GuestClipboard::Image {
+                    mime: "image/png".into(),
+                    bytes: b"\x89PNG".to_vec(),
+                }),
+            ),
+            ("text/html", b"<b>", Err(())),
+            ("text/plain", &[0xff, 0xfe], Err(())),
+        ];
+        for (kind, body, expected) in cases {
+            let inbox = Inbox::default();
+            let page = AnsweringPage {
+                inbox: &inbox,
+                op: Op::Clipboard,
+                kind,
+                body,
+                seen: RefCell::default(),
+            };
+            let bridge = Bridge {
+                page: &page,
+                inbox: &inbox,
+            };
+            let result = bridge.request_guest_clipboard(Duration::from_millis(500), true);
+            assert_eq!(result.map_err(|_| ()), expected, "{kind}");
+            let script = page.seen.borrow()[0].clone();
+            assert!(script.contains("\"requestClipboard\""));
+            assert!(script
+                .contains("\"kd,65507\",\"kd,99\",\"ku,99\",\"ku,65507\",\"REQUEST_CLIPBOARD\""));
+        }
+    }
+
+    #[test]
+    fn capabilities_are_read_from_the_pages_answer() {
+        let inbox = Inbox::default();
+        let page = AnsweringPage {
+            inbox: &inbox,
+            op: Op::Capabilities,
+            kind: "application/json",
+            body: br#"{"audioDecoder":true,"opus":false,"transport":true,"extra":1}"#,
+            seen: RefCell::default(),
+        };
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        let capabilities = bridge.capabilities(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            capabilities,
+            Capabilities {
+                audio_decoder: true,
+                opus: false,
+                transport: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_silent_page_times_out() {
+        let page = FakePage::default();
+        let inbox = Inbox::default();
+        let bridge = Bridge {
+            page: &page,
+            inbox: &inbox,
+        };
+        let started = Instant::now();
+        let error = bridge
+            .request_guest_clipboard(Duration::from_millis(1), false)
+            .unwrap_err();
+        // The wait is the request plus the reply grace, never unbounded.
+        assert!(started.elapsed() < Duration::from_secs(8));
+        assert!(!error.is_empty());
+    }
+}

@@ -123,3 +123,7 @@ retained, including immediate outside-click failures and harness errors. GTK's
 500 ms activation timeout explains the immediate-click behavior; the final
 probes wait beyond that native interval.
 These checks do not establish live VM health or installer behavior. Release preparation records these checks for Silo 0.4.0.
+
+## Desktop viewer clipboard items
+
+On macOS the Edit menu ends with Paste into Computer and Copy from Computer. They have no accelerator of their own: Command+V and Command+C in a desktop viewer are consumed by a native key monitor scoped to viewer windows (`viewer_shortcuts.rs`), and every other window keeps the standard Cut, Copy and Paste items. The two items are enabled only while a desktop viewer has focus and a device clipboard is available, which is not yet the case, so they stay disabled. They are not part of `MenuState` and send nothing to the main window. Linux viewer windows have no menu bar; Ctrl+Shift+V and Ctrl+Shift+C are handled by a GTK key handler on the viewer window. See [the desktop notes](SiloUI-DESKTOP.md#clipboard-and-the-host-bridge-selkies).

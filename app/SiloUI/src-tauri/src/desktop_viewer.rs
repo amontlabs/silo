@@ -1,5 +1,8 @@
 //! A privileged local shell and an unprivileged guest child webview.
-use crate::{desktop_proxy::Proxy, editor, owned_tunnel::Tunnel, remote, remote_access, runtime};
+use crate::{
+    desktop_bridge::Bridge, desktop_proxy::Proxy, editor, owned_tunnel::Tunnel, remote,
+    remote_access, runtime,
+};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -373,13 +376,25 @@ pub(crate) async fn open_desktop(
                 return Err("Could not open desktop viewer.".into());
             }
         };
-        viewer.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+        let menu_app = app.clone();
+        let shortcut_label = label.clone();
+        viewer.on_window_event(move |event| match event {
+            tauri::WindowEvent::Destroyed => {
+                crate::viewer_shortcuts::uninstall(&shortcut_label);
+                crate::app_menu::set_viewer_focus(&menu_app, false);
                 // Attach never holds the lock across window work, so this cannot
                 // wait on the main thread; reap the tunnel after unlocking.
                 let removed = viewers().lock().ok().and_then(|mut e| e.remove(&label));
                 drop(removed);
             }
+            tauri::WindowEvent::Focused(focused) => {
+                crate::app_menu::set_viewer_focus(&menu_app, *focused);
+            }
+            _ => {}
+        });
+        let (shortcut_app, shortcut_window) = (app.clone(), viewer.clone());
+        let _ = viewer.run_on_main_thread(move || {
+            crate::viewer_shortcuts::install(&shortcut_app, &shortcut_window);
         });
         Ok(())
     })
@@ -414,15 +429,44 @@ fn desktop_position(
     ))
 }
 
-/// Refuses the async clipboard API and page-driven copy in guest frames;
-/// behaviour is covered by `desktop/linux-desktop-guest-guard.test.ts`.
-const GUEST_CLIPBOARD_GUARD: &str = include_str!("desktop_viewer_guard.js");
+/// Locks the clipboard and capture APIs in guest frames, seeds the Selkies
+/// client settings and installs the page half of the host bridge; behaviour is
+/// covered by `desktop/linux-desktop-guest-guard.test.ts` and
+/// `desktop/linux-desktop-bridge.test.ts`.
+const GUEST_BRIDGE_SCRIPT: &str = include_str!("desktop_viewer_bridge.js");
+
+pub(crate) fn is_viewer_label(label: &str) -> bool {
+    label.starts_with("desktop-shell-")
+}
+
+/// Runs `f` against the bridge of one viewer's guest page. The bridge waits for
+/// the page's answers, so call this from a worker thread, never the main thread.
+pub(crate) fn with_bridge<R>(
+    app: &AppHandle,
+    label: &str,
+    f: impl FnOnce(&Bridge) -> Result<R, String>,
+) -> Result<R, String> {
+    let inbox = viewers()
+        .lock()
+        .map_err(|_| "Desktop unavailable.")?
+        .get(label)
+        .and_then(|viewer| viewer.proxy.as_ref())
+        .filter(|proxy| proxy.running())
+        .map(|proxy| proxy.inbox.clone())
+        .ok_or("The desktop is not connected.")?;
+    let view = app
+        .get_webview(&format!("guest-{label}"))
+        .ok_or("The desktop display is closed.")?;
+    f(&Bridge {
+        page: &view,
+        inbox: &inbox,
+    })
+}
 
 fn viewer_url(origin: &str) -> tauri::Url {
-    // Native viewers use WebKit. Its user agent can omit "Safari", bypassing
-    // KasmVNC's safeguard against clipboard reads opening Paste menus on clicks.
-    // Set the client option explicitly; its manual clipboard panel stays enabled.
-    tauri::Url::parse(&format!("{origin}/?resize=scale&clipboard_seamless=false")).unwrap()
+    // Selkies reads only token, offscreen_worker and socket_worker from the URL.
+    // Its other settings come from localStorage, which the bridge script seeds.
+    tauri::Url::parse(&format!("{origin}/")).unwrap()
 }
 
 #[tauri::command]
@@ -518,7 +562,7 @@ pub(crate) async fn desktop_viewer_attach(
         // Guest pages must never write to the host's Downloads folder (G-13).
         .on_download(|_, _| false)
         // Nor use the host clipboard, from any frame (G-20).
-        .initialization_script_for_all_frames(GUEST_CLIPBOARD_GUARD)
+        .initialization_script_for_all_frames(GUEST_BRIDGE_SCRIPT)
         .on_navigation(move |url| {
             url.as_str() == "about:blank" || url.origin().ascii_serialization() == permitted
         });
@@ -672,22 +716,22 @@ mod input_tests {
     use super::*;
 
     #[test]
-    fn every_viewer_connection_disables_implicit_clipboard_reads() {
+    fn viewer_urls_carry_no_stale_client_settings() {
         // Local and SSH-tunneled desktops both receive a fresh loopback origin.
         for port in [42001, 53102] {
             let origin = format!("http://127.0.0.1:{port}");
             let url = viewer_url(&origin);
             assert_eq!(url.origin().ascii_serialization(), origin);
-            let settings: HashMap<_, _> = url.query_pairs().into_owned().collect();
-            assert_eq!(
-                settings.get("clipboard_seamless").map(String::as_str),
-                Some("false")
-            );
-            assert_eq!(settings.get("resize").map(String::as_str), Some("scale"));
-            // Manual clipboard transfer keeps the client's enabled defaults.
-            assert!(!settings.contains_key("clipboard_up"));
-            assert!(!settings.contains_key("clipboard_down"));
+            assert_eq!(url.path(), "/");
+            assert_eq!(url.query(), None);
         }
+    }
+
+    #[test]
+    fn only_desktop_shell_windows_count_as_viewers() {
+        assert!(is_viewer_label("desktop-shell-0123"));
+        assert!(!is_viewer_label("guest-desktop-shell-0123"));
+        assert!(!is_viewer_label("main"));
     }
 }
 

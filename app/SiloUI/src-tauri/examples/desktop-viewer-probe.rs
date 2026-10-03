@@ -1,3 +1,6 @@
+#[path = "../src/desktop_bridge.rs"]
+#[allow(dead_code)]
+mod desktop_bridge;
 #[path = "../src/desktop_proxy.rs"]
 mod desktop_proxy;
 
