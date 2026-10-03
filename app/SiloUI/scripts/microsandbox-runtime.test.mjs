@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { spawn, execFileSync } from "node:child_process"
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { chmod, copyFile, mkdir, symlink, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
@@ -52,6 +52,8 @@ async function fixture(t) {
   const archive = join(root, "source.tar.gz")
   execFileSync("/usr/bin/tar", ["-czf", archive, "-C", root, "source"])
   for (const tool of ["rustc", "cargo"]) await writeFile(join(bin, tool), toolScript, { mode: 0o755 })
+  // GNU tar decompresses through an external gzip found on PATH, and the workers run with only this directory on PATH.
+  await symlink(execFileSync("/bin/sh", ["-c", "command -v gzip"], { encoding: "utf8" }).trim(), join(bin, "gzip"))
   const worker = join(root, "worker.mjs")
   await writeFile(worker, `
 import { buildPatchedExecutable } from ${JSON.stringify(runtimeModule)}
