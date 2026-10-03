@@ -555,9 +555,13 @@ def set_desktop_start_size(environment, account):
     width, height = DESKTOP_START_SIZE
     name = f'{width}x{height}'
     screen = None
-    for _ in range(XRANDR_READY_SECONDS * 5):
-        screen = xrandr_screen(environment, account)
-        if screen:
+    deadline = time.monotonic() + XRANDR_READY_SECONDS
+    while True:
+        try:
+            screen = xrandr_screen(environment, account)
+        except RuntimeError:
+            screen = None
+        if screen or time.monotonic() >= deadline:
             break
         time.sleep(0.2)
     if not screen:
@@ -1047,7 +1051,8 @@ def status():
                  'starting' if 'starting' in (session_state, stream_state) else 'stopped')
         backend = 'selkies'
         streamer_version = '2.0.0'
-        update_required = streamer_recipe_version() < STREAMER_CURRENT_RECIPE
+        update_required = False
+        update_available = streamer_recipe_version() < STREAMER_CURRENT_RECIPE
     elif recipe == 'kasm':
         state = legacy_state
         # A crashed helper must not make an orphaned Xvnc session appear safe
@@ -1058,6 +1063,7 @@ def status():
         backend = 'kasm'
         streamer_version = None
         update_required = False
+        update_available = False
     else:
         current = selkies_state()
         session_state = (selkies_session_state(current, running) if isinstance(current, dict)
@@ -1067,11 +1073,15 @@ def status():
         backend = None
         streamer_version = None
         update_required = True
+        update_available = False
+    # Required: the installed streamer cannot run. Available: it runs but predates the
+    # current recipe, so starting stays possible and the update is optional.
     return dict(installed=(STATE / 'installed.json').exists(), version='1', state=state,
                 autoStart=config['autoStart'], port=6901, user=USER, display=':1',
                 backend=backend, streamerVersion=streamer_version,
                 sessionState=session_state, streamState=stream_state,
-                updateRequired=update_required, **lcu_status())
+                updateRequired=update_required, updateAvailable=update_available,
+                **lcu_status())
 
 
 def start():

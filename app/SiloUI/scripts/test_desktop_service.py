@@ -483,6 +483,7 @@ class DesktopLifecycle(unittest.TestCase):
             result = service.status()
         self.assertIsNone(result['backend'])
         self.assertTrue(result['updateRequired'])
+        self.assertFalse(result['updateAvailable'])
         self.assertEqual(result['state'], 'failed')
         self.assertEqual(result['sessionState'], 'stopped')
         self.assertEqual(result['streamState'], 'failed')
@@ -505,7 +506,7 @@ class DesktopLifecycle(unittest.TestCase):
         self.assertEqual([call.args[0]['name'] for call in stop_process.call_args_list],
                          ['xfce', 'pulse', 'xvfb'])
 
-    def test_selkies_v1_receipt_preserves_live_state_and_requires_update(self):
+    def test_older_supported_receipts_preserve_live_state_and_offer_an_update(self):
         executable = self.root / 'selkies'
         executable.write_text('#!/bin/sh\nexit 0\n')
         executable.chmod(0o755)
@@ -546,7 +547,8 @@ class DesktopLifecycle(unittest.TestCase):
         self.assertEqual(result['state'], 'running')
         self.assertEqual(result['sessionState'], 'running')
         self.assertEqual(result['streamState'], 'running')
-        self.assertTrue(result['updateRequired'])
+        self.assertFalse(result['updateRequired'])
+        self.assertTrue(result['updateAvailable'])
 
         receipt_value = json.loads(receipt.read_text())
         receipt_value['recipeVersion'] = 2
@@ -555,7 +557,8 @@ class DesktopLifecycle(unittest.TestCase):
              common_patches[4], common_patches[5], common_patches[6], common_patches[7]:
             result = service.status()
         self.assertEqual(result['state'], 'running')
-        self.assertTrue(result['updateRequired'])
+        self.assertFalse(result['updateRequired'])
+        self.assertTrue(result['updateAvailable'])
 
         receipt_value['recipeVersion'] = 3
         service.write(receipt, receipt_value)
@@ -574,6 +577,12 @@ class DesktopLifecycle(unittest.TestCase):
             result = service.status()
         self.assertEqual(result['state'], 'running')
         self.assertFalse(result['updateRequired'])
+        self.assertFalse(result['updateAvailable'])
+
+    def test_current_recipe_matches_the_bundled_streamer_lock(self):
+        lock = json.loads((SOURCE.parent / 'desktop-streamer-lock.json').read_text())
+        self.assertEqual(lock['recipeVersion'], service.STREAMER_CURRENT_RECIPE)
+        self.assertIn(service.STREAMER_CURRENT_RECIPE, service.STREAMER_RECIPE_VERSIONS)
 
     def test_session_repair_restarts_a_failed_session_with_a_live_supervisor(self):
         cu_spec = importlib.util.spec_from_file_location(
@@ -1223,8 +1232,10 @@ class DesktopStartSize(unittest.TestCase):
             calls.append(arguments)
             code, out, err = replies(arguments, calls)
             return SimpleNamespace(returncode=code, stdout=out, stderr=err)
+        clock = iter(i * 0.2 for i in range(1000))
         with patch.object(service, 'run_xrandr', side_effect=xrandr), \
-             patch.object(service.time, 'sleep'):
+             patch.object(service.time, 'sleep'), \
+             patch.object(service.time, 'monotonic', side_effect=lambda: next(clock)):
             try:
                 service.set_desktop_start_size({}, 'account')
                 error = None
@@ -1264,6 +1275,36 @@ class DesktopStartSize(unittest.TestCase):
         self.assertRegex(str(error), 'could not add the 1440x900 mode: bad mode')
         _calls, error = self.run_resize(lambda arguments, calls: (1, '', 'no display'))
         self.assertRegex(str(error), 'did not report a RandR output')
+
+    def test_a_display_that_is_not_ready_yet_is_polled_within_a_bound(self):
+        attempts = []
+
+        def replies(arguments, calls):
+            if arguments == ['--query']:
+                attempts.append(1)
+                if len(attempts) < 4:
+                    return 1, '', "can't open display"
+                size = (1440, 900) if any('--output' in call for call in calls) else (4096, 4096)
+                return 0, self.QUERY.format(w=size[0], h=size[1]), ''
+            return 0, '', ''
+        calls, error = self.run_resize(replies)
+        self.assertIsNone(error)
+        self.assertEqual(calls[:4], [['--query']] * 4)
+        calls, error = self.run_resize(lambda arguments, _calls: (1, '', 'no display'))
+        self.assertLessEqual(len(calls), service.XRANDR_READY_SECONDS * 5 + 2)
+
+    def test_a_hung_xrandr_query_is_retried_until_the_bound(self):
+        attempts = []
+
+        def hung_then_ready(arguments, _environment, _account):
+            attempts.append(arguments)
+            if len(attempts) < 3:
+                raise RuntimeError('xrandr could not run: timed out')
+            return SimpleNamespace(returncode=0, stdout=self.QUERY.format(w=1440, h=900), stderr='')
+        with patch.object(service, 'run_xrandr', side_effect=hung_then_ready), \
+             patch.object(service.time, 'sleep'):
+            service.set_desktop_start_size({}, 'account')
+        self.assertEqual(len(attempts), 3)
 
     def test_the_resize_runs_right_after_xvfb_starts_and_not_after_other_processes(self):
         steps = []
