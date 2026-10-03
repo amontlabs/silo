@@ -7,7 +7,6 @@ import { resolveRuntimeTarget, stageRuntime } from "./microsandbox-runtime.mjs"
 import { stageLfsTransferRuntime } from "./lfs-transfer-runtime.mjs"
 import { stageGitRuntime } from "./git-runtime.mjs"
 import { preflight } from "./preflight.mjs"
-import { stageGuestImage } from "./guest-image.mjs"
 import { fetchStream } from "./build-input.mjs"
 import { stageLinuxPackageTools } from "./linux-package-tools.mjs"
 
@@ -33,9 +32,6 @@ await stageLfsTransferRuntime({ appRoot, targetTriple, fetchStream })
 
 console.log(`Prepared bundled MicroSandbox ${prepared.targetTriple}`)
 console.log(`Prepared bundled Git ${git.targetTriple}`)
-
-const guest = await stageGuestImage({ appRoot, targetTriple, fetchStream })
-console.log(`Prepared bundled guest ${guest.imageReference}`)
 
 // Signed package metadata lets publication verify version and target without running it.
 const { version } = JSON.parse(readFileSync(resolve(appRoot, "package.json"), "utf8"))

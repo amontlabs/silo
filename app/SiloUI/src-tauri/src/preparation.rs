@@ -1,11 +1,15 @@
 //! Background preparation of what each device needs before computers work well: the
-//! bundled VM image imported into the runtime and the pinned LCU archive downloaded and
-//! verified. Both start at launch without the device-wide operation gate. Actions that
-//! need one call `ensure_image` or `ensure_lcu`, which join the work in flight or run it.
+//! pinned VM image downloaded, verified and imported into the runtime, and the pinned LCU
+//! archive downloaded and verified. Both start at launch without the device-wide operation
+//! gate. Actions that need one call `ensure_image` or `ensure_lcu`, which join the work in
+//! flight or run it.
 //! The ChatGPT for Linux download has its own worker (`chatgpt_app`) and status.
 use crate::{
     chatgpt_app::{self, DebArch, Downloader, HttpDownloader},
-    runtime::{guest_image, ProcessRunner, RuntimePaths},
+    runtime::{
+        guest_image::{self, PinnedImage},
+        ProcessRunner, RuntimePaths, RuntimeRunner,
+    },
 };
 use serde::Serialize;
 use std::{
@@ -260,26 +264,76 @@ fn kick() {
         });
 }
 
-/// Returns once the VM image is imported: joins the in-flight background import, or runs it now.
-/// `report` receives a 0..=100 fraction when known (None = indeterminate). Never holds the operation gate.
+/// Returns once the VM image is imported: joins the in-flight background preparation, or runs it
+/// now (download and checksum of the pinned archive when it is not on this device, then the import).
+/// `report` receives a 0..=100 fraction while the archive downloads and None while it is verified
+/// and imported. Never holds the operation gate.
 pub fn ensure_image(paths: &RuntimePaths, report: &dyn Fn(Option<u8>)) -> Result<(), String> {
-    IMAGE.ensure(
-        &|| guest_image::is_imported(paths),
-        &|_| {
-            guest_image::prepare(&ProcessRunner, paths)
-                .map(|_| ())
-                .map_err(|error| Failure::from(error.to_string()))
-        },
+    let pinned = PinnedImage::host()?;
+    ensure_image_with(
+        &IMAGE,
+        paths,
+        &pinned,
+        &|| guest_image::is_imported_as(paths, &pinned.manifest),
+        &HttpDownloader::default(),
+        &ProcessRunner,
+        report,
+    )
+}
+
+/// `imported` tells whether the runtime already holds the pinned image, in which case nothing
+/// is downloaded or imported.
+fn ensure_image_with(
+    job: &Job,
+    paths: &RuntimePaths,
+    pinned: &PinnedImage,
+    imported: &dyn Fn() -> bool,
+    downloader: &dyn Downloader,
+    runner: &dyn RuntimeRunner,
+    report: &dyn Fn(Option<u8>),
+) -> Result<(), String> {
+    job.ensure(
+        imported,
+        &|progress| prepare_image(paths, pinned, downloader, runner, progress),
         &emit,
         report,
     )
+}
+
+/// Downloads the pinned archive unless a verified copy is published under the image root,
+/// then imports it into the runtime cache.
+fn prepare_image(
+    paths: &RuntimePaths,
+    pinned: &PinnedImage,
+    downloader: &dyn Downloader,
+    runner: &dyn RuntimeRunner,
+    progress: &dyn Fn(Option<u8>),
+) -> Result<(), Failure> {
+    let spec = ArchiveSpec::image(pinned);
+    if published(&paths.guest_image, &spec).is_none() {
+        progress(Some(0));
+        download_and_publish(&paths.guest_image, &spec, downloader, &|received| {
+            progress(Some(percent(received, spec.bytes)));
+        })?;
+    }
+    progress(None);
+    guest_image::prepare_as(runner, paths, &pinned.manifest)
+        .map(|_| ())
+        .map_err(|error| Failure::from(error.to_string()))
+}
+
+fn percent(received: u64, total: u64) -> u8 {
+    if total == 0 {
+        return 0;
+    }
+    (u128::from(received) * 100 / u128::from(total)).min(100) as u8
 }
 
 /// The read-only host folder holding the verified pinned LCU archive for this device's guest
 /// architecture (file name as in guest/lcu-lock.json's URL), once ready.
 pub fn lcu_folder() -> Option<PathBuf> {
     let root = LCU_ROOT.get()?;
-    let spec = LcuSpec::bundled().ok()?;
+    let spec = ArchiveSpec::lcu().ok()?;
     published(root, &spec)
 }
 
@@ -288,10 +342,10 @@ pub fn ensure_lcu(report: &dyn Fn(Option<u8>)) -> Result<PathBuf, String> {
     let root = LCU_ROOT
         .get()
         .ok_or("Silo is still starting. Retry in a moment.")?;
-    let spec = LcuSpec::bundled()?;
+    let spec = ArchiveSpec::lcu()?;
     LCU.ensure(
         &|| published(root, &spec).is_some(),
-        &|_| download_and_publish(root, &spec, &HttpDownloader::default()),
+        &|_| download_and_publish(root, &spec, &HttpDownloader::default(), &|_| {}),
         &emit,
         report,
     )?;
@@ -310,13 +364,20 @@ pub(crate) fn retry_preparation() -> PreparationStatus {
     snapshot()
 }
 
-// ------------------------------------------------------------------ LCU
+// -------------------------------------------------------------- archives
 
-struct LcuSpec {
+/// A pinned download published below a root as `<root>/<version>/<archive>`.
+struct ArchiveSpec {
     version: String,
     archive: String,
     url: String,
     sha256: String,
+    /// The exact size, or 0 when only the checksum pins the archive.
+    bytes: u64,
+    /// What the user-facing messages call it, as in "could not download {what}".
+    what: &'static str,
+    /// The downloaded file, as in "The downloaded {file} did not match".
+    file: &'static str,
 }
 
 fn safe_name(value: &str) -> bool {
@@ -328,13 +389,25 @@ fn safe_name(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
 }
 
-impl LcuSpec {
-    fn bundled() -> Result<Self, String> {
-        let arch = DebArch::host().map_err(|error| error.message)?;
-        Self::parse(LCU_LOCK, arch)
+impl ArchiveSpec {
+    fn image(pinned: &PinnedImage) -> Self {
+        Self {
+            version: pinned.manifest.version.clone(),
+            archive: guest_image::ARCHIVE_FILE.into(),
+            url: pinned.url.clone(),
+            sha256: pinned.manifest.archive_sha256.clone(),
+            bytes: pinned.manifest.archive_bytes,
+            what: "the VM image",
+            file: "VM image file",
+        }
     }
 
-    fn parse(json: &str, arch: DebArch) -> Result<Self, String> {
+    fn lcu() -> Result<Self, String> {
+        let arch = DebArch::host().map_err(|error| error.message)?;
+        Self::parse_lcu(LCU_LOCK, arch)
+    }
+
+    fn parse_lcu(json: &str, arch: DebArch) -> Result<Self, String> {
         let invalid = || "LCU lock is invalid.".to_owned();
         let lock: serde_json::Value = serde_json::from_str(json).map_err(|_| invalid())?;
         let version = lock["version"].as_str().ok_or_else(invalid)?;
@@ -357,32 +430,41 @@ impl LcuSpec {
             archive: archive.into(),
             url: url.into(),
             sha256: sha256.into(),
+            bytes: 0,
+            what: "LCU",
+            file: "LCU file",
         })
+    }
+
+    fn part_name(&self) -> String {
+        format!("{}-{}.part", self.version, self.archive)
     }
 }
 
 type Stamp = (PathBuf, u64, Option<SystemTime>);
 
-/// The archive a full checksum covered in this process.
-static VERIFIED: Mutex<Option<Stamp>> = Mutex::new(None);
+/// The archives a full checksum covered in this process.
+static VERIFIED: Mutex<Vec<Stamp>> = Mutex::new(Vec::new());
 
-/// The folder of the verified archive, `None` when it is missing or does not match the lock.
+/// The folder of the verified archive, `None` when it is missing or does not match the spec.
 /// The checksum is read once per process and again when the file changes.
-fn published(root: &Path, spec: &LcuSpec) -> Option<PathBuf> {
+fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
     let folder = root.join(&spec.version);
     let file = folder.join(&spec.archive);
     let meta = fs::symlink_metadata(&file).ok()?;
-    if !meta.is_file() {
+    if !meta.is_file() || (spec.bytes > 0 && meta.len() != spec.bytes) {
         return None;
     }
     let stamp = (file.clone(), meta.len(), meta.modified().ok());
-    if locked(&VERIFIED).as_ref() == Some(&stamp) {
+    if locked(&VERIFIED).contains(&stamp) {
         return Some(folder);
     }
     if chatgpt_app::sha256_file(&file).ok()? != spec.sha256 {
         return None;
     }
-    *locked(&VERIFIED) = Some(stamp);
+    let mut verified = locked(&VERIFIED);
+    verified.retain(|(path, ..)| *path != file);
+    verified.push(stamp);
     Some(folder)
 }
 
@@ -393,40 +475,72 @@ fn remove_tree(path: &Path) {
     let _ = fs::remove_dir_all(path);
 }
 
-fn failure(error: &chatgpt_app::Error) -> Failure {
+fn capitalized(text: &str) -> String {
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(characters).collect()
+    })
+}
+
+fn failure(spec: &ArchiveSpec, error: &chatgpt_app::Error) -> Failure {
     Failure {
         message: if error.retryable {
-            "Silo could not download LCU. Check your network connection, then retry.".into()
+            format!(
+                "Silo could not download {}. Check your network connection, then retry.",
+                spec.what
+            )
         } else {
-            "LCU is no longer available at its pinned location. Update Silo.".into()
+            format!(
+                "{} is no longer available at its pinned location. Update Silo.",
+                capitalized(spec.what)
+            )
         },
         retryable: error.retryable,
     }
 }
 
-fn storage_failure(_: std::io::Error) -> Failure {
-    Failure::from("Silo could not save LCU. Check free disk space, then retry.".to_owned())
+fn storage_failure(spec: &ArchiveSpec) -> impl Fn(std::io::Error) -> Failure + '_ {
+    move |_| {
+        Failure::from(format!(
+            "Silo could not save {}. Check free disk space, then retry.",
+            spec.what
+        ))
+    }
 }
 
-/// Downloads the pinned archive (resuming a partial file), verifies its checksum and publishes
-/// it read-only as `<root>/<version>/<archive>`, then removes every other version.
+/// Downloads the pinned archive (resuming a partial file), verifies its size and checksum and
+/// publishes it read-only as `<root>/<version>/<archive>`, then removes every other version.
+/// `progress` receives the bytes downloaded so far.
 fn download_and_publish(
     root: &Path,
-    spec: &LcuSpec,
+    spec: &ArchiveSpec,
     downloader: &dyn Downloader,
+    progress: &dyn Fn(u64),
 ) -> Result<(), Failure> {
+    let saving = storage_failure(spec);
     let downloads = root.join(DOWNLOAD_DIR);
-    fs::create_dir_all(&downloads).map_err(storage_failure)?;
-    let part = downloads.join(format!("{}.part", spec.archive));
+    fs::create_dir_all(&downloads).map_err(&saving)?;
+    let part = downloads.join(spec.part_name());
+    if spec.bytes > 0 {
+        let have = fs::metadata(&part).map_or(0, |meta| meta.len());
+        guest_image::check_space(&downloads, spec.bytes.saturating_sub(have))
+            .map_err(Failure::from)?;
+    }
     downloader
-        .fetch(&spec.url, &part, 0, &mut |_| {})
-        .map_err(|error| failure(&error))?;
-    let matches = chatgpt_app::sha256_file(&part).is_ok_and(|hash| hash == spec.sha256);
+        .fetch(&spec.url, &part, spec.bytes, &mut |received| {
+            progress(received)
+        })
+        .map_err(|error| failure(spec, &error))?;
+    let size_matches =
+        spec.bytes == 0 || fs::metadata(&part).is_ok_and(|meta| meta.len() == spec.bytes);
+    let matches =
+        size_matches && chatgpt_app::sha256_file(&part).is_ok_and(|hash| hash == spec.sha256);
     if !matches {
         let _ = fs::remove_file(&part);
-        return Err(Failure::from(
-            "The downloaded LCU file did not match its checksum and was removed. Retry.".to_owned(),
-        ));
+        return Err(Failure::from(format!(
+            "The downloaded {} did not match its checksum and was removed. Retry.",
+            spec.file
+        )));
     }
     let staging = root.join(format!(
         "{PUBLISH_PREFIX}{}-{}",
@@ -451,24 +565,39 @@ fn download_and_publish(
         if moved.get() {
             remove_tree(&target);
         }
-        return Err(storage_failure(error));
+        return Err(saving(error));
     }
     collect_garbage(root, &spec.version);
     Ok(())
 }
 
-/// Removes every version but `keep` and any unfinished staging directory.
+/// Removes every version but `keep`, any unfinished staging directory and the partial
+/// downloads of other versions.
 fn collect_garbage(root: &Path, keep: &str) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if name == keep || name == DOWNLOAD_DIR {
+        if name == keep {
             continue;
         }
-        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+        if name == DOWNLOAD_DIR {
+            remove_other_partials(&entry.path(), keep);
+        } else if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
             remove_tree(&entry.path());
+        }
+    }
+}
+
+fn remove_other_partials(downloads: &Path, keep: &str) {
+    let Ok(entries) = fs::read_dir(downloads) else {
+        return;
+    };
+    let prefix = format!("{keep}-");
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = fs::remove_file(entry.path());
         }
     }
 }

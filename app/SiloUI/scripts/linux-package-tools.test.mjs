@@ -91,7 +91,6 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
   const linux = JSON.parse(await readFile(join(configRoot, "tauri.linux.conf.json"), "utf8"))
   const packaged = JSON.parse(await readFile(join(configRoot, "tauri.linux.package.conf.json"), "utf8"))
   assert.deepEqual(Object.keys(base.bundle.resources), [
-    "runtime/guest-image/",
     "runtime/microsandbox/manifest.json",
     "runtime/microsandbox/licenses/",
     "runtime/lfs-transfer/",

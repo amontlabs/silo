@@ -1,42 +1,116 @@
-//! Bundled guest image validation and local-only import. No registry fallback.
+//! The pinned guest image: its lock, and the local-only import of the downloaded archive.
+//! `preparation` downloads and verifies the archive; this module never reaches a registry.
 use super::{RuntimeError, RuntimePaths, RuntimeRunner};
 use flate2::read::GzDecoder;
 use microsandbox_image::{Digest as ImageDigest, GlobalCache, Reference};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
     fs::File,
     io::{Read, Write},
-    path::Path,
-    sync::{Condvar, Mutex},
-    time::{Duration, Instant},
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::Duration,
 };
 
 static IMPORT_LOCK: Mutex<()> = Mutex::new(());
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const LOCK: &str = include_str!("../../guest-image/image-lock.json");
+/// The file name of the published archive inside `<root>/<version>/`.
+pub(crate) const ARCHIVE_FILE: &str = "image.tar.gz";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GuestImageManifest {
     schema_version: u8,
-    #[serde(default)]
-    version: String,
+    pub(crate) version: String,
     architecture: String,
     pub(crate) image_reference: String,
     image_digest: String,
-    archive_sha256: String,
-    archive_bytes: u64,
-    unpacked_bytes: u64,
+    pub(crate) archive_sha256: String,
+    pub(crate) archive_bytes: u64,
+    pub(crate) unpacked_bytes: u64,
 }
 
-/// The recipe version of the bundled image (for example `ubuntu-24.04-v4`), if readable.
-pub(crate) fn bundled_version(directory: &Path) -> Option<String> {
-    validate_directory(directory)
+/// The image this build pins for the device's architecture and where its archive is published.
+#[derive(Clone, Debug)]
+pub(crate) struct PinnedImage {
+    pub(crate) manifest: GuestImageManifest,
+    pub(crate) url: String,
+}
+
+impl PinnedImage {
+    /// The image pinned in `guest-image/image-lock.json` for this device.
+    pub(crate) fn host() -> Result<Self, String> {
+        let key = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            "x86_64" => "amd64",
+            _ => return Err("Silo's VM image does not support this device.".into()),
+        };
+        Self::parse(LOCK, key, std::env::consts::ARCH)
+    }
+
+    fn parse(json: &str, key: &str, architecture: &str) -> Result<Self, String> {
+        let invalid = || "Silo's VM image information is invalid. Update Silo.".to_owned();
+        let lock: serde_json::Value = serde_json::from_str(json).map_err(|_| invalid())?;
+        let release = lock["releaseUrl"].as_str().ok_or_else(invalid)?;
+        let manifest: GuestImageManifest =
+            serde_json::from_value(lock["images"][key].clone()).map_err(|_| invalid())?;
+        if !release.starts_with("https://")
+            || release.ends_with('/')
+            || manifest.architecture != architecture
+            || !safe_version(&manifest.version)
+        {
+            return Err(invalid());
+        }
+        manifest.validate().map_err(|_| invalid())?;
+        Ok(Self {
+            url: format!("{release}/image-{key}.tar.gz"),
+            manifest,
+        })
+    }
+}
+
+impl GuestImageManifest {
+    fn validate(&self) -> Result<(), String> {
+        if self.schema_version != 1
+            || !valid_sha256(&self.archive_sha256)
+            || !self
+                .image_digest
+                .strip_prefix("sha256:")
+                .is_some_and(valid_sha256)
+            || self.image_reference.parse::<Reference>().is_err()
+            || self.archive_bytes == 0
+            || self.archive_bytes > MAX_ARCHIVE_BYTES
+            || self.unpacked_bytes == 0
+            || self.unpacked_bytes > MAX_UNPACKED_BYTES
+        {
+            return Err("Silo's VM image information is invalid. Update Silo.".into());
+        }
+        Ok(())
+    }
+
+    /// Where the verified archive of this image is published below `root`.
+    pub(crate) fn archive_path(&self, root: &Path) -> PathBuf {
+        root.join(&self.version).join(ARCHIVE_FILE)
+    }
+}
+
+fn safe_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && !value.starts_with('.')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+}
+
+/// The recipe version of the pinned image (for example `ubuntu-24.04-v4`).
+pub(crate) fn pinned_version() -> Option<String> {
+    PinnedImage::host()
         .ok()
-        .map(|manifest| manifest.version)
-        .filter(|version| !version.is_empty())
+        .map(|pinned| pinned.manifest.version)
 }
 
 #[cfg(test)]
@@ -80,7 +154,7 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-fn open_bundle_file(path: &Path) -> Result<File, String> {
+fn open_archive(path: &Path) -> Result<File, String> {
     let mut options = File::options();
     options.read(true);
     #[cfg(unix)]
@@ -88,236 +162,41 @@ fn open_bundle_file(path: &Path) -> Result<File, String> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NONBLOCK);
     }
-    let file = options
-        .open(path)
-        .map_err(|_| "Silo's bundled VM image is missing. Reinstall Silo and retry.")?;
-    if !file
+    let file = options.open(path).map_err(|_| {
+        "Silo's VM image is not downloaded yet. Wait for the download to finish, or retry."
+    })?;
+    let metadata = file
         .metadata()
-        .map_err(|_| "Silo's VM image could not be read.")?
-        .is_file()
-    {
-        return Err(
-            "Silo's bundled VM image input is not a regular file. Reinstall Silo and retry.".into(),
-        );
+        .map_err(|_| "Silo's VM image could not be read.")?;
+    if !metadata.is_file() {
+        return Err("Silo's VM image is not a regular file. Retry to download it again.".into());
     }
     Ok(file)
 }
 
-/// Inspect bundled resources only. This never creates/imports a runtime cache.
-#[cfg(test)]
-pub(crate) fn validate_bundle(resource_dir: &Path) -> Result<GuestImageManifest, String> {
-    validate_directory(&resource_dir.join("guest-image"))
-}
-
-#[cfg(test)]
-pub(crate) fn validate_bundle_until(
-    resource_dir: &Path,
-    deadline: Instant,
-) -> Result<GuestImageManifest, String> {
-    validate_directory_until(&resource_dir.join("guest-image"), Some(deadline))
-}
-
-fn validate_directory(directory: &Path) -> Result<GuestImageManifest, String> {
-    validate_directory_until(directory, None)
-}
-
-fn validate_directory_until(
-    directory: &Path,
-    deadline: Option<Instant>,
-) -> Result<GuestImageManifest, String> {
-    let (manifest, mut archive) = read_manifest(directory, deadline)?;
-    hash_archive(&mut archive, &manifest, deadline)?;
-    Ok(manifest)
-}
-
-fn deadline_passed(deadline: Option<Instant>) -> Result<(), String> {
-    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-        Err("Silo's VM image check timed out. Retry checks.".to_owned())
-    } else {
-        Ok(())
-    }
-}
-
-/// Parses and range-checks the manifest and confirms the archive is a regular
-/// file of the expected length. Cheap; never reads the archive contents.
-fn read_manifest(
-    directory: &Path,
-    deadline: Option<Instant>,
-) -> Result<(GuestImageManifest, File), String> {
-    deadline_passed(deadline)?;
-    let file = open_bundle_file(&directory.join("manifest.json"))?;
-    let mut bytes = Vec::new();
-    file.take(64 * 1024 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "Silo's VM image information could not be read.")?;
-    if bytes.len() > 64 * 1024 {
-        return Err("Silo's VM image information is invalid. Reinstall Silo.".into());
-    }
-    let manifest: GuestImageManifest = serde_json::from_slice(&bytes)
-        .map_err(|_| "Silo's VM image information is invalid. Reinstall Silo.")?;
-    if manifest.schema_version != 1 || manifest.architecture != std::env::consts::ARCH {
-        return Err("Silo's bundled VM image does not support this device. Install the matching Silo build.".into());
-    }
-    if !valid_sha256(&manifest.archive_sha256)
-        || !manifest
-            .image_digest
-            .strip_prefix("sha256:")
-            .is_some_and(valid_sha256)
-        || manifest.image_reference.parse::<Reference>().is_err()
-        || manifest.archive_bytes == 0
-        || manifest.archive_bytes > MAX_ARCHIVE_BYTES
-        || manifest.unpacked_bytes == 0
-        || manifest.unpacked_bytes > MAX_UNPACKED_BYTES
-    {
-        return Err("Silo's VM image information is invalid. Reinstall Silo.".into());
-    }
-    let archive = open_bundle_file(&directory.join("image.tar.gz"))?;
-    if archive
-        .metadata()
-        .map_err(|_| "Silo's VM image could not be read.")?
-        .len()
-        != manifest.archive_bytes
-    {
-        return Err("Silo's bundled VM image is incomplete. Reinstall Silo and retry.".into());
-    }
-    Ok((manifest, archive))
-}
-
-fn hash_archive(
-    archive: &mut File,
-    manifest: &GuestImageManifest,
-    deadline: Option<Instant>,
-) -> Result<(), String> {
+fn hash_archive(archive: &mut File, manifest: &GuestImageManifest) -> Result<(), String> {
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 128 * 1024];
+    let mut length = 0u64;
     loop {
-        deadline_passed(deadline)?;
         let count = archive
             .read(&mut buffer)
             .map_err(|_| "Silo's VM image could not be read.")?;
         if count == 0 {
             break;
         }
+        length += count as u64;
         hash.update(&buffer[..count]);
     }
-    deadline_passed(deadline)?;
-    if format!("{:x}", hash.finalize()) != manifest.archive_sha256 {
+    if length != manifest.archive_bytes
+        || format!("{:x}", hash.finalize()) != manifest.archive_sha256
+    {
         return Err(
-            "Silo's bundled VM image failed its integrity check. Reinstall Silo and retry.".into(),
+            "Silo's downloaded VM image failed its integrity check. Retry to download it again."
+                .into(),
         );
     }
     Ok(())
-}
-
-/// Identity of the archive a full verification covered: any replacement or
-/// edit moves at least one field.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ArchiveStamp {
-    path: std::path::PathBuf,
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(unix)]
-    changed: (i64, i64),
-    sha256: String,
-}
-
-fn archive_stamp(path: &Path, file: &File, manifest: &GuestImageManifest) -> Option<ArchiveStamp> {
-    let metadata = file.metadata().ok()?;
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-    Some(ArchiveStamp {
-        path: path.to_path_buf(),
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-        #[cfg(unix)]
-        device: metadata.dev(),
-        #[cfg(unix)]
-        inode: metadata.ino(),
-        #[cfg(unix)]
-        changed: (metadata.ctime(), metadata.ctime_nsec()),
-        sha256: manifest.archive_sha256.clone(),
-    })
-}
-
-enum Verification {
-    Running,
-    Done(Result<(), String>),
-}
-
-/// Full-hash verification of each bundled archive in this process, replaced
-/// when the archive's stamp moves.
-static VERIFIED: Mutex<Option<HashMap<std::path::PathBuf, (ArchiveStamp, Verification)>>> =
-    Mutex::new(None);
-static VERIFIED_CHANGED: Condvar = Condvar::new();
-
-#[cfg(test)]
-static HASHED: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
-
-/// Like `validate_bundle_until`, but hashes the archive once per process
-/// (and again only if its stamp changes). The hash runs on a background
-/// thread that outlives a timed-out check, so a retry waits on the same work
-/// instead of restarting it. Preparing the image for use still re-hashes.
-pub(crate) fn validate_bundle_cached(
-    resource_dir: &Path,
-    deadline: Instant,
-) -> Result<GuestImageManifest, String> {
-    let directory = resource_dir.join("guest-image");
-    let (manifest, archive) = read_manifest(&directory, Some(deadline))?;
-    let archive_path = directory.join("image.tar.gz");
-    let Some(stamp) = archive_stamp(&archive_path, &archive, &manifest) else {
-        return Err("Silo's VM image could not be read.".into());
-    };
-    let mut guard = VERIFIED.lock().unwrap_or_else(|error| error.into_inner());
-    if guard
-        .get_or_insert_default()
-        .get(&archive_path)
-        .is_none_or(|(known, _)| *known != stamp)
-    {
-        guard
-            .get_or_insert_default()
-            .insert(archive_path.clone(), (stamp.clone(), Verification::Running));
-        let worker_manifest = manifest.clone();
-        let worker_stamp = stamp.clone();
-        std::thread::spawn(move || {
-            let mut archive = archive;
-            #[cfg(test)]
-            HASHED
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .push(worker_stamp.path.clone());
-            let result = hash_archive(&mut archive, &worker_manifest, None);
-            let mut guard = VERIFIED.lock().unwrap_or_else(|error| error.into_inner());
-            if let Some((known, state)) = guard.get_or_insert_default().get_mut(&worker_stamp.path)
-            {
-                if *known == worker_stamp {
-                    *state = Verification::Done(result);
-                }
-            }
-            VERIFIED_CHANGED.notify_all();
-        });
-    }
-    loop {
-        match guard.get_or_insert_default().get(&archive_path) {
-            Some((known, Verification::Done(result))) if *known == stamp => {
-                return result.clone().map(|()| manifest);
-            }
-            Some((known, _)) if *known != stamp => {
-                return Err("Silo's VM image changed during the check. Retry checks.".into());
-            }
-            _ => {}
-        }
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return Err("Silo's VM image check timed out. Retry checks.".into());
-        };
-        guard = VERIFIED_CHANGED
-            .wait_timeout(guard, remaining)
-            .unwrap_or_else(|error| error.into_inner())
-            .0;
-    }
 }
 
 fn cached(cache: &GlobalCache, manifest: &GuestImageManifest) -> bool {
@@ -346,7 +225,7 @@ fn cached(cache: &GlobalCache, manifest: &GuestImageManifest) -> bool {
         && cache.all_layers_materialized(&layers)
 }
 
-fn check_space(directory: &Path, required: u64) -> Result<(), String> {
+pub(crate) fn check_space(directory: &Path, required: u64) -> Result<(), String> {
     let path = std::ffi::CString::new(directory.as_os_str().as_encoded_bytes())
         .map_err(|_| "Invalid VM image storage location.")?;
     let mut statistics = std::mem::MaybeUninit::<libc::statvfs>::uninit();
@@ -357,7 +236,7 @@ fn check_space(directory: &Path, required: u64) -> Result<(), String> {
     let available = (statistics.f_bavail as u64).saturating_mul(statistics.f_frsize as u64);
     if available < required {
         return Err(format!(
-            "Free at least {} MiB to prepare Silo's bundled VM image, then retry.",
+            "Free at least {} MiB to prepare Silo's VM image, then retry.",
             required.div_ceil(1024 * 1024)
         ));
     }
@@ -365,13 +244,14 @@ fn check_space(directory: &Path, required: u64) -> Result<(), String> {
 }
 
 fn unpack(archive: &Path, output: &mut File, expected_bytes: u64) -> Result<(), String> {
-    let input = open_bundle_file(archive)?;
+    let input = open_archive(archive)?;
     let mut decoder = GzDecoder::new(input).take(expected_bytes + 1);
-    let written = std::io::copy(&mut decoder, output).map_err(|_| {
-        "Silo's bundled VM image could not be unpacked. Check disk space and retry."
-    })?;
+    let written = std::io::copy(&mut decoder, output)
+        .map_err(|_| "Silo's VM image could not be unpacked. Check disk space and retry.")?;
     if written != expected_bytes {
-        return Err("Silo's bundled VM image has an invalid unpacked size. Reinstall Silo.".into());
+        return Err(
+            "Silo's VM image has an invalid unpacked size. Retry to download it again.".into(),
+        );
     }
     output
         .flush()
@@ -379,37 +259,49 @@ fn unpack(archive: &Path, output: &mut File, expected_bytes: u64) -> Result<(), 
     Ok(())
 }
 
-/// Whether the bundled image is already in the runtime's image cache. Reads the manifest and
-/// the cache metadata only.
+/// Whether the pinned image is already in the runtime's image cache. Reads the cache metadata
+/// only, so an image imported by an earlier Silo counts without its archive.
 pub(crate) fn is_imported(paths: &RuntimePaths) -> bool {
-    let Ok((manifest, _)) = read_manifest(&paths.guest_image, None) else {
-        return false;
-    };
-    GlobalCache::new(&paths.home.join("cache")).is_ok_and(|cache| cached(&cache, &manifest))
+    PinnedImage::host().is_ok_and(|pinned| is_imported_as(paths, &pinned.manifest))
 }
 
+pub(crate) fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bool {
+    GlobalCache::new(&paths.home.join("cache")).is_ok_and(|cache| cached(&cache, manifest))
+}
+
+/// Imports the pinned image from its downloaded archive unless the cache already holds it.
 pub(crate) fn prepare<R: RuntimeRunner + ?Sized>(
     runner: &R,
     paths: &RuntimePaths,
+) -> Result<String, RuntimeError> {
+    let pinned = PinnedImage::host().map_err(RuntimeError::Unavailable)?;
+    prepare_as(runner, paths, &pinned.manifest)
+}
+
+pub(crate) fn prepare_as<R: RuntimeRunner + ?Sized>(
+    runner: &R,
+    paths: &RuntimePaths,
+    manifest: &GuestImageManifest,
 ) -> Result<String, RuntimeError> {
     let _lock = IMPORT_LOCK.lock().map_err(|_| {
         RuntimeError::Unavailable(
             "VM image preparation is unavailable. Restart Silo and retry.".into(),
         )
     })?;
-    let (manifest, mut bundled) =
-        read_manifest(&paths.guest_image, None).map_err(RuntimeError::Unavailable)?;
+    manifest.validate().map_err(RuntimeError::Unavailable)?;
     let cache = GlobalCache::new(&paths.home.join("cache")).map_err(|_| {
         RuntimeError::Unavailable(
             "Silo's VM image storage could not be opened. Check storage access and retry.".into(),
         )
     })?;
-    // An image already in the cache is not read from the bundle again, so the bundled
-    // archive is only hashed when it is about to be imported.
-    if cached(&cache, &manifest) {
-        return Ok(manifest.image_reference);
+    // An image already in the cache needs no archive, so the archive is only
+    // opened and hashed when it is about to be imported.
+    if cached(&cache, manifest) {
+        return Ok(manifest.image_reference.clone());
     }
-    hash_archive(&mut bundled, &manifest, None).map_err(RuntimeError::Unavailable)?;
+    let archive_path = manifest.archive_path(&paths.guest_image);
+    let mut downloaded = open_archive(&archive_path).map_err(RuntimeError::Unavailable)?;
+    hash_archive(&mut downloaded, manifest).map_err(RuntimeError::Unavailable)?;
     // Tar staging plus uncompressed layers and materialized filesystem data. This
     // is temporary import space, not a minimum capacity imposed on each computer.
     check_space(cache.tmp_dir(), manifest.unpacked_bytes.saturating_mul(4))
@@ -418,7 +310,7 @@ pub(crate) fn prepare<R: RuntimeRunner + ?Sized>(
         RuntimeError::Unavailable("Silo could not prepare temporary VM image storage.".into())
     })?;
     unpack(
-        &paths.guest_image.join("image.tar.gz"),
+        &archive_path,
         archive.as_file_mut(),
         manifest.unpacked_bytes,
     )
@@ -439,15 +331,15 @@ pub(crate) fn prepare<R: RuntimeRunner + ?Sized>(
         )
         .map_err(|_| {
             RuntimeError::Unavailable(
-                "Silo could not prepare its bundled VM image. Check disk space and retry.".into(),
+                "Silo could not prepare its VM image. Check disk space and retry.".into(),
             )
         })?;
-    if !cached(&cache, &manifest) {
+    if !cached(&cache, manifest) {
         return Err(RuntimeError::Unavailable(
             "The imported VM image did not pass verification. Retry image preparation.".into(),
         ));
     }
-    Ok(manifest.image_reference)
+    Ok(manifest.image_reference.clone())
 }
 
 #[cfg(test)]
@@ -457,95 +349,75 @@ mod tests {
     use serde_json::json;
     use std::fs;
 
-    fn fixture(directory: &Path) -> serde_json::Value {
-        fs::create_dir_all(directory.join("guest-image")).unwrap();
+    struct Fixture {
+        directory: tempfile::TempDir,
+        manifest: GuestImageManifest,
+        paths: RuntimePaths,
+    }
+
+    /// A pinned image whose archive is published below the paths' guest image root.
+    fn fixture() -> Fixture {
+        let directory = tempfile::tempdir().unwrap();
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(b"test archive").unwrap();
         let archive = encoder.finish().unwrap();
-        fs::write(directory.join("guest-image/image.tar.gz"), &archive).unwrap();
-        let manifest = json!({"schemaVersion":1,"architecture":std::env::consts::ARCH,
-            "imageReference":"ghcr.io/0xpolarzero/silo-guest:test", "imageDigest":format!("sha256:{}", "a".repeat(64)),
-            "archiveSha256":format!("{:x}",Sha256::digest(&archive)),"archiveBytes":archive.len(),"unpackedBytes":12});
-        fs::write(
-            directory.join("guest-image/manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
+        let manifest: GuestImageManifest = serde_json::from_value(json!({
+            "schemaVersion": 1, "version": "ubuntu-24.04-test",
+            "architecture": std::env::consts::ARCH,
+            "imageReference": "ghcr.io/amontlabs/silo-guest:test",
+            "imageDigest": format!("sha256:{}", "a".repeat(64)),
+            "archiveSha256": format!("{:x}", Sha256::digest(&archive)),
+            "archiveBytes": archive.len(), "unpackedBytes": 12,
+        }))
         .unwrap();
-        manifest
-    }
-    #[test]
-    fn bundled_version_reads_the_recipe_version_when_present() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut manifest = fixture(dir.path());
-        assert_eq!(bundled_version(&dir.path().join("guest-image")), None);
-        manifest["version"] = json!("ubuntu-24.04-v4");
-        fs::write(
-            dir.path().join("guest-image/manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            bundled_version(&dir.path().join("guest-image")).as_deref(),
-            Some("ubuntu-24.04-v4")
-        );
-        assert_eq!(bundled_version(&dir.path().join("missing")), None);
-    }
-    #[test]
-    fn bundle_preflight_is_read_only_and_rejects_corruption() {
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        assert!(validate_bundle(dir.path()).is_ok());
-        assert!(!dir.path().join("cache").exists());
-        fs::write(dir.path().join("guest-image/image.tar.gz"), b"corrupt").unwrap();
-        assert!(validate_bundle(dir.path())
-            .unwrap_err()
-            .contains("incomplete"));
-    }
-    #[test]
-    fn preflight_stops_validating_when_its_collection_deadline_expires() {
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        let error = validate_bundle_until(dir.path(), std::time::Instant::now()).unwrap_err();
-        assert!(error.contains("timed out"), "{error}");
-        assert!(validate_bundle(dir.path()).is_ok());
-    }
-
-    #[test]
-    fn cached_validation_hashes_once_and_detects_a_changed_archive() {
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        let archive = dir.path().join("guest-image/image.tar.gz");
-        let hashes = || {
-            HASHED
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|path| **path == archive)
-                .count()
+        let paths = RuntimePaths {
+            guest_image: directory.path().join("guest-image"),
+            executable: directory.path().join("msb"),
+            home: directory.path().join("home"),
+            storage_home: None,
+            library: directory.path().join("lib"),
+            metadata: directory.path().join("metadata"),
+            volumes: directory.path().join("volumes"),
         };
-        let later = || Instant::now() + Duration::from_secs(30);
-        assert!(validate_bundle_cached(dir.path(), later()).is_ok());
-        assert!(validate_bundle_cached(dir.path(), later()).is_ok());
-        assert_eq!(hashes(), 1);
-        // Same length, different content.
-        let mut bytes = fs::read(&archive).unwrap();
-        *bytes.last_mut().unwrap() ^= 0xff;
-        fs::write(&archive, bytes).unwrap();
-        let error = validate_bundle_cached(dir.path(), later()).unwrap_err();
-        assert!(error.contains("integrity"), "{error}");
-        assert_eq!(hashes(), 2);
-        assert!(validate_bundle_cached(dir.path(), later())
-            .unwrap_err()
-            .contains("integrity"));
-        assert_eq!(hashes(), 2);
+        let path = manifest.archive_path(&paths.guest_image);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, &archive).unwrap();
+        Fixture {
+            directory,
+            manifest,
+            paths,
+        }
     }
 
     #[test]
-    fn cached_validation_honours_its_deadline() {
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        let error = validate_bundle_cached(dir.path(), Instant::now()).unwrap_err();
-        assert!(error.contains("timed out"), "{error}");
+    fn the_embedded_lock_pins_a_valid_image_for_each_architecture() {
+        for (key, architecture) in [("arm64", "aarch64"), ("amd64", "x86_64")] {
+            let pinned = PinnedImage::parse(LOCK, key, architecture).unwrap();
+            assert_eq!(
+                pinned.url,
+                format!(
+                    "https://github.com/amontlabs/silo/releases/download/guest-{}/image-{key}.tar.gz",
+                    pinned.manifest.version
+                )
+            );
+            assert!(pinned
+                .manifest
+                .image_reference
+                .contains(&pinned.manifest.version));
+        }
+        assert!(PinnedImage::host().is_ok());
+        assert!(pinned_version().is_some_and(|version| version.starts_with("ubuntu-")));
+    }
+
+    #[test]
+    fn a_lock_that_is_not_https_or_names_another_architecture_is_rejected() {
+        assert!(PinnedImage::parse(LOCK, "arm64", "x86_64").is_err());
+        assert!(PinnedImage::parse(LOCK, "riscv", "aarch64").is_err());
+        let plain = LOCK.replacen("https://", "http://", 1);
+        assert!(PinnedImage::parse(&plain, "arm64", "aarch64").is_err());
+        let traversal = LOCK.replacen("\"version\": \"ubuntu-24.04-v4\"", "\"version\": \"..\"", 1);
+        assert!(PinnedImage::parse(&traversal, "arm64", "aarch64").is_err());
+        assert!(PinnedImage::parse("{", "arm64", "aarch64").is_err());
     }
 
     #[test]
@@ -563,84 +435,69 @@ mod tests {
     }
 
     #[test]
-    fn missing_and_wrong_architecture_never_pass() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(validate_bundle(dir.path()).is_err());
-        let mut manifest = fixture(dir.path());
-        manifest["architecture"] = json!("other");
-        fs::write(
-            dir.path().join("guest-image/manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        assert!(validate_bundle(dir.path())
-            .unwrap_err()
-            .contains("does not support"));
+    fn the_archive_is_found_by_version_and_checked_by_size_and_checksum() {
+        let fixture = fixture();
+        let path = fixture.manifest.archive_path(&fixture.paths.guest_image);
+        assert!(path.ends_with("guest-image/ubuntu-24.04-test/image.tar.gz"));
+        hash_archive(&mut File::open(&path).unwrap(), &fixture.manifest).unwrap();
+        let mut changed = fs::read(&path).unwrap();
+        *changed.last_mut().unwrap() ^= 0xff;
+        fs::write(&path, &changed).unwrap();
+        let error = hash_archive(&mut File::open(&path).unwrap(), &fixture.manifest).unwrap_err();
+        assert!(error.contains("integrity"), "{error}");
+        changed.push(0);
+        fs::write(&path, changed).unwrap();
+        assert!(hash_archive(&mut File::open(&path).unwrap(), &fixture.manifest).is_err());
     }
+
     #[test]
     fn decompression_checks_exact_size_and_removes_temporary_file() {
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        let mut output = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        let fixture = fixture();
+        let archive = fixture.manifest.archive_path(&fixture.paths.guest_image);
+        let mut output = tempfile::NamedTempFile::new_in(fixture.directory.path()).unwrap();
         let path = output.path().to_owned();
-        assert!(unpack(
-            &dir.path().join("guest-image/image.tar.gz"),
-            output.as_file_mut(),
-            11
-        )
-        .is_err());
+        assert!(unpack(&archive, output.as_file_mut(), 11).is_err());
         drop(output);
         assert!(!path.exists());
-        let mut output = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
-        unpack(
-            &dir.path().join("guest-image/image.tar.gz"),
-            output.as_file_mut(),
-            12,
-        )
-        .unwrap();
+        let mut output = tempfile::NamedTempFile::new_in(fixture.directory.path()).unwrap();
+        unpack(&archive, output.as_file_mut(), 12).unwrap();
     }
+
+    struct FailingImporter(std::sync::atomic::AtomicUsize);
+    impl RuntimeRunner for FailingImporter {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<super::super::CommandOutput, RuntimeError> {
+            assert_eq!(&args[..2], ["image", "load"]);
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(RuntimeError::Unavailable("interrupted".into()))
+        }
+    }
+
     #[test]
     fn failed_import_is_not_successful_and_retry_reimports() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        struct FailingImporter(AtomicUsize);
-        impl RuntimeRunner for FailingImporter {
-            fn run(
-                &self,
-                _paths: &RuntimePaths,
-                args: &[String],
-                _timeout: Duration,
-            ) -> Result<super::super::CommandOutput, RuntimeError> {
-                assert_eq!(&args[..2], ["image", "load"]);
-                self.0.fetch_add(1, Ordering::SeqCst);
-                Err(RuntimeError::Unavailable("interrupted".into()))
-            }
-        }
-        let dir = tempfile::tempdir().unwrap();
-        fixture(dir.path());
-        let paths = RuntimePaths {
-            guest_image: dir.path().join("guest-image"),
-            executable: dir.path().join("msb"),
-            home: dir.path().join("home"),
-            storage_home: None,
-            library: dir.path().join("lib"),
-            metadata: dir.path().join("metadata"),
-            volumes: dir.path().join("volumes"),
-        };
-        let runner = FailingImporter(AtomicUsize::new(0));
+        let fixture = fixture();
+        let runner = FailingImporter(std::sync::atomic::AtomicUsize::new(0));
         for _ in 0..2 {
-            assert!(prepare(&runner, &paths)
+            assert!(prepare_as(&runner, &fixture.paths, &fixture.manifest)
                 .unwrap_err()
                 .to_string()
                 .contains("could not prepare"));
             assert_eq!(
-                fs::read_dir(paths.home.join("cache/tmp")).unwrap().count(),
+                fs::read_dir(fixture.paths.home.join("cache/tmp"))
+                    .unwrap()
+                    .count(),
                 0
             );
         }
-        assert_eq!(runner.0.load(Ordering::SeqCst), 2);
+        assert_eq!(runner.0.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
+
     #[test]
-    fn an_uncached_image_is_not_imported_and_a_tampered_bundle_is_never_loaded() {
+    fn an_uncached_image_without_a_verified_archive_is_not_imported() {
         struct Unreachable;
         impl RuntimeRunner for Unreachable {
             fn run(
@@ -649,31 +506,22 @@ mod tests {
                 _: &[String],
                 _: Duration,
             ) -> Result<super::super::CommandOutput, RuntimeError> {
-                panic!("a bundle that fails its checksum must not be imported");
+                panic!("an image without a verified archive must not be imported");
             }
         }
-        let dir = tempfile::tempdir().unwrap();
-        let mut manifest = fixture(dir.path());
-        let paths = RuntimePaths {
-            guest_image: dir.path().join("guest-image"),
-            executable: dir.path().join("msb"),
-            home: dir.path().join("home"),
-            storage_home: None,
-            library: dir.path().join("lib"),
-            metadata: dir.path().join("metadata"),
-            volumes: dir.path().join("volumes"),
-        };
-        assert!(!is_imported(&paths));
-        manifest["archiveSha256"] = json!("b".repeat(64));
-        fs::write(
-            dir.path().join("guest-image/manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        assert!(prepare(&Unreachable, &paths)
+        let fixture = fixture();
+        assert!(!is_imported_as(&fixture.paths, &fixture.manifest));
+        let archive = fixture.manifest.archive_path(&fixture.paths.guest_image);
+        fs::write(&archive, b"tampered").unwrap();
+        assert!(prepare_as(&Unreachable, &fixture.paths, &fixture.manifest)
             .unwrap_err()
             .to_string()
             .contains("integrity"));
+        fs::remove_file(&archive).unwrap();
+        assert!(prepare_as(&Unreachable, &fixture.paths, &fixture.manifest)
+            .unwrap_err()
+            .to_string()
+            .contains("not downloaded yet"));
     }
 
     #[test]
@@ -685,8 +533,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires signed bundled msb, hypervisor access and staged guest image"]
-    fn live_bundled_image_import_and_cache_reuse() {
+    #[ignore = "requires signed bundled msb, hypervisor access and a downloaded guest image"]
+    fn live_downloaded_image_import_and_cache_reuse() {
         crate::test_support::live::require_confirmation();
         use super::super::{CommandOutput, ProcessRunner};
         struct NoImport;
@@ -700,13 +548,21 @@ mod tests {
                 panic!("A verified cached image must not be imported again");
             }
         }
+        let pinned = PinnedImage::host().unwrap();
         let directory = tempfile::Builder::new()
             .prefix("silo-image-live-")
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
+        let guest_image = directory.path().join("guest-image");
+        let archive = pinned.manifest.archive_path(&guest_image);
+        fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        fs::copy(
+            std::env::var("SILO_TEST_GUEST_ARCHIVE").expect("set SILO_TEST_GUEST_ARCHIVE"),
+            &archive,
+        )
+        .unwrap();
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("runtime/guest-image"),
+            guest_image,
             executable: std::env::var("SILO_TEST_MSB")
                 .expect("set SILO_TEST_MSB")
                 .into(),
@@ -744,10 +600,6 @@ mod tests {
             fs::read_dir(paths.home.join("cache/tmp")).unwrap().count(),
             0
         );
-        let cache = GlobalCache::new(&paths.home.join("cache")).unwrap();
-        assert!(cached(
-            &cache,
-            &validate_directory(&paths.guest_image).unwrap()
-        ));
+        assert!(is_imported(&paths));
     }
 }

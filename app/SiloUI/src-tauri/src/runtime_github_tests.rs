@@ -97,7 +97,7 @@ fn cleanup_live_checkpoint_fork(
 }
 
 #[test]
-#[ignore = "requires a signed MicroSandbox binary, hypervisor access, bundled image and GitHub network access"]
+#[ignore = "requires a signed MicroSandbox binary, hypervisor access, a guest image and GitHub network access"]
 fn github_guest_bootstrap_and_live_identity() {
     let _test_state = crate::test_support::global_state();
     crate::test_support::live::require_confirmation();

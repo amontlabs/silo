@@ -5,7 +5,7 @@ blocking the app or holding the device-wide operation gate:
 
 | Item | Owner | What it does |
 | --- | --- | --- |
-| Computer image | `src-tauri/src/preparation.rs`, `guest_image.rs` | Imports the bundled image into the runtime cache (about a minute, first launch of a release only). |
+| Computer image | `src-tauri/src/preparation.rs`, `guest_image.rs` | Downloads the image pinned in `guest-image/image-lock.json` (about 400 MiB, once), verifies its size and SHA-256, publishes it read-only and imports it into the runtime cache (about a minute). Nothing is downloaded when the cache already holds the image. See [guest images](SiloUI-GUEST-IMAGES.md#download-on-first-use). |
 | LCU archive | `preparation.rs` | Downloads the archive pinned in `src-tauri/guest/lcu-lock.json` for the guest architecture, verifies its SHA-256 and publishes it read-only. |
 | ChatGPT for Linux | `chatgpt_app.rs` | Unchanged. Its status is shown beside the other two. |
 
@@ -16,7 +16,7 @@ Evidence for the design is in
 
 - `preparation::start` runs once from the startup task, after the image cache repair and before any
   computer starts. Each item runs on its own thread; an item that is already prepared becomes `ready`
-  with a metadata check only (the bundled archive is not hashed when the image is already cached).
+  with a metadata check only (the archive is neither downloaded nor hashed when the image is already cached).
 - Every item is one `Job`: at most one run at a time. `ensure_image` and `ensure_lcu` join a run in
   flight, return at once when the item is ready, and otherwise run it. A joiner of a failed run gets
   that failure; the next call tries again. `guest_image::prepare` still serializes imports with a

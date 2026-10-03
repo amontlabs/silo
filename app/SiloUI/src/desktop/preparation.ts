@@ -117,12 +117,13 @@ function percent(received: number, total: number | null | undefined) {
  * is an item until the next attempt starts. Items that are ready or only waiting are absent. */
 export function describePreparation(status: PreparationStatus | null, chatgpt: ChatGptAppStatus | null): PreparationItem[] {
   const items: PreparationItem[] = []
-  const task = (id: "image" | "lcu", running: string, failed: string, value: PreparationTask | undefined) => {
-    if (value?.state === "running") items.push({ id, state: "running", text: running, progress: value.fraction == null ? null : value.fraction / 100, retryable: false })
+  const task = (id: "image" | "lcu", running: (fraction: number | null) => string, failed: string, value: PreparationTask | undefined) => {
+    if (value?.state === "running") items.push({ id, state: "running", text: running(value.fraction ?? null), progress: value.fraction == null ? null : value.fraction / 100, retryable: false })
     if (value?.state === "failed") items.push({ id, state: "failed", text: value.message || failed, progress: null, retryable: value.retryable })
   }
-  task("image", "Importing the VM image (first time only)", "Silo could not import its VM image.", status?.image)
-  task("lcu", "Downloading LCU", "Silo could not download LCU.", status?.lcu)
+  // The image reports a fraction while it downloads, then none while it is verified and imported.
+  task("image", fraction => fraction === null ? "Preparing the VM image (first time only)" : `Downloading the VM image · ${Math.floor(fraction)}%`, "Silo could not prepare its VM image.", status?.image)
+  task("lcu", () => "Downloading LCU", "Silo could not download LCU.", status?.lcu)
   switch (chatgpt?.state) {
     case "downloading": {
       const fraction = percent(chatgpt.receivedBytes, chatgpt.totalBytes)

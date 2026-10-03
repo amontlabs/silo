@@ -41,7 +41,6 @@ class RuntimeTransferTests(unittest.TestCase):
         executable = b'compiled public runtime'
         self.write(MSB, executable, 0o755)
         self.write(MSB + '.sha256', hashlib.sha256(executable).hexdigest().encode())
-        self.write('app/SiloUI/src-tauri/runtime/guest-image/image.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/dugite/v1/git.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/source.tar.gz')
         self.write('app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/pin/builds/linux-arm64/git-lfs-transfer', executable, 0o755)
