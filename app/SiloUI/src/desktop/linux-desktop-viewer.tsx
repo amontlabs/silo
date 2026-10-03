@@ -221,7 +221,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     finally { operation.current = false; setBusy(false) }
   }
   return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
-    clipboard={<ViewerClipboard computer={computer} name={name} needsUpdate={state?.updateRequired === true} />}
+    clipboard={<ViewerClipboard computer={computer} name={name} needsUpdate={state?.updateRequired === true || state?.updateAvailable === true} />}
     onAction={action => { void handleAction(action) }}
     onRetry={() => { setConnection(value => value + 1); void refresh(false) }}
     onFullscreen={() => { const window = getCurrentWindow(); void window.isFullscreen().then(value => window.setFullscreen(!value)).catch(cause => setError(String(cause))) }} />
