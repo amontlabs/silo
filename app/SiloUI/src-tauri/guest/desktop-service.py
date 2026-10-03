@@ -33,7 +33,18 @@ LCU_PREFIX = Path('/opt/lcu')
 TMP = Path('/tmp')
 DISPLAY_LOCK = TMP / '.X1-lock'
 DISPLAY_SOCKET_DIR = TMP / '.X11-unix'
-SELKIES_SCREEN = '1440x900x24'
+# The desktop starts at DESKTOP_START_SIZE. Xvfb is created with XVFB_SCREEN as its
+# largest size so RandR can grow the screen to follow a viewer window.
+DESKTOP_START_SIZE = (1440, 900)
+XVFB_SCREEN = '4096x4096x24'
+# CVT reduced-blanking timings for 1440x900 at 60 Hz, used when Xvfb lists no such mode.
+START_MODELINE = ['88.75', '1440', '1488', '1520', '1600', '900', '903', '909', '926',
+                  '+hsync', '-vsync']
+XRANDR_READY_SECONDS = 10
+XRANDR_TIMEOUT_SECONDS = 10
+# Receipt revisions the service still runs; only the newest is current.
+STREAMER_RECIPE_VERSIONS = (1, 2, 3)
+STREAMER_CURRENT_RECIPE = 3
 SELKIES_MAX_ATTEMPTS = 3
 # A stream that stays up this long starts a fresh retry budget, so unrelated
 # crashes hours apart never add up to a failed display.
@@ -213,11 +224,11 @@ def streamer_backend():
                 receipt.get('schemaVersion') != 1 or
                 receipt.get('state') != 'ready' or receipt.get('backend') != 'selkies' or
                 receipt.get('version') != '2.0.0' or type(receipt.get('recipeVersion')) is not int or
-                receipt.get('recipeVersion') not in (1, 2) or
+                receipt.get('recipeVersion') not in STREAMER_RECIPE_VERSIONS or
                 receipt.get('architecture') != machine or
                 not isinstance(receipt.get('packageSha256'), str) or
                 not re.fullmatch(r'[0-9a-f]{64}', receipt['packageSha256']) or
-                resolution != {'width': 1440, 'height': 900} or
+                resolution != {'width': DESKTOP_START_SIZE[0], 'height': DESKTOP_START_SIZE[1]} or
                 not SELKIES_EXECUTABLE.is_file() or not os.access(SELKIES_EXECUTABLE, os.X_OK)):
             return None
         return 'selkies'
@@ -230,7 +241,7 @@ def streamer_recipe_version():
     try:
         value = json.loads((STATE / 'streamer.json').read_text())
         revision = value.get('recipeVersion')
-        return revision if type(revision) is int and revision in (1, 2) else 0
+        return revision if type(revision) is int and revision in STREAMER_RECIPE_VERSIONS else 0
     except (OSError, ValueError, TypeError, AttributeError):
         return 0
 
@@ -491,12 +502,16 @@ def sleep_until_service_event(seconds):
     time.sleep(seconds)
 
 
-def launch_managed_process(name, argv, environment, account):
+def account_demoter(account):
     def demote():
         os.initgroups(USER, account.pw_gid)
         os.setgid(account.pw_gid)
         os.setuid(account.pw_uid)
+    return demote
 
+
+def launch_managed_process(name, argv, environment, account):
+    demote = account_demoter(account)
     with LOG.open('ab', buffering=0) as output:
         child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output,
                                  stderr=output, env=environment, start_new_session=True,
@@ -510,6 +525,57 @@ def launch_managed_process(name, argv, environment, account):
             child.wait(timeout=5)
         raise RuntimeError(f'{name} exited or failed identity validation; inspect {LOG}')
     return child, dict(name=name, pid=child.pid, **current)
+
+
+def run_xrandr(arguments, environment, account):
+    try:
+        result = subprocess.run(['xrandr', *arguments], env=environment, capture_output=True,
+                                text=True, timeout=XRANDR_TIMEOUT_SECONDS,
+                                preexec_fn=account_demoter(account), close_fds=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f'xrandr could not run: {error}') from None
+    return result
+
+
+def xrandr_screen(environment, account):
+    """Return (output, current size, listed mode names) from `xrandr --query`, or None."""
+    result = run_xrandr(['--query'], environment, account)
+    if result.returncode != 0:
+        return None
+    current = re.search(r'current (\d+) x (\d+)', result.stdout)
+    output = re.search(r'^(\S+) connected', result.stdout, re.MULTILINE)
+    if not current or not output:
+        return None
+    modes = set(re.findall(r'^\s+(\d+x\d+)\s', result.stdout, re.MULTILINE))
+    return output.group(1), (int(current.group(1)), int(current.group(2))), modes
+
+
+def set_desktop_start_size(environment, account):
+    """Shrink the freshly started Xvfb screen to DESKTOP_START_SIZE through RandR."""
+    width, height = DESKTOP_START_SIZE
+    name = f'{width}x{height}'
+    screen = None
+    for _ in range(XRANDR_READY_SECONDS * 5):
+        screen = xrandr_screen(environment, account)
+        if screen:
+            break
+        time.sleep(0.2)
+    if not screen:
+        raise RuntimeError('Xvfb did not report a RandR output; check that xrandr and the RANDR extension are available')
+    output, current, modes = screen
+    if current != DESKTOP_START_SIZE:
+        if name not in modes:
+            created = run_xrandr(['--newmode', name, *START_MODELINE], environment, account)
+            added = run_xrandr(['--addmode', output, name], environment, account)
+            if added.returncode != 0:
+                raise RuntimeError(f'xrandr could not add the {name} mode: '
+                                   f'{(added.stderr or created.stderr).strip()}')
+        applied = run_xrandr(['--output', output, '--mode', name, '--fb', name], environment, account)
+        if applied.returncode != 0:
+            raise RuntimeError(f'xrandr could not set the {name} screen size: {applied.stderr.strip()}')
+        screen = xrandr_screen(environment, account)
+        if not screen or screen[1] != DESKTOP_START_SIZE:
+            raise RuntimeError(f'The desktop screen did not change to {name}')
 
 
 def stop_managed_child(child):
@@ -530,8 +596,12 @@ def launch_selkies_streamer(account, environment):
     argv = [str(SELKIES_EXECUTABLE), '--addr=127.0.0.1', '--port=6901',
             '--enable-https=false', f'--basic-auth-user={USER}',
             f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
-            '--use-cpu=true', '--enable-resize=false', '--enable-clipboard=false',
-            '--enable-binary-clipboard=false', '--file-transfers=none']
+            '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
+            '--enable-resize=true', '--use-css-scaling=true|locked',
+            '--enable-clipboard=true', '--enable-binary-clipboard=true',
+            '--clipboard-seamless=false', '--file-transfers=none',
+            '--audio-enabled=true', '--audio-bitrate=64000',
+            '--microphone-enabled=false|locked', '--ui-sidebar-show-audio-settings=false']
     return launch_managed_process('selkies', argv, environment, account)
 
 
@@ -809,7 +879,8 @@ def log_line(text):
         pass
 
 
-def start_session_processes(commands, environment, account, state, children, stopping):
+def start_session_processes(commands, environment, account, state, children, stopping,
+                            after_launch=None):
     """Launch the session processes in order, retrying a failed launch with backoff.
 
     A failed attempt stops what it started, so the next one begins from nothing."""
@@ -826,6 +897,8 @@ def start_session_processes(commands, environment, account, state, children, sto
                 children.append(child)
                 state['sessionProcesses'].append(record)
                 write_selkies_state(state)
+                if after_launch:
+                    after_launch(command)
             return
         except SessionCommandMissing:
             raise
@@ -895,13 +968,15 @@ def supervise_selkies():
                                PULSE_RUNTIME_PATH=str(RUN / 'user/pulse'),
                                PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}')
             commands = [
-                ('xvfb', ['Xvfb', ':1', '-screen', '0', SELKIES_SCREEN, '-nolisten', 'tcp',
-                          '-auth', str(RUN / 'user/Xauthority')]),
+                ('xvfb', ['Xvfb', ':1', '-screen', '0', XVFB_SCREEN, '+extension', 'RANDR',
+                          '-noreset', '-nolisten', 'tcp', '-auth', str(RUN / 'user/Xauthority')]),
                 ('pulse', ['pulseaudio', '--daemonize=no', '--exit-idle-time=-1']),
                 ('xfce', ['dbus-run-session', '--', 'startxfce4']),
             ]
-            start_session_processes(commands, environment, account, state, session_children,
-                                    lambda: stopping)
+            start_session_processes(
+                commands, environment, account, state, session_children, lambda: stopping,
+                after_launch=lambda command: (set_desktop_start_size(environment, account)
+                                              if command == 'xvfb' else None))
             if stopping:
                 return
             state['sessionState'] = 'running'
@@ -972,7 +1047,7 @@ def status():
                  'starting' if 'starting' in (session_state, stream_state) else 'stopped')
         backend = 'selkies'
         streamer_version = '2.0.0'
-        update_required = streamer_recipe_version() < 2
+        update_required = streamer_recipe_version() < STREAMER_CURRENT_RECIPE
     elif recipe == 'kasm':
         state = legacy_state
         # A crashed helper must not make an orphaned Xvnc session appear safe

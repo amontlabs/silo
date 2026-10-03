@@ -551,6 +551,14 @@ class DesktopLifecycle(unittest.TestCase):
         receipt_value = json.loads(receipt.read_text())
         receipt_value['recipeVersion'] = 2
         service.write(receipt, receipt_value)
+        with common_patches[0], common_patches[1], common_patches[2], common_patches[3], \
+             common_patches[4], common_patches[5], common_patches[6], common_patches[7]:
+            result = service.status()
+        self.assertEqual(result['state'], 'running')
+        self.assertTrue(result['updateRequired'])
+
+        receipt_value['recipeVersion'] = 3
+        service.write(receipt, receipt_value)
         current_patches = (
             patch.object(service, 'SELKIES_EXECUTABLE', executable),
             patch.object(service.os, 'uname', return_value=SimpleNamespace(machine='aarch64')),
@@ -628,7 +636,7 @@ class DesktopLifecycle(unittest.TestCase):
         children = [SimpleNamespace(pid=pid, poll=Mock(return_value=1 if pid == 11 else None))
                     for pid in (10, 11, 12)]
 
-        def start(_commands, _environment, _account, state, session_children, _stopping):
+        def start(_commands, _environment, _account, state, session_children, _stopping, after_launch=None):
             session_children.extend(children)
             state['sessionProcesses'] = [{'pid': child.pid} for child in children]
 
@@ -852,7 +860,7 @@ class DesktopLifecycle(unittest.TestCase):
         waits = []
         session = [SimpleNamespace(pid=pid, poll=lambda: None) for pid in (10, 11, 12)]
 
-        def start(_commands, _environment, _account, state, children, _stopping):
+        def start(_commands, _environment, _account, state, children, _stopping, after_launch=None):
             children.extend(session)
             state['sessionProcesses'] = [{'pid': child.pid} for child in session]
 
@@ -1181,6 +1189,92 @@ class SessionStartRetry(unittest.TestCase):
                                 stopping=lambda: next(stops, True))
         self.assertIsNone(result.error)
         self.assertEqual(result.launcher.call_count, 2)
+
+
+class StreamerLaunch(unittest.TestCase):
+    def launch_argv(self):
+        connection = {'username': service.USER, 'port': 6901, 'password': 'a' * 64}
+        with patch.object(service, 'read', return_value=connection), \
+             patch.object(service, 'launch_managed_process', return_value=('child', {})) as launcher:
+            service.launch_selkies_streamer('account', {})
+        return launcher.call_args.args[1]
+
+    def test_selkies_flags_enable_clipboard_audio_and_resize_and_lock_the_rest(self):
+        argv = self.launch_argv()
+        for flag in ('--enable-clipboard=true', '--enable-binary-clipboard=true',
+                     '--clipboard-seamless=false', '--file-transfers=none',
+                     '--audio-enabled=true', '--audio-bitrate=64000',
+                     '--microphone-enabled=false|locked', '--ui-sidebar-show-audio-settings=false',
+                     '--enable-resize=true', '--use-css-scaling=true|locked',
+                     '--mode=websockets', '--enable-dual-mode=false|locked'):
+            self.assertIn(flag, argv)
+        self.assertEqual(len({arg.split('=')[0] for arg in argv}), len(argv))
+
+
+class DesktopStartSize(unittest.TestCase):
+    QUERY = ('Screen 0: minimum 1 x 1, current {w} x {h}, maximum 32767 x 32767\n'
+             'screen connected primary {w}x{h}+0+0 0mm x 0mm\n   {w}x{h}      60.00*\n'
+             '   1024x768      60.00\n')
+
+    def run_resize(self, replies):
+        calls = []
+
+        def xrandr(arguments, _environment, _account):
+            calls.append(arguments)
+            code, out, err = replies(arguments, calls)
+            return SimpleNamespace(returncode=code, stdout=out, stderr=err)
+        with patch.object(service, 'run_xrandr', side_effect=xrandr), \
+             patch.object(service.time, 'sleep'):
+            try:
+                service.set_desktop_start_size({}, 'account')
+                error = None
+            except RuntimeError as caught:
+                error = caught
+        return calls, error
+
+    def test_xvfb_starts_large_and_is_shrunk_to_the_start_size_with_a_new_mode(self):
+        self.assertEqual(service.XVFB_SCREEN, '4096x4096x24')
+
+        def replies(arguments, calls):
+            if arguments == ['--query']:
+                size = (1440, 900) if any('--output' in call for call in calls) else (4096, 4096)
+                return 0, self.QUERY.format(w=size[0], h=size[1]), ''
+            return 0, '', ''
+        calls, error = self.run_resize(replies)
+        self.assertIsNone(error)
+        self.assertEqual(calls[1], ['--newmode', '1440x900', *service.START_MODELINE])
+        self.assertEqual(calls[2], ['--addmode', 'screen', '1440x900'])
+        self.assertEqual(calls[3], ['--output', 'screen', '--mode', '1440x900', '--fb', '1440x900'])
+
+    def test_a_listed_mode_is_reused_and_a_correct_size_is_left_alone(self):
+        listed = self.QUERY.format(w=4096, h=4096) + '   1440x900      59.90\n'
+        calls, error = self.run_resize(lambda arguments, _calls: (0, listed, ''))
+        self.assertIsNotNone(error)
+        self.assertEqual([call[0] for call in calls if call[0] != '--query'], ['--output'])
+        calls, error = self.run_resize(lambda arguments, _calls: (0, self.QUERY.format(w=1440, h=900), ''))
+        self.assertIsNone(error)
+        self.assertEqual(calls, [['--query']])
+
+    def test_a_failed_resize_is_a_clear_error(self):
+        def replies(arguments, calls):
+            if arguments == ['--query']:
+                return 0, self.QUERY.format(w=4096, h=4096), ''
+            return (1, '', 'bad mode') if arguments[0] == '--addmode' else (0, '', '')
+        _calls, error = self.run_resize(replies)
+        self.assertRegex(str(error), 'could not add the 1440x900 mode: bad mode')
+        _calls, error = self.run_resize(lambda arguments, calls: (1, '', 'no display'))
+        self.assertRegex(str(error), 'did not report a RandR output')
+
+    def test_the_resize_runs_right_after_xvfb_starts_and_not_after_other_processes(self):
+        steps = []
+        with patch.object(service, 'launch_managed_process',
+                          side_effect=lambda name, *_: (SimpleNamespace(name=name), {'name': name})), \
+             patch.object(service, 'write_selkies_state'), \
+             patch.object(service.shutil, 'which', return_value='/usr/bin/x'):
+            service.start_session_processes(
+                SessionStartRetry.COMMANDS, {}, 'account', {'sessionProcesses': []}, [], lambda: False,
+                after_launch=steps.append)
+        self.assertEqual(steps, ['xvfb', 'pulse', 'xfce'])
 
 
 if __name__ == '__main__':

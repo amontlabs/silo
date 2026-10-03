@@ -30,7 +30,7 @@ import json, re, sys
 # SILO_STREAMER_LOCK_V1
 lock = json.load(open(sys.argv[1], encoding='utf-8'))
 if (set(lock) != {'schemaVersion', 'recipeVersion', 'version', 'resolution', 'assets'} or
-        lock['schemaVersion'] != 1 or lock['recipeVersion'] != 2 or
+        lock['schemaVersion'] != 1 or lock['recipeVersion'] != 3 or
         lock['version'] != '2.0.0' or lock['resolution'] != {'width': 1440, 'height': 900} or
         set(lock['assets']) != {'amd64', 'arm64'}):
     raise SystemExit('Invalid bundled desktop streamer lock')

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import pwd
+import re
 import secrets
 import shutil
 import signal
@@ -23,7 +24,9 @@ RUN = Path("/run/silo-desktop-probe")
 LOG = Path("/var/log/silo-desktop-probe")
 MANIFEST = Path(__file__).with_name("desktop-viewer-probe-lock.json")
 MARKER_KIND = "silo-desktop-viewer-probe"
-SCREEN = "1440x900x24"
+SCREEN = "4096x4096x24"
+START_SIZE = "1440x900"
+START_MODELINE = ["88.75", "1440", "1488", "1520", "1600", "900", "903", "909", "926", "+hsync", "-vsync"]
 PORT = 6901
 USER = "silo"
 
@@ -181,6 +184,24 @@ def spawn(name, argv, env, account):
         reap_spawned_child(child)
         raise
 
+def set_start_size(env, account):
+    def xrandr(*arguments):
+        return subprocess.run(["xrandr", *arguments], env=env, capture_output=True, text=True, timeout=10,
+                              preexec_fn=lambda: (os.initgroups(USER, account.pw_gid),
+                                                  os.setgid(account.pw_gid), os.setuid(account.pw_uid)))
+    query = xrandr("--query")
+    output = re.search(r"^(\S+) connected", query.stdout, re.MULTILINE)
+    if query.returncode != 0 or not output:
+        fail("xrandr found no Xvfb output; check x11-xserver-utils and the RANDR extension")
+    if not re.search(rf"^\s+{START_SIZE}\s", query.stdout, re.MULTILINE):
+        xrandr("--newmode", START_SIZE, *START_MODELINE)
+        added = xrandr("--addmode", output.group(1), START_SIZE)
+        if added.returncode != 0:
+            fail(f"xrandr could not add {START_SIZE}: {added.stderr.strip()}")
+    applied = xrandr("--output", output.group(1), "--mode", START_SIZE, "--fb", START_SIZE)
+    if applied.returncode != 0:
+        fail(f"xrandr could not set {START_SIZE}: {applied.stderr.strip()}")
+
 def session_environment(account):
     session = RUN / "session"
     return {"HOME": account.pw_dir, "USER": USER, "LOGNAME": USER, "PATH": os.environ["PATH"],
@@ -191,8 +212,10 @@ def session_environment(account):
 def selkies_args(secret):
     return ["selkies", "--addr=127.0.0.1", f"--port={PORT}", "--enable-https=false",
             "--basic-auth-user=silo", f"--basic-auth-password={secret}", "--encoder=h264enc",
-            "--use-cpu=true", "--enable-resize=false", "--enable-clipboard=false",
-            "--enable-binary-clipboard=false", "--file-transfers=none"]
+            "--use-cpu=true", "--mode=websockets", "--enable-dual-mode=false|locked", "--enable-resize=true", "--use-css-scaling=true|locked",
+            "--enable-clipboard=true", "--enable-binary-clipboard=true", "--clipboard-seamless=false",
+            "--file-transfers=none", "--audio-enabled=true", "--audio-bitrate=64000",
+            "--microphone-enabled=false|locked", "--ui-sidebar-show-audio-settings=false"]
 
 def stop_recorded(item):
     current = proc_identity(item["pid"])
@@ -238,7 +261,8 @@ def start(marker_path):
     state = {"fixtureId": marker["fixtureId"], "bootId": boot_id(), "processes": []}
     state_write(state)
     commands = [
-        ("xvfb", ["Xvfb", ":1", "-screen", "0", SCREEN, "-nolisten", "tcp", "-auth", str(authority)]),
+        ("xvfb", ["Xvfb", ":1", "-screen", "0", SCREEN, "+extension", "RANDR", "-noreset",
+                          "-nolisten", "tcp", "-auth", str(authority)]),
         ("pulse", ["pulseaudio", "--daemonize=no", "--exit-idle-time=-1"]),
         ("xfce", ["dbus-run-session", "--", "startxfce4"]),
         ("selkies", selkies_args(secret)),
@@ -247,6 +271,8 @@ def start(marker_path):
         state["processes"].append(spawn(name, argv, env, account))
         state_write(state)
         time.sleep(.5)
+        if name == "xvfb":
+            set_start_size(env, account)
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and not port_open():
         time.sleep(.2)
