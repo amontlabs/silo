@@ -726,15 +726,15 @@ fn upload(
             .map_err(|_| "Could not prepare the upload.")?;
         let partial = partial_name(target, &uuid::Uuid::new_v4().simple().to_string()[..12]);
         // Replacing publishes with the replacing rename. Otherwise the legacy rename
-        // refuses an existing name, and the listing of the partial shows whether it did.
+        // refuses an existing name, and the listing of the folder shows whether it did;
+        // a listing that fails fails the upload.
         let publish = if policy == ConflictPolicy::Replace {
             format!("rename {} {}\n", relative(&partial)?, relative(target)?)
         } else {
             format!(
-                "-rename -l {} {}\n-ls -lan {}\n",
+                "-rename -l {} {}\nls -lan\n",
                 relative(&partial)?,
-                relative(target)?,
-                relative(&partial)?
+                relative(target)?
             )
         };
         let batch = format!(
@@ -781,10 +781,20 @@ fn upload(
             }
         });
         let result = result.and_then(|output| {
-            if policy == ConflictPolicy::Replace || !lists(&output, &partial) {
+            if policy == ConflictPolicy::Replace {
                 return Ok(target.clone());
             }
-            publish_beside_existing(sftp, control, &folder.canonical, &partial, source, &targets)
+            match publication(&output, &partial, target)? {
+                Publication::Published => Ok(target.clone()),
+                Publication::Taken => publish_beside_existing(
+                    sftp,
+                    control,
+                    &folder.canonical,
+                    &partial,
+                    source,
+                    &targets,
+                ),
+            }
         });
         match result {
             Ok(published) => {
@@ -813,6 +823,26 @@ fn lists(output: &str, name: &str) -> bool {
         .any(|entry| entry.name.strip_prefix("./").unwrap_or(&entry.name) == name)
 }
 
+enum Publication {
+    Published,
+    /// The target name was taken, so the file is still under its partial name.
+    Taken,
+}
+
+/// Reads the listing of the folder after a refusing rename of `partial` to `target`.
+/// Only a listing that shows the file under one of the two names settles the outcome.
+fn publication(output: &str, partial: &str, target: &str) -> Result<Publication, RunError> {
+    if lists(output, partial) {
+        Ok(Publication::Taken)
+    } else if lists(output, target) {
+        Ok(Publication::Published)
+    } else {
+        Err(RunError::Failed(
+            "The uploaded file did not appear in the computer.".into(),
+        ))
+    }
+}
+
 /// The file is stored under its partial name and its target name was taken in the
 /// meantime. Tries the next numbered names, never replacing anything, and returns the
 /// name it ended up with.
@@ -836,11 +866,11 @@ fn publish_beside_existing(
             .collect();
         let candidate = keep_both_name(&source.name, &|name| taken.contains(name));
         let batch = format!(
-            "cd {directory_arg}\n-rename -l {partial_arg} {}\n-ls -lan {partial_arg}\n",
+            "cd {directory_arg}\n-rename -l {partial_arg} {}\nls -lan\n",
             relative(&candidate).map_err(RunError::Failed)?
         );
         let output = sftp.run(&batch, Some(PROBE_LIMIT), control.cancel, &mut || {})?;
-        if !lists(&output, partial) {
+        if let Publication::Published = publication(&output, partial, &candidate)? {
             return Ok(candidate);
         }
     }
@@ -984,6 +1014,16 @@ struct Slot {
 
 impl Slot {
     fn take(id: &str) -> Result<Self, String> {
+        Self::take_if_accepting(id, crate::runtime::shutdown::ensure_accepting_operations)
+    }
+
+    /// Registers the slot unless `accepting` refuses. Quit refuses admission before it
+    /// cancels the registered transfer, so deciding while the registry is locked leaves no
+    /// transfer registered after that cancellation.
+    fn take_if_accepting(
+        id: &str,
+        accepting: impl FnOnce() -> Result<(), String>,
+    ) -> Result<Self, String> {
         if id.is_empty()
             || id.len() > 64
             || !id
@@ -995,6 +1035,7 @@ impl Slot {
         let mut active = ACTIVE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        accepting()?;
         if active.is_some() {
             return Err("Another file transfer is still running.".into());
         }
@@ -1874,9 +1915,9 @@ mod tests {
         fs::write(
             &world.sftp.program,
             format!(
-                "#!/bin/sh\nbatch=\nwhile [ $# -gt 0 ]; do case \"$1\" in -b) batch=$2; shift 2;; *) shift;; esac; done\nif grep -q '^put' \"$batch\"; then\n  name=$(sed -n 's/^put [^ ]* \"\\.\\/\\(.*\\)\"$/\\1/p' \"$batch\")\n  head -c 123 /dev/zero > \"{}/$name\"\n  sleep 1\n  exit 0\nfi\nexec {SFTP} -D {} -b \"$batch\"\n",
+                "#!/bin/sh\nbatch=\nwhile [ $# -gt 0 ]; do case \"$1\" in -b) batch=$2; shift 2;; *) shift;; esac; done\nif grep -q '^put' \"$batch\"; then\n  name=$(sed -n 's/^put [^ ]* \"\\.\\/\\(.*\\)\"$/\\1/p' \"$batch\")\n  head -c 123 /dev/zero > \"{}/$name\"\n  sleep 1\n  grep -v '^put' \"$batch\" > \"$batch.rest\"\n  exec {SFTP} -D {server} -b \"$batch.rest\"\nfi\nexec {SFTP} -D {server} -b \"$batch\"\n",
                 world.remote.display(),
-                server().unwrap(),
+                server = server().unwrap(),
             ),
         )
         .unwrap();
@@ -2118,8 +2159,23 @@ mod tests {
         for bad in ["", "a b", "../x", &"a".repeat(65)] {
             assert!(Slot::take(bad).is_err(), "{bad:?}");
         }
-        let first = Slot::take("one").unwrap();
-        assert!(Slot::take("two").unwrap_err().contains("still running"));
+        // One test owns the shared registry; admission is decided by `Ok` here so a
+        // shutdown running in another test does not interfere.
+        let admit = |id: &str| Slot::take_if_accepting(id, || Ok(()));
+        let refused = Slot::take_if_accepting("quit-race", || {
+            assert!(
+                ACTIVE.try_lock().is_err(),
+                "the decision is made under the registry lock"
+            );
+            Err("Silo is quitting.".into())
+        });
+        assert_eq!(refused.unwrap_err(), "Silo is quitting.");
+        assert!(
+            ACTIVE.lock().unwrap().is_none(),
+            "a refused transfer leaves no slot for Quit to miss"
+        );
+        let first = admit("one").unwrap();
+        assert!(admit("two").unwrap_err().contains("still running"));
         cancel_all();
         assert!(first.cancel.load(Ordering::Acquire));
         let started = Instant::now();
@@ -2131,7 +2187,7 @@ mod tests {
             close_all(Duration::from_secs(5));
         });
         assert!(started.elapsed() < Duration::from_secs(4));
-        drop(Slot::take("two").unwrap());
+        drop(admit("two").unwrap());
     }
 
     /// A client for the real server whose batches that contain `needle` first run `before`,
@@ -2422,6 +2478,83 @@ mod tests {
             b"racer\n"
         );
         assert_eq!(names(&world.remote), ["a (1).txt", "a.txt"]);
+    }
+
+    /// An `sftp` that stores the file, then runs the batch with `rewrite` (a `sed`
+    /// expression) applied, and fails when `fail` is set, as a folder whose access was
+    /// revoked after the upload would.
+    fn broken_publication(world: &World, rewrite: &str, fail: bool) {
+        let failure = if fail {
+            "echo \"Couldn't read directory: Permission denied\" >&2; exit 1"
+        } else {
+            "exit 0"
+        };
+        let server = server().unwrap();
+        fs::write(
+            &world.sftp.program,
+            format!(
+                "#!/bin/sh\nbatch=\nwhile [ $# -gt 0 ]; do case \"$1\" in -b) batch=$2; shift 2;; *) shift;; esac; done\nif grep -q '^-rename' \"$batch\"; then\nsed -e '{rewrite}' \"$batch\" > \"$batch.cut\"\n{SFTP} -D {server} -b \"$batch.cut\"\n{failure}\nfi\nexec {SFTP} -D {server} -b \"$batch\"\n",
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_publication_that_cannot_be_inspected_is_an_error_not_an_upload() {
+        let Some(world) = world() else { return };
+        broken_publication(&world, "/^-rename/d;/^ls /d", true);
+        let cancel = AtomicBool::new(false);
+        let sources = [source(&world, "a.txt", b"mine")];
+        for policy in [ConflictPolicy::Ask, ConflictPolicy::KeepBoth] {
+            let outcome = upload(
+                &world.sftp,
+                &control(&world, &cancel, &|_| {}),
+                world.roots[0].as_str(),
+                &sources,
+                policy,
+                false,
+            );
+            assert!(outcome.is_err(), "{outcome:?}");
+            assert!(names(&world.remote).is_empty(), "the partial is removed");
+        }
+    }
+
+    #[test]
+    fn a_listing_that_shows_neither_name_is_an_error() {
+        let Some(world) = world() else { return };
+        broken_publication(&world, r#"s/^-rename -l \("[^"]*"\) .*/-rm \1/"#, false);
+        let cancel = AtomicBool::new(false);
+        let sources = [source(&world, "a.txt", b"mine")];
+        let outcome = upload(
+            &world.sftp,
+            &control(&world, &cancel, &|_| {}),
+            world.roots[0].as_str(),
+            &sources,
+            ConflictPolicy::Ask,
+            false,
+        );
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(names(&world.remote).is_empty());
+    }
+
+    #[test]
+    fn publication_needs_a_listing_that_shows_the_file() {
+        let listing = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| format!("-rw-r--r--    ? 1 1 5 Oct  3 22:35 {name}\n"))
+                .collect::<String>()
+        };
+        assert!(matches!(
+            publication(&listing(&["a", ".a.part"]), ".a.part", "a"),
+            Ok(Publication::Taken)
+        ));
+        assert!(matches!(
+            publication(&listing(&["a"]), ".a.part", "a"),
+            Ok(Publication::Published)
+        ));
+        assert!(publication(&listing(&["b"]), ".a.part", "a").is_err());
+        assert!(publication("", ".a.part", "a").is_err());
     }
 
     #[test]

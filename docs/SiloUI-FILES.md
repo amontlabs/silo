@@ -95,9 +95,12 @@ Rejected, per the reuse policy in `AGENTS.md`:
 - Uploads write `.<name>.silo-part-<id>` (non-wildcard characters only) beside the
   target and publish it. Replace uses the replacing `rename`. Ask and Keep both use
   `rename -l`, the legacy rename that fails when the target exists, so a file created
-  after the folder was inspected is never overwritten: the partial then takes the next
-  free `name (n)` (up to 8 tries, then an error), and the outcome lists the names
-  actually stored. Failed or cancelled uploads remove the partial in a second short
+  after the folder was inspected is never overwritten. A plain `ls -lan` of the folder
+  follows it and is not error-suppressed: the partial still listed means the name was
+  taken, so the partial takes the next free `name (n)` (up to 8 tries, then an error);
+  the target listed without the partial means it was published; a listing that fails,
+  or shows neither name, fails the upload and removes the partial. The outcome lists the
+  names actually stored. Failed or cancelled uploads remove the partial in a second short
   session. Keep-both numbering budgets the whole name including the extension within
   255 bytes. Downloads write a hidden partial beside the chosen destination, check its
   size, set ordinary permissions (0644, not the computer's) and rename it; the
@@ -125,7 +128,7 @@ Rejected, per the reuse policy in `AGENTS.md`:
   ends the whole `sftp` process group (including the ProxyCommand) and removes the
   partial. Each `sftp` runs under the same parent-lifetime watchdog as the SSH forwards
   (`owned_tunnel`), so it also ends if Silo crashes or is force-quit, and a graceful quit
-  cancels the running transfer and waits up to 5 seconds for it to clean up. A computer
+  cancels the running transfer and waits up to 5 seconds for it to clean up, before it closes SSH connections or stops computers; a transfer is admitted or refused under the registry lock, so one that races Quit is either refused or cancelled. A computer
   partial left by a force-quit stays hidden in the folder.
 - The picker, dropped files and save dialog are native. The backend keeps the chosen
   paths and gives the window an opaque one-time token (valid 10 minutes, at most 16 held,
@@ -148,7 +151,7 @@ Rejected, per the reuse policy in `AGENTS.md`:
   `desktop_viewer.rs` registers `Webview::on_webview_event` on the child and
   `WindowEvent::DragDrop` on the shell; both call `transfer::native_drop`, which emits
   `silo://viewer-drag` and `silo://viewer-drop` (a token and names) to the shell window
-  only. Tauri's drag-drop handler consumes the drop, so the page gets no HTML5 drop event
+  only; the shell listens on its own window, so another open viewer never hears them. Tauri's drag-drop handler consumes the drop, so the page gets no HTML5 drop event
   and no file contents. Confirm on macOS and Linux that a drop over the display uploads
   and that the page's `drop` listener never fires.
 - `sftp` behavior against a real guest (`posix-rename` for Replace, `rename -l` against a

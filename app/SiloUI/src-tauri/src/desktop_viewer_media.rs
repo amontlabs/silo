@@ -24,6 +24,8 @@ const PROBE_WAIT: Duration = Duration::from_secs(2);
 const PROBE_ATTEMPTS: u32 = 20;
 const PROBE_PAUSE: Duration = Duration::from_millis(500);
 
+const SUPERSEDED: &str = "The desktop sound check was cancelled.";
+
 /// The operations on a viewer's page that sound and resizing need.
 pub(crate) trait Media {
     fn capabilities(&self, timeout: Duration) -> Result<Capabilities, String>;
@@ -63,14 +65,19 @@ pub(crate) fn probe_step(media: &dyn Media) -> Result<Option<bool>, String> {
 }
 
 /// Repeats `step` until it answers, treating errors (no connection or page
-/// yet) like an unopened transport, for at most `attempts` tries.
+/// yet) like an unopened transport, for at most `attempts` tries. It stops as
+/// soon as `obsolete` reports that nobody wants the answer any more.
 pub(crate) fn probe(
     mut step: impl FnMut() -> Result<Option<bool>, String>,
     attempts: u32,
     pause: Duration,
+    obsolete: impl Fn() -> bool,
 ) -> Result<bool, String> {
     let mut last = "The desktop display is not ready.".to_string();
     for attempt in 0..attempts {
+        if obsolete() {
+            return Err(SUPERSEDED.into());
+        }
         match step() {
             Ok(Some(supported)) => return Ok(supported),
             Ok(None) => {}
@@ -108,6 +115,119 @@ pub(crate) fn apply_audio_ordered(
     apply_audio(media, muted, active)
 }
 
+type Outcome = Result<bool, String>;
+
+struct ProbeSlot {
+    /// Bumped by every request and cancellation; a probe that sees a newer
+    /// value than the one it started with is obsolete.
+    epoch: u64,
+    running: bool,
+    waiters: Vec<tokio::sync::oneshot::Sender<Outcome>>,
+}
+
+/// Sound probes per viewer window. At most one worker probes a viewer at a
+/// time: a request made while it runs joins it, and restarts its probe so the
+/// answer describes the newest page. A cancellation drops the waiters and ends
+/// the probe at its next step.
+#[derive(Default)]
+pub(crate) struct Probes {
+    slots: Mutex<HashMap<String, ProbeSlot>>,
+}
+
+impl Probes {
+    /// Registers a waiter for the viewer's next answer. The flag says the
+    /// caller must run [`Probes::work`] because no worker is running.
+    pub(crate) fn enlist(
+        &self,
+        label: &str,
+    ) -> Result<(tokio::sync::oneshot::Receiver<Outcome>, bool), String> {
+        let mut slots = self
+            .slots
+            .lock()
+            .map_err(|_| "Desktop sound unavailable.")?;
+        let slot = slots.entry(label.to_string()).or_insert(ProbeSlot {
+            epoch: 0,
+            running: false,
+            waiters: Vec::new(),
+        });
+        slot.epoch += 1;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        slot.waiters.push(sender);
+        let start = !slot.running;
+        slot.running = true;
+        Ok((receiver, start))
+    }
+
+    /// Abandons the viewer's waiting requests and any probe in progress.
+    pub(crate) fn cancel(&self, label: &str) {
+        if let Ok(mut slots) = self.slots.lock() {
+            if let Some(slot) = slots.get_mut(label) {
+                slot.epoch += 1;
+                slot.waiters.clear();
+            }
+        }
+    }
+
+    /// Cancels the viewer's probe and drops its slot unless a worker still
+    /// uses it.
+    fn forget(&self, label: &str) {
+        self.cancel(label);
+        if let Ok(mut slots) = self.slots.lock() {
+            if slots.get(label).is_some_and(|slot| !slot.running) {
+                slots.remove(label);
+            }
+        }
+    }
+
+    /// Probes until no request is waiting, answering every waiter with the
+    /// result of a probe that no later request or cancellation overtook.
+    /// `run` receives the check for an obsolete probe.
+    pub(crate) fn work(&self, label: &str, mut run: impl FnMut(&dyn Fn() -> bool) -> Outcome) {
+        loop {
+            let epoch = {
+                let Ok(mut slots) = self.slots.lock() else {
+                    return;
+                };
+                let Some(slot) = slots.get_mut(label) else {
+                    return;
+                };
+                if slot.waiters.is_empty() {
+                    slot.running = false;
+                    return;
+                }
+                slot.epoch
+            };
+            let obsolete = || {
+                self.slots
+                    .lock()
+                    .map(|slots| slots.get(label).is_none_or(|slot| slot.epoch != epoch))
+                    .unwrap_or(true)
+            };
+            let outcome = run(&obsolete);
+            let Ok(mut slots) = self.slots.lock() else {
+                return;
+            };
+            let Some(slot) = slots.get_mut(label) else {
+                return;
+            };
+            if slot.epoch != epoch {
+                continue;
+            }
+            for waiter in slot.waiters.drain(..) {
+                let _ = waiter.send(outcome.clone());
+            }
+            slot.running = false;
+            return;
+        }
+    }
+}
+
+static PROBES: OnceLock<Probes> = OnceLock::new();
+
+fn probes() -> &'static Probes {
+    PROBES.get_or_init(Default::default)
+}
+
 /// The newest sound revision applied for each viewer window.
 static SOUND_REVISIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<u64>>>>> = OnceLock::new();
 
@@ -121,6 +241,7 @@ fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
 
 /// Drops the ordering state of a closed viewer window.
 pub(crate) fn forget_viewer(label: &str) {
+    probes().forget(label);
     if let Some(slots) = SOUND_REVISIONS.get() {
         if let Ok(mut slots) = slots.lock() {
             slots.remove(label);
@@ -154,16 +275,31 @@ pub(crate) async fn desktop_viewer_sound_support(
     computer: String,
 ) -> Result<SoundSupport, String> {
     let label = require_viewer(&window, &computer)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        probe(
-            || with_bridge(&app, &label, |bridge| probe_step(bridge)),
-            PROBE_ATTEMPTS,
-            PROBE_PAUSE,
-        )
+    let (answer, start) = probes().enlist(&label)?;
+    if start {
+        tauri::async_runtime::spawn_blocking(move || {
+            probes().work(&label, |obsolete| {
+                probe(
+                    || with_bridge(&app, &label, |bridge| probe_step(bridge)),
+                    PROBE_ATTEMPTS,
+                    PROBE_PAUSE,
+                    obsolete,
+                )
+            })
+        });
+    }
+    answer
+        .await
+        .map_err(|_| SUPERSEDED)?
         .map(|sound| SoundSupport { sound })
-    })
-    .await
-    .map_err(|_| "Desktop sound check failed.")?
+}
+
+/// Abandons the viewer's sound check, for a page or connection that is gone.
+#[tauri::command]
+pub(crate) fn desktop_viewer_sound_cancel(window: Window, computer: String) -> Result<(), String> {
+    let label = require_viewer(&window, &computer)?;
+    probes().cancel(&label);
+    Ok(())
 }
 
 #[tauri::command]
@@ -281,6 +417,7 @@ mod tests {
             },
             5,
             Duration::ZERO,
+            || false,
         );
         assert_eq!(result, Ok(true));
         assert_eq!(tries.get(), 3);
@@ -296,10 +433,78 @@ mod tests {
             },
             3,
             Duration::ZERO,
+            || false,
         );
         assert_eq!(result, Err("not connected".into()));
         assert_eq!(tries.get(), 3);
-        assert!(probe(|| Ok(None), 2, Duration::ZERO).is_err());
+        assert!(probe(|| Ok(None), 2, Duration::ZERO, || false).is_err());
+    }
+
+    #[test]
+    fn an_obsolete_probe_stops_before_its_next_step() {
+        let tries = Cell::new(0);
+        let result = probe(
+            || {
+                tries.set(tries.get() + 1);
+                Ok(None)
+            },
+            20,
+            Duration::ZERO,
+            || tries.get() >= 2,
+        );
+        assert_eq!(result, Err(SUPERSEDED.into()));
+        assert_eq!(tries.get(), 2);
+    }
+
+    #[test]
+    fn requests_during_a_probe_join_one_worker_and_restart_it() {
+        let probes = Probes::default();
+        let (first, start) = probes.enlist("v").unwrap();
+        assert!(start);
+        let runs = Cell::new(0);
+        probes.work("v", |obsolete| {
+            runs.set(runs.get() + 1);
+            if runs.get() == 1 {
+                let (_, start) = probes.enlist("v").unwrap();
+                assert!(!start);
+                assert!(obsolete());
+                return Err("stale".into());
+            }
+            assert!(!obsolete());
+            Ok(true)
+        });
+        assert_eq!(runs.get(), 2);
+        assert_eq!(first.blocking_recv().unwrap(), Ok(true));
+        assert!(probes.enlist("v").unwrap().1, "the worker has finished");
+    }
+
+    #[test]
+    fn a_repeatedly_reloading_page_never_adds_workers() {
+        let probes = Probes::default();
+        assert!(probes.enlist("v").unwrap().1);
+        for _ in 0..50 {
+            assert!(!probes.enlist("v").unwrap().1);
+        }
+    }
+
+    #[test]
+    fn cancelling_drops_waiters_and_ends_the_probe() {
+        let probes = Probes::default();
+        let (waiting, _) = probes.enlist("v").unwrap();
+        probes.work("v", |obsolete| {
+            probes.cancel("v");
+            assert!(obsolete());
+            Err("stale".into())
+        });
+        assert!(waiting.blocking_recv().is_err());
+        assert!(probes.enlist("v").unwrap().1);
+    }
+
+    #[test]
+    fn probes_of_different_viewers_are_independent() {
+        let probes = Probes::default();
+        assert!(probes.enlist("a").unwrap().1);
+        assert!(probes.enlist("b").unwrap().1);
     }
 
     #[test]

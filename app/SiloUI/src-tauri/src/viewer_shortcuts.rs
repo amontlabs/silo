@@ -70,6 +70,18 @@ pub(crate) fn takes_shortcut(focus: Focus) -> bool {
     focus == Focus::Other
 }
 
+/// What a key press means once the keys that started a shortcut are known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) enum Press {
+    /// A new press of a shortcut: start its transfer.
+    Start(Shortcut),
+    /// Autorepeat of a key that started a shortcut: consumed, whatever modifiers are down now.
+    Swallow,
+    /// Not Silo's: the focused control receives it.
+    Pass,
+}
+
 /// Tracks the physical keys that started a shortcut, so holding one down starts one transfer.
 #[derive(Debug, Default)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -79,13 +91,20 @@ pub(crate) struct HeldKeys {
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 impl HeldKeys {
-    /// A press of `code`; true unless that key is still down from an earlier press.
-    pub(crate) fn press(&mut self, code: u16) -> bool {
+    /// Decides a press of `code`, given what its modifiers classify as. A key already down
+    /// from a shortcut stays consumed even after the modifiers were released, so its
+    /// autorepeat never reaches the guest while its release is swallowed.
+    pub(crate) fn decide(&mut self, code: u16, shortcut: Option<Shortcut>) -> Press {
         if self.codes.contains(&code) {
-            return false;
+            return Press::Swallow;
         }
-        self.codes.push(code);
-        true
+        match shortcut {
+            Some(shortcut) => {
+                self.codes.push(code);
+                Press::Start(shortcut)
+            }
+            None => Press::Pass,
+        }
     }
 
     /// A release of `code`; true when it ends a tracked press.
@@ -322,15 +341,14 @@ mod linux {
                 option: state.contains(gdk::ModifierType::MOD1_MASK),
                 shift: state.contains(gdk::ModifierType::SHIFT_MASK),
             };
-            match classify(Platform::Linux, keys, event.keyval().to_unicode()) {
-                Some(shortcut) => {
-                    // Autorepeat sends further presses of the same physical key.
-                    if held.borrow_mut().press(event.hardware_keycode()) {
-                        run(&app, &label, shortcut);
-                    }
+            let shortcut = classify(Platform::Linux, keys, event.keyval().to_unicode());
+            match held.borrow_mut().decide(event.hardware_keycode(), shortcut) {
+                Press::Start(shortcut) => {
+                    run(&app, &label, shortcut);
                     glib::Propagation::Stop
                 }
-                None => glib::Propagation::Proceed,
+                Press::Swallow => glib::Propagation::Stop,
+                Press::Pass => glib::Propagation::Proceed,
             }
         });
         Ok(())
@@ -374,25 +392,59 @@ mod tests {
         }
     }
 
+    fn press(held: &mut HeldKeys, code: u16) -> bool {
+        matches!(
+            held.decide(code, Some(Shortcut::CopyFromComputer)),
+            Press::Start(_)
+        )
+    }
+
     #[test]
     fn a_held_shortcut_key_starts_one_transfer_until_it_is_released_or_focus_is_lost() {
         let mut held = HeldKeys::default();
-        assert!(held.press(54));
-        assert!(!held.press(54), "autorepeat");
-        assert!(!held.press(54));
+        assert!(press(&mut held, 54));
+        assert!(!press(&mut held, 54), "autorepeat");
+        assert!(!press(&mut held, 54));
         assert!(!held.release(55), "another key");
-        assert!(!held.press(54));
+        assert!(!press(&mut held, 54));
         assert!(held.release(54));
         assert!(!held.release(54));
-        assert!(held.press(54), "a new press after the release");
+        assert!(press(&mut held, 54), "a new press after the release");
         held.clear();
-        assert!(held.press(54), "a press after focus returns");
+        assert!(press(&mut held, 54), "a press after focus returns");
         held.clear();
         // A second shortcut key pressed while the first is down is a new transfer, and the
         // first one's autorepeat stays suppressed.
-        assert!(held.press(54));
-        assert!(held.press(55));
-        assert!(!held.press(54));
+        assert!(press(&mut held, 54));
+        assert!(press(&mut held, 55));
+        assert!(!press(&mut held, 54));
+    }
+
+    #[test]
+    fn autorepeat_stays_consumed_after_the_modifiers_are_released_first() {
+        let mut held = HeldKeys::default();
+        let paste = Some(Shortcut::PasteIntoComputer);
+        assert_eq!(
+            held.decide(55, paste),
+            Press::Start(Shortcut::PasteIntoComputer)
+        );
+        // Ctrl and Shift come up before V does: the repeats no longer classify.
+        assert_eq!(held.decide(55, None), Press::Swallow);
+        assert_eq!(held.decide(55, None), Press::Swallow);
+        assert_eq!(held.decide(55, paste), Press::Swallow);
+        // The final release is swallowed too, and the next plain V is the guest's.
+        assert!(held.release(55));
+        assert_eq!(held.decide(55, None), Press::Pass);
+        assert_eq!(
+            held.decide(55, paste),
+            Press::Start(Shortcut::PasteIntoComputer)
+        );
+        held.clear();
+        assert_eq!(
+            held.decide(55, None),
+            Press::Pass,
+            "focus loss forgets the key"
+        );
     }
 
     #[test]

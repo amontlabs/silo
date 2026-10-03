@@ -8,10 +8,25 @@ const native = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
   handlers: new Map<string, Handler>(),
+  windows: new Map<string, Map<string, Handler>>(),
+  label: "desktop-shell-a",
   unlisten: vi.fn(),
 }))
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }))
 vi.mock("@tauri-apps/api/event", () => ({ listen: native.listen }))
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => {
+    const label = native.label
+    return {
+      listen: async (event: string, handler: Handler) => {
+        const handlers = native.windows.get(label) ?? new Map<string, Handler>()
+        native.windows.set(label, handlers)
+        handlers.set(event, handler)
+        return native.unlisten
+      },
+    }
+  },
+}))
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => { throw new Error("the viewer does not read native drops itself") },
 }))
@@ -21,13 +36,17 @@ function Viewer({ computer = "dev" }: { computer?: string }) {
   return <header><ViewerTransferStatus drop={drop} /></header>
 }
 
-const emit = (event: string, payload: unknown) => act(async () => { native.handlers.get(event)?.({ payload }) })
+// The native side addresses a drop to one viewer window; only that window's listeners hear it.
+const emitTo = (label: string, event: string, payload: unknown) => act(async () => { native.windows.get(label)?.get(event)?.({ payload }) })
+const emit = (event: string, payload: unknown) => emitTo("desktop-shell-a", event, payload)
 const dropped = (names: string[], token = "tok") => emit("silo://viewer-drop", { token, names })
-const ready = () => waitFor(() => expect(native.handlers.has("silo://viewer-drop") && native.handlers.has("silo://viewer-drag")).toBe(true))
+const ready = (label = "desktop-shell-a") => waitFor(() => expect(native.windows.get(label)?.has("silo://viewer-drop") && native.windows.get(label)?.has("silo://viewer-drag")).toBe(true))
 
 beforeEach(() => {
   native.invoke.mockReset()
   native.handlers.clear()
+  native.windows.clear()
+  native.label = "desktop-shell-a"
   native.unlisten.mockReset()
   native.listen.mockReset().mockImplementation(async (event: string, handler: Handler) => { native.handlers.set(event, handler); return native.unlisten })
 })
@@ -101,6 +120,19 @@ describe("dropping files on the desktop viewer", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss" }))
     expect(screen.queryByRole("alert")).toBeNull()
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+  })
+
+  it("listens on its own window only, so a drop aimed at one viewer is not uploaded by another", async () => {
+    native.invoke.mockResolvedValue({ status: "done", names: ["a.txt"] })
+    render(<Viewer computer="first" />)
+    native.label = "desktop-shell-b"
+    render(<Viewer computer="second" />)
+    await ready("desktop-shell-a")
+    await ready("desktop-shell-b")
+    expect(native.listen.mock.calls.map(([event]) => event)).not.toContain("silo://viewer-drop")
+    await emitTo("desktop-shell-b", "silo://viewer-drop", { token: "for-b", names: ["a.txt"] })
+    await waitFor(() => expect(native.invoke).toHaveBeenCalledTimes(1))
+    expect(native.invoke).toHaveBeenCalledWith("upload_files", expect.objectContaining({ computer: "second", selection: "for-b" }))
   })
 
   it("ignores malformed or empty drops and stops listening when the viewer closes", async () => {

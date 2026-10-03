@@ -724,6 +724,7 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
     let _guards = (admission, backup, github, secrets, runtime);
     restart_after_install(
         || {
+            crate::runtime::shutdown::drain_transfers();
             crate::ssh_access::close_all();
             crate::remote_network::close_all();
             crate::desktop_viewer::close_all();

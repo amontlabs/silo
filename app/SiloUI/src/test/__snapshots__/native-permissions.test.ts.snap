@@ -35,6 +35,7 @@ exports[`native command permissions > pins every non-main window grant 1`] = `
       "allow-desktop-viewer-detach",
       "allow-desktop-viewer-reset-screen",
       "allow-desktop-viewer-set-audio",
+      "allow-desktop-viewer-sound-cancel",
       "allow-desktop-viewer-sound-support",
       "allow-read-desktop-state",
       "core:event:allow-listen",

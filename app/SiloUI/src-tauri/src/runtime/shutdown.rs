@@ -57,23 +57,47 @@ pub(crate) fn ensure_accepting_operations() -> Result<(), String> {
     }
 }
 
+/// The longest Quit waits for a cancelled file transfer to remove its partial files.
+const TRANSFER_DRAIN: Duration = Duration::from_secs(5);
+
+/// The wait for cancelled transfers: at most `TRANSFER_DRAIN`, and never beyond what
+/// is left of the shutdown budget.
+fn transfer_drain_budget(remaining: Duration) -> Duration {
+    remaining.min(TRANSFER_DRAIN)
+}
+
+/// Waits for the transfer that shutdown cancelled to finish its cleanup, which needs
+/// its connection to the computer, so it must precede closing connections and
+/// stopping computers.
+pub(crate) fn drain_transfers() {
+    crate::transfer::close_all(transfer_drain_budget(maintenance_budget()));
+}
+
+/// Runs Quit's `stop` after `drain` has let the cancelled transfers clean up.
+fn drain_then<T>(drain: impl FnOnce(), stop: impl FnOnce() -> T) -> T {
+    drain();
+    stop()
+}
+
 pub(crate) fn stop_local_computers(app: &AppHandle) -> Result<(), String> {
-    let result = while_quitting(&OPERATIONS, |guard| {
-        // Quit has stopped admission and holds the operation gate: the SSH monitor
-        // cannot restore listeners while local computer shutdown is in progress.
-        crate::ssh_access::close_all();
-        crate::desktop_viewer::close_all();
-        // With the storage migration unfinished no runtime is in use, so no computer of this
-        // Silo can be running and Quit has nothing to stop.
-        let Some(paths) = runtime_paths_if_in_use(app)? else {
-            return Ok(());
-        };
-        // The quit overlay follows the queue and shows which computer is stopping (D-29).
-        let progress = |name: &str, index: usize, total: usize| {
-            guard.relabel(&format!("Stopping {name} ({index} of {total})"));
-        };
-        stop_local_computers_with(&ProcessRunner, &paths, &progress)
-            .map_err(|error| safe_activity_error(&error))
+    let result = drain_then(drain_transfers, || {
+        while_quitting(&OPERATIONS, |guard| {
+            // Quit has stopped admission and holds the operation gate: the SSH monitor
+            // cannot restore listeners while local computer shutdown is in progress.
+            crate::ssh_access::close_all();
+            crate::desktop_viewer::close_all();
+            // With the storage migration unfinished no runtime is in use, so no computer of this
+            // Silo can be running and Quit has nothing to stop.
+            let Some(paths) = runtime_paths_if_in_use(app)? else {
+                return Ok(());
+            };
+            // The quit overlay follows the queue and shows which computer is stopping (D-29).
+            let progress = |name: &str, index: usize, total: usize| {
+                guard.relabel(&format!("Stopping {name} ({index} of {total})"));
+            };
+            stop_local_computers_with(&ProcessRunner, &paths, &progress)
+                .map_err(|error| safe_activity_error(&error))
+        })
     });
     let _ = app.emit("silo://application-state-changed", ());
     result
@@ -360,6 +384,25 @@ fn stop_uncommitted_computer(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn cancelled_transfers_drain_before_computers_stop_within_the_shutdown_budget() {
+        let order = std::cell::RefCell::new(Vec::new());
+        drain_then(
+            || order.borrow_mut().push("drain"),
+            || order.borrow_mut().push("stop"),
+        );
+        assert_eq!(*order.borrow(), ["drain", "stop"]);
+        assert_eq!(
+            transfer_drain_budget(Duration::from_secs(60)),
+            TRANSFER_DRAIN
+        );
+        assert_eq!(
+            transfer_drain_budget(Duration::from_secs(2)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(transfer_drain_budget(Duration::ZERO), Duration::ZERO);
+    }
 
     struct Runner {
         states: Mutex<HashMap<String, String>>,

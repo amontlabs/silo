@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
 import { CircleAlert, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -66,9 +67,11 @@ export function useViewerFileDrop(computer: string) {
   useEffect(() => {
     let disposed = false
     const stops: Array<() => void> = []
+    // Events are listened for on this window only: a listener on every target
+    // would also receive the drops aimed at another open viewer.
     const subscribe = (event: string, handler: (payload: unknown) => void) => {
       try {
-        void listen(event, message => handler(message.payload))
+        void getCurrentWebviewWindow().listen(event, message => handler(message.payload))
           .then(stop => { if (disposed) stop(); else stops.push(stop) })
           .catch(() => {})
       } catch { /* A window without native events offers no drop target. */ }

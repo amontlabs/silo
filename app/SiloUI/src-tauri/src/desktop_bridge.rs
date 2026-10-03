@@ -74,14 +74,16 @@ impl Op {
             Self::Sent => 0,
         }
     }
-    /// Acknowledgements for several sends can be outstanding together; every
-    /// other operation has one request at a time, and a newer one supersedes it.
+    /// Acknowledgements for several sends and answers to several capability
+    /// questions (the sound probe and the clipboard policy) can be outstanding
+    /// together; the clipboard has one request at a time, and a newer one
+    /// supersedes it.
     fn concurrent(self) -> bool {
-        self == Self::Sent
+        matches!(self, Self::Sent | Self::Capabilities)
     }
 }
-/// Most acknowledgements awaited at once.
-const MAX_PENDING_SENT: usize = 16;
+/// Most nonces awaited at once for a concurrent operation.
+const MAX_PENDING: usize = 16;
 
 /// What the page posted: a short content kind (a MIME type, `none` or
 /// `application/json`) and the raw body.
@@ -155,7 +157,7 @@ impl Inbox {
             let entries = pending.entry(op).or_default();
             if op.concurrent() {
                 entries.retain(|entry| entry.expires > now);
-                if entries.len() >= MAX_PENDING_SENT {
+                if entries.len() >= MAX_PENDING {
                     entries.remove(0);
                 }
             } else {
@@ -1213,6 +1215,35 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_capability_questions_are_each_answered() {
+        let inbox = Inbox::default();
+        let first = inbox.expect(Op::Capabilities, Duration::from_secs(5));
+        let second = inbox.expect(Op::Capabilities, Duration::from_secs(5));
+        let target =
+            |nonce: &str| format!("{ROUTE_PREFIX}capabilities?nonce={nonce}&kind=application/json");
+        assert_eq!(
+            post(&inbox, &target(&second.nonce), b"{}"),
+            Status::Accepted
+        );
+        assert_eq!(post(&inbox, &target(&first.nonce), b"{}"), Status::Accepted);
+        assert!(first.wait(Duration::from_secs(1)).is_ok());
+        assert!(second.wait(Duration::from_secs(1)).is_ok());
+    }
+
+    #[test]
+    fn a_newer_clipboard_request_supersedes_an_older_one() {
+        let inbox = Inbox::default();
+        let old = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let new = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        assert!(inbox
+            .claim(Op::Clipboard, &old.nonce, Instant::now())
+            .is_err());
+        assert!(inbox
+            .claim(Op::Clipboard, &new.nonce, Instant::now())
+            .is_ok());
+    }
+
+    #[test]
     fn a_send_succeeds_only_when_the_page_says_the_socket_took_it() {
         let inbox = Inbox::default();
         let page = AckingPage::new(&inbox);
@@ -1267,7 +1298,7 @@ mod tests {
     fn clipboard_answers_cover_flavours_oversize_and_a_closed_transport() {
         let html_and_text = br#"{"text/html":"<b>hi</b>","text/plain":"hi","other":1}"#;
         let html_only = br#"{"text/html":"<b>hi</b>"}"#;
-        let cases: [(&str, &[u8], Result<GuestClipboard, ()>); 7] = [
+        let cases: [(&str, &[u8], Result<GuestClipboard, ()>); 8] = [
             (
                 FLAVOURS_MIME,
                 html_and_text,
@@ -1279,6 +1310,7 @@ mod tests {
             ("too-large", b"", Ok(GuestClipboard::TooLarge)),
             ("disconnected", b"", Err(())),
             ("refused", b"", Err(())),
+            ("unreadable", b"", Err(())),
         ];
         for (kind, body, expected) in cases {
             let inbox = Inbox::default();

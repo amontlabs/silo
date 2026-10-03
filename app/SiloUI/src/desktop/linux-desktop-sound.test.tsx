@@ -154,6 +154,17 @@ it("reapplies the sound state and checks again after the display page reloads", 
   expect(audioCalls().at(-1)).toEqual({ computer: "dev", muted: true, active: true })
 })
 
+it("cancels the native sound check when the display is left, but not on a page reload", async () => {
+  const cancels = () => invoke.mock.calls.filter(([command]) => command === "desktop_viewer_sound_cancel").length
+  const view = render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
+  await screen.findByRole("button", { name: "Mute sound" })
+  guestPageLoaded()
+  await waitFor(() => expect(supportCalls()).toBeGreaterThan(1))
+  expect(cancels()).toBe(0)
+  view.unmount()
+  expect(invoke).toHaveBeenCalledWith("desktop_viewer_sound_cancel", { computer: "dev" })
+})
+
 it("sends strictly increasing revisions so the native side can drop stale updates", async () => {
   const user = userEvent.setup()
   render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
