@@ -1489,6 +1489,38 @@ mod tests {
     }
 
     #[test]
+    fn aliases_of_the_reserved_route_are_refused_and_never_forwarded() {
+        let (_directory, upstream, socket) = guest();
+        let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+        for alias in [
+            "/%5f%5fsilo/v1/clipboard?nonce=a&kind=none",
+            "/__SILO/v1/clipboard",
+            "/__silo//v1/clipboard",
+            "/x/../__silo/v1/clipboard",
+            "/x/%2e%2e/__silo/v1/clipboard",
+        ] {
+            assert!(
+                reserved_request(&proxy, alias, true, b"x").starts_with("HTTP/1.1 403"),
+                "{alias}"
+            );
+            let mut socket = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            write!(
+                socket,
+                "GET {alias} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nCookie: {}={}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+                proxy.port, proxy.cookie_name, proxy.token
+            )
+            .unwrap();
+            let mut response = String::new();
+            socket.read_to_string(&mut response).unwrap();
+            assert!(response.starts_with("HTTP/1.1 403"), "{alias}: {response}");
+        }
+        assert_guest_untouched(&upstream);
+    }
+
+    #[test]
     fn unsolicited_and_oversize_reserved_requests_are_rejected_without_the_guest() {
         use crate::desktop_bridge::Op;
         let (_directory, upstream, socket) = guest();

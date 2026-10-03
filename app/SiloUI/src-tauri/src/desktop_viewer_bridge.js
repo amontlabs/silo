@@ -5,10 +5,20 @@
 // drives it through `Webview::eval` and it answers Rust only by posting to the
 // proxy's reserved `/__silo/v1/<op>` route with a single-use nonce.
 (() => {
+  // Everything below runs before the page's scripts; the intrinsics it relies
+  // on are captured now so later tampering with prototypes cannot redirect it.
+  const apply = Reflect.apply
+  const defineProperty = Object.defineProperty
+  const freeze = Object.freeze
+  const hasOwn = Object.prototype.hasOwnProperty
+  const toText = String
+  const toLower = String.prototype.toLowerCase
+  const arrayIsArray = Array.isArray
+  const regexTest = RegExp.prototype.test
   const refuse = () => Promise.reject(new DOMException("Computer desktops cannot use this device's clipboard.", "NotAllowedError"))
   const refuseCapture = () => Promise.reject(new DOMException("Computer desktops cannot use this device's microphone or screen.", "NotAllowedError"))
   const lock = (target, name, value) => {
-    try { Object.defineProperty(target, name, { value, configurable: false, writable: false }) } catch { /* already locked */ }
+    try { defineProperty(target, name, { value, configurable: false, writable: false }) } catch { /* already locked */ }
   }
   if (typeof Clipboard !== "undefined") {
     for (const name of ["read", "readText", "write", "writeText"]) lock(Clipboard.prototype, name, refuse)
@@ -19,8 +29,12 @@
   }
   if (typeof Document !== "undefined") {
     const execCommand = Document.prototype.execCommand
-    lock(Document.prototype, "execCommand", function (command, ...rest) {
-      return /^(copy|cut|paste)$/i.test(String(command)) ? false : execCommand.call(this, command, ...rest)
+    // The command is converted once; the native method only ever sees that
+    // validated primitive, never the page's object.
+    lock(Document.prototype, "execCommand", function (command, showUI, value) {
+      const name = apply(toLower, toText(command), [])
+      if (name === "copy" || name === "cut" || name === "paste") return false
+      return apply(execCommand, this, [name, showUI, value])
     })
   }
   // Page handlers could replace the copied data; the user's own selection is
@@ -135,7 +149,10 @@
     })
   } catch { /* the page already owns the property */ }
 
+  // Rust accepts only these characters in the kind.
+  const KIND = /^[A-Za-z0-9/.+-]{1,64}$/
   const post = async (op, nonce, kind, body) => {
+    if (!apply(regexTest, KIND, [kind])) return
     const query = `nonce=${encodeURIComponent(nonce)}&kind=${encodeURIComponent(kind)}`
     try {
       await nativeFetch(`${ROUTE}${op}?${query}`, { method: "POST", body, cache: "no-store", credentials: "same-origin" })
@@ -151,9 +168,12 @@
   const socketReady = () => Boolean(transport) && typeof transport.send === "function"
     && (transport.readyState === undefined || transport.readyState === 1)
   const sendFrames = frames => {
-    if (!Array.isArray(frames) || !socketReady()) return false
-    if (!frames.every(frame => typeof frame === "string" && ALLOWED_FRAME.test(frame))) return false
-    for (const frame of frames) transport.send(frame)
+    if (!arrayIsArray(frames) || !socketReady()) return false
+    const count = frames.length
+    for (let i = 0; i < count; i++) {
+      if (typeof frames[i] !== "string" || !apply(regexTest, ALLOWED_FRAME, [frames[i]])) return false
+    }
+    for (let i = 0; i < count; i++) transport.send(frames[i])
     return true
   }
   // Answers with the next announcement after the request, or after the timeout
@@ -208,11 +228,11 @@
     },
     resetResolutionToWindow: () => nativePost({ type: "resetResolutionToWindow" }, location.origin),
   }
-  const bridge = Object.freeze({
+  const bridge = freeze({
     invoke(method, args) {
-      const call = Object.prototype.hasOwnProperty.call(methods, method) ? methods[method] : null
+      const call = typeof method === "string" && apply(hasOwn, methods, [method]) ? methods[method] : null
       if (!call) return false
-      return call(...(Array.isArray(args) ? args : [])) !== false
+      return apply(call, undefined, arrayIsArray(args) ? args : []) !== false
     },
   })
   lock(window, "__silo", bridge)

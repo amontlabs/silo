@@ -62,6 +62,7 @@ mod terminal;
 mod test_support;
 #[cfg(target_os = "macos")]
 mod titlebar;
+mod transfer;
 mod tray;
 mod updates;
 mod viewer_shortcuts;
@@ -152,6 +153,10 @@ fn main() {
             host_push_operations::repository_push_status,
             host_push::dismiss_repository_push,
             files::list_computer_directory,
+            transfer::choose_upload_files,
+            transfer::upload_files,
+            transfer::download_file,
+            transfer::cancel_transfer,
             network::read_network_state,
             network::save_network_port,
             network::remove_network_port,

@@ -1,6 +1,7 @@
 import { computerTarget } from "@/features/application/model/connections"
 import { visibleText } from "@/lib/visible-text"
-import { FolderActions } from "./folder-actions"
+import { FileActions, FolderActions } from "./folder-actions"
+import type { FileTransferControls } from "./use-file-transfers"
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ChevronRight, File, Folder, Link } from "lucide-react"
 
@@ -15,14 +16,16 @@ type RegisterDirectory = (path: string) => () => void
 const rowClass = "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-state=open]_.tree-caret]:rotate-90"
 const refreshInterval = 10_000
 
-function Directory({ computer, path, label, store, expanded, toggle, register, editor, onOpenEditor }: {
+function Directory({ computer, computerLabel, path, label, store, expanded, toggle, register, editor, onOpenEditor, transfers }: {
   computer: string
+  computerLabel: string
   path: string
   label: string
   store: DirectoryStore
   expanded: ReadonlySet<string>
   editor: string
   onOpenEditor?: (computer: string, path: string) => void
+  transfers?: FileTransferControls
   toggle: (path: string, open: boolean) => void
   register: RegisterDirectory
 }) {
@@ -45,15 +48,16 @@ function Directory({ computer, path, label, store, expanded, toggle, register, e
               <ChevronRight className="tree-caret size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none" aria-hidden="true" />
               <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="truncate" title={visibleText(entry.name)}>{visibleText(entry.name)}</span>
             </CollapsibleTrigger>
-              {onOpenEditor && <FolderActions editor={editor} path={entry.path} onOpen={() => onOpenEditor(computer, entry.path)} />}
+              {onOpenEditor && <FolderActions editor={editor} path={entry.path} onOpen={() => onOpenEditor(computer, entry.path)} onUpload={transfers && (() => transfers.upload(computer, entry.path, computerLabel))} uploadDisabled={transfers?.busy} />}
             </div>
             <CollapsibleContent className="ml-4">
-              {expanded.has(entry.path) && <Directory editor={editor} computer={computer} path={entry.path} label={`${visibleText(entry.name)} contents`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} />}
+              {expanded.has(entry.path) && <Directory editor={editor} computer={computer} computerLabel={computerLabel} path={entry.path} label={`${visibleText(entry.name)} contents`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} transfers={transfers} />}
             </CollapsibleContent>
-          </Collapsible> : <div className="flex h-8 items-center gap-2 rounded-md px-2 font-mono text-xs" title={entry.kind === "symlink" ? "Symbolic link" : undefined}>
+          </Collapsible> : <div className="group/folder flex h-8 items-center gap-2 rounded-md px-2 font-mono text-xs hover:bg-muted focus-within:bg-muted" title={entry.kind === "symlink" ? "Symbolic link" : undefined}>
             <span className="size-3.5 shrink-0" aria-hidden="true" />
             {entry.kind === "symlink" ? <Link className="size-4 shrink-0 text-muted-foreground" aria-label="Symbolic link" /> : <File className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-            <span className="truncate select-text" title={visibleText(entry.name)}>{visibleText(entry.name)}</span>
+            <span className="min-w-0 flex-1 truncate select-text" title={visibleText(entry.name)}>{visibleText(entry.name)}</span>
+            {transfers && entry.kind === "file" && <FileActions name={visibleText(entry.name)} disabled={transfers.busy} onDownload={() => transfers.download(computer, entry.path, computerLabel)} />}
           </div>}
         </li>
       ))}
@@ -77,7 +81,7 @@ function Directory({ computer, path, label, store, expanded, toggle, register, e
  * window are all visible, one timer and one pair of focus listeners at the root refresh every
  * folder currently shown; collapsed folders and hidden pages are never polled.
  */
-export function ComputerFileTree({ computer, store, active, editor, onOpenEditor }: { editor: string; onOpenEditor?: (computer: string, path: string) => void; computer: ApplicationComputer; store: DirectoryStore; active: boolean }) {
+export function ComputerFileTree({ computer, store, active, editor, onOpenEditor, transfers }: { editor: string; onOpenEditor?: (computer: string, path: string) => void; transfers?: FileTransferControls; computer: ApplicationComputer; store: DirectoryStore; active: boolean }) {
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const available = computer.state === "running" && computer.freshness === "fresh"
@@ -132,10 +136,10 @@ export function ComputerFileTree({ computer, store, active, editor, onOpenEditor
       <ChevronRight className="tree-caret size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none" aria-hidden="true" />
       <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="truncate" title={computer.configuration.name}>{computer.configuration.name}</span>
     </CollapsibleTrigger>
-      {onOpenEditor && <FolderActions editor={editor} path="/workspace" onOpen={() => onOpenEditor(target, "/workspace")} disabled={!available} />}
+      {onOpenEditor && <FolderActions editor={editor} path="/workspace" onOpen={() => onOpenEditor(target, "/workspace")} onUpload={transfers && (() => transfers.upload(target, "/workspace", computer.configuration.name))} uploadDisabled={!available || transfers?.busy} disabled={!available} />}
     </div>
     <CollapsibleContent className="ml-4">
-      {open && (available ? active && <Directory editor={editor} computer={target} path="/workspace" label={`Files in ${computer.configuration.name}`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} />
+      {open && (available ? active && <Directory editor={editor} computer={target} computerLabel={computer.configuration.name} path="/workspace" label={`Files in ${computer.configuration.name}`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} transfers={transfers} />
         : <p className="border-l border-border py-1 pl-5 text-xs text-muted-foreground">{computer.freshness !== "fresh" ? "Reconnect to browse files." : computer.state === "stopped" ? "Start this computer to browse its files." : "Files will be available when this computer is running."}</p>)}
     </CollapsibleContent>
   </Collapsible></li>

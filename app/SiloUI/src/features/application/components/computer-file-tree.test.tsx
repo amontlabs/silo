@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ComputerFileTree } from "./computer-file-tree"
+import type { FileTransferControls } from "./use-file-transfers"
 import { createDirectoryStore, type DirectoryPage } from "../model/directory-store"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 
@@ -227,5 +228,50 @@ describe("live file tree", () => {
     await act(async () => resolve(page("second")))
     await waitFor(() => expect(screen.getByText("second")).toBeVisible())
     expect(screen.getByText("first")).toBeVisible()
+  })
+
+  describe("file transfer actions", () => {
+    const controls = (overrides: Partial<FileTransferControls> = {}): FileTransferControls => ({ busy: false, upload: vi.fn(), download: vi.fn(), ...overrides })
+    const entries = { entries: [
+      { name: "src", path: "/workspace/src", kind: "folder" as const },
+      { name: "a b.txt", path: "/workspace/a b.txt", kind: "file" as const },
+      { name: "link", path: "/workspace/link", kind: "symlink" as const },
+    ], nextOffset: null, snapshotId: "t" }
+
+    it("uploads into the root and into a folder row, and downloads a file row with its exact path", async () => {
+      const user = userEvent.setup()
+      const transfers = controls()
+      const store = createDirectoryStore(vi.fn().mockResolvedValue(entries))
+      render(<ComputerFileTree editor="Cursor" computer={computer} store={store} active onOpenEditor={vi.fn()} transfers={transfers} />)
+      const folder = await screen.findByRole("button", { name: "Folder src" })
+      await user.click(within(folder.parentElement!).getByRole("button", { name: "Upload files here" }))
+      expect(transfers.upload).toHaveBeenCalledWith(computer.configuration.name, "/workspace/src", computer.configuration.name)
+      const root = screen.getByRole("button", { name: computer.configuration.name })
+      await user.click(within(root.parentElement!).getByRole("button", { name: "Upload files here" }))
+      expect(transfers.upload).toHaveBeenLastCalledWith(computer.configuration.name, "/workspace", computer.configuration.name)
+      await user.click(screen.getByRole("button", { name: "Download a b.txt" }))
+      expect(transfers.download).toHaveBeenCalledWith(computer.configuration.name, "/workspace/a b.txt", computer.configuration.name)
+    })
+
+    it("offers downloads only for regular files", async () => {
+      const store = createDirectoryStore(vi.fn().mockResolvedValue(entries))
+      render(<ComputerFileTree editor="Cursor" computer={computer} store={store} active transfers={controls()} />)
+      await screen.findByText("link")
+      expect(screen.getAllByRole("button", { name: /^Download / })).toHaveLength(1)
+    })
+
+    it("disables every transfer action while one is running", async () => {
+      const store = createDirectoryStore(vi.fn().mockResolvedValue(entries))
+      render(<ComputerFileTree editor="Cursor" computer={computer} store={store} active onOpenEditor={vi.fn()} transfers={controls({ busy: true })} />)
+      await screen.findByText("a b.txt")
+      for (const button of [...screen.getAllByRole("button", { name: "Upload files here" }), screen.getByRole("button", { name: "Download a b.txt" })]) expect(button).toBeDisabled()
+    })
+
+    it("shows no transfer actions where the tree is not given the controls", async () => {
+      const store = createDirectoryStore(vi.fn().mockResolvedValue(entries))
+      render(<ComputerFileTree editor="Cursor" computer={computer} store={store} active onOpenEditor={vi.fn()} />)
+      await screen.findByText("a b.txt")
+      expect(screen.queryByRole("button", { name: /Upload files here|^Download / })).toBeNull()
+    })
   })
 })

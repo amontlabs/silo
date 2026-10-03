@@ -2,6 +2,7 @@ import { computerTarget } from "@/features/application/model/connections"
 import { fixtureLogPage, type LogLoader } from "@/features/application/model/logs"
 import { useMemo, useState } from "react"
 import { fixtureDirectoryLoader } from "./directory-loader"
+import { fixtureFileTransfers } from "./file-transfers"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -73,6 +74,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
     return fixtureLogPage(computer, request)
   }, [fixture.source.computers])
   const listComputerDirectory = useMemo(() => fixtureDirectoryLoader(source.computers), [source.computers])
+  const fileTransfers = useMemo(() => fixtureFileTransfers(source.computers), [source.computers])
   // Read once, when the application opens: a result acknowledged on the screen about the backup is already seen.
   const [initialResult] = useState(() => unseenResult?.current())
   const backup = useBackupFixture({
@@ -95,6 +97,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       restoreCheckpoint: fixture.restoreCheckpoint,
       deleteCheckpoint: fixture.deleteCheckpoint,
       listComputerDirectory,
+      fileTransfers,
       queryLogs,
       ...actions,
       saveSecret: (request) => {

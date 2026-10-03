@@ -16,6 +16,12 @@ function setup(loader = vi.fn().mockResolvedValue(page([]))) {
   return { user: userEvent.setup(), loader, props, onOpen, ...render(<StatusFolderPicker {...props} />) }
 }
 describe("status folder picker live directories", () => {
+  it("offers no file transfer actions", async () => {
+    setup(vi.fn().mockResolvedValue({ snapshotId: "s", entries: [{ name: "src", path: "/workspace/src", kind: "folder" }, { name: "a.txt", path: "/workspace/a.txt", kind: "file" }], nextOffset: null }))
+    await screen.findByText("src")
+    expect(screen.queryByRole("button", { name: /Upload|Download/ })).toBeNull()
+  })
+
   it("reveals complete sanitized folder names and the computer heading", async () => {
     const name = `${"folder-".repeat(30)}\u202E`
     setup(vi.fn().mockResolvedValue(page([name])))
