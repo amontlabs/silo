@@ -98,5 +98,5 @@ export function parseLinuxDesktopState(value: unknown): LinuxDesktopState {
 export function desktopViewerRoute() {
   const query = new URLSearchParams(window.location.search)
   const computer = query.get("desktop")
-  return computer ? { computer, name: query.get("name") ?? computer } : null
+  return computer ? { computer, name: query.get("name") ?? computer, id: query.get("id") ?? computer } : null
 }

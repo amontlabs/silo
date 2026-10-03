@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
     WebviewWindowBuilder, Window,
 };
 
@@ -310,6 +310,7 @@ pub(crate) async fn open_desktop(
     }
     tauri::async_runtime::spawn_blocking(move || {
         runtime::shutdown::ensure_accepting_operations()?;
+        let mut stable_id = computer.clone();
         let name = if let Some((device, computer)) = remote_access::target(&computer)? {
             // Verify the remote identity before creating a shell.
             let state = remote::call_remote(
@@ -330,20 +331,20 @@ pub(crate) async fn open_desktop(
         } else {
             runtime::validate_name(&computer).map_err(|e| e.to_string())?;
             let paths = runtime::runtime_paths(&app)?;
-            if !runtime::read_metadata(&paths.metadata)
-                .map_err(|e| e.to_string())?
+            let metadata = runtime::read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
+            let configuration = metadata
                 .computers
                 .iter()
-                .any(|m| m.name() == computer)
-            {
-                return Err("Computer no longer exists.".into());
-            }
+                .find(|m| m.name() == computer)
+                .ok_or("Computer no longer exists.")?;
+            stable_id = configuration.id().to_string();
             computer.clone()
         };
         let mut route = tauri::Url::parse("http://silo.local/index.html").unwrap();
         route
             .query_pairs_mut()
             .append_pair("desktop", &computer)
+            .append_pair("id", &stable_id)
             .append_pair("name", &name);
         let route = format!("index.html?{}", route.query().unwrap());
         let claim = {
@@ -381,6 +382,7 @@ pub(crate) async fn open_desktop(
         viewer.on_window_event(move |event| match event {
             tauri::WindowEvent::Destroyed => {
                 crate::viewer_shortcuts::uninstall(&shortcut_label);
+                crate::desktop_viewer_media::forget_viewer(&shortcut_label);
                 let others = menu_app
                     .webview_windows()
                     .into_iter()
@@ -444,6 +446,9 @@ fn desktop_position(
 /// covered by `desktop/linux-desktop-guest-guard.test.ts` and
 /// `desktop/linux-desktop-bridge.test.ts`.
 const GUEST_BRIDGE_SCRIPT: &str = include_str!("desktop_viewer_bridge.js");
+
+/// Sent to a viewer's shell each time its guest page finishes loading.
+const VIEWER_PAGE_EVENT: &str = "silo://desktop-viewer-page";
 
 pub(crate) fn is_viewer_label(label: &str) -> bool {
     label.starts_with("desktop-shell-")
@@ -605,6 +610,8 @@ pub(crate) async fn desktop_viewer_attach(
         let (proxy, tunnel) = connect(&app, &computer).map_err(|e| abort(&e))?;
         let origin = format!("http://127.0.0.1:{}", proxy.port);
         let permitted = origin.clone();
+        let page_app = app.clone();
+        let page_shell = window.label().to_owned();
         let builder = WebviewBuilder::new(
             &label,
             WebviewUrl::External(tauri::Url::parse("about:blank").unwrap()),
@@ -618,6 +625,15 @@ pub(crate) async fn desktop_viewer_attach(
         .initialization_script_for_all_frames(GUEST_BRIDGE_SCRIPT)
         .on_navigation(move |url| {
             url.as_str() == "about:blank" || url.origin().ascii_serialization() == permitted
+        })
+        // Selkies reloads its page after a connection failure; the shell then
+        // reapplies the sound state to the replacement page.
+        .on_page_load(move |_, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && payload.url().as_str() != "about:blank"
+            {
+                let _ = page_app.emit_to(page_shell.as_str(), VIEWER_PAGE_EVENT, ());
+            }
         });
         let view = window
             .add_child(builder, position, LogicalSize::new(width, height))

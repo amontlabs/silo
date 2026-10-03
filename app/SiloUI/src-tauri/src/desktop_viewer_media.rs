@@ -6,7 +6,11 @@
 use crate::desktop_bridge::{Bridge, Capabilities};
 use crate::desktop_viewer::{is_viewer_label, require_computer, with_bridge};
 use serde::Serialize;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock},
+    time::Duration,
+};
 use tauri::{AppHandle, Window};
 
 /// The screen size the toolbar's reset item requests.
@@ -86,6 +90,44 @@ pub(crate) fn apply_audio(media: &dyn Media, muted: bool, active: bool) -> Resul
     media.set_audio_active(active)
 }
 
+/// Applies `revision` unless a newer one already ran, so updates that reach
+/// the worker pool out of order cannot leave an older state applied last. The
+/// lock serializes updates to one page.
+pub(crate) fn apply_audio_ordered(
+    latest: &Mutex<u64>,
+    revision: u64,
+    media: &dyn Media,
+    muted: bool,
+    active: bool,
+) -> Result<(), String> {
+    let mut latest = latest.lock().map_err(|_| "Desktop sound unavailable.")?;
+    if revision < *latest {
+        return Ok(());
+    }
+    *latest = revision;
+    apply_audio(media, muted, active)
+}
+
+/// The newest sound revision applied for each viewer window.
+static SOUND_REVISIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<u64>>>>> = OnceLock::new();
+
+fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
+    let mut slots = SOUND_REVISIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Desktop sound unavailable.")?;
+    Ok(slots.entry(label.to_string()).or_default().clone())
+}
+
+/// Drops the ordering state of a closed viewer window.
+pub(crate) fn forget_viewer(label: &str) {
+    if let Some(slots) = SOUND_REVISIONS.get() {
+        if let Ok(mut slots) = slots.lock() {
+            slots.remove(label);
+        }
+    }
+}
+
 pub(crate) fn reset_screen(media: &dyn Media) -> Result<(), String> {
     media.reset_resolution(RESET_WIDTH, RESET_HEIGHT)
 }
@@ -131,10 +173,14 @@ pub(crate) async fn desktop_viewer_set_audio(
     computer: String,
     muted: bool,
     active: bool,
+    revision: u64,
 ) -> Result<(), String> {
     let label = require_viewer(&window, &computer)?;
+    let latest = sound_revision(&label)?;
     tauri::async_runtime::spawn_blocking(move || {
-        with_bridge(&app, &label, |bridge| apply_audio(bridge, muted, active))
+        with_bridge(&app, &label, |bridge| {
+            apply_audio_ordered(&latest, revision, bridge, muted, active)
+        })
     })
     .await
     .map_err(|_| "Desktop sound change failed.")?
@@ -264,6 +310,56 @@ mod tests {
         assert_eq!(
             *fake.calls.borrow(),
             ["mute true", "active false", "mute false", "active true"]
+        );
+    }
+
+    #[test]
+    fn an_older_sound_revision_never_overrides_a_newer_one() {
+        let fake = Fake::default();
+        let latest = Mutex::new(0);
+        apply_audio_ordered(&latest, 2, &fake, true, false).unwrap();
+        apply_audio_ordered(&latest, 1, &fake, false, true).unwrap();
+        apply_audio_ordered(&latest, 2, &fake, true, false).unwrap();
+        assert_eq!(
+            *fake.calls.borrow(),
+            ["mute true", "active false", "mute true", "active false"]
+        );
+    }
+
+    #[test]
+    fn concurrent_sound_updates_end_on_the_newest_state() {
+        struct Recording(Mutex<Vec<String>>);
+        impl Media for Recording {
+            fn capabilities(&self, _: Duration) -> Result<Capabilities, String> {
+                unreachable!()
+            }
+            fn set_audio_muted(&self, muted: bool) -> Result<(), String> {
+                std::thread::sleep(Duration::from_millis(5));
+                self.0.lock().unwrap().push(format!("mute {muted}"));
+                Ok(())
+            }
+            fn set_audio_active(&self, active: bool) -> Result<(), String> {
+                self.0.lock().unwrap().push(format!("active {active}"));
+                Ok(())
+            }
+            fn reset_resolution(&self, _: u32, _: u32) -> Result<(), String> {
+                unreachable!()
+            }
+        }
+        let media = Recording(Mutex::new(Vec::new()));
+        let latest = Mutex::new(0);
+        std::thread::scope(|scope| {
+            for revision in 1..=8u64 {
+                let (media, latest) = (&media, &latest);
+                scope.spawn(move || {
+                    let on = revision == 8;
+                    apply_audio_ordered(latest, revision, media, !on, on).unwrap();
+                });
+            }
+        });
+        assert_eq!(
+            media.0.lock().unwrap().last().map(String::as_str),
+            Some("active true")
         );
     }
 

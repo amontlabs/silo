@@ -192,9 +192,9 @@ numberOfChannels: 2})` succeeds. Rust records the result for that viewer.
   desktop configuration (default: unmuted).
 - **Not supported:** the helper sends `STOP_AUDIO` so the guest stops encoding,
   and the toolbar shows no sound control. Selkies 2.0.0 decodes audio only
-  through WebCodecs, which WebKit gained in Safari 26, so on macOS 14 and 15
-  this is the expected outcome unless P5 shows otherwise. The help page states
-  which systems play sound.
+  through WebCodecs, which WebKit gained in Safari 26. That version reaches
+  macOS 14 and 15 through Safari updates, so support follows the installed web
+  engine, not the macOS version. The help page describes that detection.
 - In both cases, when the viewer window is hidden or minimized the helper sends
   `STOP_AUDIO`, and `START_AUDIO` when it returns (if supported and unmuted).
 
@@ -327,7 +327,7 @@ and a fresh look, never a click in the wrong place.
   - Live on the packaged Dev app, local and remote (Linux test machine):
     every probe, plus clipboard round-trips with Unicode and a 10 MB image,
     upload and download of a 1 GiB file, cancellation, symlink refusal,
-    playback after checkpoint restore, sound hidden on macOS 14 or 15, and an
+    playback after checkpoint restore, sound hidden on an engine without Opus `AudioDecoder`, and an
     LCU agent task while the viewer window is resized.
 - **Docs.** Update [SiloUI-DESKTOP.md](SiloUI-DESKTOP.md) (replace the KasmVNC
   clipboard section), [viewer direction](SiloUI-DESKTOP-VIEWER-DIRECTION.md)
@@ -349,8 +349,8 @@ Phase 4 is independent of the bridge and can run in parallel with Phases 1-3.
 
 ## Open risks
 
-- **macOS 14 and 15 audio.** If WKWebView lacks `AudioDecoder`, those systems
-  get no sound control; everything else works.
+- **Older web engines.** A system whose WebKit lacks `AudioDecoder` (macOS
+  without the Safari 26 updates) gets no sound control; everything else works.
 - **Minified client hooks.** `selkiesTransport` and the `postMessage` verbs are
   not a documented API. P1 pins them; a Selkies upgrade must re-verify them.
 - **Shortcut capture.** If neither menu accelerators nor native monitors see
