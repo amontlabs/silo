@@ -154,7 +154,7 @@ own App, replace all three values. The example contains Silo's two public identi
 
 | Key | Value / source |
 | --- | --- |
-| `SILO_GITHUB_APP_SLUG` | `microsandbox-workspaces` |
+| `SILO_GITHUB_APP_SLUG` | `silo-amont-labs` |
 | `SILO_GITHUB_CLIENT_ID` | `Iv23liEjp3VnGe0sw2LU` |
 | `SILO_GITHUB_CLIENT_SECRET` | Client secret from the GitHub App settings; never commit the value |
 
