@@ -1,5 +1,20 @@
 # silo-ui
 
+## 0.11.1
+
+0.11.0 was not published separately, so this release also contains all of its changes; see 0.11.0 below.
+
+### Before upgrading
+
+- **Debian package users:** Silo's APT repository moved. Run this once, then update as usual:
+  `sudo sed -i 's#https://0xpolarzero.github.io/silo/apt#https://apt.silo.amontlabs.com/apt#' /etc/apt/sources.list.d/silo.sources`
+- **GitHub access:** the Silo GitHub App is now `silo-amont-labs`. Earlier versions can't find it, so update to keep using GitHub repository access.
+- **Remote computers:** update Silo on every computer you manage remotely; this release changes the remote protocol.
+
+### Patch Changes
+
+- c6b16ed: Fixed LCU failing to download on macOS 15 with "Silo could not save LCU".
+
 ## 0.11.0
 
 ### Before upgrading
