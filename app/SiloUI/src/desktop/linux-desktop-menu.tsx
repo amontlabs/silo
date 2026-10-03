@@ -6,14 +6,19 @@ import { Ellipsis } from "lucide-react"
 import { ActionsMenu } from "@/components/actions-menu"
 import { Button } from "@/components/ui/button"
 
+export const RESET_SCREEN_LABEL = "Reset to 1440×900"
+
 export type DesktopMenuProps = {
   busy: boolean
   onSelect: (action: "stop" | "restart") => void
+  /** Sets the computer's screen back to its default size; omitted when it cannot. */
+  onResetScreen?: () => void
   onError: (message: string) => void
 }
 
-export function DesktopActionsMenu({ busy, onSelect }: DesktopMenuProps) {
+export function DesktopActionsMenu({ busy, onSelect, onResetScreen }: DesktopMenuProps) {
   return <ActionsMenu label="Desktop actions" items={[
+    ...(onResetScreen ? [{ label: RESET_SCREEN_LABEL, disabled: busy, onSelect: onResetScreen }] : []),
     { label: "Restart desktop", disabled: busy, onSelect: () => onSelect("restart") },
     { label: "Stop desktop", disabled: busy, onSelect: () => onSelect("stop") },
   ]} />
@@ -21,7 +26,7 @@ export function DesktopActionsMenu({ busy, onSelect }: DesktopMenuProps) {
 
 // The guest is a separate native webview above the shell. HTML dropdowns cannot
 // cover it; use an OS popup without resizing or disconnecting the desktop.
-export function NativeDesktopActionsMenu({ busy, onSelect, onError }: DesktopMenuProps) {
+export function NativeDesktopActionsMenu({ busy, onSelect, onResetScreen, onError }: DesktopMenuProps) {
   const opening = useRef(false)
   const menu = useRef<Menu | null>(null)
   const mounted = useRef(false)
@@ -42,6 +47,7 @@ export function NativeDesktopActionsMenu({ busy, onSelect, onError }: DesktopMen
       await menu.current?.close()
       menu.current = null
       const next = await Menu.new({ items: [
+        ...(onResetScreen ? [{ text: RESET_SCREEN_LABEL, action: () => { if (mounted.current) onResetScreen() } }] : []),
         { text: "Restart desktop…", action: () => { if (mounted.current) onSelect("restart") } },
         { text: "Stop desktop…", action: () => { if (mounted.current) onSelect("stop") } },
       ] })

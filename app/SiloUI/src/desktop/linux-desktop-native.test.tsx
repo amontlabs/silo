@@ -176,7 +176,7 @@ it("reconnects by detaching the previous child before attaching a fresh one", as
   fail = false
   await user.click(screen.getByRole("button", { name: "Reconnect" }))
   await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument())
-  expect(invoke.mock.calls.map(([command]) => command).filter(command => command.startsWith("desktop_viewer_"))).toEqual(["desktop_viewer_detach", "desktop_viewer_attach"])
+  expect(invoke.mock.calls.map(([command]) => command).filter(command => command === "desktop_viewer_detach" || command === "desktop_viewer_attach")).toEqual(["desktop_viewer_detach", "desktop_viewer_attach"])
 })
 
 
@@ -210,8 +210,8 @@ it("uses a native dropdown without reconnecting or resizing the guest", async ()
   // GTK returns before dismissal, so the menu must survive popup resolution.
   expect(nativeMenu.close).not.toHaveBeenCalled()
   const items = nativeMenu.create.mock.calls[0][0].items
-  expect(items.map((item: { text: string }) => item.text)).toEqual(["Restart desktop…", "Stop desktop…"])
-  act(() => items[1].action())
+  expect(items.map((item: { text: string }) => item.text)).toEqual(["Reset to 1440×900", "Restart desktop…", "Stop desktop…"])
+  act(() => items[2].action())
   expect(invoke).not.toHaveBeenCalled()
   await user.click(screen.getByRole("button", { name: "Stop desktop" }))
   expect(invoke).toHaveBeenCalledWith("desktop_action", { computer: "dev", action: "stop" })

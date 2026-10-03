@@ -5,13 +5,15 @@ import { CircleAlert, Maximize, Monitor } from "lucide-react"
 import { parseLinuxDesktopState, type LinuxDesktopState, type DesktopAction } from "./linux-desktop-state"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { DesktopSoundButton } from "./linux-desktop-sound"
+import { useDesktopSound, type DesktopSound } from "./linux-desktop-sound-state"
 import { DesktopActionsMenu, NativeDesktopActionsMenu, type DesktopMenuProps } from "./linux-desktop-menu"
 
 // Guest pages draw inside Silo's window, so anything inside the frame,
 // including dialogs that look like Silo's, comes from the computer (G-20).
 const GUEST_CONTENT_NOTICE = "Everything inside the amber frame comes from the computer. Silo's own controls are only in this bar."
 
-export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, lcuUpdated = false, MenuComponent = DesktopActionsMenu }: {
+export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, lcuUpdated = false, sound, onResetScreen, MenuComponent = DesktopActionsMenu }: {
   name: string
   state: LinuxDesktopState | null
   busy: boolean
@@ -21,6 +23,8 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   onFullscreen: () => void
   screenRef?: React.RefObject<HTMLDivElement | null>
   lcuUpdated?: boolean
+  sound?: DesktopSound
+  onResetScreen?: () => void
   MenuComponent?: ComponentType<DesktopMenuProps>
 }) {
   const [menuError, setMenuError] = useState<string | null>(null)
@@ -74,8 +78,9 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
         {streamStarting && <span role="status" className="text-xs text-muted-foreground">Connecting display…</span>}
         {lcuUpdated && (computerUse ? computerUse.state === "ready" : state?.lcuState === "ready") && <span role="status" className="text-xs text-muted-foreground">{computerUse ? "Reconnect agent sessions to load computer use." : "Reconnect agent sessions to load LCU."}</span>}
       </>}
+      {running && sound && <DesktopSoundButton sound={sound} />}
       <Button variant="ghost" size="icon-xs" aria-label="Toggle fullscreen" onClick={onFullscreen}><Maximize /></Button>
-      {running && <MenuComponent busy={busy} onSelect={action => { setMenuError(null); setConfirm(action) }} onError={setMenuError} />}
+      {running && <MenuComponent busy={busy} onResetScreen={onResetScreen} onSelect={action => { setMenuError(null); setConfirm(action) }} onError={setMenuError} />}
     </header>
     {running ? <section aria-label="Computer display" aria-description={GUEST_CONTENT_NOTICE} className="flex min-h-0 flex-1 bg-amber-500 p-1">
       {/* The guest webview covers only this element; the frame around it stays Silo's. */}
@@ -178,6 +183,10 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     void attach()
     return () => { disposed = true; refreshAttachment.current = null; observer.disconnect(); window.removeEventListener("resize", updateBounds); void transport(() => invoke("desktop_viewer_detach")).catch(() => {}) }
   }, [computer, streamReady, connection, transport])
+  const sound = useDesktopSound(computer, streamReady && !connectionError, connection)
+  function resetScreen() {
+    void Promise.resolve(invoke("desktop_viewer_reset_screen", { computer })).catch(cause => setError(String(cause)))
+  }
   async function handleAction(action: DesktopAction) {
     if (operation.current) return
     operation.current = true
@@ -200,7 +209,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     catch (cause) { setError(String(cause)); if (action === "setup-lcu" || action === "setup-computer-use") setState(previous) }
     finally { operation.current = false; setBusy(false) }
   }
-  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} MenuComponent={NativeDesktopActionsMenu}
+  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={resetScreen} MenuComponent={NativeDesktopActionsMenu}
     onAction={action => { void handleAction(action) }}
     onRetry={() => { setConnection(value => value + 1); void refresh(false) }}
     onFullscreen={() => { const window = getCurrentWindow(); void window.isFullscreen().then(value => window.setFullscreen(!value)).catch(cause => setError(String(cause))) }} />
