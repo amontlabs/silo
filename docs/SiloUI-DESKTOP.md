@@ -507,3 +507,63 @@ node app/SiloUI/src-tauri/target/verification/desktop-input/verify-url.mjs
 These checks do not replace packaged-app or live guest input acceptance; no
 bundle was launched for this change. The change takes effect when the updated
 application opens or reconnects a desktop viewer.
+
+## Device clipboard module
+
+`src-tauri/src/clipboard.rs` is the device-side clipboard used by the viewer
+integration ([plan](SiloUI-VIEWER-INTEGRATION-PLAN.md), Phases 1 and 2). It has
+no JavaScript surface and adds no Tauri capability.
+
+### Choice
+
+| Option | Result |
+|---|---|
+| `tauri-plugin-clipboard-manager` | Rejected. It wraps `arboard` but exposes text and RGBA images to the webview through commands and capabilities, and offers no control over Linux selection ownership. |
+| `arboard` 3.6.1 directly | Chosen. Dual MIT or Apache-2.0, maintained by 1Password, Send + Sync with no macOS main-thread requirement, text and image support, X11 and Wayland backends. |
+| Custom NSPasteboard, X11 and Wayland code | Rejected. The platform protocols are what `arboard` already implements. |
+
+`arboard` is built with `default-features = false` and `image-data` plus
+`wayland-data-control`. `image` 0.25 was already locked through Tauri and
+`arboard`; Silo enables its `png`, `jpeg`, `webp` and `bmp` features, which adds
+the pure-Rust `zune-jpeg` and `image-webp` decoders. The new locked packages are
+`arboard`, `wl-clipboard-rs`, `x11rb`, `clipboard-win` and their dependencies;
+all are MIT, Apache-2.0 or similar permissive licenses, and the repository
+keeps no per-crate license manifest (`THIRD-PARTY-NOTICES.md` covers only the
+bundled runtimes).
+
+### Behavior
+
+- `DeviceClipboard` is the interface the bridge depends on (`read_text`,
+  `write_text`, `read_image`, `write_image_from_encoded`); `ClipboardService`
+  applies the policy over a `RawClipboard`, and `system()` returns the process-wide
+  `arboard` instance. A fake lives in `clipboard::fake` for tests.
+- Text reads reject content over the caller's byte cap instead of truncating.
+  Image reads and writes enforce an encoded-byte cap and a pixel cap; writes check
+  the cap and the declared dimensions before decoding.
+- Writes accept PNG, JPEG, WebP and BMP. The declared MIME type must match the
+  sniffed content. Errors are typed: `Empty`, `TooLarge`, `Unsupported`,
+  `Unavailable` and `Decode`. Image reads return PNG.
+- Calls block on the platform clipboard; run them on a blocking worker.
+
+### Linux
+
+`arboard` serves a selection from a background thread owned by its `Clipboard`,
+and ownership ends when that handle drops. The module keeps one handle in a
+static for the life of the process, so a paste works after a write returns and
+shutdown never waits on the clipboard. Selection data is lost when the app
+exits unless a clipboard manager keeps it.
+
+Wayland uses the `wlr-data-control` or `ext-data-control` protocol through
+`wl-clipboard-rs`. GNOME's compositor (the Ubuntu 24.04 default) does not
+implement either, so `arboard` falls back to X11 through XWayland; that path
+needs Xwayland to be running. **Probe** on Ubuntu 24.04 GNOME Wayland and X11
+sessions before relying on either.
+
+### Gaps
+
+- Only the unit tests with the fake run in CI; the ignored
+  `clipboard::tests::live_text_and_image_round_trip` touches the real clipboard
+  and is run by hand.
+- Linux behavior was not exercised on a Linux host for this change.
+- Only the `CLIPBOARD` selection is used; `PRIMARY` is not read or written.
+- HTML, rich text and file lists are not handled.
