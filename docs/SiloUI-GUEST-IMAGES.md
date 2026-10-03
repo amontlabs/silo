@@ -13,7 +13,7 @@ there is no version picker or arbitrary-image compatibility promise in this chan
 
 The public standard container package is
 `ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4`, with `-arm64` and `-amd64` tags (v3 remains published).
-The matching [versioned release](https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v4)
+The matching [versioned release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4)
 contains compressed Docker-save archives, package inventories in JSON manifests,
 SHA256SUMS, the recipe, setup script and source commit. The image itself retains
 Ubuntu's package copyright files under `/usr/share/doc`.
@@ -135,8 +135,8 @@ must not download or repair packages to establish the working account. At v3
 publication, the optional desktop used separate package and KasmVNC downloads;
 the [current desktop recipe](SiloUI-DESKTOP.md) uses Selkies.
 
-The public [v3 release](https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v3)
-was produced by [publication run 35546417121](https://github.com/0xpolarzero/silo/actions/runs/35546417121)
+The public [v3 release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v3)
+was produced by [publication run 35546417121](https://github.com/amontlabs/silo/actions/runs/35546417121)
 from source `a9827c263df3daee28959b2c2073d85c6f980e9d`. The v3 lock at publication
 recorded these archives:
 
@@ -162,7 +162,7 @@ The GUI was not launched, and Linux/KVM execution remains untested.
 ## Guest image v4 recipe (published)
 
 `GUEST_IMAGE_VERSION` is `ubuntu-24.04-v4`. v4 is published as the
-[`guest-ubuntu-24.04-v4` release](https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v4),
+[`guest-ubuntu-24.04-v4` release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4),
 built from source commit `aae2ed939339cb559d81915b4e8df8a150cb8a90` (its
 `source-commit.txt`), and `guest-image/image-lock.json` pins it: both manifests are
 copied into the lock, and new computers use the image with the built-in desktop.
@@ -243,7 +243,7 @@ x264, x265, FFmpeg n8.1, kvazaar, libvpx, SVT-AV1 and dav1d, and pcmflux carries
 audio libraries, none of which are part of the Ubuntu package set. Silo therefore treats those
 parts as redistributed GPL/LGPL software: `app/SiloUI/THIRD-PARTY-NOTICES.md` lists each component
 with its version and license, the exact upstream sources and the build recipe are mirrored in the
-[`guest-ubuntu-24.04-v4-source` release](https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v4-source)
+[`guest-ubuntu-24.04-v4-source` release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4-source)
 with their SHA-256 values (`SOURCES.md`, `sources.json`, `SHA256SUMS`), and the v4 release notes and
 the notices include a written offer for the corresponding source. The x264 commit is established by
 upstream's build log and branch history rather than a pinned ref (see `SOURCES.md`). Ubuntu packages
@@ -280,7 +280,7 @@ experiment. Final published archive sizes are authoritative in the image lock.
 ## Verification on 2026-09-10 (guest image v1)
 
 The image publication run succeeded:
-https://github.com/0xpolarzero/silo/actions/runs/34452627515
+https://github.com/amontlabs/silo/actions/runs/34452627515
 Source recipe commit: `e9d90f58acb45689931e371d008fd0c81015571a`.
 Anonymous GHCR requests returned HTTP 200 for the multi-architecture image and
 both platform manifests. Each platform's config digest matches the corresponding
@@ -336,7 +336,7 @@ Version 2 adds curl to new computers. Existing computer disks and restored backu
 their packages; install curl inside those computers with
 `apt-get update && apt-get install -y curl` (as root).
 
-[Image publication](https://github.com/0xpolarzero/silo/actions/runs/34837327776)
+[Image publication](https://github.com/amontlabs/silo/actions/runs/34837327776)
 built ARM64 and AMD64 and ran curl, Git, Git LFS, gh and credential-helper checks
 with container networking disabled before publishing. Curl also read a local
 file through its file protocol. Both manifests record curl 8.5.0-2ubuntu10.13.

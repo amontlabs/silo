@@ -1399,7 +1399,7 @@ body:has(dialog[open]) {
 .theme-menu button[aria-checked="true"] .theme-check { visibility: visible; }
 @media (max-width: 480px) {
   .header-actions { gap: 6px; }
-  .site-header nav a[href="https://github.com/0xpolarzero/silo#start-working"] { display: none; }
+  .site-header nav a[href="https://github.com/amontlabs/silo#start-working"] { display: none; }
 }
 .footer-note { align-items: center; }
 .feature-media picture, .detail-media picture { display: block; }

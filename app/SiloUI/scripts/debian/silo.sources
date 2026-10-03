@@ -1,6 +1,6 @@
 # Managed by the Silo installer
 Types: deb
-URIs: https://0xpolarzero.github.io/silo/apt
+URIs: https://apt.silo.amontlabs.com/apt
 Suites: stable
 Components: main
 Architectures: amd64 arm64

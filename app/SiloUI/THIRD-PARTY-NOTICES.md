@@ -107,14 +107,14 @@ distributes it under GPL-2.0-or-later terms as a whole. The H.264 and H.265 code
 that these licenses do not grant; Silo does not provide a patent license.
 
 Corresponding source. Source for every component above, at the exact versions, is mirrored at
-https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v4-source with `SHA256SUMS`,
+https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4-source with `SHA256SUMS`,
 `sources.json` and `SOURCES.md` (Selkies, pixelflux, pcmflux, x264, x265, FFmpeg, kvazaar, libvpx,
 SVT-AV1, dav1d and the AlmaLinux 8 source packages), including the build recipe (`pyproject.toml`,
 `setup.py`) and the FFmpeg configure line.
 Written offer: for at least three years from 2026-10-02, and for as long as the image is offered for
 download, Silo will give anyone who received it the complete corresponding source code of these
 components on request, at no charge beyond the cost of providing it, via
-https://github.com/0xpolarzero/silo/issues.
+https://github.com/amontlabs/silo/issues.
 
 # Silo guest image: Ubuntu packages
 

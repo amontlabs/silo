@@ -224,7 +224,7 @@ function Closing() {
   return <Frame light label="AVAILABLE FOR macOS + LINUX" note="OPEN SOURCE · MIT LICENSE">
     <div className="r-close-lockup" style={copyStyle(f, 5)}><Brand large /></div>
     <div className="r-close-title" style={copyStyle(f, 15)}>Give your agents<br/><em>a space of their own.</em></div>
-    <div className="r-close-cta" style={copyStyle(f, 32)}><span>silo.polarzero.xyz</span><ArrowRight size={35} strokeWidth={1.5} /></div>
+    <div className="r-close-cta" style={copyStyle(f, 32)}><span>silo.amontlabs.com</span><ArrowRight size={35} strokeWidth={1.5} /></div>
     <div className="r-close-tags" style={copyStyle(f, 45)}><span><Monitor size={19} />Linux computers</span><span><MousePointer2 size={19} />Agent desktops</span><span><KeyRound size={19} />Scoped access</span></div>
   </Frame>;
 }

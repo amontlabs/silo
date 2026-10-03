@@ -115,7 +115,7 @@ def build(packages, output, fingerprint, public_key, now=None):
     (root / 'retained-releases.json').write_text(json.dumps([digest]))
     shutil.copyfile(public_key, root / 'silo-archive-keyring.gpg')
     (output / '.nojekyll').touch()
-    (output / 'index.html').write_text('<!doctype html><title>Silo software updates</title><h1>Silo software updates</h1><p>This is the signed software source used by Silo’s Linux installer.</p><p><a href="https://github.com/0xpolarzero/silo/releases/latest">Download Silo</a></p>')
+    (output / 'index.html').write_text('<!doctype html><title>Silo software updates</title><h1>Silo software updates</h1><p>This is the signed software source used by Silo’s Linux installer.</p><p><a href="https://github.com/amontlabs/silo/releases/latest">Download Silo</a></p>')
     check_budget(output)
 
 

@@ -37,7 +37,7 @@ Linux needs a working desktop credential store implementing Secret Service, such
 ## 2. Get the source
 
 ```sh
-git clone https://github.com/0xpolarzero/silo.git
+git clone https://github.com/amontlabs/silo.git
 cd silo
 rustup override set 1.94.0
 npm --prefix app/SiloUI ci
@@ -54,7 +54,7 @@ Fill in these settings:
 | GitHub field | What to enter |
 | --- | --- |
 | GitHub App name | A unique name, such as `Silo-yourusername-dev`. |
-| Homepage URL | `https://github.com/0xpolarzero/silo` or your own fork's URL. |
+| Homepage URL | `https://github.com/amontlabs/silo` or your own fork's URL. |
 | Callback URL / Redirect URI | `http://127.0.0.1/github/callback` |
 | Allow wildcard matching, if shown | Leave disabled. |
 | Expire user authorization tokens | Leave enabled; Silo renews them automatically. Check **Optional features** after creation if this setting is not on the form. |

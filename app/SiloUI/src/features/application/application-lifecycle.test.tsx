@@ -590,7 +590,7 @@ it("prevents app interaction during installation and restores the existing page 
 const { UpdatesProvider } = await import("@/features/updates/update-store")
 const user = userEvent.setup()
 let emit!: (snapshot: import("@/features/updates/update-store").UpdateSnapshot) => void
-const state: import("@/features/updates/update-store").UpdateSnapshot = { phase: "idle", lastChecked: null, retryAction: null, currentVersion: "0.1.0", availableVersion: null, releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "macos", releaseUrl: "https://github.com/0xpolarzero/silo/releases", error: null, errorDetails: null, installBlockReason: null, runningComputers: [], canInstall: true }
+const state: import("@/features/updates/update-store").UpdateSnapshot = { phase: "idle", lastChecked: null, retryAction: null, currentVersion: "0.1.0", availableVersion: null, releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "macos", releaseUrl: "https://github.com/amontlabs/silo/releases", error: null, errorDetails: null, installBlockReason: null, runningComputers: [], canInstall: true }
 const backend = { read: async () => state, subscribe: async (receive: typeof emit) => { emit = receive; return () => {} }, check: vi.fn(), download: vi.fn(), install: vi.fn(), setAutomaticChecks: vi.fn(), openRelease: vi.fn() }
 render(<UpdatesProvider backend={backend}><ApplicationPreview source={applicationSourceForScenario("running")} initialRoute={{ tab: "settings", settingsSection: "general" }} /></UpdatesProvider>)
 await screen.findByText("Version 0.1.0")
@@ -619,7 +619,7 @@ const user = userEvent.setup()
 const state: import("@/features/updates/update-store").UpdateSnapshot = {
   phase, retryAction, lastChecked: null, currentVersion: "0.3.3", availableVersion: "0.3.4", releaseNotes: null,
   downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "appimage",
-  releaseUrl: "https://github.com/0xpolarzero/silo/releases", error: retryAction ? "Could not install." : null,
+  releaseUrl: "https://github.com/amontlabs/silo/releases", error: retryAction ? "Could not install." : null,
   errorDetails: null, installBlockReason: null, runningComputers: [], canInstall: true,
 }
 let failAction!: (error: Error) => void

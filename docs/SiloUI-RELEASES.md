@@ -460,7 +460,7 @@ pushes and manual draft builds use the same signing and validation pipeline;
 only the separate publication workflow can make the draft public.
 
 The app reads
-`https://github.com/0xpolarzero/silo/releases/latest/download/latest.json`.
+`https://github.com/amontlabs/silo/releases/latest/download/latest.json`.
 That file references immutable version-specific download URLs and all three
 platform signatures. Partial build/upload failures leave the prior public release
 and update feed unchanged. A partial draft must be inspected and explicitly

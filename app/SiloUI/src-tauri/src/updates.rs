@@ -36,7 +36,7 @@ pub(crate) fn operation_guard() -> Result<AdmissionGuard, String> {
     ADMITTED.fetch_add(1, Ordering::SeqCst);
     Ok(AdmissionGuard(guard))
 }
-const RELEASE_URL: &str = "https://github.com/0xpolarzero/silo/releases/latest";
+const RELEASE_URL: &str = "https://github.com/amontlabs/silo/releases/latest";
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

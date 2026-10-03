@@ -9,7 +9,7 @@ import { UpdatesProvider, useUpdates, type UpdateBackend, type UpdateSnapshot, t
 const initial: UpdateSnapshot = {
   phase: "idle", lastChecked: null, retryAction: null, currentVersion: "0.3.3", availableVersion: null,
   releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "appimage",
-  releaseUrl: "https://github.com/0xpolarzero/silo/releases", error: null, errorDetails: null,
+  releaseUrl: "https://github.com/amontlabs/silo/releases", error: null, errorDetails: null,
   installBlockReason: null, runningComputers: [], canInstall: true,
 }
 function mount(patch: Partial<UpdateSnapshot> = {}) {
