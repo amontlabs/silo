@@ -534,6 +534,23 @@ pub(crate) fn prepare_private_transport(
     Ok((alias, config))
 }
 
+/// The SSH alias and private configuration for a local or remote computer, in a
+/// per-purpose directory below the runtime's `ssh` folder. Nothing is added to the
+/// user's own SSH configuration.
+pub(crate) fn private_computer_transport(
+    app: &AppHandle,
+    computer: &str,
+    purpose: &str,
+) -> Result<(String, PathBuf), String> {
+    if let Some((device, remote)) = crate::remote_access::target(computer)? {
+        return prepare_remote_private(app, &device, &remote, "/workspace");
+    }
+    runtime::validate_name(computer).map_err(|error| error.to_string())?;
+    let paths = runtime::runtime_paths(app)?;
+    let directory = paths.home.join("ssh").join(purpose).join(computer);
+    prepare_private_transport(&paths, computer, &directory)
+}
+
 fn prepare_configuration(
     paths: &RuntimePaths,
     name: &str,
