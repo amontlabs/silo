@@ -107,7 +107,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   </main></TooltipProvider>
 }
 
-export function NativeLinuxDesktopViewer({ computer, name }: { computer: string; name: string }) {
+export function NativeLinuxDesktopViewer({ computer, name, id = computer }: { computer: string; name: string; id?: string }) {
   const drop = useViewerFileDrop(computer)
   const [state, setState] = useState<LinuxDesktopState | null>(null)
   const [busy, setBusy] = useState(true)
@@ -115,6 +115,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
   const [error, setError] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connection, setConnection] = useState(0)
+  const [attached, setAttached] = useState(false)
   const screenRef = useRef<HTMLDivElement>(null)
   const refreshAttachment = useRef<(() => void) | null>(null)
   const operation = useRef(false)
@@ -168,6 +169,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
   const streamReady = state?.state === "running" && (state.streamState == null || state.streamState === "running")
   useEffect(() => {
     if (!streamReady || !screenRef.current) {
+      setAttached(false)
       void transport(() => invoke("desktop_viewer_detach")).catch(cause => setError(String(cause)))
       return
     }
@@ -182,7 +184,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
       const viewportHeight = window.innerHeight
       if (width <= 0 || height <= 0) return
       pending = true
-      try { await transport(async () => { if (!disposed) await invoke("desktop_viewer_attach", { computer, x, y, width, height, viewportHeight }) }); if (!disposed) setConnectionError(null) }
+      try { await transport(async () => { if (!disposed) await invoke("desktop_viewer_attach", { computer, x, y, width, height, viewportHeight }) }); if (!disposed) { setConnectionError(null); setAttached(true) } }
       catch (cause) { if (!disposed) setConnectionError(String(cause)) }
       finally { pending = false; if (dirty) { dirty = false; void attach() } }
     }
@@ -192,9 +194,11 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     observer.observe(screen)
     window.addEventListener("resize", updateBounds)
     void attach()
-    return () => { disposed = true; refreshAttachment.current = null; observer.disconnect(); window.removeEventListener("resize", updateBounds); void transport(() => invoke("desktop_viewer_detach")).catch(() => {}) }
+    return () => { disposed = true; setAttached(false); refreshAttachment.current = null; observer.disconnect(); window.removeEventListener("resize", updateBounds); void transport(() => invoke("desktop_viewer_detach")).catch(() => {}) }
   }, [computer, streamReady, connection, transport])
-  const sound = useDesktopSound(computer, streamReady && !connectionError, connection)
+  const sound = useDesktopSound(computer, id, streamReady && attached && !connectionError, connection)
+  // Desktops that predate guest resizing run with it off, so resetting the size does nothing there.
+  const desktopOutdated = state?.updateRequired === true || state?.updateAvailable === true
   function resetScreen() {
     void Promise.resolve(invoke("desktop_viewer_reset_screen", { computer })).catch(cause => setError(String(cause)))
   }
@@ -220,8 +224,8 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     catch (cause) { setError(String(cause)); if (action === "setup-lcu" || action === "setup-computer-use") setState(previous) }
     finally { operation.current = false; setBusy(false) }
   }
-  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
-    clipboard={<ViewerClipboard computer={computer} name={name} needsUpdate={state?.updateRequired === true || state?.updateAvailable === true} />}
+  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={desktopOutdated ? undefined : resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
+    clipboard={<ViewerClipboard computer={computer} name={name} needsUpdate={desktopOutdated} />}
     onAction={action => { void handleAction(action) }}
     onRetry={() => { setConnection(value => value + 1); void refresh(false) }}
     onFullscreen={() => { const window = getCurrentWindow(); void window.isFullscreen().then(value => window.setFullscreen(!value)).catch(cause => setError(String(cause))) }} />

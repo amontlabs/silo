@@ -133,7 +133,7 @@ do not promise zero CPU or zero timing impact on a running task.
 | --- | --- |
 | Open and watch | Attach to the existing session. No unsolicited guest input, clipboard writes, keymap/DPI changes, app launches or display reconfiguration |
 | Desktop stopped | Show that state. Starting the desktop is a separate explicit operation, never a side effect of opening a viewer |
-| Resize, zoom or fullscreen the viewer | Selkies follows the viewer window (debounced) while the viewer is open. Closing it keeps the size; the viewer's actions menu resets to 1440x900. Zoom and fullscreen only change local presentation |
+| Resize, zoom or fullscreen the viewer | Selkies follows the viewer window (debounced) while the viewer is open, including when it enters or leaves fullscreen, so the guest resolution changes with them. Closing the viewer keeps the size; the viewer's actions menu resets to 1440x900 on up-to-date desktops (recipe 2 desktops run with resizing off and do not offer it) |
 | Change guest resolution | Explicit controller operation in Display settings; persist it with the session |
 | Close every viewer | Keep the desktop, apps and agent running; stop unused capture/encoding when safe |
 | Viewer crash, reload or network loss | Reattach to the same session; reject stale/replayed input and re-read geometry |
@@ -168,7 +168,7 @@ Repair reusable gaps upstream before shipping.
 | CPU-only guest | Mandatory supported path with software rendering/encoding; no guest GPU prerequisite |
 | Guest with a supported encoder | Use hardware encoding within the same service when detected and qualified; host GPU presence alone is insufficient |
 | Clipboard and files | Deliberate controller operations with direction and completion feedback; observing does not overwrite either clipboard. Text and images (1 MiB and 16 MiB limits) move through Paste into computer and Copy from computer in the toolbar, with Command+V/C on macOS and Ctrl+Shift+V/C on Linux; see [SiloUI-DESKTOP.md](SiloUI-DESKTOP.md#clipboard-behaviour). Files are separate |
-| Audio | Playback from the same session, with a speaker toggle shown only where the web engine decodes Opus (expected absent on macOS 14 and 15); the stream stops while the viewer is hidden. Microphone and camera stay locked off |
+| Audio | Playback from the same session, with a speaker toggle shown only where the web engine decodes Opus (it appears when the system's installed web engine supports it, for example macOS with the Safari 26 updates); the stream stops while the viewer is hidden. Microphone and camera stay locked off |
 | Multiple views or displays | Reuse the current per-computer viewer; no automatic guest display creation/removal on window open or close |
 | Computer checkpoints | Reconnect after the computer's supported restore operation; independently verify guest devices and process state. Viewer reconnect is not a checkpoint |
 

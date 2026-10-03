@@ -675,24 +675,36 @@ bound to the window's own computer through `require_computer`, rejected from
 `main`, and run on a blocking worker through `with_bridge`:
 
 - `desktop_viewer_sound_support` asks the page for its capabilities, retrying for
-  up to 20 attempts (0.5 s apart) until the Selkies transport is open (the page may still be
-  loading right after attach). When the engine decodes Opus, sound is offered.
+  up to 20 attempts (0.5 s apart) until the Selkies transport is open. The shell
+  calls it only after the attach command succeeded, repeats a failed call every
+  3 s (up to 40 times) while the display is still connecting, and calls it again
+  after each page load: the native side emits `silo://desktop-viewer-page` to the
+  shell whenever the guest page finishes loading, because Selkies reloads its
+  page after a socket failure and the replacement page starts without the mute
+  and stream state. When the engine decodes Opus, sound is offered.
   Otherwise it calls `set_audio_active(false)` so the computer stops encoding
   audio, and the toolbar shows no sound control. Selkies 2.0.0 decodes audio
-  only through WebCodecs, so macOS 14 and 15 are expected to have no sound; this
-  is a check of the running engine, never of the OS version.
-- `desktop_viewer_set_audio(muted, active)` applies the mute choice and starts or
-  stops the audio stream. The shell calls it with `active: false` while its
+  only through WebCodecs, which the system's WebKit provides from Safari 26 (also
+  installable on macOS 14 and 15); this is a check of the running engine, never
+  of the OS version.
+- `desktop_viewer_set_audio(muted, active, revision)` applies the mute choice and
+  starts or stops the audio stream. Updates run on separate workers, so each
+  carries a monotonic revision and the native side applies them under a
+  per-viewer lock, skipping any revision older than the last applied one. The shell calls it with `active: false` while its
   document is hidden or minimized (`visibilitychange`) and `true` when it
   returns. The speaker button is the shell's own control; the guest sidebar has
   no audio section. The mute choice is stored per computer in the shell's
-  `localStorage` (`silo-desktop-muted:<computer>`, default unmuted), because it
+  `localStorage` (`silo-desktop-muted:<computer configuration ID>`, default
+  unmuted; the viewer route carries the ID, and remote targets use their stable
+  `silo-remote:` identity. Values saved under a computer name are ignored), because it
   is a viewer preference on this device and the shared settings document is not
   readable from viewer windows. Computers on a recipe 2 guest keep Selkies'
   default of audio on; sound is detected and controlled the same way there, and
   the viewer's `getUserMedia` lock still keeps the microphone out of reach.
 - `desktop_viewer_reset_screen` sends `r,1440x900,primary`; it appears as
-  **Reset to 1440×900** in the desktop actions menu.
+  **Reset to 1440×900** in the desktop actions menu, except for desktops that
+  report `updateRequired` or `updateAvailable`, whose Selkies runs with resizing
+  off and ignores it.
 
 Resizing needs no Silo code: the guest child webview's bounds follow the shell's
 screen area (a `ResizeObserver` plus the window `resize` event), the Selkies
@@ -703,7 +715,7 @@ Closing the viewer keeps the size, so an agent working without a viewer sees no
 change. The reset is explicit and one-off: the next resize of the window makes
 the screen follow the window again.
 
-Live checks needed: `AudioDecoder` Opus support on WKWebView (macOS 14, 15, 26)
+Live checks needed: `AudioDecoder` Opus support on WKWebView (macOS 14, 15 and 26, with and without the Safari 26 updates)
 and WebKitGTK (deb and AppImage, where `libgstopus` must be bundled); audible
 playback and mute; the audio stream stopping on minimize; that `visibilitychange`
 fires on minimize in both engines; the resize round trip and reset on a
