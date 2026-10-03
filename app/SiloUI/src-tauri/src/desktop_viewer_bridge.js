@@ -85,7 +85,7 @@
   // `cws`, `cwd`, `cwe` write text; `cb`, `cbs`, `cbd`, `cbe` write binary; `kd` and
   // `ku` are key events; `r,WxH` resizes; `REQUEST_CLIPBOARD` asks the server to
   // push its current selection.
-  const ALLOWED_FRAME = /^(?:cw,[A-Za-z0-9+/=]*|cws,[^,]+,\d+|cwd,[^,]+,[A-Za-z0-9+/=]*|cwe,[^,]+|cb,[^,]+,[A-Za-z0-9+/=]*|cbs,[^,]+,[^,]+,\d+|cbd,[^,]+,[A-Za-z0-9+/=]*|cbe,[^,]+|kd,\d+|ku,\d+|r,\d+x\d+,primary|REQUEST_CLIPBOARD)$/
+  const ALLOWED_FRAME = /^(?:cw,[A-Za-z0-9+/=]*|cws,[^,]+,\d+|cwd,[^,]+,[A-Za-z0-9+/=]*|cwe,[^,]+|cb,[^,]+,[A-Za-z0-9+/=]*|cbs,[^,]+,[^,]+,\d+|cbd,[^,]+,[A-Za-z0-9+/=]*|cbe,[^,]+|kd,\d+|ku,\d+|r,\d+x\d+,primary|REQUEST_CLIPBOARD|cr)$/
 
   // The last clipboard payload the guest announced, kept as base64 so nothing
   // is decoded or sent anywhere until Rust asks for it. An announcement above
@@ -93,6 +93,10 @@
   // answers with older content.
   let latest = null
   let assembly = null
+  // Set by `clipboard_reply,cr`, which Selkies sends ahead of the payload it
+  // answers a `cr` request with; the next payload is that answer, not an
+  // announcement of a change.
+  let replyPending = false
   let sequence = 0
   const waiters = new Set()
 
@@ -104,30 +108,39 @@
     latest = payload
     for (const waiter of [...waiters]) waiter(latest)
   }
-  const recordOversized = () => publish({ mime: "", encoded: "", oversized: true, sequence: ++sequence })
-  const record = (mime, encoded) => {
-    if (base64Size(encoded) > MAX_CLIPBOARD_BYTES) recordOversized()
-    else publish({ mime, encoded, oversized: false, sequence: ++sequence })
+  const recordOversized = reply => publish({ mime: "", encoded: "", oversized: true, reply, sequence: ++sequence })
+  const record = (mime, encoded, reply) => {
+    if (base64Size(encoded) > MAX_CLIPBOARD_BYTES) recordOversized(reply)
+    else publish({ mime, encoded, oversized: false, reply, sequence: ++sequence })
+  }
+  const takeReply = () => {
+    const reply = replyPending
+    replyPending = false
+    return reply
   }
   // Selkies websockets_mode.py `send_ws_clipboard_data`: `clipboard,<b64>` and
   // `clipboard_binary,<mime>,<b64>` below 16 KiB; otherwise `clipboard_start,<mime>,<size>`,
   // `clipboard_data,<b64>` chunks and `clipboard_finish`.
   const observe = data => {
     if (typeof data !== "string" || !data.startsWith("clipboard")) return
-    if (data.startsWith("clipboard,")) {
+    if (data === "clipboard_reply,cr") {
+      replyPending = true
+    } else if (data.startsWith("clipboard,")) {
       assembly = null
-      record(TEXT_MIME, data.slice(10))
+      record(TEXT_MIME, data.slice(10), takeReply())
     } else if (data.startsWith("clipboard_binary,")) {
       assembly = null
       const split = data.indexOf(",", 17)
-      if (split > 17) record(data.slice(17, split), data.slice(split + 1))
+      const reply = takeReply()
+      if (split > 17) record(data.slice(17, split), data.slice(split + 1), reply)
     } else if (data.startsWith("clipboard_start,")) {
       const [, mime, size] = data.split(",")
       const declared = Number(size)
       assembly = null
+      const reply = takeReply()
       if (!mime || !Number.isSafeInteger(declared) || declared < 0) return
-      if (declared > MAX_CLIPBOARD_BYTES) recordOversized()
-      else assembly = { mime, declared, chunks: [], length: 0 }
+      if (declared > MAX_CLIPBOARD_BYTES) recordOversized(reply)
+      else assembly = { mime, declared, chunks: [], length: 0, reply }
     } else if (data.startsWith("clipboard_data,")) {
       if (!assembly) return
       const chunk = data.slice(15)
@@ -139,7 +152,7 @@
       assembly = null
       if (!done) return
       const encoded = done.chunks.join("")
-      if (base64Size(encoded) === done.declared) record(done.mime, encoded)
+      if (base64Size(encoded) === done.declared) record(done.mime, encoded, done.reply)
     }
   }
 
@@ -173,6 +186,7 @@
     watching.add(socket)
     latest = null
     assembly = null
+    replyPending = false
     heldModifiers = Object.create(null)
     const original = socket.send
     if (typeof original === "function") {
@@ -259,12 +273,14 @@
   // `none` when there is none). Selkies answers REQUEST_CLIPBOARD at once, so a
   // repeat of the cached content can arrive before the application publishes the
   // new selection. A copy shortcut on a connection that has announced nothing yet
-  // first asks for the current selection and waits for that answer (at most
-  // BASELINE_WAIT_MS), so the old selection is not taken for the copied one. When
-  // that answer is still missing, the shortcut goes out anyway and the first
-  // announcement afterwards may be the late answer rather than the copy, so it is
-  // held for BASELINE_GRACE_MS: a different announcement within that time wins, and
-  // otherwise the held one is the answer.
+  // first sends `cr` and waits for its reply (at most BASELINE_WAIT_MS), which
+  // Selkies tags with `clipboard_reply,cr` ahead of the payload, so the old
+  // selection is not taken for the copied one. Tagged payloads never end a request;
+  // they only set the baseline. When the reply is still missing, the shortcut goes
+  // out anyway and the first untagged announcement afterwards is held for
+  // BASELINE_GRACE_MS: the tagged reply arriving meanwhile settles it against the
+  // baseline, a different announcement within that time wins, and otherwise the
+  // held one is the answer.
   // Kinds `too-large` (an announcement above the cap), `unreadable` (data that is
   // not base64), `disconnected` and `refused` carry no content.
   const BASELINE_WAIT_MS = 500
@@ -304,8 +320,20 @@
     }
     const differs = (payload, other) => payload.oversized || !other || other.oversized || payload.mime !== other.mime || payload.encoded !== other.encoded
     const changed = payload => payload.sequence > started && differs(payload, baseline)
+    // The reply to the baseline request names the selection the guest held before
+    // the shortcut, so an announcement held as possibly that selection is judged
+    // against it.
+    const adopt = payload => {
+      baseline = payload
+      unbaselined = false
+      const pending = held
+      held = null
+      clearTimeout(graceTimer)
+      if (pending && differs(pending, payload)) finish(pending)
+    }
     const waiter = payload => {
       if (payload.sequence <= started) return
+      if (payload.reply) { if (unbaselined) adopt(payload); return }
       if (!unbaselined) { if (changed(payload)) finish(payload); return }
       if (!held) {
         held = payload
@@ -329,12 +357,12 @@
       send()
       unbaselined = !answered && !baseline
     }
-    const baselineWaiter = () => proceed(true)
+    const baselineWaiter = payload => { if (payload.reply) proceed(true) }
     const timer = setTimeout(() => { if (socketReady()) finish(latest); else answer("disconnected", NO_BODY()) }, wait)
     if (!socketReady()) { answer("disconnected", NO_BODY()); return }
     if (shortcut === true && !latest) {
       waiters.add(baselineWaiter)
-      const outcome = deliver(["REQUEST_CLIPBOARD"], false)
+      const outcome = deliver(["cr"], false)
       if (outcome !== "ok") { answer(outcome === "closed" ? "disconnected" : "refused", NO_BODY()); return }
       baselineTimer = setTimeout(() => proceed(false), Math.min(BASELINE_WAIT_MS, wait))
     } else send()
