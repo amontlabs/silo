@@ -18,6 +18,7 @@ import { ExportIncompleteError, type BackupArchive, type BackupController, type 
 import { checkpointUsageSchema, type ComputerCheckpointOperation } from "@/features/application/model/checkpoint-source"
 import type { StatusBarActions, StatusBarRoute } from "@/features/status-bar/status-bar-types"
 
+import { downloadOutcomeSchema, transferProgressEvent, transferProgressSchema, uploadOutcomeSchema } from "@/features/application/model/file-transfer"
 import { deviceSchema, connectionsStatusSchema, remoteComputerTarget, parseRemoteComputerTarget, computerTarget, type Device, type ConnectionsStatus } from "@/features/application/model/connections"
 
 type EventHandler = (event?: { payload: unknown }) => void
@@ -1741,6 +1742,16 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     authorizeDevice: address => native.invoke<void>("authorize_device", { address }),
     setupDeviceKey: address => native.invoke<void>("setup_device_key", { address }),
     listComputerDirectory: async (computer, path, offset, snapshotId) => directoryPageShape.parse(await native.invoke("list_computer_directory", { computer, path, offset, snapshotId: snapshotId ?? null })),
+    fileTransfers: {
+      chooseUploadFiles: async () => z.array(z.string()).parse(await native.invoke("choose_upload_files")),
+      upload: async ({ id, computer, directory, paths, conflict }) => uploadOutcomeSchema.parse(await native.invoke("upload_files", { transferId: id, computer, directory, paths, conflict })),
+      download: async ({ id, computer, path }) => downloadOutcomeSchema.parse(await native.invoke("download_file", { transferId: id, computer, path })),
+      cancel: async id => { await native.invoke("cancel_transfer", { transferId: id }) },
+      onProgress: handler => native.listen(transferProgressEvent, event => {
+        const parsed = transferProgressSchema.safeParse(event?.payload)
+        if (parsed.success) handler(parsed.data)
+      }),
+    },
     retryRuntimeChecks: () => { void refresh() },
     saveComputerConfiguration,
     dismissComputerConfigurationError: () => {

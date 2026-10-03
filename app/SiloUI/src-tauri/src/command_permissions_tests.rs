@@ -142,3 +142,53 @@ fn pre_upgrade_backup_commands_are_allowlisted_for_the_main_window_only() {
         }
     }
 }
+
+#[test]
+fn file_transfer_commands_are_limited_to_the_main_window_and_the_viewer_shell() {
+    let manifests: Value =
+        serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let holders = |permission: &str| -> Vec<String> {
+        let mut names: Vec<String> = capabilities
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(_, capability)| {
+                capability["permissions"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&Value::String(permission.into()))
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        names.sort();
+        names
+    };
+    for (command, viewer) in [
+        ("choose_upload_files", false),
+        ("download_file", false),
+        ("upload_files", true),
+        ("cancel_transfer", true),
+    ] {
+        let permission = format!("allow-{}", command.replace('_', "-"));
+        assert_eq!(
+            manifests["__app-acl__"]["permissions"][&permission]["commands"]["allow"],
+            serde_json::json!([command]),
+            "Tauri must generate a permission for {command}"
+        );
+        let expected: &[&str] = if viewer {
+            &["desktop-transfer", "preview"]
+        } else {
+            &["preview"]
+        };
+        assert_eq!(holders(&permission), expected, "{command}");
+    }
+    assert_eq!(
+        capabilities["desktop-transfer"]["webviews"],
+        serde_json::json!(["desktop-shell-*"])
+    );
+    assert!(capabilities["desktop-transfer"]["windows"]
+        .as_array()
+        .is_none_or(Vec::is_empty));
+}

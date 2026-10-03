@@ -2,7 +2,8 @@
 
 Implemented 2026-09-09. Files browses `/workspace` through the bundled runtime.
 The existing repository panel, computer filters, pane layout and folder rows remain.
-No content editor, upload, download, deletion, recursive search or automatic boot
+Single-file upload and download were added 2026-10-03 ([below](#upload-and-download)).
+No content editor, deletion, folder transfer, recursive search or automatic boot
 is included.
 
 ## Loading and refresh
@@ -41,6 +42,83 @@ initial status inspection has the existing runtime read timeout.
 Relevant pinned upstream source:
 - [CLI execution](https://github.com/superradcompany/microsandbox/blob/5eca4de8bf233e57f114140f8c076ea8c96f21ab/crates/cli/lib/commands/exec.rs)
 - [Rust sandbox implementation](https://github.com/superradcompany/microsandbox/tree/5eca4de8bf233e57f114140f8c076ea8c96f21ab/sdk/rust/lib/sandbox)
+
+## Upload and download
+
+Files uploads into the shown folder (**Upload files here** on the computer's root and
+on every folder row) and downloads from file rows (**Download**). Both appear only on
+the Files page; the status panel's folder picker has no transfer actions. Dropping
+files on the desktop viewer uploads them to the computer's Downloads folder (see
+[the viewer integration plan](SiloUI-VIEWER-INTEGRATION-PLAN.md#phase-4-file-upload-and-download)).
+
+### Mechanism
+
+`src-tauri/src/transfer.rs` runs the system OpenSSH `sftp` client (`/usr/bin/sftp`) in
+batch mode (`-b`) with the managed SSH configuration and ProxyCommand the editor and
+Git transport already use: `msb ssh serve --stdio --no-start` for a local computer,
+`silo --remote-guest` for a computer on another device. A stopped computer is never
+started ("Start this computer to transfer files."). The session runs as the working
+account, so uploaded files belong to `silo`. The shared function
+`editor::private_computer_transport` returns the alias and configuration for either
+kind of computer.
+
+Rejected, per the reuse policy in `AGENTS.md`:
+
+| Alternative | Why not |
+| --- | --- |
+| `msb copy` | Starts stopped computers, writes root-owned files, and has no progress API. |
+| `exec` with stdin | Needs a hand-written framing and integrity protocol. |
+| JSON frames over `silo-remote` | Frames are capped at 4 MiB and remote computers would need a second path. |
+| Selkies' own file transfer | Gives the guest page a channel to the device; it stays `none`. |
+| Reimplementing SFTP | `sftp` is maintained, ships with both supported hosts and already handles the protocol. |
+
+### Rules
+
+- Roots: `/workspace` and the working account's `~/Downloads`. The requested path is
+  checked lexically with `valid_path`, then the computer reports the folder's real
+  location (`cd` then `pwd`), which must also lie inside a root; a link that leaves the
+  roots is refused. Downloads additionally require the entry to be a regular file;
+  links and folders are refused.
+- Host names are sanitized (no `/`, NUL or control characters, not `.` or `..`, at most
+  255 bytes). Remote names reach `sftp` only through commands that do not expand
+  wildcards (`cd`, `put`, `rename`, bare `ls`); local sources are staged behind a fixed
+  symlink name. A file whose name contains `* ? [ ] { } \` cannot be downloaded, because
+  `get` would expand it; uploading such names works.
+- Conflicts are read from `ls -lan` after a `cd`. The first upload request uses the
+  `ask` policy and sends nothing when a name exists; the Silo dialog then repeats it
+  with Replace or Keep both (`name (1).ext`, default). Names repeated inside one batch
+  are numbered too. Replace refuses to overwrite a folder. The viewer drop always keeps
+  both.
+- Uploads write `.<name>.silo-part-<id>` (non-wildcard characters only) beside the
+  target and `rename` it into place; failed or cancelled uploads remove the partial
+  in a second short session. Downloads write a hidden partial beside the chosen
+  destination, check its size, and rename it; the destination comes from the backend
+  save dialog.
+- Free space is read with `df` when the guest's SFTP server supports it; otherwise the
+  check is skipped and a full disk is reported as a failed transfer.
+- Limits: 4 GiB per file, 8 GiB and 100 files per upload, one transfer at a time.
+  Throughput through the ProxyCommands has not been measured (plan item P8).
+- Progress arrives as `silo://transfer-progress` events. `sftp` prints no progress in
+  batch mode, so a download reports the size of its local partial and an upload asks the
+  computer for its partial's size every 1.5 s through a second short session. Cancel
+  ends the whole `sftp` process group (including the ProxyCommand) and removes the
+  partial.
+- The picker, dropped paths and save dialog are native; the frontend passes host paths
+  back to the backend but never reads file contents, and the guest page never receives
+  them. Only the main window can pick and download; the main window and desktop viewer
+  shells can upload (viewer shells only to Downloads), and the status panel can do
+  neither.
+
+### Needs live verification
+
+- Whether Tauri delivers drag-and-drop events for the window that hosts the guest child
+  webview on macOS and Linux (plan item P9). The shell window listens with
+  `onDragDropEvent`; if the child webview swallows drops, the drop target must move to
+  the shell window over the viewer area.
+- `sftp` behavior against a real guest (`posix-rename` for Replace, `df`, home folder
+  creation) and over a remote computer; automated tests use OpenSSH's `sftp-server`
+  on the test machine and scripted stand-ins.
+- Throughput (P8) and the cost of the progress probe on large uploads.
 
 ## Verification
 

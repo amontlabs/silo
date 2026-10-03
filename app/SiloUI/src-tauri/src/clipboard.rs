@@ -7,12 +7,19 @@
 //! The system clipboard lives in a process-lifetime static. On X11 and Wayland, arboard serves
 //! the selection from a background thread owned by the `Clipboard`; dropping it would end
 //! ownership, so the static is never dropped and shutdown never waits on it.
+//!
+//! Platform calls run on a dedicated worker thread and each caller waits a bounded time. A call
+//! that does not return in time is reported as unavailable and its worker is abandoned; the next
+//! call starts a fresh worker, up to a small cap on workers that are still stuck.
 
 #![allow(dead_code)]
 
 use std::fmt;
 use std::io::Cursor;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 
@@ -116,12 +123,12 @@ impl<R: RawClipboard> ClipboardService<R> {
     }
 }
 
-pub type SystemClipboard = ClipboardService<ArboardClipboard>;
+pub type SystemClipboard = ClipboardService<BoundedClipboard<ArboardClipboard>>;
 
 /// The device clipboard shared by the whole process.
 pub fn system() -> &'static SystemClipboard {
     static SYSTEM: OnceLock<SystemClipboard> = OnceLock::new();
-    SYSTEM.get_or_init(|| ClipboardService::new(ArboardClipboard::default()))
+    SYSTEM.get_or_init(|| ClipboardService::new(BoundedClipboard::new(ArboardClipboard::default)))
 }
 
 impl<R: RawClipboard> DeviceClipboard for ClipboardService<R> {
@@ -146,21 +153,26 @@ impl<R: RawClipboard> DeviceClipboard for ClipboardService<R> {
         let Some(image) = self.raw.get_image()? else {
             return Ok(None);
         };
-        let (width, height) = (image.width as u64, image.height as u64);
-        if width == 0 || height == 0 {
-            return Ok(None);
-        }
-        if width * height > limits.max_pixels {
+        let (Ok(width), Ok(height)) = (u32::try_from(image.width), u32::try_from(image.height))
+        else {
             return Err(ClipboardError::TooLarge {
                 limit: limits.max_pixels,
             });
+        };
+        if width == 0 || height == 0 {
+            return Ok(None);
         }
-        if image.rgba.len() as u64 != width * height * 4 {
+        check_pixels(width, height, limits)?;
+        let Some(expected) = rgba_len(width, height) else {
+            return Err(ClipboardError::TooLarge {
+                limit: limits.max_pixels,
+            });
+        };
+        if expected != image.rgba.len() {
             return Err(ClipboardError::Decode(
                 "pixel buffer does not match its dimensions".into(),
             ));
         }
-        let (width, height) = (image.width as u32, image.height as u32);
         let bytes = encode_png(width, height, image.rgba, limits.max_encoded_bytes)?;
         Ok(Some(PngBytes {
             bytes,
@@ -200,9 +212,28 @@ pub fn format_for_mime(mime: &str) -> ClipboardResult<ImageFormat> {
 }
 
 fn pixel_limits(limits: ImageLimits) -> Limits {
+    let side = u32::try_from(limits.max_pixels).unwrap_or(u32::MAX);
     let mut out = Limits::default();
+    out.max_image_width = Some(side);
+    out.max_image_height = Some(side);
     out.max_alloc = Some(limits.max_pixels.saturating_mul(8));
     out
+}
+
+/// Byte length of an RGBA8 buffer, or `None` when it does not fit in `usize`.
+fn rgba_len(width: u32, height: u32) -> Option<usize> {
+    (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)
+}
+
+fn check_pixels(width: u32, height: u32, limits: ImageLimits) -> ClipboardResult<()> {
+    match u64::from(width).checked_mul(u64::from(height)) {
+        Some(pixels) if pixels <= limits.max_pixels => Ok(()),
+        _ => Err(ClipboardError::TooLarge {
+            limit: limits.max_pixels,
+        }),
+    }
 }
 
 fn decode_image(bytes: &[u8], mime: &str, limits: ImageLimits) -> ClipboardResult<RawImage> {
@@ -232,17 +263,29 @@ fn decode_image(bytes: &[u8], mime: &str, limits: ImageLimits) -> ClipboardResul
     if width == 0 || height == 0 {
         return Err(ClipboardError::Decode("image has no pixels".into()));
     }
-    if u64::from(width) * u64::from(height) > limits.max_pixels {
+    check_pixels(width, height, limits)?;
+    if decoder.total_bytes() > limits.max_pixels.saturating_mul(8) {
         return Err(ClipboardError::TooLarge {
             limit: limits.max_pixels,
         });
     }
     let image =
         DynamicImage::from_decoder(decoder).map_err(|error| map_image_error(error, limits))?;
+    let (width, height) = (image.width(), image.height());
+    check_pixels(width, height, limits)?;
+    let len = rgba_len(width, height).ok_or(ClipboardError::TooLarge {
+        limit: limits.max_pixels,
+    })?;
+    let rgba = image.into_rgba8().into_raw();
+    if rgba.len() != len {
+        return Err(ClipboardError::Decode(
+            "pixel buffer does not match its dimensions".into(),
+        ));
+    }
     Ok(RawImage {
         width: width as usize,
         height: height as usize,
-        rgba: image.into_rgba8().into_raw(),
+        rgba,
     })
 }
 
@@ -298,6 +341,156 @@ impl ArboardClipboard {
         }
         let clipboard = guard.as_mut().expect("clipboard handle was just created");
         action(clipboard).map_err(map_arboard_error)
+    }
+}
+
+impl Drop for ArboardClipboard {
+    fn drop(&mut self) {
+        let handle = self
+            .handle
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        std::mem::forget(handle);
+    }
+}
+
+/// How long a caller waits for a platform clipboard call.
+const CALL_TIMEOUT: Duration = Duration::from_secs(3);
+/// Workers allowed to exist at once, counting abandoned ones that are still stuck.
+const MAX_WORKERS: usize = 3;
+
+type Job<R> = Box<dyn FnOnce(&R) + Send>;
+
+struct Worker<R> {
+    id: u64,
+    jobs: mpsc::Sender<Job<R>>,
+}
+
+/// Runs each [`RawClipboard`] call on a worker thread that owns the platform handle, so a call
+/// that never returns cannot block other callers. After a timeout the worker is abandoned and
+/// the next call creates a new one from `make`.
+pub struct BoundedClipboard<R: RawClipboard + 'static> {
+    make: Arc<dyn Fn() -> R + Send + Sync>,
+    timeout: Duration,
+    current: Mutex<Option<Worker<R>>>,
+    live: Arc<AtomicUsize>,
+    next_id: AtomicUsize,
+}
+
+impl<R: RawClipboard + 'static> BoundedClipboard<R> {
+    pub fn new(make: impl Fn() -> R + Send + Sync + 'static) -> Self {
+        Self::with_timeout(make, CALL_TIMEOUT)
+    }
+
+    pub fn with_timeout(make: impl Fn() -> R + Send + Sync + 'static, timeout: Duration) -> Self {
+        Self {
+            make: Arc::new(make),
+            timeout,
+            current: Mutex::new(None),
+            live: Arc::new(AtomicUsize::new(0)),
+            next_id: AtomicUsize::new(0),
+        }
+    }
+
+    fn sender(&self) -> ClipboardResult<(u64, mpsc::Sender<Job<R>>)> {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(worker) = current.as_ref() {
+            return Ok((worker.id, worker.jobs.clone()));
+        }
+        if self.live.load(Ordering::SeqCst) >= MAX_WORKERS {
+            return Err(ClipboardError::Unavailable(
+                "earlier clipboard calls have not returned".into(),
+            ));
+        }
+        let (jobs, queue) = mpsc::channel::<Job<R>>();
+        let make = Arc::clone(&self.make);
+        let live = Arc::clone(&self.live);
+        live.fetch_add(1, Ordering::SeqCst);
+        let spawned = std::thread::Builder::new()
+            .name("silo-clipboard".into())
+            .spawn({
+                let live = Arc::clone(&live);
+                move || {
+                    let raw = make();
+                    while let Ok(job) = queue.recv() {
+                        job(&raw);
+                    }
+                    live.fetch_sub(1, Ordering::SeqCst);
+                }
+            });
+        if let Err(error) = spawned {
+            live.fetch_sub(1, Ordering::SeqCst);
+            return Err(ClipboardError::Unavailable(error.to_string()));
+        }
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst) as u64;
+        *current = Some(Worker {
+            id,
+            jobs: jobs.clone(),
+        });
+        Ok((id, jobs))
+    }
+
+    fn abandon(&self, id: u64) {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if current.as_ref().is_some_and(|worker| worker.id == id) {
+            *current = None;
+        }
+    }
+
+    fn run<T: Send + 'static>(
+        &self,
+        call: impl FnOnce(&R) -> ClipboardResult<T> + Send + 'static,
+    ) -> ClipboardResult<T> {
+        let (id, jobs) = self.sender()?;
+        let (reply, answer) = mpsc::channel();
+        let job: Job<R> = Box::new(move |raw| {
+            let _ = reply.send(call(raw));
+        });
+        if jobs.send(job).is_err() {
+            self.abandon(id);
+            return Err(ClipboardError::Unavailable(
+                "the clipboard worker stopped".into(),
+            ));
+        }
+        match answer.recv_timeout(self.timeout) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => {
+                self.abandon(id);
+                Err(ClipboardError::Unavailable("timed out".into()))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                self.abandon(id);
+                Err(ClipboardError::Unavailable(
+                    "the clipboard worker stopped".into(),
+                ))
+            }
+        }
+    }
+}
+
+impl<R: RawClipboard + 'static> RawClipboard for BoundedClipboard<R> {
+    fn get_text(&self) -> ClipboardResult<Option<String>> {
+        self.run(|raw| raw.get_text())
+    }
+
+    fn set_text(&self, text: &str) -> ClipboardResult<()> {
+        let text = text.to_owned();
+        self.run(move |raw| raw.set_text(&text))
+    }
+
+    fn get_image(&self) -> ClipboardResult<Option<RawImage>> {
+        self.run(|raw| raw.get_image())
+    }
+
+    fn set_image(&self, image: RawImage) -> ClipboardResult<()> {
+        self.run(move |raw| raw.set_image(image))
     }
 }
 
@@ -431,6 +624,10 @@ pub mod fake {
 
         pub fn set_raw_text(&self, text: &str) {
             self.service.raw.set_text(text).unwrap();
+        }
+
+        pub fn set_raw_image(&self, width: usize, height: usize, rgba: Vec<u8>) {
+            *self.service.raw.image.lock().unwrap() = Some((width, height, rgba));
         }
 
         pub fn text(&self) -> Option<String> {
@@ -708,6 +905,187 @@ mod tests {
             ClipboardError::Unavailable(_)
         ));
         assert_eq!(absent_as_none::<u8>(Err(ClipboardError::Empty)), Ok(None));
+    }
+
+    fn small_limits(max_pixels: u64) -> ImageLimits {
+        ImageLimits {
+            max_encoded_bytes: usize::MAX,
+            max_pixels,
+        }
+    }
+
+    #[test]
+    fn every_format_is_capped_by_decoded_size() {
+        for (format, mime) in [
+            (ImageFormat::Png, "image/png"),
+            (ImageFormat::Jpeg, "image/jpeg"),
+            (ImageFormat::WebP, "image/webp"),
+            (ImageFormat::Bmp, "image/bmp"),
+        ] {
+            for (width, height) in [(16, 16), (1, 300), (300, 1)] {
+                let clipboard = FakeClipboard::default();
+                let bytes = encode(format, width, height);
+                let limits = small_limits(255);
+                assert_eq!(
+                    clipboard.write_image_from_encoded(&bytes, mime, limits),
+                    Err(ClipboardError::TooLarge { limit: 255 }),
+                    "{mime} {width}x{height}"
+                );
+                assert!(clipboard.image_rgba().is_none(), "{mime}");
+            }
+        }
+    }
+
+    #[test]
+    fn decoder_limits_cover_width_height_and_allocation() {
+        let limits = pixel_limits(small_limits(100));
+        assert_eq!(limits.max_image_width, Some(100));
+        assert_eq!(limits.max_image_height, Some(100));
+        assert_eq!(limits.max_alloc, Some(800));
+        let png = encode(ImageFormat::Png, 1, 150);
+        let mut reader = ImageReader::with_format(Cursor::new(&png), ImageFormat::Png);
+        reader.limits(limits);
+        assert!(matches!(
+            reader.into_decoder(),
+            Err(image::ImageError::Limits(_))
+        ));
+    }
+
+    #[test]
+    fn pixel_checks_do_not_overflow() {
+        assert!(check_pixels(u32::MAX, u32::MAX, small_limits(u64::MAX)).is_ok());
+        assert!(check_pixels(u32::MAX, u32::MAX, small_limits(1 << 40)).is_err());
+        assert_eq!(rgba_len(u32::MAX, u32::MAX), None);
+        assert!(check_pixels(10, 10, small_limits(100)).is_ok());
+        assert!(check_pixels(10, 11, small_limits(100)).is_err());
+        assert_eq!(rgba_len(3, 2), Some(24));
+    }
+
+    #[test]
+    fn oversized_raw_image_dimensions_are_rejected() {
+        let clipboard = FakeClipboard::default();
+        clipboard.set_raw_image(usize::MAX, usize::MAX, Vec::new());
+        assert!(matches!(
+            clipboard.read_image(small_limits(u64::MAX)),
+            Err(ClipboardError::TooLarge { .. })
+        ));
+        clipboard.set_raw_image(u32::MAX as usize, u32::MAX as usize, Vec::new());
+        assert!(matches!(
+            clipboard.read_image(small_limits(u64::MAX)),
+            Err(ClipboardError::TooLarge { .. })
+        ));
+    }
+
+    type Gate = Arc<(Mutex<bool>, std::sync::Condvar)>;
+
+    fn release(gate: &Gate) {
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+    }
+
+    /// A [`RawClipboard`] whose first text read on a shared counter blocks until the gate opens.
+    struct Blocking {
+        gate: Gate,
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl RawClipboard for Blocking {
+        fn get_text(&self) -> ClipboardResult<Option<String>> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                let mut open = self.gate.0.lock().unwrap();
+                while !*open {
+                    open = self.gate.1.wait(open).unwrap();
+                }
+            }
+            Ok(Some("ok".into()))
+        }
+        fn set_text(&self, _: &str) -> ClipboardResult<()> {
+            Ok(())
+        }
+        fn get_image(&self) -> ClipboardResult<Option<RawImage>> {
+            Ok(None)
+        }
+        fn set_image(&self, _: RawImage) -> ClipboardResult<()> {
+            Ok(())
+        }
+    }
+
+    fn new_gate() -> Gate {
+        Arc::new((Mutex::new(false), std::sync::Condvar::new()))
+    }
+
+    #[test]
+    fn stuck_call_times_out_and_later_calls_use_a_fresh_worker() {
+        let gate = new_gate();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let shared = Arc::clone(&gate);
+        let bounded = BoundedClipboard::with_timeout(
+            move || Blocking {
+                gate: Arc::clone(&shared),
+                reads: Arc::clone(&reads),
+            },
+            Duration::from_millis(100),
+        );
+        assert_eq!(
+            bounded.get_text(),
+            Err(ClipboardError::Unavailable("timed out".into()))
+        );
+        assert_eq!(bounded.get_text(), Ok(Some("ok".into())));
+        assert_eq!(bounded.set_text("x"), Ok(()));
+        release(&gate);
+    }
+
+    #[test]
+    fn stuck_workers_are_capped_and_recover_when_released() {
+        let gate = new_gate();
+        let shared = Arc::clone(&gate);
+        let bounded = BoundedClipboard::with_timeout(
+            move || Blocking {
+                gate: Arc::clone(&shared),
+                reads: Arc::new(AtomicUsize::new(0)),
+            },
+            Duration::from_millis(50),
+        );
+        for _ in 0..MAX_WORKERS {
+            assert_eq!(
+                bounded.get_text(),
+                Err(ClipboardError::Unavailable("timed out".into()))
+            );
+        }
+        let refused = bounded.get_text();
+        assert!(
+            matches!(&refused, Err(ClipboardError::Unavailable(why)) if why.contains("not returned")),
+            "{refused:?}"
+        );
+        release(&gate);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match bounded.get_text() {
+                Ok(text) => {
+                    assert_eq!(text.as_deref(), Some("ok"));
+                    break;
+                }
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                Err(error) => panic!("did not recover: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_clipboard_passes_results_through() {
+        let gate = new_gate();
+        release(&gate);
+        let bounded = BoundedClipboard::with_timeout(
+            move || Blocking {
+                gate: Arc::clone(&gate),
+                reads: Arc::new(AtomicUsize::new(0)),
+            },
+            Duration::from_secs(5),
+        );
+        assert_eq!(bounded.get_text(), Ok(Some("ok".into())));
+        assert_eq!(bounded.get_image().map(|image| image.is_none()), Ok(true));
     }
 
     /// Opt-in: touches the real device clipboard. Run with

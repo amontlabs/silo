@@ -14,6 +14,19 @@ exports[`native command permissions > pins every non-main window grant 1`] = `
     ],
   },
   {
+    "identifier": "desktop-transfer",
+    "permissions": [
+      "allow-cancel-transfer",
+      "allow-upload-files",
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
+    ],
+    "webviews": [
+      "desktop-shell-*",
+    ],
+    "windows": [],
+  },
+  {
     "identifier": "desktop-viewer",
     "permissions": [
       "allow-desktop-action",

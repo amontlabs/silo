@@ -64,7 +64,7 @@ fn cached_page(
     page(&snapshot.entries, offset, id)
 }
 
-fn valid_path(path: &str) -> bool {
+pub(crate) fn valid_path(path: &str) -> bool {
     path.len() <= 4096
         && !path.contains('\0')
         && (path == "/workspace"

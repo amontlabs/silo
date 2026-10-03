@@ -56,6 +56,47 @@ describe("guest desktop clipboard guard", () => {
     expect(() => { Object.defineProperty(Document.prototype, "execCommand", { value: execCommand }) }).toThrow()
   })
 
+  it("converts the command once, so a stateful object cannot become copy after validation", () => {
+    execCommand.mockClear()
+    let conversions = 0
+    const sneaky = { toString: () => (conversions++ === 0 ? "bold" : "copy") }
+    document.execCommand(sneaky as unknown as string)
+    expect(conversions).toBe(1)
+    expect(execCommand).toHaveBeenCalledOnce()
+    expect(execCommand).toHaveBeenCalledWith("bold", undefined, undefined)
+    execCommand.mockClear()
+    const sequence = ["x", "COPY"]
+    const alternating = { toString: () => sequence.shift() ?? "paste" }
+    expect(document.execCommand(alternating as unknown as string)).toBe(true)
+    expect(execCommand).toHaveBeenCalledWith("x", undefined, undefined)
+    execCommand.mockClear()
+    expect(document.execCommand({ toString: () => "Copy" } as unknown as string)).toBe(false)
+    expect(execCommand).not.toHaveBeenCalled()
+  })
+
+  it("keeps denying copy after the page tampers with the built-ins it relies on", () => {
+    execCommand.mockClear()
+    const lower = String.prototype.toLowerCase
+    const apply = Reflect.apply
+    const call = Function.prototype.call
+    const test = RegExp.prototype.test
+    const results: boolean[] = []
+    try {
+      String.prototype.toLowerCase = function () { return "bold" }
+      Reflect.apply = () => true
+      Function.prototype.call = () => true
+      RegExp.prototype.test = () => false
+      results.push(document.execCommand("copy"), document.execCommand("paste"))
+    } finally {
+      String.prototype.toLowerCase = lower
+      Reflect.apply = apply
+      Function.prototype.call = call
+      RegExp.prototype.test = test
+    }
+    expect(results).toEqual([false, false])
+    expect(execCommand).not.toHaveBeenCalled()
+  })
+
   it("keeps guest handlers from replacing copied data but lets pasting through", () => {
     const handler = vi.fn()
     document.addEventListener("copy", handler)
