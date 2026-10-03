@@ -645,12 +645,17 @@ and Rust code can start a transfer:
   content cached when the request started and keeps waiting while the content is
   unchanged, because Selkies answers `REQUEST_CLIPBOARD` at once with the old
   selection before the application publishes the new one; at the deadline it
-  falls back to the latest cached content. On a connection that has announced
-  nothing yet, a copy first sends `REQUEST_CLIPBOARD` alone and waits for its answer
-  (at most 0.5 s) as the baseline before pressing Ctrl+C. When that answer is still
-  missing, Ctrl+C goes out anyway and the first announcement afterwards is held for
-  0.3 s because it may be the late answer: a different announcement in that time is
-  the copy, and otherwise the held one is returned. Data that is not valid
+  falls back to the latest cached content. Selkies precedes the payload it sends
+  in answer to a `cr` request with `clipboard_reply,cr`, which unsolicited
+  announcements lack, and the bridge marks such payloads as replies: a reply never
+  ends a copy, it only sets the baseline. On a connection that has announced
+  nothing yet, a copy first sends `cr` alone and waits for its reply (at most
+  0.5 s) as the baseline before pressing Ctrl+C. When that reply is still missing,
+  Ctrl+C goes out anyway and the first announcement afterwards is held for 0.3 s
+  because it may be the late answer: the reply arriving meanwhile, in either order,
+  settles it (a held announcement that differs from the reply is the copy, an equal
+  one is old and the wait continues), a different announcement in that time is the
+  copy, and otherwise the held one is returned. Data that is not valid
   base64 is answered as kind `unreadable` ("content Silo cannot copy") after the
   request's waiter and timer are removed. An announcement above 24 MiB (or a
   declared size above it) replaces the cache with an oversized marker and is

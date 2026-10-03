@@ -98,8 +98,14 @@ Rejected, per the reuse policy in `AGENTS.md`:
   after the folder was inspected is never overwritten. The outcome is then read from
   exit statuses, never from listing text, which cannot keep a name's identity (a name can
   contain a newline and a forged row, and non-UTF-8 or Unicode names are escaped under a
-  `C` locale): a session of its own runs `df` on the exact partial name, then on the
-  exact target name, and `df` exits 0 only when that path exists. The partial present
+  `C` locale): a session of its own runs `cd` into the exact partial path, then
+  the exact target path. `cd` expands no wildcards and needs no server extension (`df`
+  exits 1 without `statvfs@openssh.com`, which is not an absence). The client resolves
+  the path and stats it, and words the outcomes from its own status text: exit 0 or
+  `Can't change directory: "..." is not a directory` means the path exists, and a stderr
+  of exactly `stat remote: No such file or directory` means it does not. Any other
+  output, such as a permission refusal, an unresolvable folder (`realpath ...`) or extra
+  lines, is an error and never an absence. The partial present
   means the name was taken, so the partial takes the next free `name (n)` (up to 8
   tries, then an error); only the target present means it was published; a check that
   fails, or neither name present, fails the upload and removes the partial. The outcome lists the

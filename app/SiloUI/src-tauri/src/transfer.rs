@@ -392,6 +392,16 @@ impl RunError {
     }
 }
 
+/// What the client prints when the final stat of `cd` finds no such file.
+const STAT_MISSING: &str = "stat remote: No such file or directory";
+
+/// The client's refusal to enter a path that exists but is not a directory.
+fn is_not_a_directory(message: &str) -> bool {
+    !message.contains(['\r', '\n'])
+        && message.starts_with("Can't change directory: \"")
+        && message.ends_with("\" is not a directory")
+}
+
 fn failure_message(stderr: &str, code: Option<i32>) -> String {
     let text = stderr.to_ascii_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
@@ -511,23 +521,25 @@ impl Sftp {
         }
     }
 
-    /// Whether `name` exists in `directory`, from the exit status of `df` on that exact
-    /// name in a session of its own. Nothing the computer prints is read, so no name it
-    /// invents or escapes can stand in for the one asked about.
+    /// Whether `name` exists in `directory`, from `cd` into that exact path in a session
+    /// of its own. `cd` does not expand wildcards and needs no server extension. The
+    /// client resolves the path and then stats it, and it words a missing name, a name
+    /// that is not a directory and every other failure differently, from its own status
+    /// text rather than the server's. Only a stderr that is exactly one of those two
+    /// messages settles the answer; a folder that cannot be resolved, a refusal or any
+    /// other output is an error, never an absence.
     fn exists(&self, directory: &str, name: &str, cancel: &AtomicBool) -> Result<bool, RunError> {
-        let batch = format!(
-            "cd {}\ndf {}\n",
-            quote(directory).map_err(RunError::Failed)?,
-            relative(name).map_err(RunError::Failed)?
-        );
+        quote(name).map_err(RunError::Failed)?;
+        let path = format!("{}/{name}", directory.trim_end_matches('/'));
+        let batch = format!("cd {}\n", quote(&path).map_err(RunError::Failed)?);
         let finished = self.execute(&batch, PROBE_LIMIT, cancel, None, &mut || None)?;
+        let errors = String::from_utf8_lossy(&finished.errors);
+        let message = errors.trim_end_matches(['\r', '\n']);
         match finished.code {
             Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            code => Err(RunError::Failed(failure_message(
-                &String::from_utf8_lossy(&finished.errors),
-                code,
-            ))),
+            Some(1) if message == STAT_MISSING => Ok(false),
+            Some(1) if is_not_a_directory(message) => Ok(true),
+            code => Err(RunError::Failed(failure_message(&errors, code))),
         }
     }
 
@@ -2624,7 +2636,11 @@ mod tests {
     #[test]
     fn a_publication_that_cannot_be_checked_is_an_error_not_an_upload() {
         let Some(world) = world() else { return };
-        intercepted(&world, "^df", "echo 'Connection closed' >&2; exit 255");
+        intercepted(
+            &world,
+            "^cd .*silo-part",
+            "echo 'Connection closed' >&2; exit 255",
+        );
         let cancel = AtomicBool::new(false);
         let sources = [source(&world, "a.txt", b"mine")];
         for policy in [ConflictPolicy::Ask, ConflictPolicy::KeepBoth] {
@@ -2725,6 +2741,167 @@ mod tests {
                     !world.sftp.exists(directory, name, &cancel).unwrap(),
                     "{name:?} must not match under {locale}"
                 );
+            }
+        }
+    }
+
+    /// Serves the local file system through OpenSSH's server with `refused` requests
+    /// denied, as a server built without them would answer.
+    fn without_requests(world: &World, refused: &str) {
+        fs::write(
+            &world.sftp.program,
+            format!(
+                "#!/bin/sh\nbatch=\nwhile [ $# -gt 0 ]; do case \"$1\" in -b) batch=$2; shift 2;; *) shift;; esac; done\nexec {SFTP} -D \"{} -P {refused}\" -b \"$batch\"\n",
+                server().unwrap(),
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn existence_does_not_need_the_statvfs_extension() {
+        let Some(world) = world() else { return };
+        without_requests(&world, "statvfs");
+        let cancel = AtomicBool::new(false);
+        let directory = world.roots[0].as_str();
+        let df = world.sftp.quick(
+            &format!("cd {}\ndf\n", quote(directory).unwrap()),
+            PROBE_LIMIT,
+        );
+        assert!(df.is_err(), "the server must refuse statvfs: {df:?}");
+        fs::write(world.remote.join("here.txt"), b"x").unwrap();
+        fs::create_dir(world.remote.join("dir")).unwrap();
+        for name in ["here.txt", "dir"] {
+            assert!(world.sftp.exists(directory, name, &cancel).unwrap());
+        }
+        assert!(!world.sftp.exists(directory, "gone.txt", &cancel).unwrap());
+        for policy in [ConflictPolicy::Ask, ConflictPolicy::KeepBoth] {
+            let sources = [source(&world, "here.txt", b"mine")];
+            let outcome = upload(
+                &world.sftp,
+                &control(&world, &cancel, &|_| {}),
+                directory,
+                &sources,
+                policy,
+                false,
+            )
+            .unwrap();
+            if policy == ConflictPolicy::KeepBoth {
+                let UploadOutcome::Done { names: stored } = outcome else {
+                    panic!("{outcome:?}")
+                };
+                assert_eq!(stored, ["here (1).txt"]);
+            }
+            let fresh = [source(&world, "fresh.txt", b"new")];
+            let again = upload(
+                &world.sftp,
+                &control(&world, &cancel, &|_| {}),
+                directory,
+                &fresh,
+                policy,
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                again,
+                UploadOutcome::Done {
+                    names: vec!["fresh.txt".into()]
+                }
+            );
+            fs::remove_file(world.remote.join("fresh.txt")).unwrap();
+        }
+        assert_eq!(fs::read(world.remote.join("here.txt")).unwrap(), b"x");
+        assert_eq!(names(&world.remote), ["dir", "here (1).txt", "here.txt"]);
+    }
+
+    #[test]
+    fn existence_never_expands_wildcards_and_refuses_names_it_cannot_quote() {
+        let Some(world) = world() else { return };
+        let cancel = AtomicBool::new(false);
+        let directory = world.roots[0].as_str();
+        for name in ["ab.txt", "a\\b", "x y", "[a]"] {
+            fs::write(world.remote.join(name), b"x").unwrap();
+        }
+        for name in ["a*", "a?.txt", "[ab]", "a\\*", "x*", "{ab.txt,x y}", "*"] {
+            assert!(
+                !world.sftp.exists(directory, name, &cancel).unwrap(),
+                "{name:?}"
+            );
+        }
+        for name in ["a\\b", "x y", "[a]"] {
+            assert!(world.sftp.exists(directory, name, &cancel).unwrap());
+        }
+        for name in ["new\nline", "tab\tname", ""] {
+            assert!(
+                matches!(
+                    world.sftp.exists(directory, name, &cancel),
+                    Err(RunError::Failed(_))
+                ),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_to_look_is_an_error_not_an_absence() {
+        let Some(world) = world() else { return };
+        let cancel = AtomicBool::new(false);
+        let directory = world.roots[0].as_str();
+        let absent_folder = world
+            .sftp
+            .exists(&format!("{directory}/nowhere"), "x", &cancel);
+        assert!(absent_folder.is_err(), "{absent_folder:?}");
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let parent = world.remote.join("locked");
+        fs::create_dir(&parent).unwrap();
+        fs::write(parent.join("inside"), b"x").unwrap();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0)).unwrap();
+        let blocked = world
+            .sftp
+            .exists(&format!("{directory}/locked"), "inside", &cancel);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(blocked.is_err(), "{blocked:?}");
+    }
+
+    #[test]
+    fn only_the_clients_own_wording_for_a_missing_name_counts_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = AtomicBool::new(false);
+        let cases: [(&str, Option<bool>); 9] = [
+            (
+                "printf 'stat remote: No such file or directory\\r\\n' >&2; exit 1",
+                Some(false),
+            ),
+            ("echo 'stat remote: No such file or directory' >&2; exit 1", Some(false)),
+            (
+                "echo 'Can'\\''t change directory: \"/r/x\" is not a directory' >&2; exit 1",
+                Some(true),
+            ),
+            ("exit 0", Some(true)),
+            ("echo 'stat remote: Permission denied' >&2; exit 1", None),
+            ("echo 'realpath /r/x: No such file' >&2; exit 1", None),
+            (
+                "printf 'warning\\nstat remote: No such file or directory\\n' >&2; exit 1",
+                None,
+            ),
+            ("echo 'stat remote: No such file or directory' >&2; exit 255", None),
+            (
+                "echo 'Can'\\''t change directory: \"x\" is not a directory\\nstat remote: Permission denied' >&2; exit 1",
+                None,
+            ),
+        ];
+        for (body, expected) in cases {
+            let sftp = scripted(dir.path(), body);
+            let found = sftp.exists("/r", "x", &cancel);
+            match expected {
+                Some(exists) => assert_eq!(found.unwrap(), exists, "{body}"),
+                None => assert!(
+                    matches!(found, Err(RunError::Failed(_))),
+                    "{body}: {found:?}"
+                ),
             }
         }
     }
