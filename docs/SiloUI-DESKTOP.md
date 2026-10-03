@@ -599,9 +599,10 @@ and Rust code can start a transfer:
   operation (`clipboard`, `capabilities`, `sent`). Nonces expire after the requested
   wait plus 5 seconds, a wrong nonce neither succeeds nor cancels the real one,
   and each operation has a byte cap (24 MiB clipboard, 4 KiB capabilities, no body
-  for `sent`) checked against `Content-Length` before the body is read. Sends can
-  be outstanding together (at most 16 `sent` nonces); the other operations keep one
-  request, which a newer one supersedes. Rejections are
+  for `sent`) checked against `Content-Length` before the body is read. Sends and
+  capability questions (the sound probe and the clipboard policy) can be outstanding
+  together (at most 16 nonces each); the clipboard keeps one request, which a newer one
+  supersedes. Rejections are
   logged with rate limiting. The accepted body goes to the waiting Rust caller.
 - *Page helper.* The script wraps `window.selkiesTransport` (the
   WebSocket-mode transport, absent in WebRTC mode; the helper reports that in
@@ -644,7 +645,11 @@ and Rust code can start a transfer:
   content cached when the request started and keeps waiting while the content is
   unchanged, because Selkies answers `REQUEST_CLIPBOARD` at once with the old
   selection before the application publishes the new one; at the deadline it
-  falls back to the latest cached content. An announcement above 24 MiB (or a
+  falls back to the latest cached content. On a connection that has announced
+  nothing yet, a copy first sends `REQUEST_CLIPBOARD` alone and waits for its answer
+  (at most 0.5 s) as the baseline before pressing Ctrl+C. Data that is not valid
+  base64 is answered as kind `unreadable` ("content Silo cannot copy") after the
+  request's waiter and timer are removed. An announcement above 24 MiB (or a
   declared size above it) replaces the cache with an oversized marker and is
   answered as `too-large` (Rust: "too large"), never with older content. A
   Selkies flavours envelope (`application/x-selkies-clipboard-flavours`, a JSON
@@ -675,8 +680,8 @@ Edit menu has matching *Paste into Computer* and *Copy from Computer* items that
 are enabled only while a viewer has focus. On Linux a GTK key handler on the
 viewer window handles Ctrl+Shift+V and Ctrl+Shift+C (plain Ctrl+C and Ctrl+V stay
 guest shortcuts), starting one transfer per physical press: further key-press
-events for a key still held are consumed without a transfer until its release (also
-consumed) or the window loses focus. The viewer window has no native menu bar, so
+events for a key still held are consumed without a transfer, even after Ctrl and Shift
+were released first, until its release (also consumed) or the window loses focus. The viewer window has no native menu bar, so
 the toolbar buttons are its menu equivalent. Other windows
 keep their normal Copy and Paste. The handlers are live and start the transfers
 described under *Clipboard behaviour* below.
@@ -737,7 +742,11 @@ bound to the window's own computer through `require_computer`, rejected from
 `main`, and run on a blocking worker through `with_bridge`:
 
 - `desktop_viewer_sound_support` asks the page for its capabilities, retrying for
-  up to 20 attempts (0.5 s apart) until the Selkies transport is open. The shell
+  up to 20 attempts (0.5 s apart) until the Selkies transport is open. One worker
+  probes a viewer at a time: a request made while it runs (a page reload) joins it and
+  restarts its probe for the newest page, so a page that reloads without answering
+  never accumulates workers. `desktop_viewer_sound_cancel` abandons the probe when the
+  shell leaves the display, and closing the viewer window does the same. The shell
   calls it only after the attach command succeeded, repeats a failed call every
   3 s (up to 40 times) while the display is still connecting, and calls it again
   after each page load: the native side emits `silo://desktop-viewer-page` to the

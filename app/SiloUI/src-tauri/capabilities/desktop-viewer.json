@@ -12,6 +12,7 @@
     "allow-desktop-viewer-attach",
     "allow-desktop-viewer-detach",
     "allow-desktop-viewer-sound-support",
+    "allow-desktop-viewer-sound-cancel",
     "allow-desktop-viewer-set-audio",
     "allow-desktop-viewer-reset-screen",
     "allow-desktop-viewer-clipboard",

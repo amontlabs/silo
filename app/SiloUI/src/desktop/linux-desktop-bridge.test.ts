@@ -296,6 +296,7 @@ describe("host bridge page helper", () => {
   })
 
   it("releases held modifiers around the Ctrl+C of a clipboard request too", async () => {
+    socket.receive(`clipboard,${b64("cached")}`)
     socket.send(`kd,${SHIFT_L}`)
     socket.sent.length = 0
     call("requestClipboard", "copy-1", 20, [...CHORD, "REQUEST_CLIPBOARD"], true)
@@ -316,6 +317,53 @@ describe("host bridge page helper", () => {
     socket.receive(`clipboard,${b64("new")}`)
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
     expect(body(posted()[0].init)).toBe("new")
+  })
+
+  it("asks for the current selection before a copy shortcut when nothing is cached, so the old selection is not taken for the copy", async () => {
+    call("requestClipboard", "fresh-1", 2000, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    expect(socket.sent).toEqual(["REQUEST_CLIPBOARD"])
+    socket.receive(`clipboard,${b64("old")}`)
+    expect(socket.sent).toEqual(["REQUEST_CLIPBOARD", ...CHORD, "REQUEST_CLIPBOARD"])
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
+    socket.receive(`clipboard,${b64("old")}`)
+    await flush()
+    expect(fetchMock).not.toHaveBeenCalled()
+    socket.receive(`clipboard,${b64("copied")}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("copied")
+  })
+
+  it("sends the copy shortcut after a short wait when the guest has no selection to report", async () => {
+    call("requestClipboard", "fresh-2", 2000, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    expect(socket.sent).toEqual(["REQUEST_CLIPBOARD"])
+    await vi.waitFor(() => expect(socket.sent).toEqual(["REQUEST_CLIPBOARD", ...CHORD, "REQUEST_CLIPBOARD"]))
+    socket.receive(`clipboard,${b64("first copy")}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("first copy")
+  })
+
+  it("does not send the copy shortcut once the request already ended", async () => {
+    call("requestClipboard", "fresh-3", 10, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["none"])
+    await new Promise(resolve => setTimeout(resolve, 600))
+    expect(socket.sent).toEqual(["REQUEST_CLIPBOARD"])
+  })
+
+  it("answers malformed clipboard data with an explicit failure and leaves nothing pending", async () => {
+    socket.receive("clipboard,!")
+    call("requestClipboard", "bad-1", 20, [])
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(requestKinds()).toEqual(["unreadable"])
+    expect(posted()[0].init.body).toHaveLength(0)
+    call("requestClipboard", "bad-2", 5000, [])
+    socket.receive("clipboard,@@")
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(requestKinds()).toEqual(["unreadable", "unreadable"])
+    socket.receive(`clipboard,${b64("later")}`)
+    await flush()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it("falls back to the cached clipboard when only repeats arrive before the deadline", async () => {

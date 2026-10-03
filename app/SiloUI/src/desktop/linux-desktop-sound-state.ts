@@ -76,6 +76,12 @@ export function useDesktopSound(computer: string, computerId: string, attached: 
     check()
     return () => { disposed = true; window.clearTimeout(timer) }
   }, [computer, attached, probeKey])
+  // A new page or connection restarts the native check by asking again; only
+  // leaving the display abandons it.
+  useEffect(() => {
+    if (!attached) return
+    return () => { void Promise.resolve(invoke("desktop_viewer_sound_cancel", { computer })).catch(() => {}) }
+  }, [computer, attached])
   useEffect(() => {
     if (!available) return
     void Promise.resolve(invoke("desktop_viewer_set_audio", { computer, muted, active: visible, revision: nextRevision() })).catch(() => {})

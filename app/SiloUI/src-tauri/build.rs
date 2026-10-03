@@ -32,6 +32,7 @@ fn main() {
             "desktop_viewer_attach",
             "desktop_viewer_detach",
             "desktop_viewer_sound_support",
+            "desktop_viewer_sound_cancel",
             "desktop_viewer_set_audio",
             "desktop_viewer_reset_screen",
             "desktop_viewer_clipboard",
