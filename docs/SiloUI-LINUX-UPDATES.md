@@ -63,7 +63,10 @@ GitHub Pages hosts the latest two complete releases, signed `InRelease` and
 `Release.gpg`, and deterministic package indexes. Signed metadata expires in
 14 days. Previously signed indexes are retained by hash for clients refreshing
 cached metadata. The job fails above a 900 MiB site budget; move the package pool
-to larger hosting before increasing retention. Failed builds leave the deployed
+to larger hosting before increasing retention. Packages stay about 35 MiB each because the
+~400 MiB guest VM image is no longer bundled: Silo downloads it on first use from the pinned
+guest-image release ([guest images](SiloUI-GUEST-IMAGES.md#download-on-first-use)).
+An APT repository holding two 0.11.x releases of both architectures was the cause of the earlier overrun. Failed builds leave the deployed
 site intact. Monitor workflow failures: expired metadata intentionally stops
 clients accepting stale updates. GitHub may disable scheduled workflows in a
 public repository after 60 days without activity; keep the schedule enabled.

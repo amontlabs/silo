@@ -113,7 +113,7 @@ the text default. The image describes itself in
 `capabilities`, `streamerVersion`).
 
 - **Host.** A new computer saved without a desktop setting gets one with
-  `Start desktop with computer` on when the bundled image is v4 or later
+  `Start desktop with computer` on when the pinned image is v4 or later
   (`desktop::default_new_computer_desktops`, applied when the configuration is saved),
   and `desktop.builtIn: true`. Creation then runs the same install action as the
   explicit flow, so no user step is needed. A new built-in computer always starts its

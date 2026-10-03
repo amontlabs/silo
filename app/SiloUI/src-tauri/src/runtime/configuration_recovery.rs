@@ -510,7 +510,7 @@ pub(super) fn normalize_desktop_intent(
         }
     }
     let mut request = journal.request.clone();
-    apply_desktop_defaults(paths, &known, &mut request);
+    apply_desktop_defaults(&known, &mut request);
     if request == journal.request {
         return Ok(journal);
     }

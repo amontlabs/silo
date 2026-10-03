@@ -1,6 +1,8 @@
-# Bundled Silo guest images
+# Silo guest images
 
-Silo ships one recommended Ubuntu 24.04 image for the app's CPU architecture.
+Silo uses one recommended Ubuntu 24.04 image for the app's CPU architecture. Installers do not
+contain it: Silo downloads it once, on first use ([below](#download-on-first-use)). Sections that
+describe verification of an image "bundled" in the app record releases up to 0.11.x.
 curl, Git, Git LFS, gh, CA certificates and Silo's credential helper are installed while
 building that image. The v3 image also bundles sudo, Python 3 and
 OpenSSH's SFTP server for offline working-account provisioning. Silo creates
@@ -78,21 +80,20 @@ The pinned action's [input contract](https://github.com/docker/setup-qemu-action
 and [implementation](https://github.com/docker/setup-qemu-action/blob/99012661954931238ded8c8b007157a8430204e1/src/main.ts)
 confirm the default is mutable and installation uses privileged containers.
 
-`app/SiloUI/guest-image/image-lock.json` pins the exact release archive SHA-256,
-length, uncompressed archive length and Docker config digest for each architecture.
-Normal `npm run runtime:prepare` downloads that exact archive once and stages it
-under `src-tauri/runtime/guest-image`. It does not require Docker. Cached or local
-artifacts must pass the same checksum; mismatches never silently reach an app.
+`app/SiloUI/guest-image/image-lock.json` pins the release URL (the repository's
+`guest-ubuntu-24.04-v4` release in `amontlabs/silo`), and for each architecture the exact release
+archive SHA-256, length, uncompressed archive length, image reference and Docker config digest.
+The lock is the single source of truth: the app embeds it at build time
+(`include_str!` in `src-tauri/src/guest_image.rs`) and downloads
+`<releaseUrl>/image-<arch>.tar.gz`. `npm run runtime:prepare` and the Tauri bundle no longer
+stage or contain the image, so it does not enter installers, updater archives or the APT
+repository. Changing the lock changes the next build and nothing else: published installers keep
+the image they were built with pinned.
 
-Preparation streams each archive through incremental SHA-256 verification into
-an exclusive temporary file beside its destination, then renames it only after
-verification succeeds. Cached guest archives are verified in 1 MiB chunks.
-Downloads stop at the architecture's pinned compressed length and have a
-10-minute deadline covering response headers and body. An interrupted,
-truncated, oversized or altered replacement leaves the previous archive and
-manifest intact. Local approved artifacts use the same streaming verifier.
-MicroSandbox, Git and Git LFS source downloads share the file pipeline; inputs
-without a pinned length have a 1 GiB cap, and license downloads have a 4 MiB cap.
+`runtime:prepare` streams the MicroSandbox, Git and Git LFS inputs through incremental SHA-256
+verification into an exclusive temporary file beside its destination, then renames it only after
+verification succeeds. Downloads of inputs without a pinned length have a 1 GiB cap, and license
+downloads have a 4 MiB cap.
 See [streaming build-input measurements](research/stream-build-inputs-2026-10-02.md)
 for peak memory, preparation timings and regression coverage.
 
@@ -261,12 +262,53 @@ in the same change.
 
 ## Runtime behavior
 
-The app validates the bundled image before importing it into its private
-MicroSandbox cache. It decompresses a bounded temporary Docker archive because
-the bundled runtime's `image load` does not accept an outer gzip stream. Creation
-uses the verified cached image with pulling disabled. Missing/corrupt/wrong-CPU
-images fail visibly; there is no package-install or online-image fallback.
-GitHub access, Git identity and secrets remain separate live configuration.
+The app downloads and verifies the pinned archive (below), then imports it into its private
+MicroSandbox cache. It decompresses a bounded temporary Docker archive because the bundled
+runtime's `image load` does not accept an outer gzip stream. Creation uses the verified cached
+image with pulling disabled. A missing, corrupt or wrong-CPU image fails visibly; there is no
+package-install or online-image fallback. GitHub access, Git identity and secrets remain
+separate live configuration.
+
+## Download on first use
+
+From the release after 0.11.x the image is prepared on the device by the background preparation described in
+[background preparation](SiloUI-PREPARATION.md). The decision and its numbers: the v4 archive is
+about 400 MiB compressed, which made installers and updates about 440 MiB instead of 35 MiB and
+pushed the APT repository past its [900 MiB budget](SiloUI-LINUX-UPDATES.md).
+
+- **When.** At launch, after the image cache repair, without the operation gate. A creation that
+  needs the image waits for the same work before it takes the gate, so "Creating a sandbox now
+  finishes everything" still holds; the creation toast shows "Waiting for the VM image" and the
+  preparation toast shows the download percentage.
+- **Already imported.** The check is `guest_image::is_imported_as`: the runtime cache holds the
+  pinned reference with the pinned config digest and materialized layers. A device that imported
+  the same image from an earlier Silo (bundled or downloaded) is ready at once, with no download
+  and no archive on disk. The image reference is unchanged by the repository move, so the cache
+  key matches.
+- **Where.** `<app data>/guest-image/<version>/image.tar.gz` (the app data directory is per
+  [channel](SiloUI-BUILD-CHANNELS.md), so Silo and Silo Dev never share it), mode 0444 in a 0555
+  folder, written by `preparation::download_and_publish` (the same code that publishes the LCU
+  archive). `RuntimePaths.guest_image` is that root. The archive stays after the import so a
+  device that loses its cache or selects another storage location imports it again without the
+  network.
+- **How.** `chatgpt_app::HttpDownloader`: unauthenticated HTTPS only, at most five redirects
+  (release assets redirect to `objects.githubusercontent.com`), no GitHub token, resume of a
+  partial file in `.download/<version>-image.tar.gz.part`, five attempts with backoff, a hard
+  stop at the pinned length. Free space for the missing bytes is checked first. The size and the
+  SHA-256 must both match the lock before the file is published atomically (staging directory,
+  rename); a mismatch deletes the partial file and fails with "did not match its checksum and was
+  removed. Retry." Older versions and stale partial files are removed after a publish.
+- **Messages.** Retryable: "Silo could not download the VM image. Check your network connection,
+  then retry." (with Retry in the toast). A 404 or 410: "The VM image is no longer available at
+  its pinned location. Update Silo." Low space: "Free at least N MiB to prepare Silo's VM image,
+  then retry."
+- **Remote computers.** The other device runs the same app, so its own preparation downloads the
+  image for its architecture and a creation requested over the connection waits for it there.
+  Remote creation keeps its 35-minute request window.
+- **Live tests** that need a real image place the verified archive at
+  `src-tauri/runtime/guest-image/<version>/image.tar.gz` (download
+  `<releaseUrl>/image-<arch>.tar.gz` and check it against the lock) or set
+  `SILO_TEST_GUEST_ARCHIVE` for the ignored import test.
 
 ## Sources
 

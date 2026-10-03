@@ -389,8 +389,12 @@ manager and never replace package-owned binaries in place. See
 Intel macOS and Windows are unsupported.
 Linux packages keep runtime/Git helpers in `/usr/libexec/silo/tools`; they never
 overwrite system Git in `/usr/bin`. AppImage keeps its helpers inside the image.
-The guest image, native runtime, host Git/LFS tools and notices are packaged with
-the application; existing computer disks are not release assets.
+The native runtime, host Git/LFS tools and notices are packaged with
+the application. The guest VM image is not: Silo downloads it once from the pinned
+guest-image release on first use ([guest images](SiloUI-GUEST-IMAGES.md#download-on-first-use)),
+which keeps installers and updates near 35 MiB. Existing computer disks are not release assets.
+A change to `guest-image/image-lock.json` is embedded in the next app build; publish the guest
+release assets before releasing an app that pins them, because the app downloads them directly.
 
 ### Signing setup
 
@@ -571,8 +575,9 @@ use the selected compiler's GOROOT with further toolchain switching disabled.
 The LFS manifest also records every bundled license file's SHA256; both caches
 reject missing, changed or unexpected notices instead of packaging an incomplete
 notice tree alongside a valid executable.
-Keys include the runner, target, Rust and selected Go versions, staging scripts, runtime patch,
-and guest lockfile, so app version changes alone do not invalidate the runtime.
+Keys include the runner, target, Rust and selected Go versions, staging scripts and runtime patch,
+so app version changes alone do not invalidate the runtime. The guest image is not part of the
+runtime cache.
 Preparation always verifies and stages restored inputs and regenerates package
 metadata. Cache misses follow the normal build path.
 
@@ -749,7 +754,7 @@ exit, and checks that `waitpid` reports no unreaped child.
 
 ### Disk-space diagnostic units
 
-Low-space messages for update installation, bundled computer image preparation, and
+Low-space messages for update installation, computer image preparation, and
 ChatGPT app downloads express their existing binary byte calculations as MiB.
 [NIST's binary-prefix definitions](https://physics.nist.gov/cuu/Units/binary.html)
 distinguish one MiB (1,048,576 bytes) from one MB (1,000,000 bytes). The previous MB

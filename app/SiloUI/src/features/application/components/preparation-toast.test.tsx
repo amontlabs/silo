@@ -36,7 +36,7 @@ describe("PreparationToast", () => {
     const { emit } = mount({ image: task("running"), lcu: task("pending") })
     await act(async () => { await vi.advanceTimersByTimeAsync(PREPARATION_SHOW_DELAY_MS + 50) })
     expect(screen.getByText("Preparing Silo")).toBeInTheDocument()
-    expect(screen.getAllByText("Importing the VM image (first time only)").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Preparing the VM image (first time only)").length).toBeGreaterThan(0)
     expect(dismiss).not.toHaveBeenCalledWith("preparation")
     emit({ image: task("ready"), lcu: task("ready") })
     await act(async () => { await vi.advanceTimersByTimeAsync(PREPARATION_HIDE_DELAY_MS + 50) })

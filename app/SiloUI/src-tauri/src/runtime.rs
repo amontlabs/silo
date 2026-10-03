@@ -776,11 +776,17 @@ fn paths_for_storage(app: &AppHandle, storage: &Path) -> Result<RuntimePaths, St
         .resource_dir()
         .map_err(|error| format!("Silo could not locate its bundled resources: {error}"))?;
     let user_home = app.path().home_dir().map_err(|error| error.to_string())?;
+    let guest_image = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Silo could not locate its application storage: {error}"))?
+        .join("guest-image");
     Ok(paths_in_storage(
         executable,
         &resource_dir,
         &user_home,
         storage,
+        guest_image,
     ))
 }
 
@@ -789,6 +795,7 @@ fn paths_in_storage(
     resource_dir: &Path,
     user_home: &Path,
     storage: &Path,
+    guest_image: PathBuf,
 ) -> RuntimePaths {
     let library = bundled_runtime_library(
         &executable,
@@ -798,7 +805,7 @@ fn paths_in_storage(
     let storage_home = storage.join("microsandbox");
     let home = runtime_home_alias(user_home, &storage_home);
     RuntimePaths {
-        guest_image: resource_dir.join("guest-image"),
+        guest_image,
         executable,
         home,
         storage_home: Some(storage_home),
@@ -964,7 +971,7 @@ impl RuntimeRunner for SetupRunner<'_> {
             .find(|pair| pair[0] == "--name")
             .map(|pair| pair[1].as_str())
             .unwrap_or("");
-        // The first computer on a device imports the bundled image, one blocking runtime
+        // The first computer on a device imports the VM image, one blocking runtime
         // call with no progress output of its own.
         if matches!(args, [first, second, ..] if first == "image" && second == "load") {
             (self.publish)(computer_progress(
@@ -3428,7 +3435,7 @@ fn computer_progress(
         ("computer-configuration", _) => format!("{computer} configured."),
         ("computer-verification", 0) => format!("Verifying {computer}…"),
         ("computer-verification", _) => format!("{computer} verified."),
-        ("computer-image-preparation", _) => "Preparing the bundled VM image…".into(),
+        ("computer-image-preparation", _) => "Preparing the VM image…".into(),
         ("computer-image-import", _) => {
             "Importing the VM image (first time only, about a minute)…".into()
         }
@@ -3512,7 +3519,7 @@ fn creation_needs(
     let Ok(previous) = read_metadata(&paths.metadata) else {
         return Default::default();
     };
-    apply_desktop_defaults(paths, &previous, &mut request);
+    apply_desktop_defaults(&previous, &mut request);
     let mut needs = crate::creation_inputs::Needs::default();
     for configuration in request.computers.iter() {
         if previous
@@ -4069,7 +4076,7 @@ fn apply_configuration_with_progress(
     validate_request(&request).map_err(|e| e.to_string())?;
     validate_requested_resources(&request, &resources).map_err(|e| e.to_string())?;
     let previous = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
-    apply_desktop_defaults(paths, &previous, &mut request);
+    apply_desktop_defaults(&previous, &mut request);
     configuration_recovery::prepare_retry(&ProcessRunner, paths, Some(&request))
         .map_err(|e| e.to_string())?;
     let retry_computer = retry_computer.or_else(|| {
@@ -5204,16 +5211,15 @@ fn apply_whole_configuration(
 /// with or recorded in the configuration journal, so a resubmitted failed creation
 /// matches the journaled (already defaulted) request.
 fn apply_desktop_defaults(
-    paths: &RuntimePaths,
     previous: &ComputerConfigurationRequest,
     request: &mut ComputerConfigurationRequest,
 ) {
-    // Tests never depend on which image happens to be bundled in `runtime/`: they
-    // run as a v3 image unless they pin another version (`guest_image::pin_test_version`).
+    // Tests never depend on which image the lock pins: they run as a v3 image unless
+    // they pin another version (`guest_image::pin_test_version`).
     #[cfg(test)]
     let version = guest_image::test_version();
     #[cfg(not(test))]
-    let version = guest_image::bundled_version(&paths.guest_image);
+    let version = guest_image::pinned_version();
     apply_desktop_defaults_for(version.as_deref(), previous, request);
 }
 
@@ -5242,7 +5248,7 @@ fn apply_whole_configuration_with_progress(
     let _attempt = configuration_recovery::attempt();
     validate_request(&request)?;
     let previous = read_metadata(&paths.metadata)?;
-    apply_desktop_defaults(paths, &previous, &mut request);
+    apply_desktop_defaults(&previous, &mut request);
     if retry_computer.is_some_and(|name| {
         !request
             .computers
@@ -5664,8 +5670,7 @@ pub(crate) fn create_disposable_desktop_computer(
     request.computers.push(configuration);
     // Unit tests default to a v3 image; a live run uses the image it was given, so a
     // v4 image makes the new computer built in exactly as the app does.
-    let _pin = guest_image::bundled_version(&paths.guest_image)
-        .map(|version| guest_image::pin_test_version(&version));
+    let _pin = guest_image::pinned_version().map(|version| guest_image::pin_test_version(&version));
     apply_whole_configuration(&ProcessRunner, paths, &device_resources()?, request)?;
     read_metadata(&paths.metadata)?
         .computers
@@ -7245,7 +7250,7 @@ esac
     fn bundled_image_preparation_reports_its_actual_stage() {
         let _test_state = crate::test_support::global_state();
         let event = computer_progress("attempt", "computer-image-preparation", "dev", 0);
-        assert_eq!(event.message, "Preparing the bundled VM image…");
+        assert_eq!(event.message, "Preparing the VM image…");
     }
 
     #[test]
@@ -8490,7 +8495,7 @@ esac
         ));
         // Replay defaults the same way and must now match the saved intent.
         let mut replayed = old.clone();
-        apply_desktop_defaults(&paths, &journal.previous, &mut replayed);
+        apply_desktop_defaults(&journal.previous, &mut replayed);
         configuration_recovery::begin(&paths, &replayed).unwrap();
         let saved = configuration_recovery::pending_request(&paths)
             .unwrap()
@@ -8636,22 +8641,20 @@ esac
 
     #[test]
     fn tests_run_as_a_v3_image_unless_they_pin_another_version() {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        let defaulted = |paths: &RuntimePaths| {
+        let defaulted = || {
             let mut request = request(vec![computer()]);
-            apply_desktop_defaults(paths, &request_without_computers(), &mut request);
+            apply_desktop_defaults(&request_without_computers(), &mut request);
             request.computers[0].clone()
         };
-        // Whatever image is bundled in `runtime/`, the default is a plain v3 computer.
-        let plain = defaulted(&paths);
+        // Whatever image the lock pins, the default is a plain v3 computer.
+        let plain = defaulted();
         assert!(!crate::computer_use::is_built_in(&plain), "{plain:?}");
         {
             let _v4 = guest_image::pin_test_version("ubuntu-24.04-v4");
-            let built_in = defaulted(&paths);
+            let built_in = defaulted();
             assert!(crate::computer_use::is_built_in(&built_in), "{built_in:?}");
         }
-        let plain = defaulted(&paths);
+        let plain = defaulted();
         assert!(!crate::computer_use::is_built_in(&plain), "{plain:?}");
     }
 

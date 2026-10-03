@@ -2,7 +2,7 @@ import type { PreparationBackend, PreparationStatus, PreparationTask } from "@/d
 
 // Deterministic fixtures for the background preparation toast. Select with `?preparation=<name>`
 // in the browser preview (combine with `&chatgpt=downloading`); nothing here reaches Silo services.
-export const preparationFixtureNames = ["importing", "downloading-lcu", "both", "failed", "ready"] as const
+export const preparationFixtureNames = ["downloading-image", "importing", "downloading-lcu", "both", "failed", "ready"] as const
 export type PreparationFixtureName = typeof preparationFixtureNames[number]
 
 export function preparationFixtureFromSearch(search: string): PreparationFixtureName | undefined {
@@ -14,6 +14,7 @@ const task = (state: PreparationTask["state"], extra: Partial<PreparationTask> =
 
 export function fixturePreparationStatus(name: PreparationFixtureName): PreparationStatus {
   switch (name) {
+    case "downloading-image": return { image: task("running", { fraction: 42 }), lcu: task("pending") }
     case "importing": return { image: task("running"), lcu: task("pending") }
     case "downloading-lcu": return { image: task("ready"), lcu: task("running") }
     case "both": return { image: task("running"), lcu: task("running") }
