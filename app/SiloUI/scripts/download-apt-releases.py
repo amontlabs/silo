@@ -9,12 +9,26 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
 
 def gh(*args):
     return subprocess.check_output(['gh', *args], text=True)
+
+
+def attested(tag, target, repository, required):
+    """Fails unless the bytes match the digest GitHub attested at publication."""
+    for name in ('Silo-linux-x64.deb', 'Silo-linux-arm64.deb'):
+        args = ['gh', 'release', 'verify-asset', tag, str(target / name), '--repo', repository]
+        result = subprocess.run(args, check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            continue
+        if not required and 'no attestations' in result.stdout + result.stderr:
+            return False
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+    return True
 
 
 def download(output, repository):
@@ -25,7 +39,7 @@ def download(output, repository):
     if not stable or stable[0]['tag_name'] != latest['tag_name']:
         raise ValueError('Latest release must be the highest published stable version')
     output.mkdir(parents=True, exist_ok=False)
-    for release in stable[:2]:
+    for index, release in enumerate(stable[:2]):
         if release.get('immutable') is not True:
             raise ValueError(f"{release['tag_name']} is not an immutable release; enable release immutability before publishing")
         version = release['tag_name'][1:]
@@ -42,8 +56,11 @@ def download(output, repository):
             package = target / name
             if package.is_symlink() or hashlib.sha256(package.read_bytes()).hexdigest() != hashes.get(name):
                 raise ValueError('Release package checksum mismatch')
-            # Fails unless the bytes match the digest GitHub attested at publication.
-            subprocess.run(['gh', 'release', 'verify-asset', release['tag_name'], str(package), '--repo', repository], check=True)
+        if not attested(release['tag_name'], target, repository, required=index == 0):
+            # Releases published before the repository moved carry no attestation for it;
+            # the predecessor is left out rather than published unverified.
+            shutil.rmtree(target)
+            print(f"Leaving out {release['tag_name']}: GitHub has no release attestation for it in {repository}")
     (output / 'latest-version').write_text(latest['tag_name'])
 
 

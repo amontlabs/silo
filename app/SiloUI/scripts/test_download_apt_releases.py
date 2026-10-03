@@ -13,7 +13,7 @@ spec.loader.exec_module(module)
 
 
 class DownloadTests(unittest.TestCase):
-    def download(self, latest='v0.2.0', tamper=False, mutable=(), unattested=()):
+    def download(self, latest='v0.2.0', tamper=False, mutable=(), unattested=(), missing=()):
         releases = [dict(tag_name=v, draft=d, prerelease=False, immutable=v not in mutable) for v, d in [('v0.3.0', True), ('v0.1.0', False), ('v0.2.0', False)]]
         self.verified = []
         def gh(*args):
@@ -21,13 +21,15 @@ class DownloadTests(unittest.TestCase):
             return json.dumps({'tag_name': latest} if args[-1].endswith('/latest') else [releases])
         def fetch(args, **kwargs):
             self.assertEqual(args[args.index('--repo') + 1], 'example/fork')
-            self.assertTrue(kwargs['check'])
             if args[:3] == ['gh', 'release', 'verify-asset']:
                 tag, package = args[3], Path(args[4])
                 if tag in unattested:
-                    raise subprocess.CalledProcessError(1, args)
+                    return subprocess.CompletedProcess(args, 1, '', 'digest mismatch for asset')
+                if tag in missing:
+                    return subprocess.CompletedProcess(args, 1, '', f'no attestations for tag {tag} (sha1:0000)')
                 self.verified.append((tag, package.name))
-                return subprocess.CompletedProcess(args, 0)
+                return subprocess.CompletedProcess(args, 0, '', '')
+            self.assertTrue(kwargs['check'])
             self.assertEqual(args[:3], ['gh', 'release', 'download'])
             directory = Path(args[args.index('--dir') + 1])
             sums = []
@@ -68,3 +70,16 @@ class DownloadTests(unittest.TestCase):
     def test_rejects_a_mutable_release(self):
         with self.assertRaisesRegex(ValueError, 'not an immutable release'):
             self.download(mutable=('v0.1.0',))
+
+    def test_rejects_a_mismatched_attestation_for_the_latest_release(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.download(unattested=('v0.2.0',))
+
+    def test_requires_an_attestation_for_the_latest_release(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.download(missing=('v0.2.0',))
+
+    def test_leaves_out_a_predecessor_without_any_attestation(self):
+        output = self.download(missing=('v0.1.0',))
+        self.assertEqual({p.name for p in output.iterdir() if p.is_dir()}, {'0.2.0'})
+        self.assertEqual(sorted(self.verified), [('v0.2.0', 'Silo-linux-arm64.deb'), ('v0.2.0', 'Silo-linux-x64.deb')])
