@@ -527,19 +527,19 @@ def launch_managed_process(name, argv, environment, account):
     return child, dict(name=name, pid=child.pid, **current)
 
 
-def run_xrandr(arguments, environment, account):
+def run_xrandr(arguments, environment, account, timeout=XRANDR_TIMEOUT_SECONDS):
     try:
         result = subprocess.run(['xrandr', *arguments], env=environment, capture_output=True,
-                                text=True, timeout=XRANDR_TIMEOUT_SECONDS,
+                                text=True, timeout=timeout,
                                 preexec_fn=account_demoter(account), close_fds=True)
     except (OSError, subprocess.SubprocessError) as error:
         raise RuntimeError(f'xrandr could not run: {error}') from None
     return result
 
 
-def xrandr_screen(environment, account):
+def xrandr_screen(environment, account, timeout=XRANDR_TIMEOUT_SECONDS):
     """Return (output, current size, listed mode names) from `xrandr --query`, or None."""
-    result = run_xrandr(['--query'], environment, account)
+    result = run_xrandr(['--query'], environment, account, timeout)
     if result.returncode != 0:
         return None
     current = re.search(r'current (\d+) x (\d+)', result.stdout)
@@ -556,14 +556,18 @@ def set_desktop_start_size(environment, account):
     name = f'{width}x{height}'
     screen = None
     deadline = time.monotonic() + XRANDR_READY_SECONDS
+    # Each query may run only as long as the readiness window has left.
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         try:
-            screen = xrandr_screen(environment, account)
+            screen = xrandr_screen(environment, account, min(XRANDR_TIMEOUT_SECONDS, remaining))
         except RuntimeError:
             screen = None
-        if screen or time.monotonic() >= deadline:
+        if screen:
             break
-        time.sleep(0.2)
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
     if not screen:
         raise RuntimeError('Xvfb did not report a RandR output; check that xrandr and the RANDR extension are available')
     output, current, modes = screen

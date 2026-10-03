@@ -184,24 +184,29 @@ def spawn(name, argv, env, account):
         reap_spawned_child(child)
         raise
 
-def set_start_size(env, account, ready_seconds=10, sleep=time.sleep):
-    def xrandr(*arguments):
-        return subprocess.run(["xrandr", *arguments], env=env, capture_output=True, text=True, timeout=10,
+def set_start_size(env, account, ready_seconds=10, sleep=time.sleep, clock=time.monotonic):
+    def xrandr(*arguments, timeout=10):
+        return subprocess.run(["xrandr", *arguments], env=env, capture_output=True, text=True, timeout=timeout,
                               preexec_fn=lambda: (os.initgroups(USER, account.pw_gid),
                                                   os.setgid(account.pw_gid), os.setuid(account.pw_uid)))
-    def query_screen():
-        query = xrandr("--query")
+    def query_screen(timeout=10):
+        try:
+            query = xrandr("--query", timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
         output = re.search(r"^(\S+) connected", query.stdout, re.MULTILINE)
         current = re.search(r"current (\d+) x (\d+)", query.stdout)
         if query.returncode != 0 or not output or not current:
             return None
         return query.stdout, output.group(1), f"{current.group(1)}x{current.group(2)}"
     screen = None
-    for _ in range(max(1, int(ready_seconds * 5))):
-        screen = query_screen()
+    deadline = clock() + ready_seconds
+    # Each query may run only as long as the readiness window has left.
+    while clock() < deadline:
+        screen = query_screen(min(10, deadline - clock()))
         if screen:
             break
-        sleep(.2)
+        sleep(max(0, min(.2, deadline - clock())))
     if not screen:
         fail("xrandr found no Xvfb output; check x11-xserver-utils and the RANDR extension")
     listing, output, current = screen

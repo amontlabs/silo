@@ -97,10 +97,21 @@ it. A computer with a recipe 2 receipt therefore keeps its old service and old
 Selkies flags (no clipboard, no resize, default audio) until its owner updates it.
 The host does not rely on the installed helper to notice this: `status_with` in
 `src/desktop.rs` also reads `/var/lib/silo-desktop/streamer.json` in the same guest
-command and compares its `recipeVersion` with the bundled lock's. A selkies receipt
-from 1 up to (not including) the bundled revision sets `updateAvailable` and clears
-`updateRequired`, whatever an older helper reported; a current receipt clears both;
-a missing or unrecognized receipt keeps the helper's own values. A computer on
+command and compares its `recipeVersion` with the bundled lock's, but only when the
+helper itself reports the `selkies` backend, because that means the installed helper
+validated the receipt and can run it. For such a helper, a receipt from 1 up to (not
+including) the bundled revision sets `updateAvailable` and clears `updateRequired`
+(an older helper called a runnable recipe 1 or 2 required), and a current receipt
+clears `updateAvailable`. A helper that reports no backend has rejected the receipt
+(invalid fields, unsafe permissions, a missing Selkies executable, or a revision it
+does not know, which includes a helper from before the bundled recipe seeing a
+current receipt), so its `updateRequired` always stands and Start is replaced by
+Update. A missing or unrecognized receipt keeps the helper's own values. The
+receipt is read by a short `python3` snippet in the guest that opens it with
+`O_NOFOLLOW|O_NONBLOCK`, accepts only a regular file of at most 4 KiB owned by root
+that group and others cannot write, and prints an empty line otherwise (also when
+`python3` is missing), so a symlink, a pipe or a huge file can neither redirect the
+read nor stall the status command. A computer on
 another device is read by its owner Silo, which applies the same rule; an owner
 that predates this change still reports only `updateRequired`, so its viewer keeps
 showing "Update desktop" alone, and a viewer that predates it ignores
@@ -585,10 +596,12 @@ and Rust code can start a transfer:
   script produces are kept in `desktop_bridge_contract.json`, which both the
   script's test and the Rust parser's test read. A request needs the viewer's cookie, the
   `POST` method, and a single-use nonce that Rust issued for that viewer and
-  operation (`clipboard`, `capabilities`). Nonces expire after the requested
+  operation (`clipboard`, `capabilities`, `sent`). Nonces expire after the requested
   wait plus 5 seconds, a wrong nonce neither succeeds nor cancels the real one,
-  and each operation has a byte cap (24 MiB clipboard, 4 KiB capabilities)
-  checked against `Content-Length` before the body is read. Rejections are
+  and each operation has a byte cap (24 MiB clipboard, 4 KiB capabilities, no body
+  for `sent`) checked against `Content-Length` before the body is read. Sends can
+  be outstanding together (at most 16 `sent` nonces); the other operations keep one
+  request, which a newer one supersedes. Rejections are
   logged with rate limiting. The accepted body goes to the waiting Rust caller.
 - *Page helper.* The script wraps `window.selkiesTransport` (the
   WebSocket-mode transport, absent in WebRTC mode; the helper reports that in
@@ -602,6 +615,42 @@ and Rust code can start a transfer:
   change, because its gain node exists only once audio flows. The script still
   locks the web clipboard APIs and now also makes `getUserMedia` and
   `getDisplayMedia` always reject.
+- *Acknowledged sends.* `sendFrames` and `sendShortcut` take a nonce and post
+  the outcome to `/__silo/v1/sent` (`ok`, `closed` when the transport is absent
+  or not open, `refused` for a frame outside the allow-list). Rust waits up to 3 s
+  for it, so Paste and the screen reset succeed only when the socket took every
+  frame, and a closed transport surfaces as "The desktop is not connected."
+  `requestClipboard` answers `disconnected` instead of content when the
+  transport is not open at the start or at its deadline, so a disconnected Copy
+  never returns cached content.
+- *Held modifiers.* The helper wraps the socket's `send` to learn which
+  modifier keysyms (Shift, Control, Meta, Alt, Super and Hyper, ISO_Level3_Shift,
+  Mode_switch) the guest holds, from the page's own `kd`/`ku`/`kr` frames. The
+  `kh` heartbeat only refreshes keys the Selkies server already holds down
+  (`input_handler.py`), so it never presses a released key again. The shortcut
+  chord (`sendShortcut`, and `requestClipboard` for Copy's Ctrl+C) first sends
+  `ku` for every held modifier, then Ctrl+C or Ctrl+V, and leaves them released;
+  the user's later physical release sends a `ku` that is harmless. This makes
+  Ctrl+Shift+C arrive as plain Ctrl+C (no Chromium inspector) and keeps a Super
+  or Alt that the macOS Command key may have left held out of the chord. The
+  native handlers consume the intercepted press, and Selkies drops a release for
+  a key it never sent, so the shortcut's own key events do not reach the guest.
+- *Clipboard policy.* `capabilities` also reports `clipboard`,
+  `clipboardIn` and `clipboardOut` from `window.clipboard_enabled`,
+  `clipboard_in_enabled` and `clipboard_out_enabled`, which the client mirrors
+  from the server's `server_settings` (`null` until they arrive). See *Older
+  desktops* below for how Rust uses them.
+- *Copy results.* `requestClipboard` compares each announcement with the
+  content cached when the request started and keeps waiting while the content is
+  unchanged, because Selkies answers `REQUEST_CLIPBOARD` at once with the old
+  selection before the application publishes the new one; at the deadline it
+  falls back to the latest cached content. An announcement above 24 MiB (or a
+  declared size above it) replaces the cache with an oversized marker and is
+  answered as `too-large` (Rust: "too large"), never with older content. A
+  Selkies flavours envelope (`application/x-selkies-clipboard-flavours`, a JSON
+  object of MIME type to text that browsers' HTML selections arrive as) is
+  parsed by Rust from the bounded body: the plain-text flavour is used and HTML
+  is discarded.
 - *Connection pairing.* `with_bridge` takes the connection generation and inbox
   under the registry lock, looks up the child webview, then confirms the
   generation is unchanged, so a reconnect cannot pair an old inbox with the new
@@ -616,12 +665,19 @@ and Rust code can start a transfer:
 
 **Native shortcuts** (`viewer_shortcuts.rs`). Triggers never come from in-page key
 events. On macOS an `NSEvent` local monitor, scoped to viewer windows by their
-`NSWindow`, consumes Command+C and Command+V before WKWebView sees them, and the
+`NSWindow`, consumes Command+C and Command+V before WKWebView sees them, but only
+when the window's first responder is not an editable native text control and not
+inside the shell's own web view (the monitor registers the shell `WKWebView`'s
+address and walks the responder's superviews, comparing addresses only); a future
+input in the viewer toolbar therefore keeps normal copy and paste, and the guest
+web view, whose responder is outside the shell, gets the transfers. The
 Edit menu has matching *Paste into Computer* and *Copy from Computer* items that
 are enabled only while a viewer has focus. On Linux a GTK key handler on the
 viewer window handles Ctrl+Shift+V and Ctrl+Shift+C (plain Ctrl+C and Ctrl+V stay
-guest shortcuts); the viewer window has no native menu bar, so the toolbar
-buttons are its menu equivalent. Other windows
+guest shortcuts), starting one transfer per physical press: further key-press
+events for a key still held are consumed without a transfer until its release (also
+consumed) or the window loses focus. The viewer window has no native menu bar, so
+the toolbar buttons are its menu equivalent. Other windows
 keep their normal Copy and Paste. The handlers are live and start the transfers
 described under *Clipboard behaviour* below.
 
@@ -653,9 +709,15 @@ never written).
   the window's own computer) returns a typed report; shortcut-started transfers
   send the same report as the `desktop-clipboard` event to the shell window.
 - **Older desktops.** A recipe 2 desktop has clipboard transfer disabled on the
-  server and cannot report that, so the toolbar (which knows the desktop's
-  `updateRequired`) shows "Update the desktop to use the clipboard" instead of
-  trying. A shortcut on such a desktop shows the same message.
+  server (`clipboard_enabled` false in its settings). Before reading the device
+  clipboard or sending any key, the shared Rust path (shortcuts, menu items and
+  toolbar buttons alike) asks the page for the server's settings, retrying for up
+  to 4 s while they have not arrived. Clipboard off gives status `unsupported`,
+  shown as "Update the desktop to use the clipboard"; the direction being off
+  gives a failure; settings still unknown give "The desktop is not connected".
+  This holds for a computer on another device too, whatever its owner Silo
+  reports, because the check runs in the viewer's own page. The toolbar no
+  longer predicts it from the update flags.
 
 Live checks outstanding: a Dev build against a recipe 3 computer (text and image
 both ways, Command+C and Command+V with the guest focused, no WebKit Paste popup)

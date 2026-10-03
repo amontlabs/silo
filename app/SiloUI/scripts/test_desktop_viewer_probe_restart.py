@@ -62,16 +62,27 @@ QUERY_AFTER = "Screen 0: minimum 1 x 1, current 1440 x 900, maximum 4096 x 4096\
 class StartSizeReadinessTest(unittest.TestCase):
     ACCOUNT = types.SimpleNamespace(pw_gid=1000)
 
-    def run_size(self, responses, **options):
+    def run_size(self, responses, query_seconds=0.0, **options):
         calls = []
+        timeouts = []
         pending = list(responses)
+        now = [0.0]
 
-        def fake_run(command, **_):
+        def fake_run(command, **keywords):
             calls.append(command[1:])
+            timeouts.append(keywords["timeout"])
+            now[0] += query_seconds
             return pending.pop(0) if len(pending) > 1 else pending[0]
 
-        with patch.object(PROBE.subprocess, "run", side_effect=fake_run):
-            PROBE.set_start_size({}, self.ACCOUNT, sleep=lambda _: None, **options)
+        def sleep(seconds):
+            now[0] += seconds
+
+        try:
+            with patch.object(PROBE.subprocess, "run", side_effect=fake_run):
+                PROBE.set_start_size({}, self.ACCOUNT, sleep=sleep, clock=lambda: now[0], **options)
+        finally:
+            self.elapsed = now[0]
+            self.timeouts = timeouts
         return calls
 
     def test_waits_for_a_display_that_is_transiently_unavailable(self):
@@ -85,6 +96,26 @@ class StartSizeReadinessTest(unittest.TestCase):
     def test_gives_up_after_the_readiness_bound(self):
         with self.assertRaisesRegex(RuntimeError, "no Xvfb output"):
             self.run_size([xrandr_result(1, "", "can't open display")], ready_seconds=1)
+
+    def test_slow_queries_cannot_stretch_the_readiness_window(self):
+        with self.assertRaisesRegex(RuntimeError, "no Xvfb output"):
+            self.run_size([xrandr_result(1, "", "can't open display")], query_seconds=4.0, ready_seconds=10)
+        self.assertLessEqual(self.elapsed, 10 + 4.0)
+        self.assertLessEqual(max(self.timeouts), 10)
+        self.assertLess(self.timeouts[-1], 4.0 + 0.001)
+
+    def test_a_query_that_times_out_is_retried_within_the_window(self):
+        now = [0.0]
+
+        def hung(command, **keywords):
+            now[0] += keywords["timeout"]
+            raise PROBE.subprocess.TimeoutExpired(command, keywords["timeout"])
+
+        with patch.object(PROBE.subprocess, "run", side_effect=hung):
+            with self.assertRaisesRegex(RuntimeError, "no Xvfb output"):
+                PROBE.set_start_size({}, self.ACCOUNT, ready_seconds=10,
+                                     sleep=lambda seconds: now.__setitem__(0, now[0] + seconds), clock=lambda: now[0])
+        self.assertLessEqual(now[0], 10.001)
 
     def test_fails_when_the_applied_size_is_not_reported(self):
         with self.assertRaisesRegex(RuntimeError, "did not change"):

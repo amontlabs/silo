@@ -153,14 +153,41 @@ fn bundled_recipe_version() -> Option<u64> {
         .as_u64()
 }
 
-/// Derives update availability from the installed receipt rather than from the installed
-/// helper, whose own threshold may predate the bundled recipe. A runnable older recipe is
-/// an optional update; the helper's requirement only stands for recipes that cannot run.
+/// Reads the receipt as one line of JSON, or an empty line. The guest opens it without
+/// following a symlink and without blocking on a pipe, accepts only a small regular file
+/// owned by root (or the reader) that nobody else can write, and prints nothing otherwise,
+/// so the helper's own status stands.
+fn receipt_read_command(path: &str) -> String {
+    format!(
+        r#"python3 -c 'import os,stat,sys
+try:
+    fd=os.open("{path}",os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_NOCTTY)
+    try:
+        info=os.fstat(fd)
+        if stat.S_ISREG(info.st_mode) and info.st_uid in (0,os.geteuid()) and not info.st_mode&0o022 and info.st_size<=4096:
+            data=os.read(fd,4097)
+            if len(data)<=4096:
+                sys.stdout.write(data.decode("utf-8").replace("\n","").replace("\r",""))
+    finally:
+        os.close(fd)
+except Exception:
+    pass
+print()' 2>/dev/null || echo"#
+    )
+}
+
+/// Derives update availability from the installed receipt for a helper that has validated
+/// it and reports the `selkies` backend, because an older helper's own threshold may predate
+/// the bundled recipe. A runnable older recipe is an optional update, not a requirement.
+/// A helper that reports no backend has rejected the receipt (unreadable, unsafe, a recipe it
+/// does not know, or a missing executable), and its `updateRequired` always stands.
 fn apply_receipt_recipe(status: &mut Value, receipt: Option<&Value>, bundled: Option<u64>) {
     let (Some(bundled), Some(receipt)) = (bundled, receipt) else {
         return;
     };
-    if receipt.get("backend").and_then(Value::as_str) != Some("selkies") {
+    if status.get("backend").and_then(Value::as_str) != Some("selkies")
+        || receipt.get("backend").and_then(Value::as_str) != Some("selkies")
+    {
         return;
     }
     let Some(installed) = receipt.get("recipeVersion").and_then(Value::as_u64) else {
@@ -170,7 +197,6 @@ fn apply_receipt_recipe(status: &mut Value, receipt: Option<&Value>, bundled: Op
         status["updateRequired"] = json!(false);
         status["updateAvailable"] = json!(true);
     } else if installed == bundled {
-        status["updateRequired"] = json!(false);
         status["updateAvailable"] = json!(false);
     }
 }
@@ -425,9 +451,9 @@ fn status_with(
         script.push('\n');
         script.push_str(crate::computer_use::STATUS_COMMAND);
     }
-    script.push_str(&format!(
-        "\nprintf '%s\\n' \"$(tr -d '\\n\\r' < {STREAMER_RECEIPT} 2>/dev/null || true)\"\n"
-    ));
+    script.push('\n');
+    script.push_str(&receipt_read_command(STREAMER_RECEIPT));
+    script.push('\n');
     let output = guest(
         runner,
         paths,
@@ -1833,7 +1859,7 @@ mod tests {
         runner.assert_finished();
     }
     fn receipt_read_suffix() -> String {
-        format!("\nprintf '%s\\n' \"$(tr -d '\\n\\r' < {STREAMER_RECEIPT} 2>/dev/null || true)\"\n")
+        format!("\n{}\n", receipt_read_command(STREAMER_RECEIPT))
     }
 
     fn recipe_status(helper: Value, receipt: &str) -> Value {
@@ -1894,8 +1920,10 @@ mod tests {
             assert_eq!(status["updateAvailable"], true);
             assert_eq!(status["updateRequired"], false);
         }
+        // A helper that reports the selkies backend has validated the receipt; with a
+        // current receipt nothing is available.
         let current = format!("{{\"backend\":\"selkies\",\"recipeVersion\":{bundled}}}");
-        let status = recipe_status(old_helper(json!(true)), &current);
+        let status = recipe_status(old_helper(json!(false)), &current);
         assert_eq!(status["updateAvailable"], false);
         assert_eq!(status["updateRequired"], false);
         let status = recipe_status(old_helper(json!(true)), "");
@@ -1907,6 +1935,87 @@ mod tests {
         );
         assert_eq!(status["updateRequired"], true);
         assert_eq!(status["updateAvailable"], false);
+    }
+
+    #[test]
+    fn a_helper_that_rejected_the_receipt_keeps_its_update_requirement() {
+        let _test_state = crate::test_support::global_state();
+        let bundled = bundled_recipe_version().unwrap();
+        // The helper reports no backend when the receipt has invalid fields, unsafe
+        // permissions or no Selkies executable, whatever recipe revision it names.
+        let rejecting_helper = json!({"installed":true,"state":"failed","autoStart":true,"backend":null,"sessionState":"stopped","streamState":"failed","streamerVersion":null,"updateRequired":true,"updateAvailable":false});
+        for revision in [bundled - 1, bundled, bundled + 1] {
+            let receipt = format!("{{\"backend\":\"selkies\",\"recipeVersion\":{revision}}}");
+            let status = recipe_status(rejecting_helper.clone(), &receipt);
+            assert_eq!(status["updateRequired"], true, "{revision}");
+            assert_eq!(status["updateAvailable"], false, "{revision}");
+            assert_eq!(status["backend"], Value::Null);
+        }
+        // A helper from before the bundled recipe does not know it and rejects its receipt too.
+        let current = format!("{{\"backend\":\"selkies\",\"recipeVersion\":{bundled}}}");
+        let status = recipe_status(rejecting_helper, &current);
+        assert_eq!(status["updateRequired"], true);
+        // A validated current desktop is left as the helper reported it.
+        let healthy = json!({"installed":true,"state":"stopped","autoStart":true,"backend":"selkies","sessionState":"stopped","streamState":"stopped","streamerVersion":"2.0.0","updateRequired":false,"updateAvailable":false});
+        let status = recipe_status(healthy, &current);
+        assert_eq!(status["updateRequired"], false);
+        assert_eq!(status["updateAvailable"], false);
+    }
+
+    /// Runs the guest receipt reader on this device against `path`.
+    fn read_receipt(path: &std::path::Path) -> (String, Duration) {
+        let started = std::time::Instant::now();
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(receipt_read_command(path.to_str().unwrap()))
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        (String::from_utf8(output.stdout).unwrap(), started.elapsed())
+    }
+
+    #[test]
+    fn the_receipt_reader_returns_one_line_for_a_small_regular_file_only() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("streamer.json");
+        std::fs::write(&file, "{\"a\":\n1,\r\"b\":2}").unwrap();
+        assert_eq!(read_receipt(&file).0, "{\"a\":1,\"b\":2}\n");
+
+        let missing = dir.path().join("missing.json");
+        assert_eq!(read_receipt(&missing).0, "\n");
+
+        let link = dir.path().join("link.json");
+        symlink(&file, &link).unwrap();
+        assert_eq!(read_receipt(&link).0, "\n");
+
+        let big = dir.path().join("big.json");
+        std::fs::write(&big, "x".repeat(4097)).unwrap();
+        assert_eq!(read_receipt(&big).0, "\n");
+        let limit = dir.path().join("limit.json");
+        std::fs::write(&limit, "x".repeat(4096)).unwrap();
+        assert_eq!(read_receipt(&limit).0, format!("{}\n", "x".repeat(4096)));
+
+        let writable = dir.path().join("writable.json");
+        std::fs::write(&writable, "{}").unwrap();
+        std::fs::set_permissions(&writable, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert_eq!(read_receipt(&writable).0, "\n");
+
+        assert_eq!(read_receipt(dir.path()).0, "\n");
+    }
+
+    #[test]
+    fn the_receipt_reader_does_not_block_on_a_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("streamer.json");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let (output, elapsed) = read_receipt(&fifo);
+        assert_eq!(output, "\n");
+        assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
     }
 
     fn built_in_computer() -> ComputerConfiguration {

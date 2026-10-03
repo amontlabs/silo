@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { CircleAlert, ClipboardCopy, ClipboardPaste } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { CLIPBOARD_EVENT, CLIPBOARD_UPDATE_MESSAGE, clipboardFeedback, type ClipboardAction, type ClipboardReport } from "./viewer-clipboard-feedback"
+import { CLIPBOARD_EVENT, clipboardFeedback, type ClipboardAction, type ClipboardReport } from "./viewer-clipboard-feedback"
 
 const FEEDBACK_MS = 4000
 
@@ -14,8 +14,9 @@ function isReport(value: unknown): value is ClipboardReport {
 const isMac = () => typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
 
 /** Paste and Copy buttons for the computer's clipboard, with brief status feedback. Shortcut-started
- * transfers report through the same status. */
-export function ViewerClipboard({ computer, name, needsUpdate = false }: { computer: string; name: string; needsUpdate?: boolean }) {
+ * transfers report through the same status. The backend says when a desktop does not support the
+ * clipboard. */
+export function ViewerClipboard({ computer, name }: { computer: string; name: string }) {
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null)
   const [pending, setPending] = useState(false)
   const timer = useRef<number | undefined>(undefined)
@@ -29,12 +30,11 @@ export function ViewerClipboard({ computer, name, needsUpdate = false }: { compu
     let disposed = false
     let stop: (() => void) | undefined
     void listen<unknown>(CLIPBOARD_EVENT, event => {
-      if (isReport(event.payload)) show(needsUpdate ? { text: CLIPBOARD_UPDATE_MESSAGE, error: true } : clipboardFeedback(event.payload, name))
+      if (isReport(event.payload)) show(clipboardFeedback(event.payload, name))
     }).then(unlisten => { if (disposed) unlisten(); else stop = unlisten }).catch(() => {})
     return () => { disposed = true; stop?.() }
-  }, [name, needsUpdate, show])
+  }, [name, show])
   async function transfer(action: ClipboardAction) {
-    if (needsUpdate) { show({ text: CLIPBOARD_UPDATE_MESSAGE, error: true }); return }
     setPending(true)
     try {
       const report = await invoke<unknown>("desktop_viewer_clipboard", { computer, action })

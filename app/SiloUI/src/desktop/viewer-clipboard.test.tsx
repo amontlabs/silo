@@ -36,6 +36,7 @@ it.each<[Partial<ClipboardReport>, string]>([
   [{ action: "paste", status: "device-empty", content: null }, "This device's clipboard has no text or image"],
   [{ action: "paste", status: "too-large", content: "image" }, "That image is too large to paste"],
   [{ status: "too-large", content: "text" }, "That text is too large to copy"],
+  [{ status: "too-large", content: null }, "Build box's clipboard is too large to copy"],
   [{ status: "not-connected", content: null }, "The desktop is not connected"],
   [{ status: "failed", content: null, message: "The computer did not answer." }, "The computer did not answer."],
 ])("shows %j as an alert", async (overrides, text) => {
@@ -55,12 +56,20 @@ it("shows a rejected command as an alert and re-enables the buttons", async () =
   expect(screen.getByRole("button", { name: "Copy from computer" })).toBeEnabled()
 })
 
-it("asks for a desktop update without calling the backend on an older desktop", async () => {
+it("asks for a desktop update when the backend reports the clipboard unsupported", async () => {
+  native.invoke.mockResolvedValue(report({ action: "paste", status: "unsupported", content: null }))
   const user = userEvent.setup()
-  render(<ViewerClipboard computer="dev" name="Build box" needsUpdate />)
+  render(<ViewerClipboard computer="dev" name="Build box" />)
   await user.click(screen.getByRole("button", { name: "Paste into computer" }))
+  expect(native.invoke).toHaveBeenCalledWith("desktop_viewer_clipboard", { computer: "dev", action: "paste" })
   expect(await screen.findByRole("alert")).toHaveTextContent("Update the desktop to use the clipboard")
-  expect(native.invoke).not.toHaveBeenCalled()
+})
+
+it("shows the same update request for a shortcut-started transfer", async () => {
+  render(<ViewerClipboard computer="dev" name="Build box" />)
+  await waitFor(() => expect(native.receive).not.toBe(undefined))
+  await act(async () => { native.receive({ payload: report({ status: "unsupported", content: null }) }) })
+  expect(screen.getByRole("alert")).toHaveTextContent("Update the desktop to use the clipboard")
 })
 
 it("shows the outcome of a shortcut-started transfer and ignores unrelated events", async () => {

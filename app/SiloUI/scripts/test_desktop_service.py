@@ -1228,7 +1228,7 @@ class DesktopStartSize(unittest.TestCase):
     def run_resize(self, replies):
         calls = []
 
-        def xrandr(arguments, _environment, _account):
+        def xrandr(arguments, _environment, _account, timeout=None):
             calls.append(arguments)
             code, out, err = replies(arguments, calls)
             return SimpleNamespace(returncode=code, stdout=out, stderr=err)
@@ -1296,7 +1296,7 @@ class DesktopStartSize(unittest.TestCase):
     def test_a_hung_xrandr_query_is_retried_until_the_bound(self):
         attempts = []
 
-        def hung_then_ready(arguments, _environment, _account):
+        def hung_then_ready(arguments, _environment, _account, timeout=None):
             attempts.append(arguments)
             if len(attempts) < 3:
                 raise RuntimeError('xrandr could not run: timed out')
@@ -1305,6 +1305,41 @@ class DesktopStartSize(unittest.TestCase):
              patch.object(service.time, 'sleep'):
             service.set_desktop_start_size({}, 'account')
         self.assertEqual(len(attempts), 3)
+
+    def test_slow_queries_cannot_stretch_the_readiness_window(self):
+        now = [0.0]
+        timeouts = []
+
+        def hung(arguments, _environment, _account, timeout=None):
+            timeouts.append(timeout)
+            now[0] += timeout
+            raise RuntimeError('xrandr could not run: timed out')
+        with patch.object(service, 'run_xrandr', side_effect=hung), \
+             patch.object(service.time, 'sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+             patch.object(service.time, 'monotonic', side_effect=lambda: now[0]):
+            with self.assertRaisesRegex(RuntimeError, 'did not report a RandR output'):
+                service.set_desktop_start_size({}, 'account')
+        self.assertLessEqual(now[0], service.XRANDR_READY_SECONDS + 0.001)
+        self.assertTrue(all(0 < timeout <= service.XRANDR_TIMEOUT_SECONDS for timeout in timeouts))
+        self.assertLess(timeouts[-1], service.XRANDR_TIMEOUT_SECONDS + 0.001)
+        self.assertEqual(len(timeouts), 1)
+
+    def test_the_last_query_gets_only_the_time_that_remains(self):
+        now = [0.0]
+        timeouts = []
+
+        def slow(arguments, _environment, _account, timeout=None):
+            timeouts.append(timeout)
+            now[0] += 4.0
+            return SimpleNamespace(returncode=1, stdout='', stderr='no display')
+        with patch.object(service, 'run_xrandr', side_effect=slow), \
+             patch.object(service.time, 'sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+             patch.object(service.time, 'monotonic', side_effect=lambda: now[0]):
+            with self.assertRaises(RuntimeError):
+                service.set_desktop_start_size({}, 'account')
+        self.assertLessEqual(max(timeouts), service.XRANDR_TIMEOUT_SECONDS)
+        self.assertAlmostEqual(timeouts[-1], service.XRANDR_READY_SECONDS - sum(4.2 for _ in timeouts[:-1]), places=3)
+        self.assertLessEqual(now[0], service.XRANDR_READY_SECONDS + 4.0)
 
     def test_the_resize_runs_right_after_xvfb_starts_and_not_after_other_processes(self):
         steps = []
