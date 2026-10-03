@@ -381,7 +381,14 @@ pub(crate) async fn open_desktop(
         viewer.on_window_event(move |event| match event {
             tauri::WindowEvent::Destroyed => {
                 crate::viewer_shortcuts::uninstall(&shortcut_label);
-                crate::app_menu::set_viewer_focus(&menu_app, false);
+                let others = menu_app
+                    .webview_windows()
+                    .into_iter()
+                    .map(|(name, window)| (name, window.is_focused().unwrap_or(false)));
+                crate::app_menu::set_viewer_focus(
+                    &menu_app,
+                    viewer_focused_besides(&shortcut_label, others),
+                );
                 // Attach never holds the lock across window work, so this cannot
                 // wait on the main thread; reap the tunnel after unlocking.
                 let removed = viewers().lock().ok().and_then(|mut e| e.remove(&label));
@@ -446,21 +453,64 @@ pub(crate) fn with_bridge<R>(
     label: &str,
     f: impl FnOnce(&Bridge) -> Result<R, String>,
 ) -> Result<R, String> {
-    let inbox = viewers()
-        .lock()
-        .map_err(|_| "Desktop unavailable.")?
-        .get(label)
-        .and_then(|viewer| viewer.proxy.as_ref())
-        .filter(|proxy| proxy.running())
-        .map(|proxy| proxy.inbox.clone())
-        .ok_or("The desktop is not connected.")?;
+    let ticket = {
+        let entries = viewers().lock().map_err(|_| "Desktop unavailable.")?;
+        bridge_ticket(&entries, label).ok_or("The desktop is not connected.")?
+    };
+    // The child webview is looked up by a label that a reconnect reuses, so the
+    // connection must still be the ticket's once the handle is in hand.
     let view = app
         .get_webview(&format!("guest-{label}"))
         .ok_or("The desktop display is closed.")?;
+    let current = {
+        let entries = viewers().lock().map_err(|_| "Desktop unavailable.")?;
+        ticket_is_current(&entries, label, &ticket)
+    };
+    if !current {
+        return Err("The desktop reconnected.".into());
+    }
     f(&Bridge {
         page: &view,
-        inbox: &inbox,
+        inbox: &ticket.inbox,
     })
+}
+
+/// The connection a bridge call was started against.
+struct BridgeTicket {
+    generation: u64,
+    inbox: std::sync::Arc<crate::desktop_bridge::Inbox>,
+}
+fn bridge_ticket(entries: &HashMap<String, Viewer>, label: &str) -> Option<BridgeTicket> {
+    let viewer = entries.get(label)?;
+    let proxy = viewer.proxy.as_ref().filter(|proxy| proxy.running())?;
+    Some(BridgeTicket {
+        generation: viewer.generation,
+        inbox: proxy.inbox.clone(),
+    })
+}
+fn ticket_is_current(
+    entries: &HashMap<String, Viewer>,
+    label: &str,
+    ticket: &BridgeTicket,
+) -> bool {
+    entries.get(label).is_some_and(|viewer| {
+        viewer.generation == ticket.generation
+            && viewer
+                .proxy
+                .as_ref()
+                .is_some_and(|proxy| std::sync::Arc::ptr_eq(&proxy.inbox, &ticket.inbox))
+    })
+}
+
+/// Whether the clipboard menu items stay enabled after `closing` is destroyed:
+/// only if another viewer window has focus.
+fn viewer_focused_besides(
+    closing: &str,
+    windows: impl IntoIterator<Item = (String, bool)>,
+) -> bool {
+    windows
+        .into_iter()
+        .any(|(label, focused)| focused && label != closing && is_viewer_label(&label))
 }
 
 fn viewer_url(origin: &str) -> tauri::Url {
@@ -1127,5 +1177,73 @@ mod registry_tests {
         };
         abort_attach(&mut entries, "shell", generation);
         assert!(begin_attach(&mut entries, "shell", "dev", false).is_ok());
+    }
+
+    fn running_proxy() -> (tempfile::TempDir, Proxy) {
+        let directory = tempfile::tempdir().unwrap();
+        let proxy = Proxy::start(
+            directory.path().join("guest.sock"),
+            6901,
+            "silo",
+            "password",
+        )
+        .unwrap();
+        (directory, proxy)
+    }
+
+    #[test]
+    fn a_bridge_ticket_pairs_the_inbox_with_its_connection() {
+        let mut entries = registry();
+        assert!(bridge_ticket(&entries, "shell").is_none());
+        assert!(bridge_ticket(&entries, "missing").is_none());
+        let (_directory, proxy) = running_proxy();
+        let inbox = proxy.inbox.clone();
+        entries.get_mut("shell").unwrap().proxy = Some(proxy);
+        let ticket = bridge_ticket(&entries, "shell").unwrap();
+        assert!(std::sync::Arc::ptr_eq(&ticket.inbox, &inbox));
+        assert!(ticket_is_current(&entries, "shell", &ticket));
+    }
+
+    #[test]
+    fn a_reconnect_invalidates_tickets_from_the_old_connection() {
+        let mut entries = registry();
+        let (_first_dir, first) = running_proxy();
+        entries.get_mut("shell").unwrap().proxy = Some(first);
+        let ticket = bridge_ticket(&entries, "shell").unwrap();
+        // Disconnect and reattach under the same label, as a reconnect does.
+        let stale = entries.get_mut("shell").unwrap().disconnect();
+        drop(stale);
+        let AttachPlan::Connect { generation, .. } =
+            begin_attach(&mut entries, "shell", "dev", false).unwrap()
+        else {
+            panic!("expected a connect plan");
+        };
+        let (_second_dir, second) = running_proxy();
+        assert!(finish_attach(&mut entries, "shell", generation, Some(second), None).is_ok());
+        assert!(!ticket_is_current(&entries, "shell", &ticket));
+        let fresh = bridge_ticket(&entries, "shell").unwrap();
+        assert!(ticket_is_current(&entries, "shell", &fresh));
+        assert!(!std::sync::Arc::ptr_eq(&fresh.inbox, &ticket.inbox));
+        // A closed viewer has no current tickets either.
+        entries.remove("shell");
+        assert!(!ticket_is_current(&entries, "shell", &fresh));
+    }
+
+    #[test]
+    fn closing_one_viewer_keeps_the_menu_enabled_while_another_is_focused() {
+        let windows = |focused: &str| {
+            ["main", "desktop-shell-a", "desktop-shell-b"]
+                .map(|label| (label.to_string(), label == focused))
+        };
+        assert!(viewer_focused_besides(
+            "desktop-shell-a",
+            windows("desktop-shell-b")
+        ));
+        assert!(!viewer_focused_besides(
+            "desktop-shell-a",
+            windows("desktop-shell-a")
+        ));
+        assert!(!viewer_focused_besides("desktop-shell-a", windows("main")));
+        assert!(!viewer_focused_besides("desktop-shell-a", windows("none")));
     }
 }

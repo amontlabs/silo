@@ -199,26 +199,124 @@ impl Status {
     }
 }
 
-/// True for every target the proxy must answer itself and never forward.
-pub(crate) fn is_reserved(target: &str) -> bool {
-    let path = target.split(['?', '#']).next().unwrap_or(target);
+/// Decodes `%XX` escapes strictly: a malformed escape is `None`.
+fn percent_decode(text: &str) -> Option<Vec<u8>> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let pair = bytes.get(index + 1..index + 3)?;
+            if !pair.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            let value = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+            out.push(value);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Some(out)
+}
+
+/// The path as a server behind the proxy could read it: escapes (repeatedly
+/// decoded), backslashes, case, repeated slashes, dot segments and path
+/// parameters are all resolved.
+fn canonical_path(target: &str) -> String {
+    let mut path = target
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(target)
+        .to_string();
+    for _ in 0..4 {
+        let decoded = String::from_utf8_lossy(&percent_decode_lossy(&path)).into_owned();
+        if decoded == path {
+            break;
+        }
+        path = decoded;
+    }
+    let mut segments: Vec<&str> = Vec::new();
+    let lowered = path.replace('\\', "/").to_ascii_lowercase();
+    for segment in lowered.split('/') {
+        let segment = segment.split(';').next().unwrap_or("").trim();
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    format!("/{}", segments.join("/"))
+}
+
+/// Like `percent_decode`, but a malformed escape stays literal.
+fn percent_decode_lossy(text: &str) -> Vec<u8> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let escape = (bytes[index] == b'%')
+            .then(|| bytes.get(index + 1..index + 3))
+            .flatten()
+            .filter(|pair| pair.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok());
+        match escape {
+            Some(value) => {
+                out.push(value);
+                index += 3;
+            }
+            None => {
+                out.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    out
+}
+
+fn in_reserved_namespace(path: &str) -> bool {
     path == "/__silo" || path.starts_with("/__silo/")
 }
 
-struct Route<'a> {
-    op: Op,
-    nonce: &'a str,
-    kind: &'a str,
+/// True for every target the proxy must answer itself and never forward: the
+/// reserved namespace under any spelling a server behind the proxy could
+/// resolve to it.
+pub(crate) fn is_reserved(target: &str) -> bool {
+    let path = target.split(['?', '#']).next().unwrap_or(target);
+    in_reserved_namespace(path) || in_reserved_namespace(&canonical_path(target))
 }
-fn parse_route(target: &str) -> Result<Route<'_>, Status> {
+
+struct Route {
+    op: Op,
+    nonce: String,
+    kind: String,
+}
+/// Longest raw query value; escapes triple the size of the decoded value.
+const MAX_QUERY_VALUE: usize = 192;
+fn query_value(raw: &str) -> Result<String, Status> {
+    if raw.len() > MAX_QUERY_VALUE {
+        return Err(Status::BadRequest);
+    }
+    let decoded = percent_decode(raw).ok_or(Status::BadRequest)?;
+    String::from_utf8(decoded).map_err(|_| Status::BadRequest)
+}
+fn parse_route(target: &str) -> Result<Route, Status> {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    // Only the exact spelling of a handled route is served; an alias of the
+    // reserved namespace is refused rather than answered.
+    if path != canonical_path(path) {
+        return Err(Status::Forbidden);
+    }
     let name = path.strip_prefix(ROUTE_PREFIX).ok_or(Status::NotFound)?;
     let op = Op::parse(name).ok_or(Status::NotFound)?;
     let (mut nonce, mut kind) = (None, None);
     for pair in query.split('&') {
         match pair.split_once('=') {
-            Some(("nonce", value)) if nonce.is_none() => nonce = Some(value),
-            Some(("kind", value)) if kind.is_none() => kind = Some(value),
+            Some(("nonce", value)) if nonce.is_none() => nonce = Some(query_value(value)?),
+            Some(("kind", value)) if kind.is_none() => kind = Some(query_value(value)?),
             _ => return Err(Status::BadRequest),
         }
     }
@@ -258,7 +356,7 @@ pub(crate) fn serve_route(
         inbox.log_rejection("method");
         return Status::BadRequest;
     }
-    let claim = match inbox.claim(route.op, route.nonce, now) {
+    let claim = match inbox.claim(route.op, &route.nonce, now) {
         Ok(claim) => claim,
         Err(reason) => {
             inbox.log_rejection(&format!("{} {reason:?}", route.op.name()));
@@ -276,7 +374,7 @@ pub(crate) fn serve_route(
     match read_body(length as usize) {
         Ok(body) => {
             claim.deliver(Reply {
-                kind: route.kind.to_string(),
+                kind: route.kind,
                 body,
             });
             Status::Accepted
@@ -621,6 +719,116 @@ mod tests {
         // None of those consumed the nonce.
         let good = format!("{ROUTE_PREFIX}clipboard?nonce={nonce}&kind=none");
         assert_eq!(post(&inbox, &good, b""), Status::Accepted);
+    }
+
+    /// The requests `desktop_viewer_bridge.js` produces, shared with
+    /// `desktop/linux-desktop-bridge.test.ts`.
+    #[derive(Deserialize)]
+    struct ContractCase {
+        name: String,
+        url: String,
+        body: String,
+        kind: String,
+    }
+
+    #[test]
+    fn the_requests_the_page_script_produces_are_accepted() {
+        let cases: Vec<ContractCase> =
+            serde_json::from_str(include_str!("desktop_bridge_contract.json")).unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let op = if case.url.contains("/clipboard?") {
+                Op::Clipboard
+            } else {
+                Op::Capabilities
+            };
+            let inbox = Inbox::default();
+            let expectation = inbox.expect(op, Duration::from_secs(5));
+            let target = case.url.replace("abc123", &expectation.nonce);
+            assert_eq!(
+                post(&inbox, &target, case.body.as_bytes()),
+                Status::Accepted,
+                "{}",
+                case.name
+            );
+            let reply = expectation.wait(Duration::from_secs(1)).unwrap();
+            assert_eq!(reply.kind, case.kind, "{}", case.name);
+            assert_eq!(reply.body, case.body.as_bytes(), "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn query_escapes_are_strict_and_bounded() {
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let n = &expectation.nonce;
+        for bad in [
+            format!("kind=text%2&nonce={n}"),
+            format!("kind=text%zzplain&nonce={n}"),
+            format!("kind=text%2Bplain%00&nonce={n}"),
+            format!("kind=%2F%2F%25&nonce={n}"),
+            format!("kind=text%2Fplain&nonce=%{n}"),
+            format!("kind={}&nonce={n}", "%41".repeat(70)),
+            format!("kind=%ff&nonce={n}"),
+        ] {
+            let target = format!("{ROUTE_PREFIX}clipboard?{bad}");
+            assert_eq!(post(&inbox, &target, b"x"), Status::BadRequest, "{bad}");
+        }
+        // None of those consumed the nonce.
+        let good = format!("{ROUTE_PREFIX}clipboard?nonce={n}&kind=text%2Fplain");
+        assert_eq!(post(&inbox, &good, b"x"), Status::Accepted);
+    }
+
+    #[test]
+    fn aliases_of_the_reserved_namespace_are_reserved_and_refused() {
+        let aliases = [
+            "/%5f%5fsilo/v1/clipboard?nonce=a&kind=none",
+            "/%5F%5Fsilo/v1/clipboard",
+            "/__SILO/v1/clipboard",
+            "/__Silo/v1/clipboard",
+            "/__silo//v1/clipboard",
+            "/__silo/./v1/clipboard",
+            "/x/../__silo/v1/clipboard",
+            "/x/%2e%2e/__silo/v1/clipboard",
+            "/%2e/__silo/v1/clipboard",
+            "/__silo/v1/../v1/clipboard",
+            "/__silo/%76%31/clipboard",
+            "/__silo/v1%2Fclipboard",
+            "/%255f%255fsilo/v1/clipboard",
+            "/%2F__silo/v1/clipboard",
+            "/\\__silo/v1/clipboard",
+            "/__silo;x/v1/clipboard",
+            "/__silo/v1/clipboard/",
+        ];
+        let inbox = Inbox::default();
+        let expectation = inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        for alias in aliases {
+            assert!(is_reserved(alias), "{alias}");
+            let status = serve_route(
+                &inbox,
+                "POST",
+                alias,
+                Some(1),
+                |_| Ok(vec![0]),
+                Instant::now(),
+            );
+            assert_eq!(status, Status::Forbidden, "{alias}");
+        }
+        // Aliases did not spend the nonce.
+        let target = format!(
+            "{ROUTE_PREFIX}clipboard?nonce={}&kind=none",
+            expectation.nonce
+        );
+        assert_eq!(post(&inbox, &target, b""), Status::Accepted);
+        for ordinary in [
+            "/",
+            "/index.html",
+            "/%5f%5fsilox",
+            "/a/__silo/v1/clipboard",
+            "/websockify",
+        ] {
+            assert!(!is_reserved(ordinary), "{ordinary}");
+        }
     }
 
     #[test]
