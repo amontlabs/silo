@@ -5,6 +5,7 @@ import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, Comp
 import type { LogLoader, LogQuery } from "./logs"
 import type { Device, ConnectionsStatus, ComputerDevice } from "./connections"
 import type { DirectoryLoader } from "./directory-store"
+import type { FileTransferActions } from "./file-transfer"
 import type {
   SetupComputerConfiguration,
   SetupComputerConfigurationRequest,
@@ -348,6 +349,8 @@ export interface ApplicationActions {
   removeNetworkPort?: (computer: string, port: number) => Promise<void>
   openNetworkPort?: (computer: string, port: number) => Promise<void>
   listComputerDirectory?: DirectoryLoader
+  /** Upload to and download from a running computer. Absent where the native boundary is unavailable. */
+  fileTransfers?: FileTransferActions
   saveSecret: (request: SecretConfigurationRequest) => Promise<void> | void
   removeSecret: (id: string) => Promise<void> | void
   retrySecret?: (id: string) => Promise<void> | void
