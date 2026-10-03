@@ -15,11 +15,12 @@ function permissions(window: string, webview: string) {
     .flatMap(capability => capability.permissions.map(permission => typeof permission === "string" ? permission : permission.identifier))
 }
 
-it("grants the desktop shell only its desktop controls, native menu, and fullscreen", () => {
+it("grants the desktop shell only its desktop controls, clipboard, native menu, events, and fullscreen", () => {
   const allowed = permissions("desktop-shell-example", "desktop-shell-example")
   expect(allowed.sort()).toEqual([
-    "allow-read-desktop-state", "allow-desktop-action", "allow-desktop-viewer-attach", "allow-desktop-viewer-detach",
+    "allow-read-desktop-state", "allow-desktop-action", "allow-desktop-viewer-attach", "allow-desktop-viewer-detach", "allow-desktop-viewer-clipboard",
     "allow-desktop-viewer-sound-support", "allow-desktop-viewer-set-audio", "allow-desktop-viewer-reset-screen",
+    "core:event:allow-listen", "core:event:allow-unlisten",
     "core:window:allow-is-fullscreen", "core:window:allow-set-fullscreen",
     "core:window:allow-inner-size", "core:window:allow-scale-factor",
     "core:menu:allow-new", "core:menu:allow-popup", "core:resources:allow-close",
@@ -36,7 +37,7 @@ it("does not grant guest content native commands even though it shares the shell
 it("registers the viewer commands in both native dispatch and build permissions", () => {
   const main = readFileSync(resolve(native, "src/main.rs"), "utf8")
   const build = readFileSync(resolve(native, "build.rs"), "utf8")
-  for (const command of ["read_desktop_state", "desktop_action", "open_desktop", "desktop_viewer_attach", "desktop_viewer_detach", "desktop_viewer_sound_support", "desktop_viewer_set_audio", "desktop_viewer_reset_screen"]) {
+  for (const command of ["read_desktop_state", "desktop_action", "open_desktop", "desktop_viewer_attach", "desktop_viewer_detach", "desktop_viewer_sound_support", "desktop_viewer_set_audio", "desktop_viewer_reset_screen", "desktop_viewer_clipboard"]) {
     expect(main).toContain(`::${command},`)
     expect(build).toContain(`"${command}"`)
   }

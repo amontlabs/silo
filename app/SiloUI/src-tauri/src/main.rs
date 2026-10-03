@@ -65,6 +65,7 @@ mod titlebar;
 mod transfer;
 mod tray;
 mod updates;
+mod viewer_clipboard;
 mod viewer_shortcuts;
 #[cfg(target_os = "macos")]
 mod window_material;
@@ -133,6 +134,7 @@ fn main() {
             desktop_viewer_media::desktop_viewer_sound_support,
             desktop_viewer_media::desktop_viewer_set_audio,
             desktop_viewer_media::desktop_viewer_reset_screen,
+            desktop_viewer::desktop_viewer_clipboard,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,

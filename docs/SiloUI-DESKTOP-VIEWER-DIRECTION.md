@@ -167,7 +167,7 @@ Repair reusable gaps upstream before shipping.
 | Browser animation and video | Adapt frame rate/encoding within Selkies; preserve input responsiveness |
 | CPU-only guest | Mandatory supported path with software rendering/encoding; no guest GPU prerequisite |
 | Guest with a supported encoder | Use hardware encoding within the same service when detected and qualified; host GPU presence alone is insufficient |
-| Clipboard and files | Deliberate controller operations with direction and completion feedback; observing does not overwrite either clipboard |
+| Clipboard and files | Deliberate controller operations with direction and completion feedback; observing does not overwrite either clipboard. Text and images (1 MiB and 16 MiB limits) move through Paste into computer and Copy from computer in the toolbar, with Command+V/C on macOS and Ctrl+Shift+V/C on Linux; see [SiloUI-DESKTOP.md](SiloUI-DESKTOP.md#clipboard-behaviour). Files are separate |
 | Audio | Playback from the same session, with a speaker toggle shown only where the web engine decodes Opus (expected absent on macOS 14 and 15); the stream stops while the viewer is hidden. Microphone and camera stay locked off |
 | Multiple views or displays | Reuse the current per-computer viewer; no automatic guest display creation/removal on window open or close |
 | Computer checkpoints | Reconnect after the computer's supported restore operation; independently verify guest devices and process state. Viewer reconnect is not a checkpoint |

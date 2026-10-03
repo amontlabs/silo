@@ -34,6 +34,7 @@ fn main() {
             "desktop_viewer_sound_support",
             "desktop_viewer_set_audio",
             "desktop_viewer_reset_screen",
+            "desktop_viewer_clipboard",
             "set_app_menu_state",
             "show_app_menu",
             "get_update_state",

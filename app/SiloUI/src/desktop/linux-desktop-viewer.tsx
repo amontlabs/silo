@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { CircleAlert, Maximize, Monitor } from "lucide-react"
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { DesktopSoundButton } from "./linux-desktop-sound"
 import { useDesktopSound, type DesktopSound } from "./linux-desktop-sound-state"
+import { ViewerClipboard } from "./viewer-clipboard"
 import { DesktopActionsMenu, NativeDesktopActionsMenu, type DesktopMenuProps } from "./linux-desktop-menu"
 import { ViewerTransferStatus, useViewerFileDrop } from "./viewer-file-drop"
 
@@ -14,7 +15,7 @@ import { ViewerTransferStatus, useViewerFileDrop } from "./viewer-file-drop"
 // including dialogs that look like Silo's, comes from the computer (G-20).
 const GUEST_CONTENT_NOTICE = "Everything inside the amber frame comes from the computer. Silo's own controls are only in this bar."
 
-export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, lcuUpdated = false, sound, onResetScreen, MenuComponent = DesktopActionsMenu, transfer }: {
+export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, lcuUpdated = false, sound, onResetScreen, MenuComponent = DesktopActionsMenu, transfer, clipboard }: {
   name: string
   state: LinuxDesktopState | null
   busy: boolean
@@ -29,6 +30,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   MenuComponent?: ComponentType<DesktopMenuProps>
   /** File transfer status, shown in the toolbar. */
   transfer?: React.ReactNode
+  clipboard?: ReactNode
 }) {
   const [menuError, setMenuError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<"stop" | "restart" | null>(null)
@@ -81,6 +83,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
         {streamStarting && <span role="status" className="text-xs text-muted-foreground">Connecting display…</span>}
         {lcuUpdated && (computerUse ? computerUse.state === "ready" : state?.lcuState === "ready") && <span role="status" className="text-xs text-muted-foreground">{computerUse ? "Reconnect agent sessions to load computer use." : "Reconnect agent sessions to load LCU."}</span>}
       </>}
+      {running && clipboard}
       {transfer}
       {running && sound && <DesktopSoundButton sound={sound} />}
       <Button variant="ghost" size="icon-xs" aria-label="Toggle fullscreen" onClick={onFullscreen}><Maximize /></Button>
@@ -215,6 +218,7 @@ export function NativeLinuxDesktopViewer({ computer, name }: { computer: string;
     finally { operation.current = false; setBusy(false) }
   }
   return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
+    clipboard={<ViewerClipboard computer={computer} name={name} needsUpdate={state?.updateRequired === true} />}
     onAction={action => { void handleAction(action) }}
     onRetry={() => { setConnection(value => value + 1); void refresh(false) }}
     onFullscreen={() => { const window = getCurrentWindow(); void window.isFullscreen().then(value => window.setFullscreen(!value)).catch(cause => setError(String(cause))) }} />

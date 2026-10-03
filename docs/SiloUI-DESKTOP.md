@@ -542,9 +542,8 @@ Every other client setting comes from `localStorage` under the key
 `"true"` or `"false"`. The viewer URL is now the bare origin, and the
 initialization script writes `<prefix>_clipboard_seamless = "false"` before the
 client reads its settings. The prefix is computed from `location` at run time
-because the proxy port changes on every attach. Clipboard transfer is currently
-off in the guest (`--enable-clipboard=false`); the seeded setting keeps the
-guest page from writing this device's clipboard on its own once it is turned on.
+because the proxy port changes on every attach. The seeded setting keeps the
+guest page from writing this device's clipboard on its own.
 
 **Host bridge** (`desktop_bridge.rs`, `desktop_viewer_bridge.js`). The guest
 serves both the Selkies server and the client JavaScript in the viewer, so the
@@ -606,10 +605,45 @@ Edit menu has matching *Paste into Computer* and *Copy from Computer* items that
 are enabled only while a viewer has focus. On Linux a GTK key handler on the
 viewer window handles Ctrl+Shift+V and Ctrl+Shift+C (plain Ctrl+C and Ctrl+V stay
 guest shortcuts); the viewer window has no native menu bar, so the toolbar
-buttons planned for the clipboard phase are its menu equivalent. Other windows
-keep their normal Copy and Paste. Until the clipboard phase supplies a device
-clipboard (`host_clipboard()`), the monitor, handlers and menu items stay inert
-and nothing changes for users.
+buttons are its menu equivalent. Other windows
+keep their normal Copy and Paste. The handlers are live and start the transfers
+described under *Clipboard behaviour* below.
+
+### Clipboard behaviour
+
+`viewer_clipboard.rs` holds the orchestration; the shortcuts, the Edit menu
+items and the toolbar buttons all call it, and it touches the device clipboard
+only for those explicit actions (the connect-time push from Selkies is cached,
+never written).
+
+- **Paste into computer** reads the device clipboard on a blocking worker. Text
+  wins when both exist (at most 1 MiB, never truncated); otherwise an image is
+  sent as PNG (at most 16 MiB encoded, 32 Mpixel). It sets the computer's
+  clipboard, then presses Ctrl+V there. An empty device clipboard sends nothing.
+- **Copy from computer** presses Ctrl+C in the computer and waits up to 1 s for
+  its new selection, falling back to the last one the page saw. Text is limited
+  to 1 MiB; images (PNG, JPEG, WebP, BMP, 16 MiB) are decoded and validated by
+  `write_image_from_encoded` before replacing the device clipboard. An empty or
+  undecodable answer leaves the device clipboard unchanged. HTML flavours are not
+  forwarded.
+- **Triggers.** macOS: Command+V and Command+C while a viewer is focused, plus
+  Edit, *Paste into Computer* and *Copy from Computer*. Linux: Ctrl+Shift+V and
+  Ctrl+Shift+C (plain Ctrl+C and Ctrl+V remain guest shortcuts). Both OSes: the
+  *Paste into computer* and *Copy from computer* buttons in the viewer toolbar.
+- **Feedback.** The toolbar shows "Pasted into / Copied from <computer>" (with
+  "image" for images) or the problem: clipboard empty, too large, desktop not
+  connected, another transfer running, or the failure text. The button command
+  `desktop_viewer_clipboard` (granted to `desktop-shell-*` windows only, bound to
+  the window's own computer) returns a typed report; shortcut-started transfers
+  send the same report as the `desktop-clipboard` event to the shell window.
+- **Older desktops.** A recipe 2 desktop has clipboard transfer disabled on the
+  server and cannot report that, so the toolbar (which knows the desktop's
+  `updateRequired`) shows "Update the desktop to use the clipboard" instead of
+  trying. A shortcut on such a desktop shows the same message.
+
+Live checks outstanding: a Dev build against a recipe 3 computer (text and image
+both ways, Command+C and Command+V with the guest focused, no WebKit Paste popup)
+and Ctrl+Shift+C/V on Ubuntu 24.04 under Wayland and X11.
 
 Probe items remaining (need a live Dev build): whether `Webview::eval` reaches
 the `add_child` webview once its page has loaded on both engines; whether the
