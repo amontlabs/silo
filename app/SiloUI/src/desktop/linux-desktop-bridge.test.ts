@@ -7,6 +7,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 // run against a fake Selkies socket the way Rust drives it through eval.
 const native = resolve(dirname(fileURLToPath(import.meta.url)), "../../src-tauri")
 const script = readFileSync(resolve(native, "src/desktop_viewer_bridge.js"), "utf8")
+// Requests the script must produce, also fed to the Rust parser (desktop_bridge.rs).
+const contract = JSON.parse(readFileSync(resolve(native, "src/desktop_bridge_contract.json"), "utf8")) as Array<{ name: string; url: string; body: string; kind: string }>
 
 class FakeSocket {
   sent: string[] = []
@@ -179,5 +181,51 @@ describe("host bridge page helper", () => {
     window.removeEventListener("message", listener)
     expect(messages).toContainEqual({ type: "setMute", value: false })
     expect(messages).toContainEqual({ type: "setVolume", value: 1 })
+  })
+
+  it("produces exactly the requests the Rust contract fixture accepts", async () => {
+    const sent: Record<string, { url: string; body: string }> = {}
+    const run = async (name: string, start: () => void) => {
+      fetchMock.mockClear()
+      start()
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      sent[name] = { url: String(url), body: body(init) }
+    }
+    socket.receive(`clipboard,${b64("hello world")}`)
+    await run("clipboard text", () => call("requestClipboard", "abc123", 10, []))
+    socket.receive(`clipboard_binary,image/png,${b64("PNGDATA")}`)
+    await run("clipboard image", () => call("requestClipboard", "abc123", 10, []))
+    setTransport(new FakeSocket())
+    await run("clipboard empty", () => call("requestClipboard", "abc123", 10, []))
+    vi.stubGlobal("AudioDecoder", undefined)
+    await run("capabilities", () => call("capabilities", "abc123"))
+    expect(Object.keys(sent).sort()).toEqual(contract.map(entry => entry.name).sort())
+    for (const entry of contract) expect(sent[entry.name], entry.name).toEqual({ url: entry.url, body: entry.body })
+  })
+
+  it("never posts a kind the host would refuse", async () => {
+    socket.receive(`clipboard_binary,bad kind?x=1&y,${b64("x")}`)
+    call("requestClipboard", "abc123", 10, [])
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps working after the page tampers with the built-ins it relies on", () => {
+    const test = RegExp.prototype.test
+    const every = Array.prototype.every
+    const apply = Reflect.apply
+    try {
+      RegExp.prototype.test = () => true
+      Array.prototype.every = (() => true) as unknown as typeof Array.prototype.every
+      Reflect.apply = () => true
+      expect(call("sendFrames", ["cmd,rm -rf /"])).toBe(false)
+      expect(call("sendFrames", ["kd,65"])).toBe(true)
+      expect(socket.sent).toEqual(["kd,65"])
+    } finally {
+      RegExp.prototype.test = test
+      Array.prototype.every = every
+      Reflect.apply = apply
+    }
   })
 })

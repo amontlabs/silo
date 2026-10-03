@@ -556,9 +556,19 @@ and Rust code can start a transfer:
   `window.__silo.invoke(<method>, <args>)`. The method and arguments are
   serialized with `serde_json`; no payload is concatenated into script. The
   child keeps no Tauri capabilities. `__silo` is a frozen, non-configurable
-  property that dispatches only to a fixed method list.
+  property that dispatches only to a fixed method list. The script captures the
+  built-ins it uses before any page script runs, and `document.execCommand`
+  converts its command once and hands the native method only that validated
+  string, so a stateful object cannot pass as `bold` and arrive as `copy`.
 - *Page to host.* The proxy answers `/__silo/v1/<op>` itself and never forwards
-  anything under `/__silo` to the guest. A request needs the viewer's cookie, the
+  anything under `/__silo` to the guest, under any spelling: the path is
+  percent-decoded repeatedly and resolved for case, backslashes, repeated
+  slashes, dot segments and path parameters, and an alias of the namespace gets
+  `403` (also for WebSocket upgrades) instead of being forwarded. Query values
+  are strictly percent-decoded (at most 192 raw characters) before validation,
+  which is how the script's `kind=text%2Fplain` arrives; the exact requests the
+  script produces are kept in `desktop_bridge_contract.json`, which both the
+  script's test and the Rust parser's test read. A request needs the viewer's cookie, the
   `POST` method, and a single-use nonce that Rust issued for that viewer and
   operation (`clipboard`, `capabilities`). Nonces expire after the requested
   wait plus 5 seconds, a wrong nonce neither succeeds nor cancels the real one,
@@ -577,6 +587,11 @@ and Rust code can start a transfer:
   change, because its gain node exists only once audio flows. The script still
   locks the web clipboard APIs and now also makes `getUserMedia` and
   `getDisplayMedia` always reject.
+- *Connection pairing.* `with_bridge` takes the connection generation and inbox
+  under the registry lock, looks up the child webview, then confirms the
+  generation is unchanged, so a reconnect cannot pair an old inbox with the new
+  page. Closing one viewer re-enables the Paste and Copy menu items only if
+  another viewer window has focus.
 - *Rust API for later phases* (`desktop_viewer::with_bridge(app, label, |bridge| ...)`,
   from a worker thread and never the main thread): `send_guest_text`,
   `send_guest_image`, `press_guest_paste`, `press_guest_copy`,

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "clipboard text",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=text%2Fplain",
+    "body": "hello world",
+    "kind": "text/plain"
+  },
+  {
+    "name": "clipboard image",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=image%2Fpng",
+    "body": "PNGDATA",
+    "kind": "image/png"
+  },
+  {
+    "name": "clipboard empty",
+    "url": "/__silo/v1/clipboard?nonce=abc123&kind=none",
+    "body": "",
+    "kind": "none"
+  },
+  {
+    "name": "capabilities",
+    "url": "/__silo/v1/capabilities?nonce=abc123&kind=application%2Fjson",
+    "body": "{\"audioDecoder\":false,\"opus\":false,\"transport\":true}",
+    "kind": "application/json"
+  }
+]
