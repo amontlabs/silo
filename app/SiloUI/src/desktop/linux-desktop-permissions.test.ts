@@ -22,6 +22,7 @@ it("grants the desktop shell only its desktop controls, native menu, and fullscr
     "core:window:allow-is-fullscreen", "core:window:allow-set-fullscreen",
     "core:window:allow-inner-size", "core:window:allow-scale-factor",
     "core:menu:allow-new", "core:menu:allow-popup", "core:resources:allow-close",
+    "allow-upload-files", "allow-cancel-transfer", "core:event:allow-listen", "core:event:allow-unlisten",
   ].sort())
   expect(permissions("main", "main")).toContain("allow-open-desktop")
 })
