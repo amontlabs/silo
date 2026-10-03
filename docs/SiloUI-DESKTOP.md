@@ -593,12 +593,20 @@ bundled runtimes).
   applies the policy over a `RawClipboard`, and `system()` returns the process-wide
   `arboard` instance. A fake lives in `clipboard::fake` for tests.
 - Text reads reject content over the caller's byte cap instead of truncating.
-  Image reads and writes enforce an encoded-byte cap and a pixel cap; writes check
-  the cap and the declared dimensions before decoding.
+  Image reads and writes enforce an encoded-byte cap and a pixel cap. Writes check
+  the declared dimensions before decoding, configure the decoder with width,
+  height and allocation limits derived from the pixel cap (so WebP frames and
+  other formats cannot allocate past it), and verify the decoded dimensions and
+  RGBA buffer length with checked arithmetic.
 - Writes accept PNG, JPEG, WebP and BMP. The declared MIME type must match the
   sniffed content. Errors are typed: `Empty`, `TooLarge`, `Unsupported`,
   `Unavailable` and `Decode`. Image reads return PNG.
-- Calls block on the platform clipboard; run them on a blocking worker.
+- Calls block on the platform clipboard; run them on a blocking worker. Each
+  platform call runs on a dedicated clipboard thread and the caller waits at most
+  3 seconds, then gets `Unavailable("timed out")`. The stuck thread is abandoned
+  and the next call starts a new one; at most 3 threads exist at once, and
+  further calls fail fast until a stuck one returns. No lock is held across a
+  platform call, so one blocked read does not block later operations.
 
 ### Linux
 
