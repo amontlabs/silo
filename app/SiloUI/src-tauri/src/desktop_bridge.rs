@@ -767,7 +767,7 @@ mod tests {
             format!("kind=text%zzplain&nonce={n}"),
             format!("kind=text%2Bplain%00&nonce={n}"),
             format!("kind=%2F%2F%25&nonce={n}"),
-            format!("kind=text%2Fplain&nonce=%{n}"),
+            format!("kind=text%2Fplain&nonce={n}%"),
             format!("kind={}&nonce={n}", "%41".repeat(70)),
             format!("kind=%ff&nonce={n}"),
         ] {
