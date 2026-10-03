@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Window};
 
@@ -24,7 +24,12 @@ const PROBE_WAIT: Duration = Duration::from_secs(2);
 const PROBE_ATTEMPTS: u32 = 20;
 const PROBE_PAUSE: Duration = Duration::from_millis(500);
 
+/// The longest one viewer's sound check keeps probing, however many times the page
+/// reloads and restarts it.
+const PROBE_DEADLINE: Duration = Duration::from_secs(60);
+
 const SUPERSEDED: &str = "The desktop sound check was cancelled.";
+const NOT_READY: &str = "The desktop display is not ready.";
 
 /// The operations on a viewer's page that sound and resizing need.
 pub(crate) trait Media {
@@ -73,7 +78,7 @@ pub(crate) fn probe(
     pause: Duration,
     obsolete: impl Fn() -> bool,
 ) -> Result<bool, String> {
-    let mut last = "The desktop display is not ready.".to_string();
+    let mut last = NOT_READY.to_string();
     for attempt in 0..attempts {
         if obsolete() {
             return Err(SUPERSEDED.into());
@@ -126,9 +131,10 @@ struct ProbeSlot {
 }
 
 /// Sound probes per viewer window. At most one worker probes a viewer at a
-/// time: a request made while it runs joins it, and restarts its probe so the
-/// answer describes the newest page. A cancellation drops the waiters and ends
-/// the probe at its next step.
+/// time: a request made while it runs restarts its probe so the answer describes
+/// the newest page, and settles the older request as superseded, so a viewer has
+/// at most one waiter. A cancellation drops the waiter and ends the probe at its
+/// next step. A worker that ends removes its viewer's slot.
 #[derive(Default)]
 pub(crate) struct Probes {
     slots: Mutex<HashMap<String, ProbeSlot>>,
@@ -151,6 +157,9 @@ impl Probes {
             waiters: Vec::new(),
         });
         slot.epoch += 1;
+        for superseded in slot.waiters.drain(..) {
+            let _ = superseded.send(Err(SUPERSEDED.into()));
+        }
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slot.waiters.push(sender);
         let start = !slot.running;
@@ -169,7 +178,7 @@ impl Probes {
     }
 
     /// Cancels the viewer's probe and drops its slot unless a worker still
-    /// uses it.
+    /// uses it, which removes the slot when it ends.
     fn forget(&self, label: &str) {
         self.cancel(label);
         if let Ok(mut slots) = self.slots.lock() {
@@ -179,10 +188,17 @@ impl Probes {
         }
     }
 
-    /// Probes until no request is waiting, answering every waiter with the
-    /// result of a probe that no later request or cancellation overtook.
-    /// `run` receives the check for an obsolete probe.
-    pub(crate) fn work(&self, label: &str, mut run: impl FnMut(&dyn Fn() -> bool) -> Outcome) {
+    /// Probes until no request is waiting, answering the waiter with the result
+    /// of a probe that no later request or cancellation overtook. Restarts stop
+    /// after `deadline` in total, which fails the waiter. `run` receives the
+    /// check for an obsolete probe.
+    pub(crate) fn work(
+        &self,
+        label: &str,
+        deadline: Duration,
+        mut run: impl FnMut(&dyn Fn() -> bool) -> Outcome,
+    ) {
+        let started = Instant::now();
         loop {
             let epoch = {
                 let Ok(mut slots) = self.slots.lock() else {
@@ -192,16 +208,19 @@ impl Probes {
                     return;
                 };
                 if slot.waiters.is_empty() {
-                    slot.running = false;
+                    slots.remove(label);
                     return;
                 }
                 slot.epoch
             };
+            let expired = || started.elapsed() >= deadline;
             let obsolete = || {
-                self.slots
-                    .lock()
-                    .map(|slots| slots.get(label).is_none_or(|slot| slot.epoch != epoch))
-                    .unwrap_or(true)
+                expired()
+                    || self
+                        .slots
+                        .lock()
+                        .map(|slots| slots.get(label).is_none_or(|slot| slot.epoch != epoch))
+                        .unwrap_or(true)
             };
             let outcome = run(&obsolete);
             let Ok(mut slots) = self.slots.lock() else {
@@ -210,15 +229,29 @@ impl Probes {
             let Some(slot) = slots.get_mut(label) else {
                 return;
             };
-            if slot.epoch != epoch {
+            if slot.epoch != epoch && !expired() {
                 continue;
             }
+            let outcome = if slot.epoch != epoch {
+                Err(NOT_READY.to_string())
+            } else {
+                outcome
+            };
             for waiter in slot.waiters.drain(..) {
                 let _ = waiter.send(outcome.clone());
             }
-            slot.running = false;
+            slots.remove(label);
             return;
         }
+    }
+
+    #[cfg(test)]
+    fn waiting(&self, label: &str) -> usize {
+        self.slots
+            .lock()
+            .unwrap()
+            .get(label)
+            .map_or(0, |slot| slot.waiters.len())
     }
 }
 
@@ -278,7 +311,7 @@ pub(crate) async fn desktop_viewer_sound_support(
     let (answer, start) = probes().enlist(&label)?;
     if start {
         tauri::async_runtime::spawn_blocking(move || {
-            probes().work(&label, |obsolete| {
+            probes().work(&label, PROBE_DEADLINE, |obsolete| {
                 probe(
                     || with_bridge(&app, &label, |bridge| probe_step(bridge)),
                     PROBE_ATTEMPTS,
@@ -462,10 +495,12 @@ mod tests {
         let (first, start) = probes.enlist("v").unwrap();
         assert!(start);
         let runs = Cell::new(0);
-        probes.work("v", |obsolete| {
+        let second = RefCell::new(None);
+        probes.work("v", PROBE_DEADLINE, |obsolete| {
             runs.set(runs.get() + 1);
             if runs.get() == 1 {
-                let (_, start) = probes.enlist("v").unwrap();
+                let (receiver, start) = probes.enlist("v").unwrap();
+                *second.borrow_mut() = Some(receiver);
                 assert!(!start);
                 assert!(obsolete());
                 return Err("stale".into());
@@ -474,7 +509,9 @@ mod tests {
             Ok(true)
         });
         assert_eq!(runs.get(), 2);
-        assert_eq!(first.blocking_recv().unwrap(), Ok(true));
+        assert_eq!(first.blocking_recv().unwrap(), Err(SUPERSEDED.into()));
+        let second = second.into_inner().unwrap();
+        assert_eq!(second.blocking_recv().unwrap(), Ok(true));
         assert!(probes.enlist("v").unwrap().1, "the worker has finished");
     }
 
@@ -488,10 +525,64 @@ mod tests {
     }
 
     #[test]
+    fn a_reloading_page_settles_each_superseded_request_and_keeps_one_waiter() {
+        let probes = Probes::default();
+        let mut superseded = Vec::new();
+        for _ in 0..200 {
+            let (receiver, _) = probes.enlist("v").unwrap();
+            superseded.push(receiver);
+            assert_eq!(probes.waiting("v"), 1);
+        }
+        let newest = superseded.pop().unwrap();
+        for mut receiver in superseded {
+            assert_eq!(receiver.try_recv().unwrap(), Err(SUPERSEDED.into()));
+        }
+        drop(newest);
+    }
+
+    #[test]
+    fn restarts_end_at_the_overall_deadline() {
+        let probes = Probes::default();
+        let (mut last, _) = probes.enlist("v").unwrap();
+        let runs = Cell::new(0);
+        let newest = RefCell::new(None);
+        probes.work("v", Duration::from_millis(60), |_| {
+            runs.set(runs.get() + 1);
+            std::thread::sleep(Duration::from_millis(20));
+            let (receiver, _) = probes.enlist("v").unwrap();
+            *newest.borrow_mut() = Some(receiver);
+            Err("stale".into())
+        });
+        assert!(runs.get() >= 2 && runs.get() < 10, "{}", runs.get());
+        assert!(last.try_recv().is_ok());
+        let mut newest = newest.into_inner().unwrap();
+        assert_eq!(newest.try_recv().unwrap(), Err(NOT_READY.into()));
+        assert_eq!(probes.waiting("v"), 0);
+        assert!(probes.enlist("v").unwrap().1, "the worker has finished");
+    }
+
+    #[test]
+    fn closing_a_viewer_during_a_probe_leaves_no_slot_behind() {
+        let probes = Probes::default();
+        for cycle in 0..100 {
+            let label = format!("viewer-{cycle}");
+            let (waiting, start) = probes.enlist(&label).unwrap();
+            assert!(start);
+            probes.work(&label, PROBE_DEADLINE, |obsolete| {
+                probes.forget(&label);
+                assert!(obsolete());
+                Err("stale".into())
+            });
+            assert!(waiting.blocking_recv().is_err());
+        }
+        assert!(probes.slots.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn cancelling_drops_waiters_and_ends_the_probe() {
         let probes = Probes::default();
         let (waiting, _) = probes.enlist("v").unwrap();
-        probes.work("v", |obsolete| {
+        probes.work("v", PROBE_DEADLINE, |obsolete| {
             probes.cancel("v");
             assert!(obsolete());
             Err("stale".into())

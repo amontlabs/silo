@@ -260,16 +260,26 @@
   // repeat of the cached content can arrive before the application publishes the
   // new selection. A copy shortcut on a connection that has announced nothing yet
   // first asks for the current selection and waits for that answer (at most
-  // BASELINE_WAIT_MS), so the old selection is not taken for the copied one.
+  // BASELINE_WAIT_MS), so the old selection is not taken for the copied one. When
+  // that answer is still missing, the shortcut goes out anyway and the first
+  // announcement afterwards may be the late answer rather than the copy, so it is
+  // held for BASELINE_GRACE_MS: a different announcement within that time wins, and
+  // otherwise the held one is the answer.
   // Kinds `too-large` (an announcement above the cap), `unreadable` (data that is
   // not base64), `disconnected` and `refused` carry no content.
   const BASELINE_WAIT_MS = 500
+  const BASELINE_GRACE_MS = 300
   const requestClipboard = (nonce, timeoutMs, frames, shortcut) => {
     const wait = Math.max(0, Math.min(Number(timeoutMs) || 0, 10000))
     let baseline = latest
     let started = sequence
     let settled = false
     let baselineTimer
+    let graceTimer
+    // Set when the shortcut went out without the guest's current selection; the
+    // announcement held as possibly that selection.
+    let unbaselined = false
+    let held = null
     // Removes every waiter and timer of this request; false once it was settled.
     const settle = () => {
       if (settled) return false
@@ -278,6 +288,7 @@
       waiters.delete(baselineWaiter)
       clearTimeout(timer)
       clearTimeout(baselineTimer)
+      clearTimeout(graceTimer)
       return true
     }
     const answer = (kind, body) => {
@@ -291,9 +302,16 @@
       try { bytes = decode(payload.encoded) } catch { void post("clipboard", nonce, "unreadable", NO_BODY()); return }
       void post("clipboard", nonce, payload.mime, bytes)
     }
-    const changed = payload => payload.sequence > started
-      && (payload.oversized || !baseline || baseline.oversized || payload.mime !== baseline.mime || payload.encoded !== baseline.encoded)
-    const waiter = payload => { if (changed(payload)) finish(payload) }
+    const differs = (payload, other) => payload.oversized || !other || other.oversized || payload.mime !== other.mime || payload.encoded !== other.encoded
+    const changed = payload => payload.sequence > started && differs(payload, baseline)
+    const waiter = payload => {
+      if (payload.sequence <= started) return
+      if (!unbaselined) { if (changed(payload)) finish(payload); return }
+      if (!held) {
+        held = payload
+        graceTimer = setTimeout(() => finish(held), BASELINE_GRACE_MS)
+      } else if (differs(payload, held)) finish(payload)
+    }
     const send = () => {
       if (settled) return
       baseline = latest
@@ -303,21 +321,22 @@
       if (outcome !== "ok") answer(outcome === "closed" ? "disconnected" : "refused", NO_BODY())
     }
     let proceeded = false
-    const proceed = () => {
+    const proceed = answered => {
       if (proceeded || settled) return
       proceeded = true
       waiters.delete(baselineWaiter)
       clearTimeout(baselineTimer)
       send()
+      unbaselined = !answered && !baseline
     }
-    const baselineWaiter = () => proceed()
+    const baselineWaiter = () => proceed(true)
     const timer = setTimeout(() => { if (socketReady()) finish(latest); else answer("disconnected", NO_BODY()) }, wait)
     if (!socketReady()) { answer("disconnected", NO_BODY()); return }
     if (shortcut === true && !latest) {
       waiters.add(baselineWaiter)
       const outcome = deliver(["REQUEST_CLIPBOARD"], false)
       if (outcome !== "ok") { answer(outcome === "closed" ? "disconnected" : "refused", NO_BODY()); return }
-      baselineTimer = setTimeout(proceed, Math.min(BASELINE_WAIT_MS, wait))
+      baselineTimer = setTimeout(() => proceed(false), Math.min(BASELINE_WAIT_MS, wait))
     } else send()
   }
   const capabilities = async nonce => {

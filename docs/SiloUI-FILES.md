@@ -95,16 +95,23 @@ Rejected, per the reuse policy in `AGENTS.md`:
 - Uploads write `.<name>.silo-part-<id>` (non-wildcard characters only) beside the
   target and publish it. Replace uses the replacing `rename`. Ask and Keep both use
   `rename -l`, the legacy rename that fails when the target exists, so a file created
-  after the folder was inspected is never overwritten. A plain `ls -lan` of the folder
-  follows it and is not error-suppressed: the partial still listed means the name was
-  taken, so the partial takes the next free `name (n)` (up to 8 tries, then an error);
-  the target listed without the partial means it was published; a listing that fails,
-  or shows neither name, fails the upload and removes the partial. The outcome lists the
+  after the folder was inspected is never overwritten. The outcome is then read from
+  exit statuses, never from listing text, which cannot keep a name's identity (a name can
+  contain a newline and a forged row, and non-UTF-8 or Unicode names are escaped under a
+  `C` locale): a session of its own runs `df` on the exact partial name, then on the
+  exact target name, and `df` exits 0 only when that path exists. The partial present
+  means the name was taken, so the partial takes the next free `name (n)` (up to 8
+  tries, then an error); only the target present means it was published; a check that
+  fails, or neither name present, fails the upload and removes the partial. The outcome lists the
   names actually stored. Failed or cancelled uploads remove the partial in a second short
   session. Keep-both numbering budgets the whole name including the extension within
   255 bytes. Downloads write a hidden partial beside the chosen destination, check its
   size, set ordinary permissions (0644, not the computer's) and rename it; the
   destination comes from the backend save dialog.
+- Every `sftp` session has an output cap (4 MiB) and a time limit: 45 s for probes and
+  checks, 8 s for progress polls, 20 s for cleanup, and for a transfer 45 s plus the
+  file's size at 64 KiB/s. No session lists a folder after a transfer, so a computer
+  that streams endless directory entries cannot hold the transfer slot.
 - A download is bounded on this device, because the client reads until the computer
   stops sending. The client runs with a file-size limit of the listed size plus 1 MiB
   (the operating system stops it), the partial is also watched every 50 ms and the
@@ -128,7 +135,7 @@ Rejected, per the reuse policy in `AGENTS.md`:
   ends the whole `sftp` process group (including the ProxyCommand) and removes the
   partial. Each `sftp` runs under the same parent-lifetime watchdog as the SSH forwards
   (`owned_tunnel`), so it also ends if Silo crashes or is force-quit, and a graceful quit
-  cancels the running transfer and waits up to 5 seconds for it to clean up, before it closes SSH connections or stops computers; a transfer is admitted or refused under the registry lock, so one that races Quit is either refused or cancelled. A computer
+  cancels the running transfer and waits for it to clean up before it closes SSH connections or stops computers: at most 5 seconds, and only the part of the remaining shutdown budget (the session-end limit, such as logind's, or the 15 s maintenance budget) beyond a 3 second reserve for stopping computers and saving, which can be none. Installing an update closes transfer admission and drains the running transfer (up to 5 seconds) before it stops computers, and reopens admission if the update fails; a transfer is admitted or refused under the registry lock, so one that races Quit is either refused or cancelled. A computer
   partial left by a force-quit stays hidden in the folder.
 - The picker, dropped files and save dialog are native. The backend keeps the chosen
   paths and gives the window an opaque one-time token (valid 10 minutes, at most 16 held,

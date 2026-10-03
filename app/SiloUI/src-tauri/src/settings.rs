@@ -852,12 +852,12 @@ pub async fn flush_settings(app: AppHandle, window: WebviewWindow) -> Result<(),
 fn stop_local_computers(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     let Some(deadline) = deadline else {
         crate::startup::cancel_and_wait(app);
-        return crate::runtime::shutdown::stop_local_computers(app);
+        return crate::runtime::shutdown::stop_local_computers(app, None);
     };
     let app = app.clone();
     run_before(deadline, move || {
         crate::startup::cancel_and_wait(&app);
-        crate::runtime::shutdown::stop_local_computers(&app)
+        crate::runtime::shutdown::stop_local_computers(&app, Some(deadline))
     })
 }
 

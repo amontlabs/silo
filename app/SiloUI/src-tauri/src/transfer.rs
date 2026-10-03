@@ -44,6 +44,8 @@ const MAX_OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
 const PROBE_LIMIT: Duration = Duration::from_secs(45);
 const POLL_LIMIT: Duration = Duration::from_secs(8);
 const CLEANUP_LIMIT: Duration = Duration::from_secs(20);
+/// The slowest sustained rate a file's transfer is allowed before it is stopped.
+const SLOWEST_TRANSFER_BYTES_PER_SECOND: u64 = 64 * 1024;
 const UPLOAD_POLL: Duration = Duration::from_millis(1500);
 const DOWNLOAD_POLL: Duration = Duration::from_millis(250);
 const SFTP: &str = "/usr/bin/sftp";
@@ -429,8 +431,23 @@ fn read_capped(mut source: impl Read + Send + 'static) -> std::thread::JoinHandl
     })
 }
 
+/// How long a transfer of `bytes` may run: the probe limit plus the time the file needs
+/// at the slowest allowed rate.
+fn transfer_limit(bytes: u64) -> Duration {
+    PROBE_LIMIT + Duration::from_secs(bytes / SLOWEST_TRANSFER_BYTES_PER_SECOND)
+}
+
 /// `128 + SIGXFSZ`: how the client's shell reports a write past the file-size limit.
 const FILE_SIZE_EXIT: i32 = 128 + libc::SIGXFSZ;
+
+/// How a client ended and what it printed, up to the cap.
+struct Finished {
+    code: Option<i32>,
+    success: bool,
+    output: Vec<u8>,
+    errors: Vec<u8>,
+    overflow: bool,
+}
 
 struct Sftp {
     program: PathBuf,
@@ -457,7 +474,7 @@ impl Sftp {
     fn run(
         &self,
         batch: &str,
-        limit: Option<Duration>,
+        limit: Duration,
         cancel: &AtomicBool,
         tick: &mut dyn FnMut(),
     ) -> Result<String, RunError> {
@@ -472,11 +489,56 @@ impl Sftp {
     fn run_watched(
         &self,
         batch: &str,
-        limit: Option<Duration>,
+        limit: Duration,
         cancel: &AtomicBool,
         max_file: Option<u64>,
         watch: &mut dyn FnMut() -> Option<String>,
     ) -> Result<String, RunError> {
+        let finished = self.execute(batch, limit, cancel, max_file, watch)?;
+        if max_file.is_some() && finished.code == Some(FILE_SIZE_EXIT) {
+            Err(RunError::Failed(TOO_LARGE.into()))
+        } else if finished.success {
+            if finished.overflow {
+                Err(RunError::Failed(LISTING_TOO_LARGE.into()))
+            } else {
+                Ok(String::from_utf8_lossy(&finished.output).into_owned())
+            }
+        } else {
+            Err(RunError::Failed(failure_message(
+                &String::from_utf8_lossy(&finished.errors),
+                finished.code,
+            )))
+        }
+    }
+
+    /// Whether `name` exists in `directory`, from the exit status of `df` on that exact
+    /// name in a session of its own. Nothing the computer prints is read, so no name it
+    /// invents or escapes can stand in for the one asked about.
+    fn exists(&self, directory: &str, name: &str, cancel: &AtomicBool) -> Result<bool, RunError> {
+        let batch = format!(
+            "cd {}\ndf {}\n",
+            quote(directory).map_err(RunError::Failed)?,
+            relative(name).map_err(RunError::Failed)?
+        );
+        let finished = self.execute(&batch, PROBE_LIMIT, cancel, None, &mut || None)?;
+        match finished.code {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            code => Err(RunError::Failed(failure_message(
+                &String::from_utf8_lossy(&finished.errors),
+                code,
+            ))),
+        }
+    }
+
+    fn execute(
+        &self,
+        batch: &str,
+        limit: Duration,
+        cancel: &AtomicBool,
+        max_file: Option<u64>,
+        watch: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<Finished, RunError> {
         let mut file = tempfile::Builder::new()
             .prefix("silo-sftp-")
             .tempfile()
@@ -524,7 +586,7 @@ impl Sftp {
                 Ok(None) => {}
                 Err(_) => return Err(RunError::Failed("The transfer failed.".into())),
             }
-            if limit.is_some_and(|limit| started.elapsed() > limit) {
+            if started.elapsed() > limit {
                 return Err(RunError::Failed(UNREACHABLE.into()));
             }
             if let Some(message) = watch() {
@@ -540,24 +602,17 @@ impl Sftp {
         let (errors, _) = stderr
             .map(|h| h.join().unwrap_or_default())
             .unwrap_or_default();
-        if max_file.is_some() && status.code() == Some(FILE_SIZE_EXIT) {
-            Err(RunError::Failed(TOO_LARGE.into()))
-        } else if status.success() {
-            if overflow {
-                Err(RunError::Failed(LISTING_TOO_LARGE.into()))
-            } else {
-                Ok(String::from_utf8_lossy(&output).into_owned())
-            }
-        } else {
-            Err(RunError::Failed(failure_message(
-                &String::from_utf8_lossy(&errors),
-                status.code(),
-            )))
-        }
+        Ok(Finished {
+            code: status.code(),
+            success: status.success(),
+            output,
+            errors,
+            overflow,
+        })
     }
 
     fn quick(&self, batch: &str, limit: Duration) -> Result<String, RunError> {
-        self.run(batch, Some(limit), &AtomicBool::new(false), &mut || {})
+        self.run(batch, limit, &AtomicBool::new(false), &mut || {})
     }
 }
 
@@ -633,7 +688,7 @@ fn inspect_folder(
     }
     batch.push_str(&format!("cd {quoted}\npwd\nls -lan\n-df\n"));
     let output = sftp
-        .run(&batch, Some(PROBE_LIMIT), control.cancel, &mut || {})
+        .run(&batch, PROBE_LIMIT, control.cancel, &mut || {})
         .map_err(RunError::message)?;
     let probe = parse_probe(&output);
     if !probe.listed_folder {
@@ -726,16 +781,12 @@ fn upload(
             .map_err(|_| "Could not prepare the upload.")?;
         let partial = partial_name(target, &uuid::Uuid::new_v4().simple().to_string()[..12]);
         // Replacing publishes with the replacing rename. Otherwise the legacy rename
-        // refuses an existing name, and the listing of the folder shows whether it did;
-        // a listing that fails fails the upload.
+        // refuses an existing name, and checking which names exist afterwards shows
+        // whether it did.
         let publish = if policy == ConflictPolicy::Replace {
             format!("rename {} {}\n", relative(&partial)?, relative(target)?)
         } else {
-            format!(
-                "-rename -l {} {}\nls -lan\n",
-                relative(&partial)?,
-                relative(target)?
-            )
+            format!("-rename -l {} {}\n", relative(&partial)?, relative(target)?)
         };
         let batch = format!(
             "lcd {}\ncd {directory_arg}\nput ./src {}\n{publish}",
@@ -749,42 +800,47 @@ fn upload(
         );
         let base = done;
         let mut polled = Instant::now();
-        let result = sftp.run(&batch, None, control.cancel, &mut || {
-            let Some(every) = control.upload_poll else {
-                return;
-            };
-            if polled.elapsed() < every {
-                return;
-            }
-            let arrived = (|| {
-                let batch = format!("cd {directory_arg}\nls -lan\n");
-                let output = sftp
-                    .run(&batch, Some(POLL_LIMIT), control.cancel, &mut || {})
-                    .ok()?;
-                parse_probe(&output)
-                    .entries
-                    .into_iter()
-                    .find(|entry| entry.name == partial)
-                    .map(|entry| entry.size)
-            })();
-            polled = Instant::now();
-            if let Some(size) = arrived {
-                control.report(
-                    "upload",
-                    "transferring",
-                    target,
-                    index,
-                    count,
-                    base + size.min(source.size),
-                    total,
-                );
-            }
-        });
-        let result = result.and_then(|output| {
+        let result = sftp.run(
+            &batch,
+            transfer_limit(source.size),
+            control.cancel,
+            &mut || {
+                let Some(every) = control.upload_poll else {
+                    return;
+                };
+                if polled.elapsed() < every {
+                    return;
+                }
+                let arrived = (|| {
+                    let batch = format!("cd {directory_arg}\nls -lan\n");
+                    let output = sftp
+                        .run(&batch, POLL_LIMIT, control.cancel, &mut || {})
+                        .ok()?;
+                    parse_probe(&output)
+                        .entries
+                        .into_iter()
+                        .find(|entry| entry.name == partial)
+                        .map(|entry| entry.size)
+                })();
+                polled = Instant::now();
+                if let Some(size) = arrived {
+                    control.report(
+                        "upload",
+                        "transferring",
+                        target,
+                        index,
+                        count,
+                        base + size.min(source.size),
+                        total,
+                    );
+                }
+            },
+        );
+        let result = result.and_then(|_| {
             if policy == ConflictPolicy::Replace {
                 return Ok(target.clone());
             }
-            match publication(&output, &partial, target)? {
+            match publication(sftp, control, &folder.canonical, &partial, target)? {
                 Publication::Published => Ok(target.clone()),
                 Publication::Taken => publish_beside_existing(
                     sftp,
@@ -815,26 +871,24 @@ fn upload(
     Ok(UploadOutcome::Done { names })
 }
 
-/// Whether a listing of one name shows it.
-fn lists(output: &str, name: &str) -> bool {
-    parse_probe(output)
-        .entries
-        .iter()
-        .any(|entry| entry.name.strip_prefix("./").unwrap_or(&entry.name) == name)
-}
-
 enum Publication {
     Published,
     /// The target name was taken, so the file is still under its partial name.
     Taken,
 }
 
-/// Reads the listing of the folder after a refusing rename of `partial` to `target`.
-/// Only a listing that shows the file under one of the two names settles the outcome.
-fn publication(output: &str, partial: &str, target: &str) -> Result<Publication, RunError> {
-    if lists(output, partial) {
+/// Settles a refusing rename of `partial` to `target` by asking the computer whether
+/// each exact name exists. Only the file under one of the two names settles the outcome.
+fn publication(
+    sftp: &Sftp,
+    control: &Control,
+    directory: &str,
+    partial: &str,
+    target: &str,
+) -> Result<Publication, RunError> {
+    if sftp.exists(directory, partial, control.cancel)? {
         Ok(Publication::Taken)
-    } else if lists(output, target) {
+    } else if sftp.exists(directory, target, control.cancel)? {
         Ok(Publication::Published)
     } else {
         Err(RunError::Failed(
@@ -866,11 +920,12 @@ fn publish_beside_existing(
             .collect();
         let candidate = keep_both_name(&source.name, &|name| taken.contains(name));
         let batch = format!(
-            "cd {directory_arg}\n-rename -l {partial_arg} {}\nls -lan\n",
+            "cd {directory_arg}\n-rename -l {partial_arg} {}\n",
             relative(&candidate).map_err(RunError::Failed)?
         );
-        let output = sftp.run(&batch, Some(PROBE_LIMIT), control.cancel, &mut || {})?;
-        if let Publication::Published = publication(&output, partial, &candidate)? {
+        sftp.run(&batch, PROBE_LIMIT, control.cancel, &mut || {})?;
+        if let Publication::Published = publication(sftp, control, directory, partial, &candidate)?
+        {
             return Ok(candidate);
         }
     }
@@ -949,23 +1004,29 @@ fn download(
     );
     control.report("download", "transferring", name, 0, 1, 0, size);
     let mut reported = Instant::now();
-    let result = sftp.run_watched(&batch, None, control.cancel, Some(size), &mut || {
-        let written = fs::metadata(&partial_path).map(|m| m.len()).ok()?;
-        if written > size {
-            return Some(TOO_LARGE.into());
-        }
-        if reported.elapsed() < DOWNLOAD_POLL {
-            return None;
-        }
-        reported = Instant::now();
-        if (control.free_space)(destination_parent)
-            .is_some_and(|free| free < FREE_SPACE_RESERVE / 2)
-        {
-            return Some(STOPPED_FOR_ROOM.into());
-        }
-        control.report("download", "transferring", name, 0, 1, written, size);
-        None
-    });
+    let result = sftp.run_watched(
+        &batch,
+        transfer_limit(size),
+        control.cancel,
+        Some(size),
+        &mut || {
+            let written = fs::metadata(&partial_path).map(|m| m.len()).ok()?;
+            if written > size {
+                return Some(TOO_LARGE.into());
+            }
+            if reported.elapsed() < DOWNLOAD_POLL {
+                return None;
+            }
+            reported = Instant::now();
+            if (control.free_space)(destination_parent)
+                .is_some_and(|free| free < FREE_SPACE_RESERVE / 2)
+            {
+                return Some(STOPPED_FOR_ROOM.into());
+            }
+            control.report("download", "transferring", name, 0, 1, written, size);
+            None
+        },
+    );
     let finish = match result {
         Ok(output) => {
             let probe = parse_probe(&output);
@@ -1036,6 +1097,9 @@ impl Slot {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         accepting()?;
+        if PAUSED.load(Ordering::Acquire) {
+            return Err("Silo is installing an update. Try again after it restarts.".into());
+        }
         if active.is_some() {
             return Err("Another file transfer is still running.".into());
         }
@@ -1068,6 +1132,35 @@ pub(crate) fn cancel_all() {
     {
         cancel.store(true, Ordering::Release);
     }
+}
+
+static PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Refuses new transfers while it lives. An update holds it from before it stops
+/// computers, and dropping it reopens admission.
+#[derive(Debug)]
+pub(crate) struct Pause(());
+
+impl Drop for Pause {
+    fn drop(&mut self) {
+        let _active = ACTIVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        PAUSED.store(false, Ordering::Release);
+    }
+}
+
+/// Refuses new transfers, cancels the running one and waits up to `budget` for it to
+/// remove its partial files, which needs its connection to the computer.
+pub(crate) fn pause(budget: Duration) -> Pause {
+    {
+        let _active = ACTIVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        PAUSED.store(true, Ordering::Release);
+    }
+    close_all(budget);
+    Pause(())
 }
 
 /// Cancels the running transfer and waits up to `budget` for it to clean up.
@@ -2122,7 +2215,7 @@ mod tests {
                 }
                 cancel_ref.store(true, Ordering::Release);
             });
-            sftp.run("pwd\n", None, &cancel, &mut || {})
+            sftp.run("pwd\n", Duration::from_secs(30), &cancel, &mut || {})
         });
         assert!(matches!(outcome, Err(RunError::Cancelled)));
         let pid: i32 = fs::read_to_string(&pid_file)
@@ -2188,6 +2281,35 @@ mod tests {
         });
         assert!(started.elapsed() < Duration::from_secs(4));
         drop(admit("two").unwrap());
+
+        let held = pause(Duration::from_secs(1));
+        let refused = admit("paused").unwrap_err();
+        assert!(refused.contains("installing an update"), "{refused}");
+        assert!(ACTIVE.lock().unwrap().is_none());
+        drop(held);
+        drop(admit("reopened").unwrap());
+
+        let running = admit("running").unwrap();
+        let cancel = running.cancel.clone();
+        let started = Instant::now();
+        let held = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !cancel.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                drop(running);
+            });
+            pause(Duration::from_secs(5))
+        });
+        assert!(started.elapsed() < Duration::from_secs(4));
+        assert!(
+            ACTIVE.lock().unwrap().is_none(),
+            "the pause waited for the cleanup"
+        );
+        assert!(admit("late").is_err());
+        drop(held);
+        drop(admit("after").unwrap());
     }
 
     /// A client for the real server whose batches that contain `needle` first run `before`,
@@ -2500,9 +2622,9 @@ mod tests {
     }
 
     #[test]
-    fn a_publication_that_cannot_be_inspected_is_an_error_not_an_upload() {
+    fn a_publication_that_cannot_be_checked_is_an_error_not_an_upload() {
         let Some(world) = world() else { return };
-        broken_publication(&world, "/^-rename/d;/^ls /d", true);
+        intercepted(&world, "^df", "echo 'Connection closed' >&2; exit 255");
         let cancel = AtomicBool::new(false);
         let sources = [source(&world, "a.txt", b"mine")];
         for policy in [ConflictPolicy::Ask, ConflictPolicy::KeepBoth] {
@@ -2515,7 +2637,13 @@ mod tests {
                 false,
             );
             assert!(outcome.is_err(), "{outcome:?}");
-            assert!(names(&world.remote).is_empty(), "the partial is removed");
+            assert!(
+                names(&world.remote)
+                    .iter()
+                    .all(|name| !name.contains("silo-part")),
+                "no partial is left"
+            );
+            let _ = fs::remove_file(world.remote.join("a.txt"));
         }
     }
 
@@ -2538,23 +2666,150 @@ mod tests {
     }
 
     #[test]
-    fn publication_needs_a_listing_that_shows_the_file() {
-        let listing = |names: &[&str]| {
-            names
-                .iter()
-                .map(|name| format!("-rw-r--r--    ? 1 1 5 Oct  3 22:35 {name}\n"))
-                .collect::<String>()
+    fn a_forged_listing_row_cannot_stand_in_for_the_partial() {
+        let Some(world) = world() else { return };
+        let server = server().unwrap();
+        let forged = world.remote.display();
+        fs::write(
+            &world.sftp.program,
+            format!(
+                "#!/bin/sh\nbatch=\nwhile [ $# -gt 0 ]; do case \"$1\" in -b) batch=$2; shift 2;; *) shift;; esac; done\nif grep -q '^-rename' \"$batch\"; then\npartial=$(sed -n 's/^-rename -l \"\\.\\/\\([^\"]*\\)\" .*/\\1/p' \"$batch\")\n(cd '{forged}' && touch \"$(printf 'x\\n-rw-r--r--    ? 1 1 5 Oct  3 22:35 %s' \"$partial\")\")\nsed -e 's/^-rename -l \\(\"[^\"]*\"\\) .*/-rm \\1/' \"$batch\" > \"$batch.cut\"\n{SFTP} -D {server} -b \"$batch.cut\"\nexit 0\nfi\nexec {SFTP} -D {server} -b \"$batch\"\n",
+            ),
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(false);
+        let sources = [source(&world, "a.txt", b"mine")];
+        let outcome = upload(
+            &world.sftp,
+            &control(&world, &cancel, &|_| {}),
+            world.roots[0].as_str(),
+            &sources,
+            ConflictPolicy::Ask,
+            false,
+        );
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(!world.remote.join("a.txt").exists());
+    }
+
+    #[test]
+    fn existence_is_asked_of_the_exact_name_whatever_its_characters() {
+        let Some(world) = world() else { return };
+        let cancel = AtomicBool::new(false);
+        let directory = world.roots[0].as_str();
+        let present = [
+            "a*.txt",
+            "[x] {y}.txt",
+            "quote\"d \\ name",
+            "trailing ",
+            "-rf",
+            "\u{e9}\u{65e5}\u{672c} \u{2603}.txt",
+        ];
+        for name in present {
+            fs::write(world.remote.join(name), b"x").unwrap();
+        }
+        fs::create_dir(world.remote.join("dir")).unwrap();
+        for locale in ["C", "en_US.UTF-8"] {
+            intercepted(
+                &world,
+                "",
+                &format!("export LC_ALL={locale} LC_CTYPE={locale}"),
+            );
+            for name in present.into_iter().chain(["dir"]) {
+                assert!(
+                    world.sftp.exists(directory, name, &cancel).unwrap(),
+                    "{name:?} under {locale}"
+                );
+            }
+            for name in ["a", "ab.txt", "x.txt", "trailing", "\u{e9}", "missing"] {
+                assert!(
+                    !world.sftp.exists(directory, name, &cancel).unwrap(),
+                    "{name:?} must not match under {locale}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_unicode_name_is_published_under_a_c_locale() {
+        let Some(world) = world() else { return };
+        intercepted(&world, "", "export LC_ALL=C LC_CTYPE=C");
+        let cancel = AtomicBool::new(false);
+        let name = "caf\u{e9} \u{65e5}\u{672c}.txt";
+        let sources = [source(&world, name, b"mine")];
+        let outcome = upload(
+            &world.sftp,
+            &control(&world, &cancel, &|_| {}),
+            world.roots[0].as_str(),
+            &sources,
+            ConflictPolicy::Ask,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            outcome,
+            UploadOutcome::Done {
+                names: vec![name.into()]
+            }
+        );
+        assert_eq!(names(&world.remote), [name]);
+        let again = upload(
+            &world.sftp,
+            &control(&world, &cancel, &|_| {}),
+            world.roots[0].as_str(),
+            &sources,
+            ConflictPolicy::KeepBoth,
+            false,
+        )
+        .unwrap();
+        let UploadOutcome::Done { names: stored } = again else {
+            panic!("{again:?}")
         };
-        assert!(matches!(
-            publication(&listing(&["a", ".a.part"]), ".a.part", "a"),
-            Ok(Publication::Taken)
-        ));
-        assert!(matches!(
-            publication(&listing(&["a"]), ".a.part", "a"),
-            Ok(Publication::Published)
-        ));
-        assert!(publication(&listing(&["b"]), ".a.part", "a").is_err());
-        assert!(publication("", ".a.part", "a").is_err());
+        assert_eq!(stored.len(), 1);
+        assert_ne!(stored[0], name);
+        assert_eq!(fs::read(world.remote.join(name)).unwrap(), b"mine");
+        assert_eq!(names(&world.remote).len(), 2);
+    }
+
+    #[test]
+    fn publishing_never_asks_the_computer_for_a_directory_listing() {
+        let Some(world) = world() else { return };
+        let log = world.local.parent().unwrap().join("batches");
+        intercepted(
+            &world,
+            "",
+            &format!("cat \"$batch\" >> '{}'; echo '--' >> '{0}'", log.display()),
+        );
+        let cancel = AtomicBool::new(false);
+        fs::write(world.remote.join("a.txt"), b"old").unwrap();
+        let sources = [source(&world, "a.txt", b"mine")];
+        for policy in [ConflictPolicy::KeepBoth, ConflictPolicy::Replace] {
+            upload(
+                &world.sftp,
+                &control(&world, &cancel, &|_| {}),
+                world.roots[0].as_str(),
+                &sources,
+                policy,
+                false,
+            )
+            .unwrap();
+        }
+        for batch in fs::read_to_string(&log).unwrap().split("--\n") {
+            if batch.lines().any(|line| line.starts_with("put ")) {
+                assert!(
+                    !batch
+                        .lines()
+                        .any(|line| line.trim_start_matches('-').starts_with("ls")),
+                    "{batch}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_transfer_has_a_time_limit_that_grows_with_the_file() {
+        assert_eq!(transfer_limit(0), PROBE_LIMIT);
+        assert!(transfer_limit(MAX_FILE_BYTES) > transfer_limit(1024 * 1024));
+        assert!(transfer_limit(MAX_FILE_BYTES) < Duration::from_secs(3 * 24 * 3600));
     }
 
     #[test]
