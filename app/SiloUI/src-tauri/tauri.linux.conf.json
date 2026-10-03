@@ -12,6 +12,7 @@
           "libcap-ng0",
           "zlib1g",
           "gstreamer1.0-libav",
+          "gstreamer1.0-plugins-base",
           "openssh-client"
         ]
       },
@@ -21,6 +22,7 @@
           "libcurl",
           "libcap-ng",
           "zlib",
+          "gstreamer1-plugins-base",
           "openssh-clients"
         ]
       }

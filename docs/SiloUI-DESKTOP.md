@@ -618,6 +618,47 @@ macOS local monitor sees Command+V while the guest webview is first responder
 GTK handler precedes WebKitGTK key handling; and whether Selkies applies the
 seeded `clipboard_seamless` when the server also pushes a default.
 
+### Sound and screen size in the viewer
+
+Commands in `desktop_viewer_media.rs`, granted to `desktop-shell-*` windows only,
+bound to the window's own computer through `require_computer`, rejected from
+`main`, and run on a blocking worker through `with_bridge`:
+
+- `desktop_viewer_sound_support` asks the page for its capabilities, retrying for
+  up to 20 attempts (0.5 s apart) until the Selkies transport is open (the page may still be
+  loading right after attach). When the engine decodes Opus, sound is offered.
+  Otherwise it calls `set_audio_active(false)` so the computer stops encoding
+  audio, and the toolbar shows no sound control. Selkies 2.0.0 decodes audio
+  only through WebCodecs, so macOS 14 and 15 are expected to have no sound; this
+  is a check of the running engine, never of the OS version.
+- `desktop_viewer_set_audio(muted, active)` applies the mute choice and starts or
+  stops the audio stream. The shell calls it with `active: false` while its
+  document is hidden or minimized (`visibilitychange`) and `true` when it
+  returns. The speaker button is the shell's own control; the guest sidebar has
+  no audio section. The mute choice is stored per computer in the shell's
+  `localStorage` (`silo-desktop-muted:<computer>`, default unmuted), because it
+  is a viewer preference on this device and the shared settings document is not
+  readable from viewer windows. Computers on a recipe 2 guest keep Selkies'
+  default of audio on; sound is detected and controlled the same way there, and
+  the viewer's `getUserMedia` lock still keeps the microphone out of reach.
+- `desktop_viewer_reset_screen` sends `r,1440x900,primary`; it appears as
+  **Reset to 1440×900** in the desktop actions menu.
+
+Resizing needs no Silo code: the guest child webview's bounds follow the shell's
+screen area (a `ResizeObserver` plus the window `resize` event), the Selkies
+client sees its own window change and, 500 ms after the last change, asks the
+server for that size in CSS pixels. The shell window's minimum is 672x480, which
+leaves the guest at least 656x424 logical pixels after the toolbar and frame.
+Closing the viewer keeps the size, so an agent working without a viewer sees no
+change. The reset is explicit and one-off: the next resize of the window makes
+the screen follow the window again.
+
+Live checks needed: `AudioDecoder` Opus support on WKWebView (macOS 14, 15, 26)
+and WebKitGTK (deb and AppImage, where `libgstopus` must be bundled); audible
+playback and mute; the audio stream stopping on minimize; that `visibilitychange`
+fires on minimize in both engines; the resize round trip and reset on a
+disposable `e2e-*` computer.
+
 ## Device clipboard module
 
 `src-tauri/src/clipboard.rs` is the device-side clipboard used by the viewer

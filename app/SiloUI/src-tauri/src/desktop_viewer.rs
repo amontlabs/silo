@@ -367,7 +367,7 @@ pub(crate) async fn open_desktop(
         let result = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(route.into()))
             .title(viewer_title(&name, crate::channel::current()))
             .inner_size(1200., 820.)
-            .min_inner_size(640., 400.)
+            .min_inner_size(672., 480.)
             .build();
         let viewer = match result {
             Ok(v) => v,

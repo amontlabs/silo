@@ -16,6 +16,7 @@ mod desktop;
 mod desktop_bridge;
 mod desktop_proxy;
 mod desktop_viewer;
+mod desktop_viewer_media;
 mod device_identity;
 mod editor;
 mod files;
@@ -129,6 +130,9 @@ fn main() {
             desktop_viewer::open_desktop,
             desktop_viewer::desktop_viewer_attach,
             desktop_viewer::desktop_viewer_detach,
+            desktop_viewer_media::desktop_viewer_sound_support,
+            desktop_viewer_media::desktop_viewer_set_audio,
+            desktop_viewer_media::desktop_viewer_reset_screen,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,
