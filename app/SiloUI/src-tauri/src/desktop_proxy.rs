@@ -2,6 +2,7 @@
 //! bounded HTTP headers and transparent upgraded WebSocket streams. The guest
 //! side is the SSH tunnel's Unix socket in a private directory (G-04), so no
 //! other local process can reach the guest through it or impersonate it.
+use crate::desktop_bridge::{self, Inbox};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{
     io::{Read, Write},
@@ -20,6 +21,8 @@ pub(crate) struct Proxy {
     pub port: u16,
     pub cookie_name: String,
     pub token: String,
+    /// Pending bridge nonces; the reserved route accepts answers only for these.
+    pub(crate) inbox: Arc<Inbox>,
     stopped: Arc<AtomicBool>,
 }
 impl Drop for Proxy {
@@ -59,7 +62,11 @@ impl Stream for UnixStream {
 
 struct Request {
     header: String,
+    method: String,
+    target: String,
     body_length: u64,
+    /// Whether the request carried a Content-Length header at all.
+    length_declared: bool,
     websocket: bool,
 }
 
@@ -157,6 +164,9 @@ fn request_header(
     forwarded.push_str("\r\n");
     Ok(Request {
         body_length: body_length.unwrap_or(0),
+        length_declared: body_length.is_some(),
+        method: parts[0].to_string(),
+        target: parts[1].to_string(),
         websocket,
         header: forwarded,
     })
@@ -256,8 +266,9 @@ fn serve(
     token: &str,
     authorization: &str,
     stop: Arc<AtomicBool>,
+    inbox: &Inbox,
 ) -> std::io::Result<()> {
-    serve_with_header_progress(
+    serve_inner(
         client,
         port,
         upstream,
@@ -266,13 +277,43 @@ fn serve(
         token,
         authorization,
         stop,
+        inbox,
         Duration::from_secs(120),
         |_, _| {},
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn serve_with_header_progress(
+    client: TcpStream,
+    port: u16,
+    upstream: &Path,
+    guest_port: u16,
+    cookie_name: &str,
+    token: &str,
+    authorization: &str,
+    stop: Arc<AtomicBool>,
+    http_timeout: Duration,
+    header_progress: impl FnMut(&TcpStream, usize),
+) -> std::io::Result<()> {
+    serve_inner(
+        client,
+        port,
+        upstream,
+        guest_port,
+        cookie_name,
+        token,
+        authorization,
+        stop,
+        &Inbox::default(),
+        http_timeout,
+        header_progress,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn serve_inner(
     mut client: TcpStream,
     port: u16,
     upstream: &Path,
@@ -281,6 +322,7 @@ fn serve_with_header_progress(
     token: &str,
     authorization: &str,
     stop: Arc<AtomicBool>,
+    inbox: &Inbox,
     http_timeout: Duration,
     mut header_progress: impl FnMut(&TcpStream, usize),
 ) -> std::io::Result<()> {
@@ -313,6 +355,9 @@ fn serve_with_header_progress(
         )?;
         return Ok(());
     };
+    if desktop_bridge::is_reserved(&header.target) {
+        return serve_reserved(&mut client, &header, inbox, stop);
+    }
     let deadline = (!header.websocket).then(|| Instant::now() + http_timeout);
     let mut server = match UnixStream::connect(upstream) {
         Ok(server) => server,
@@ -350,6 +395,65 @@ fn serve_with_header_progress(
     let _ = writer.join();
     Ok(())
 }
+/// Answers the bridge's reserved route itself; the guest never sees it.
+fn serve_reserved(
+    client: &mut TcpStream,
+    request: &Request,
+    inbox: &Inbox,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = desktop_bridge::serve_route(
+        inbox,
+        &request.method,
+        &request.target,
+        (!request.websocket && request.length_declared).then_some(request.body_length),
+        |length| {
+            let mut body = vec![0; length];
+            let mut filled = 0;
+            while filled < length {
+                if Instant::now() >= deadline || stop.load(Ordering::Acquire) {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                match client.read(&mut body[filled..]) {
+                    Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+                    Ok(n) => filled += n,
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                        ) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(body)
+        },
+        Instant::now(),
+    );
+    client.write_all(
+        format!(
+            "HTTP/1.1 {}\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n",
+            status.line()
+        )
+        .as_bytes(),
+    )?;
+    // Closing with request bytes unread would reset the connection and can
+    // discard the response; read what the client still sends, within bounds.
+    let _ = client.shutdown(Shutdown::Write);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut sink = [0; 8192];
+    let mut drained = 0;
+    while drained < 1024 * 1024 && Instant::now() < deadline && !stop.load(Ordering::Acquire) {
+        match client.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => drained += n,
+        }
+    }
+    Ok(())
+}
+
 impl Proxy {
     pub(crate) fn running(&self) -> bool {
         !self.stopped.load(Ordering::Acquire)
@@ -405,6 +509,8 @@ impl Proxy {
         let worker_token = token.clone();
         let worker_cookie = cookie_name.clone();
         let active = Arc::new(AtomicUsize::new(0));
+        let inbox = Arc::new(Inbox::default());
+        let worker_inbox = inbox.clone();
         thread::spawn(move || {
             while !worker_stop.load(Ordering::Acquire) {
                 match accept(&listener) {
@@ -414,17 +520,19 @@ impl Proxy {
                             continue;
                         }
                         active.fetch_add(1, Ordering::AcqRel);
-                        let (stop, token, cookie, auth, count, upstream) = (
+                        let (stop, token, cookie, auth, count, upstream, inbox) = (
                             worker_stop.clone(),
                             worker_token.clone(),
                             worker_cookie.clone(),
                             authorization.clone(),
                             active.clone(),
                             upstream.clone(),
+                            worker_inbox.clone(),
                         );
                         thread::spawn(move || {
                             let _ = serve(
                                 socket, port, &upstream, guest_port, &cookie, &token, &auth, stop,
+                                &inbox,
                             );
                             count.fetch_sub(1, Ordering::AcqRel);
                         });
@@ -451,6 +559,7 @@ impl Proxy {
             port,
             cookie_name,
             token,
+            inbox,
             stopped,
         })
     }
@@ -767,6 +876,7 @@ mod tests {
                 "secret",
                 "auth",
                 worker_stop,
+                &Inbox::default(),
             );
             done_tx.send(result).unwrap();
         });
@@ -1312,5 +1422,102 @@ mod tests {
         drop(proxy);
         done_rx.recv_timeout(Duration::from_secs(3)).unwrap();
         worker.join().unwrap();
+    }
+
+    /// Sends one raw request to the proxy and returns the status line.
+    fn reserved_request(proxy: &Proxy, target: &str, cookie: bool, body: &[u8]) -> String {
+        let mut socket = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            socket,
+            "POST {target} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{}Content-Length: {}\r\n\r\n",
+            proxy.port,
+            if cookie {
+                format!("Cookie: {}={}\r\n", proxy.cookie_name, proxy.token)
+            } else {
+                String::new()
+            },
+            body.len()
+        )
+        .unwrap();
+        socket.write_all(body).unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        response.lines().next().unwrap_or_default().to_string()
+    }
+
+    fn assert_guest_untouched(upstream: &UnixListener) {
+        upstream.set_nonblocking(true).unwrap();
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "a reserved request reached the guest"
+        );
+    }
+
+    #[test]
+    fn the_reserved_bridge_route_is_answered_locally_and_never_forwarded() {
+        use crate::desktop_bridge::Op;
+        let (_directory, upstream, socket) = guest();
+        let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+        let expectation = proxy.inbox.expect(Op::Clipboard, Duration::from_secs(5));
+        let target = format!(
+            "/__silo/v1/clipboard?nonce={}&kind=text/plain",
+            expectation.nonce
+        );
+        // Without the viewer's cookie the request is refused before any nonce is looked at.
+        assert!(reserved_request(&proxy, &target, false, b"").starts_with("HTTP/1.1 403"));
+        // Unknown operations and paths under the reserved prefix never go to the guest either.
+        for unknown in [
+            "/__silo/v1/files?nonce=a&kind=b",
+            "/__silo/v2/clipboard",
+            "/__silo",
+        ] {
+            assert!(
+                reserved_request(&proxy, unknown, true, b"").starts_with("HTTP/1.1 404"),
+                "{unknown}"
+            );
+        }
+        assert!(reserved_request(&proxy, &target, true, b"hello").starts_with("HTTP/1.1 204"));
+        let reply = expectation.wait(Duration::from_secs(1)).unwrap();
+        assert_eq!(reply.body, b"hello");
+        // The nonce is spent.
+        assert!(reserved_request(&proxy, &target, true, b"hello").starts_with("HTTP/1.1 403"));
+        assert_guest_untouched(&upstream);
+    }
+
+    #[test]
+    fn unsolicited_and_oversize_reserved_requests_are_rejected_without_the_guest() {
+        use crate::desktop_bridge::Op;
+        let (_directory, upstream, socket) = guest();
+        let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+        let unsolicited = "/__silo/v1/clipboard?nonce=abc123&kind=text/plain";
+        assert!(reserved_request(&proxy, unsolicited, true, b"x").starts_with("HTTP/1.1 403"));
+        let expectation = proxy.inbox.expect(Op::Capabilities, Duration::from_secs(5));
+        let target = format!(
+            "/__silo/v1/capabilities?nonce={}&kind=application/json",
+            expectation.nonce
+        );
+        let big = vec![b'x'; Op::Capabilities.max_bytes() + 1];
+        assert!(reserved_request(&proxy, &target, true, &big).starts_with("HTTP/1.1 413"));
+        assert!(expectation.wait(Duration::from_millis(100)).is_err());
+        assert_guest_untouched(&upstream);
+    }
+
+    #[test]
+    fn expired_nonces_are_rejected_on_the_wire() {
+        use crate::desktop_bridge::Op;
+        let (_directory, upstream, socket) = guest();
+        let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+        let expectation = proxy.inbox.expect(Op::Clipboard, Duration::from_millis(1));
+        thread::sleep(Duration::from_millis(20));
+        let target = format!(
+            "/__silo/v1/clipboard?nonce={}&kind=text/plain",
+            expectation.nonce
+        );
+        assert!(reserved_request(&proxy, &target, true, b"late").starts_with("HTTP/1.1 403"));
+        assert_guest_untouched(&upstream);
     }
 }

@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest"
 // The script Silo injects into every frame of a guest desktop webview (G-20).
 // It locks what it guards, so it runs once, as it does in a real frame.
 const native = resolve(dirname(fileURLToPath(import.meta.url)), "../../src-tauri")
-const guard = readFileSync(resolve(native, "src/desktop_viewer_guard.js"), "utf8")
+const guard = readFileSync(resolve(native, "src/desktop_viewer_bridge.js"), "utf8")
 
 class FakeClipboard {
   writeText = vi.fn(async () => {})
@@ -17,8 +17,16 @@ class FakeClipboard {
 const clipboard = new FakeClipboard()
 const original = { ...clipboard }
 const execCommand = vi.fn(() => true)
+class FakeMediaDevices {
+  getUserMedia = vi.fn(async () => ({}))
+  getDisplayMedia = vi.fn(async () => ({}))
+}
+const mediaDevices = new FakeMediaDevices()
+const originalCapture = { ...mediaDevices }
 
 beforeAll(() => {
+  vi.stubGlobal("MediaDevices", FakeMediaDevices)
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: mediaDevices })
   vi.stubGlobal("Clipboard", FakeClipboard)
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard })
   Object.defineProperty(Document.prototype, "execCommand", { configurable: true, writable: true, value: execCommand })
@@ -59,5 +67,22 @@ describe("guest desktop clipboard guard", () => {
     document.addEventListener("paste", paste)
     document.dispatchEvent(new Event("paste", { bubbles: true }))
     expect(paste).toHaveBeenCalledOnce()
+  })
+
+  it("always refuses microphone and screen capture, and a page cannot unlock them", async () => {
+    await expect(navigator.mediaDevices.getUserMedia({ audio: true })).rejects.toMatchObject({ name: "NotAllowedError" })
+    await expect(navigator.mediaDevices.getDisplayMedia({ video: true })).rejects.toMatchObject({ name: "NotAllowedError" })
+    await expect((FakeMediaDevices.prototype as unknown as { getUserMedia: (...args: unknown[]) => Promise<unknown> }).getUserMedia.call(mediaDevices, { audio: true })).rejects.toMatchObject({ name: "NotAllowedError" })
+    expect(originalCapture.getUserMedia).not.toHaveBeenCalled()
+    expect(() => { Object.defineProperty(navigator.mediaDevices, "getUserMedia", { value: originalCapture.getUserMedia }) }).toThrow()
+    expect(() => { Object.defineProperty(FakeMediaDevices.prototype, "getUserMedia", { value: originalCapture.getUserMedia }) }).toThrow()
+    const failure = vi.fn()
+    ;(navigator as unknown as { webkitGetUserMedia: (...args: unknown[]) => void }).webkitGetUserMedia({ audio: true }, vi.fn(), failure)
+    await vi.waitFor(() => expect(failure).toHaveBeenCalledOnce())
+  })
+
+  it("seeds the Selkies setting that keeps the page from writing the clipboard on its own", () => {
+    const prefix = `${location.origin}${location.pathname}`.replace(/[^a-zA-Z0-9._-]/g, "_")
+    expect(window.localStorage.getItem(`${prefix}_clipboard_seamless`)).toBe("false")
   })
 })

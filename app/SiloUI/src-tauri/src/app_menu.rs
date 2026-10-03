@@ -94,6 +94,15 @@ pub(crate) fn show_app_menu(window: WebviewWindow) -> Result<(), String> {
     }
     Ok(())
 }
+/// Enables the Edit menu's computer clipboard items while a desktop viewer has
+/// focus (macOS; Linux viewers use Ctrl+Shift+C and Ctrl+Shift+V).
+pub(crate) fn set_viewer_focus(app: &AppHandle, focused: bool) {
+    #[cfg(target_os = "macos")]
+    native::set_viewer_focus(app, focused);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, focused);
+}
+
 #[cfg(target_os = "linux")]
 #[path = "linux_menu.rs"]
 mod linux_menu;
@@ -117,6 +126,19 @@ mod native {
     struct Controller {
         state: Mutex<MenuState>,
         items: Vec<(&'static str, MenuItem<tauri::Wry>)>,
+        /// Paste into Computer and Copy from Computer; enabled by viewer focus, not by `MenuState`.
+        #[cfg(target_os = "macos")]
+        viewer_items: Vec<MenuItem<tauri::Wry>>,
+    }
+    #[cfg(target_os = "macos")]
+    pub(super) fn set_viewer_focus(app: &AppHandle, focused: bool) {
+        let Some(menu) = app.try_state::<Controller>() else {
+            return;
+        };
+        let enabled = focused && crate::viewer_shortcuts::clipboard_shortcuts_enabled();
+        for item in &menu.viewer_items {
+            let _ = item.set_enabled(enabled);
+        }
     }
     pub(super) fn set_state(app: &AppHandle, state: MenuState) -> Result<(), String> {
         let menu = app.state::<Controller>();
@@ -219,6 +241,25 @@ mod native {
                 &item("close-window", "Close Window", Some("CmdOrCtrl+W"))?,
             ],
         )?;
+        // Command+C and Command+V in a viewer are handled by a native key monitor
+        // (viewer_shortcuts.rs), so these items carry no accelerator of their own.
+        #[cfg(target_os = "macos")]
+        let viewer_items = vec![
+            MenuItem::with_id(
+                app,
+                "silo-menu:viewer-paste",
+                "Paste into Computer",
+                false,
+                None::<&str>,
+            )?,
+            MenuItem::with_id(
+                app,
+                "silo-menu:viewer-copy",
+                "Copy from Computer",
+                false,
+                None::<&str>,
+            )?,
+        ];
         let edit = Submenu::with_items(
             app,
             "Edit",
@@ -237,6 +278,12 @@ mod native {
                 &Standard::copy(app, None)?,
                 &Standard::paste(app, None)?,
                 &Standard::select_all(app, None)?,
+                #[cfg(target_os = "macos")]
+                &Standard::separator(app)?,
+                #[cfg(target_os = "macos")]
+                &viewer_items[0],
+                #[cfg(target_os = "macos")]
+                &viewer_items[1],
             ],
         )?;
         let view = Submenu::with_items(
@@ -320,6 +367,8 @@ mod native {
         app.manage(Controller {
             state: Mutex::new(MenuState::default()),
             items,
+            #[cfg(target_os = "macos")]
+            viewer_items,
         });
         app.on_menu_event(|app, event| {
             if super::request_menu_quit(event.id().as_ref(), || crate::settings::request_quit(app))
@@ -329,6 +378,15 @@ mod native {
             let Some(command) = event.id().as_ref().strip_prefix("silo-menu:") else {
                 return;
             };
+            #[cfg(target_os = "macos")]
+            if let Some(shortcut) = match command {
+                "viewer-paste" => Some(crate::viewer_shortcuts::Shortcut::PasteIntoComputer),
+                "viewer-copy" => Some(crate::viewer_shortcuts::Shortcut::CopyFromComputer),
+                _ => None,
+            } {
+                crate::viewer_shortcuts::run_focused(app, shortcut);
+                return;
+            }
             let state = app
                 .state::<Controller>()
                 .state

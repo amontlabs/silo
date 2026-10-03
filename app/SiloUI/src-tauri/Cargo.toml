@@ -43,7 +43,7 @@ keyring = { version = "3.6", features = ["apple-native", "sync-secret-service", 
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 objc2 = "0.6"
 objc2-foundation = "0.3"
-objc2-app-kit = "0.3"
+objc2-app-kit = { version = "0.3", features = ["block2"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSettings", "UNUserNotificationCenter", "block2"] }
 block2 = "0.6"

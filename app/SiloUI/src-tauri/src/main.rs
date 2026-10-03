@@ -13,6 +13,7 @@ mod computer_use;
 mod creation_inputs;
 mod dependencies;
 mod desktop;
+mod desktop_bridge;
 mod desktop_proxy;
 mod desktop_viewer;
 mod device_identity;
@@ -62,6 +63,7 @@ mod test_support;
 mod titlebar;
 mod tray;
 mod updates;
+mod viewer_shortcuts;
 #[cfg(target_os = "macos")]
 mod window_material;
 mod working_account;

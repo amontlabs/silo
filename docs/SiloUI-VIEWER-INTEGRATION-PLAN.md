@@ -28,7 +28,7 @@ current default cannot be used by accident.
   may start a read or write of the device clipboard or a file transfer. Nothing syncs because a viewer is open.
 - **The guest child webview keeps no Tauri capabilities.**
   `capabilities/desktop-viewer.json` grants commands only to `desktop-shell-*`;
-  this plan adds none to `guest-*`. `desktop_viewer_guard.js` keeps locking the
+  this plan adds none to `guest-*`. `desktop_viewer_bridge.js` keeps locking the
   web clipboard APIs.
 - **Reuse what is pinned.** Selkies 2.0.0 already implements chunked clipboard
   (text and images), Opus audio and RandR resize. OpenSSH
