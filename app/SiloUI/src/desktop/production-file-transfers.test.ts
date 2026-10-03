@@ -13,29 +13,36 @@ function setup(replies: Record<string, unknown>) {
 describe("production file transfers", () => {
   it("passes ids, folders and conflict policies to the native commands and validates replies", async () => {
     const { invoke, transfers, production } = setup({
-      choose_upload_files: ["/Users/ada/a.txt"],
+      choose_upload_files: { token: "tok", names: ["a.txt"] },
       upload_files: { status: "conflict", names: ["a.txt"] },
       download_file: { status: "done", path: "/Users/ada/Downloads/a.txt" },
       cancel_transfer: null,
     })
     try {
-      expect(await transfers.chooseUploadFiles()).toEqual(["/Users/ada/a.txt"])
-      expect(await transfers.upload({ id: "t1", computer: "dev", directory: "/workspace", paths: ["/Users/ada/a.txt"], conflict: "ask" })).toEqual({ status: "conflict", names: ["a.txt"] })
+      expect(await transfers.chooseUploadFiles()).toEqual({ token: "tok", names: ["a.txt"] })
+      expect(await transfers.upload({ id: "t1", computer: "dev", directory: "/workspace", selection: "tok", conflict: "ask" })).toEqual({ status: "conflict", names: ["a.txt"] })
       expect(await transfers.download({ id: "t2", computer: "dev", path: "/workspace/a.txt" })).toEqual({ status: "done", path: "/Users/ada/Downloads/a.txt" })
       await transfers.cancel("t2")
       expect(invoke.mock.calls).toEqual([
         ["choose_upload_files"],
-        ["upload_files", { transferId: "t1", computer: "dev", directory: "/workspace", paths: ["/Users/ada/a.txt"], conflict: "ask" }],
+        ["upload_files", { transferId: "t1", computer: "dev", directory: "/workspace", selection: "tok", conflict: "ask" }],
         ["download_file", { transferId: "t2", computer: "dev", path: "/workspace/a.txt" }],
         ["cancel_transfer", { transferId: "t2" }],
       ])
     } finally { production.dispose() }
   })
 
+  it("treats a dismissed picker as no selection and refuses a reply that carries paths instead of a token", async () => {
+    const dismissed = setup({ choose_upload_files: null })
+    try { expect(await dismissed.transfers.chooseUploadFiles()).toBeNull() } finally { dismissed.production.dispose() }
+    const paths = setup({ choose_upload_files: ["/Users/ada/a.txt"] })
+    try { await expect(paths.transfers.chooseUploadFiles()).rejects.toThrow() } finally { paths.production.dispose() }
+  })
+
   it("rejects replies that are not a known outcome", async () => {
     const { transfers, production } = setup({ upload_files: { status: "unknown" }, download_file: { status: "done" } })
     try {
-      await expect(transfers.upload({ id: "t", computer: "dev", directory: "/workspace", paths: ["/a"], conflict: "ask" })).rejects.toThrow()
+      await expect(transfers.upload({ id: "t", computer: "dev", directory: "/workspace", selection: "tok", conflict: "ask" })).rejects.toThrow()
       await expect(transfers.download({ id: "t", computer: "dev", path: "/workspace/a" })).rejects.toThrow()
     } finally { production.dispose() }
   })

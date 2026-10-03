@@ -32,6 +32,7 @@ import { OverviewPage, type ComputerPageRequest } from "@/features/application/p
 import { useComputerTransfer } from "@/features/application/components/computer-transfer"
 import { SecretsPage } from "@/features/application/pages/secrets-page"
 import { SystemIssuePage } from "@/features/application/pages/system-issue-page"
+import { FileTransfersProvider } from "@/features/application/components/use-file-transfers"
 import { ComputersPage } from "@/features/application/pages/computers-page"
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
@@ -335,6 +336,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   return (
     // Keeps unsaved computer edits while navigating between sections (I-37).
     <ComputerEditorDraftsProvider>
+    <FileTransfersProvider api={actions.fileTransfers}>
     <ApplicationShell
       toggleSidebarRequest={sidebarRequest}
       onSidebarCollapsedChange={setSidebarCollapsed}
@@ -428,6 +430,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
         <div hidden={settingsSection !== "notifications"}><NotificationsPage /></div>
       </section>
     </ApplicationShell>
+    </FileTransfersProvider>
     </ComputerEditorDraftsProvider>
   )
 }

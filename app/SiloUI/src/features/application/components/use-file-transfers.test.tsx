@@ -4,12 +4,12 @@ import { describe, expect, it, vi } from "vitest"
 
 import { Toaster } from "@/components/ui/sonner"
 import type { FileTransferActions, TransferProgress, UploadOutcome } from "@/features/application/model/file-transfer"
-import { useFileTransfers } from "./use-file-transfers"
+import { FileTransfersProvider, useFileTransferControls, useFileTransfers } from "./use-file-transfers"
 
 function api(overrides: Partial<FileTransferActions> = {}) {
   let progress: ((value: TransferProgress) => void) | undefined
   const actions: FileTransferActions = {
-    chooseUploadFiles: vi.fn(async () => ["/Users/ada/report.pdf"]),
+    chooseUploadFiles: vi.fn(async () => ({ token: "pick-1", names: ["report.pdf"] })),
     upload: vi.fn(async (): Promise<UploadOutcome> => ({ status: "done", names: ["report.pdf"] })),
     download: vi.fn(async () => ({ status: "done" as const, path: "/Users/ada/Downloads/a.txt" })),
     cancel: vi.fn(async () => {}),
@@ -42,13 +42,13 @@ describe("file transfers on the Files page", () => {
     render(<Harness actions={actions} />)
     await user.click(screen.getByRole("button", { name: "Upload" }))
     expect(await screen.findByText("Uploaded “report.pdf” to dev")).toBeInTheDocument()
-    expect(actions.upload).toHaveBeenCalledWith(expect.objectContaining({ computer: "dev", directory: "/workspace", paths: ["/Users/ada/report.pdf"], conflict: "ask" }))
+    expect(actions.upload).toHaveBeenCalledWith(expect.objectContaining({ computer: "dev", directory: "/workspace", selection: "pick-1", conflict: "ask" }))
     expect(screen.getByRole("status")).toHaveTextContent("idle")
   })
 
   it("does nothing when the picker is dismissed", async () => {
     const user = userEvent.setup()
-    const { actions } = api({ chooseUploadFiles: vi.fn(async () => []) })
+    const { actions } = api({ chooseUploadFiles: vi.fn(async () => null) })
     render(<Harness actions={actions} />)
     await user.click(screen.getByRole("button", { name: "Upload" }))
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("idle"))
@@ -153,5 +153,34 @@ describe("file transfers on the Files page", () => {
     await user.click(screen.getByRole("button", { name: "Download" }))
     expect(await screen.findByText("Download failed")).toBeInTheDocument()
     expect(screen.getByText("Symbolic links cannot be downloaded.")).toBeInTheDocument()
+  })
+
+  it("keeps transfers, progress and the conflict question when the page that started them goes away", async () => {
+    const user = userEvent.setup()
+    let finish!: (outcome: UploadOutcome) => void
+    const upload = vi.fn()
+      .mockResolvedValueOnce({ status: "conflict", names: ["report.pdf"] })
+      .mockImplementationOnce(() => new Promise<UploadOutcome>(resolve => { finish = resolve }))
+    const { actions, emit } = api({ upload })
+    function Page() {
+      const controls = useFileTransferControls()
+      return <button onClick={() => controls?.upload("dev", "/workspace", "dev")}>Upload from page</button>
+    }
+    function App({ page }: { page: boolean }) {
+      return <FileTransfersProvider api={actions}><Toaster />{page ? <Page /> : <p>Another page</p>}</FileTransfersProvider>
+    }
+    const view = render(<App page />)
+    await user.click(screen.getByRole("button", { name: "Upload from page" }))
+    const dialog = await screen.findByRole("alertdialog")
+    view.rerender(<App page={false} />)
+    expect(screen.getByText("Another page")).toBeInTheDocument()
+    expect(screen.getByRole("alertdialog")).toBe(dialog)
+    await user.click(screen.getByRole("button", { name: "Keep both" }))
+    await screen.findByText("Uploading “report.pdf” to dev")
+    const { id } = upload.mock.calls[1][0]
+    emit({ id, computer: "dev", direction: "upload", state: "transferring", name: "report.pdf", fileIndex: 0, fileCount: 1, bytesDone: 500, bytesTotal: 1000 })
+    expect(await screen.findByText(/500 bytes of 1\.0 KB/)).toBeInTheDocument()
+    await act(async () => finish({ status: "done", names: ["report (1).pdf"] }))
+    expect(await screen.findByText("Uploaded “report (1).pdf” to dev")).toBeInTheDocument()
   })
 })

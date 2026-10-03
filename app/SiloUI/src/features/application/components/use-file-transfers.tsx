@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -26,7 +26,8 @@ const nextId = () => `file-transfer-${Date.now().toString(36)}-${++sequence}`
 /**
  * Upload and download from the Files page: native file picker and save dialog, progress and
  * cancel in one notification, and a dialog when an uploaded name already exists. Render
- * `dialog` once next to the controls' users.
+ * `dialog` once, in a component that stays mounted while the user navigates (see
+ * `FileTransfersProvider`).
  */
 export function useFileTransfers(api: FileTransferActions | undefined): { controls: FileTransferControls | undefined; dialog: ReactNode } {
   const [busy, setBusy] = useState(false)
@@ -62,6 +63,9 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
   const askConflict = useCallback((names: string[]) => new Promise<Choice>(resolve => {
     setConflict({ names, answer: choice => { setConflict(null); resolve(choice) } })
   }), [])
+  const pending = useRef<PendingConflict | null>(null)
+  useEffect(() => { pending.current = conflict }, [conflict])
+  useEffect(() => () => pending.current?.answer(null), [])
 
   const run = useCallback(async (verb: string, label: string, work: (id: string) => Promise<void>) => {
     if (!api || running.current) return
@@ -83,9 +87,9 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
   const controls = useMemo<FileTransferControls | undefined>(() => api && {
     busy,
     upload: (computer, directory, label) => void run("Uploading", label, async id => {
-      const paths = await api.chooseUploadFiles()
-      if (paths.length === 0) return
-      const names = paths.map(baseName)
+      const picked = await api.chooseUploadFiles()
+      if (!picked || picked.names.length === 0) return
+      const { names } = picked
       const start = (policy: ConflictPolicy) => {
         showOperationProgress(id, {
           title: `Uploading ${summarizeNames(names)} to ${label}`,
@@ -93,7 +97,7 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
           cancel: { onCancel: () => void api.cancel(id).catch(() => {}) },
           computer,
         })
-        return api.upload({ id, computer, directory, paths, conflict: policy })
+        return api.upload({ id, computer, directory, selection: picked.token, conflict: policy })
       }
       let outcome = await start("ask")
       if (outcome.status === "conflict") {
@@ -119,6 +123,25 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
   }, [api, busy, run, askConflict])
 
   return { controls, dialog: <ConflictDialog pending={conflict} /> }
+}
+
+const FileTransfersContext = createContext<FileTransferControls | undefined>(undefined)
+
+/**
+ * Owns file transfers for the whole application, so progress, cancel and the replace-or-keep
+ * question survive moving between pages.
+ */
+export function FileTransfersProvider({ api, children }: { api: FileTransferActions | undefined; children: ReactNode }) {
+  const { controls, dialog } = useFileTransfers(api)
+  return <FileTransfersContext.Provider value={controls}>
+    {children}
+    {dialog}
+  </FileTransfersContext.Provider>
+}
+
+/** The upload and download controls, or `undefined` where the application cannot transfer files. */
+export function useFileTransferControls(): FileTransferControls | undefined {
+  return useContext(FileTransfersContext)
 }
 
 function ConflictDialog({ pending }: { pending: PendingConflict | null }) {

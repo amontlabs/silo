@@ -258,9 +258,11 @@ JSON frames over `silo-remote` (4 MiB frames). Selkies' own file transfer stays
   Upload into the shown folder, Download on file rows. The same tree is used by
   `status-folder-picker.tsx`; keep the actions scoped to the Files page.
 - Viewer: dropping files onto the viewer uploads to `~/Downloads` and shows
-  progress in the toolbar. If P9 shows the child webview gets no Tauri drop
-  events, take the drop on the shell window over the viewer area. The guest
-  page never receives host file contents.
+  progress in the toolbar. The child webview is separate from the shell window,
+  so Rust handles its native drag-drop events (`Webview::on_webview_event`) and
+  the shell window's, and tells only the shell a one-time upload token and file
+  names. Uploads accept only such tokens, never paths. The guest page never
+  receives host file contents or drop events.
 
 ## Phase 5: the screen follows the window
 
