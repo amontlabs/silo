@@ -1,5 +1,584 @@
 # silo-ui
 
+## 0.11.0
+
+### Before upgrading
+
+- **Debian package users:** Silo's APT repository moved. Run this once, then update as usual:
+  `sudo sed -i 's#https://0xpolarzero.github.io/silo/apt#https://apt.silo.amontlabs.com/apt#' /etc/apt/sources.list.d/silo.sources`
+- **GitHub access:** the Silo GitHub App is now `silo-amont-labs`. Earlier versions can't find it, so update to keep using GitHub repository access.
+- **Remote computers:** update Silo on every computer you manage remotely; this release changes the remote protocol.
+
+### Minor Changes
+
+- 363cd18: Agents installed later in a sandbox are now set up for computer use automatically. Claude Code and Codex are registered up front, and Pi, OMP and Hermes are registered as soon as you install them, so the "Set up computer use for new agents" menu item is gone.
+- 2e05df9: Silo now prepares the VM image, the LCU archive and ChatGPT for Linux in the background at launch, with one non-blocking notification that shows progress, offers Retry when something fails, and stays out of the way once everything is ready.
+- ff2cbc6: New sandboxes use the v4 guest image, which includes the built-in Linux desktop, and get agent computer use with no setup. Silo downloads the official ChatGPT app for Linux from OpenAI by itself in the background on every computer that runs it (nothing to accept, retried automatically, never blocking sandbox creation or start) and shares it read-only with that computer's sandboxes; each sandbox installs LCU against it at boot, so computer use becomes ready automatically once that one-time background download and the sandbox's setup complete, and Claude Code, Codex and other agents can then use the desktop. Settings, Computers shows the download state on each computer and offers Retry after a failure. A per-sandbox switch lets computer-use actions run without asking first, and "Set up computer use" reruns setup after you install a new agent. Sandboxes created before this version keep their current desktop; create a new sandbox to use computer use.
+- 18e6df1: Silo now calls the environments agents use "computers" and the Macs and Linux machines running Silo "devices", and remote management is now "Connections". SSH-only computer entries are no longer offered, and any saved ones are dropped. Saved data is converted automatically on first launch. Connected devices must run the same Silo version, and when they do not, the message names the device to update. Exports from earlier versions cannot be imported.
+- fdb04bd: Settings → Computers no longer lists ChatGPT for Linux for every computer. Silo still downloads it in the background; a **Computer use components** section now appears only when a computer's download fails or its status cannot be read, with **Retry** or **Refresh**. A new switch, **Allow agents to use the computer without asking in new sandboxes**, sets the starting choice for sandboxes you create or import (off by default).
+- b402a48: Creating a sandbox now finishes everything, so **Created** means it is ready and the first start is just a start. The creation notification waits for the VM image and for ChatGPT for Linux (with its download progress) without blocking other sandbox actions or Quit, then sets up the desktop and computer use. If the download fails you can retry or finish without computer use, and anything left over completes at first start.
+- 2426f41: Remote management keys no longer carry owner forwarding privileges, and published ports on remote computers now go through guest SSH. This changes the remote protocol: a computer running this version cannot be managed by, or manage, a computer running an older Silo, so update Silo on both computers before reconnecting.
+- 3d5600f: New Linux desktops no longer install Luda agent tools, and the desktop viewer no longer offers "Repair agent tools". LCU is the supported computer-use integration. New v4 sandboxes set it up automatically; for a desktop created before v4, set LCU up from the running desktop. Existing desktops that already have Luda are left untouched.
+- c15a9b7: Sandboxes on other computers can now be dragged into place in the sandbox list too. Each computer keeps its own order of the list, for its own sandboxes and remote ones, and reordering no longer changes the sandbox configuration. Sandboxes that need attention still stay at the top. A sandbox's ⋯ menu also has **SSH**, after **Storage**, to open its SSH tab.
+- 7c13124: Creating a sandbox now shows its current step in the notification from the start, including the one-time image preparation on a new computer. When it finishes, the notification says the sandbox was created and lets you turn on **Allow without asking** for computer use right there.
+- 6f8e47e: A sandbox's computer use is now just the "Allow without asking" switch, which works whether or not the sandbox is running. Status, versions and download progress appear only when something goes wrong, with Try again or Retry. "Set up computer use for new agents" moved to the sandbox's actions menu, and the sandbox editor no longer describes the built-in desktop.
+
+### Patch Changes
+
+- 01fdaec: Avoid starting an export-file check after its import request has already been cancelled.
+- 169e92e: Reduce repeated accessibility checks when a sandbox's accessibility service is unavailable, and resume frequent checks when application content changes.
+- 39a836f: Keep Start, Stop, Restart, and Quit working when activity history cannot be read or saved. Show a warning in Activity, preserve damaged history, and clear completed or cancelled actions independently of history writes.
+- 79a39a4: A sandbox row's status, message and **Dismiss** button now line up on one line instead of sitting at slightly different heights.
+- 17600b2: Keep all system notification messages on one line and within 200 characters.
+- 2ab3446: Cancel system notices invalidated by sandbox deletion while notification policy is being checked, before submitting them to the OS.
+- 42b20a5: Recheck window focus and notification preferences after queued notifications finish waiting, so disabled notifications do not submit using stale settings.
+- 4d3e17c: Keep newer system notifications from being replaced by delayed older results, and prevent duplicate notifications for the same action.
+- 527ae7a: Remove system notifications when their sandbox is deleted, including notifications still waiting to appear.
+- 2178cd6: Keep older notifications withdrawable when a replacement is skipped because system notification permission or the desktop notification service is unavailable.
+- ff493c1: Prevent AppImage libraries from interfering with external Linux applications, even when folder paths contain unusual characters or repeated slashes.
+- 1052cc8: Keep your latest application preference when an older app chooser finishes, and ignore results after you leave the settings.
+- be72a8b: Keep newer system application defaults when an older application discovery response arrives later.
+- 1510ec7: Preserve Linux editor launch options when the launcher separates options from file paths.
+- bdd8267: Preserve environment assignments and isolation options from Linux editor desktop entries when opening a sandbox.
+- 1e96618: Include Linux editor and terminal launchers that clear selected environment variables.
+- 9e62895: Preserve the selected Flatpak editor's branch, architecture, installation, and command when opening a sandbox.
+- 9ad90fa: Open the selected Ghostty app when multiple copies are installed.
+- 89d1d34: Report an unavailable editor when its macOS bundled command has lost execute permission.
+- e808832: Preserve Linux editor desktop-entry options, including isolated user-data and extension directories, when opening a sandbox.
+- 94734eb: Keep editor SSH aliases available when the runtime directory contains brackets, question marks, asterisks, or backslashes.
+- 3e38bba: Exclude Linux editor entries whose resolved command launcher is missing or no longer executable.
+- 330a974: Stop suggesting Linux terminals whose command has been removed or lost execute permission.
+- e4a80d7: Preserve installed desktop services and account configuration when a migration file write is interrupted, and flush generated files before completing setup.
+- ef546c7: Allow home migration to retry interrupted file copies without leaving incomplete credentials or launchers at their final paths.
+- 309a5f6: Preserve existing shell files during interrupted home migration and avoid changing files outside the new home through hardlinks.
+- 60abee0: Clear notifications when their sandbox is deleted, even when another computer has a sandbox with the same name.
+- f144534: Keep delayed export or import cancellation from marking a later transfer as cancelled after relaunch.
+- b729dc2: Skip pending import file checks after you close the review, and keep them from interfering with a new review.
+- 07d1680: Keep each export's result separate so a new export cannot return an earlier file.
+- da51ab3: Keep imported disks and recovery records when a settings write fails and Silo cannot verify whether the sandbox was saved.
+- 653e32e: Keep the pre-upgrade backup removed from Storage when an older status read finishes after deletion.
+- 4fb3b94: Wait for the actual backup deletion result when Retry overlaps a deletion already in progress, instead of reporting success early.
+- 93313e8: Ignore oversized saved export-folder history without using excessive memory or changing backups and unfinished transfers.
+- 2723d87: Keep Storage accurate when a backup is deleted while Silo starts.
+- dc9e866: Show backup refresh failures in Storage and make Retry restore automatic updates.
+- 2ef2625: Stop refreshing backup and migration results for closed views, even if their updates are still connecting.
+- cfa508e: Reject export and import selections with unsupported filenames instead of opening a different path or remembering an unusable export folder.
+- c90ff75: Keep published sandbox exports when the destination folder's durability check fails, and preserve files another writer places at the export path.
+- c5ac575: Keep pre-upgrade backups available for manual deletion when their saved deletion dates exceed the supported date range.
+- b48e58c: Keep pre-upgrade backups available when their retention record is oversized, redirected, or a special file, without blocking backup status or automatic cleanup.
+- 28f31a6: Protect existing files when exporting to shared folders. If a filesystem cannot safely publish a new export, Silo asks you to choose another filesystem.
+- 9b2ec1a: Keep log browsing responsive with a bounded history window, preserve older paging and full export, and prepare copied log text only when Copy is clicked.
+- 5fccbba: Reuse repository search results when the catalog, selected repositories, and search text have not changed.
+- cd6add4: Name new Silo Dev editor SSH keys after the development channel while preserving existing keys.
+- 16846bc: Use the Silo Dev name in system menus, dialogs, the Linux tray, and shutdown messages.
+- 4a57e41: Reclaim ChatGPT app files left behind by interrupted version deletion.
+- 92d3c18: Recover from invalid ChatGPT app publication records without blocking status reads or downloads.
+- a326a23: Keep your ChatGPT download retry request when the previous failed download is still stopping.
+- 6335bd1: Refuse a symlinked shared ChatGPT folder during sandbox creation even while a download holds the storage lock.
+- 56a132c: Back off remote ChatGPT status checks when a computer returns an unreadable response, and resume normal polling after recovery.
+- 6de6fcd: Read remote ChatGPT app download status without waiting for local event registration.
+- b5c4a62: Keep failed ChatGPT app retry messages visible until dismissed, including when download status becomes ready or unknown.
+- 300b5d5: Clean up unfinished extraction when ChatGPT package unpacking fails to start.
+- 83b99c5: Clarify that checkpoints must be deleted in Silo on the sandbox's owning computer.
+- e65b64a: Restoring a checkpoint after changing your Git identity in Silo no longer brings back the old author. Imported sandboxes keep their existing Git identity until you set one in Silo.
+- d83ff53: Keep scheduled storage reclamation running for healthy sandboxes while retrying unresolved checkpoint cleanup for other sandboxes.
+- fb8bda4: Prevent a checkpoint failure’s Retry action from starting another checkpoint operation on a sandbox that is already busy.
+- 1f31ca1: Keep other sandboxes' latest state when a checkpoint operation finishes, while still showing newly created forks.
+- cd69644: Use fewer sandbox status checks when calculating checkpoint storage usage.
+- 793696f: Return focus to command search when cancelling a command confirmation.
+- c490a3f: Return to the previously focused control when dismissing Commands opened with a keyboard shortcut or native menu.
+- 1b83949: Return keyboard focus to Connect computer after cancelling or completing the connection form.
+- edd89e3: Show newly connected computers even when an older computer-list request fails during the connection.
+- 8fed8cb: Keep Retry on a failed computer removal working after an unrelated computer setting changes.
+- 94c7ccf: Ignore obsolete computer-settings Retry actions after newer changes or closed settings controls.
+- caa4b2a: Prevent computer-setting retries from overlapping a pending remote-management change or connection removal.
+- 28e7cbf: Keep long computer addresses and status messages inside settings rows, and show complete computer names on hover.
+- 75c9e90: Show the active SSH repair step when connecting a computer, instead of displaying “Connecting…” during key setup or Terminal authorization.
+- 504a33c: Changing a sandbox's computer-use "Allow without asking" setting now returns at once and applies in the background: the panel shows "Applying…", and if it fails or only some agents change it says so and warns that some agents may still act without asking, and Silo tries again when the sandbox starts. Importing or transferring a sandbox starts from Silo's default, a failed command no longer shows an out-of-date setting, a stop or quit interrupts a running change, and a failed ChatGPT download no longer hides the confirmed setting. The switch configures the agents' approval prompts; it is not a security boundary inside the sandbox. Also: recovering an interrupted sandbox creation keeps its original settings, built-in desktops always start with their sandbox, and the desktop viewer no longer offers computer use setup after a failed ChatGPT download.
+- 7437ff7: Recheck computer-use readiness after each sandbox boot and repair failed desktop sessions without reinstalling unchanged components.
+- ad29396: A sandbox's computer use now says when it is waiting on a failed ChatGPT for Linux download rather than on its own setup, and offers Retry for that download right there. After "Set up computer use" succeeds, the sandbox's page reminds you to reconnect agent sessions to load the tools. Settings, Computers marks a status it could not refresh as last known and offers Refresh.
+- 726467d: Save computer-use setup progress to disk before reporting completion, and report errors when it cannot be saved.
+- e5f0018: Manual computer-use setup now applies the latest approval choice before finishing when the choice changes during setup.
+- 1846c9a: Forking a sandbox now fails cleanly if Silo cannot save its inherited computer-use approval setting.
+- a22b03e: Computer use setup retries automatically when a sandbox's network is briefly unavailable.
+- 4f1eff8: Report invalid computer-use settings files without blocking status checks or approval changes.
+- ac4c224: Reduce repeated computer-use status checks while a sandbox is unavailable, and restore normal checks after recovery.
+- 57284c2: Silo now reports computer-use settings cleanup failures instead of reporting sandbox deletion as complete.
+- e8e771c: Reject oversized computer-use settings or status without using excessive memory or changing your saved approval choice.
+- 226e506: Pause computer-use and remote ChatGPT status checks in hidden views and refresh when you return, while setup and downloads finish in the background.
+- 1c49ee2: Ignore late connection-form completions after leaving the form.
+- dfebec6: Keep copy feedback tied to the latest clipboard write and prevent delayed feedback timers after leaving a view.
+- d8c7012: The button that creates a sandbox now says Create.
+- 33d5968: Keep Debian update downloads available when newer Silo releases are published while your package manager still uses an earlier valid package list.
+- 3b31efe: Close Silo safely if a Debian update installs but cannot restart. Reopen Silo to finish the update and restore its sandboxes.
+- 0df305a: Report invalid bundled sandbox image files promptly instead of leaving setup checks or preparation waiting indefinitely.
+- d759b7f: Report invalid bundled Git and virtual-machine files during Linux integrity checks instead of leaving checks waiting indefinitely.
+- 1df7cf2: Report damaged bundled dependency information without hanging or using excessive memory.
+- c39c69b: Limit setup-check output so it cannot fill temporary storage.
+- 2947f60: Keep completed dependency checks visible when slower checks time out, and offer Retry for the unfinished checks.
+- 8f8763c: Avoid starting queued dependency checks after Silo closes.
+- 9b7b5a4: Keep remote desktop connections tied to the requested sandbox when a sandbox name is reused.
+- d7c0365: Reject desktop connection credentials when the selected sandbox is replaced during lookup.
+- 09844ff: Save sandbox desktop preferences to disk before confirming the change.
+- d993665: Release desktop viewer connections after two minutes when a page request or upload stalls, so you can reconnect.
+- eb0c6cd: Reject desktop status and computer-use approval changes for a replaced sandbox instead of applying them to a new sandbox with the same name.
+- 378fa74: Keep the desktop viewer listener available after interrupted or aborted connection attempts.
+- 7502c0c: Prevent extra request bytes from being sent with bodyless desktop viewer requests.
+- a37abab: Reject malformed desktop HTTP framing and authentication fields that use Unicode whitespace as a delimiter.
+- 5d6c434: Handle interrupted desktop viewer reads without disconnecting or losing part of a request or response.
+- dd7d2fe: Reject invalid desktop viewer requests before they reach the sandbox.
+- 96dbe16: Reconnect desktop viewers when their local HTTP listener stops instead of retaining an unusable display connection.
+- 80ea0e9: Reject queued desktop actions when their sandbox was replaced, so they cannot change a new sandbox with the same name.
+- 87b25a1: Identify development desktop-viewer windows as Silo Dev in their native titles.
+- 1943ff9: Reduce repeated desktop viewer connection checks during failures and resume normal checks after recovery.
+- 801fc06: Reconnect sandbox desktop displays after their computer becomes reachable again, without restarting the desktop session.
+- 079f75f: Hide obsolete desktop connection errors and the Reconnect control when the sandbox or its display stops. Keep the controls for starting the sandbox or recovering its display visible.
+- 4c185d6: Stop unresponsive desktop tunnel processes after closing a viewer or an unexpected application exit.
+- 1783cc3: Release desktop display connections when their viewer client disconnects, even if the guest keeps its connection open.
+- 5730a4b: Improve error message and destructive button text contrast in both themes, including hover states.
+- 1cd33df: Refuse Dev configuration imports through linked channel directories or files before copying any settings or credentials.
+- 9b45d94: Flush imported Silo Dev settings and backups before continuing, and remove partial private temporary files when a write fails.
+- d1c99f3: Keep private configuration and SSH key backups owner-only when importing settings into Silo Dev.
+- 2c1aadf: Stop configuration imports if Silo Dev starts while the replacement confirmation is open.
+- 7449845: Associate status captions with labelled disclosure buttons so assistive technology can report summaries such as failed dependency checks.
+- 2b15594: Use MiB for binary disk-space amounts in update, VM image, and ChatGPT download errors.
+- c74a033: Flush authorized-key directory changes before acknowledging remote access updates, including unchanged retries after a failed save.
+- 606a6c6: Save SSH connection files to disk before confirming an editor configuration update.
+- 9ae3517: Save repaired sandbox image information to disk before reporting success, and report errors if saving cannot be completed.
+- 0bff67e: Save log exports to disk before confirming success.
+- f545de5: Save remote-management settings to disk before confirming success.
+- 6ae9210: Save port mappings to disk before confirming a configuration update.
+- 972b40c: Save secret settings to disk before confirming success.
+- 9f7dd52: Explain when a VM folder name contains unsupported control characters instead of opening a different folder in the editor.
+- e9715d6: Linux editor desktop entries now preserve literal percent signs in executable paths and launch arguments.
+- 81416ac: Open Linux editors whose desktop entries use `env -C` or `env --chdir`, retaining their chosen working directory.
+- d4f8405: Open the exact requested VM folder in VS Code and Zed when its name contains literal percent escapes such as `%20` or `%2F`.
+- c052979: OpenSSH checks now report unavailable client tools when installed files lack executable permissions.
+- 106e60e: Preserve existing VS Code workspace configuration and explain how to repair it when Silo cannot read it, instead of silently replacing it.
+- c156b30: Repair permissions on reused SSH connection keys without changing their identity, so editor and sandbox connections keep working after a key becomes broadly readable.
+- fa20251: Show readable error messages in action and background notifications instead of “[object Object]”.
+- 41d1913: Name the owning computer in log errors when sandboxes share a name.
+- 8c59706: Show readable failure reasons when loading sandbox logs or viewing older entries, including connection errors.
+- 96fa36a: Label ports as “Sandbox stopping” while their sandbox shuts down instead of saying it is starting.
+- ba6f563: Show the failure reason and recovery guidance when a port change is rejected.
+- 559b267: Keep complete recovery instructions and partial-change warnings visible when an error has separate diagnostic details.
+- a54e6e0: Show port status as unknown when sandbox state is stale, including cached stopped, starting, and failed sandboxes.
+- e2f1b29: Show a loading message in the tray during startup instead of claiming no sandboxes exist before inventory is read.
+- c56158e: Keep unread checkpoint and reclaim information unknown after a storage read fails, and explain how to retry.
+- 101f90a: Show the remote Silo update instruction without claiming logs are empty when that computer cannot serve logs.
+- 8936209: Pressing Escape in the Commands palette no longer cancels a pending confirmation behind it.
+- 646d68a: Keep Silo commands responsive while the export folder picker waits for backup status.
+- ad8632a: Preparing a checkpoint export no longer changes your saved checkpoint history while another checkpoint operation is in progress.
+- 98bfd3d: Settle pending export requests when Silo closes before the export starts reporting its progress.
+- 6abbb98: Recover VMs left paused by failed full checkpoints. Resume them when possible, preserve their disks if a forced stop is needed, and keep recovery available through ordinary sandbox controls when recovery fails.
+- 079344c: Return keyboard focus to the Add button when dismissing an import popover.
+- 09c451a: Preserve keyboard focus when keeping an import or export running after its cancellation prompt.
+- 023b4ef: Show the selected background and contrasting checkmark on checked checkboxes.
+- e46d961: Announce confirmation and form popover titles and descriptions to screen readers.
+- ba92a36: Keep filter selections and results unchanged while using keyboard keys to compose text with an input method editor.
+- f3b74b9: Keep filter keyboard selection working when the available sandbox list changes.
+- 32f1889: Keep the highlighted filter option visible when navigating long lists with the keyboard.
+- 8eb03be: Preserve popover form drafts when Escape cancels an input method candidate.
+- 4fcb8db: Keep GitHub repository selections and Git identity fields unchanged while confirming input method candidates.
+- 5af7546: Keep inline confirmations open when Escape belongs to an input method composition.
+- 72189d6: Announce the selected action when a menu or command-palette action opens a confirmation popover.
+- 7a3e913: Keep focus on the clicked page control when dismissing a confirmation or form popover by clicking outside it.
+- 5249d35: Restore scrollbar thickness and orientation styling in sandbox lists and scrollable panels.
+- 3a2b3ac: Expose completed, running, pending, and failed operation steps to screen readers.
+- d9b8fa9: Reject unsupported saved sandbox CPU counts, including values above 255.
+- 7676c47: Clear an earlier backup read error after successfully deleting the pre-upgrade backup.
+- cf9a38f: Ignore notifications delivered to an app view that has already closed.
+- f4fdbc7: Show SSH configuration repair notices even when they arrive as Silo starts listening for them.
+- 1ba94f1: Show a status read error and Refresh action when a computer returns an unreadable ChatGPT for Linux status.
+- 7aeb46f: Show recovered export and import results even when they arrive as the migration notice opens.
+- 8ddd134: Keep current ChatGPT for Linux status clear of errors from older status reads.
+- 99a75d3: Acknowledge import and export results when their Open or reveal action closes the notification, so handled results do not reappear after restarting Silo.
+- 888d62a: Remove stale Retry and Open buttons when a notification starts a new background operation.
+- e9d13ff: Dismiss remote repository push notifications when their sandbox is deleted, while preserving notifications for same-named sandboxes on other computers.
+- 8d0b35a: Keep operation progress and Cancel controls visible after retrying a failed background operation.
+- c79591e: Keep sidebar hover previews open when keyboard focus enters from the sidebar toggle.
+- 03b4072: Keep unrelated export and import notifications visible when deleting a sandbox after its notification has been replaced.
+- 2b5da3b: Show soft hyphens explicitly in guest file, folder, and repository names so distinct paths cannot hide that difference.
+- bc8813d: Keep unsaved sandbox edits when opening and dismissing the Add menu.
+- 9471fc5: Pause sandbox settings saves while a checkpoint runs, keeping unsaved edits available when it finishes.
+- 071b3f9: Recheck sandbox settings when confirming Stop and save, so newly reported computer limits show validation errors before saving.
+- 6278da4: Preserve an open sandbox editor's protection against concurrent changes when deleting another sandbox.
+- fa2a2ee: Recheck sandbox deletion eligibility at confirmation when configuration changes are locked or the owning computer becomes unavailable.
+- aeb26b9: Disable sandbox reordering while editing to preserve unsaved drafts and their protection against concurrent changes.
+- 0f81749: Keep a dismissed Stop and save confirmation closed after the sandbox stops or another change temporarily blocks saving.
+- 7ad8738: Offer Review changes immediately when returning to a sandbox edit whose pending save was rejected while another page was open.
+- db5100e: Keep a new sandbox draft open with a clear explanation if its selected computer is removed before saving, so another computer can be chosen.
+- 21a8d80: Show the current resource value when switching a new sandbox to a computer with fewer available presets.
+- 8c73cd2: Keep sandbox conflict and review notices with unsaved edits when navigating away and returning.
+- 8012439: Keep sandbox resource presets within supported limits, even on high-capacity computers.
+- f5b8179: Keep sandbox saves locked across navigation and clear saved drafts even when their editor is closed before saving finishes.
+- 1eb4639: Keep local sandbox saves scoped to this computer when another computer is removed while an editor is open.
+- 8e9de86: Pause sandbox settings changes when its status cannot be refreshed, preserving unsaved edits until Silo knows whether the sandbox is running.
+- 7aa0fb9: Reduce repeated failed folder refreshes while healthy folders continue updating. Refresh visible folders immediately when you return to the window.
+- f1176fc: Keep filter suggestions out of the Tab sequence so keyboard users can leave the filter directly.
+- 58ca070: Restore the automatic GitHub CLI environment default when starting checkpoints, and retain supported environment defaults when importing exports.
+- d66d6aa: Fix importing a sandbox checkpoint export: valid archives were refused with "its capture scope is not supported".
+- db00e9e: The Linux desktop now starts reliably after a sandbox restarts or is imported: a leftover audio-server file from the previous session no longer stops it, a failed session start is retried, and computer use waits for the desktop instead of reporting that it was not running.
+- 39131f5: Recover ChatGPT for Linux download progress after status event subscription fails, and offer Refresh while updates are unavailable.
+- a3cb1a6: Report incomplete editor connection repairs when SSH configuration files cannot be read or replaced, and allow repair to succeed after storage becomes writable.
+- 2b7b53e: Prevent GitHub settings from crashing when a newly discovered sandbox is named constructor.
+- f7e252e: Allow turning off a sandbox's Git identity even when its name or email is empty.
+- 38c15b9: Keep the highlighted GitHub repository stable when the catalog refreshes, so Enter cannot grant access to a different repository.
+- 7cc26a0: Discard old GitHub edits and retry actions when a sandbox is deleted or replaced, so a new sandbox with the same name does not inherit them.
+- 99cfa59: Keep Enable and Disable access available for connected personal tokens when GitHub OAuth is disconnected or connecting.
+- fcaa567: Record scoped GitHub push credentials before use and retry their revocation independently of sandbox grant renewal, including after an app restart.
+- 564433f: Start imported full checkpoints with a fresh boot of their saved disks, without resuming captured memory or processes.
+- 7e15f73: Keep each sandbox's latest state when lifecycle responses arrive out of order on the same computer.
+- cff4735: Require a desktop-entry file when choosing a browser on Linux, with a clear error for executable-only selections.
+- ffbf104: Keep overlapping Linux notifications for the same operation from creating duplicates that remain after sandbox deletion.
+- 31b210f: Preserve the correct sandbox notifications when the Linux desktop notification service restarts.
+- bf253d5: Update the launch-at-login status when enabling notifications detects an external login-item change.
+- 6cb10f5: Preserve completed and failed migration status when earlier Retry or status responses arrive late, and confirm status after Retry.
+- 911c25b: Keep notification permission controls accurate when a settings refresh finishes before an older permission check.
+- 20aa695: Preserve application preferences and current GitHub connection state when finishing setup after a sandbox deletion confirmation.
+- 381c7f5: Prevent setup from crashing for a sandbox named constructor when GitHub policy or recovery fields are missing.
+- f245c4d: Hide private-key blocks across retained log records, pages, searches, and exports.
+- 775bea0: Prevent an old token-removal retry from deleting a replacement token or starting overlapping credential operations.
+- f9bc0be: Keep the active GitHub personal token and account unchanged when saving a replacement fails.
+- 8068dcd: Keep the recovered Git identity checkbox consistent with the identity settings submitted by setup.
+- 174efa1: Make the initial Storage error notification's Retry read measurements again, while preventing overlapping requests.
+- 694e322: Preserve pending GitHub token revocations when pushes and credential cleanup finish concurrently.
+- b7ac419: Simplify the sandbox storage "reclaim unused space" block into a single "Unused space" row that shows the last result and a "Free up space" button, with matching wording in history and notifications.
+- 823ce93: Keep action result notifications tied to the original sandbox so replacements cannot inherit old errors.
+- f9f4363: Retry GitHub token checks and repository reads after an interrupted response body instead of leaving them blocked until an explicit retry.
+- 16728d3: Saving a personal GitHub token now retries that token's checks without restarting failed OAuth token operations or checks for other credentials.
+- ad18e24: Automatically retry safe GitHub token checks and repository reads after an HTTP request timeout instead of leaving them blocked until an explicit retry.
+- 64afd70: Preserve GitHub's requested waiting period during service outages when retrying explicitly or restarting Silo.
+- 4e792a5: Retrying GitHub access for one sandbox no longer restarts stopped token operations for other sandboxes or the account.
+- 9229694: Fix sandbox GitHub access when GitHub omits the optional App client ID from an installation response.
+- c328666: GitHub pushes recover on their own after a temporary credential-store failure instead of staying blocked until restart.
+- 9df50d3: Bound memory use when rejecting an oversized GitHub configuration file.
+- 028f603: Refreshing GitHub repositories no longer retries stopped token requests whose outcomes are unknown. Stopped requests for other credentials and workspaces, and GitHub's waiting periods, are preserved.
+- 676130a: Handle interrupted GitHub sign-in responses without losing the authorization result.
+- 9bf2577: Reject host pushes when GitHub access changes while their credentials are being acquired.
+- 9f2a8c4: Preserve the last working GitHub configuration when a repository catalog exceeds the supported storage size.
+- 21301b8: Keep the existing GitHub account and workspace access when saving a reconnected account fails.
+- 027dba6: Keep selected GitHub repository access working when repository or owner capitalization changes.
+- fe0ee59: Preserve pending GitHub access changes in other sandboxes when retrying one sandbox.
+- 3fdee30: Keep sandbox state available when saved GitHub settings report no authentication method.
+- 1e0e07c: Keep GitHub disconnect pending when token renewal fails because of an App configuration error, instead of forgetting credentials before revoking access.
+- f97dc0a: Reject invalid GitHub settings revision numbers without changing saved sandbox choices.
+- 999cfac: Discard newly issued GitHub tokens when Connect rejects an unsupported session, including Apps with token expiration disabled.
+- 06e9d90: Preserve rejected GitHub repository and identity choices when retrying after settings refresh.
+- b8e09e2: Use “1 second” in GitHub retry messages when one second remains.
+- 9fad68c: Fix GitHub authorization and token management for source builds using a GitHub App client ID that contains a dot.
+- 3e336a0: Expose invisible Unicode joiners, fillers, selectors, and tags in guest file and repository names while preserving original paths for actions.
+- 867ffe4: Verify desktop packages before accepting a preinstalled guest desktop when its package list cannot be read.
+- a248ed8: Keep computer-use tools able to discover all open Linux applications, even when checking other applications takes too long.
+- bedcdfc: Limit sandbox desktop logs during streaming and retries so they cannot fill the sandbox's disk.
+- 178b54f: Report permission denied when a workspace folder cannot be reached through its parent, instead of claiming the folder no longer exists.
+- a9725cd: Preserve files outside the managed Linux desktop log directory when the home or VNC directory is a symbolic link.
+- fb8bda4: Recover a failed Linux desktop session when computer-use setup retries Start, and reap exited desktop session processes.
+- 3f74461: Stop starting additional desktop repair attempts after the computer-use setup wait expires.
+- e7223a1: Explain checkpoint deletion blockers and that retained data can be released by deleting its last dependent checkpoint.
+- 95b36ae: Update bundled help for Debian in-app updates, older remote computers, and ChatGPT download recovery.
+- 6b505e8: Correct the macOS Settings menu path in the bundled help for Silo Dev.
+- d8508ef: Clarify that in-app update instructions apply to production Silo and that Silo Dev has no update feed.
+- d583084: Clarify that copying diagnostic details is available only where a copy control is offered.
+- efc28d5: Explain that duplicated sandboxes with built-in computer use start their desktop automatically, even when the original used manual startup.
+- e6d100e: Explain how to update a legacy desktop when its viewer requires an update before starting.
+- 6f5ca5a: Clarify that reclaiming workspace storage frees allocated space on the computer while preserving workspace capacity and files.
+- e8d82a8: Clarify that computer-use setup needs both the sandbox and its Linux desktop running.
+- b1e072e: Update troubleshooting help to follow the System issue recovery instructions and rerun checks with Retry checks.
+- b67c6b3: Keep search text out of log exports so searching for a credential or private text does not include it in a shared file.
+- d2e5703: Preserve files outside the new home during account migration by stopping on conflicting files, folders, or links and reporting the path to resolve before retrying.
+- d69e107: Keep pushes to different repositories independent when a failed push removes its publishing cache.
+- e2bbc59: Refresh repository state after a push even when an older discovery is still running, instead of restoring stale commit counts.
+- 945a372: Allow repository pushes to retry when saving the initial push record fails, instead of leaving an unstarted push stuck in progress.
+- ab90928: Report a GitHub push with a lost acknowledgment as unknown, while keeping explicit branch rejections actionable.
+- 36032dd: Report an interrupted GitHub push as unknown when host disk-space or process-status checks stop it, so you can check the branch before retrying.
+- 9214ed8: Preserve newer fetched tracking data and repointed origins when a sandbox push finishes.
+- 68d4623: Prevent push completion from changing a local branch through a symbolic remote tracking ref.
+- 364d4f0: Require acknowledgment of an unknown push result before another computer can start a new push for the same repository.
+- b015a5d: Focus the available Cancel or retry action when an import is being checked or cannot be imported.
+- 4253d23: Keep the import name field's label stable and associate duplicate-name and format errors with the field for assistive technology.
+- 074d712: Show each sandbox’s completed log read immediately while other computers are still loading, retaining previous results during refresh.
+- c4b915f: Preserve concurrent port saves across computers and sandboxes, and confirm current settings after an older save reply arrives.
+- 7669cf5: Preserve saved GitHub access and Git identities when keeping sandboxes omitted from recovered setup.
+- efeb68d: Computer use now works for all supported agents on Linux desktops; previously only some agent modes could reach the display.
+- 4e9ff7b: Agents can now type, click and scroll in GTK 4 apps such as GNOME Text Editor on the Linux desktop.
+- a52358b: Computer use on the Linux desktop is safer: agents' keys and clicks no longer risk landing in the wrong window when actions overlap, and held keys are always released.
+- e6eb6b3: Computer use on the Linux desktop only redirects an agent's input when Silo can confirm which app owns the window, and held keys behave as in Codex.
+- 99ee657: Computer use on the Linux desktop refuses a click when another window covers the target, and recovers on its own if the computer-use engine stops responding.
+- a66babb: Computer use on the Linux desktop never leaves a mouse button or key pressed after an interrupted action, and refuses clicks while a popup holds the pointer.
+- 1adc67e: Computer use now uses LCU 0.8.8, which registers every supported agent, including ones installed after the sandbox was set up.
+- ac01274: Show the current sandbox operation step when its delayed progress notification appears.
+- 71de672: Clear sandbox operation progress notifications when they are disabled or their view closes, and restore them when tracking resumes.
+- a201c98: Prevent an older Start, Stop, or Restart retry from undoing a newer lifecycle action on the same sandbox. Local and remote actions share this ordering; actions on other sandboxes still run independently.
+- 302575e: Keep Linux system updates from accepting an incomplete installation confirmation after its timeout.
+- ada1f3b: Keep sandbox links on their owning computer and prevent recreated sandboxes from inheriting old navigation history.
+- 093b574: Hide command lines with credential options in sandbox logs, failure details, and exported diagnostics.
+- 360ae71: Restore keyboard focus after closing the log date filter editor.
+- b335fa3: Make expanded diagnostic and setup activity output focusable so keyboard users can scroll it.
+- 5aff97c: Check for log export cancellation after writing and syncing, before replacing the destination file.
+- 94369b7: Treat a cancelled log export as cancelled when its pending log query also fails.
+- d2e5048: Cancel log exports that have not started yet without opening a save dialog or replacing an existing export.
+- 4cfb811: Include the year in log date filter summaries so ranges across different years stay distinct.
+- 282d289: Make expanded log messages focusable and named so keyboard users can scroll long output.
+- a569666: Count unfinished private-key redaction state against the log search memory budget, so searches over many such records fail with a narrow-your-search message instead of using unbounded memory.
+- e4bd3f9: Keep log age tracking and cleanup working when Linux storage folders have unusual names.
+- dc07d15: Use singular labels for one matching log record and one storage reclaim attempt.
+- 948c21c: Hide credential-bearing URLs in sandbox logs, failure details, and exported diagnostics.
+- b81e274: Hide signed URLs and URLs with encoded credential query parameters in sandbox logs and exported diagnostics.
+- 0733410: Report an error when the macOS browser launcher stalls instead of waiting indefinitely.
+- c3527dd: Keep navigation requests available to the active main window after an older view closes.
+- f52f5af: Preserve the latest requested destination in the main window when earlier navigation finishes late.
+- d4c2343: Retry opening the installer page when View installers on GitHub fails.
+- 2d70389: Update the bundled MicroSandbox runtime to 0.7.6. Commands that run inside a sandbox (identity checks, tool verification, repository and account setup) no longer wait on an open input pipe, which could leave an operation hanging. Checkpoint exports made with the previous runtime still import.
+- 4020e7c: Move links to legacy home directories into the working account's home while preserving links to external and relative paths.
+- b274d79: Prevent completed storage migrations from reopening pre-upgrade sandbox data when the saved storage selection is missing.
+- 2f27354: Migrate shell and launcher settings that name an entire legacy home directory while preserving external paths with similar names.
+- 0d3ec46: Keep the app responsive while migration progress waits for a storage write.
+- e7b5293: Silo now lives at github.com/amontlabs/silo and silo.amontlabs.com, and Debian installs get updates from apt.silo.amontlabs.com. Existing Debian installs must run `sudo sed -i 's#https://0xpolarzero.github.io/silo/apt#https://apt.silo.amontlabs.com/apt#' /etc/apt/sources.list.d/silo.sources` once to keep receiving updates.
+  
+  The Silo GitHub App is now `silo-amont-labs`, owned by Amont Labs. Update Silo to keep using GitHub repository access; earlier versions look for the app under its previous name.
+- 10fd55f: Refresh expired folder listings when a sandbox is replaced by another with the same name.
+- 43737a9: Allow log export to be retried after an unexpected export-task failure.
+- 35d0a37: Preserve the previous log export and request an update when a selected remote computer cannot serve logs.
+- c4de1e2: Avoid invoking the macOS developer-tools installer when a Git shortcut points to Apple's Git shim and developer tools are absent.
+- e195931: Ignore non-executable files when identifying another Silo launch through PATH.
+- 18004c1: Report SSH connection key cleanup failures when removing a computer, and keep the computer listed so removal can be retried.
+- a8d074b: Keep Linux tray health updates that arrive while the status icon is starting.
+- fee1755: Preserve the instruction to start a sandbox when it stops during a file listing.
+- 5551cca: Close native sandbox menus when their controls disappear and ignore late menu creation or obsolete actions.
+- b3a21a6: Keep remote network services loading until that computer responds, and retain cached sandbox ports while waiting.
+- 846f4af: Remove saved port forwards when deleting a sandbox so a new sandbox with the same name does not inherit them.
+- 31c5ca3: Show “No matching sandboxes” immediately on the Network page when a filter matches no sandboxes.
+- ca49747: Name the sandbox and owning computer in port-operation feedback and link remote system notifications to the correct sandbox.
+- b8322d1: Prevent a port failure’s Retry action from starting a second save while another port change is in progress.
+- cb1bc34: Keep failed port removals visible and retry them on refresh, including when a sandbox has no other published ports.
+- 28186b4: Apply the existing saved-port settings limit while reading the file, preventing oversized inputs from allocating their full contents before rejection.
+- 3fec180: Stop refreshing editor and migration notifications after their views close, and ignore outdated backup updates.
+- f0e12e3: Show failed setup draft saves during onboarding and let you retry without losing your edits.
+- e4d2ec9: Keep a chosen GitHub OAuth sign-in when you change a sandbox's repository access during setup and resume later.
+- 6ddaab8: Preserve existing GitHub access when sandbox policies load during onboarding, without replacing edited or recovered choices.
+- 6c4f1f6: Use singular sandbox labels when reviewing setup for one sandbox.
+- 2c0c883: Keep each sandbox's GitHub authentication method through onboarding and draft recovery, and enable token selection when a token is connected.
+- 9c03183: Open the Linux desktop from an icon next to Open in terminal and Open in editor.
+- 2348531: Let Escape dismiss an operation cancellation question and return to its Cancel button without stopping the operation.
+- 1cc511e: Keep command confirmations tied to the current sandbox, and cancel them when that action becomes unavailable.
+- 6fdb721: Focus the personal-token field when editing opens and return focus to Add or Replace token when editing closes.
+- 273dda6: Keep port drafts tied to their original sandbox so a replacement with the same name cannot receive an older edit.
+- 655ddab: Keep browser-open failure notifications separate for ports on different sandboxes and computers.
+- 7b80245: Prevent old port-operation retries from targeting renamed or replacement sandboxes or running after their Ports view closes.
+- 4cf3d00: Preserve edited or new port drafts when an older failed save succeeds through its notification Retry.
+- 945ae66: Show failed preference saves in General settings and offer a retry while retaining edits. Explain when write-protected settings last only for the current session.
+- 91c8f4f: Preserve binary launcher files when migrating older sandbox accounts, even when they contain the old home folder path.
+- b9895ce: Keep temporary export and restore files private to the current user.
+- f27c01c: Create new workspace disk directories with owner-only permissions to protect private files stored inside VM disks.
+- b0d3413: Prevent late background events from updating an app view that has already closed during startup.
+- 14d2ed8: Only offer push cancellation for a queue entry owned by the current sandbox, including after a sandbox is recreated.
+- 124e0ff: Update push notifications when progress messages, failure details, or confirmed retry targets change.
+- e4153c1: Keep Silo commands responsive while preparing a repository push.
+- 7a49914: Show a persistent warning when a repository push's outcome cannot be confirmed. Closing the warning still requires checking GitHub before another push.
+- 4f22309: Allow computer-use setup to repair invalid saved setup status instead of failing to load it.
+- dea237a: Preserve shell configuration encoding and line endings when migrating older VM accounts.
+- c861294: Keep healthy sandbox ports reachable when a same-named sandbox on another computer fails discovery, and identify the affected computer in ambiguous error messages.
+- 5a8012c: Avoid flashing progress notifications for quick operations that replace completed work between queue updates.
+- ab9bc40: Restore the previous keyboard focus after dismissing the main window's Quit confirmation.
+- e375abe: Improve pending operation step text contrast in light and dark themes.
+- d78a22f: Include the year in storage reclaim history so older attempts remain distinguishable.
+- f02b272: Verify recovered setup correctly for a sandbox named constructor with no saved Git identity.
+- ef10a69: Prevent recreated sandboxes from inheriting pending actions or late lifecycle results from their predecessors.
+- 027c6b5: Keep script launchers usable when migrating older sandbox accounts, preserving their text format and executable permissions.
+- 6bd7cc6: Do not start remote changes after their timeout expires or management permission is revoked, even if checking the connection took too long.
+- b6d58e0: Treat missing or malformed computer-use approval status from remote computers as unknown, while preserving warnings when the chosen and applied approval modes differ.
+- 3627d83: Report a timeout when the receiving Silo instance stops accepting a remote request.
+- f68b8f0: Give remote checkpoint actions their full supported timeout, including time spent waiting and connecting, and keep retries tied to the same action.
+- 22ab074: Reduce repeated background reads when the saved computer list is unavailable, while keeping local status and manual refreshes responsive.
+- 1c7f2fc: Reduce repeated status requests to offline computers while keeping healthy computers up to date and manual refreshes immediate.
+- bfe869a: Preserve remote bridge links to unrelated AppImages instead of replacing them when remote management is enabled.
+- 8de109a: Prevent malformed remote operation records from blocking remote changes or being treated as unrecorded operations.
+- 20d3b84: Preserve SSH key restrictions when multiple computers connect at the same time.
+- 9fe3a1f: Accept remote replies up to the supported size even when the SSH login shell prints a banner.
+- e87d3c6: Keep remote requests within their timeout when SSH stops accepting input, and reject oversized requests before connecting.
+- 8da432f: Reject special remote settings files promptly so they cannot freeze remote-management settings and authorization reads.
+- 74378bc: Stop queued remote SSH key authorization after access is revoked, and record key changes so connection retries do not repeat them.
+- 4a195f4: Reduce repeated ChatGPT download status checks when a remote computer is unreachable, and resume normal checks after it reconnects.
+- dbf4a2c: Apply remote IPC read deadlines to complete messages so partial traffic cannot keep an incomplete request or reply alive indefinitely.
+- bc122bf: Keep remote guest-access preparation bound to the selected sandbox while it waits. Renames use the current name, and a replacement sandbox cannot receive the original request.
+- 635f1d4: Repair existing SSH directory and authorization-file permissions when installing Silo's remote-management key, so repeated setup can restore key authentication.
+- fc01433: Report a repair error when an older remote management key cannot be restricted during connection setup.
+- 8b94f90: Preserve other sandboxes' latest state when a remote sandbox is added, edited, or deleted.
+- 1abe87e: Keep the latest remote-management choice when an older status request finishes or fails.
+- 7902096: Reserve remote connection capacity during saves and while disconnected ports await reconnection.
+- d8e8466: Keep remote port connections and reconnection attempts intact when a computer returns invalid network information.
+- 2a338bd: Preserve remote port connections when a computer temporarily cannot inspect a sandbox's network state.
+- 0e96253: Preserve newly saved remote port connections when an older network refresh finishes.
+- 213434b: Prevent an older remote network refresh from replacing endpoints or closing connections verified by a newer refresh.
+- ab04227: Discard remote reconnect attempts superseded by cleanup, a new connection, or an endpoint change.
+- 7a80db8: Keep removed remote ports disconnected when an earlier connection attempt finishes.
+- 7565a8c: Reject outdated network information when a remote sandbox is replaced during a status check.
+- 7d1c9c3: Open remote sandbox notifications on the correct computer when sandbox names match, and preserve notification links after renaming a sandbox.
+- 5750e6d: Treat remote actions with oversized saved recovery records as uncertain and avoid repeating them after restart, without using excessive memory.
+- 2a13890: Close a computer's local access to a remote port once the other computer removes its publication.
+- 2642f87: Report malformed remote replies as connection errors instead of treating missing results as successful actions.
+- 76a08eb: Accept remote replies after permitted shell startup output containing partial reply markers, while preserving the output size limit.
+- 3740bf1: Stop reconnecting for remote changes after their request deadline expires.
+- 72780be: Stop retrying remote actions after Quit begins, including when shutdown fails and Silo stays open.
+- ce55af9: Repair reused remote management key permissions and derive the public identity from the private key when setting up or upgrading a connection.
+- 90885fc: Keep Network and SSH status fresh for healthy computers while another computer is slow or unavailable.
+- 1b07e21: Keep the app responsive while loading or saving remote computer settings.
+- 6081120: Reject remote-management settings larger than 1 MiB without replacing the saved settings, preventing oversized files from exhausting memory during remote status reads.
+- e2de3fe: Keep remote snapshots, port changes, and VM actions working while many port, desktop, or editor connections to another computer are open.
+- 0a76489: Close published remote-port SSH tunnels and their child processes when the controlling Silo app crashes or exits.
+- 33c1223: Confirm remote port forwarding is ready before showing its local address, so an unrelated local service cannot be mistaken for the connection.
+- 91ff5be: Retrying a failed sandbox creation no longer fails after the built-in desktop default, repairing an incomplete preinstalled desktop restores the full set of packages and settings, and creating a sandbox on another computer allows time for its desktop.
+- a2f1ef0: Restore update notifications when you return to Silo after their connection failed, and keep connection errors visible until automatic updates work again.
+- 0ec9bd8: Prevent recreated sandboxes from receiving cached repository listings or commit counts from their predecessors.
+- dd5617a: Report a repository discovery error when Git cannot inspect working tree changes instead of showing the repository as clean.
+- 0f070d8: Keep the highlighted repository or authorization action visible when navigating long repository lists with arrow keys.
+- fc4423a: Keep GitHub repository suggestions out of the page Tab order while preserving arrow-key and Enter selection.
+- dd2b6d8: Fix computer-use setup and storage reclaim after the MicroSandbox 0.7.6 update. The bundled runtime stopped reporting which run of a computer is active, so a built-in computer was never set up for computer use after it started and its disk space was not reclaimed after a start. The runtime reports it again, and Silo now says so plainly if a runtime ever lacks it.
+- fce3007: Retry restoring a theme saved by an older Silo version after a temporary settings failure, without requiring an app restart.
+- 93e042b: Retry update installation after settings delivery or other preparation fails without discarding the selected update and checking for another release.
+- dedb628: Show complete text on hover for truncated row details, disclosure headings and captions, and status badges.
+- 96a29d8: Show complete file, folder, and sandbox names on hover in the file tree and menu bar folder picker.
+- 87a5331: Show complete selected filter names on hover when their chips truncate the text.
+- ff53a55: Show complete operation checklist step labels on hover when notification text is truncated.
+- 7c68425: Keep log entries visible after an unusually long line instead of skipping the following entry.
+- 8cf92a0: Reject oversized saved sandbox actions without using excessive memory or waiting indefinitely.
+- 1edeee1: Record a failed sandbox action in Activity when its recovery progress cannot be saved, instead of leaving it marked as running.
+- a71eadf: Show placeholders for damaged execution log entries with missing or invalid messages.
+- 144696e: Show unfinished actions from a previous app launch as interrupted even when the operating system reuses Silo's process ID.
+- 4ac091a: Preserve replacement sandboxes when saving or verifying Git identities, including replacements made while an identity update waits to run.
+- 55573f4: Prevent pending GitHub access updates from sending credentials to a replacement sandbox with the same name.
+- 1ce27d9: Preserve replacement sandboxes when saved settings refer to an older sandbox, instead of stopping or reconfiguring the replacement during an edit.
+- a8b17f2: Reject secret updates when the selected sandbox was replaced before the update could run.
+- 6fa2ca4: Preserve a checkpoint fork's recovery state and assignments when its saved sandbox list cannot finish syncing to disk.
+- bbdb841: Keep pre-upgrade backups while sandbox images still depend on their files, or when those dependencies cannot be checked.
+- e5cc5ff: Keep timeout and connection checks active for queued remote actions.
+- 7fbf778: Dismiss sandbox crashes successfully when activity history is damaged, while preserving that history and showing a warning.
+- bf1637f: Preserve oversized sandbox activity files and show a warning instead of replacing them after reading only a valid prefix.
+- fbbef3e: Report sandbox images that could not be checked or repaired, even when other image repairs succeed.
+- b414c42: Report missing sandbox image files during repair, including files already expected in the current storage location.
+- 6bb7e75: Allow already-started remote actions to finish after their original start deadline expires.
+- ae83d9f: Keep pre-upgrade backups when sandbox image information is redirected or too large to check safely.
+- 03ef714: Report a startup error when a running sandbox has replaced the one you selected, instead of treating its reused name as a successful launch.
+- 436a541: Keep secret revocation pending when a failed checkpoint restore leaves a running sandbox with access. Read that sandbox's actual state for terminal, network, and file access.
+- 30f459a: Avoid reporting successful storage reclamation as a failure when a sandbox writes to a checkpoint disk at the same time.
+- d187f6a: Allow Quit to stop a replacement VM when an unfinished configuration change reuses a removed VM's name.
+- d5c08ac: Allow Quit to complete when an unfinished sandbox setup's Stop command reports an error but the exact VM is verified stopped. Keep shutdown blocked if it is still running or cannot be verified.
+- d5b8009: Show the actual disk usage and maintenance errors when a failed checkpoint restore has already created a sandbox. Explain that its restore must finish before reclaiming space.
+- 2c213d2: Block updates when an unfinished sandbox setup still has a virtual machine, so installation cannot overlook it.
+- 1df85c2: Reduce repeated sandbox health checks while their virtual-machine service is unavailable and resume normal checks after recovery.
+- 4f3fd1c: Preserve converted sandbox storage when retrying a migration that stopped after selecting the upgraded runtime.
+- 9c3b7dd: Keep Silo's managed virtual-machine folders private to the current user and repair existing folders with broader permissions.
+- af57838: Correct Safari website-address guidance for macOS 14 and 15, and explain the cookie-sharing limitation of the 127.0.0.1 fallback.
+- bbf9c9f: Reject oversized saved sandbox configuration before reading the entire file into memory, keeping the existing 1 MiB limit and preserving the saved file.
+- c11d30e: Show port discovery failures without a misleading “No ports” result on sandbox detail pages.
+- 8b5dbf2: Return focus to Add after cancelling sandbox import before a review opens.
+- a0665d7: Support standard keyboard navigation in the Add sandbox menu and preserve focus when opening an editor.
+- 3ce9ba6: Expose computer badges and read-only disk values with accessible roles and names, and show keyboard focus on read-only disk groups.
+- bff211d: Name sandbox deletion confirmations for screen readers and describe the sandbox and data affected by each destructive choice.
+- 3a59a16: Focus sandbox editors immediately for direct edits while preserving focus after menu selections.
+- 0f57a3a: Keep keyboard focus in the sandbox editor when duplicating settings from the row menu.
+- 4601883: Return keyboard focus to the sandbox row or Add button after closing an inline sandbox editor.
+- 474abc5: Expose sandbox lists and row controls as named groups for assistive technology.
+- 36318c6: Describe the arrow-key controls for reordering sandbox rows to screen readers.
+- 3ea003d: Announce pending sandbox settings saves to screen readers.
+- 2e620d9: Require reloading changed secret access settings before saving an older draft, while preserving its replacement value.
+- 855fd15: Keep removed secrets out of the list when an older save reply arrives late.
+- d720085: Improve the light-theme contrast of secret restart notices.
+- e04ccfb: Explain how to recover from secret storage capacity failures or a sandbox deleted during a save, while retaining the draft.
+- db0a2b0: Keep concurrent secret saves from restoring assignments to a deleted sandbox or granting them to a new sandbox with the same name. Let sandbox cleanup finish while an update is being prepared.
+- a56c3d4: Reject oversized secret settings before replacing the saved document, so existing secrets remain readable and editable.
+- 9ddab17: Show secret assignments on the local sandbox when a remote computer has a sandbox with the same name.
+- 80b89aa: Explain secret value, sandbox, and domain limits in the editor before saving.
+- 16382b5: Keep Silo commands responsive while reading secret settings from slow storage.
+- 7a46078: Preserve newer secret changes and their error status when an older runtime update finishes after concurrent edits.
+- 80c2967: Offer Retry when concurrent secret edits exhaust live application attempts instead of leaving an indefinite Applying status.
+- 9eec0c6: Preserve the saved computer-use approval choice when switching from a Silo version that records an unfamiliar setup outcome, and retry setup with that choice.
+- c168221: Keep the saved export folder when another app version adds preference fields, and preserve those fields when choosing a new folder.
+- 0cd7199: Preserve preferences added by another Silo version when saving GitHub settings.
+- 6c8daee: Keep Storage history readable after switching Silo versions when saved maintenance records contain additional fields, and preserve those fields on save.
+- de18755: Preserve preferences added by another Silo version when saving remote-management settings.
+- 7bc32c9: Keep the automatic-update-check preference readable after switching Silo versions when additional preferences are present, and preserve those preferences on save.
+- a8950c1: Avoid immediate network and SSH retries when a background timer fires during a slow status read.
+- 27a99d1: Reduce repeated network and SSH status requests after a computer fails to respond, while healthy computers and manual refreshes stay responsive.
+- 565ed23: Preserve onboarding recovery after deleting the last sandbox, including an unfinished replacement sandbox.
+- 649e28f: Avoid reporting a settings-save failure during Quit when a newer settings event supersedes the final status read.
+- 25f9af0: Prevent a pending sandbox-status read from reopening the Quit confirmation during logout or system shutdown.
+- c40e139: Save the latest setup draft when delivery is slow or interrupted instead of replaying superseded edits before completion.
+- 01ae31e: Finish sandbox shutdown within short Linux logout and shutdown deadlines, leaving time to release the system's wait for Silo.
+- 7ca8e20: Honor macOS logout and shutdown requests while an earlier Quit confirmation or settings flush is still pending.
+- 111f8e9: Protect saved onboarding recovery from overwrites when a sandbox's desktop policy is missing required data.
+- 64a3057: Honor logout and shutdown deadlines when Quit is waiting for local sandboxes or settings to save. Keep sandbox starts blocked if that Quit fails during shutdown.
+- 6c6a37a: Honor short logout and shutdown deadlines even if settings save confirmation does not arrive.
+- 4e770a5: Keep successful settings synchronization visible when an older settings read later fails.
+- d5760fa: Keep sandbox lifecycle and repository push notifications up to date when switching between Sandboxes and Files.
+- cccddd0: Skip applying a blank Git identity during setup when no host author is configured, while still prefilling an identity that loads later.
+- 6de401d: Show this computer's loaded sandboxes after cancelling a setup editor opened before they loaded.
+- 4c8d213: Calculate setup elapsed time correctly when a reported start timestamp is zero.
+- 2f390b9: Stop GitHub setup status checks when their app view closes.
+- 17d1610: Show personal-token access separately from OAuth repository restrictions in the setup review.
+- bf39bb5: Apply personal-token GitHub settings during setup even when OAuth is disconnected, and show token access in the review.
+- dadbeba: Keep the sidebar preview open when another control handles Escape or an input method is composing text.
+- 387c7fa: Show small export file sizes in bytes or KiB instead of rounding them to zero MiB.
+- 2ec2c2c: Show empty and small disk allocations accurately in storage summaries and sandbox deletion confirmations.
+- cd37227: Revoke exported SSH keys when access is disabled even if their local key files are missing. Report a recovery error for older settings whose managed key identity cannot be recovered.
+- 3fd76cb: Skip ports already occupied on the selected network address when enabling SSH access for the first time.
+- 7842530: Preserve newly registered SSH keys when editing ports, addresses, or access toggles from an older UI snapshot. Explicit key-list updates still replace authorization.
+- 53b71a4: Preserve manually authorized SSH keys when a connecting computer registers the same public key, including after access is disabled and re-enabled.
+- 96f129b: Keep remote SSH key registration safe to retry, and prevent abandoned requests from changing authorized keys.
+- 8a09515: The sandbox page's **SSH access** tab is now called **SSH**. Clicking a sandbox's SSH badge, in the sandbox list or on its page, opens that tab, and the badge on the sandbox page now lines up with the status text beside it.
+- d511ecf: Prevent SSH failure retries from changing access while another SSH save or connection preparation is in progress.
+- 3bd88d0: Stop stalled SSH public-key extraction after five seconds so editor and desktop connection setup can recover.
+- 8b2abdf: Ignore obsolete SSH Retry actions after newer operations or closed sandbox controls, and respect current read-only state.
+- 7b243ef: Reset SSH controls when a sandbox is replaced so old retries and late connection commands cannot carry into its replacement.
+- 099194f: Keep independent SSH settings changes for different sandboxes when save responses arrive out of order.
+- e7994e4: Starting a sandbox now shows its progress right away, and the computer-use check that follows a start runs silently instead of appearing as a separate step.
+- 1bb25a0: Startup checks no longer report the runtime unavailable when the computer is busy.
+- d7f7da1: Pressing Escape cancels the status panel’s quit confirmation before dismissing the panel.
+- 7cf496a: Cancel queued folder reads when you close the status panel's folder picker.
+- 8e6fd11: Reduce repeated folder reads after failures in the status menu, while keeping focus refreshes immediate.
+- c8b822a: Do not open a sandbox actions menu if its status row disappears while the native menu is being created.
+- 4b6b075: Handle tray panel startup failures and ignore updates after the panel closes.
+- b2b22a5: Keep the development status panel's current height when an earlier resize request fails.
+- d71eee2: Show storage reclamation results even when you leave the Storage tab before the operation finishes.
+- 2e0c641: Use less memory when building Silo from source, and preserve cached files if a download is too large or stalls.
+- f7e8036: Keep expired Quit requests from saving settings after shutdown has already rejected the request.
+- f19d564: Restore in-app notifications when their connection initially fails and you return to the Silo window.
+- c4f9f6a: Recover the Quit overlay when the shutdown event connection initially fails and the Silo window regains focus.
+- b95c627: Keep running work and its cancel control visible during Quit when queue event registration fails.
+- 41909dd: Show current running work and cancellation controls when Quit starts while background updates are still connecting.
+- d2314eb: Recover the Quit overlay on window focus when its initial shutdown-state read fails.
+- 698d661: Keep onboarding recovery drafts private to the main window and preserve them when shared settings change.
+- ef49053: Show an error before opening a terminal when required storage or library folders have unsupported names, instead of using a different path.
+- e6db05b: Notifications now keep their icon, title, action and close button on one centred line, with any extra content below. The "Created" notification shows the "Allow without asking" switch for every new sandbox with built-in computer use, even before its first start.
+- 7beae5f: Ignore malformed sandbox setup status from a computer instead of crashing the sandbox list or status panel.
+- 4e153b0: Disable connection removal when the current integration does not provide that action.
+- be13d52: Report that sandbox configuration needs refreshing when saving an empty setup before its state has loaded.
+- 911645a: Ignore invalid optional startup and application preferences received from a computer so its other settings remain usable.
+- 2c6a6c9: Preserve unfamiliar sandbox configuration fields and show readable field names when reviewing concurrent edits.
+- 690de7e: Show configuration validation errors in the sandbox editor when they do not belong to an editable field.
+- 1f2a562: Keep storage history usable when a saved reclaim trigger has an unknown name.
+- 35f3934: Avoid redrawing the computer-use panel when periodic sandbox status reads return unchanged data.
+- 8e9bd4c: Avoid redrawing computer-use download progress when its status or connection errors have not changed.
+- e04d084: Avoid unnecessary interface refreshes when background checks find no changes.
+- 0a2f64a: Avoid redrawing update status when background checks or repeated notifications report no changes.
+- b1d0652: Removing a published port now immediately cuts off other computers still using it.
+- 330a974: Retry downloading an available update after a command delivery failure instead of starting another update check.
+- 1088e6c: Reduce repeated update installation checks when the updater cannot answer, and resume normal checks after recovery.
+- db129eb: Keep pending preferences and onboarding drafts when saving fails, and require a successful save before installing an update.
+- 7a8938a: Keep the latest update status visible when an earlier status check fails.
+- f051295: Preserve Debian update error details even when the saved log is incomplete or contains invalid text.
+- 8ff76c3: Reject oversized update recovery files without loading their complete contents into memory.
+- 68f17fd: Preserve sandbox update recovery when the saved sandbox configuration is missing.
+- c9333cf: Handle oversized update preference files without loading their complete contents into memory.
+- 6082fb6: Keep automatic update preferences consistent when changes are saved at the same time.
+- a0af439: Keep the Debian update preparation timeout active when the helper stops reporting progress.
+- 366470f: Clear the update preference read error after successfully saving a replacement preference.
+- a108f62: Updating Silo no longer fails to relaunch when an unfinished sandbox creation from an earlier version was waiting to be resumed.
+- 864fef3: Require a fresh update request after the selected release or installation eligibility changes, instead of restoring a withdrawn sandbox-stop confirmation.
+- 71bf39b: Expose sandbox badges as named groups so assistive technology can identify their sandbox state and computer.
+- 071392a: Keep long names and paths inside tooltips, including tooltips with keyboard shortcuts.
+
 ## 0.10.0
 
 ### Highlights

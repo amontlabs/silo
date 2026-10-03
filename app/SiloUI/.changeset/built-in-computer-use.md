@@ -1,5 +1,0 @@
----
-"silo-ui": minor
----
-
-New sandboxes use the v4 guest image, which includes the built-in Linux desktop, and get agent computer use with no setup. Silo downloads the official ChatGPT app for Linux from OpenAI by itself in the background on every computer that runs it (nothing to accept, retried automatically, never blocking sandbox creation or start) and shares it read-only with that computer's sandboxes; each sandbox installs LCU against it at boot, so computer use becomes ready automatically once that one-time background download and the sandbox's setup complete, and Claude Code, Codex and other agents can then use the desktop. Settings, Computers shows the download state on each computer and offers Retry after a failure. A per-sandbox switch lets computer-use actions run without asking first, and "Set up computer use" reruns setup after you install a new agent. Sandboxes created before this version keep their current desktop; create a new sandbox to use computer use.
