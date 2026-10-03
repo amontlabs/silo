@@ -74,7 +74,9 @@ Xvfb starts, `set_desktop_start_size` runs `xrandr` as the `silo` account: it
 adds a 1440x900 mode (`--newmode` with CVT reduced-blanking timings, then
 `--addmode screen`) when Xvfb lists none, and applies it with
 `--output screen --mode 1440x900 --fb 1440x900`, the same arguments Selkies'
-`display_utils_xrandr.py` uses. If `xrandr` is missing, no output appears or the
+`display_utils_xrandr.py` uses. The first `xrandr --query` polls until a 10 second
+deadline (a query that errors or times out counts as not ready), and the applied size
+is read back. If `xrandr` is missing, no output appears or the
 size does not take effect, the attempt fails like any session start failure: the
 session is torn down and retried up to three times, then reported `failed`, with
 the reason in `/var/log/silo-desktop.log`. A computer with no viewer attached
@@ -84,14 +86,28 @@ not the current size; a desktop resized by a viewer is healthy, and the
 receipt check never compares against the live screen.
 
 **Recipe 3.** `recipeVersion` in `desktop-streamer-lock.json` is 3. The service
-accepts receipts 1, 2 and 3 and reports `updateRequired` for anything older than 3.
+accepts receipts 1, 2 and 3. An older receipt is a runnable desktop with an
+optional update: the helper reports `updateAvailable` and leaves `updateRequired`
+false. `updateRequired` is only for a receipt the service cannot run (invalid or
+unknown revision), where Start is replaced by "Update desktop".
 
 **Existing computers.** The host only installs `silo-desktop` when it adds a
 desktop or runs `update-streamer`; starting or attaching a desktop never replaces
 it. A computer with a recipe 2 receipt therefore keeps its old service and old
 Selkies flags (no clipboard, no resize, default audio) until its owner updates it.
-After the desktop is stopped, its status reports `updateRequired`, the viewer shows
-"Update desktop", and that runs `setup-desktop.sh update-streamer`. This is the
+The host does not rely on the installed helper to notice this: `status_with` in
+`src/desktop.rs` also reads `/var/lib/silo-desktop/streamer.json` in the same guest
+command and compares its `recipeVersion` with the bundled lock's. A selkies receipt
+from 1 up to (not including) the bundled revision sets `updateAvailable` and clears
+`updateRequired`, whatever an older helper reported; a current receipt clears both;
+a missing or unrecognized receipt keeps the helper's own values. A computer on
+another device is read by its owner Silo, which applies the same rule; an owner
+that predates this change still reports only `updateRequired`, so its viewer keeps
+showing "Update desktop" alone, and a viewer that predates it ignores
+`updateAvailable`. While the desktop is stopped, the viewer keeps "Start desktop"
+as the primary action and shows "Update desktop" beside it with a note about
+clipboard, sound control and window-sized screen (a Kasm desktop gets the same
+secondary button). Choosing it runs `setup-desktop.sh update-streamer`. This is the
 recipe 1 to 2 path: it reinstalls the pinned Selkies package, keeps the viewer
 credentials, rewrites the receipt as recipe 3 and installs the new service. It
 does not rebuild the computer, touch files or restart a running desktop (it

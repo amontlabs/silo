@@ -31,7 +31,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   const streamStarting = running && state?.sessionState === "running" && state.streamState === "starting"
   const updateRequired = state?.state === "stopped" && state.updateRequired === true
   const updateAvailable = state?.installed && state.state === "stopped"
-    && (state.updateRequired === true || state.backend === "kasm")
+    && (state.updateRequired === true || state.updateAvailable === true || state.backend === "kasm")
   // v4 computers report computer use as a unit; older ones report the legacy LCU fields.
   const computerUse = state?.computerUse
   // A failed ChatGPT download is the device's, and setting up the computer cannot fix it.
@@ -85,7 +85,10 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
         <Monitor aria-hidden="true" className="size-8 text-muted-foreground" />
         <p className="text-sm">{busy || state?.state === "starting" ? "Connecting to desktop…" : !state ? "Desktop unavailable" : state.state === "uninstalled" ? computerUse ? "Desktop unavailable" : "Desktop is not installed" : state.state === "failed" ? "Desktop needs attention" : state.state === "computer-stopped" ? "Computer is stopped" : "Desktop is stopped"}</p>
         {state && state.state !== "uninstalled" && state.state !== "starting" && <Button disabled={busy} size="sm" onClick={() => onAction(primaryAction)}>{actionLabel}</Button>}
-        {updateAvailable && !updateRequired && <Button disabled={busy} size="sm" variant="ghost" onClick={() => onAction("update-streamer")}>Update desktop</Button>}
+        {updateAvailable && !updateRequired && <>
+          <Button disabled={busy} size="sm" variant="ghost" onClick={() => onAction("update-streamer")}>Update desktop</Button>
+          {state?.backend === "selkies" && <p className="text-xs text-muted-foreground">Updating adds clipboard sharing, sound control and a screen that follows the window. It needs a network connection. You can start the desktop without updating.</p>}
+        </>}
         {state?.state === "uninstalled" && !computerUse && <p className="text-xs text-muted-foreground">Choose Add Linux desktop in the computer’s actions menu.</p>}
       </div>
     </div>}

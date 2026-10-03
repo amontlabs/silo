@@ -63,7 +63,9 @@ export const linuxDesktopStateSchema = z.object({
   backend: z.enum(["kasm", "selkies"]).nullish(),
   sessionState: desktopSessionStateSchema.nullish(),
   streamState: desktopSessionStateSchema.nullish(),
+  // Required: the installed desktop cannot start. Available: it starts, and an update adds newer features.
   updateRequired: z.boolean().nullish(),
+  updateAvailable: z.boolean().nullish(),
   lcuState: z.enum(["needs-runtime", "not-installed", "installing", "repair-required", "failed", "ready"]).nullish(),
   lcuReason: z.string().nullish().catch(null),
   lcuVersion: z.string().nullish().catch(null),

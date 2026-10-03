@@ -140,6 +140,41 @@ pub(crate) fn guest_within(
     Ok(output.stdout)
 }
 
+/// The pinned streamer recipe this Silo installs.
+const STREAMER_LOCK: &str = include_str!("../guest/desktop-streamer-lock.json");
+/// The oldest installed streamer recipe revision the bundled guest helper still runs.
+const OLDEST_RUNNABLE_RECIPE: u64 = 1;
+const STREAMER_RECEIPT: &str = "/var/lib/silo-desktop/streamer.json";
+
+fn bundled_recipe_version() -> Option<u64> {
+    serde_json::from_str::<Value>(STREAMER_LOCK)
+        .ok()?
+        .get("recipeVersion")?
+        .as_u64()
+}
+
+/// Derives update availability from the installed receipt rather than from the installed
+/// helper, whose own threshold may predate the bundled recipe. A runnable older recipe is
+/// an optional update; the helper's requirement only stands for recipes that cannot run.
+fn apply_receipt_recipe(status: &mut Value, receipt: Option<&Value>, bundled: Option<u64>) {
+    let (Some(bundled), Some(receipt)) = (bundled, receipt) else {
+        return;
+    };
+    if receipt.get("backend").and_then(Value::as_str) != Some("selkies") {
+        return;
+    }
+    let Some(installed) = receipt.get("recipeVersion").and_then(Value::as_u64) else {
+        return;
+    };
+    if (OLDEST_RUNNABLE_RECIPE..bundled).contains(&installed) {
+        status["updateRequired"] = json!(false);
+        status["updateAvailable"] = json!(true);
+    } else if installed == bundled {
+        status["updateRequired"] = json!(false);
+        status["updateAvailable"] = json!(false);
+    }
+}
+
 // Stage the bundled sources for first installation and explicit repairs/updates.
 // An existing guest helper may predate these pinned inputs, so never delegate
 // installation or repair to an older copy.
@@ -155,7 +190,7 @@ fn installer_script(action: &str) -> String {
         (
             "SILO_DESKTOP_STREAMER_LOCK_SOURCE",
             "desktop-streamer-lock.json",
-            include_str!("../guest/desktop-streamer-lock.json"),
+            STREAMER_LOCK,
             "SILO_DESKTOP_STREAMER_LOCK_EOF",
         ),
         (
@@ -357,7 +392,7 @@ fn status_with(
     let settings = crate::desktop::configuration(configuration);
     let built_in = crate::computer_use::is_built_in(configuration);
     let fallback = |state: &str| {
-        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "streamerVersion":null, "lcuState":null, "lcuReason":null, "lcuVersion":null, "lcuAppVersion":null, "lcuRuntimeVersion":null, "lcuAgents":null, "lcuReadiness":null});
+        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "updateAvailable":false, "streamerVersion":null, "lcuState":null, "lcuReason":null, "lcuVersion":null, "lcuAppVersion":null, "lcuRuntimeVersion":null, "lcuAgents":null, "lcuReadiness":null});
         // A stopped computer still reports its approval mode and the last versions it had.
         if let Some(computer_use) =
             crate::computer_use::desktop_state(paths, configuration, false, None)
@@ -390,6 +425,9 @@ fn status_with(
         script.push('\n');
         script.push_str(crate::computer_use::STATUS_COMMAND);
     }
+    script.push_str(&format!(
+        "\nprintf '%s\\n' \"$(tr -d '\\n\\r' < {STREAMER_RECEIPT} 2>/dev/null || true)\"\n"
+    ));
     let output = guest(
         runner,
         paths,
@@ -403,10 +441,15 @@ fn status_with(
     let value: Value = serde_json::from_str(lines.next().unwrap_or("").trim())
         .map_err(|_| "The desktop returned an invalid status.")?;
     let mut status = public_status(value)?;
+    let guest_state = built_in
+        .then(|| lines.next())
+        .flatten()
+        .and_then(|line| serde_json::from_str::<Value>(line.trim()).ok());
+    let receipt = lines
+        .next()
+        .and_then(|line| serde_json::from_str::<Value>(line.trim()).ok());
+    apply_receipt_recipe(&mut status, receipt.as_ref(), bundled_recipe_version());
     if built_in {
-        let guest_state = lines
-            .next()
-            .and_then(|line| serde_json::from_str::<Value>(line.trim()).ok());
         if let Some(computer_use) =
             crate::computer_use::desktop_state(paths, configuration, true, guest_state.as_ref())
         {
@@ -469,6 +512,11 @@ fn public_status(value: Value) -> Result<Value, String> {
         Some(Value::Bool(value)) => *value,
         Some(_) => return Err("The desktop returned an invalid update requirement.".into()),
     };
+    let update_available = match value.get("updateAvailable") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err("The desktop returned an invalid update availability.".into()),
+    };
     let streamer_version = value["streamerVersion"].as_str().filter(|version| {
         let parts = version.split('.').collect::<Vec<_>>();
         parts.len() == 3
@@ -519,7 +567,8 @@ fn public_status(value: Value) -> Result<Value, String> {
         "lcuAppVersion":lcu_app_version, "lcuRuntimeVersion":lcu_runtime_version,
         "lcuAgents":lcu_agents, "lcuReadiness":lcu_readiness, "backend":backend,
         "sessionState":session_state, "streamState":stream_state,
-        "updateRequired":update_required, "streamerVersion":streamer_version}),
+        "updateRequired":update_required, "updateAvailable":update_available && !update_required,
+        "streamerVersion":streamer_version}),
     )
 }
 
@@ -1776,13 +1825,90 @@ mod tests {
             status_with(&runner, &paths(dir.path()), &configuration).unwrap(),
             json!({"installed":true,"state":"computer-stopped","autoStart":false,
                    "backend":null,"sessionState":"stopped","streamState":"stopped",
-                   "updateRequired":false,"streamerVersion":null,
+                   "updateRequired":false,"updateAvailable":false,"streamerVersion":null,
                    "lcuState":null,"lcuReason":null,"lcuVersion":null,
                    "lcuAppVersion":null,"lcuRuntimeVersion":null,
                    "lcuAgents":null,"lcuReadiness":null})
         );
         runner.assert_finished();
     }
+    fn receipt_read_suffix() -> String {
+        format!("\nprintf '%s\\n' \"$(tr -d '\\n\\r' < {STREAMER_RECEIPT} 2>/dev/null || true)\"\n")
+    }
+
+    fn recipe_status(helper: Value, receipt: &str) -> Value {
+        let dir = tempfile::tempdir().unwrap();
+        let configuration: ComputerConfiguration = serde_json::from_value(json!({"id":"id","name":"dev","cpus":1,"maxCPUs":1,"memoryGiB":2,"maxMemoryGiB":2,"workspaceStorageGiB":10,"runtimeStorageGiB":10,"desktop":{"startWithComputer":true}})).unwrap();
+        let script = format!(
+            "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop status; else printf '%s\\n' '{{\"installed\":false,\"state\":\"uninstalled\",\"autoStart\":false}}'; fi{}",
+            receipt_read_suffix()
+        );
+        let runner = ScriptedRunner::new([
+            inspect(
+                "Running",
+                json!({"silo.managed":"true","silo.machine-id":"id"}),
+            ),
+            ExpectedCommand::ok(
+                [
+                    "exec",
+                    "dev",
+                    "--no-start",
+                    "--no-tty",
+                    "--quiet",
+                    "--timeout",
+                    "15s",
+                    "--user",
+                    "root",
+                    "--workdir",
+                    "/",
+                    "--",
+                    "sh",
+                    "-c",
+                    script.as_str(),
+                ],
+                format!("{helper}\n{receipt}\n"),
+            ),
+        ]);
+        let status = status_with(&runner, &paths(dir.path()), &configuration).unwrap();
+        runner.assert_finished();
+        status
+    }
+
+    #[test]
+    fn an_older_helper_cannot_hide_or_force_a_desktop_update() {
+        let _test_state = crate::test_support::global_state();
+        let bundled = bundled_recipe_version().unwrap();
+        let old_helper = |required: Value| {
+            let mut value = json!({"installed":true,"state":"stopped","autoStart":true,"backend":"selkies","sessionState":"stopped","streamState":"stopped","streamerVersion":"2.0.0"});
+            if !required.is_null() {
+                value["updateRequired"] = required;
+            }
+            value
+        };
+        let older = format!(
+            "{{\"backend\":\"selkies\",\"recipeVersion\":{}}}",
+            bundled - 1
+        );
+        for required in [Value::Null, json!(false), json!(true)] {
+            let status = recipe_status(old_helper(required), &older);
+            assert_eq!(status["updateAvailable"], true);
+            assert_eq!(status["updateRequired"], false);
+        }
+        let current = format!("{{\"backend\":\"selkies\",\"recipeVersion\":{bundled}}}");
+        let status = recipe_status(old_helper(json!(true)), &current);
+        assert_eq!(status["updateAvailable"], false);
+        assert_eq!(status["updateRequired"], false);
+        let status = recipe_status(old_helper(json!(true)), "");
+        assert_eq!(status["updateRequired"], true);
+        assert_eq!(status["updateAvailable"], false);
+        let status = recipe_status(
+            old_helper(json!(true)),
+            "{\"backend\":\"selkies\",\"recipeVersion\":0}",
+        );
+        assert_eq!(status["updateRequired"], true);
+        assert_eq!(status["updateAvailable"], false);
+    }
+
     fn built_in_computer() -> ComputerConfiguration {
         serde_json::from_value(json!({"id":"00000000-0000-4000-8000-000000000001","name":"dev","cpus":1,"maxCPUs":1,"memoryGiB":2,"maxMemoryGiB":2,"workspaceStorageGiB":10,"runtimeStorageGiB":10,"desktop":{"startWithComputer":true,"builtIn":true}})).unwrap()
     }
@@ -1825,14 +1951,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let configuration = built_in_computer();
         let script = format!(
-            "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop status; else printf '%s\\n' '{{\"installed\":false,\"state\":\"uninstalled\",\"autoStart\":false}}'; fi\n{}",
-            crate::computer_use::STATUS_COMMAND
+            "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop status; else printf '%s\\n' '{{\"installed\":false,\"state\":\"uninstalled\",\"autoStart\":false}}'; fi\n{}{}",
+            crate::computer_use::STATUS_COMMAND,
+            receipt_read_suffix()
         );
         let guest_output = format!(
             "{}\n{}\n",
             json!({"installed":true,"state":"running","autoStart":true,"sessionState":"running","streamState":"running","backend":"selkies"}),
             json!({"state":"ready","reason":null,"compatibility":"untested","warning":"Not tested.","appVersion":"26.928.31416","runtimeVersion":null,"lcuVersion":"0.8.0","agents":["codex"],"approval":"ask","mount":"ok"})
-        );
+        ) + "{\"backend\":\"selkies\",\"recipeVersion\":2}\n";
         let runner = ScriptedRunner::new([
             inspect(
                 "Running",

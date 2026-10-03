@@ -306,6 +306,29 @@ it("offers an explicit stopped-only desktop update without starting or attaching
   expect(invoke.mock.calls.some(([command, args]) => command === "desktop_action" && args?.action === "start")).toBe(false)
 })
 
+it("keeps a compatible older desktop startable and offers the update separately", async () => {
+  invoke.mockImplementation(async (command, args) => {
+    if (command === "read_desktop_state") return {
+      installed: true, autoStart: true, state: "stopped", backend: "selkies",
+      sessionState: "stopped", streamState: "stopped", updateRequired: false, updateAvailable: true,
+    }
+    if (command === "desktop_action" && args?.action === "start") return {
+      installed: true, autoStart: true, state: "stopped", backend: "selkies",
+      sessionState: "stopped", streamState: "stopped", updateRequired: false, updateAvailable: true,
+    }
+    return undefined
+  })
+  const user = userEvent.setup()
+  render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
+  expect(await screen.findByRole("button", { name: "Start desktop" })).toBeVisible()
+  expect(screen.getByRole("button", { name: "Update desktop" })).toBeVisible()
+  expect(screen.getByText(/clipboard sharing, sound control and a screen that follows the window/)).toBeVisible()
+  expect(invoke.mock.calls.some(([command]) => command === "desktop_action")).toBe(false)
+  await user.click(screen.getByRole("button", { name: "Start desktop" }))
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("desktop_action", { computer: "dev", action: "start" }))
+  expect(invoke.mock.calls.some(([command, args]) => command === "desktop_action" && args?.action === "update-streamer")).toBe(false)
+})
+
 it("keeps a healthy stopped legacy desktop startable and makes migration optional", async () => {
   invoke.mockImplementation(async (command, args) => {
     if (command === "read_desktop_state") return {

@@ -184,23 +184,39 @@ def spawn(name, argv, env, account):
         reap_spawned_child(child)
         raise
 
-def set_start_size(env, account):
+def set_start_size(env, account, ready_seconds=10, sleep=time.sleep):
     def xrandr(*arguments):
         return subprocess.run(["xrandr", *arguments], env=env, capture_output=True, text=True, timeout=10,
                               preexec_fn=lambda: (os.initgroups(USER, account.pw_gid),
                                                   os.setgid(account.pw_gid), os.setuid(account.pw_uid)))
-    query = xrandr("--query")
-    output = re.search(r"^(\S+) connected", query.stdout, re.MULTILINE)
-    if query.returncode != 0 or not output:
+    def query_screen():
+        query = xrandr("--query")
+        output = re.search(r"^(\S+) connected", query.stdout, re.MULTILINE)
+        current = re.search(r"current (\d+) x (\d+)", query.stdout)
+        if query.returncode != 0 or not output or not current:
+            return None
+        return query.stdout, output.group(1), f"{current.group(1)}x{current.group(2)}"
+    screen = None
+    for _ in range(max(1, int(ready_seconds * 5))):
+        screen = query_screen()
+        if screen:
+            break
+        sleep(.2)
+    if not screen:
         fail("xrandr found no Xvfb output; check x11-xserver-utils and the RANDR extension")
-    if not re.search(rf"^\s+{START_SIZE}\s", query.stdout, re.MULTILINE):
-        xrandr("--newmode", START_SIZE, *START_MODELINE)
-        added = xrandr("--addmode", output.group(1), START_SIZE)
-        if added.returncode != 0:
-            fail(f"xrandr could not add {START_SIZE}: {added.stderr.strip()}")
-    applied = xrandr("--output", output.group(1), "--mode", START_SIZE, "--fb", START_SIZE)
-    if applied.returncode != 0:
-        fail(f"xrandr could not set {START_SIZE}: {applied.stderr.strip()}")
+    listing, output, current = screen
+    if current != START_SIZE:
+        if not re.search(rf"^\s+{START_SIZE}\s", listing, re.MULTILINE):
+            xrandr("--newmode", START_SIZE, *START_MODELINE)
+            added = xrandr("--addmode", output, START_SIZE)
+            if added.returncode != 0:
+                fail(f"xrandr could not add {START_SIZE}: {added.stderr.strip()}")
+        applied = xrandr("--output", output, "--mode", START_SIZE, "--fb", START_SIZE)
+        if applied.returncode != 0:
+            fail(f"xrandr could not set {START_SIZE}: {applied.stderr.strip()}")
+        verified = query_screen()
+        if not verified or verified[2] != START_SIZE:
+            fail(f"the Xvfb screen did not change to {START_SIZE}")
 
 def session_environment(account):
     session = RUN / "session"
@@ -272,7 +288,14 @@ def start(marker_path):
         state_write(state)
         time.sleep(.5)
         if name == "xvfb":
-            set_start_size(env, account)
+            try:
+                set_start_size(env, account)
+            except BaseException:
+                for item in reversed(state["processes"]):
+                    stop_recorded(item)
+                state["processes"] = []
+                state_write(state)
+                raise
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and not port_open():
         time.sleep(.2)
