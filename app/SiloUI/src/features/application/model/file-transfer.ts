@@ -30,19 +30,27 @@ export const transferProgressSchema = z.object({
 export type TransferProgress = z.infer<typeof transferProgressSchema>
 
 export const transferProgressEvent = "silo://transfer-progress"
+export const viewerDragEvent = "silo://viewer-drag"
+export const viewerDropEvent = "silo://viewer-drop"
+
+/** Files the user picked or dropped; the native side keeps their paths and hands out this one-time token. */
+export const uploadSelectionSchema = z.object({ token: z.string().min(1), names: z.array(z.string()) })
+export type UploadSelection = z.infer<typeof uploadSelectionSchema>
 
 export interface UploadRequest {
   /** One transfer at a time; the same id cancels it and labels its progress. */
   id: string
   computer: string
   directory: string
-  paths: string[]
+  /** The token of a selection the user made in the native picker or by dropping files. */
+  selection: string
   conflict: ConflictPolicy
 }
 
-/** The native file transfer boundary. Paths on this device are only ever chosen or dropped by the user. */
+/** The native file transfer boundary. Paths on this device never reach the page: the user's picks stay native. */
 export interface FileTransferActions {
-  chooseUploadFiles: () => Promise<string[]>
+  /** `null` when the picker is dismissed. */
+  chooseUploadFiles: () => Promise<UploadSelection | null>
   upload: (request: UploadRequest) => Promise<UploadOutcome>
   download: (request: { id: string; computer: string; path: string }) => Promise<DownloadOutcome>
   cancel: (id: string) => Promise<void>

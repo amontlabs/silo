@@ -2,8 +2,8 @@ import type { ApplicationComputer } from "@/features/application/model/applicati
 import { computerTarget } from "@/features/application/model/connections"
 import { baseName, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
-/** Host files offered by the fixture upload picker; previews and tests only. */
-export const fixtureUploadPaths = ["/Users/ada/Documents/report.pdf", "/Users/ada/Documents/notes.txt"]
+/** Names the fixture upload picker offers; previews and tests only. */
+export const fixtureUploadNames = ["report.pdf", "notes.txt"]
 
 /**
  * A deterministic transfer boundary. Uploading a name that a computer's top-level workspace
@@ -13,11 +13,11 @@ export function fixtureFileTransfers(computers: ApplicationComputer[]): FileTran
   const listeners = new Set<(progress: TransferProgress) => void>()
   const emit = (progress: TransferProgress) => listeners.forEach(listener => listener(progress))
   return {
-    chooseUploadFiles: async () => [...fixtureUploadPaths],
-    upload: async ({ id, computer, directory, paths, conflict }) => {
+    chooseUploadFiles: async () => ({ token: "fixture-selection", names: [...fixtureUploadNames] }),
+    upload: async ({ id, computer, directory, conflict }) => {
       const owner = computers.find(item => computerTarget(item) === computer)
       if (!owner || owner.state !== "running") throw "Start this computer to transfer files."
-      const names = paths.map(baseName)
+      const names = [...fixtureUploadNames]
       const existing = directory === "/workspace" ? names.filter(name => owner.files.some(file => file.name === name)) : []
       if (existing.length > 0 && conflict === "ask") return { status: "conflict", names: existing }
       const stored = names.map(name => existing.includes(name) && conflict === "keepBoth" ? name.replace(/(\.[^.]+)?$/, " (1)$1") : name)

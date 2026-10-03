@@ -4,8 +4,7 @@ import { computerTarget } from "@/features/application/model/connections"
 import { NetworkPage } from "./network-page"
 import { FolderActions } from "@/features/application/components/folder-actions"
 import { ComputerFileTree } from "@/features/application/components/computer-file-tree"
-import { useFileTransfers } from "@/features/application/components/use-file-transfers"
-import type { FileTransferActions } from "@/features/application/model/file-transfer"
+import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
 import { useMemo, useState } from "react"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Loader2, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
@@ -67,11 +66,9 @@ function Files({
   editor,
   onOpenEditor,
   directoryStore,
-  fileTransfers,
   active,
 }: {
   source: ApplicationSource
-  fileTransfers?: FileTransferActions
   onRefreshRepositories?: () => Promise<void>
   editor: string
   onOpenEditor: (computer: string, path: string) => void
@@ -92,7 +89,7 @@ function Files({
   }
   const [repositoriesOpen, setRepositoriesOpen] = useState(true)
   const [fileTreeOpen, setFileTreeOpen] = useState(true)
-  const transfers = useFileTransfers(fileTransfers)
+  const transfers = useFileTransferControls()
   if (computers.length === 0) return <EmptyState icon={<File />} title="No matching computers" description="Clear the computer filter to browse files and repositories in every computer." />
   const repositories = computers.flatMap((computer) => computer.repositories.map((repository) => ({ computer, repository })))
   const pushOperations = new Map(repositoryPushOperations.map((operation) => [`${operation.computer}:${operation.repositoryPath}`, operation]))
@@ -184,9 +181,8 @@ function Files({
           <CollapsibleContent className="file-pane-content-motion min-h-0 flex-1" data-files-pane-content="file-tree">
             <div className="h-full overflow-y-auto overscroll-contain px-2 pt-2" data-files-pane-scroll="file-tree">
               <ul className="grid gap-0.5" aria-label="File tree">
-                {computers.map((computer) => <ComputerFileTree editor={editor} key={computer.configuration.id} computer={computer} store={directoryStore} active={active} onOpenEditor={onOpenEditor} transfers={transfers.controls} />)}
+                {computers.map((computer) => <ComputerFileTree editor={editor} key={computer.configuration.id} computer={computer} store={directoryStore} active={active} onOpenEditor={onOpenEditor} transfers={transfers} />)}
               </ul>
-              {transfers.dialog}
             </div>
           </CollapsibleContent>
         </section>
@@ -405,7 +401,7 @@ export function ComputersPage({
   return (
     <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
       {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
-      {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} fileTransfers={networkActions.fileTransfers} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
+      {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <Logs key={JSON.stringify(visibleComputers.map(computerTarget))} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} />}
       {section === "network" && <NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} />}
       {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={activity => {

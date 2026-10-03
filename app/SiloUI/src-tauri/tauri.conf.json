@@ -47,7 +47,8 @@
         "preview",
         "status",
         "application-events",
-        "desktop-viewer"
+        "desktop-viewer",
+        "desktop-transfer"
       ],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420"

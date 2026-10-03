@@ -16,6 +16,7 @@ pub(crate) fn begin() {
     }
     QUIT_GENERATION.fetch_add(1, Ordering::SeqCst);
     QUITTING.store(true, Ordering::SeqCst);
+    crate::transfer::cancel_all();
 }
 
 /// The current shutdown generation. A retry sequence captures it before its first

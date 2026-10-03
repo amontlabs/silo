@@ -5,13 +5,20 @@ import { describe, expect, it } from "vitest"
 const native = resolve(import.meta.dirname, "../../src-tauri")
 const commands = ["choose_upload_files", "upload_files", "download_file", "cancel_transfer"]
 type Capability = { identifier: string; windows: string[]; webviews?: string[]; permissions: Array<string | { identifier: string }> }
-const capabilities = readdirSync(resolve(native, "capabilities")).filter(name => name.endsWith(".json"))
+const files = readdirSync(resolve(native, "capabilities")).filter(name => name.endsWith(".json"))
   .map(name => JSON.parse(readFileSync(resolve(native, "capabilities", name), "utf8")) as Capability)
+// With an explicit list in tauri.conf.json, only the listed capabilities apply.
+const configured = (JSON.parse(readFileSync(resolve(native, "tauri.conf.json"), "utf8")) as { app: { security: { capabilities: string[] } } }).app.security.capabilities
+const capabilities = files.filter(capability => configured.includes(capability.identifier))
 const identifier = (entry: string | { identifier: string }) => typeof entry === "string" ? entry : entry.identifier
 const holders = (permission: string) => capabilities.filter(capability => capability.permissions.some(entry => identifier(entry) === permission))
 const permission = (command: string) => `allow-${command.replaceAll("_", "-")}`
 
 describe("file transfer permission boundary", () => {
+  it("applies every capability file and only existing ones", () => {
+    expect([...configured].sort()).toEqual(files.map(capability => capability.identifier).sort())
+  })
+
   it.each(commands)("registers %s with the native manifest and handler list", command => {
     const manifest = readFileSync(resolve(native, "build.rs"), "utf8").split(".commands(&[")[1]?.split("])")[0] ?? ""
     expect(manifest).toContain(`"${command}"`)
@@ -42,6 +49,7 @@ describe("file transfer permission boundary", () => {
 
   it("lets the viewer shell listen for transfer progress", () => {
     const viewer = capabilities.find(capability => capability.identifier === "desktop-transfer")
+    expect(viewer?.webviews).toEqual(["desktop-shell-*"])
     expect((viewer?.permissions ?? []).map(identifier)).toEqual(expect.arrayContaining(["core:event:allow-listen", "core:event:allow-unlisten"]))
   })
 })

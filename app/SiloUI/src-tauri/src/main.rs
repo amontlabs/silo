@@ -336,6 +336,7 @@ fn main() {
             settings::exit_backstop(_app);
             ssh_access::close_all();
             remote_network::close_all();
+            transfer::close_all(std::time::Duration::from_secs(5));
         }
         if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
             settings::prevent_exit_until_saved(_app, api, *code);

@@ -81,19 +81,40 @@ Rejected, per the reuse policy in `AGENTS.md`:
   links and folders are refused.
 - Host names are sanitized (no `/`, NUL or control characters, not `.` or `..`, at most
   255 bytes). Remote names reach `sftp` only through commands that do not expand
-  wildcards (`cd`, `put`, `rename`, bare `ls`); local sources are staged behind a fixed
-  symlink name. A file whose name contains `* ? [ ] { } \` cannot be downloaded, because
+  wildcards (`cd`, `put`, `rename`, `ls` of the folder or of a wildcard-free name); local
+  sources are staged behind a fixed symlink name. A file whose name contains `* ? [ ] { } \` cannot be downloaded, because
   `get` would expand it; uploading such names works.
-- Conflicts are read from `ls -lan` after a `cd`. The first upload request uses the
+- Conflicts are read from `ls -lan` after a `cd`. sftp ignores the status of a bare
+  `ls`, so a listing only counts when it names the folder itself (`.`) and fits in the
+  4 MiB output cap; an unreadable or oversized folder fails the transfer instead of
+  looking empty. The first upload request uses the
   `ask` policy and sends nothing when a name exists; the Silo dialog then repeats it
   with Replace or Keep both (`name (1).ext`, default). Names repeated inside one batch
   are numbered too. Replace refuses to overwrite a folder. The viewer drop always keeps
   both.
 - Uploads write `.<name>.silo-part-<id>` (non-wildcard characters only) beside the
-  target and `rename` it into place; failed or cancelled uploads remove the partial
-  in a second short session. Downloads write a hidden partial beside the chosen
-  destination, check its size, and rename it; the destination comes from the backend
-  save dialog.
+  target and publish it. Replace uses the replacing `rename`. Ask and Keep both use
+  `rename -l`, the legacy rename that fails when the target exists, so a file created
+  after the folder was inspected is never overwritten: the partial then takes the next
+  free `name (n)` (up to 8 tries, then an error), and the outcome lists the names
+  actually stored. Failed or cancelled uploads remove the partial in a second short
+  session. Keep-both numbering budgets the whole name including the extension within
+  255 bytes. Downloads write a hidden partial beside the chosen destination, check its
+  size, set ordinary permissions (0644, not the computer's) and rename it; the
+  destination comes from the backend save dialog.
+- A download is bounded on this device, because the client reads until the computer
+  stops sending. The client runs with a file-size limit of the listed size plus 1 MiB
+  (the operating system stops it), the partial is also watched every 50 ms and the
+  transfer stopped as soon as it exceeds the listed size, and the destination volume
+  must have the file plus 64 MiB free before it starts and at least 32 MiB while it
+  runs. Every abort removes the partial and says why.
+- The computer can change a file or folder between Silo checking it and the client
+  reading it. The same session lists the file again just before `get`, and a result
+  that is no longer the same regular file (or the same folder) is discarded. A swap in
+  the remaining milliseconds can only change which of the computer's own bytes are read,
+  within the bound above; nothing about it affects where or how the file is written on
+  this device. Uploads cannot be hurt this way beyond what the computer could already do
+  to its own files.
 - Free space is read with `df` when the guest's SFTP server supports it; otherwise the
   check is skipped and a full disk is reported as a failed transfer.
 - Limits: 4 GiB per file, 8 GiB and 100 files per upload, one transfer at a time.
@@ -102,21 +123,36 @@ Rejected, per the reuse policy in `AGENTS.md`:
   batch mode, so a download reports the size of its local partial and an upload asks the
   computer for its partial's size every 1.5 s through a second short session. Cancel
   ends the whole `sftp` process group (including the ProxyCommand) and removes the
-  partial.
-- The picker, dropped paths and save dialog are native; the frontend passes host paths
-  back to the backend but never reads file contents, and the guest page never receives
-  them. Only the main window can pick and download; the main window and desktop viewer
-  shells can upload (viewer shells only to Downloads), and the status panel can do
-  neither.
+  partial. Each `sftp` runs under the same parent-lifetime watchdog as the SSH forwards
+  (`owned_tunnel`), so it also ends if Silo crashes or is force-quit, and a graceful quit
+  cancels the running transfer and waits up to 5 seconds for it to clean up. A computer
+  partial left by a force-quit stays hidden in the folder.
+- The picker, dropped files and save dialog are native. The backend keeps the chosen
+  paths and gives the window an opaque one-time token (valid 10 minutes, at most 16 held,
+  bound to the window that received it); `upload_files` accepts only such a token, never a
+  path, and it survives only an upload that asks about a conflict. The frontend never
+  reads file contents or paths, and the guest page never receives them. Only the main
+  window can pick and download; the main window and desktop viewer shells can upload
+  (viewer shells only to Downloads), and the status panel can do neither. The
+  `desktop-transfer` capability must be listed in `tauri.conf.json`
+  (`app.security.capabilities`) to apply; `transfer-permissions.test.ts` checks the
+  capabilities as configured.
+- Transfers, their progress notification and the replace-or-keep dialog belong to the
+  application, not to the Files page, so they continue and stay visible while the user
+  moves between pages.
 
 ### Needs live verification
 
-- Whether Tauri delivers drag-and-drop events for the window that hosts the guest child
-  webview on macOS and Linux (plan item P9). The shell window listens with
-  `onDragDropEvent`; if the child webview swallows drops, the drop target must move to
-  the shell window over the viewer area.
-- `sftp` behavior against a real guest (`posix-rename` for Replace, `df`, home folder
-  creation) and over a remote computer; automated tests use OpenSSH's `sftp-server`
+- Native drops over the computer's display (plan item P9). The child webview that shows
+  the computer is a separate webview, so a drop on it is not a window event of the shell.
+  `desktop_viewer.rs` registers `Webview::on_webview_event` on the child and
+  `WindowEvent::DragDrop` on the shell; both call `transfer::native_drop`, which emits
+  `silo://viewer-drag` and `silo://viewer-drop` (a token and names) to the shell window
+  only. Tauri's drag-drop handler consumes the drop, so the page gets no HTML5 drop event
+  and no file contents. Confirm on macOS and Linux that a drop over the display uploads
+  and that the page's `drop` listener never fires.
+- `sftp` behavior against a real guest (`posix-rename` for Replace, `rename -l` against a
+  Linux `sftp-server`, `df`, home folder creation) and over a remote computer; automated tests use OpenSSH's `sftp-server`
   on the test machine and scripted stand-ins.
 - Throughput (P8) and the cost of the progress probe on large uploads.
 
