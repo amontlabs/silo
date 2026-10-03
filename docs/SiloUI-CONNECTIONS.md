@@ -15,7 +15,7 @@ A controller can connect during onboarding without creating a local computer. Lo
 
 ## Close and Quit
 
-Closing the window retains the existing status-bar behavior. **Quit Silo** blocks new work, saves pending preferences, coordinates accepted operations, gracefully stops and verifies all Silo-owned local computers, closes this controller's tunnels, and exits. Computers on other devices are not stopped.
+Closing the window retains the existing status-bar behavior. **Quit Silo** blocks new work, saves pending preferences, coordinates accepted operations, lets a cancelled file transfer clean up within the remaining shutdown budget, gracefully stops and verifies all Silo-owned local computers, closes this controller's tunnels, and exits. Computers on other devices are not stopped.
 
 The existing screen shows **Stopping local computers…** while shutdown runs. A stop or settings-save failure keeps Silo open with an actionable error and restores manual controls. Computers already stopped are not automatically restarted after a failed Quit. Failed provisioning before metadata publication is handled using its validated recovery journal; unknown managed identities block a successful Quit rather than being silently abandoned.
 

@@ -343,6 +343,28 @@ describe("host bridge page helper", () => {
     expect(body(posted()[0].init)).toBe("first copy")
   })
 
+  it("does not take a baseline reply that arrives after the shortcut for the copied content", async () => {
+    call("requestClipboard", "late-1", 2000, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    await vi.waitFor(() => expect(socket.sent).toEqual(["REQUEST_CLIPBOARD", ...CHORD, "REQUEST_CLIPBOARD"]))
+    socket.receive(`clipboard,${b64("old")}`)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(fetchMock).not.toHaveBeenCalled()
+    socket.receive(`clipboard,${b64("copied")}`)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("copied")
+  })
+
+  it("repeats of a late baseline reply do not end the wait, and a lone announcement is answered after the grace period", async () => {
+    call("requestClipboard", "late-2", 2000, [...CHORD, "REQUEST_CLIPBOARD"], true)
+    await vi.waitFor(() => expect(socket.sent.length).toBeGreaterThan(1))
+    socket.receive(`clipboard,${b64("old")}`)
+    socket.receive(`clipboard,${b64("old")}`)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(fetchMock).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    expect(body(posted()[0].init)).toBe("old")
+  })
+
   it("does not send the copy shortcut once the request already ended", async () => {
     call("requestClipboard", "fresh-3", 10, [...CHORD, "REQUEST_CLIPBOARD"], true)
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())

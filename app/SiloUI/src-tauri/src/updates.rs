@@ -664,6 +664,23 @@ impl From<String> for InstallError {
 /// `exec` skips exit cleanup, so close helpers and release the instance claim first.
 /// A failed replacement must exit without reopening admission or restoring computers:
 /// this process no longer owns the claim. Startup restores the saved running set.
+/// Closes file-transfer admission and lets the running transfer clean up (`close`)
+/// before `prepare` stops computers, since cleanup needs its computer. The returned
+/// guard keeps admission closed; the caller drops it once the update has failed and
+/// its computers are running again, or leaves it to the replaced process.
+fn prepare_after_transfers<P>(
+    close: impl FnOnce() -> P,
+    prepare: impl FnOnce() -> Result<(), String>,
+) -> (P, Result<(), String>) {
+    let closed = close();
+    let result = prepare();
+    (closed, result)
+}
+
+fn close_transfers() -> crate::transfer::Pause {
+    crate::transfer::pause(crate::runtime::shutdown::TRANSFER_DRAIN)
+}
+
 fn restart_after_install(close: impl FnOnce(), restart: impl FnOnce() -> String) -> ! {
     close();
     let error = restart();
@@ -689,6 +706,7 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
     let secrets = crate::secrets::update_guard()?;
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let mut runtime = None;
+    let mut transfers = None;
     let result = debian::install(
         version,
         |status| {
@@ -704,7 +722,11 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
             runtime = Some(guard);
             crate::runtime::shutdown::ensure_accepting_operations()?;
             crate::settings::flush_for_update(app)?;
-            crate::runtime::update_recovery::prepare(app, consent)
+            let (closed, prepared) = prepare_after_transfers(close_transfers, || {
+                crate::runtime::update_recovery::prepare(app, consent)
+            });
+            transfers = Some(closed);
+            prepared
         },
     );
     if let Err(error) = result {
@@ -716,15 +738,15 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
                 )));
             }
         }
+        drop(transfers);
         return Err(InstallError::Failed(error));
     }
     // Keep installation guards and shutdown admission closed until this process
     // is replaced or exits. Startup owns recovery from the retained update journal.
     crate::runtime::shutdown::begin();
-    let _guards = (admission, backup, github, secrets, runtime);
+    let _guards = (admission, backup, github, secrets, runtime, transfers);
     restart_after_install(
         || {
-            crate::runtime::shutdown::drain_transfers();
             crate::ssh_access::close_all();
             crate::remote_network::close_all();
             crate::desktop_viewer::close_all();
@@ -795,12 +817,20 @@ pub(crate) async fn install_update(
             Ok(guards) => guards,
             Err(error) => { let _ = modify(&worker, |s| s.bytes = Some(bytes)); return Err(error.into()); }
         };
+        let mut transfers = None;
         let result = installation_preflight(&bytes)
             .and_then(|_| crate::settings::flush_for_update(&worker))
-            .and_then(|_| crate::runtime::update_recovery::prepare(&worker, stop_computers))
+            .and_then(|_| {
+                let (closed, prepared) = prepare_after_transfers(close_transfers, || {
+                    crate::runtime::update_recovery::prepare(&worker, stop_computers)
+                });
+                transfers = Some(closed);
+                prepared
+            })
             .and_then(|_| update.install(&bytes).map_err(|e| e.to_string()));
         if let Err(error) = result {
             let restore = crate::runtime::update_recovery::restore_locked(&worker);
+            drop(transfers);
             let _ = modify(&worker, |s| s.bytes = Some(bytes));
             return Err(match restore { Ok(()) => error, Err(resume) => format!("{error}\nComputers could not resume: {resume}. Relaunch Silo to retry.") }.into());
         }
@@ -809,7 +839,7 @@ pub(crate) async fn install_update(
         // Close admission before releasing installation guards. The update
         // journal retains the running set for startup to restore after restart.
         crate::runtime::shutdown::begin();
-        drop((_admission, _backup, _github, _secrets, _runtime));
+        drop((_admission, _backup, _github, _secrets, _runtime, transfers));
         worker.restart()
     }).await.unwrap_or_else(|_| Err(InstallError::Failed("Update installation was interrupted. Relaunch Silo to restore the saved computer state, then download the update again.".into())));
     match result {
@@ -838,6 +868,32 @@ pub(crate) async fn open_update_release(app: tauri::AppHandle) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transfers_close_before_computers_stop_and_stay_closed_until_released() {
+        let events = std::cell::RefCell::new(Vec::new());
+        struct Closed<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
+        impl Drop for Closed<'_> {
+            fn drop(&mut self) {
+                self.0.borrow_mut().push("reopen");
+            }
+        }
+        let (closed, result) = prepare_after_transfers(
+            || {
+                events.borrow_mut().push("close");
+                Closed(&events)
+            },
+            || {
+                events.borrow_mut().push("stop");
+                Err("stopping failed".to_string())
+            },
+        );
+        assert_eq!(result.unwrap_err(), "stopping failed");
+        assert_eq!(*events.borrow(), ["close", "stop"]);
+        // The caller restores computers, then drops the guard.
+        events.borrow_mut().push("restore");
+        drop(closed);
+        assert_eq!(*events.borrow(), ["close", "stop", "restore", "reopen"]);
+    }
     #[test]
     fn unavailable_feed_does_not_blame_the_connection_or_claim_success() {
         assert_eq!(

@@ -647,7 +647,10 @@ and Rust code can start a transfer:
   selection before the application publishes the new one; at the deadline it
   falls back to the latest cached content. On a connection that has announced
   nothing yet, a copy first sends `REQUEST_CLIPBOARD` alone and waits for its answer
-  (at most 0.5 s) as the baseline before pressing Ctrl+C. Data that is not valid
+  (at most 0.5 s) as the baseline before pressing Ctrl+C. When that answer is still
+  missing, Ctrl+C goes out anyway and the first announcement afterwards is held for
+  0.3 s because it may be the late answer: a different announcement in that time is
+  the copy, and otherwise the held one is returned. Data that is not valid
   base64 is answered as kind `unreadable` ("content Silo cannot copy") after the
   request's waiter and timer are removed. An announcement above 24 MiB (or a
   declared size above it) replaces the cache with an oversized marker and is
@@ -743,9 +746,12 @@ bound to the window's own computer through `require_computer`, rejected from
 
 - `desktop_viewer_sound_support` asks the page for its capabilities, retrying for
   up to 20 attempts (0.5 s apart) until the Selkies transport is open. One worker
-  probes a viewer at a time: a request made while it runs (a page reload) joins it and
-  restarts its probe for the newest page, so a page that reloads without answering
-  never accumulates workers. `desktop_viewer_sound_cancel` abandons the probe when the
+  probes a viewer at a time: a request made while it runs (a page reload) restarts its
+  probe for the newest page and settles the older request at once as cancelled, so a
+  viewer has at most one waiting request and a page that reloads without answering
+  never accumulates workers or pending calls. Restarts stop after 60 s in total. The
+  worker removes the viewer's slot when it ends, so closing a viewer during a probe
+  leaves nothing behind. `desktop_viewer_sound_cancel` abandons the probe when the
   shell leaves the display, and closing the viewer window does the same. The shell
   calls it only after the attach command succeeded, repeats a failed call every
   3 s (up to 40 times) while the display is still connecting, and calls it again

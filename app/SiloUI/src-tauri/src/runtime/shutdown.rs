@@ -58,19 +58,32 @@ pub(crate) fn ensure_accepting_operations() -> Result<(), String> {
 }
 
 /// The longest Quit waits for a cancelled file transfer to remove its partial files.
-const TRANSFER_DRAIN: Duration = Duration::from_secs(5);
+pub(crate) const TRANSFER_DRAIN: Duration = Duration::from_secs(5);
+/// Time the drain leaves for closing connections, stopping computers and saving state.
+const STOP_RESERVE: Duration = Duration::from_secs(3);
 
-/// The wait for cancelled transfers: at most `TRANSFER_DRAIN`, and never beyond what
-/// is left of the shutdown budget.
+/// The wait for cancelled transfers: at most `TRANSFER_DRAIN`, and only the part of
+/// `remaining` beyond `STOP_RESERVE`, which can be zero.
 fn transfer_drain_budget(remaining: Duration) -> Duration {
-    remaining.min(TRANSFER_DRAIN)
+    remaining.saturating_sub(STOP_RESERVE).min(TRANSFER_DRAIN)
+}
+
+/// The time left until the earlier of the maintenance budget and `deadline`.
+fn remaining_budget(deadline: Option<Instant>, now: Instant) -> Duration {
+    let maintenance = maintenance_budget();
+    deadline.map_or(maintenance, |at| {
+        maintenance.min(at.saturating_duration_since(now))
+    })
 }
 
 /// Waits for the transfer that shutdown cancelled to finish its cleanup, which needs
 /// its connection to the computer, so it must precede closing connections and
-/// stopping computers.
-pub(crate) fn drain_transfers() {
-    crate::transfer::close_all(transfer_drain_budget(maintenance_budget()));
+/// stopping computers. `deadline` is the session-end limit, if one applies.
+fn drain_transfers(deadline: Option<Instant>) {
+    crate::transfer::close_all(transfer_drain_budget(remaining_budget(
+        deadline,
+        Instant::now(),
+    )));
 }
 
 /// Runs Quit's `stop` after `drain` has let the cancelled transfers clean up.
@@ -79,26 +92,32 @@ fn drain_then<T>(drain: impl FnOnce(), stop: impl FnOnce() -> T) -> T {
     stop()
 }
 
-pub(crate) fn stop_local_computers(app: &AppHandle) -> Result<(), String> {
-    let result = drain_then(drain_transfers, || {
-        while_quitting(&OPERATIONS, |guard| {
-            // Quit has stopped admission and holds the operation gate: the SSH monitor
-            // cannot restore listeners while local computer shutdown is in progress.
-            crate::ssh_access::close_all();
-            crate::desktop_viewer::close_all();
-            // With the storage migration unfinished no runtime is in use, so no computer of this
-            // Silo can be running and Quit has nothing to stop.
-            let Some(paths) = runtime_paths_if_in_use(app)? else {
-                return Ok(());
-            };
-            // The quit overlay follows the queue and shows which computer is stopping (D-29).
-            let progress = |name: &str, index: usize, total: usize| {
-                guard.relabel(&format!("Stopping {name} ({index} of {total})"));
-            };
-            stop_local_computers_with(&ProcessRunner, &paths, &progress)
-                .map_err(|error| safe_activity_error(&error))
-        })
-    });
+pub(crate) fn stop_local_computers(
+    app: &AppHandle,
+    deadline: Option<Instant>,
+) -> Result<(), String> {
+    let result = drain_then(
+        || drain_transfers(deadline),
+        || {
+            while_quitting(&OPERATIONS, |guard| {
+                // Quit has stopped admission and holds the operation gate: the SSH monitor
+                // cannot restore listeners while local computer shutdown is in progress.
+                crate::ssh_access::close_all();
+                crate::desktop_viewer::close_all();
+                // With the storage migration unfinished no runtime is in use, so no computer of this
+                // Silo can be running and Quit has nothing to stop.
+                let Some(paths) = runtime_paths_if_in_use(app)? else {
+                    return Ok(());
+                };
+                // The quit overlay follows the queue and shows which computer is stopping (D-29).
+                let progress = |name: &str, index: usize, total: usize| {
+                    guard.relabel(&format!("Stopping {name} ({index} of {total})"));
+                };
+                stop_local_computers_with(&ProcessRunner, &paths, &progress)
+                    .map_err(|error| safe_activity_error(&error))
+            })
+        },
+    );
     let _ = app.emit("silo://application-state-changed", ());
     result
 }
@@ -397,11 +416,27 @@ mod tests {
             transfer_drain_budget(Duration::from_secs(60)),
             TRANSFER_DRAIN
         );
-        assert_eq!(
-            transfer_drain_budget(Duration::from_secs(2)),
-            Duration::from_secs(2)
-        );
         assert_eq!(transfer_drain_budget(Duration::ZERO), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_short_session_deadline_shrinks_the_transfer_drain_and_keeps_a_stop_reserve() {
+        let now = Instant::now();
+        // logind grants about 4.25 s; the drain may not consume the stop reserve.
+        let logind = Duration::from_millis(4250);
+        let drain = transfer_drain_budget(logind);
+        assert_eq!(drain, Duration::from_millis(1250));
+        assert!(logind - drain >= STOP_RESERVE);
+        // A deadline inside the reserve leaves nothing to drain.
+        let tight = remaining_budget(Some(now + Duration::from_secs(2)), now);
+        assert_eq!(transfer_drain_budget(tight), Duration::ZERO);
+        let passed = remaining_budget(Some(now), now + Duration::from_secs(1));
+        assert_eq!(transfer_drain_budget(passed), Duration::ZERO);
+        // Without a session deadline the maintenance budget applies.
+        assert!(remaining_budget(None, now) <= storage::TRIM_BUDGET);
+        assert!(
+            remaining_budget(Some(now + Duration::from_secs(100)), now) <= storage::TRIM_BUDGET
+        );
     }
 
     struct Runner {
