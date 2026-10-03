@@ -8,9 +8,21 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
+
+class ScriptTime:
+    def __init__(self, sleeps):
+        self.sleeps = sleeps
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
 
 SCRIPT = Path(__file__).parents[1] / 'src-tauri/guest/silo-computer-use.py'
 SPEC = importlib.util.spec_from_file_location('silo_computer_use', SCRIPT)
@@ -100,7 +112,8 @@ class Guest(unittest.TestCase):
             mock.patch.object(cu, 'run', self.fake_run),
             # Files written by the tests are owned by the test user, not root.
             mock.patch.object(cu, 'read_json', self.read_json),
-            mock.patch.object(cu.time, 'sleep', lambda seconds: self.sleeps.append(seconds)),
+            # Only the script's own waits are recorded; subprocess polling keeps the real sleep.
+            mock.patch.object(cu, 'time', ScriptTime(self.sleeps)),
         ]
         for patch in patches:
             patch.start()
