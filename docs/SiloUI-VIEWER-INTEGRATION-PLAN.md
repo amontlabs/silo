@@ -269,19 +269,21 @@ does, using Selkies' own automatic resize.
 
 **Why this is safe for agents.** LCU, the computer-use layer, never relies on
 a cached screen size. Every pointer action is expressed relative to a target
-window; immediately before sending input LCU reads the window's geometry and
-the screen size (`_NET_DESKTOP_GEOMETRY`) again, and refuses a point that no
-longer lies inside the window (`lcu/linux_sky_service.mjs` 400-405 and
-585-610, test "a point valid for the old geometry is rejected after the window
-shrank"). A resize during an agent action therefore produces a refused action
+window. LCU reads the screen size (`_NET_DESKTOP_GEOMETRY`) once per action,
+and immediately before sending input reads the window's geometry again and
+refuses a point that no longer lies inside the window
+(`lcu/linux_sky_service.mjs` 400-408, 594-607 and 678-700, test "a point valid
+for the old geometry is rejected after the window shrank"). A resize during an agent action therefore produces a refused action
 and a fresh look, never a click in the wrong place.
 
 **Guest:**
 
-- Start Xvfb with room to grow, `-screen 0 4096x4096x24` (Selkies caps client
-  requests at 4080 pixels; upstream starts Xvfb at 8192x4096), then set
+- Start Xvfb with room to grow, `-screen 0 4096x4096x24`. Xvfb 21.1 fixes its
+  RandR maximum at the start size (`hw/vfb/InitOutput.c`, `vfbRandRInit`), so
+  today's 1440x900 start cannot grow. The framebuffer is one allocation of
+  about 64 MiB; Selkies caps client requests at 4080 pixels. Then set
   1440x900 with `xrandr` at session start so a computer with no viewer keeps
-  today's size. P7 measures the memory cost.
+  today's size. P7 measures resident memory.
 - Launch Selkies with `--enable-resize=true` and `--use-css-scaling=true|locked`.
   CSS scaling sends the window size in logical pixels and stretches the canvas,
   so a Retina window does not quadruple the pixels the guest encodes in
