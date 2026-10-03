@@ -44,7 +44,7 @@ it.each([
 ])('opens SSH details for %s while keeping native actions disabled', async (name, computer, endpoint) => {
   const actions = Object.entries(demoActions)
     .filter(([, action]) => action === readOnlyOperation)
-    .map(([action]) => vi.spyOn(demoActions, action as keyof typeof demoActions));
+    .map(([action]) => vi.spyOn(demoActions as unknown as Record<string, (...args: unknown[]) => unknown>, action));
   const network = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('The demo must not fetch live data'));
   const user = userEvent.setup();
   render(<ReadOnlyDemo />);

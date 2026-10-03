@@ -368,7 +368,7 @@ These are evidenced costs, missing guarantees, or investigation targets. They ar
 
 ### O-02. Stream large build inputs instead of holding complete archives
 
-[prepare-microsandbox-runtime.mjs](../../app/SiloUI/scripts/prepare-microsandbox-runtime.mjs), lines 22–51, buffers fetch bodies; [guest-image.mjs](../../app/SiloUI/scripts/guest-image.mjs), lines 24–33, reads full cached images for verification. The image lock records 414,843,188/423,476,714-byte archives. Use maintained stream primitives, incremental hashes, pinned-size limits, deadlines, temporary files, and atomic publication. Measure peak RSS and cold/warm preparation time before and after; no peak-memory failure was reproduced.
+[prepare-microsandbox-runtime.mjs](../../app/SiloUI/scripts/prepare-microsandbox-runtime.mjs), lines 22–51, buffers fetch bodies; [guest-image.mjs](https://github.com/amontlabs/silo/blob/91c8145fdc37/app/SiloUI/scripts/guest-image.mjs), lines 24–33, reads full cached images for verification. The image lock records 414,843,188/423,476,714-byte archives. Use maintained stream primitives, incremental hashes, pinned-size limits, deadlines, temporary files, and atomic publication. Measure peak RSS and cold/warm preparation time before and after; no peak-memory failure was reproduced.
 
 ### O-03. Measure startup before splitting the main bundle
 

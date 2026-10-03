@@ -291,7 +291,7 @@ Use a bounded spool or incremental drain with a retained diagnostic tail. Test a
 
 ### O-02. Stream large build inputs and hash cached files incrementally
 
-[Runtime preparation](../../app/SiloUI/scripts/prepare-microsandbox-runtime.mjs), lines 22–25, 32–35 and 48–51, buffers downloads with `arrayBuffer`. [Guest staging](../../app/SiloUI/scripts/guest-image.mjs) reads the entire cached image just to hash/check it, and retains complete bytes during staging. [Image lock](../../app/SiloUI/guest-image/image-lock.json) records **414,843,188 bytes for ARM64 and 423,476,714 bytes for AMD64**, about 396/404 MiB, before transient buffers or other build work.
+[Runtime preparation](../../app/SiloUI/scripts/prepare-microsandbox-runtime.mjs), lines 22–25, 32–35 and 48–51, buffers downloads with `arrayBuffer`. [Guest staging](https://github.com/amontlabs/silo/blob/91c8145fdc37/app/SiloUI/scripts/guest-image.mjs) reads the entire cached image just to hash/check it, and retains complete bytes during staging. [Image lock](../../app/SiloUI/guest-image/image-lock.json) records **414,843,188 bytes for ARM64 and 423,476,714 bytes for AMD64**, about 396/404 MiB, before transient buffers or other build work.
 
 Use maintained Node stream primitives, incremental SHA-256, pinned-size enforcement, temporary files, atomic rename, and a bounded download deadline. Keep the existing digest/size guarantees. Benchmark cold and cached `runtime:prepare` peak RSS and elapsed time; no peak-memory benchmark was run in this review. Refactor the build-input seam only after preserving its offline staging tests.
 
