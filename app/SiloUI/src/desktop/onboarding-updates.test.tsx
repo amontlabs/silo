@@ -34,7 +34,7 @@ vi.mock("./production-onboarding", async () => {
 const available: UpdateSnapshot = {
   phase: "available", lastChecked: null, retryAction: null, currentVersion: "0.2.1", availableVersion: "0.2.2",
   releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "macos",
-  releaseUrl: "https://github.com/0xpolarzero/silo/releases", error: null, errorDetails: null,
+  releaseUrl: "https://github.com/amontlabs/silo/releases", error: null, errorDetails: null,
   installBlockReason: null, runningComputers: [], canInstall: true,
 }
 const source = { applicationActions: {}, statusActions: {} } as unknown as ProductionSource

@@ -4,7 +4,7 @@ Silo gives agents computers. Each computer is a Linux virtual machine powered by
 
 Use your usual editor and terminal, give an AI agent a Linux desktop, and choose which repositories and credentials each computer can access.
 
-[Download](https://github.com/0xpolarzero/silo/releases/latest) · [Website and demo](https://silo.polarzero.xyz) · [Build from source](docs/SiloUI-BUILD-FROM-SOURCE.md) · [Documentation](docs/README.md)
+[Download](https://github.com/amontlabs/silo/releases/latest) · [Website and demo](https://silo.amontlabs.com) · [Build from source](docs/SiloUI-BUILD-FROM-SOURCE.md) · [Documentation](docs/README.md)
 
 ![Silo showing a Linux desktop, local and remote computers, and GitHub access controls](docs/silo-showcase.webp)
 
@@ -24,15 +24,15 @@ The computer runtime, base Linux image, and Git tools are bundled. Silo download
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
-| macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/0xpolarzero/silo/releases/latest/download/Silo-macos-arm64.dmg) |
-| Linux x86-64 | Ubuntu 24.04-compatible system | [DEB](https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-x64.deb) · [AppImage](https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-x64.AppImage) |
-| Linux ARM64 | Ubuntu 24.04-compatible system | [DEB](https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-arm64.deb) · [AppImage](https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-arm64.AppImage) |
+| macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
+| Linux x86-64 | Ubuntu 24.04-compatible system | [DEB](https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-x64.deb) · [AppImage](https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-x64.AppImage) |
+| Linux ARM64 | Ubuntu 24.04-compatible system | [DEB](https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-arm64.deb) · [AppImage](https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-arm64.AppImage) |
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 
 **Linux:** in the download directory, run `sudo apt install ./Silo-linux-x64.deb` (use `Silo-linux-arm64.deb` for ARM64). Accept the update-source prompt to receive releases through Software Updater. For AppImage, enable **Allow executing file as program** in its file properties, then launch it. Local computers require KVM access; GitHub and secrets require a working Secret Service credential store, such as GNOME Keyring.
 
-Upgrading an older installation? Saved data is converted automatically on first launch, but exports from earlier versions cannot be imported. Read the [release notes](https://github.com/0xpolarzero/silo/releases/latest) for required migration steps.
+Upgrading an older installation? Saved data is converted automatically on first launch, but exports from earlier versions cannot be imported. Read the [release notes](https://github.com/amontlabs/silo/releases/latest) for required migration steps.
 
 ## Start working
 
@@ -66,6 +66,6 @@ For checks and release procedures, see the [development and release guide](docs/
 
 ## Help and license
 
-Check **Logs** and **Activity** for errors. [Report an issue](https://github.com/0xpolarzero/silo/issues) with your app version, OS, and reproduction steps; remove private data from shared logs.
+Check **Logs** and **Activity** for errors. [Report an issue](https://github.com/amontlabs/silo/issues) with your app version, OS, and reproduction steps; remove private data from shared logs.
 
 Silo is [MIT licensed](LICENSE). Bundled dependencies have their own [licenses and notices](app/SiloUI/THIRD-PARTY-NOTICES.md).

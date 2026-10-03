@@ -14,7 +14,7 @@ device connections, or virtual machines are used in the film.
 0:37 — Edit PACKAGE_TOKEN and restrict its access to the web computer and registry.npmjs.org HTTPS domain.
 0:42 — Create a backup of the stopped local web computer. Silo captures and verifies the backup, then shows the saved archive in its recent backup history. The example compresses the waiting time.
 0:47 — Connect the development server on Studio Mac's port 5173 in Network. Open the local forwarded address, 127.0.0.1:53124, in an illustrated browser on the laptop.
-0:54 — Silo. Give your agents a space of their own. Linux computers, agent desktops, scoped access. Available for macOS and Linux at silo.polarzero.xyz. Open source under the MIT license.
+0:54 — Silo. Give your agents a space of their own. Linux computers, agent desktops, scoped access. Available for macOS and Linux at silo.amontlabs.com. Open source under the MIT license.
 
 To connect devices, install Silo on both, enable SSH access on the owning
 device, and enable Allow connections from other devices. Keep Silo running on

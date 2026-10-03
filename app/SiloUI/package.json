@@ -7,14 +7,14 @@
   "version": "0.10.0",
   "description": "Desktop app for local and remote Linux sandboxes on macOS and Linux.",
   "license": "MIT",
-  "homepage": "https://silo.polarzero.xyz",
+  "homepage": "https://silo.amontlabs.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0xpolarzero/silo.git",
+    "url": "git+https://github.com/amontlabs/silo.git",
     "directory": "app/SiloUI"
   },
   "bugs": {
-    "url": "https://github.com/0xpolarzero/silo/issues"
+    "url": "https://github.com/amontlabs/silo/issues"
   },
   "type": "module",
   "scripts": {

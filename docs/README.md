@@ -143,7 +143,7 @@ Superseded plans live in [`archive/`](archive/):
 Silo evaluated replacing its backend with a local E2B deployment, then kept
 MicroSandbox. The PoC in `experiments/e2b-local` was removed from `main`; it is
 kept on the `archive/media-and-experiments` branch and at
-[`c122a49`](https://github.com/0xpolarzero/silo/tree/c122a498da064f08321c29bff82a6e92056a917d/experiments/e2b-local).
+[`c122a49`](https://github.com/amontlabs/silo/tree/c122a498da064f08321c29bff82a6e92056a917d/experiments/e2b-local).
 
 - [E2B fit for Silo](research/e2b-fit-2026-09-22.md): agent desktop capabilities, snapshots, local hosting requirements and the proposed comparison workflow.
 - [E2B adoption assessment](research/e2b-adoption-assessment-2026-09-24.md): feature inventory, established benefits and drawbacks, current-stack coverage limits, and the recommendation to refactor desktop packaging/viewing before replacing the backend.

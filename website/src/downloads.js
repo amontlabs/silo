@@ -1,4 +1,4 @@
-const base = "https://github.com/0xpolarzero/silo/releases/latest/download/";
+const base = "https://github.com/amontlabs/silo/releases/latest/download/";
 
 export function linuxDownloads(architecture) {
   if (!["x64", "arm64"].includes(architecture))

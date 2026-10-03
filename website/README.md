@@ -126,11 +126,11 @@ See [design research](../docs/SiloUI-LANDING-REFERENCES.md) for the approved dir
 
 ## Vercel publication
 
-Production: [silo.polarzero.xyz](https://silo.polarzero.xyz), also set as the GitHub
+Production: [silo.amontlabs.com](https://silo.amontlabs.com), also set as the GitHub
 repository website. The Vercel deployment is available at
 [silo-theta.vercel.app](https://silo-theta.vercel.app).
 
-The Vercel `silo` project is connected to `0xpolarzero/silo`. Pushes and merges
+The Vercel `silo` project is connected to `amontlabs/silo`, and production is [silo.amontlabs.com](https://silo.amontlabs.com). Pushes and merges
 to `main` trigger production deployments; other branches receive preview deployments.
 The project settings use Node.js 24 and the repository root with:
 

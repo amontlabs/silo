@@ -4,7 +4,7 @@ import { expect, it, vi } from "vitest"
 import { UpdatesCard, UpdateNotice } from "./updates"
 import { UpdatesProvider, type UpdateBackend, type UpdateSnapshot } from "./update-store"
 
-const state: UpdateSnapshot = { phase: "idle", lastChecked: null, retryAction: null, currentVersion: "0.1.0", availableVersion: null, releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "macos", releaseUrl: "https://github.com/0xpolarzero/silo/releases", error: null, errorDetails: null, installBlockReason: null, runningComputers: [], canInstall: true }
+const state: UpdateSnapshot = { phase: "idle", lastChecked: null, retryAction: null, currentVersion: "0.1.0", availableVersion: null, releaseNotes: null, downloadedBytes: 0, totalBytes: null, automaticChecks: true, packageKind: "macos", releaseUrl: "https://github.com/amontlabs/silo/releases", error: null, errorDetails: null, installBlockReason: null, runningComputers: [], canInstall: true }
 function mount(initial: Partial<UpdateSnapshot> = {}, adjust: (backend: UpdateBackend) => void = () => {}) {
   let emit!: (value: UpdateSnapshot) => void
   const backend: UpdateBackend = {

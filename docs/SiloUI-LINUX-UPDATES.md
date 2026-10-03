@@ -45,7 +45,7 @@ interrupted package transaction with `sudo apt --fix-broken install`.
 
 ## Publishing
 
-The source URL is `https://0xpolarzero.github.io/silo/apt`, suite `stable`,
+The source URL is `https://apt.silo.amontlabs.com/apt`, suite `stable`,
 component `main`, architectures `amd64` and `arm64`.
 
 `.github/workflows/apt-repository.yml` runs after **Publish verified Silo draft**
@@ -139,9 +139,9 @@ Xubuntu's graphical updater, native computer health, or a production release upg
 
 ## Reported empty graphical updater, 14 September 2026
 
-The public [amd64 package index](https://0xpolarzero.github.io/silo/apt/dists/stable/main/binary-amd64/Packages)
+The public [amd64 package index](https://apt.silo.amontlabs.com/apt/dists/stable/main/binary-amd64/Packages)
 advertised Silo 0.4.4 during investigation. The corresponding
-[APT publication run](https://github.com/0xpolarzero/silo/actions/runs/34852064374)
+[APT publication run](https://github.com/amontlabs/silo/actions/runs/34852064374)
 succeeded. Missing publication was therefore not reproduced. This does not
 verify the user's installed version, repository enrollment, local APT cache,
 or graphical package installer. Obtain the installed Silo version and

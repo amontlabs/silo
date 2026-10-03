@@ -2,7 +2,7 @@
 FROM ubuntu:24.04@sha256:224a1869083a311ef3f13648a154ba79832fbef6364d31493642ca03082da254
 LABEL org.opencontainers.image.title="Silo Ubuntu guest" \
       org.opencontainers.image.description="Ubuntu 24.04 with Silo's Git integration, offline working-account tools, an Xfce desktop with the Selkies streamer, and the system libraries for Linux computer use. No credentials." \
-      org.opencontainers.image.source="https://github.com/0xpolarzero/silo" \
+      org.opencontainers.image.source="https://github.com/amontlabs/silo" \
       org.opencontainers.image.version="ubuntu-24.04-v4"
 
 # v3 content. Unchanged: working-account tools and the Git/GitHub setup.

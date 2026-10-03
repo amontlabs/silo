@@ -442,7 +442,7 @@ function Outro() {
         <span>Silo</span>
       </div>
       <div className="outro-link">
-        github.com/0xpolarzero/silo <ArrowRight size={23} />
+        github.com/amontlabs/silo <ArrowRight size={23} />
       </div>
     </div>
   );

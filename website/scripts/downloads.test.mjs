@@ -7,11 +7,11 @@ test("each Linux architecture selects both matching published package formats", 
     const { deb, appImage } = linuxDownloads(architecture);
     assert.equal(
       deb,
-      `https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-${architecture}.deb`,
+      `https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-${architecture}.deb`,
     );
     assert.equal(
       appImage,
-      `https://github.com/0xpolarzero/silo/releases/latest/download/Silo-linux-${architecture}.AppImage`,
+      `https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-${architecture}.AppImage`,
     );
   }
 });

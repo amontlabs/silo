@@ -141,8 +141,8 @@ mod native {
     }
     fn link(command: &str) -> Option<&'static str> {
         match command {
-            "issues" => Some("https://github.com/0xpolarzero/silo/issues"),
-            "releases" => Some("https://github.com/0xpolarzero/silo/releases"),
+            "issues" => Some("https://github.com/amontlabs/silo/issues"),
+            "releases" => Some("https://github.com/amontlabs/silo/releases"),
             _ => None,
         }
     }
@@ -612,7 +612,7 @@ mod tests {
             HelpNavigation::Stay
         );
         assert_eq!(
-            at("https://github.com/0xpolarzero/silo/issues"),
+            at("https://github.com/amontlabs/silo/issues"),
             HelpNavigation::Browser
         );
         assert_eq!(at("file:///etc/passwd"), HelpNavigation::Block);

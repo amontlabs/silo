@@ -56,7 +56,7 @@ function issueUrl(state: RuntimeMigrationState) {
     `Migrated: ${state.migratedCount} of ${state.totalCount}; failed: ${state.failedCount}.`,
     "Please describe what happened. Attach logs only after checking them for private data.",
   ].join("\n")
-  return `https://github.com/0xpolarzero/silo/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`
+  return `https://github.com/amontlabs/silo/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`
 }
 
 export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: { children: ReactNode; backend?: RuntimeMigrationBackend }) {
