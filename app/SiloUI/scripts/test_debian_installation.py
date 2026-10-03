@@ -96,7 +96,7 @@ class InstallerTests(unittest.TestCase):
             run('apt-get', '-o', f'Dir::Etc::sourcelist={SOURCE}', '-o', 'Dir::Etc::sourceparts=-', '-o', 'APT::Get::List-Cleanup=0', 'update')
             self.assertIn(b'Candidate: 0.1.0', run('apt-cache', 'policy', 'silo').stdout)
             new_site = fixture.root / 'new-site'
-            repo.build(fixture.packages, new_site, fixture.fingerprint, fixture.key)
+            repo.build([item for item in fixture.packages if item[0] in ('0.1.0', '0.2.0')], new_site, fixture.fingerprint, fixture.key)
             published.unlink(); published.symlink_to(new_site, target_is_directory=True)
             # No apt refresh here: reproduce the exact reported stale candidate.
             self.assertIn(b'Candidate: 0.1.0', run('apt-cache', 'policy', 'silo').stdout)
