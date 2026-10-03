@@ -18,8 +18,11 @@ exports[`native command permissions > pins every non-main window grant 1`] = `
     "permissions": [
       "allow-desktop-action",
       "allow-desktop-viewer-attach",
+      "allow-desktop-viewer-clipboard",
       "allow-desktop-viewer-detach",
       "allow-read-desktop-state",
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
       "core:menu:allow-new",
       "core:menu:allow-popup",
       "core:resources:allow-close",

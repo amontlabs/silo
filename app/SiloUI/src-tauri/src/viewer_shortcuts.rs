@@ -5,12 +5,8 @@
 //! the page sees the key: an `NSEvent` local monitor on macOS, a GTK key handler
 //! on the viewer window on Linux, and the Edit menu on macOS. All three call
 //! the same handlers below, which reach the computer only through the bridge.
-use crate::desktop_bridge::{Bridge, GuestClipboard};
-use std::time::Duration;
+use crate::viewer_clipboard;
 use tauri::AppHandle;
-
-/// How long Copy from Computer waits for the guest to announce a new selection.
-const COPY_WAIT: Duration = Duration::from_millis(1000);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shortcut {
@@ -52,76 +48,18 @@ pub(crate) fn classify(platform: Platform, keys: Keys, letter: Option<char>) -> 
     }
 }
 
-/// The device clipboard as the shortcut handlers need it.
-pub(crate) trait HostClipboard {
-    fn read_text(&self) -> Result<Option<String>, String>;
-    fn write_text(&self, text: &str) -> Result<(), String>;
-}
-
-/// The device clipboard the shortcuts use. `None` until the clipboard phase
-/// provides one; while it is `None` the shortcuts and menu items stay inert and
-/// the viewer behaves as before.
-fn host_clipboard() -> Option<&'static (dyn HostClipboard + Sync)> {
-    None
-}
-
 pub(crate) fn clipboard_shortcuts_enabled() -> bool {
-    host_clipboard().is_some()
+    true
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum CopyOutcome {
-    Copied,
-    NothingToCopy,
-    /// The guest holds an image; images arrive with the image phase.
-    Unsupported,
-}
-
-/// Paste into Computer: put the device clipboard text on the computer's
-/// clipboard, then press Ctrl+V there.
-pub(crate) fn paste_into_computer(
-    bridge: &Bridge,
-    clipboard: &dyn HostClipboard,
-) -> Result<(), String> {
-    let Some(text) = clipboard.read_text()?.filter(|text| !text.is_empty()) else {
-        return Ok(());
-    };
-    bridge.send_guest_text(&text)?;
-    bridge.press_guest_paste()
-}
-
-/// Copy from Computer: press Ctrl+C there, wait for the new selection, then
-/// write it to the device clipboard.
-pub(crate) fn copy_from_computer(
-    bridge: &Bridge,
-    clipboard: &dyn HostClipboard,
-) -> Result<CopyOutcome, String> {
-    match bridge.request_guest_clipboard(COPY_WAIT, true)? {
-        GuestClipboard::Text(text) => {
-            clipboard.write_text(&text)?;
-            Ok(CopyOutcome::Copied)
-        }
-        GuestClipboard::Empty => Ok(CopyOutcome::NothingToCopy),
-        GuestClipboard::Image { .. } => Ok(CopyOutcome::Unsupported),
-    }
-}
-
-/// Runs a shortcut for one viewer on a worker thread; the bridge waits for the
+/// Starts a shortcut's transfer for one viewer on a worker thread; the bridge waits for the
 /// page and must never block the main thread.
 pub(crate) fn run(app: &AppHandle, label: &str, shortcut: Shortcut) {
-    let Some(clipboard) = host_clipboard() else {
-        return;
+    let action = match shortcut {
+        Shortcut::PasteIntoComputer => viewer_clipboard::Action::Paste,
+        Shortcut::CopyFromComputer => viewer_clipboard::Action::Copy,
     };
-    let (app, label) = (app.clone(), label.to_string());
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = crate::desktop_viewer::with_bridge(&app, &label, |bridge| match shortcut {
-            Shortcut::PasteIntoComputer => paste_into_computer(bridge, clipboard),
-            Shortcut::CopyFromComputer => copy_from_computer(bridge, clipboard).map(|_| ()),
-        });
-        if let Err(message) = result {
-            eprintln!("Silo desktop viewer shortcut: {message}");
-        }
-    });
+    viewer_clipboard::spawn(app, label, action);
 }
 
 /// Runs a shortcut for the viewer window that has focus, if any.
@@ -295,8 +233,6 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::desktop_bridge::{Inbox, Op, Page};
-    use std::{cell::RefCell, time::Instant};
 
     fn mac(command: bool, control: bool, option: bool, shift: bool) -> Keys {
         Keys {
@@ -349,109 +285,6 @@ mod tests {
             mac(false, false, false, true),
         ] {
             assert_eq!(classify(Platform::Linux, keys, Some('v')), None, "{keys:?}");
-        }
-    }
-
-    #[test]
-    fn the_shortcuts_stay_inert_until_a_device_clipboard_is_provided() {
-        assert!(!clipboard_shortcuts_enabled());
-    }
-
-    #[derive(Default)]
-    struct FakeClipboard {
-        text: RefCell<Option<String>>,
-        written: RefCell<Vec<String>>,
-    }
-    impl HostClipboard for FakeClipboard {
-        fn read_text(&self) -> Result<Option<String>, String> {
-            Ok(self.text.borrow().clone())
-        }
-        fn write_text(&self, text: &str) -> Result<(), String> {
-            self.written.borrow_mut().push(text.to_string());
-            Ok(())
-        }
-    }
-
-    #[derive(Default)]
-    struct RecordingPage {
-        scripts: RefCell<Vec<String>>,
-    }
-    impl Page for RecordingPage {
-        fn eval(&self, script: &str) -> Result<(), String> {
-            self.scripts.borrow_mut().push(script.to_string());
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn paste_sends_the_device_text_then_ctrl_v() {
-        let page = RecordingPage::default();
-        let inbox = Inbox::default();
-        let bridge = Bridge {
-            page: &page,
-            inbox: &inbox,
-        };
-        let clipboard = FakeClipboard::default();
-        paste_into_computer(&bridge, &clipboard).unwrap();
-        assert!(
-            page.scripts.borrow().is_empty(),
-            "an empty clipboard sends nothing"
-        );
-        *clipboard.text.borrow_mut() = Some("hello".into());
-        paste_into_computer(&bridge, &clipboard).unwrap();
-        let scripts = page.scripts.borrow();
-        assert_eq!(scripts.len(), 2);
-        assert!(scripts[0].contains("\"cw,aGVsbG8=\""));
-        assert!(scripts[1].contains("\"kd,118\""));
-    }
-
-    /// A page that answers a clipboard request with fixed content.
-    struct AnsweringPage<'a> {
-        inbox: &'a Inbox,
-        kind: &'static str,
-        body: &'static [u8],
-    }
-    impl Page for AnsweringPage<'_> {
-        fn eval(&self, script: &str) -> Result<(), String> {
-            let start = script.find("[\"").unwrap() + 2;
-            let nonce: String = script[start..].chars().take_while(|c| *c != '"').collect();
-            let claim = self
-                .inbox
-                .claim(Op::Clipboard, &nonce, Instant::now())
-                .unwrap();
-            claim.deliver(crate::desktop_bridge::Reply {
-                kind: self.kind.to_string(),
-                body: self.body.to_vec(),
-            });
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn copy_writes_only_text_the_user_asked_for() {
-        for (kind, body, outcome, written) in [
-            (
-                "text/plain",
-                &b"from guest"[..],
-                CopyOutcome::Copied,
-                vec!["from guest"],
-            ),
-            ("none", &b""[..], CopyOutcome::NothingToCopy, vec![]),
-            ("image/png", &b"png"[..], CopyOutcome::Unsupported, vec![]),
-        ] {
-            let inbox = Inbox::default();
-            let page = AnsweringPage {
-                inbox: &inbox,
-                kind,
-                body,
-            };
-            let bridge = Bridge {
-                page: &page,
-                inbox: &inbox,
-            };
-            let clipboard = FakeClipboard::default();
-            assert_eq!(copy_from_computer(&bridge, &clipboard).unwrap(), outcome);
-            assert_eq!(*clipboard.written.borrow(), written);
         }
     }
 }

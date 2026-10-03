@@ -31,6 +31,7 @@ fn main() {
             "open_desktop",
             "desktop_viewer_attach",
             "desktop_viewer_detach",
+            "desktop_viewer_clipboard",
             "set_app_menu_state",
             "show_app_menu",
             "get_update_state",
