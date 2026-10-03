@@ -1,5 +1,5 @@
 {
-  "releaseUrl": "https://github.com/0xpolarzero/silo/releases/download/guest-ubuntu-24.04-v4",
+  "releaseUrl": "https://github.com/amontlabs/silo/releases/download/guest-ubuntu-24.04-v4",
   "images": {
     "arm64": {
       "schemaVersion": 1,

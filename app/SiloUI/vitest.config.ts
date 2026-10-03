@@ -12,7 +12,7 @@ const nodeTests = [
   "src/features/onboarding/model/**/*.test.ts",
   "src/features/preferences/model/**/*.test.ts",
   "src/features/preferences/{settings-store,system-integrations-store}.test.ts",
-  "src/test/{git-runtime,guest-image,microsandbox-runtime,native-permissions,transition-styles}.test.ts",
+  "src/test/{git-runtime,microsandbox-runtime,native-permissions,transition-styles}.test.ts",
 ]
 
 // Share transforms and aliases only. Inheriting maxWorkers into each project

@@ -52,7 +52,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         lookup-only: ${{ inputs.lookup-only }}
-        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/scripts/guest-image.mjs', 'app/SiloUI/patches/microsandbox-*.patch', 'app/SiloUI/guest-image/image-lock.json') }}
+        key: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-go${{ steps.go-compiler.outputs.version }}-${{ hashFiles('.github/actions/prepare-release-runtime/action.yml', 'app/SiloUI/runtime-inputs.json', 'app/SiloUI/scripts/preflight.mjs', 'app/SiloUI/scripts/prepare-microsandbox-runtime.mjs', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/scripts/git-runtime.mjs', 'app/SiloUI/scripts/lfs-transfer-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch') }}
         # Older cache archives are input candidates only; preparation below
         # rechecks pinned bytes and the source/patch/toolchain build key.
         restore-keys: silo-runtime-v1-${{ inputs.runner }}-${{ inputs.target }}-rust${{ steps.runtime-inputs.outputs.toolchain }}-
@@ -67,7 +67,6 @@ runs:
           app/SiloUI/src-tauri/target/runtime-cache/dugite
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/source.tar.gz
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/builds
-          app/SiloUI/src-tauri/runtime/guest-image/image.tar.gz
     - name: Report public runtime cache status
       shell: bash
       env:
@@ -138,7 +137,6 @@ runs:
           app/SiloUI/src-tauri/target/runtime-cache/dugite
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/source.tar.gz
           app/SiloUI/src-tauri/target/runtime-cache/git-lfs-transfer/*/builds
-          app/SiloUI/src-tauri/runtime/guest-image/image.tar.gz
     - name: Save Cargo downloads
       if: inputs.lookup-only != 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main' && steps.cargo.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
