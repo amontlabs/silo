@@ -433,18 +433,25 @@ fn download_and_publish(
         std::process::id(),
         UNIQUE.fetch_add(1, Ordering::Relaxed)
     ));
+    let target = root.join(&spec.version);
+    let moved = std::cell::Cell::new(false);
     let publish = || -> std::io::Result<()> {
         fs::create_dir(&staging)?;
         let file = staging.join(&spec.archive);
         fs::rename(&part, &file)?;
         fs::set_permissions(&file, fs::Permissions::from_mode(0o444))?;
-        fs::set_permissions(&staging, fs::Permissions::from_mode(0o555))?;
-        let target = root.join(&spec.version);
         remove_tree(&target);
-        fs::rename(&staging, &target)
+        // macOS 15 refuses to rename a directory the user cannot write to, so the folder is
+        // moved into place first and made read-only afterwards.
+        fs::rename(&staging, &target)?;
+        moved.set(true);
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o555))
     };
     if let Err(error) = publish() {
         remove_tree(&staging);
+        if moved.get() {
+            remove_tree(&target);
+        }
         return Err(storage_failure(error));
     }
     collect_garbage(root, &spec.version);
