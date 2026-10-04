@@ -13,7 +13,7 @@ const params = new URLSearchParams(location.search)
 // tightly cropped frame (always the dark product UI) for use on other pages.
 const screens = params.get('variant') === 'screens'
 const initialDark = screens || params.get('theme') !== 'light'
-const frameSize = screens ? { width: 1633, height: 1113 } : { width: 1600, height: 1100 }
+const frameSize = { width: 1600, height: 1100 }
 document.documentElement.classList.toggle('dark', initialDark)
 // Capture mode: no page chrome around the frame, and a transparent page behind it.
 document.documentElement.classList.toggle('showcase-capture', screens || params.get('capture') === '1')
@@ -42,7 +42,7 @@ export function Showcase() {
   const [scale, setScale] = useState(fit)
   useEffect(() => { const resize = () => setScale(fit()); window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize) }, [capture])
   return <div className="showcase-workbench">
-    <div className="showcase-canvas" style={{ width: frameSize.width * scale, height: frameSize.height * scale }}><div className={`showcase-frame${screens ? ' showcase-screens' : ''}`} style={{ transform: `scale(${scale})`, ...(screens ? frameSize : {}) }}>
+    <div className="showcase-canvas" style={{ width: frameSize.width * scale, height: frameSize.height * scale }}><div className={`showcase-frame${screens ? ' showcase-screens' : ''}`} style={{ transform: `scale(${scale})` }}>
       {!screens && <div className="showcase-atmosphere" aria-hidden="true" />}
       {!screens && <header className="showcase-heading">
         <div className="showcase-brand"><SiloMark aria-hidden="true" /><span>Silo</span></div>

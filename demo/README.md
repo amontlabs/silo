@@ -154,8 +154,9 @@ For a control-free, unscaled canvas, use `?capture=1` (and optionally
 
 `?variant=screens` shows only the three product screens (Linux desktop,
 Computers, GitHub) in the same arrangement, without heading, background or
-labels, on a transparent frame cropped to the windows plus an 80px margin for
-their shadows (1633×1113). It always uses the dark product UI. The shadows are
+labels, on a transparent frame. The GitHub window is shown in full. The capture
+crops to the measured bounds of the three windows plus an 80px margin for
+their shadows. It always uses the dark product UI. The shadows are
 softened so the image reads on dark and light pages; it is used on amontlabs.com.
 
 ```sh

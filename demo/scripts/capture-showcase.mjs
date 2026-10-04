@@ -16,7 +16,7 @@ const scale = 2
 
 const shots = [
   { file: 'silo-showcase.webp', query: '?capture=1&theme=dark', width: 1600, height: 1100, transparent: true },
-  { file: 'silo-showcase-screens.webp', query: '?variant=screens', transparent: true },
+  { file: 'silo-showcase-screens.webp', query: '?variant=screens', transparent: true, crop: 80 },
 ]
 
 const up = () => fetch(`${origin}/showcase.html`).then((r) => r.ok, () => false)
@@ -60,8 +60,15 @@ try {
     // Wait for the production UI, then for fonts and a settled layout.
     await evaluate(`new Promise((ok, fail) => { const t = Date.now(); const f = () => document.querySelectorAll('.showcase-shot .silo-window').length === 3 && document.querySelector('button[aria-label="SSH access controls for lab"][aria-expanded="true"]') ? ok() : Date.now() - t > 20000 ? fail(new Error('showcase did not render')) : setTimeout(f, 100); f() })`)
     await evaluate('document.fonts.ready.then(() => new Promise((r) => setTimeout(r, 800)))')
-    const rect = await evaluate(`(() => { const r = document.querySelector('.showcase-frame').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })()`)
-    const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...rect, scale: 1 }, captureBeyondViewport: false, fromSurface: true })
+    // Default: the whole frame. With `crop`: the union of the three windows plus that margin (CSS px).
+    const rect = await evaluate(`(() => {
+      const crop = ${shot.crop ?? 0}
+      const boxes = [...document.querySelectorAll('.showcase-shot .silo-window, .showcase-desktop-window')].map((e) => e.getBoundingClientRect())
+      const r = crop ? { left: Math.min(...boxes.map((b) => b.left)), top: Math.min(...boxes.map((b) => b.top)), right: Math.max(...boxes.map((b) => b.right)), bottom: Math.max(...boxes.map((b) => b.bottom)) } : document.querySelector('.showcase-frame').getBoundingClientRect()
+      const x = Math.round(r.left) - crop, y = Math.round(r.top) - crop
+      return { x, y, width: Math.round(r.right) + crop - x, height: Math.round(r.bottom) + crop - y }
+    })()`)
+    const { data } = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...rect, scale: 1 }, captureBeyondViewport: true, fromSurface: true })
     const png = join(profile, `${shot.file}.png`)
     writeFileSync(png, Buffer.from(data, 'base64'))
     // Lossy WebP with a lossless alpha channel keeps soft shadows clean.
