@@ -15,6 +15,7 @@
     "prepare": "npm run prepare:css",
     "render:ssh": "npm run prepare && remotion render src/index.ts SiloSshDemo out/silo-ssh-demo-v4.mp4 --codec=h264 --muted --crf=18 --concurrency=4",
     "showcase": "../app/SiloUI/node_modules/.bin/vite --config showcase.vite.config.mjs --configLoader native",
+    "capture:showcase": "node scripts/capture-showcase.mjs",
     "build:showcase": "../app/SiloUI/node_modules/.bin/vite build --config showcase.vite.config.mjs --configLoader native"
   },
   "dependencies": {
