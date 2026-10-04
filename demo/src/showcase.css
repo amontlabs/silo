@@ -83,3 +83,23 @@ html.dark .showcase-eyebrow { color:#aac8c2; }
 
 .showcase-brand { display:flex; align-items:center; gap:12px; margin-bottom:18px; font-size:28px; font-weight:600; letter-spacing:-.7px; }
 .showcase-brand svg { width:38px; height:38px; }
+
+/* Screens-only variant (?variant=screens): the three windows in the same
+   arrangement on a transparent frame, cropped to their bounding box plus an
+   even margin for the shadows. The dark product UI only. Labels stay in the
+   layout (hidden, not removed) so the windows keep their relative positions. */
+html.showcase-capture, html.showcase-capture body, html.showcase-capture .showcase-workbench,
+.showcase-screens, .showcase-canvas:has(.showcase-screens) { background:transparent; }
+.showcase-capture .showcase-workbench { padding:0; min-height:0; }
+.showcase-workbench:has(.showcase-screens) { overflow:visible; }
+.showcase-canvas:has(.showcase-screens) { margin:0; overflow:visible; border-radius:0; }
+.showcase-screens, html.dark .showcase-screens { --margin:80px; overflow:hidden; border-radius:0; background:transparent; }
+/* Windows span x 64–1537, y 101–1054 of the full composition (labels included in
+   the layout, so the first window sits 33px below its shot); shift so that box
+   starts at the margin. */
+.showcase-screens .showcase-shot { overflow:visible; translate:calc(var(--margin) - 64px) calc(var(--margin) - 101px); }
+.showcase-screens .showcase-shot-label { visibility:hidden; }
+.showcase-screens .showcase-github { border-radius:0; }
+/* Softer, tighter shadows that read on both dark and light pages. */
+.showcase-screens .showcase-product .silo-window { box-shadow:0 0 0 1px #a3c5c42e,0 18px 44px -18px #001c2955,0 2px 6px #001c2920; }
+.showcase-screens .showcase-desktop-window { box-shadow:0 0 0 1px #a3c5c42e,0 18px 44px -18px #001c2955,0 2px 6px #001c2920; }
