@@ -2395,12 +2395,14 @@ mod tests {
     fn the_client_cannot_write_far_past_the_listed_size_even_between_checks() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("written");
+        // The client stops the group and removes the partial as soon as it sees the overrun,
+        // so the script ignores TERM and counts through a descriptor opened beforehand.
         let (world, destination, path) = download_world(
             &dir,
             4,
             &format!(
-                "head -c 3000000 /dev/zero > \"$partial\"; code=$?; wc -c < \"$partial\" > {}; exit $code",
-                marker.display()
+                "trap '' TERM; : > \"$partial\"; exec 4< \"$partial\"; head -c 3000000 /dev/zero >> \"$partial\"; code=$?; wc -c <&4 > {marker}.tmp; mv {marker}.tmp {marker}; exit $code",
+                marker = marker.display()
             ),
         );
         let cancel = AtomicBool::new(false);
@@ -2412,7 +2414,12 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, TOO_LARGE);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let written: u64 = fs::read_to_string(&marker).unwrap().trim().parse().unwrap();
+        assert!(written > 4, "{written}");
         assert!(written <= 4 + WRITE_SLACK, "{written}");
         assert!(!destination.exists());
     }

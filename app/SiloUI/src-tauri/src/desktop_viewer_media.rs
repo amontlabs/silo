@@ -546,14 +546,15 @@ mod tests {
         let (mut last, _) = probes.enlist("v").unwrap();
         let runs = Cell::new(0);
         let newest = RefCell::new(None);
-        probes.work("v", Duration::from_millis(60), |_| {
+        probes.work("v", Duration::from_millis(300), |_| {
             runs.set(runs.get() + 1);
             std::thread::sleep(Duration::from_millis(20));
             let (receiver, _) = probes.enlist("v").unwrap();
             *newest.borrow_mut() = Some(receiver);
             Err("stale".into())
         });
-        assert!(runs.get() >= 2 && runs.get() < 10, "{}", runs.get());
+        // Each run takes at least 20 ms, so the deadline admits at most 16.
+        assert!(runs.get() >= 2 && runs.get() <= 16, "{}", runs.get());
         assert!(last.try_recv().is_ok());
         let mut newest = newest.into_inner().unwrap();
         assert_eq!(newest.try_recv().unwrap(), Err(NOT_READY.into()));

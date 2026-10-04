@@ -87,11 +87,20 @@ struct Cached {
     redaction: Redaction,
     summary: Summary,
 }
-static CACHE: std::sync::OnceLock<
-    std::sync::Mutex<HashMap<String, (Instant, std::sync::Arc<Cached>)>>,
-> = std::sync::OnceLock::new();
-fn cache() -> &'static std::sync::Mutex<HashMap<String, (Instant, std::sync::Arc<Cached>)>> {
+type Cache = std::sync::Mutex<HashMap<String, (Instant, std::sync::Arc<Cached>)>>;
+#[cfg(not(test))]
+static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
+#[cfg(not(test))]
+fn cache() -> &'static Cache {
     CACHE.get_or_init(Default::default)
+}
+// Each test thread gets its own cache so parallel tests cannot evict each other's snapshots.
+#[cfg(test)]
+fn cache() -> &'static Cache {
+    thread_local! {
+        static CACHE: &'static Cache = Box::leak(Box::default());
+    }
+    CACHE.with(|cache| *cache)
 }
 
 /// PEM state belongs to a stream and execution session, independent of search filters.
