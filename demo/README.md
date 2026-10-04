@@ -150,8 +150,24 @@ Studio Mac. No native commands or real account connections are used.
 - `showcase.vite.config.mjs`: standalone browser workbench, reusing the app's Vite dependencies.
 
 For a control-free, unscaled canvas, use `?capture=1` (and optionally
-`&theme=light`). Capture `.showcase-frame` at 1600×1100 or a higher device pixel
-ratio. This is a draft workbench; no final PNG is published automatically.
+`&theme=light`); `.showcase-frame` is 1600×1100.
+
+`?variant=screens` shows only the three product screens (Linux desktop,
+Computers, GitHub) in the same arrangement, without heading, background or
+labels, on a transparent frame cropped to the windows plus an 80px margin for
+their shadows (1633×1113). It always uses the dark product UI. The shadows are
+softened so the image reads on dark and light pages; it is used on amontlabs.com.
+
+```sh
+npm --prefix demo run capture:showcase
+```
+
+This starts (or reuses) the showcase server on port 3410, renders with headless
+Chrome at device pixel ratio 2 through the Chrome DevTools Protocol, and writes
+`docs/silo-showcase.webp` (3200×2200, the README image) and
+`docs/silo-showcase-screens.webp` (the screens variant, WebP with alpha). It needs
+Node.js 24, Google Chrome (`CHROME_PATH` overrides the macOS default path) and
+python3 with Pillow for the WebP encoding (`PYTHON` selects the interpreter).
 The screenshot composition explicitly shows the standard glass appearance even
 if the capture device requests reduced transparency; production accessibility
 behavior is untouched. The workbench imports actual Silo components rather than
