@@ -123,7 +123,7 @@ absolute).
   `--skip-system --offline`.
 - Pinned LCU release archive, hash-checked, staged for installation in the computer
   (done: `guest/lcu-lock.json`, `/usr/local/share/silo/lcu/`). The published v4 image
-  stages LCU 0.8.1; Silo now pins LCU 0.8.8 (below), which a computer downloads and
+  stages LCU 0.8.1; Silo now pins LCU 0.9.2 (below), which a computer downloads and
   verifies at setup until a new image stages it.
 - Accessibility: dconf `toolkit-accessibility=true` system default and an
   autostarted AT-SPI attribute poller for Chromium/Electron.
@@ -144,7 +144,7 @@ absolute).
 - Every device does this itself at its own start, remote ones included; a
   controller never prepares an app for another device.
 
-Done: lock (`lcuVersion` 0.8.8), download, verification, extraction and
+Done: lock (`lcuVersion` 0.9.2), download, verification, extraction and
 publication under `<app data>/chatgpt/published/`, started automatically at app
 start with retries (2026-10-02, replacing the one-time notice), cached status
 reads and a device-level Retry. See [ChatGPT app](SiloUI-CHATGPT-APP.md).
@@ -474,6 +474,28 @@ running instance is up. During a wait the state is `preparing` ("Could not downl
 (network). Silo tries again automatically."); a boot, a switch change, a manual setup, a
 stop/restart or a deletion cancels it. After the last retry the failure stays until the next
 boot or a manual setup.
+
+### LCU 0.9.2 pin (2026-10-05)
+
+Silo pins LCU 0.9.2 (tag `v0.9.2`, commit 9c6c5e6; linux-arm64
+`18e0220c9abc2eade0178005ee8b99555a1aec493d70a6d3e0ad3a8c45989417`, linux-x64
+`a0c8bf44c5d77123bfc567611fbcd2749c9bdb711ddbfa2c7d9c873a9fc2b070`, verified by
+download; the archives are published at `amontlabs/lcu`, where the project moved from
+`0xpolarzero/lcu`). Compared with the extracted 0.8.8 archive: `scripts/install.py` differs only in
+one message, so `SYSTEM_PACKAGES` and the `--skip-system --offline` flow are unchanged, and
+`tested-versions.json` is identical (the pair ChatGPT 26.928.31416 with runtime
+`0.0.27/20260927214556-b77d38801cca`, last verified by LCU 0.8.0, is still covered). The runtime,
+tool schema and input behavior are unchanged since 0.8.8. New in 0.8.9 to 0.9.2: launchers
+re-execute under Python 3.12 or newer (Ubuntu 24.04 ships 3.12), setup reads installer output
+through files and records its choices even when a step fails, `lcu update` and its update
+notices, the macOS-only `lcu apps`, and the Claude app approval mod (`lcu-approve`, installed by
+`lcu setup --agent claude-code`; Linux has no per-app approval). `lcu update` replaces an
+installation from the network and the update notices check for new releases in the
+background; Silo installs LCU itself from the pinned archive, so these are not part of its flow.
+No guest image rebuild is needed: the host stages the pinned archive into each computer and the
+guest helper uses it when its hash matches, else downloads and verifies it, so existing
+`ubuntu-24.04-v4` computers pick up the new pin at their next setup.
+The section below describes the 0.8.8 pin it replaces.
 
 ### LCU 0.8.8 pin (2026-10-03)
 

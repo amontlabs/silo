@@ -264,7 +264,7 @@ fn the_bundled_lock_names_an_https_archive_for_each_architecture() {
     }
     let plain = LCU_LOCK.replace("https://", "http://");
     assert!(ArchiveSpec::parse_lcu(&plain, DebArch::Amd64).is_err());
-    let traversal = LCU_LOCK.replace("lcu-0.8.8-linux-x64.tar.gz", "..");
+    let traversal = LCU_LOCK.replace("lcu-0.9.2-linux-x64.tar.gz", "..");
     assert!(ArchiveSpec::parse_lcu(&traversal, DebArch::Amd64).is_err());
 }
 
@@ -278,14 +278,14 @@ fn a_verified_archive_is_published_read_only_and_older_versions_are_removed() {
     fs::create_dir_all(root.join(".publish-1-1")).unwrap();
     fs::create_dir_all(root.join(DOWNLOAD_DIR)).unwrap();
     fs::write(part_of(&root, &old), b"partial of an older version").unwrap();
-    let current = spec("0.8.8");
+    let current = spec("0.9.2");
     assert!(published(&root, &current).is_none());
     let downloader = Fake::serving(BODY);
     download_and_publish(&root, &current, &downloader, &no_progress)
         .map_err(|f| f.message)
         .unwrap();
     let folder = published(&root, &current).unwrap();
-    assert_eq!(folder, root.join("0.8.8"));
+    assert_eq!(folder, root.join("0.9.2"));
     let file = folder.join(&current.archive);
     assert_eq!(fs::read(&file).unwrap(), BODY);
     assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o222, 0);
@@ -309,14 +309,14 @@ fn a_verified_archive_is_published_read_only_and_older_versions_are_removed() {
 fn an_archive_that_fails_its_checksum_is_discarded_and_not_published() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("lcu");
-    let current = spec("0.8.8");
+    let current = spec("0.9.2");
     let failure = download_and_publish(&root, &current, &Fake::serving(b"tampered"), &no_progress)
         .err()
         .unwrap();
     assert!(failure.retryable);
     assert!(failure.message.contains("checksum"));
     assert!(published(&root, &current).is_none());
-    assert!(!root.join("0.8.8").exists());
+    assert!(!root.join("0.9.2").exists());
     assert!(!part_of(&root, &current).exists());
 }
 
@@ -324,11 +324,11 @@ fn an_archive_that_fails_its_checksum_is_discarded_and_not_published() {
 fn a_published_archive_that_changed_is_no_longer_ready() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("lcu");
-    let current = spec("0.8.8");
+    let current = spec("0.9.2");
     download_and_publish(&root, &current, &Fake::serving(BODY), &no_progress)
         .map_err(|f| f.message)
         .unwrap();
-    let folder = root.join("0.8.8");
+    let folder = root.join("0.9.2");
     fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
     let file = folder.join(&current.archive);
     fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
@@ -341,7 +341,7 @@ fn a_published_archive_that_changed_is_no_longer_ready() {
 fn download_failures_say_what_to_do_without_naming_another_vendor() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("lcu");
-    let current = spec("0.8.8");
+    let current = spec("0.9.2");
     let mut downloader = Fake::serving(BODY);
     downloader.error = Some(error(true));
     let transient = download_and_publish(&root, &current, &downloader, &no_progress)
@@ -361,7 +361,7 @@ fn download_failures_say_what_to_do_without_naming_another_vendor() {
 fn ensuring_the_archive_through_a_job_downloads_once_then_is_ready() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("lcu");
-    let current = spec("0.8.8");
+    let current = spec("0.9.2");
     let job = Job::new();
     let downloader = Fake::serving(BODY);
     for _ in 0..2 {

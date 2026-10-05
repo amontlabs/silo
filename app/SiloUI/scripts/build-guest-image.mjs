@@ -14,7 +14,7 @@ export function lcuArchive(architecture) {
   const asset = lock.assets?.[architecture]
   if (lock.schemaVersion !== 1 || !/^[0-9][0-9A-Za-z.]*$/.test(lock.version) || !asset
     || !/^[0-9a-f]{64}$/.test(asset.sha256)
-    || !asset.url.startsWith(`https://github.com/0xpolarzero/lcu/releases/download/v${lock.version}/`)) {
+    || !asset.url.startsWith(`https://github.com/amontlabs/lcu/releases/download/v${lock.version}/`)) {
     throw new Error("The LCU lock is invalid")
   }
   return { version: lock.version, url: asset.url, sha256: asset.sha256, name: asset.url.split("/").pop() }

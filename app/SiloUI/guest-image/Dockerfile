@@ -21,11 +21,11 @@ RUN sh /tmp/silo-setup-github.sh \
 #     No mousepad (GTK 3.24's AT-SPI PasteText use-after-free crashes every GTK3
 #     text view); gnome-text-editor (GTK4) is the text editor. Includes the dconf
 #     stack and python3-pyatspi for the poller in src-tauri/guest/silo-accessibility.py.
-#  3. LCU SYSTEM_PACKAGES (checked against v0.8.8; v0.8.5 added libxres1), a superset of the ChatGPT Linux
+#  3. LCU SYSTEM_PACKAGES (checked against v0.9.2; v0.8.5 added libxres1), a superset of the ChatGPT Linux
 #     .deb's dependencies on Ubuntu 24.04, so LCU installs with --skip-system --offline.
 #     The LCU archive staged below is the lock's version (guest/lcu-lock.json); the
 #     published v4 image was built when the lock said 0.8.1.
-#     Source: https://github.com/0xpolarzero/lcu/blob/v0.8.8/scripts/install.py
+#     Source: https://github.com/amontlabs/lcu/blob/v0.9.2/scripts/install.py
 #     Packages already named in an earlier group are not repeated.
 #
 # The pinned Selkies .deb is downloaded, SHA-256 verified, installed and deleted
@@ -68,7 +68,7 @@ RUN --mount=type=bind,source=src-tauri/guest/desktop-streamer-lock.json,target=/
     && apt-get install -y --no-install-recommends /tmp/selkies.deb \
     && test -x /usr/bin/selkies \
     && rm -f /tmp/selkies.deb \
-    && set -- $(python3 -c "import json,re,sys; l=json.load(open('/mnt/lcu-lock.json')); a=l['assets'][sys.argv[1]]; assert l['schemaVersion']==1 and re.fullmatch(r'[0-9][0-9A-Za-z.]*', l['version']) and a['url'].startswith('https://github.com/0xpolarzero/lcu/releases/download/v'+l['version']+'/') and re.fullmatch('[0-9a-f]{64}', a['sha256']); print(a['url'], a['sha256'])" "$TARGETARCH") \
+    && set -- $(python3 -c "import json,re,sys; l=json.load(open('/mnt/lcu-lock.json')); a=l['assets'][sys.argv[1]]; assert l['schemaVersion']==1 and re.fullmatch(r'[0-9][0-9A-Za-z.]*', l['version']) and a['url'].startswith('https://github.com/amontlabs/lcu/releases/download/v'+l['version']+'/') and re.fullmatch('[0-9a-f]{64}', a['sha256']); print(a['url'], a['sha256'])" "$TARGETARCH") \
     && lcu_url=$1 && lcu_sha256=$2 \
     && install -d -m 0755 /usr/local/share/silo/lcu \
     && lcu_archive=/usr/local/share/silo/lcu/${lcu_url##*/} \
