@@ -8713,6 +8713,22 @@ esac
     }
 
     #[test]
+    fn a_resubmitted_configuration_without_desktop_settings_keeps_the_saved_desktop() {
+        // Onboarding creates `dev`, which the backend defaults to a built-in desktop, then
+        // resubmits its own draft, which never had desktop settings, when setup finishes.
+        let mut created = request(vec![computer()]);
+        apply_desktop_defaults_for(
+            Some("ubuntu-24.04-v4"),
+            &request_without_computers(),
+            &mut created,
+        );
+        let mut resubmitted = request(vec![computer()]);
+        apply_desktop_defaults_for(Some("ubuntu-24.04-v4"), &created, &mut resubmitted);
+        assert_eq!(resubmitted, created);
+        validate_computer_update(&created.computers[0], &resubmitted.computers[0]).unwrap();
+    }
+
+    #[test]
     fn resubmitted_failed_creation_without_desktop_matches_the_journaled_request() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();

@@ -34,7 +34,8 @@ pub(crate) fn image_includes_desktop(image_version: &str) -> bool {
 }
 
 /// On such an image the desktop is part of every new computer, started with it (computer use
-/// needs a running session). Existing computers and explicit choices are left alone, except
+/// needs a running session). Existing computers and explicit choices are left alone (an
+/// existing computer's request without desktop settings keeps its saved ones), except
 /// that `built_in` is Silo's to decide: an existing computer keeps what it had and a new computer
 /// has it exactly when it is created from such an image, whatever a request says; a new
 /// built-in computer also always starts its desktop with the computer.
@@ -49,6 +50,9 @@ pub(crate) fn default_new_computer_desktops(
         let desktop = &mut configuration.desktop;
         match old {
             Some(old) => {
+                if desktop.is_none() {
+                    *desktop = old.desktop.clone();
+                }
                 let was_built_in =
                     crate::desktop::configuration(old).is_some_and(|old| old.built_in);
                 if let Some(configuration) = desktop {
