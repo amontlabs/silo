@@ -203,7 +203,7 @@ SFTP server) and adds, in one further layer:
   ([built-in computer use](SiloUI-DESKTOP.md#built-in-computer-use)); if the lock is
   bumped without a new image the computer downloads and verifies the new archive instead
   (needs network once). The published `ubuntu-24.04-v4` image contains LCU 0.8.1 while
-  Silo pins 0.9.2, installed in the computer at setup; images built from the current lock
+  Silo pins 0.9.3, installed in the computer at setup; images built from the current lock
   stage the lock's version.
 - **Accessibility defaults.** `gsettings-desktop-schemas`, the dconf stack,
   `/etc/dconf/profile/user` (`user-db:user`, `system-db:local`) and

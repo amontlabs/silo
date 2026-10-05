@@ -123,7 +123,7 @@ absolute).
   `--skip-system --offline`.
 - Pinned LCU release archive, hash-checked, staged for installation in the computer
   (done: `guest/lcu-lock.json`, `/usr/local/share/silo/lcu/`). The published v4 image
-  stages LCU 0.8.1; Silo now pins LCU 0.9.2 (below), which a computer downloads and
+  stages LCU 0.8.1; Silo now pins LCU 0.9.3 (below), which a computer downloads and
   verifies at setup until a new image stages it.
 - Accessibility: dconf `toolkit-accessibility=true` system default and an
   autostarted AT-SPI attribute poller for Chromium/Electron.
@@ -144,7 +144,7 @@ absolute).
 - Every device does this itself at its own start, remote ones included; a
   controller never prepares an app for another device.
 
-Done: lock (`lcuVersion` 0.9.2), download, verification, extraction and
+Done: lock (`lcuVersion` 0.9.3), download, verification, extraction and
 publication under `<app data>/chatgpt/published/`, started automatically at app
 start with retries (2026-10-02, replacing the one-time notice), cached status
 reads and a device-level Retry. See [ChatGPT app](SiloUI-CHATGPT-APP.md).
@@ -474,6 +474,19 @@ running instance is up. During a wait the state is `preparing` ("Could not downl
 (network). Silo tries again automatically."); a boot, a switch change, a manual setup, a
 stop/restart or a deletion cancels it. After the last retry the failure stays until the next
 boot or a manual setup.
+
+### LCU 0.9.3 pin (2026-10-05)
+
+Silo pins LCU 0.9.3 (tag `v0.9.3`; linux-arm64
+`a419284a52df0f970199a64631c3b4552a035a3a657cbbb015f2936763ec5db5`, linux-x64
+`026b729a1131c5b58bca27b94dae62c3d248c0bf6135120b9e3f40f6ffcaa72e`, matching the release's
+`.sha256` files and notes). `scripts/install.py` and `tested-versions.json` are unchanged from
+0.9.2. The change that matters for computers: where bubblewrap can start, LCU now keeps the model's
+JavaScript kernel inside `codex sandbox` (read-only filesystem, no network, confined
+subprocesses) and runs only the verified Sky worker outside it; 0.8.2 to 0.9.2 ran the kernel
+unsandboxed. Where bubblewrap cannot start, the kernel stays unsandboxed and `lcu doctor` says
+so. See LCU's `docs/ADAPTERS.md#linux-sandbox-state`. The section below describes the 0.9.2 pin
+it replaces.
 
 ### LCU 0.9.2 pin (2026-10-05)
 

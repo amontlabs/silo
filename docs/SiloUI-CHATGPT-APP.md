@@ -263,7 +263,7 @@ plan and has not been recomputed locally; the OpenAI InRelease signature could
 not be checked here (no gpg), only its hash chain to `Packages`.
 
 The runtime pair is `0.0.27/20260927214556-b77d38801cca`
-(`resources/cua_node/manifest.json`). `lcuVersion` is `0.9.2`, the LCU release
+(`resources/cua_node/manifest.json`). `lcuVersion` is `0.9.3`, the LCU release
 tested with it (the published v4 image still stages 0.8.1; see
 [the computer use plan](SiloUI-COMPUTER-USE-PLAN.md#lcu-083-pin-2026-10-02)); `guest/lcu-lock.json` pins that release's archives (a test
 checks that both locks agree). The owner updates the pair by hand: bump the
