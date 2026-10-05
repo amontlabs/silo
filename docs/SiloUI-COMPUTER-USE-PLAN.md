@@ -123,7 +123,7 @@ absolute).
   `--skip-system --offline`.
 - Pinned LCU release archive, hash-checked, staged for installation in the computer
   (done: `guest/lcu-lock.json`, `/usr/local/share/silo/lcu/`). The published v4 image
-  stages LCU 0.8.1; Silo now pins LCU 0.9.3 (below), which a computer downloads and
+  stages LCU 0.8.1; Silo now pins LCU 0.9.4 (below), which a computer downloads and
   verifies at setup until a new image stages it.
 - Accessibility: dconf `toolkit-accessibility=true` system default and an
   autostarted AT-SPI attribute poller for Chromium/Electron.
@@ -144,7 +144,7 @@ absolute).
 - Every device does this itself at its own start, remote ones included; a
   controller never prepares an app for another device.
 
-Done: lock (`lcuVersion` 0.9.3), download, verification, extraction and
+Done: lock (`lcuVersion` 0.9.4), download, verification, extraction and
 publication under `<app data>/chatgpt/published/`, started automatically at app
 start with retries (2026-10-02, replacing the one-time notice), cached status
 reads and a device-level Retry. See [ChatGPT app](SiloUI-CHATGPT-APP.md).
@@ -474,6 +474,16 @@ running instance is up. During a wait the state is `preparing` ("Could not downl
 (network). Silo tries again automatically."); a boot, a switch change, a manual setup, a
 stop/restart or a deletion cancels it. After the last retry the failure stays until the next
 boot or a manual setup.
+
+### LCU 0.9.4 pin (2026-10-05)
+
+Silo pins LCU 0.9.4 (tag `v0.9.4`; linux-arm64
+`2841dfaa0e28721d08bd49d9ef9d82554add95e09ea79c24e8c1d89a8b1f48e5`, linux-x64
+`ad6137c19b46771959c52b803d0f072a08a57ee052e032c93542f2e448280195`, matching the release's
+notes and verified by download). Compared with the extracted 0.9.3 archive only the Pi adapter,
+documentation and bundle metadata differ: `scripts/install.py`, `tested-versions.json`, the runtime
+and the Claude Code and Codex adapters a computer registers are unchanged. The section below
+describes the 0.9.3 pin it replaces.
 
 ### LCU 0.9.3 pin (2026-10-05)
 
