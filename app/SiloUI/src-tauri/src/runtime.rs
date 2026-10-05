@@ -888,6 +888,51 @@ pub(crate) fn prepare_private_directory(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Removes `home` when it is a directory this account owns that holds only a tree of empty
+/// directories below `cache`: what an earlier Silo left by opening the image cache before
+/// the alias existed. Only empty directories are removed, so no file is ever deleted; any
+/// other content leaves `home` untouched and returns false.
+#[cfg(unix)]
+fn remove_empty_cache_skeleton(home: &Path) -> std::io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    fn collect(directory: &Path, found: &mut Vec<PathBuf>) -> std::io::Result<bool> {
+        found.push(directory.to_path_buf());
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
+                return Ok(false);
+            }
+            if !collect(&entry.path(), found)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+    let metadata = fs::symlink_metadata(home)?;
+    if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
+        return Ok(false);
+    }
+    let mut names = fs::read_dir(home)?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<Result<Vec<_>, _>>()?;
+    names.retain(|name| name != "cache");
+    let cache = home.join("cache");
+    let mut directories = Vec::new();
+    if !names.is_empty() {
+        return Ok(false);
+    }
+    if fs::symlink_metadata(&cache).is_ok() && !collect(&cache, &mut directories)? {
+        return Ok(false);
+    }
+    // Deepest first, so each remove_dir only ever sees an empty directory.
+    for directory in directories.iter().rev() {
+        fs::remove_dir(directory)?;
+    }
+    fs::remove_dir(home)?;
+    Ok(true)
+}
+
 pub(crate) fn prepare_runtime_home(
     home: &Path,
     storage_home: Option<&Path>,
@@ -920,6 +965,11 @@ pub(crate) fn prepare_runtime_home(
             prepare_private_directory(parent)?;
             match fs::symlink_metadata(home) {
                 Ok(metadata) => {
+                    if metadata.is_dir() && remove_empty_cache_skeleton(home)? {
+                        std::os::unix::fs::symlink(storage_home, home)?;
+                        builder.create(storage_home)?;
+                        return prepare_private_directory(storage_home);
+                    }
                     let conflict = if !metadata.file_type().is_symlink() {
                         Some("is an existing file or directory, not a symbolic link".to_string())
                     } else if metadata.uid() != unsafe { libc::geteuid() } {

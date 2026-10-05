@@ -1,6 +1,6 @@
 //! The pinned guest image: its lock, and the local-only import of the downloaded archive.
 //! `preparation` downloads and verifies the archive; this module never reaches a registry.
-use super::{RuntimeError, RuntimePaths, RuntimeRunner};
+use super::{prepare_runtime_home, RuntimeError, RuntimePaths, RuntimeRunner};
 use flate2::read::GzDecoder;
 use microsandbox_image::{Digest as ImageDigest, GlobalCache, Reference};
 use serde::Deserialize;
@@ -266,7 +266,10 @@ pub(crate) fn is_imported(paths: &RuntimePaths) -> bool {
 }
 
 pub(crate) fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bool {
-    GlobalCache::new(&paths.home.join("cache")).is_ok_and(|cache| cached(&cache, manifest))
+    // A read-only check must not create the runtime home: before the alias is prepared,
+    // creating `cache` beneath it would make the alias a real directory.
+    let directory = paths.home.join("cache");
+    directory.is_dir() && GlobalCache::new(&directory).is_ok_and(|cache| cached(&cache, manifest))
 }
 
 /// Imports the pinned image from its downloaded archive unless the cache already holds it.
@@ -289,6 +292,9 @@ pub(crate) fn prepare_as<R: RuntimeRunner + ?Sized>(
         )
     })?;
     manifest.validate().map_err(RuntimeError::Unavailable)?;
+    // The cache lives below the runtime home, which may be a symbolic link that
+    // only this call creates; it must exist before anything is created under it.
+    prepare_runtime_home(&paths.home, paths.storage_home.as_deref())?;
     let cache = GlobalCache::new(&paths.home.join("cache")).map_err(|_| {
         RuntimeError::Unavailable(
             "Silo's VM image storage could not be opened. Check storage access and retry.".into(),
@@ -531,6 +537,91 @@ mod tests {
         assert!(check_space(dir.path(), u64::MAX)
             .unwrap_err()
             .contains("Free at least"));
+    }
+
+    /// Succeeds at `image load` only if the runtime home is prepared the way the real runner
+    /// prepares it, recording what that preparation saw.
+    struct HomePreparingImporter(std::sync::Mutex<Vec<bool>>);
+    impl RuntimeRunner for HomePreparingImporter {
+        fn run(
+            &self,
+            paths: &RuntimePaths,
+            _args: &[String],
+            _timeout: Duration,
+        ) -> Result<super::super::CommandOutput, RuntimeError> {
+            let prepared = prepare_runtime_home(&paths.home, paths.storage_home.as_deref());
+            self.0.lock().unwrap().push(prepared.is_ok());
+            prepared.map(|()| unreachable_output())
+        }
+    }
+
+    fn unreachable_output() -> super::super::CommandOutput {
+        super::super::CommandOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+
+    /// A fixture whose alias and storage sit below a short root, which keeps the modeled
+    /// control socket under macOS's 104-byte limit.
+    fn aliased_fixture() -> (Fixture, tempfile::TempDir) {
+        let mut fixture = fixture();
+        let root = tempfile::Builder::new()
+            .prefix("silo")
+            .tempdir_in(crate::test_support::live::temp_root())
+            .unwrap();
+        fixture.paths.home = root.path().join("a/h");
+        fixture.paths.storage_home = Some(root.path().join("s"));
+        (fixture, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_install_creates_the_runtime_alias_as_a_symlink_before_importing() {
+        let _test_state = crate::test_support::global_state();
+        let (fixture, _root) = aliased_fixture();
+        let storage = fixture.paths.storage_home.clone().unwrap();
+        let runner = HomePreparingImporter(Default::default());
+        // The fake runner cannot populate the cache, so verification fails after the load.
+        let error = prepare_as(&runner, &fixture.paths, &fixture.manifest).unwrap_err();
+        assert!(
+            error.to_string().contains("did not pass verification"),
+            "{error}"
+        );
+        assert_eq!(*runner.0.lock().unwrap(), [true]);
+        assert_eq!(fs::read_link(&fixture.paths.home).unwrap(), storage);
+        assert!(storage.join("cache/tmp").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checking_for_an_image_does_not_create_the_runtime_home() {
+        let _test_state = crate::test_support::global_state();
+        let (fixture, _root) = aliased_fixture();
+        assert!(!is_imported_as(&fixture.paths, &fixture.manifest));
+        assert!(fs::symlink_metadata(&fixture.paths.home).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_cache_skeleton_left_at_the_alias_is_recovered_but_data_is_not() {
+        let _test_state = crate::test_support::global_state();
+        let (fixture, _root) = aliased_fixture();
+        let storage = fixture.paths.storage_home.clone().unwrap();
+        let home = &fixture.paths.home;
+        fs::create_dir_all(home.join("cache/tmp")).unwrap();
+        prepare_runtime_home(home, Some(&storage)).unwrap();
+        assert_eq!(fs::read_link(home).unwrap(), storage);
+        fs::remove_file(home).unwrap();
+        fs::create_dir_all(home.join("cache/tmp")).unwrap();
+        fs::write(home.join("cache/tmp/keep"), b"data").unwrap();
+        let error = prepare_runtime_home(home, Some(&storage)).unwrap_err();
+        assert!(error.to_string().contains("No existing data was changed"));
+        assert!(home.join("cache/tmp/keep").is_file());
+        fs::remove_file(home.join("cache/tmp/keep")).unwrap();
+        fs::write(home.join("other"), b"data").unwrap();
+        assert!(prepare_runtime_home(home, Some(&storage)).is_err());
+        assert!(home.join("other").is_file());
     }
 
     #[test]
