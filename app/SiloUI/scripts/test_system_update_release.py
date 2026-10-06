@@ -116,6 +116,17 @@ class SystemUpdateTests(unittest.TestCase):
             sender.join(timeout=2)
             self.assertFalse(sender.is_alive())
 
+    def test_update_must_be_requested_by_the_process_that_started_pkexec(self):
+        parents = {300: 200, 200: 100, 400: 50}
+        exes = {'/proc/200/exe': '/usr/bin/pkexec', '/proc/50/exe': '/usr/bin/python3'}
+
+        def requested(pid, helper_pid):
+            return helper.requested_by(pid, helper_pid, parents.__getitem__, exes.__getitem__)
+
+        self.assertTrue(requested(100, 300))
+        self.assertFalse(requested(101, 300))
+        self.assertFalse(requested(50, 400))
+
     def test_running_process_exception_requires_exact_live_processes_and_root_owned_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp, 'permit')
