@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { useId, useRef, useState } from "react"
 import { CalendarDays } from "lucide-react"
 import { FilterCombobox, type FilterOption } from "@/components/filter-combobox"
@@ -55,7 +56,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
       if (from && to && from > to) throw new Error("The start date is after the end date. Change the date filter to see logs.")
       onChange({ source, since: from, until: to })
       setError(""); setOpen(false)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { setError(errorMessage(cause)) }
   }
   const fields = [
     { label: "From", date: fromDate, time: fromTime, setDate: setFromDate, setTime: setFromTime },

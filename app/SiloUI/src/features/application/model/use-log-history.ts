@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
-import { errorMessage } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
 import type { ApplicationComputer } from "./application-source"
 import { isUnsupportedRemote, logEntryKey, logIdentity, LOG_ROW_HEIGHT, type LogEntry, type LogLoader, type LogPage, type LogQuery } from "./logs"
 

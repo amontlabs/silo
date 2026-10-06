@@ -2,7 +2,8 @@ import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState, ty
 import { formatStorageBytes as formatBytes, type WorkspaceStorageState } from '../model/workspace-storage'
 import { HardDrive, Database, Folder, Gauge, RefreshCw, History, ChevronDown, Check, CircleAlert, Layers, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { dismissOperationToast, errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess } from '@/lib/operation-toast'
+import { errorMessage } from '@/lib/error-message'
+import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from '@/lib/operation-toast'
 import { DisabledReason } from '../components/disabled-reason'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { invoke, isTauri } from "@tauri-apps/api/core"
@@ -133,7 +134,7 @@ async function start() {
   function run() {
     void boot().catch(async (error: unknown) => {
       if (disposed) return
-      const message = `Silo startup failed: ${error instanceof Error ? error.message : String(error)}. No computer state changed.`
+      const message = `Silo startup failed: ${errorMessage(error)}. No computer state changed.`
       const retry = () => { showLoading(); run() }
       const loaded = await surface.catch(() => null)
       if (disposed) return

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { useEffect, useRef, useState } from "react"
 
 import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest } from "@/features/application/model/application-source"
@@ -10,7 +11,7 @@ const actionableFailures = new Set([
 ])
 
 function operationFailure(error: unknown, fallback: string) {
-  const message = typeof error === "string" ? error : error instanceof Error ? error.message : ""
+  const message = errorMessage(error)
   return actionableFailures.has(message) ? message : fallback
 }
 

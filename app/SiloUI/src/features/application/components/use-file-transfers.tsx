@@ -3,7 +3,8 @@ import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
-import { dismissOperationToast, errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
+import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 import { baseName, formatBytes, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
 export interface FileTransferControls {

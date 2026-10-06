@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input"
 import type { ApplicationActions, ApplicationComputer } from "../model/application-source"
 import { formatLog } from "../model/logs"
 import { useLogHistory } from "../model/use-log-history"
-import { dismissOperationToast, errorMessage, showActionFailure, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
+import { dismissOperationToast, showActionFailure, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 
 export interface LogWindow { since: string; until: string }
 export function Logs({ computers, query, onQueryChange, actions, active, window: initialWindow, onWindowChange }: {

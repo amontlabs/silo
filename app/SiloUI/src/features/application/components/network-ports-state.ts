@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
-import { bridgeErrorMessage } from "@/contracts/bridge-error"
-import { errorMessage, showActionFailure, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
+import { showActionFailure, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 import { computerTarget } from "@/features/application/model/connections"
 import type { ApplicationActions, ApplicationComputer, NetworkPort, NetworkState } from "@/features/application/model/application-source"
 
@@ -96,7 +96,7 @@ export function useNetworkPorts({ computers, network, error, actions, active }: 
       onSuccess?.()
       return true
     } catch (cause) {
-      const message = bridgeErrorMessage(cause) ?? (typeof cause === "string" ? cause : cause instanceof Error ? cause.message : "The port could not be updated.")
+      const message = errorMessage(cause, { fallback: "The port could not be updated." })
       showOperationFailure(id, `${copy.failure} · ${location}`, { description: message, retry: () => void run(id, identity, copy, operation, onSuccess), computer, noticeComputer })
       return false
     } finally { pending.current = false; setBusy(false) }
@@ -111,7 +111,7 @@ export function useNetworkPorts({ computers, network, error, actions, active }: 
         return
       }
       try { await actions.openNetworkPort!(computerTarget(computer), port) }
-      catch (cause) { showActionFailure(`Could not open port ${port} · ${location}`, typeof cause === "string" ? cause : errorMessage(cause), () => void attempt(), { id: `network-port-open:${computer.configuration.id}:${port}`, noticeComputer: { id: computer.configuration.id, name: computer.configuration.name } }) }
+      catch (cause) { showActionFailure(`Could not open port ${port} · ${location}`, errorMessage(cause), () => void attempt(), { id: `network-port-open:${computer.configuration.id}:${port}`, noticeComputer: { id: computer.configuration.id, name: computer.configuration.name } }) }
     }
     await attempt()
   }

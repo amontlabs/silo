@@ -1,4 +1,5 @@
 /* oxlint-disable react/only-export-components */
+import { errorMessage } from "@/lib/error-message"
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { z } from "zod"
 
@@ -45,10 +46,6 @@ export interface PreUpgradeBackupState {
   acknowledge: () => Promise<void>
 }
 
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
-
 /**
  * Reads the backup when mounted and whenever Silo reports a change. Pass no backend to see none.
  * Measuring walks the folder, so it happens only while `measure` is true: where the size is shown.
@@ -80,7 +77,7 @@ export function usePreUpgradeBackup(backend: PreUpgradeBackupBackend | undefined
         setLoadError(null)
         setLoaded(true)
       } catch (cause) {
-        if (live && mine === requests.sequence) { setLoadError(message(cause)); setLoaded(true) }
+        if (live && mine === requests.sequence) { setLoadError(errorMessage(cause)); setLoaded(true) }
       }
     }
     void backend.subscribe(() => { if (live) void refresh.current() }).then(stop => {
