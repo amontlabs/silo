@@ -176,6 +176,14 @@ pub(crate) fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
     }
 }
 
+/// Drops control characters, including escape sequences' introducers, that a terminal or
+/// editor could act on when pasted; tab, newline and carriage return stay.
+fn without_control_characters(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
+        .collect()
+}
+
 /// Copy from Computer: press Ctrl+C there, wait for the new selection, then write it to the
 /// device clipboard. An empty answer leaves the device clipboard unchanged.
 pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
@@ -190,6 +198,10 @@ pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
         Ok(GuestClipboard::Text(text)) => {
             if text.len() > MAX_TEXT_BYTES {
                 return Report::too_large(action, Content::Text);
+            }
+            let text = without_control_characters(&text);
+            if text.is_empty() {
+                return Report::new(action, Status::ComputerEmpty, None);
             }
             match device.write_text(&text) {
                 Ok(()) => Report::new(action, Status::Copied, Some(Content::Text)),
@@ -382,6 +394,25 @@ mod tests {
             report.message.as_deref(),
             Some("The computer did not answer.")
         );
+    }
+
+    #[test]
+    fn copy_strips_control_characters_but_keeps_line_breaks() {
+        let device = FakeClipboard::default();
+        let hostile = "a\u{1b}[31mb\tc\r\nd\u{7}\u{0}e\u{7f}f\u{9b}g\u{85}h";
+        let report = copy(
+            &FakeGuest::answering(Ok(GuestClipboard::Text(hostile.into()))),
+            &device,
+        );
+        assert_eq!(report.status, Status::Copied);
+        assert_eq!(device.text().as_deref(), Some("a[31mb\tc\r\ndefgh"));
+
+        let report = copy(
+            &FakeGuest::answering(Ok(GuestClipboard::Text("\u{1b}\u{7}".into()))),
+            &device,
+        );
+        assert_eq!(report.status, Status::ComputerEmpty);
+        assert_eq!(device.text().as_deref(), Some("a[31mb\tc\r\ndefgh"));
     }
 
     #[test]
