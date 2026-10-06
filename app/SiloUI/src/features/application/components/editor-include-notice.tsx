@@ -17,8 +17,8 @@ export function EditorIncludeNotice() {
   if (!loaded || !line || dismissed === line) return null
   const dismiss = () => { void updateSettings({ editorIncludeNoticeDismissed: line }) }
   return <div className="mx-auto w-full max-w-4xl px-4 pt-4 sm:px-6">
-    <section aria-labelledby="editor-include-notice-title" className="flex items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2.5 text-xs">
-      <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
+    <section aria-labelledby="editor-include-notice-title" className="flex items-start gap-2.5 rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2.5 text-xs">
+      <TriangleAlert className="mt-px size-3.5 shrink-0 text-warning" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <h2 id="editor-include-notice-title" className="font-medium">Add a line to your SSH configuration</h2>
         <p className="mt-0.5 text-muted-foreground">Silo couldn't update your SSH config, which links to a file it can't change. Add this line at the top so editors reconnect to your current computers.</p>

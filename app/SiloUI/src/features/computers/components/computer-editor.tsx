@@ -273,11 +273,11 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
           </div>
         </div>
       ) : divergent ? (
-        <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <p role="status" className="rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2 text-xs text-warning">
           This computer was changed elsewhere.{changedFields.length > 0 ? ` Updated: ${changedFields.map(computerFieldLabel).join(", ")}.` : ""}
         </p>
       ) : review ? (
-        <div role="status" aria-label="Review changes" className="grid gap-1 rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <div role="status" aria-label="Review changes" className="grid gap-1 rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2 text-xs text-warning">
           <p>Your edits are kept on top of the latest settings.</p>
           {review.conflicts.length > 0 && <>
             <p>Also changed elsewhere:</p>

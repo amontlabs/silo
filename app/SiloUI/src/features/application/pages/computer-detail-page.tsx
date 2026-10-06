@@ -230,8 +230,8 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 title={<span className="truncate font-mono" title={address ? `${port.port} → ${address}` : `Port ${port.port}`}>{address ? `${port.port} → ${address}` : `Port ${port.port}`}</span>}
                 detailClassName="whitespace-normal"
                 detail={<span className="inline-flex flex-wrap items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-emerald-500" : "bg-muted-foreground/50")} aria-hidden="true" />
-                  <span className={stateText === "Reachable" ? "text-emerald-700 dark:text-emerald-400" : undefined}>{stateText}</span>
+                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-success" : "bg-muted-foreground/50")} aria-hidden="true" />
+                  <span className={stateText === "Reachable" ? "text-success" : undefined}>{stateText}</span>
                   {port.message && <span className={port.state === "unknown" ? "text-destructive" : "text-muted-foreground"}>· {port.message}</span>}
                 </span>}
                 actions={<div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -259,7 +259,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
                 title={<span className="truncate" title={title}>{title}</span>}
                 detail={<span className="inline-flex items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-emerald-500" : "bg-muted-foreground/50")} aria-hidden="true" />
+                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-success" : "bg-muted-foreground/50")} aria-hidden="true" />
                   {stateText}
                 </span>}
               />
@@ -435,7 +435,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>}
       />
 
-      {Boolean(computer.pendingSecretRevocations?.length) && <div role="note" aria-label="Pending secret revocation" className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+      {Boolean(computer.pendingSecretRevocations?.length) && <div role="note" aria-label="Pending secret revocation" className="flex items-center gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
         <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
         <p className="min-w-0 flex-1 break-words">May still have access to {computer.pendingSecretRevocations!.join(", ")} until it restarts.</p>
         <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="restart" disabled={controls.readOnly || !restartAvailability.canRestart} reason={controls.readOnly ? undefined : restartAvailability.reasons.restart}>

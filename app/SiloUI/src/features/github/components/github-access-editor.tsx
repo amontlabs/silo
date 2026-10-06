@@ -288,7 +288,7 @@ export function GitHubAccessEditor({
           icon={
             <ListRowIcon
               aria-hidden="true"
-              className={`${compactConnection ? "" : "size-9 rounded-full"} ${connectionState === "connected" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : ""}`}
+              className={`${compactConnection ? "" : "size-9 rounded-full"} ${connectionState === "connected" ? "bg-success/10 text-success" : ""}`}
             >
               {connectionState === "connected" ? <Check className={compactConnection ? "size-3.5" : "size-4"} />
                 : connectionState === "connecting" ? <LoaderCircle className={`${compactConnection ? "size-3.5" : "size-4"} animate-spin motion-reduce:animate-none`} />

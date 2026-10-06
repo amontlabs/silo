@@ -85,7 +85,7 @@ export function RepositoryPushFeedback({
   if (operation.status === "succeeded") {
     if (!showSuccess) return null
     return (
-      <div className="flex h-6 items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400" role="status" aria-live="polite" aria-atomic="true">
+      <div className="flex h-6 items-center gap-1.5 text-xs text-success" role="status" aria-live="polite" aria-atomic="true">
         <CircleCheck className="size-3.5" aria-hidden="true" />
         Pushed {commitLabel(operation.commitCount)}.
       </div>

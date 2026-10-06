@@ -232,13 +232,13 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
       className={cn(
         "hover:bg-muted/35 select-text",
         item.status === "running" && "bg-primary/[0.025]",
-        item.tone === "warning" && "bg-amber-500/[0.035]",
+        item.tone === "warning" && "bg-warning/[0.035]",
         item.tone === "danger" && "bg-destructive/[0.025]",
       )}
       icon={
         <ListRowIcon aria-hidden="true" className={cn(
-          item.tone === "success" && "bg-emerald-500/10",
-          item.tone === "warning" && "bg-amber-500/10",
+          item.tone === "success" && "bg-success/10",
+          item.tone === "warning" && "bg-warning/10",
           item.tone === "danger" && "bg-destructive/10",
         )}>
           {item.status === "running"
@@ -246,9 +246,9 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
             : item.tone === "danger"
               ? <CircleAlert className="size-3.5 text-destructive" />
               : item.tone === "warning"
-                ? <TriangleAlert className="size-3.5 text-amber-600 dark:text-amber-400" />
+                ? <TriangleAlert className="size-3.5 text-warning" />
                 : item.tone === "success"
-                  ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  ? <Check className="size-3.5 text-success" />
                   : <Activity className="size-3.5" />}
         </ListRowIcon>
       }

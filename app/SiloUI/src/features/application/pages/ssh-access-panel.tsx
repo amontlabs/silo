@@ -176,7 +176,7 @@ export function SshAccessBadges({ access, stale = false, onOpen }: { access?: Ss
   const status = unknown ? "Status unavailable" : access.state === "listening" ? "Listening" : access.state === "waiting" ? "Waiting for computer" : access.message || "Unavailable"
   // Problems show on the badge itself (icon, colour and, for errors, text), not only in its tooltip.
   const tone = failed ? "border-destructive/20 bg-destructive/10 text-destructive"
-    : unknown ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+    : unknown ? "border-warning/20 bg-warning/10 text-warning"
     : network ? "border-blue-500/15 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"
   const name = access.state === "listening" && !unknown ? label : `${label}: ${status}`
   const className = `inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`

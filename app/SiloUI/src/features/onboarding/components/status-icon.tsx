@@ -11,13 +11,13 @@ interface StatusIconProps {
 
 export function StatusIcon({ status, waitingLabel, className }: StatusIconProps) {
   if (status === "succeeded") {
-    return <Check aria-label="Complete" className={cn("size-4 text-emerald-600 dark:text-emerald-400", className)} />
+    return <Check aria-label="Complete" className={cn("size-4 text-success", className)} />
   }
   if (status === "failed") {
     return <AlertCircle aria-label="Failed" className={cn("size-4 text-destructive", className)} />
   }
   if (status === "running") {
-    return <LoaderCircle aria-label="In progress" className={cn("size-4 animate-spin motion-reduce:animate-none text-amber-700 dark:text-amber-400", className)} />
+    return <LoaderCircle aria-label="In progress" className={cn("size-4 animate-spin motion-reduce:animate-none text-warning", className)} />
   }
   return (
     <span

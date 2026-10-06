@@ -189,7 +189,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
 
       {unfinished && <div role="group" aria-label="Unfinished Restore" className="grid gap-2 rounded-md border border-border p-2.5">
         <div className="flex items-start gap-2">
-          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-warning" />
           <div className="grid gap-1">
             <p>
               The Restore to {unfinished.checkpointName ? `“${unfinished.checkpointName}”` : "a checkpoint"} did not finish.{" "}

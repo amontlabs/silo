@@ -102,7 +102,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   expect(devBadge).toHaveClass("h-5", "items-center", "justify-center", "text-[10px]")
   expect(devBadge.querySelector('[data-slot="status-badge-indicator"]')).toHaveClass("grid", "size-2", "place-items-center")
   expect(devBadge.querySelector('[data-slot="status-badge-label"]')).toHaveTextContent("dev")
-  expect(devRepository.querySelector('[data-computer-state-dot="running"]')).toHaveClass("bg-emerald-500")
+  expect(devRepository.querySelector('[data-computer-state-dot="running"]')).toHaveClass("bg-success")
   expect(within(playgroundsRepository).getByLabelText("playgrounds, Stopped")).toBeVisible()
   expect(playgroundsRepository.querySelector('[data-computer-state-dot="stopped"]')).toHaveClass("bg-muted-foreground/55")
   const repositoryHeader = devRepository.querySelector("[data-repository-header]") as HTMLElement
@@ -294,7 +294,7 @@ it("shows one truthful network table and uses the selected browser for opening p
   const rows = within(network).getAllByRole("row").slice(1)
   expect(rows).toHaveLength(3)
   expect(within(rows[0]).getByText("3000")).toBeVisible()
-  expect(within(rows[0]).getByText("Reachable")).toHaveClass("text-emerald-700")
+  expect(within(rows[0]).getByText("Reachable")).toHaveClass("text-success")
   expect(within(rows[0]).getByText("http://127.0.0.1:3000")).toBeVisible()
   expect(within(rows[0]).getByLabelText("dev, Running")).toBeVisible()
   expect(within(rows[1]).getByText("Waiting for service")).toBeVisible()
@@ -482,8 +482,8 @@ it("keeps a failed push as a small in-row label with details and retry", async (
 
 
 it.each([
-  ["running", "Running", "running", "bg-emerald-500"],
-  ["starting", "Starting", "starting", "bg-amber-500"],
+  ["running", "Running", "running", "bg-success"],
+  ["starting", "Starting", "starting", "bg-warning"],
   ["stopped", "Stopped", "stopped", "bg-muted-foreground/55"],
   ["error", "Failed", "failed", "bg-destructive"],
 ] as const)("colors repository computer badges for the %s fixture", async (mode, label, state, className) => {

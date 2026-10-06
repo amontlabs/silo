@@ -30,7 +30,7 @@ export function DependencyDisclosure({ group, onRetry }: { group: DependencyGrou
       <ListCard>
         <DisclosureHeader
           icon={
-            <ListRowIcon className={group.status === "failed" ? "bg-destructive/10 text-destructive" : group.status === "running" ? "" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}>
+            <ListRowIcon className={group.status === "failed" ? "bg-destructive/10 text-destructive" : group.status === "running" ? "" : "bg-success/10 text-success"}>
               {group.status === "running"
                 ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-label="Checking" />
                 : group.status === "failed"

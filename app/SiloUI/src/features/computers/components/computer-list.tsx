@@ -33,7 +33,7 @@ function ComputerIcon({ state, remote }: { state: ComputerIconState; remote: boo
   return (
     <ListRowIcon
       className={cn(
-        state === "warning" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        state === "warning" && "bg-warning/10 text-warning",
         state === "error" && "bg-destructive/10 text-destructive",
       )}
       data-computer-icon-state={state}
@@ -88,10 +88,10 @@ export function ComputerListRow({
       className={cn(
         "computer-row",
         !tone && "hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "running" && "bg-emerald-500/[0.035] hover:bg-emerald-500/[0.07] focus-within:bg-emerald-500/[0.07]",
-        tone === "starting" && "bg-amber-500/[0.035] hover:bg-amber-500/[0.07] focus-within:bg-amber-500/[0.07]",
+        tone === "running" && "bg-success/[0.035] hover:bg-success/[0.07] focus-within:bg-success/[0.07]",
+        tone === "starting" && "bg-warning/[0.035] hover:bg-warning/[0.07] focus-within:bg-warning/[0.07]",
         tone === "stopped" && "bg-muted/15 hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "warning" && "bg-amber-500/[0.04] hover:bg-amber-500/[0.08] focus-within:bg-amber-500/[0.08]",
+        tone === "warning" && "bg-warning/[0.04] hover:bg-warning/[0.08] focus-within:bg-warning/[0.08]",
         tone === "error" && "bg-destructive/[0.035] hover:bg-destructive/[0.07] focus-within:bg-destructive/[0.07]",
       )}
       data-computer-row-tone={tone}
@@ -108,7 +108,7 @@ export function ComputerListRow({
       }
       detail={detail}
       detailClassName={cn(
-        iconState === "warning" && "text-amber-700 dark:text-amber-400",
+        iconState === "warning" && "text-warning",
         iconState === "error" && "text-destructive",
         detailClassName,
       )}

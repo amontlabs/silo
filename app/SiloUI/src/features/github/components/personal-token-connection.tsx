@@ -74,7 +74,7 @@ export function PersonalTokenConnection({ status, onSave, onRemove }: {
     finally { operation.current.pending = false; if (operation.current.mounted) setBusy(false) }
   }
   return <ListCard className="shrink-0">
-    <ListRow icon={<ListRowIcon>{busy ? <Loader2 className="size-3.5 animate-spin" /> : connected ? <Check className="size-3.5 text-emerald-600" /> : <KeyRound className="size-3.5" />}</ListRowIcon>}
+    <ListRow icon={<ListRowIcon>{busy ? <Loader2 className="size-3.5 animate-spin" /> : connected ? <Check className="size-3.5 text-success" /> : <KeyRound className="size-3.5" />}</ListRowIcon>}
       title={<h3 className="text-sm">{connected ? `Token connected as @${status.account}` : "Personal access token"}</h3>}
       detail={status?.message ?? (connected ? "Available to computers that select Use token." : "Connect a token with the GitHub permissions you choose.")}
       actions={<div className="flex gap-1">

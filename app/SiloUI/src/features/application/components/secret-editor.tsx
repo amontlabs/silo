@@ -72,7 +72,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     }
   }}>
     <h3 className="flex min-w-0 items-center gap-2 text-xs font-semibold"><KeyRound className="size-4 shrink-0" aria-hidden="true" /><span className="break-all">{title}</span></h3>
-    {settingsChanged && <div className="grid gap-2 rounded-md bg-amber-500/10 p-2.5 text-[11px]">
+    {settingsChanged && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-[11px]">
       <p role="alert">This secret changed while you were editing. Reload its current settings before saving.</p>
       <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => {
         if (!secret) return
@@ -117,7 +117,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
       <p id={`${id}-domains-hint`} className="text-[11px] text-muted-foreground">Separate hosts with commas. Use * to allow any HTTPS destination.</p>
       {fieldError("domains")}
     </div>
-    {anyDomain && <div className="grid gap-2 rounded-md bg-amber-500/10 p-2.5 text-[11px] text-amber-700 dark:text-amber-400">
+    {anyDomain && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-[11px] text-warning">
       <p>Any HTTPS server could receive this secret.</p>
       <label className="flex items-center gap-2"><Checkbox checked={draft.allowAnyDomain} aria-invalid={Boolean(errors.allowAnyDomain)} aria-describedby={errors.allowAnyDomain ? `${id}-allowAnyDomain-error` : undefined} onCheckedChange={(checked) => update({ allowAnyDomain: checked === true })} />Allow any HTTPS destination</label>
       {fieldError("allowAnyDomain")}

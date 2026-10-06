@@ -41,7 +41,7 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
           <h3 className="break-all font-mono">{secret.name}</h3>
           {secret.state === "applying" && <span role="status" className="text-[10px] text-muted-foreground">{secret.removing ? "Removing…" : "Applying…"}</span>}
           {secret.state === "restart-required" && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 text-[10px] text-warning">
               <RotateCw className="size-3" aria-hidden="true" />Restart to apply{secret.pendingComputers?.length ? `: ${secret.pendingComputers.join(", ")}` : ""}
             </span>
           )}

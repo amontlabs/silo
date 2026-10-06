@@ -57,7 +57,7 @@ const statusLabel: Record<ReviewQueueItemView["status"], string> = {
 function ValidationBadge({ status }: { status: ReviewQueueItemView["status"] }) {
   return <span className={cn(
     "inline-flex shrink-0 items-center gap-1 text-[10px] font-normal",
-    status === "failed" ? "text-destructive" : status === "running" ? "text-amber-700 dark:text-amber-400" : status === "succeeded" ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
+    status === "failed" ? "text-destructive" : status === "running" ? "text-warning" : status === "succeeded" ? "text-success" : "text-muted-foreground",
   )}>{status === "running" && <LoaderCircle className="size-2.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{statusLabel[status]}</span>
 }
 
@@ -125,7 +125,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
             role="group"
             aria-label={title}
-            className={complete ? "bg-emerald-500/[0.035] hover:bg-emerald-500/[0.07] focus-within:bg-emerald-500/[0.07]" : undefined}
+            className={complete ? "bg-success/[0.035] hover:bg-success/[0.07] focus-within:bg-success/[0.07]" : undefined}
             title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-[10px] font-normal text-muted-foreground">Skipped</span>}</>}
             detail={title === "Git identity" && identityFailure?.failure ? `${detail} · ${identityFailure.failure}` : detail}
             detailClassName={title === "Git identity" && identityFailure ? "whitespace-normal break-words text-destructive" : undefined}

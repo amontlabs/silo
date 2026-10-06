@@ -36,7 +36,7 @@ export function NetworkPage({ computers, browser, network, error, actions, activ
           const state = networkPortState(computer, port, rowError)
           return <div key={key} role="row" className={`${grid} hover:bg-muted/55 focus-within:bg-muted/55`}>
             <span role="cell" className="font-mono font-medium">{port.port}</span><span role="cell" className="hidden min-w-0 font-mono text-muted-foreground sm:block">{address ? <Tooltip><TooltipTrigger asChild><span className="block truncate">{address}</span></TooltipTrigger><TooltipContent>{address}</TooltipContent></Tooltip> : "—"}</span>
-            <span role="cell" className={state === "Reachable" ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>{state}</span>
+            <span role="cell" className={state === "Reachable" ? "text-success" : "text-muted-foreground"}>{state}</span>
             <span role="cell"><ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} /></span>
             <span role="cell" className="flex justify-end gap-1"><NetworkPortRowActions controller={controller} computer={computer} port={port} state={state} browser={browser} host={host} /></span>
             {port.message && computer.state === "running" && <span role="cell" className={`col-span-full text-xs ${port.state === "unknown" ? "text-destructive" : "text-muted-foreground"}`}>{port.message}</span>}

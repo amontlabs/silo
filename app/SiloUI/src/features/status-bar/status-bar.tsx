@@ -32,7 +32,7 @@ function OperationIssue({ title, detail, actionLabel, actionText = "Details", to
       <ListRow
         icon={tone === "error"
           ? <ListRowIcon className="bg-destructive/10 text-destructive"><CircleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>
-          : <ListRowIcon className="bg-amber-500/10 text-amber-600 dark:text-amber-400"><TriangleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>}
+          : <ListRowIcon className="bg-warning/10 text-warning"><TriangleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>}
         title={title}
         detail={detail}
         detailClassName="whitespace-normal break-words"
@@ -223,7 +223,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   </span> : undefined}
                   detail={<span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span className="truncate" title={availability.busy ? activity?.title ?? computer.stateDetail : detail}>
-                      {availability.busy ? <span className="font-medium text-amber-700 dark:text-amber-400">{computer.lifecycleAction ? (computer.lifecycleAction === "restart" ? "Restarting…" : computer.lifecycleAction === "stop" ? "Stopping…" : "Starting…") : activity?.title ?? (computer.state === "starting" ? computer.stateDetail : "Working…")}</span> : <><ComputerStateLabel state={computer.state} />{detail && <span> · {detail}</span>}</>}
+                      {availability.busy ? <span className="font-medium text-warning">{computer.lifecycleAction ? (computer.lifecycleAction === "restart" ? "Restarting…" : computer.lifecycleAction === "stop" ? "Stopping…" : "Starting…") : activity?.title ?? (computer.state === "starting" ? computer.stateDetail : "Working…")}</span> : <><ComputerStateLabel state={computer.state} />{detail && <span> · {detail}</span>}</>}
                     </span>
                     {pendingSecrets.length > 0 && <SecretChangesLabel computer={configuration.name} state={computer.state} secrets={pendingSecrets} />}
                   </span>}

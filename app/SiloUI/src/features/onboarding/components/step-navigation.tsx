@@ -29,7 +29,7 @@ function StepStatus({ status, collapsed }: { status: PresentationStatus; collaps
     collapsed ? "absolute -top-1 -right-1 size-2 rounded-full bg-sidebar ring-2 ring-sidebar" : "size-3.5",
     status === "failed" && "text-destructive",
     status === "running" && "animate-spin text-foreground",
-    status === "succeeded" && "text-emerald-600 dark:text-emerald-400",
+    status === "succeeded" && "text-success",
   )} />
   return collapsed ? indicator : <span className="grid size-5 shrink-0 place-items-center">{indicator}</span>
 }

@@ -59,10 +59,10 @@ const attentionLabel = ({ errors, warnings }: SidebarAttention) => countLabel(er
 function AttentionMark({ attention, collapsed }: { attention: SidebarAttention; collapsed: boolean }) {
   const error = attention.errors > 0
   return collapsed
-    ? <span data-navigation-attention aria-hidden="true" className={cn("absolute top-1 right-1 size-1.5 rounded-full", error ? "bg-destructive" : "bg-amber-500")} />
+    ? <span data-navigation-attention aria-hidden="true" className={cn("absolute top-1 right-1 size-1.5 rounded-full", error ? "bg-destructive" : "bg-warning")} />
     : <span data-navigation-attention aria-hidden="true" className={cn(
       "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1 text-[10px] leading-none font-semibold tabular-nums",
-      error ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      error ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/20 bg-warning/10 text-warning",
     )}>{attention.errors + attention.warnings}</span>
 }
 
@@ -127,12 +127,12 @@ function NavigationButton({
         tone === "danger"
           ? "text-destructive hover:bg-destructive/[0.07] hover:text-destructive"
           : tone === "warning"
-            ? "text-amber-700 hover:bg-amber-500/[0.08] hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-400"
+            ? "text-warning hover:bg-warning/10 hover:text-warning"
           : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && (tone === "danger"
           ? "bg-destructive/10 font-medium text-destructive"
           : tone === "warning"
-            ? "bg-amber-500/10 font-medium text-amber-800 dark:text-amber-300"
+            ? "bg-warning/10 font-medium text-warning"
           : "bg-sidebar-accent font-medium text-sidebar-accent-foreground"),
         reserveDisclosure && "sidebar-primary-with-disclosure",
       )}
@@ -246,7 +246,7 @@ function SubNavigation<Section extends string>({
           {collapsed && attention?.section === id && <span
             role="status"
             aria-label={attentionLabel(attention)}
-            className={cn("absolute top-1 right-1 size-1.5 rounded-full", attention.errors > 0 ? "bg-destructive" : "bg-amber-500")}
+            className={cn("absolute top-1 right-1 size-1.5 rounded-full", attention.errors > 0 ? "bg-destructive" : "bg-warning")}
           />}
           {!collapsed && attention?.section === id && (
             <span className="flex shrink-0 items-center gap-1">
@@ -271,7 +271,7 @@ function SubNavigation<Section extends string>({
                       <span
                         role="status"
                         aria-label={warningsLabel(attention.warnings)}
-                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-amber-700 dark:text-amber-400"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-warning/20 bg-warning/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-warning"
                       >
                         {attention.warnings}
                       </span>

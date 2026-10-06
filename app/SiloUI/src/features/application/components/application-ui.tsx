@@ -6,8 +6,8 @@ import type { ComputerState } from "@/features/application/model/application-sou
 import type { ComputerDevice } from "@/features/application/model/connections"
 
 const computerStateStyles: Record<ComputerState, string> = {
-  running: "bg-emerald-500",
-  starting: "bg-amber-500",
+  running: "bg-success",
+  starting: "bg-warning",
   stopped: "bg-muted-foreground/55",
   failed: "bg-destructive",
 }
@@ -42,8 +42,8 @@ export function ComputerBadge({ name, state, device }: { name: string; state: Co
 }
 
 const computerStateLabelStyles: Record<ComputerState, string> = {
-  running: "text-emerald-700 dark:text-emerald-400",
-  starting: "text-amber-700 dark:text-amber-400",
+  running: "text-success",
+  starting: "text-warning",
   stopped: "text-muted-foreground",
   failed: "text-destructive",
 }

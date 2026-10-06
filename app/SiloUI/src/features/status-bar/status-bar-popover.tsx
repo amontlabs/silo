@@ -13,7 +13,7 @@ import type { StatusBarActions } from "./status-bar-types"
 
 function StatusBarIcon({ tone, reduceMotion }: { tone: ReturnType<typeof statusBarHealth>["tone"]; reduceMotion: boolean }) {
   const color = tone === "error" ? "text-destructive"
-    : tone === "warning" || tone === "busy" ? "text-amber-700 dark:text-amber-400"
+    : tone === "warning" || tone === "busy" ? "text-warning"
       : tone === "neutral" ? "text-muted-foreground" : "text-foreground"
   const Indicator = tone === "busy" ? LoaderCircle : tone === "error" ? CircleAlert : tone === "warning" ? TriangleAlert : null
   return (

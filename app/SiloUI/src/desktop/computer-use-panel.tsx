@@ -71,7 +71,7 @@ const APPROVAL_HINT = "Agents such as Claude Code and Codex use this computer's 
 function Problem({ message, title, tone = "error", actionLabel, onAction, actionDisabled, actionTitle, onDismiss }: {
   message: string; title?: string | null; tone?: "error" | "warning"; actionLabel?: string; onAction?: () => void; actionDisabled?: boolean; actionTitle?: string; onDismiss?: () => void
 }) {
-  return <div role={tone === "error" ? "alert" : "note"} className={tone === "error" ? "flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-destructive" : "flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400"}>
+  return <div role={tone === "error" ? "alert" : "note"} className={tone === "error" ? "flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-destructive" : "flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-warning"}>
     <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
     <span className="min-w-0 flex-1 truncate" title={title ?? message}>{message}</span>
     {onAction && <Button type="button" size="xs" variant="outline" disabled={actionDisabled} title={actionTitle} onClick={onAction}>{actionLabel}</Button>}

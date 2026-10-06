@@ -52,8 +52,8 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
           aria-live="polite"
           icon={<ListRowIcon className={cn(
             failed && "bg-destructive/10 text-destructive",
-            running && "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-            complete && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+            running && "bg-warning/10 text-warning",
+            complete && "bg-success/10 text-success",
           )}><StatusIcon status={progress.status} className="size-3.5" /></ListRowIcon>}
           title={<h3>{title}</h3>}
           detail={configurations.length === 0 ? "Continue setup without a computer. Add one from Computers whenever you’re ready." : <>{progress.currentComputer && <span className="font-medium">{progress.currentComputer} · </span>}{progress.currentMessage}</>}
@@ -91,7 +91,7 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
               iconState: state === "failed" ? "error" : "normal",
               badge: <span className={cn(
                 "inline-flex shrink-0 items-center gap-1 text-[10px] font-normal",
-                state === "failed" ? "text-destructive" : state === "working" ? "text-amber-700 dark:text-amber-400" : state === "ready" ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
+                state === "failed" ? "text-destructive" : state === "working" ? "text-warning" : state === "ready" ? "text-success" : "text-muted-foreground",
               )}>{state === "working" && <LoaderCircle className="size-2.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{computerStatusLabel[state]}</span>,
               detail: <span title={summary}>{summary}{status && state !== "ready" && status.detail !== "Waiting" ? ` · ${status.detail}` : ""}</span>,
               detailClassName: state === "failed" ? "whitespace-normal break-words" : undefined,

@@ -243,7 +243,7 @@ describe("migration complete: result of an export or import the upgrade interrup
     render(<RuntimeMigrationBoundary backend={createFixtureMigrationBackend(createFixturePreUpgradeBackup(), transfer)}><p>Normal application</p></RuntimeMigrationBoundary>)
     const result = await screen.findByRole("region", { name: "Export complete" })
     expect(result).toHaveTextContent("Silo verified this export after relaunching.")
-    expect(result).not.toHaveClass("border-amber-500/30")
+    expect(result).not.toHaveClass("border-warning/30")
   })
 
   it("does not read the result when the screen is not shown, so the application shows it", async () => {

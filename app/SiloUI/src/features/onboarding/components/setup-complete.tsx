@@ -33,7 +33,7 @@ export function SetupComplete({ configurations, githubSummary }: {
       <ListCard divided>
         <ListRow
           role="status"
-          icon={<ListRowIcon className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" aria-hidden="true"><Check className="size-3.5" /></ListRowIcon>}
+          icon={<ListRowIcon className="bg-success/10 text-success" aria-hidden="true"><Check className="size-3.5" /></ListRowIcon>}
           title={<h2 id="setup-complete-title">Setup complete</h2>}
           detail={`${configurations.length} ${configurations.length === 1 ? "computer is" : "computers are"} ready. Open Silo to get started.`}
           detailClassName="whitespace-normal"
