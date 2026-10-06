@@ -59,8 +59,8 @@ function ComputerUseProblems({ source, active }: { source: ApplicationSource; ac
     return snapshot.status?.state === "failed" || snapshot.loadError || snapshot.subscriptionError ? [{ ...entry, snapshot }] : []
   })
   if (problems.length === 0) return null
-  return <section aria-label="Computer use components" className="grid gap-3">
-    <h2 className="text-xs font-medium">Computer use components</h2>
+  return <section aria-label="Computer use tools" className="grid gap-3">
+    <h2 className="text-xs font-medium">Computer use tools</h2>
     <div className="grid gap-3 rounded-lg border p-3">
       <p className="text-xs text-muted-foreground">{CHATGPT_DOWNLOAD_NOTE}</p>
       <ul aria-label="Devices that need attention" className="grid gap-3">

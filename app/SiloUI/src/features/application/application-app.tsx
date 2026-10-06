@@ -424,9 +424,9 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       )}
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
-          <GeneralPage source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={(enabled) => { void updateSettings({ reduceMotion: enabled }) }} />
+          <GeneralPage source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={(enabled) => { void updateSettings({ reduceMotion: enabled }) }} active={visibleTab === "settings" && settingsSection === "general"} />
         </div>
-        <div hidden={settingsSection !== "connections"} className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6"><ConnectionsSettings source={source} actions={actions} active={visibleTab === "settings" && settingsSection === "connections"} /></div>
+        <div hidden={settingsSection !== "connections"} className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6"><ConnectionsSettings source={source} actions={actions} /></div>
         <div hidden={settingsSection !== "notifications"}><NotificationsPage /></div>
       </section>
     </ApplicationShell>

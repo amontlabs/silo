@@ -23,7 +23,24 @@ describe("computer editor keyboard", () => {
     expect(onConfigurationsChange).toHaveBeenCalledOnce()
   })
 
-  it("cancels with Escape", async () => {
+  it("keeps a changed draft when Escape is pressed", async () => {
+    const { user } = renderEditor()
+    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
+    await user.click(screen.getByRole("combobox", { name: "CPUs at start" }))
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("textbox", { name: "Computer name" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("textbox", { name: "Computer name" })).not.toBeInTheDocument()
+  })
+
+  it("does not submit with Enter while the stop confirmation is shown", async () => {
+    const { onConfigurationsChange, user } = renderEditor({ running: true })
+    await user.click(screen.getByRole("button", { name: "Stop and save…" }))
+    await user.keyboard("{Enter}")
+    expect(onConfigurationsChange).not.toHaveBeenCalled()
+  })
+
+  it("cancels an untouched editor with Escape", async () => {
     const { onConfigurationsChange, user } = renderEditor()
     await user.click(screen.getByRole("textbox", { name: "Computer name" }))
     await user.keyboard("{Escape}")

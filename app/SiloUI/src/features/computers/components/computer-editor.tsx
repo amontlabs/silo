@@ -245,15 +245,17 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     else onSave(builtInNewVm && startsWithComputer ? { ...draft, desktop: { startWithComputer: true } } : draft)
   }
 
-  // Escape cancels the edit unless it is already being dismissed by something else.
+  const initialDraft = useRef(editor.draft)
+  // Escape cancels only an untouched editor, so a keystroke never discards typed changes.
   function cancelOnEscape(event: React.KeyboardEvent) {
     if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || saving || stopPending) return
+    if (!sameComputerConfiguration(initialDraft.current, draft)) return
     event.preventDefault()
     onCancel()
   }
 
   return (
-    <form ref={container} noValidate className="grid min-w-0 gap-3 p-3" data-testid={`computer-editor-${draft.id}`} onSubmit={(event) => { event.preventDefault(); if (!saving && !deletedElsewhere && !blockedReason) save() }} onKeyDown={cancelOnEscape}>
+    <form ref={container} noValidate className="grid min-w-0 gap-3 p-3" data-testid={`computer-editor-${draft.id}`} onSubmit={(event) => { event.preventDefault(); if (!saving && !stopPending && !deletedElsewhere && !blockedReason) save() }} onKeyDown={cancelOnEscape}>
       <div className="flex min-w-0 items-center gap-2">
         <Monitor className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 text-xs font-semibold">Computer details</span>

@@ -59,7 +59,7 @@ function ManagementAddresses({ management }: { management: ConnectionsStatus }) 
   </div>
 }
 
-export function ConnectionsSettings({ source, actions }: { source: ApplicationSource; actions: ApplicationActions; active?: boolean }) {
+export function ConnectionsSettings({ source, actions }: { source: ApplicationSource; actions: ApplicationActions }) {
   return <div className="grid gap-6">
     {actions.connectDevice && <DevicesSection source={source} actions={actions} />}
   </div>

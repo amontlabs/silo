@@ -12,7 +12,7 @@ function source(connections: ApplicationSource["connections"]): ApplicationSourc
   return { ...applicationSourceForScenario("running"), connections, devices: [] }
 }
 
-describe("Computer use components", () => {
+describe("Computer use tools", () => {
   const HOST = "11111111-1111-4111-8111-111111111111"
   const OFFLINE = "22222222-2222-4222-8222-222222222222"
   const devices = [
@@ -31,7 +31,7 @@ describe("Computer use components", () => {
     </ComputerUseProvider>)
     return { reads, retry }
   }
-  const section = () => screen.queryByRole("region", { name: "Computer use components" })
+  const section = () => screen.queryByRole("region", { name: "Computer use tools" })
   const row = (name: string) => within(screen.getByRole("list", { name: "Devices that need attention" })).getByText(name).closest("li")!
 
   it("shows nothing while every device prepares ChatGPT for Linux, ready or not", async () => {
@@ -46,7 +46,7 @@ describe("Computer use components", () => {
 
   it("lists only the devices with a failed download, with the reason and the disclosure", async () => {
     settings({ local: { state: "ready", path: "/p", version: "1" }, [HOST]: { state: "failed", reason: "Silo could not reach OpenAI.", retryable: true } })
-    expect(await screen.findByRole("region", { name: "Computer use components" })).toBeVisible()
+    expect(await screen.findByRole("region", { name: "Computer use tools" })).toBeVisible()
     expect(within(row("Office Mac")).getByRole("alert")).toHaveTextContent("Silo could not reach OpenAI. Silo tries again automatically.")
     expect(screen.queryByText("This device")).not.toBeInTheDocument()
     expect(screen.getByText("Silo downloads ChatGPT for Linux from OpenAI so agents in your computers can use the Linux desktop.")).toBeVisible()
@@ -69,7 +69,7 @@ describe("Computer use components", () => {
 
   it("reveals the complete name of a device with a problem", async () => {
     settings({ local: { state: "ready", path: "/p", version: "1" }, [HOST]: { state: "failed", reason: "Offline.", retryable: true } })
-    await screen.findByRole("region", { name: "Computer use components" })
+    await screen.findByRole("region", { name: "Computer use tools" })
     expect(within(row("Office Mac")).getByText("Office Mac")).toHaveAttribute("title", "Office Mac")
   })
 
@@ -151,3 +151,16 @@ it("stops subscription recovery timers when device settings become inactive", as
 })
 
 
+
+it("does not read or subscribe to any device while inactive", async () => {
+  const read = vi.fn(async () => ({ state: "ready", path: "/p", version: "1" }))
+  const listen = vi.fn(async () => () => {})
+  const backend: ComputerUseBackend = {
+    readDesktopState: async () => ({}), setApproval: async () => ({}), setup: async () => ({}),
+    chatGptStatus: read, retry: async () => ({}), listenStatus: listen,
+  }
+  render(<ComputerUseProvider bridge={createComputerUseBridge(backend)}><ComputerUseSettings source={source(undefined)} active={false} /></ComputerUseProvider>)
+  await act(async () => { await Promise.resolve() })
+  expect(read).not.toHaveBeenCalled()
+  expect(listen).not.toHaveBeenCalled()
+})
