@@ -1,5 +1,5 @@
 ---
-"silo-ui": patch
+"silo-ui": minor
 ---
 
 - The computer editor saves with Enter and cancels with Escape, and shows the computer name rule before you save.

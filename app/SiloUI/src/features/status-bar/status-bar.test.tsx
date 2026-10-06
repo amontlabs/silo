@@ -72,6 +72,15 @@ describe("status bar", () => {
     expect(screen.getByRole("alert", { name: "Computer operation unavailable" })).toHaveTextContent("Local computers unavailable.")
   })
 
+  it("names the device in a remote computer's Stop confirmation", async () => {
+    const base = applicationSourceForScenario("complete")
+    const device = { id: "office", name: "office-mac", address: "office.local", connected: true, computerId: "vm-1" }
+    const { user } = setup({ computers: [{ ...base.computers[0]!, device, state: "running" }] })
+    await user.click(screen.getByRole("button", { name: "Actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Stop…" }))
+    expect(screen.getByText(/Stop dev on office-mac\?/)).toBeVisible()
+  })
+
   it("keeps a remote Start independent of same-named local guards (I-04)", async () => {
     const base = applicationSourceForScenario("complete")
     const device = { id: "office", name: "office-mac", address: "office.local", connected: true, computerId: "vm-1" }

@@ -265,24 +265,6 @@ export function useComputerEditing({
     setEditorResetToken(token => token + 1)
   }
 
-  async function remove(configuration: SetupComputerConfiguration) {
-    if (disabled || (isComputerRunning?.(configuration))) return
-    const busy = busyReason(configuration)
-    if (busy) { showActionFailure(`Could not delete ${configuration.name}`, busy, undefined, { native: false }); return }
-    beginOperation()
-    captureBaseline()
-    const baseline = baselineRef.current ?? undefined
-    if (onDeleteComputer) {
-      setCommitting(true)
-      try { await onDeleteComputer(baseline?.find(item => item.id === configuration.id) ?? configuration, baseline) }
-      catch (cause) { showActionFailure(`Could not delete ${configuration.name}`, cause, undefined, { native: false }) }
-      finally { setCommitting(false) }
-      return
-    }
-    const base = baseline ?? configurations
-    dispatchChange(configurationRequest(base.filter(({ id }) => id !== configuration.id)).computers, baseline ? scopedBaseline() : undefined)
-  }
-
   // Delete a configuration without the list's confirmation — the detail page confirms
   // in its own dialog, so it captures a fresh baseline and awaits the deletion here, letting
   // failures propagate to the dialog instead of the inline notice.
@@ -329,6 +311,6 @@ export function useComputerEditing({
     editorFocusRequest, setEditorFocusRequest,
     baselineRef,
     captureBaseline, beginOperation, scopedBaseline, dispatchChange,
-    startEdit, startAdd, startDuplicate, save, remove, reviewConflict, deleteComputerNow, deleteWithNotice,
+    startEdit, startAdd, startDuplicate, save, reviewConflict, deleteComputerNow, deleteWithNotice,
   }
 }

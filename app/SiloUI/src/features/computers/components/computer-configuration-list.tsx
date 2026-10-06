@@ -344,6 +344,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         delete: close => <DeleteComputerBody
                           displayName={deletionName}
                           details={presentation?.deleteDetails}
+                          draft={Boolean(isComputerCreated) && !isComputerCreated?.(configuration)}
                           onClose={close}
                           onDelete={() => deleteWithNotice(configuration)}
                         />,

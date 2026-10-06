@@ -97,3 +97,16 @@ it("closes the delete confirmation on one Escape after hovering its menu trigger
   expect(trigger).toHaveFocus()
   expect(save).not.toHaveBeenCalled()
 })
+
+it("asks to remove a computer that has not been created from setup", async () => {
+  const configuration = productionComputerDefaults[0]
+  const save = vi.fn()
+  const user = userEvent.setup()
+  render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={save} isComputerCreated={() => false} /></TooltipProvider>)
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Delete ${configuration.name}` }))
+  expect(await screen.findByText(`Remove ${configuration.name} from setup?`)).toBeVisible()
+  expect(screen.getByText("It has not been created yet, so no files are affected.")).toBeVisible()
+  await user.click(popoverButton("Remove"))
+  expect(save).toHaveBeenCalled()
+})
