@@ -115,9 +115,13 @@ fn request_header(
                 }
             }
             "cookie" => {
-                authenticated |= value
-                    .split(';')
-                    .any(|part| part.trim_matches([' ', '\t']) == format!("{cookie_name}={token}"));
+                let expected = format!("{cookie_name}={token}");
+                authenticated |= value.split(';').any(|part| {
+                    constant_time_eq(
+                        part.trim_matches([' ', '\t']).as_bytes(),
+                        expected.as_bytes(),
+                    )
+                });
             }
             "origin" => {
                 if value != format!("http://{expected_host}") {
@@ -170,6 +174,148 @@ fn request_header(
         websocket,
         header: forwarded,
     })
+}
+/// Compares secrets without an early exit on the first differing byte.
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= usize::from(
+            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
+        );
+    }
+    difference == 0
+}
+
+/// Longest upstream response head the proxy will rewrite.
+const MAX_RESPONSE_HEAD: usize = 32 * 1024;
+
+/// The policy every proxied HTTP response carries: the guest's page may load
+/// its own assets and open its own socket, but cannot reach any other host.
+fn content_security_policy(port: u16) -> String {
+    format!(
+        "default-src 'self' data: blob:; \
+         script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; \
+         worker-src 'self' blob:; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data: blob:; \
+         media-src 'self' data: blob:; \
+         font-src 'self' data:; \
+         connect-src 'self' ws://127.0.0.1:{port} blob: data:; \
+         frame-src 'self' blob:; \
+         form-action 'self'; \
+         base-uri 'none'; \
+         object-src 'none'"
+    )
+}
+
+/// Replaces any upstream Content-Security-Policy in a complete response head
+/// (status line through the blank line) with the proxy's own. Returns `None`
+/// for a head that is malformed or whose line endings a browser could read
+/// differently from this parser.
+fn rewrite_response_head(head: &[u8], port: u16) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(head).ok()?;
+    let body = text.strip_suffix("\r\n\r\n")?;
+    if body
+        .replace("\r\n", "")
+        .bytes()
+        .any(|b| b == b'\r' || b == b'\n' || b == 0)
+    {
+        return None;
+    }
+    let mut lines = body.split("\r\n");
+    let status = lines.next()?;
+    if !status.starts_with("HTTP/1.") {
+        return None;
+    }
+    let mut out = format!("{status}\r\n");
+    let mut dropping = false;
+    for line in lines {
+        if line.starts_with([' ', '\t']) {
+            if !dropping {
+                out.push_str(line);
+                out.push_str("\r\n");
+            }
+            continue;
+        }
+        let name = line.split_once(':').map_or(line, |(name, _)| name);
+        dropping = matches!(
+            name.trim_matches([' ', '\t']).to_ascii_lowercase().as_str(),
+            "content-security-policy" | "content-security-policy-report-only"
+        );
+        if !dropping {
+            out.push_str(line);
+            out.push_str("\r\n");
+        }
+    }
+    out.push_str(&format!(
+        "Content-Security-Policy: {}\r\n\r\n",
+        content_security_policy(port)
+    ));
+    Some(out.into_bytes())
+}
+
+/// Relays an upstream HTTP response, rewriting its head and passing the body
+/// through untouched.
+fn relay_response(
+    mut from: impl Stream,
+    mut to: impl Stream,
+    port: u16,
+    stop: Arc<AtomicBool>,
+    ended: Arc<AtomicBool>,
+    deadline: Option<Instant>,
+) {
+    let poll_interval = Duration::from_millis(250);
+    let _ = from.read_timeout(Some(poll_interval));
+    let _ = to.write_timeout(Some(Duration::from_secs(5)));
+    let mut buffered = Vec::new();
+    let mut bytes = [0; 8 * 1024];
+    let head_end = loop {
+        if let Some(at) = buffered.windows(4).position(|w| w == b"\r\n\r\n") {
+            break at + 4;
+        }
+        if buffered.len() > MAX_RESPONSE_HEAD {
+            bad_gateway(&mut to);
+            return;
+        }
+        if stop.load(Ordering::Acquire)
+            || ended.load(Ordering::Acquire)
+            || deadline.is_some_and(|at| Instant::now() >= at)
+        {
+            to.shutdown_write();
+            return;
+        }
+        match from.read(&mut bytes) {
+            Ok(0) => {
+                bad_gateway(&mut to);
+                return;
+            }
+            Ok(n) => buffered.extend_from_slice(&bytes[..n]),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(_) => {
+                bad_gateway(&mut to);
+                return;
+            }
+        }
+    };
+    let Some(head) = rewrite_response_head(&buffered[..head_end], port) else {
+        bad_gateway(&mut to);
+        return;
+    };
+    if to.write_all(&head).is_err() || to.write_all(&buffered[head_end..]).is_err() {
+        return;
+    }
+    relay(from, to, stop, ended, deadline);
+}
+fn bad_gateway(to: &mut impl Stream) {
+    let _ =
+        to.write_all(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    to.shutdown_write();
 }
 fn forward_body(
     mut from: impl Stream,
@@ -390,7 +536,11 @@ fn serve_inner(
             );
         }
     });
-    relay(server, client, stop, ended.clone(), deadline);
+    if header.websocket {
+        relay(server, client, stop, ended.clone(), deadline);
+    } else {
+        relay_response(server, client, port, stop, ended.clone(), deadline);
+    }
     ended.store(true, Ordering::Release);
     let _ = writer.join();
     Ok(())
@@ -1551,5 +1701,118 @@ mod tests {
         );
         assert!(reserved_request(&proxy, &target, true, b"late").starts_with("HTTP/1.1 403"));
         assert_guest_untouched(&upstream);
+    }
+
+    fn csp_values(head: &str) -> Vec<&str> {
+        head.split("\r\n")
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(name, _)| name.trim().eq_ignore_ascii_case("content-security-policy"))
+            .map(|(_, value)| value.trim())
+            .collect()
+    }
+
+    #[test]
+    fn response_heads_carry_only_the_proxy_policy() {
+        let upstream = "HTTP/1.1 200 OK\r\n\
+            content-security-policy: default-src *\r\n\
+            CONTENT-SECURITY-POLICY : connect-src *\r\n\
+            Content-Security-Policy-Report-Only: default-src *\r\n\
+            Content-Security-Policy: script-src *;\r\n\
+            \t img-src *\r\n\
+            Content-Type: text/html\r\n\
+            X-Folded: one\r\n\
+            \ttwo\r\n\r\n";
+        let head =
+            String::from_utf8(rewrite_response_head(upstream.as_bytes(), 4242).unwrap()).unwrap();
+        assert_eq!(csp_values(&head), [content_security_policy(4242)]);
+        assert!(!head.to_ascii_lowercase().contains("report-only"));
+        assert!(!head.contains("img-src *"));
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(head.contains("Content-Type: text/html\r\n"));
+        assert!(head.contains("X-Folded: one\r\n\ttwo\r\n"));
+        assert!(head.ends_with("\r\n\r\n"));
+        assert!(content_security_policy(4242).contains("connect-src 'self' ws://127.0.0.1:4242"));
+    }
+
+    #[test]
+    fn response_heads_without_a_policy_gain_one_and_ambiguous_heads_are_refused() {
+        let head = String::from_utf8(
+            rewrite_response_head(b"HTTP/1.1 304 Not Modified\r\nETag: x\r\n\r\n", 1).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(csp_values(&head).len(), 1);
+        for malformed in [
+            &b"HTTP/1.1 200 OK\r\nX: a\nContent-Security-Policy: default-src *\r\n\r\n"[..],
+            b"HTTP/1.1 200 OK\r\nX: a\rb\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nX: a\0b\r\n\r\n",
+            b"garbage\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nX: a\r\n",
+        ] {
+            assert!(rewrite_response_head(malformed, 1).is_none());
+        }
+    }
+
+    #[test]
+    fn constant_time_comparison_matches_equality() {
+        assert!(constant_time_eq(b"", b""));
+        assert!(constant_time_eq(b"token", b"token"));
+        assert!(!constant_time_eq(b"token", b"tokeN"));
+        assert!(!constant_time_eq(b"token", b"token2"));
+        assert!(!constant_time_eq(b"token2", b"token"));
+    }
+
+    #[test]
+    fn proxied_http_responses_get_the_policy_and_keep_their_bodies() {
+        for (method, response, body) in [
+            (
+                "GET",
+                &b"HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src *\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\nok\r\n0\r\n\r\n"[..],
+                "2\r\nok\r\n0\r\n\r\n",
+            ),
+            (
+                "HEAD",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n",
+                "",
+            ),
+            (
+                "GET",
+                b"HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n",
+                "",
+            ),
+        ] {
+            let (_directory, upstream, socket) = guest();
+            let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+            let worker = thread::spawn(move || {
+                let (mut stream, _) = upstream.accept().unwrap();
+                let mut data = Vec::new();
+                let mut byte = [0];
+                while !data.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    data.push(byte[0]);
+                }
+                // Deliver the head in two writes to exercise reassembly.
+                let split = 10;
+                stream.write_all(&response[..split]).unwrap();
+                stream.flush().unwrap();
+                thread::sleep(Duration::from_millis(50));
+                stream.write_all(&response[split..]).unwrap();
+            });
+            let mut socket = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            write!(
+                socket,
+                "{method} / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nCookie: {}={}\r\n\r\n",
+                proxy.port, proxy.cookie_name, proxy.token
+            )
+            .unwrap();
+            let mut received = String::new();
+            socket.read_to_string(&mut received).unwrap();
+            let (head, tail) = received.split_once("\r\n\r\n").unwrap();
+            assert_eq!(csp_values(head), [content_security_policy(proxy.port)]);
+            assert_eq!(tail, body);
+            worker.join().unwrap();
+        }
     }
 }
