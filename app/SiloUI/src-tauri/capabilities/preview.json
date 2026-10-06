@@ -26,6 +26,7 @@
     "allow-update-onboarding-draft",
     "allow-import-legacy-theme",
     "allow-flush-settings",
+    "allow-reset-protected-settings",
     "allow-begin-settings-flush",
     "allow-complete-settings-flush",
     "allow-read-system-integrations",

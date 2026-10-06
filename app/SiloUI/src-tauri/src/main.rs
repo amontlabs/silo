@@ -6,6 +6,7 @@ mod bridge_error;
 mod bundled_tools;
 mod channel;
 mod chatgpt_app;
+mod child_process;
 mod clipboard;
 #[cfg(test)]
 mod command_permissions_tests;
