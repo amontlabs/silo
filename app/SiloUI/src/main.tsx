@@ -12,6 +12,7 @@ import { ApplicationCatalogLoader } from "@/desktop/application-catalog-loader"
 import { createApplicationService } from "@/desktop/applications"
 import { createNativeDependencyStore } from "@/desktop/dependencies"
 import { desktopViewerRoute } from "@/desktop/linux-desktop-state"
+import { loadWithRetry } from "@/desktop/lazy-load"
 import { createProductionSource } from "@/desktop/production-source"
 import { createDesktopSettingsStore, connectSettingsLifecycle } from "@/desktop/settings"
 import { connectSystemIntegrationLifecycle, createDesktopSystemIntegrationStore } from "@/desktop/system-integrations"
@@ -21,8 +22,9 @@ import { SystemIntegrationProvider } from "@/features/preferences/system-integra
 import { initializeTheme } from "@/features/preferences/theme"
 
 // Each window shows one large tree. It loads on demand, in parallel with the native reads below.
-const loadSurface = () => import("@/desktop/production-surface")
-const loadViewer = () => import("@/desktop/linux-desktop-viewer")
+const loadSurface = loadWithRetry(() => import("@/desktop/production-surface"))
+const loadViewer = loadWithRetry(() => import("@/desktop/linux-desktop-viewer"))
+const loadFailure = () => import("@/desktop/startup-failure")
 
 const desktop = isTauri()
 const windowLabel = desktop ? getCurrentWindow().label : ""
@@ -45,21 +47,37 @@ if (import.meta.hot) import.meta.hot.dispose(() => {
   for (const stop of cleanup.splice(0).reverse()) stop()
 })
 
+/** The window's code could not load: say so with a Retry that loads it again. */
+async function showLoadFailure(error: unknown, retry: () => void) {
+  const message = `Silo startup failed: ${error instanceof Error ? error.message : String(error)}. No computer state changed.`
+  try {
+    const { StartupFailure } = await loadFailure()
+    if (!disposed) root.render(<StartupFailure message={message} retry={retry} />)
+  } catch {
+    if (!disposed) root.render(<p role="alert" className="p-6 text-sm">{message} Reopen Silo to try again.</p>)
+  }
+}
+
 async function start() {
   if (!desktop) {
-    const { Unavailable } = await loadSurface()
-    if (!disposed) root.render(<Unavailable message="Open Silo in the desktop app." />)
+    try {
+      const { Unavailable } = await loadSurface()
+      if (!disposed) root.render(<Unavailable message="Open Silo in the desktop app." />)
+    } catch (error) { await showLoadFailure(error, () => void start()) }
     return
   }
 
   const viewer = desktopViewerRoute()
   if (windowLabel.startsWith("desktop-") && viewer) {
-    const { NativeLinuxDesktopViewer } = await loadViewer()
-    if (!disposed) root.render(<NativeLinuxDesktopViewer {...viewer} />)
+    try {
+      const { NativeLinuxDesktopViewer } = await loadViewer()
+      if (!disposed) root.render(<NativeLinuxDesktopViewer {...viewer} />)
+    } catch (error) { await showLoadFailure(error, () => void start()) }
     return
   }
 
-  const surface = loadSurface()
+  let surface = loadSurface()
+  surface.catch(() => {})
   let rendered = false
   // Rust has already shown the window: paint before any native call. The status panel's
   // skeleton ships with its tree; the main window's shell is small enough to paint at once.
@@ -80,11 +98,10 @@ async function start() {
   // Only feeds the loading skeleton; its failure leaves the list empty.
   void production.loadConfiguration()
   // Live state does not depend on the settings, so it loads while they do.
-  void production.initialize().then(
-    // Both windows list open sites in their computer menus, which come from network services.
-    () => { track(production.watchNetwork({ ambient: !statusPanel })) },
-    (error: unknown) => console.error("Silo live updates:", error),
-  )
+  void production.initialize().catch((error: unknown) => console.error("Silo live updates:", error))
+  // Both windows list open sites in their computer menus, which come from network services.
+  // The watch starts reading once live updates are running, however that start turns out.
+  track(production.watchNetwork({ ambient: !statusPanel }))
   const systemIntegrations = createDesktopSystemIntegrationStore(settings)
   track(() => systemIntegrations.dispose())
   if (!statusPanel) {
@@ -101,9 +118,14 @@ async function start() {
 
   // The only steps a Retry repeats: settings must be ready before the app renders.
   async function boot() {
-    const [{ ProductionSurface }] = await Promise.all([surface, (async () => {
+    const [{ ProductionSurface }, initialCatalog] = await Promise.all([surface, (async () => {
       if (!statusPanel) await invoke("initialize_settings")
       await settings.initialize()
+      // Defaults resolve with the catalog; wait for it briefly so early actions carry the application path.
+      return Promise.race([
+        applicationService.read().catch((error: unknown) => { console.error("Silo applications:", error); return null }),
+        new Promise<null>(resolve => setTimeout(resolve, 1000, null)),
+      ])
     })()])
     if (disposed) return
     if (!started) {
@@ -115,8 +137,8 @@ async function start() {
     root.render(
       <StrictMode>
         <SettingsProvider store={settings}>
-          <ApplicationCatalogProvider service={applicationService}>
-            <ApplicationCatalogLoader />
+          <ApplicationCatalogProvider service={applicationService} initialCatalog={initialCatalog ?? undefined}>
+            {!initialCatalog && <ApplicationCatalogLoader />}
             {statusPanel || !computerUse || !preparation ? content : (
               <SystemIntegrationProvider store={systemIntegrations}>
                 <ComputerUseProvider bridge={computerUse}>
@@ -134,10 +156,10 @@ async function start() {
     void boot().catch(async (error: unknown) => {
       if (disposed) return
       const message = `Silo startup failed: ${error instanceof Error ? error.message : String(error)}. No computer state changed.`
-      const retry = () => { showLoading(); run() }
+      const retry = () => { surface = loadSurface(); surface.catch(() => {}); showLoading(); run() }
       const loaded = await surface.catch(() => null)
       if (disposed) return
-      if (!loaded) { root.render(<p role="alert" className="p-6 text-sm">{message}</p>); return }
+      if (!loaded) { await showLoadFailure(error, retry); return }
       const { Unavailable } = loaded
       if (!statusPanel) { root.render(<Unavailable message={message} retry={retry} retryLabel="Retry" />); return }
       const { StatusPanelUnavailable } = await import("@/desktop/application-loading")

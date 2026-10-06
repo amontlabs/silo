@@ -611,7 +611,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   function watchNetwork(options?: { ambient?: boolean }): () => void {
     const ambient = options?.ambient === true
     if (ambient) networkAmbientWatchers++; else networkWatchers++
-    void readNetwork()
+    // Before live updates start, the first refresh reads network services for the watcher.
+    if (live && !disposed) void readNetwork()
     let watching = true
     return () => { if (watching) { watching = false; if (ambient) networkAmbientWatchers--; else networkWatchers-- } }
   }
