@@ -4,15 +4,14 @@ import { invoke, isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import "./index.css"
+import { SiloWindow } from "@/components/silo-window"
 import { createComputerUseBridge, nativeComputerUseBackend } from "@/desktop/computer-use-bridge"
 import { createPreparationStore, nativePreparationBackend, PreparationProvider } from "@/desktop/preparation"
 import { ComputerUseProvider } from "@/desktop/computer-use-provider"
-import { createApplicationService, emptyApplicationCatalog } from "@/desktop/applications"
-import { StatusPanelUnavailable } from "@/desktop/application-loading"
+import { ApplicationCatalogLoader } from "@/desktop/application-catalog-loader"
+import { createApplicationService } from "@/desktop/applications"
 import { createNativeDependencyStore } from "@/desktop/dependencies"
 import { desktopViewerRoute } from "@/desktop/linux-desktop-state"
-import { NativeLinuxDesktopViewer } from "@/desktop/linux-desktop-viewer"
-import { ProductionSurface, StartupLoading, Unavailable } from "@/desktop/production-surface"
 import { createProductionSource } from "@/desktop/production-source"
 import { createDesktopSettingsStore, connectSettingsLifecycle } from "@/desktop/settings"
 import { connectSystemIntegrationLifecycle, createDesktopSystemIntegrationStore } from "@/desktop/system-integrations"
@@ -20,6 +19,10 @@ import { ApplicationCatalogProvider } from "@/features/preferences/application-c
 import { SettingsProvider } from "@/features/preferences/settings-store"
 import { SystemIntegrationProvider } from "@/features/preferences/system-integrations-store"
 import { initializeTheme } from "@/features/preferences/theme"
+
+// Each window shows one large tree. It loads on demand, in parallel with the native reads below.
+const loadSurface = () => import("@/desktop/production-surface")
+const loadViewer = () => import("@/desktop/linux-desktop-viewer")
 
 const desktop = isTauri()
 const windowLabel = desktop ? getCurrentWindow().label : ""
@@ -42,20 +45,33 @@ if (import.meta.hot) import.meta.hot.dispose(() => {
   for (const stop of cleanup.splice(0).reverse()) stop()
 })
 
-function start() {
+async function start() {
   if (!desktop) {
-    root.render(<Unavailable message="Open Silo in the desktop app." />)
+    const { Unavailable } = await loadSurface()
+    if (!disposed) root.render(<Unavailable message="Open Silo in the desktop app." />)
     return
   }
 
   const viewer = desktopViewerRoute()
   if (windowLabel.startsWith("desktop-") && viewer) {
-    root.render(<NativeLinuxDesktopViewer {...viewer} />)
+    const { NativeLinuxDesktopViewer } = await loadViewer()
+    if (!disposed) root.render(<NativeLinuxDesktopViewer {...viewer} />)
     return
   }
 
-  // Rust has already shown the window: paint before any native call.
-  root.render(<StartupLoading statusPanel={statusPanel} />)
+  const surface = loadSurface()
+  let rendered = false
+  // Rust has already shown the window: paint before any native call. The status panel's
+  // skeleton ships with its tree; the main window's shell is small enough to paint at once.
+  function showLoading() {
+    rendered = false
+    if (!statusPanel) {
+      root.render(<SiloWindow title="Silo" label="Silo"><span role="status" className="sr-only">Opening Silo…</span></SiloWindow>)
+      return
+    }
+    void surface.then(({ StartupLoading }) => { if (!disposed && !rendered) root.render(<StartupLoading statusPanel />) }, () => {})
+  }
+  showLoading()
   const dependencies = !statusPanel ? createNativeDependencyStore() : null
   dependencies?.retry()
   if (dependencies) track(() => dependencies.dispose())
@@ -63,6 +79,11 @@ function start() {
   void connectSettingsLifecycle(settings, !statusPanel, () => production.drainSetup()).then(track)
   // Only feeds the loading skeleton; its failure leaves the list empty.
   void production.loadConfiguration()
+  // Live state does not depend on the settings, so it loads while they do.
+  void production.initialize().then(
+    () => { if (statusPanel) track(production.watchNetwork()) },
+    (error: unknown) => console.error("Silo live updates:", error),
+  )
   const systemIntegrations = createDesktopSystemIntegrationStore(settings)
   track(() => systemIntegrations.dispose())
   if (!statusPanel) {
@@ -73,50 +94,56 @@ function start() {
   // Resolved defaults are local to each webview's store, not saved settings.
   // Both windows must discover them; the provider refreshes them on focus.
   const applicationService = createApplicationService(settings)
-  const computerUse = createComputerUseBridge(nativeComputerUseBackend)
-  const preparation = createPreparationStore(nativePreparationBackend)
+  const computerUse = statusPanel ? null : createComputerUseBridge(nativeComputerUseBackend)
+  const preparation = statusPanel ? null : createPreparationStore(nativePreparationBackend)
   let started = false
 
   // The only steps a Retry repeats: settings must be ready before the app renders.
   async function boot() {
-    if (!statusPanel) await invoke("initialize_settings")
-    await settings.initialize()
-    const applicationCatalog = await applicationService.read().catch((error: unknown) => {
-      console.error("Silo applications:", error)
-      return emptyApplicationCatalog
-    })
+    const [{ ProductionSurface }] = await Promise.all([surface, (async () => {
+      if (!statusPanel) await invoke("initialize_settings")
+      await settings.initialize()
+    })()])
     if (disposed) return
     if (!started) {
       started = true
       track(initializeTheme(settings))
-      void production.initialize().catch((error: unknown) => console.error("Silo live updates:", error))
     }
+    const content = <ProductionSurface source={production} dependencyStore={dependencies} statusPanel={statusPanel} />
+    rendered = true
     root.render(
       <StrictMode>
         <SettingsProvider store={settings}>
-          <SystemIntegrationProvider store={systemIntegrations}>
-            <ApplicationCatalogProvider initialCatalog={applicationCatalog} service={applicationService}>
-              <ComputerUseProvider bridge={computerUse}>
-                <PreparationProvider store={preparation}>
-                  <ProductionSurface source={production} dependencyStore={dependencies} statusPanel={statusPanel} />
-                </PreparationProvider>
-              </ComputerUseProvider>
-            </ApplicationCatalogProvider>
-          </SystemIntegrationProvider>
+          <ApplicationCatalogProvider service={applicationService}>
+            <ApplicationCatalogLoader />
+            {statusPanel || !computerUse || !preparation ? content : (
+              <SystemIntegrationProvider store={systemIntegrations}>
+                <ComputerUseProvider bridge={computerUse}>
+                  <PreparationProvider store={preparation}>{content}</PreparationProvider>
+                </ComputerUseProvider>
+              </SystemIntegrationProvider>
+            )}
+          </ApplicationCatalogProvider>
         </SettingsProvider>
       </StrictMode>,
     )
   }
 
   function run() {
-    void boot().catch((error: unknown) => {
+    void boot().catch(async (error: unknown) => {
       if (disposed) return
       const message = `Silo startup failed: ${error instanceof Error ? error.message : String(error)}. No computer state changed.`
-      const retry = () => { root.render(<StartupLoading statusPanel={statusPanel} />); run() }
-      root.render(statusPanel ? <StatusPanelUnavailable message={message} retry={retry} /> : <Unavailable message={message} retry={retry} retryLabel="Retry" />)
+      const retry = () => { showLoading(); run() }
+      const loaded = await surface.catch(() => null)
+      if (disposed) return
+      if (!loaded) { root.render(<p role="alert" className="p-6 text-sm">{message}</p>); return }
+      const { Unavailable } = loaded
+      if (!statusPanel) { root.render(<Unavailable message={message} retry={retry} retryLabel="Retry" />); return }
+      const { StatusPanelUnavailable } = await import("@/desktop/application-loading")
+      if (!disposed) root.render(<StatusPanelUnavailable message={message} retry={retry} />)
     })
   }
   run()
 }
 
-start()
+void start()
