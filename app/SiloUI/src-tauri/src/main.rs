@@ -189,6 +189,7 @@ fn main() {
             settings::update_onboarding_draft,
             settings::import_legacy_theme,
             settings::flush_settings,
+            settings::reset_protected_settings,
             settings::begin_settings_flush,
             settings::complete_settings_flush,
             settings::cancel_settings_flush,

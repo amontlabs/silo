@@ -53,6 +53,7 @@ export function createDesktopSettingsStore(initialSettings: SettingsPatch, main:
     updateSettings: async (patch) => nativeSnapshotSchema.parse(await invoke("update_settings", { patch })),
     updateOnboardingDraft: async (draft) => nativeSnapshotSchema.parse(await invoke("update_onboarding_draft", { draft })),
     flush: () => invoke("flush_settings"),
+    resetProtected: async () => nativeSnapshotSchema.parse(await invoke("reset_protected_settings")),
   }
   return createSettingsStore(backend, initialSettings)
 }

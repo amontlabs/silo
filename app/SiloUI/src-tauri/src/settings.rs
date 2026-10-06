@@ -108,6 +108,22 @@ impl SettingsStore {
         self.snapshot.clone()
     }
 
+    /// Move a write-protected settings file aside and start again from defaults.
+    fn reset_protected(&mut self) -> Result<Snapshot, String> {
+        if self.protected_error.is_none() {
+            return Err("Settings are not write-protected".into());
+        }
+        let Some(path) = self.path.clone() else {
+            return Err("There is no settings file to reset".into());
+        };
+        set_aside_document(&path)
+            .map_err(|error| format!("The settings file could not be set aside: {error}"))?;
+        let revision = self.snapshot.revision + 1;
+        *self = Self::load(Some(path));
+        self.snapshot.revision = revision;
+        Ok(self.snapshot())
+    }
+
     fn update(&mut self, patch: Map<String, Value>) -> Result<Snapshot, String> {
         if patch
             .iter()
@@ -233,7 +249,41 @@ fn write_document(path: &Path, document: &Map<String, Value>) -> io::Result<()> 
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|error| error.error)?;
     // Rename is atomic; syncing the directory makes its new entry durable as well.
-    File::open(parent)?.sync_all()
+    // The file is already in place, so a failure here is not a failed save.
+    if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
+        eprintln!("Silo settings: the settings directory could not be synced: {error}");
+    }
+    Ok(())
+}
+
+/// Move an unusable settings file aside, keeping it for recovery.
+fn set_aside_document(path: &Path) -> io::Result<()> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "settings.json".into());
+    for attempt in 0..100u32 {
+        let suffix = if attempt == 0 {
+            String::new()
+        } else {
+            format!("-{attempt}")
+        };
+        let target = path.with_file_name(format!("{name}.invalid-{stamp}{suffix}"));
+        if target.exists() {
+            continue;
+        }
+        return match fs::rename(path, &target) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        };
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "no free name for the saved copy of the settings file",
+    ))
 }
 
 fn bounded_string(value: &Value, max: usize, allow_empty: bool) -> bool {
@@ -528,6 +578,10 @@ impl SettingsState {
 /// How long Quit waits for the webview to acknowledge its settings flush.
 const FRONTEND_FLUSH_FALLBACK: Duration = Duration::from_secs(2);
 
+/// How long an acknowledged flush may stay unfinished before Quit completes natively,
+/// for a webview that disappears between acknowledging and finishing.
+const FRONTEND_FLUSH_WATCHDOG: Duration = Duration::from_secs(30);
+
 fn session_flush_wait(deadline: Instant, now: Instant) -> Duration {
     // Keep at least half the remaining session budget for native shutdown.
     FRONTEND_FLUSH_FALLBACK.min(deadline.saturating_duration_since(now) / 2)
@@ -563,7 +617,6 @@ impl ShutdownState {
         state.generation += 1;
         Some(state.generation)
     }
-    #[cfg(test)]
     fn generation(&self) -> u64 {
         self.0
             .lock()
@@ -826,6 +879,15 @@ pub async fn import_legacy_theme(
         }
     })
     .await
+}
+
+#[tauri::command]
+pub async fn reset_protected_settings(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<Snapshot, String> {
+    require_main(window.label())?;
+    change(app, |store| store.reset_protected()).await
 }
 
 #[tauri::command]
@@ -1182,7 +1244,13 @@ pub fn answer_quit_request(
 #[tauri::command]
 pub fn begin_settings_flush(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     require_main(window.label())?;
-    if app.state::<ShutdownState>().begin_flush() {
+    let state = app.state::<ShutdownState>();
+    if state.begin_flush() {
+        let generation = state.generation();
+        std::thread::spawn(move || {
+            std::thread::sleep(FRONTEND_FLUSH_WATCHDOG);
+            finish_exit(&app, true, Some(generation));
+        });
         Ok(())
     } else {
         Err("A settings flush is not awaiting acknowledgment".into())
@@ -1234,6 +1302,52 @@ mod tests {
         assert!(draft["unfinishedComputerEditor"]["draft"]
             .get("kind")
             .is_none());
+    }
+
+    #[test]
+    fn reset_moves_an_unusable_file_aside_and_restores_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let newer = br#"{"schemaVersion": 2, "settings": {"theme": "dark"}}"#;
+        fs::write(&path, newer).unwrap();
+        let mut store = SettingsStore::load(Some(path.clone()));
+        assert!(store.snapshot().write_protected);
+        let before = store.snapshot().revision;
+
+        let snapshot = store.reset_protected().unwrap();
+        assert!(!snapshot.write_protected);
+        assert_eq!(snapshot.save_error, None);
+        assert!(snapshot.settings.is_empty());
+        assert!(snapshot.revision > before);
+        assert!(!path.exists());
+        let kept: Vec<_> = fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("settings.json.invalid-"));
+        assert_eq!(fs::read(&kept[0]).unwrap(), newer);
+
+        store
+            .update(json!({"theme": "light"}).as_object().unwrap().clone())
+            .unwrap();
+        assert!(SettingsStore::load(Some(path)).protected_error.is_none());
+    }
+
+    #[test]
+    fn reset_refuses_healthy_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut store = SettingsStore::load(Some(path.clone()));
+        store
+            .update(json!({"theme": "dark"}).as_object().unwrap().clone())
+            .unwrap();
+        assert!(store.reset_protected().is_err());
+        assert!(path.exists());
     }
 
     #[test]
@@ -2027,6 +2141,31 @@ mod tests {
         assert!(!state.claim_exit_for(false, Some(old)));
         assert!(state.begin_flush());
         assert!(state.claim_exit(true));
+    }
+
+    #[test]
+    fn flush_watchdog_finishes_only_its_own_stalled_flush() {
+        let state = ShutdownState::default();
+        assert!(state.request());
+        let stalled = state.generation();
+        assert!(state.begin_flush());
+        assert!(
+            state.claim_exit_for(true, Some(stalled)),
+            "a flush that never completes can be finished natively"
+        );
+
+        let state = ShutdownState::default();
+        assert!(state.request());
+        let old = state.generation();
+        assert!(state.begin_flush());
+        state.cancel();
+        assert!(state.request());
+        assert!(state.begin_flush());
+        assert!(
+            !state.claim_exit_for(true, Some(old)),
+            "a watchdog from a cancelled attempt cannot finish a newer one"
+        );
+        assert!(state.claim_exit_for(true, Some(state.generation())));
     }
 
     #[test]
