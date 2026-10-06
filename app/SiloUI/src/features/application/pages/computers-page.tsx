@@ -1,12 +1,11 @@
-import { Logs, type LogWindow } from "./logs-page"
+import type { LogWindow } from "./logs-page"
 import { visibleText } from "@/lib/visible-text"
 import { computerTarget } from "@/features/application/model/connections"
-import { NetworkPage } from "./network-page"
 import { FolderActions } from "@/features/application/components/folder-actions"
 import { ComputerFileTree } from "@/features/application/components/computer-file-tree"
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
-import { useMemo, useState } from "react"
+import { memo, Suspense, useMemo, useState } from "react"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Loader2, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
 import { DisclosureHeader } from "@/components/disclosure-header"
@@ -28,6 +27,15 @@ import { commitLabel } from "@/features/application/model/repository-push"
 import { computerAvailability } from "@/features/application/model/computer-availability"
 import { showActionFailure } from "@/lib/operation-toast"
 import { cn } from "@/lib/utils"
+import { useStableCallback } from "@/lib/use-stable-callback"
+import { lazyPage } from "@/features/application/components/lazy-page"
+
+const logsPage = lazyPage(() => import("./logs-page"), "Logs")
+const networkPage = lazyPage(() => import("./network-page"), "NetworkPage")
+/** Section pages loaded on demand; fetched ahead once the application is idle. */
+export const computerSectionPages = [logsPage, networkPage]
+const Logs = logsPage.Component
+const NetworkPage = networkPage.Component
 
 function ComputerFilterBar({
   computers,
@@ -104,7 +112,7 @@ function Files({
         <section
           aria-label="Repositories"
           className={cn(
-            "collapsible-motion flex min-h-0 min-w-0 max-h-full flex-col overflow-hidden transition-[max-height] duration-200 ease-out lg:h-full lg:max-h-none lg:pr-5 lg:transition-none",
+            "collapsible-motion flex min-h-0 min-w-0 max-h-full flex-col overflow-hidden transition-[max-height] duration-100 ease-out lg:h-full lg:max-h-none lg:pr-5 lg:transition-none",
             repositoriesOpen ? fileTreeOpen ? "max-h-[50%] shrink-0" : "flex-1" : "max-h-8 shrink-0",
           )}
           data-files-pane="repositories"
@@ -165,7 +173,7 @@ function Files({
         <section
           aria-label="File tree"
           className={cn(
-            "collapsible-motion flex min-h-0 min-w-0 max-h-full flex-1 flex-col overflow-hidden transition-[max-height] duration-200 ease-out lg:h-full lg:max-h-none lg:border-l lg:border-border lg:pl-5 lg:transition-none",
+            "collapsible-motion flex min-h-0 min-w-0 max-h-full flex-1 flex-col overflow-hidden transition-[max-height] duration-100 ease-out lg:h-full lg:max-h-none lg:border-l lg:border-border lg:pl-5 lg:transition-none",
             !fileTreeOpen && "max-h-8",
           )}
           data-files-pane="file-tree"
@@ -209,16 +217,83 @@ const activityCategoryPresentation = {
   system: { label: "System", icon: Wrench },
 } as const
 
+const activityTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" })
+const formatActivityTime = (occurredAt: string) => activityTimeFormat.format(new Date(occurredAt))
+
+const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { item: ApplicationActivity; computer: ApplicationComputer | undefined; onShowLogs: (activity: ApplicationActivity) => void }) {
+  const category = activityCategoryPresentation[item.category]
+  const CategoryIcon = category.icon
+  return (
+    <ListRow
+      role="listitem"
+      aria-busy={item.status === "running" || undefined}
+      data-activity-id={item.id}
+      data-activity-status={item.status}
+      className={cn(
+        "hover:bg-muted/35 select-text",
+        item.status === "running" && "bg-primary/[0.025]",
+        item.tone === "warning" && "bg-amber-500/[0.035]",
+        item.tone === "danger" && "bg-destructive/[0.025]",
+      )}
+      icon={
+        <ListRowIcon aria-hidden="true" className={cn(
+          item.tone === "success" && "bg-emerald-500/10",
+          item.tone === "warning" && "bg-amber-500/10",
+          item.tone === "danger" && "bg-destructive/10",
+        )}>
+          {item.status === "running"
+            ? <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+            : item.tone === "danger"
+              ? <CircleAlert className="size-3.5 text-destructive" />
+              : item.tone === "warning"
+                ? <TriangleAlert className="size-3.5 text-amber-600 dark:text-amber-400" />
+                : item.tone === "success"
+                  ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  : <Activity className="size-3.5" />}
+        </ListRowIcon>
+      }
+      title={<div className="min-w-0 break-words">{item.title}</div>}
+      detailClassName="whitespace-normal"
+      detail={
+        <div className="min-w-0 space-y-1" data-activity-content>
+          {/* A failure's detail can carry raw runtime output: keep it behind Details. */}
+          {item.tone === "danger" && (item.detail || item.diagnostic)
+            ? <ErrorDetails message={item.detail} diagnostic={item.diagnostic} />
+            : <p className="whitespace-pre-wrap break-words">{item.detail}</p>}
+          {computer && item.tone === "danger" && <Button size="xs" variant="outline" onClick={() => onShowLogs(item)}>Show logs</Button>}
+          {item.status === "running" && item.progress !== undefined && (
+            <div className="flex max-w-sm items-center gap-2 pt-1">
+              <Progress value={item.progress * 100} aria-label={item.progressLabel ?? `${item.title} progress`} />
+              <span className="w-8 shrink-0 text-right text-[10px] tabular-nums">{Math.round(item.progress * 100)}%</span>
+            </div>
+          )}
+        </div>
+      }
+      actions={
+        <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1" data-activity-meta>
+          <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{formatActivityTime(item.occurredAt)}</time>
+          <div className="flex flex-wrap justify-end gap-1">
+            {item.computer && (computer
+              ? <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />
+              : <StatusBadge indicator={<Box className="size-2.5" />} aria-label={`Computer: ${item.computer}`}>{item.computer}</StatusBadge>)}
+            <StatusBadge indicator={<CategoryIcon className="size-2.5" />} aria-label={`Category: ${category.label}`}>{category.label}</StatusBadge>
+          </div>
+        </div>
+      }
+    />
+  )
+})
+
 function ActivityLog({ computers, sourceActivities, filtered, onShowLogs }: { computers: ApplicationComputer[]; sourceActivities: ApplicationActivity[]; filtered: boolean; onShowLogs: (activity: ApplicationActivity) => void }) {
   const [selectedCategories, setSelectedCategories] = useState<Set<ApplicationActivityCategory>>(() => new Set())
-  const computersByTarget = new Map(computers.map((computer) => [computerTarget(computer), computer]))
+  const computersByTarget = useMemo(() => new Map(computers.map((computer) => [computerTarget(computer), computer])), [computers])
   // Only a computer filter hides entries; without one, a deleted computer's events stay visible.
-  const allActivities = [...sourceActivities]
+  const allActivities = useMemo(() => sourceActivities
     .filter(({ computer }) => !filtered || !computer || computersByTarget.has(computer))
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
-  const activities = selectedCategories.size === 0
+    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt)), [sourceActivities, filtered, computersByTarget])
+  const activities = useMemo(() => selectedCategories.size === 0
     ? allActivities
-    : allActivities.filter(({ category }) => selectedCategories.has(category))
+    : allActivities.filter(({ category }) => selectedCategories.has(category)), [allActivities, selectedCategories])
 
   if (computers.length === 0 && allActivities.length === 0) return <EmptyState icon={<Activity />} title="No recent activity" description="Computer and system activity will appear here." />
 
@@ -240,71 +315,7 @@ function ActivityLog({ computers, sourceActivities, filtered, onShowLogs }: { co
 
       {activities.length > 0 ? (
         <ListCard divided className="max-h-full min-h-0 overflow-y-auto overscroll-contain" role="list" aria-label="Recent activity">
-          {activities.map((item) => {
-            const category = activityCategoryPresentation[item.category]
-            const CategoryIcon = category.icon
-            const computer = item.computer ? computersByTarget.get(item.computer) : undefined
-            return (
-              <ListRow
-                key={item.id}
-                role="listitem"
-                aria-busy={item.status === "running" || undefined}
-                data-activity-id={item.id}
-                data-activity-status={item.status}
-                className={cn(
-                  "hover:bg-muted/35 select-text",
-                  item.status === "running" && "bg-primary/[0.025]",
-                  item.tone === "warning" && "bg-amber-500/[0.035]",
-                  item.tone === "danger" && "bg-destructive/[0.025]",
-                )}
-                icon={
-                  <ListRowIcon aria-hidden="true" className={cn(
-                    item.tone === "success" && "bg-emerald-500/10",
-                    item.tone === "warning" && "bg-amber-500/10",
-                    item.tone === "danger" && "bg-destructive/10",
-                  )}>
-                    {item.status === "running"
-                      ? <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
-                      : item.tone === "danger"
-                        ? <CircleAlert className="size-3.5 text-destructive" />
-                        : item.tone === "warning"
-                          ? <TriangleAlert className="size-3.5 text-amber-600 dark:text-amber-400" />
-                          : item.tone === "success"
-                            ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-                            : <Activity className="size-3.5" />}
-                  </ListRowIcon>
-                }
-                title={<div className="min-w-0 break-words">{item.title}</div>}
-                detailClassName="whitespace-normal"
-                detail={
-                  <div className="min-w-0 space-y-1" data-activity-content>
-                    {/* A failure's detail can carry raw runtime output: keep it behind Details. */}
-                    {item.tone === "danger" && (item.detail || item.diagnostic)
-                      ? <ErrorDetails message={item.detail} diagnostic={item.diagnostic} />
-                      : <p className="whitespace-pre-wrap break-words">{item.detail}</p>}
-                    {computer && item.tone === "danger" && <Button size="xs" variant="outline" onClick={() => onShowLogs(item)}>Show logs</Button>}
-                    {item.status === "running" && item.progress !== undefined && (
-                      <div className="flex max-w-sm items-center gap-2 pt-1">
-                        <Progress value={item.progress * 100} aria-label={item.progressLabel ?? `${item.title} progress`} />
-                        <span className="w-8 shrink-0 text-right text-[10px] tabular-nums">{Math.round(item.progress * 100)}%</span>
-                      </div>
-                    )}
-                  </div>
-                }
-                actions={
-                  <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1" data-activity-meta>
-                    <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{new Date(item.occurredAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" })}</time>
-                    <div className="flex flex-wrap justify-end gap-1">
-                      {item.computer && (computer
-                        ? <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />
-                        : <StatusBadge indicator={<Box className="size-2.5" />} aria-label={`Computer: ${item.computer}`}>{item.computer}</StatusBadge>)}
-                      <StatusBadge indicator={<CategoryIcon className="size-2.5" />} aria-label={`Category: ${category.label}`}>{category.label}</StatusBadge>
-                    </div>
-                  </div>
-                }
-              />
-            )
-          })}
+          {activities.map((item) => <ActivityRow key={item.id} item={item} computer={item.computer ? computersByTarget.get(item.computer) : undefined} onShowLogs={onShowLogs} />)}
         </ListCard>
       ) : (
         <EmptyState
@@ -382,6 +393,16 @@ export function ComputersPage({
     () => selectedComputerIds.size === 0 ? computers : computers.filter(({ configuration }) => selectedComputerIds.has(configuration.id)),
     [computers, selectedComputerIds],
   )
+  const showActivityLogs = useStableCallback((activity: ApplicationActivity) => {
+    const computer = computers.find(item => computerTarget(item) === activity.computer)
+    if (computer) onComputerFilterChange(new Set([computer.configuration.id]))
+    const time = new Date(activity.occurredAt).getTime()
+    setLogWindow({ since: new Date(time - 5 * 60000).toISOString(), until: new Date(time + 5 * 60000).toISOString() })
+    onLogQueryChange("")
+    onSectionChange("logs")
+  })
+  // The logs reload when the set of computers changes, not when it is reordered or refreshed.
+  const logTargetsKey = useMemo(() => visibleComputers.map(computerTarget).sort().join("\n"), [visibleComputers])
   // An empty filter means every computer, so an empty list means there are none yet: offer to
   // create one. Activity still shows system events and those of deleted computers.
   const hasComputers = computers.length > 0
@@ -402,16 +423,9 @@ export function ComputersPage({
     <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
       {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
-      {section === "logs" && <Logs key={JSON.stringify(visibleComputers.map(computerTarget))} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} />}
-      {section === "network" && <NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} />}
-      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={activity => {
-        const computer = computers.find(item => computerTarget(item) === activity.computer)
-        if (computer) onComputerFilterChange(new Set([computer.configuration.id]))
-        const time = new Date(activity.occurredAt).getTime()
-        setLogWindow({ since: new Date(time - 5 * 60000).toISOString(), until: new Date(time + 5 * 60000).toISOString() })
-        onLogQueryChange("")
-        onSectionChange("logs")
-      }} />}
+      {section === "logs" && <Suspense fallback={null}><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></Suspense>}
+      {section === "network" && <Suspense fallback={null}><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></Suspense>}
+      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={showActivityLogs} />}
     </div>
   )
 }

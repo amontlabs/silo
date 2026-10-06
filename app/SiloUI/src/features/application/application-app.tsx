@@ -7,7 +7,7 @@ import { updateCommands } from "@/features/updates/update-commands"
 import { useAppMenu } from "@/desktop/app-menu"
 import { UpdateNotice } from "@/features/updates/updates"
 import { createDirectoryStore } from "@/features/application/model/directory-store"
-import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { BackupController } from "@/features/application/model/backup-source"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
@@ -24,17 +24,16 @@ import { useApplicationNavigation, type ApplicationInitialRoute } from "@/featur
 import { defaultStartupComputerIds } from "@/features/application/model/startup-computers"
 import { AlphaNotice } from "@/features/application/components/alpha-notice"
 import { EditorIncludeNotice } from "@/features/application/components/editor-include-notice"
-import { ConnectionsSettings } from "@/features/application/components/connections-settings"
-import { GeneralPage } from "@/features/application/pages/general-page"
-import { GitHubPage } from "@/features/application/pages/github-page"
-import { NotificationsPage } from "@/features/application/pages/notifications-page"
 import { OverviewPage, type ComputerPageRequest } from "@/features/application/pages/overview-page"
 import { useComputerTransfer } from "@/features/application/components/computer-transfer"
-import { SecretsPage } from "@/features/application/pages/secrets-page"
+import { ConnectionsSettings } from "@/features/application/components/connections-settings"
+import { lazyPage, preloadWhenIdle } from "@/features/application/components/lazy-page"
+import { PanelContent } from "@/features/application/components/panel-content"
 import { SystemIssuePage } from "@/features/application/pages/system-issue-page"
 import { FileTransfersProvider } from "@/features/application/components/use-file-transfers"
-import { ComputersPage } from "@/features/application/pages/computers-page"
+import { ComputersPage, computerSectionPages } from "@/features/application/pages/computers-page"
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
+import { useStableCallback } from "@/lib/use-stable-callback"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
@@ -85,6 +84,27 @@ function navigationLoadingState(source: ApplicationSource, githubBusy: boolean, 
   }
 }
 
+const githubPage = lazyPage(() => import("@/features/application/pages/github-page"), "GitHubPage")
+const secretsPage = lazyPage(() => import("@/features/application/pages/secrets-page"), "SecretsPage")
+const generalPage = lazyPage(() => import("@/features/application/pages/general-page"), "GeneralPage")
+const notificationsPage = lazyPage(() => import("@/features/application/pages/notifications-page"), "NotificationsPage")
+const secondaryPages = [githubPage, secretsPage, generalPage, notificationsPage, ...computerSectionPages]
+
+// Each page re-renders only for the parts of the source it reads.
+const GitHubPageView = memo(githubPage.Component, (a, b) => a.source.github === b.source.github
+  && a.source.computers === b.source.computers && a.actions === b.actions && a.onBusyChange === b.onBusyChange)
+const SecretsPageView = memo(secretsPage.Component, (a, b) => a.source.secrets === b.source.secrets
+  && a.source.computers === b.source.computers && a.onSaveSecret === b.onSaveSecret
+  && a.onRemoveSecret === b.onRemoveSecret && a.onRetrySecret === b.onRetrySecret)
+const GeneralPageView = memo(generalPage.Component, (a, b) => a.source.preferences === b.source.preferences
+  && a.source.computers === b.source.computers && a.source.devices === b.source.devices && a.active === b.active
+  && a.applicationPreferences === b.applicationPreferences && a.onApplicationPreferencesChange === b.onApplicationPreferencesChange && a.reduceMotion === b.reduceMotion
+  && a.onReduceMotionChange === b.onReduceMotionChange)
+const ConnectionsSettingsView = memo(ConnectionsSettings, (a, b) => a.actions === b.actions
+  && a.source.devices === b.source.devices && a.source.devicesError === b.source.devicesError
+  && a.source.connections === b.source.connections && a.source.connectionsError === b.source.connectionsError)
+const NotificationsPageView = notificationsPage.Component
+
 // Request tokens only need to be unique: each one is consumed once by the page it opens.
 let requestTokens = 0
 const nextRequestToken = () => ++requestTokens
@@ -100,14 +120,17 @@ type ApplicationAppProps = {
 }
 
 export function ApplicationApp(props: ApplicationAppProps) {
-  return <SettingsProvider initialSettings={{
-    ...props.source.preferences,
-    startupComputerIds: props.source.preferences.startupComputerIds ?? defaultStartupComputerIds(props.source.computers),
-  }}><ApplicationContent {...props} /></SettingsProvider>
+  const { preferences, computers } = props.source
+  const initialSettings = useMemo(() => ({
+    ...preferences,
+    startupComputerIds: preferences.startupComputerIds ?? defaultStartupComputerIds(computers),
+  }), [preferences, computers])
+  return <SettingsProvider initialSettings={initialSettings}><ApplicationContent {...props} /></SettingsProvider>
 }
 
 function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation }: ApplicationAppProps) {
   useBackendNotices()
+  useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
   const installingUpdate = updates?.snapshot?.phase === "installing"
     || Boolean(updates?.pending && (updates.snapshot?.phase === "ready" || updates.snapshot?.retryAction === "install"))
@@ -134,7 +157,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
 
   const { settings, updateSettings } = useSettings()
   const { reduceMotion } = settings
-  const applicationPreferences: ApplicationPreferenceSelection = {
+  const applicationPreferences = useMemo<ApplicationPreferenceSelection>(() => ({
     terminal: settings.terminal,
     editor: settings.editor,
     browser: settings.browser,
@@ -144,7 +167,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     ...(settings.terminalPath && { terminalPath: settings.terminalPath }),
     ...(settings.editorPath && { editorPath: settings.editorPath }),
     ...(settings.browserPath && { browserPath: settings.browserPath }),
-  }
+  }), [settings])
   const activeRuntimeRepair = source.runtimeRepair
   const initialComputerId = initialRoute?.computer ? resolveComputerId(initialRoute.computer) : undefined
   const navigation = useApplicationNavigation(Boolean(activeRuntimeRepair), initialRoute && { ...initialRoute, computer: initialComputerId })
@@ -165,13 +188,14 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   )
   const visibleTab = activeTab
   const visibleComputerSection = computerSection
-  const applicationSource = {
+  const preferences = useMemo(() => ({ ...source.preferences, ...settings }), [source.preferences, settings])
+  const applicationSource = useMemo<ApplicationSource>(() => ({
     ...source,
     computers,
     computerConfigurationOperation,
     repositoryPushOperations,
-    preferences: { ...source.preferences, ...settings },
-  }
+    preferences,
+  }), [source, computers, computerConfigurationOperation, repositoryPushOperations, preferences])
   const transfer = useComputerTransfer(backup, { source: applicationSource, openComputer: (id) => navigation.openComputer(id) })
 
   useEffect(() => {
@@ -200,9 +224,10 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     setRepositoryPushOperations(source.repositoryPushOperations)
   }, [source.repositoryPushOperations])
 
-  function changeApplicationPreferences(next: ApplicationPreferenceSelection) {
+  const changeApplicationPreferences = useStableCallback((next: ApplicationPreferenceSelection) => {
     void updateSettings(applicationPreferenceChanges(applicationPreferences, next))
-  }
+  })
+  const changeReduceMotion = useCallback((enabled: boolean) => { void updateSettings({ reduceMotion: enabled }) }, [updateSettings])
 
   function updateConfigurations(configurations: SetupComputerConfiguration[], baseline?: SetupComputerConfiguration[]) {
     const candidate = { schemaVersion: 1 as const, computers: configurations }
@@ -240,16 +265,17 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     setRepositoryPushOperations((current) => current.filter((operation) => operation.computer !== computer || operation.repositoryPath !== repositoryPath))
   }, [actions])
 
+  const resolvePushComputer = useStableCallback((target: string) => {
+    const configuration = computers.find(computer => computerTarget(computer) === target)?.configuration
+    return configuration ? { id: configuration.id, name: configuration.name } : undefined
+  })
   useLifecycleToasts(applicationSource, actions)
   useRepositoryPushToasts(repositoryPushOperations, {
     onPush: pushRepository,
     onDismiss: dismissRepositoryPush,
     queue: source.operationQueue,
     onCancel: actions.cancelOperation,
-    resolveComputer: target => {
-      const configuration = computers.find(computer => computerTarget(computer) === target)?.configuration
-      return configuration ? { id: configuration.id, name: configuration.name } : undefined
-    },
+    resolveComputer: resolvePushComputer,
   })
 
   function resolveComputerId(value: string) {
@@ -267,7 +293,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     forgetComputers((computer) => known.has(computer))
   }, [source.computers, computerConfigurationOperation, forgetComputers])
 
-  function navigateCommand(route: ApplicationInitialRoute) {
+  const navigateCommand = useStableCallback((route: ApplicationInitialRoute) => {
     const wantsSection = Boolean(route.computerSection && route.computerSection !== "overview")
     // A computer without a detail section deep-links into that computer's overview page.
     if (route.computer && !wantsSection) { navigation.openComputer(resolveComputerId(route.computer), route.computerTab); return }
@@ -279,7 +305,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     if (route.computerSection || route.computer) navigation.selectComputerSection(route.computerSection ?? "overview")
     else if (route.settingsSection) navigation.selectSettingsSection(route.settingsSection)
     else if (route.tab) navigation.selectTab(route.tab)
-  }
+  })
 
   const navigateRequested = useEffectEvent(navigateCommand)
   useEffect(() => {
@@ -288,20 +314,37 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     if (routeRequest) navigateRequested(routeRequest)
   }, [routeRequest])
 
+  const configurationFailed = computerConfigurationOperation?.status === "failed"
+  const overviewActions = useMemo<ApplicationActions>(() => ({ ...actions, dismissComputerConfigurationError: () => {
+    if (!configurationFailed) return
+    actions.dismissComputerConfigurationError()
+    setComputerConfigurationOperation(null)
+  } }), [actions, configurationFailed, setComputerConfigurationOperation])
   const canCreateComputer = computerConfigurationOperation === null
   const canImport = !backupBusy
   const canCheckUpdates = Boolean(updates && !updates.pending && !["checking", "downloading", "installing"].includes(updates.snapshot?.phase ?? ""))
-  function requestNewComputer() {
+  const requestNewComputer = useStableCallback(() => {
     navigation.selectComputerSection("overview")
     setNewComputerRequest(nextRequestToken())
-  }
-  function requestOnComputerPage(computerId: string, request: ComputerCommandRequest) {
+  })
+  const requestOnComputerPage = useStableCallback((computerId: string, request: ComputerCommandRequest) => {
     navigation.openComputer(computerId)
     setComputerRequest({ token: nextRequestToken(), computerId, request })
-  }
+  })
 
   // The review popover anchors to the computer list's Add button, so show the list first.
-  const openImport = () => { navigation.selectComputerSection("overview"); navigation.closeComputer(); void transfer.beginImport() }
+  const openImport = useStableCallback(() => { navigation.selectComputerSection("overview"); navigation.closeComputer(); void transfer.beginImport() })
+  const exportComputerByName = useStableCallback((name: string) => { void transfer.exportComputer(name) })
+  const openGeneralSettings = useStableCallback(() => navigation.selectSettingsSection("general"))
+  const computerAttention = useMemo(() => computerAttentionCounts(applicationSource), [applicationSource])
+  const navigationLoading = useMemo(() => navigationLoadingState(applicationSource, githubBusy, backupBusy), [applicationSource, githubBusy, backupBusy])
+  const commands = useMemo(() => [...applicationCommands(applicationSource, actions, navigateCommand, {
+    onImportComputer: canImport ? openImport : undefined,
+    onNewComputer: canCreateComputer ? requestNewComputer : undefined,
+    onExportComputer: canImport ? exportComputerByName : undefined,
+    onComputerRequest: requestOnComputerPage,
+  }), ...updateCommands(updates, openGeneralSettings)],
+  [applicationSource, actions, navigateCommand, canImport, canCreateComputer, openImport, requestNewComputer, exportComputerByName, requestOnComputerPage, updates, openGeneralSettings])
   const nativeMenu = useAppMenu({ ready: true, busy: installingUpdate,
     canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward,
     canCreateComputer, canImport, canCheckUpdates, sidebarCollapsed,
@@ -347,8 +390,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       computerSection={visibleComputerSection}
       settingsSection={settingsSection}
       systemIssueStatus={activeRuntimeRepair?.status ?? null}
-      computerAttention={computerAttentionCounts(applicationSource)}
-      navigationLoading={navigationLoadingState(applicationSource, githubBusy, backupBusy)}
+      computerAttention={computerAttention}
+      navigationLoading={navigationLoading}
       onTabChange={navigation.selectTab}
       onComputerSectionChange={navigation.selectComputerSection}
       onSettingsSectionChange={navigation.selectSettingsSection}
@@ -357,12 +400,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       onGoBack={navigation.goBack}
       onGoForward={navigation.goForward}
       reduceMotion={reduceMotion}
-      commandMenu={<ApplicationCommandMenu nativeShortcuts={nativeMenu} openRequest={searchRequest} disabled={installingUpdate} commands={[...applicationCommands(applicationSource, actions, navigateCommand, {
-        onImportComputer: canImport ? openImport : undefined,
-        onNewComputer: canCreateComputer ? requestNewComputer : undefined,
-        onExportComputer: canImport ? (name) => { void transfer.exportComputer(name) } : undefined,
-        onComputerRequest: requestOnComputerPage,
-      }), ...updateCommands(updates, () => navigation.selectSettingsSection("general"))]} />}
+      commandMenu={<ApplicationCommandMenu nativeShortcuts={nativeMenu} openRequest={searchRequest} disabled={installingUpdate} commands={commands} />}
     >
       {/* One toast reflects computer-changing operations wherever the user is, so progress and
           Cancel never vanish while the work continues. It renders nothing inline. */}
@@ -380,11 +418,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
             onCloseComputer={() => navigation.closeComputer()}
             onSelectComputerTab={(tab) => navigation.selectComputerTab(tab)}
             onNavigate={navigateCommand}
-            actions={{ ...actions, dismissComputerConfigurationError: () => {
-            if (computerConfigurationOperation?.status !== "failed") return
-            actions.dismissComputerConfigurationError()
-            setComputerConfigurationOperation(null)
-          } }} onConfigurationsChange={updateConfigurations} />
+            actions={overviewActions} onConfigurationsChange={updateConfigurations} />
         ) : (
           <ComputersPage
             notifyOperations={false}
@@ -414,9 +448,15 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
         )}
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">
-        <GitHubPage source={applicationSource} actions={actions} onBusyChange={setGitHubBusy} />
+        <PanelContent active={visibleTab === "github"}>
+          <GitHubPageView source={applicationSource} actions={actions} onBusyChange={setGitHubBusy} />
+        </PanelContent>
       </section>
-      <section id="application-panel-secrets" role="region" aria-labelledby="application-nav-secrets" hidden={visibleTab !== "secrets"}><SecretsPage source={applicationSource} onSaveSecret={actions.saveSecret} onRemoveSecret={actions.removeSecret} onRetrySecret={actions.retrySecret} /></section>
+      <section id="application-panel-secrets" role="region" aria-labelledby="application-nav-secrets" hidden={visibleTab !== "secrets"}>
+        <PanelContent active={visibleTab === "secrets"}>
+          <SecretsPageView source={applicationSource} onSaveSecret={actions.saveSecret} onRemoveSecret={actions.removeSecret} onRetrySecret={actions.retrySecret} />
+        </PanelContent>
+      </section>
       {activeRuntimeRepair && (
         <section id="application-panel-system" role="region" aria-labelledby="application-nav-system" hidden={visibleTab !== "system"}>
           <SystemIssuePage issue={activeRuntimeRepair} actions={actions} />
@@ -424,10 +464,18 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       )}
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
-          <GeneralPage source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={(enabled) => { void updateSettings({ reduceMotion: enabled }) }} active={visibleTab === "settings" && settingsSection === "general"} />
+          <PanelContent active={visibleTab === "settings" && settingsSection === "general"}>
+            <GeneralPageView source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} active={visibleTab === "settings" && settingsSection === "general"} />
+          </PanelContent>
         </div>
-        <div hidden={settingsSection !== "connections"} className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6"><ConnectionsSettings source={source} actions={actions} /></div>
-        <div hidden={settingsSection !== "notifications"}><NotificationsPage /></div>
+        <div hidden={settingsSection !== "connections"} className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
+          <PanelContent active={visibleTab === "settings" && settingsSection === "connections"}>
+            <ConnectionsSettingsView source={source} actions={actions} />
+          </PanelContent>
+        </div>
+        <div hidden={settingsSection !== "notifications"}>
+          <PanelContent active={visibleTab === "settings" && settingsSection === "notifications"}><NotificationsPageView /></PanelContent>
+        </div>
       </section>
     </ApplicationShell>
     </FileTransfersProvider>

@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useState, useSyncExternalStore, type ReactNode } from "react"
+import { createContext, createElement, useContext, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { onboardingDraftSchema, type OnboardingDraft } from "@/features/onboarding/model/onboarding-draft"
 import { defaultSettings, readSettingsOverrides, settingsPatchSchema, type Settings, type SettingsPatch } from "./model/settings"
 
@@ -258,13 +258,45 @@ export function SettingsProvider({ store, initialSettings, children }: { store?:
 }
 
 export function useSettings(initialSettings?: SettingsPatch) {
+  const store = useSettingsStore(initialSettings)
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush, canResetProtected: store.canResetProtected, resetProtected: store.resetProtected }
+}
+
+/** The settings store in context, or a private in-memory one when no provider exists. */
+export function useSettingsStore(initialSettings?: SettingsPatch) {
   const inherited = useContext(SettingsContext)
   const [local] = useState(() => {
     const value = createMemorySettingsStore()
     value.updateDefaults(initialSettings ?? {})
     return value
   })
-  const store = inherited ?? local
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush, canResetProtected: store.canResetProtected, resetProtected: store.resetProtected }
+  return inherited ?? local
+}
+
+/**
+ * Subscribes to a derived value of the settings view. The component re-renders only when
+ * the selection changes under `isEqual` (reference equality by default).
+ */
+export function useSettingsSelector<T>(select: (view: SettingsView) => T, isEqual: (a: T, b: T) => boolean = Object.is, initialSettings?: SettingsPatch): T {
+  const store = useSettingsStore(initialSettings)
+  const memo = useRef<{ view: SettingsView; value: T } | null>(null)
+  const getSelection = () => {
+    const view = store.getSnapshot()
+    const previous = memo.current
+    if (previous && previous.view === view) return previous.value
+    const value = select(view)
+    if (previous && isEqual(previous.value, value)) {
+      memo.current = { view, value: previous.value }
+      return previous.value
+    }
+    memo.current = { view, value }
+    return value
+  }
+  return useSyncExternalStore(store.subscribe, getSelection)
+}
+
+export function shallowEqual<T extends Record<string, unknown>>(a: T, b: T) {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]))
 }

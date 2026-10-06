@@ -149,7 +149,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   await user.click(filters.getByRole("combobox", { name: "Filter computers" }))
   await user.click(screen.getByRole("option", { name: "personal" }))
   await user.click(computerSections.getByRole("button", { name: "Logs" }))
-  const logs = panel.getByRole("table", { name: "Logs" })
+  const logs = await panel.findByRole("table", { name: "Logs" })
   expect(logs.closest('[data-slot="card"]')).toBeNull()
   expect(logs).toHaveClass("max-h-full", "min-h-0", "overflow-hidden")
   expect(logs).not.toHaveClass("flex-1")
@@ -185,7 +185,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
 
   await user.click(computerSections.getByRole("button", { name: "Network" }))
   expect(panel.queryByRole("region", { name: "Network for dev" })).not.toBeInTheDocument()
-  expect(panel.getByText("No ports")).toBeVisible()
+  expect(await panel.findByText("No ports")).toBeVisible()
 
   await user.click(computerSections.getByRole("button", { name: "Activity" }))
   const activity = panel.getByRole("list", { name: "Recent activity" })
@@ -277,7 +277,7 @@ it("shows one truthful network table and uses the selected browser for opening p
   await application.user.click(computerSections.getByRole("button", { name: "Network" }))
 
   const panel = within(appPanel("Computers"))
-  const network = panel.getByRole("table", { name: "Network" })
+  const network = await panel.findByRole("table", { name: "Network" })
   expect(network.closest('[data-slot="card"]')).toBeNull()
   expect(network).toHaveClass("min-h-0")
   expect(network).not.toHaveClass("flex-1")

@@ -176,7 +176,7 @@ describe("logs table", () => {
     fireEvent.scroll(viewport())
     expect(properties.onLoadOlder).toHaveBeenCalledTimes(1)
     view.rerender(<LogsTable {...properties} hasOlder loadingOlder />)
-    expect(screen.getByText("record 0")).toBeInTheDocument()
+    expect(screen.getByText("record 199")).toBeInTheDocument()
     expect(screen.getByRole("table").querySelectorAll('[data-log-skeleton]')).toHaveLength(1)
     fireEvent.scroll(viewport())
     expect(properties.onLoadOlder).toHaveBeenCalledTimes(1)
@@ -185,6 +185,17 @@ describe("logs table", () => {
     measure(520, 20_832)
     fireEvent.scroll(viewport(), { target: { scrollTop: 20_000 } })
     expect(properties.onLoadOlder).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports plain scrolling without notifying the owner and renders the rows at the new offset", () => {
+    const properties = props(rows(200))
+    render(<LogsTable {...properties} />)
+    measure(520, 10_432)
+    expect(screen.getByText("record 0")).toBeInTheDocument()
+    fireEvent.scroll(viewport(), { target: { scrollTop: 5000 } })
+    expect(properties.onScrollTopChange).toHaveBeenLastCalledWith(5000, false)
+    expect(screen.queryByText("record 0")).not.toBeInTheDocument()
+    expect(screen.getByText("record 96")).toBeInTheDocument()
   })
 
   it("keeps short result sets visible when a previous scroll offset exceeds their height", () => {
