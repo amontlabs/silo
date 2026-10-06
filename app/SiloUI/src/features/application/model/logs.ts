@@ -40,6 +40,10 @@ export type LogEntry = z.infer<typeof logEntrySchema>
 export type LogPage = z.infer<typeof logPageSchema>
 export type LogLoader = (request: LogQuery) => Promise<LogPage>
 export const LOG_ROW_HEIGHT = 52
+/** Identifies a record across devices and computers; also keys its expanded state. */
+export function logEntryKey(entry: Pick<LogEntry, "deviceId" | "computerId" | "id">): string {
+  return `${entry.deviceId}\u0000${entry.computerId}\u0000${entry.id}`
+}
 export function logIdentity(computer: ApplicationComputer): Pick<LogQuery, "computerId" | "deviceId"> {
   return { computerId: computer.device?.computerId ?? computer.configuration.id, ...(computer.device && { deviceId: computer.device.id }) }
 }

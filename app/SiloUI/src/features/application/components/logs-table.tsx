@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ComputerBadge } from "./application-ui"
 import type { ApplicationComputer } from "../model/application-source"
-import { formatLog, LOG_ROW_HEIGHT as ROW_HEIGHT, type LogEntry } from "../model/logs"
+import { formatLog, logEntryKey, LOG_ROW_HEIGHT as ROW_HEIGHT, type LogEntry } from "../model/logs"
 
 export interface LogRow { entry: LogEntry; computer: ApplicationComputer }
 interface LogsTableProps {
@@ -15,7 +15,8 @@ interface LogsTableProps {
   hasOlder: boolean
   active: boolean
   scrollTop: number
-  onScrollTopChange: (scrollTop: number) => void
+  /** `notify: false` reports plain scrolling, which needs no re-render of the owner. */
+  onScrollTopChange: (scrollTop: number, notify?: boolean) => void
   onLoadOlder: () => void
   expandedRows: ReadonlyMap<string, number>
   onExpandedRowsChange: (update: (current: ReadonlyMap<string, number>) => ReadonlyMap<string, number>) => void
@@ -25,7 +26,7 @@ const HEADER_HEIGHT = 32
 const OVERSCAN = 8
 const PREFETCH_DISTANCE = ROW_HEIGHT * 6
 const ESTIMATED_DETAILS_HEIGHT = 120
-function rowKey({ entry }: LogRow) { return JSON.stringify([entry.deviceId, entry.computerId, entry.id]) }
+function rowKey({ entry }: LogRow) { return logEntryKey(entry) }
 
 function rowAtOffset(offsets: number[], offset: number) {
   let low = 0, high = offsets.length - 1
@@ -72,7 +73,7 @@ function LogRecord({ row, rowIndex, open, onOpenChange, onHeightChange }: {
       </tr>
       <tr role="row" aria-rowindex={open ? rowIndex + 1 : undefined} aria-hidden={!open}>
         <td role="cell" colSpan={5} className="max-w-0 p-0">
-          <CollapsibleContent role="region" aria-label={`Log details from ${computer.configuration.name} at ${time}`} className="collapsible-content-motion">
+          <CollapsibleContent role="region" aria-label={`Log details from ${computer.configuration.name} at ${time}`} className="overflow-hidden">
             <div className="border-b border-border bg-muted/20 px-3 py-3">
               <p className="mb-2 text-[10px] text-muted-foreground">{entry.occurredAt}{entry.guestTimestamp ? " (time reported by the computer)" : ""} · {entry.source}{entry.session ? ` · Session ${entry.session}` : ""}</p>
               <pre role="group" tabIndex={0} aria-label={`Log message from ${computer.configuration.name} at ${time}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 select-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">{entry.line}</pre>
@@ -102,6 +103,12 @@ export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrol
   const viewport = useRef<HTMLDivElement>(null)
   const requestedRows = useRef<LogRow[] | undefined>(undefined)
   const [viewportHeight, setViewportHeight] = useState(520)
+  // The window of rendered rows follows the scroll position; state changes only when the first visible row does.
+  const [windowTop, setWindowTop] = useState(scrollTop)
+  const [seenScrollTop, setSeenScrollTop] = useState(scrollTop)
+  if (seenScrollTop !== scrollTop) { setSeenScrollTop(scrollTop); setWindowTop(scrollTop) }
+  const liveTop = useRef(scrollTop)
+  useLayoutEffect(() => { liveTop.current = scrollTop }, [scrollTop])
   const keys = useMemo(() => rows.map(rowKey), [rows])
   const layout = useMemo(() => {
     const offsets = [0], positions: number[] = []
@@ -115,7 +122,8 @@ export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrol
     return { offsets, positions, rowCount: keys.length + details + 1 }
   }, [keys, expandedRows])
   function preserveAnchor(index: number, delta: number) {
-    if (index < rowAtOffset(layout.offsets, Math.max(0, scrollTop - HEADER_HEIGHT))) onScrollTopChange(Math.max(0, scrollTop + delta))
+    const top = viewport.current?.scrollTop ?? liveTop.current
+    if (index < rowAtOffset(layout.offsets, Math.max(0, top - HEADER_HEIGHT))) onScrollTopChange(Math.max(0, top + delta))
   }
   function toggleRow(key: string, index: number, open: boolean) {
     preserveAnchor(index, (open ? 1 : -1) * ((expandedRows.get(key) ?? ROW_HEIGHT + ESTIMATED_DETAILS_HEIGHT) - ROW_HEIGHT))
@@ -157,12 +165,19 @@ export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrol
   }, [])
   useEffect(() => { measure() }, [active, hasOlder, loading, loadingOlder, rows, layout])
 
+  function scrolled(top: number) {
+    liveTop.current = top
+    onScrollTopChange(top, false)
+    const firstRow = (offset: number) => rowAtOffset(layout.offsets, Math.max(0, offset - HEADER_HEIGHT))
+    setWindowTop(current => firstRow(current) === firstRow(top) ? current : top)
+  }
+
   const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + OVERSCAN * 2
-  const start = Math.max(0, Math.min(rows.length - visibleCount, rowAtOffset(layout.offsets, Math.max(0, scrollTop - HEADER_HEIGHT)) - OVERSCAN))
+  const start = Math.max(0, Math.min(rows.length - visibleCount, rowAtOffset(layout.offsets, Math.max(0, windowTop - HEADER_HEIGHT)) - OVERSCAN))
   const visible = rows.slice(start, start + visibleCount)
   return <div role="table" aria-label="Logs" aria-busy={loading || loadingOlder} aria-rowcount={loading ? undefined : layout.rowCount} className="flex max-h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-border text-xs">
     {(loading || loadingOlder) && <span role="status" className="sr-only">{loading ? "Loading logs" : "Loading older logs"}</span>}
-    <div ref={viewport} onScroll={event => onScrollTopChange(event.currentTarget.scrollTop)} style={{ overflowAnchor: "none" }} className="min-h-0 overflow-x-auto overflow-y-auto overscroll-contain bg-card" data-table-scroll="logs">
+    <div ref={viewport} onScroll={event => scrolled(event.currentTarget.scrollTop)} style={{ overflowAnchor: "none" }} className="min-h-0 overflow-x-auto overflow-y-auto overscroll-contain bg-card" data-table-scroll="logs">
       <table role="presentation" className="w-full min-w-[40rem] border-collapse text-left">
         <thead role="rowgroup" className="sticky top-0 z-10 bg-muted">
           <tr role="row" aria-rowindex={1} style={{ height: HEADER_HEIGHT }} className="shrink-0 border-b border-border font-medium text-muted-foreground">
