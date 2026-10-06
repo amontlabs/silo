@@ -558,7 +558,7 @@ it("preserves notification and general preferences across app sections", async (
   const settingsNavigation = within(navigation.getByRole("group", { name: "Settings sections" }))
   await user.click(settingsNavigation.getByRole("button", { name: "Notifications" }))
   const settings = within(appPanel("Settings"))
-  await user.click(settings.getByRole("switch", { name: "Enable notifications" }))
+  await user.click(await settings.findByRole("switch", { name: "Enable notifications" }))
   expect(settings.getByRole("switch", { name: "Unexpected computer changes" })).toBeDisabled()
 
   await user.click(settingsNavigation.getByRole("button", { name: "General" }))

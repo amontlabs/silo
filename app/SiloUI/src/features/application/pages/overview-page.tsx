@@ -46,7 +46,7 @@ import { SecretChangesLabel } from "@/features/computers/components/secret-chang
 import { computerBusyReason, computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 import { nextComputerOrder, computerOrderKey, computerOrderRanks } from "@/features/computers/model/computer-order"
-import { useSettings } from "@/features/preferences/settings-store"
+import { useSettingsSelector, useSettingsStore } from "@/features/preferences/settings-store"
 
 /** A command palette request carried out on a computer's page. */
 export interface ComputerPageRequest {
@@ -357,7 +357,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // The computer editing callbacks, shared by the list and the detail page's in-place editor
   // and delete dialog so both commit, delete, and validate through exactly the same paths.
   // This device's own order of the list, local and remote computers alike.
-  const { settings: { computerOrder }, updateSettings } = useSettings()
+  const { updateSettings } = useSettingsStore()
+  const computerOrder = useSettingsSelector((view) => view.settings.computerOrder)
   const orderRanks = computerOrderRanks(computerOrder)
   const orderRank = (configuration: SetupComputerConfiguration) => {
     const computer = computers.get(configuration.id)

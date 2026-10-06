@@ -33,7 +33,7 @@ it("preserves unsaved Git identity and pending repository choices during source 
   const { actions, user, rerender } = renderApplication("running", source)
   await user.click(within(appNavigation()).getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
-  const name = github.getByLabelText("Git name for dev")
+  const name = await github.findByLabelText("Git name for dev")
   await user.clear(name)
   await user.type(name, "Unfinished Author")
   rerender(<ApplicationPreview source={structuredClone(source)} actions={actions} />)
@@ -52,7 +52,7 @@ it("applies repository changes immediately and commits identity fields on blur",
   await user.click(within(appNavigation()).getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
 
-  const name = github.getByLabelText("Git name for playgrounds")
+  const name = await github.findByLabelText("Git name for playgrounds")
   await user.clear(name)
   await user.type(name, "Morgan Example")
   expect(actions.saveGitHubConfiguration).not.toHaveBeenCalled()

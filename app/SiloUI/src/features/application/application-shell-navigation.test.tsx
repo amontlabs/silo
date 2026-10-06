@@ -190,7 +190,7 @@ it("collapses the sidebar to labelled icons and keeps every destination usable",
   }
   await user.click(navigation.getByRole("button", { name: "Settings" }))
   await user.click(navigation.getByRole("button", { name: "Notifications" }))
-  expect(within(appPanel("Settings")).getByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
+  expect(await within(appPanel("Settings")).findByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
   await user.click(screen.getByRole("button", { name: "Expand sidebar" }))
   expect(appNavigation()).toHaveAttribute("data-collapsed", "false")
   expect(navigation.getByRole("button", { name: "Notifications" })).toHaveAttribute("aria-current", "page")

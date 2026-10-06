@@ -8,6 +8,9 @@ import { EditorIncludeProvider } from "@/features/application/model/editor-inclu
 import { UpdatesProvider, useUpdates } from "@/features/updates/update-store"
 import { useMainRoute } from "@/desktop/use-main-route"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useStableCallback } from "@/lib/use-stable-callback"
+import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
+import type { BackupController } from "@/features/application/model/backup-source"
 import type { SiloPreflightCheck } from "@/contracts/silo"
 import { SiloWindow } from "@/components/silo-window"
 import { useDependencyStore, type DependencyStore } from "@/desktop/dependencies"
@@ -17,7 +20,7 @@ import { StatusPanel } from "@/desktop/status-panel"
 import { ApplicationLoading, StatusPanelUnavailable } from "@/desktop/application-loading"
 import { ApplicationApp } from "@/features/application/application-app"
 import { connectQuitConfirmation } from "@/desktop/settings"
-import { useSettings } from "@/features/preferences/settings-store"
+import { useSettingsStore } from "@/features/preferences/settings-store"
 
 /** Painted before any native call at startup, so the window Rust has shown is never blank. */
 export function StartupLoading({ statusPanel = false }: { statusPanel?: boolean }) {
@@ -57,7 +60,7 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   const current = useProductionSource(source)
   const routeRequest = useMainRoute(!statusPanel)
   const dependencies = useDependencyStore(dependencyStore)
-  const { settings: currentSettings, revision: settingsRevision, writeProtected: settingsProtected, store: settingsStore } = useSettings()
+  const settingsStore = useSettingsStore()
   const [preparingUpdate, setPreparingUpdate] = useState(false)
   const updateBackend = useMemo(() => ({ ...desktopUpdateBackend, install: async (stopComputers: boolean) => {
     setPreparingUpdate(true)
@@ -82,12 +85,15 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   const failures = checking ? previousFailures : checks?.filter(({ status }) => ["failed", "unavailable", "timeout"].includes(status)) ?? []
   // Initialize again rather than refresh: after a failed start it also restores live
   // events, polling and refresh-on-focus; once live it only refreshes.
-  const retryChecks = () => { dependencies?.retry(); void source.initialize().catch((error: unknown) => console.error("Silo live updates:", error)) }
+  const retryChecks = useStableCallback(() => { dependencies?.retry(); void source.initialize().catch((error: unknown) => console.error("Silo live updates:", error)) })
   // Finish persists completion; keep this session on its preferences screen until Open Silo.
   // Settings that could not be read (or a damaged, write-protected file) report defaults,
   // so a missing completion flag is unknown, not "new user": never route to onboarding
   // then. Onboarding could not save completion in that state anyway.
-  const [onboardingActive, setOnboardingActive] = useState(() => settingsRevision >= 0 && !settingsProtected && !currentSettings.onboardingComplete)
+  const [onboardingActive, setOnboardingActive] = useState(() => {
+    const { revision, writeProtected, settings } = settingsStore.getSnapshot()
+    return revision >= 0 && !writeProtected && !settings.onboardingComplete
+  })
   if (!statusPanel && onboardingActive && dependencies) {
     return <UpdatesProvider backend={updateBackend}><UpdateInstallationBoundary preparing={preparingUpdate}><ProductionOnboarding application={current.source} dependencies={dependencies} source={source} onOpenApp={() => setOnboardingActive(false)} /></UpdateInstallationBoundary></UpdatesProvider>
   }
@@ -105,11 +111,26 @@ function ProductionContent({ source, dependencyStore, statusPanel = false }: Pro
   const notice = current.localUpdating ? localUpdatingNotice : undefined
   return statusPanel
     ? <StatusPanel source={current.source} actions={source.statusActions} notice={notice} />
-    : <UpdatesProvider backend={updateBackend}><UpdateInstallationBoundary preparing={preparingUpdate}>{notice && <p role="status" className="border-b bg-muted px-4 py-2 text-xs">{notice}</p>}<ApplicationApp routeRequest={routeRequest} connectQuitConfirmation={connectQuitConfirmation} source={localRuntimeFailures.length ? { ...current.source, runtimeRepair: {
-      status: "unavailable", checking,
-      reason: failures.map(({ title, detail }) => `${title}: ${detail}`).join("\n"),
-      recovery: [...new Set(failures.map(({ remediation }) => remediation).filter(Boolean))].join("\n"),
-    } } : current.source} actions={{ ...source.applicationActions, retryRuntimeChecks: retryChecks }} backup={current.backup} /></UpdateInstallationBoundary></UpdatesProvider>
+    : <UpdatesProvider backend={updateBackend}><UpdateInstallationBoundary preparing={preparingUpdate}>{notice && <p role="status" className="border-b bg-muted px-4 py-2 text-xs">{notice}</p>}<MainApplication routeRequest={routeRequest} source={current.source} applicationActions={source.applicationActions} retryChecks={retryChecks} backup={current.backup}
+      repair={localRuntimeFailures.length ? {
+        status: "unavailable", checking,
+        reason: failures.map(({ title, detail }) => `${title}: ${detail}`).join("\n"),
+        recovery: [...new Set(failures.map(({ remediation }) => remediation).filter(Boolean))].join("\n"),
+      } : undefined} /></UpdateInstallationBoundary></UpdatesProvider>
+}
+
+type RuntimeRepair = NonNullable<ApplicationSource["runtimeRepair"]>
+/** Keeps the source and actions handed to the application stable across unrelated renders. */
+function MainApplication({ source, applicationActions, retryChecks, backup, routeRequest, repair }: {
+  source: ApplicationSource; applicationActions: ApplicationActions; retryChecks: () => void
+  backup: BackupController; routeRequest: ReturnType<typeof useMainRoute>; repair: RuntimeRepair | undefined
+}) {
+  const repairStatus = repair?.status, repairChecking = repair?.checking, repairReason = repair?.reason, repairRecovery = repair?.recovery
+  const applicationSource = useMemo(() => repairStatus
+    ? { ...source, runtimeRepair: { status: repairStatus, checking: repairChecking, reason: repairReason, recovery: repairRecovery } as RuntimeRepair }
+    : source, [source, repairStatus, repairChecking, repairReason, repairRecovery])
+  const actions = useMemo(() => ({ ...applicationActions, retryRuntimeChecks: retryChecks }), [applicationActions, retryChecks])
+  return <ApplicationApp routeRequest={routeRequest} connectQuitConfirmation={connectQuitConfirmation} source={applicationSource} actions={actions} backup={backup} />
 }
 
 function UpdateInstallationBoundary({ preparing, children }: { preparing: boolean; children: ReactNode }) {
