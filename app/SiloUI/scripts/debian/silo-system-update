@@ -35,11 +35,21 @@ def parent_pid(pid):
     return int(Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[1])
 
 
-def requested_by(pid, helper=None, parent=parent_pid, executable=os.readlink):
-    """Whether pkexec, this helper's parent, was started by the process named by pid."""
+def requested_by(pid, helper=None, parent=parent_pid, executable=os.readlink, started=start_time):
+    """Whether the process named by pid started this helper.
+
+    pkexec execs the helper, so the helper's parent is the caller; one pkexec hop is
+    also accepted. The caller's start time is read before and after to rule out pid reuse.
+    """
     helper = os.getpid() if helper is None else helper
-    pkexec = parent(helper)
-    return executable(f'/proc/{pkexec}/exe') == '/usr/bin/pkexec' and parent(pkexec) == pid
+    try:
+        before = started(pid)
+        direct = parent(helper)
+        if direct != pid and (executable(f'/proc/{direct}/exe') != '/usr/bin/pkexec' or parent(direct) != pid):
+            return False
+        return started(pid) == before and parent(helper) == direct
+    except (OSError, ValueError, IndexError):
+        return False
 
 
 def root_private_file(path):
@@ -120,11 +130,11 @@ def main():
     pid, selected = int(sys.argv[1]), version(sys.argv[2])
     uid = int(os.environ.get('PKEXEC_UID', '-1'))
     process = Path(f'/proc/{pid}')
+    identity = [pid, start_time(pid)]
     if uid <= 0 or process.stat().st_uid != uid or os.readlink(process / 'exe') not in ('/usr/bin/silo-ui', '/usr/bin/silo-ui (deleted)'):
         raise RuntimeError('The update must be requested by the installed Silo application.')
-    if not requested_by(pid):
+    if not requested_by(pid) or start_time(pid) != identity[1]:
         raise RuntimeError('The update must be requested by the installed Silo application.')
-    identity = [pid, start_time(pid)]
     DIRECTORY.mkdir(mode=0o755, exist_ok=True)
     info = DIRECTORY.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
