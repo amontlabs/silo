@@ -22,6 +22,8 @@ const emptyCatalog: ApplicationCatalog = { terminal: [], editor: [], browser: []
 const fallback = {
   catalog: emptyCatalog,
   available: false,
+  /** Whether the installed applications have been read, or were supplied up front. */
+  loaded: true,
   refresh: async () => {},
   choose: async (_kind: ApplicationKind): Promise<Application | null> => null,
 }
@@ -33,6 +35,7 @@ export function ApplicationCatalogProvider({ initialCatalog = emptyCatalog, serv
   children: ReactNode
 }) {
   const [catalog, setCatalog] = useState(initialCatalog)
+  const [loaded, setLoaded] = useState(initialCatalog !== emptyCatalog || !service)
   const revision = useRef(0)
 
   async function refresh() {
@@ -40,8 +43,8 @@ export function ApplicationCatalogProvider({ initialCatalog = emptyCatalog, serv
     const request = ++revision.current
     try {
       const next = await service.read()
-      if (request === revision.current) setCatalog(next)
-    } catch (error) { console.error("Silo applications:", error) }
+      if (request === revision.current) { setCatalog(next); setLoaded(true) }
+    } catch (error) { console.error("Silo applications:", error); if (request === revision.current) setLoaded(true) }
   }
 
   const refreshOnFocus = useEffectEvent(refresh)
@@ -66,7 +69,7 @@ export function ApplicationCatalogProvider({ initialCatalog = emptyCatalog, serv
 
   // These are event handlers; their request counter is never accessed during render.
   // oxlint-disable-next-line react/refs
-  return createElement(ApplicationContext.Provider, { value: { catalog, available: Boolean(service), refresh, choose } }, children)
+  return createElement(ApplicationContext.Provider, { value: { catalog, available: Boolean(service), loaded, refresh, choose } }, children)
 }
 
 export function useApplications() { return useContext(ApplicationContext) }

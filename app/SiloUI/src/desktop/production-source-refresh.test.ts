@@ -161,6 +161,38 @@ describe("ambient network watch", () => {
   })
 })
 
+describe("watching before live updates", () => {
+  it("reads nothing until live updates start, then reads with the first refresh; a watcher survives a failed first start", async () => {
+    let failListen = true
+    const mock = bridge()
+    mock.listen.mockImplementation(async (name, handler) => {
+      if (failListen) throw new Error("event channel closed")
+      mock.handlers.set(name, handler)
+      return () => {}
+    })
+    const store = createProductionSource(mock.bridge)
+    try {
+      const stop = store.watchNetwork({ ambient: true })
+      await Promise.resolve()
+      expect(mock.count("read_network_state")).toBe(0)
+      await expect(store.initialize()).rejects.toThrow()
+      expect(mock.count("read_network_state")).toBe(0)
+      failListen = false
+      await store.initialize()
+      await vi.waitFor(() => expect(mock.count("read_network_state")).toBe(1))
+      stop()
+    } finally { store.dispose() }
+  })
+
+  it("does not read after dispose", () => {
+    const mock = bridge()
+    const store = createProductionSource(mock.bridge)
+    store.dispose()
+    store.watchNetwork()
+    expect(mock.count("read_network_state")).toBe(0)
+  })
+})
+
 describe("operation queue polling", () => {
   it("reads the queue on each poll tick and recovers after a failed read", async () => {
     vi.useFakeTimers()
