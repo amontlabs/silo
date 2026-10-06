@@ -1195,8 +1195,9 @@ fn run_exchange(
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
-            drop(release);
-            let _ = writer.join();
+            // The writer may be stuck in a write that a lingering ssh master keeps open;
+            // it ends with that pipe, and the deadline does not wait for it.
+            drop((release, writer));
             let _ = waiter.join();
             return Err(error);
         }
@@ -4440,6 +4441,55 @@ mod reply_tests {
             &json!({"method":"handshake"}),
             Instant::now() + Duration::from_secs(2),
         )
+    }
+
+    #[test]
+    fn a_background_process_holding_the_captured_output_does_not_delay_the_reply() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("reply");
+        fs::write(&path, reply(&json!({"result":1}))).unwrap();
+        let script = home.path().join("ssh");
+        crate::test_support::write_shell_script(
+            &script,
+            format!("#!/bin/sh\nsleep 5 &\ncat '{}'\n", path.display()),
+        );
+        let started = Instant::now();
+        let result = run_exchange(
+            Command::new(&script),
+            &json!({"method":"handshake"}),
+            Instant::now() + Duration::from_secs(4),
+        );
+        assert_eq!(result, Ok(json!(1)));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_stalled_exchange_times_out_without_waiting_for_its_input() {
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("ssh");
+        crate::test_support::write_shell_script(&script, "#!/bin/sh\nsleep 5 &\nwait\n");
+        let started = Instant::now();
+        let result = run_exchange(
+            Command::new(&script),
+            &json!({"method":"x","params":"a".repeat(LIMIT / 2)}),
+            Instant::now() + Duration::from_millis(500),
+        );
+        assert!(matches!(result, Err(Failure::Failed(message)) if message.contains("timed out")));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn waiting_for_exit_returns_at_the_exit_and_leaves_the_child_to_reap() {
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        let waiter = thread::spawn(move || wait_for_exit(pid));
+        thread::sleep(Duration::from_millis(100));
+        assert!(!waiter.is_finished());
+        child.kill().unwrap();
+        let started = Instant::now();
+        waiter.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(child.wait().is_ok());
     }
 
     #[test]
