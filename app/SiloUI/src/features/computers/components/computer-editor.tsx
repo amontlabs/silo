@@ -85,19 +85,22 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
   ) : field
 }
 
-function TextField({ label, value, error, firstField = false, inputRef, ...props }: {
+function TextField({ label, value, error, hint, firstField = false, inputRef, ...props }: {
   label: string
   value: string
   error?: string
+  /** Guidance shown under the field while it has no error. */
+  hint?: string
   firstField?: boolean
   inputRef?: React.RefObject<HTMLInputElement | null>
 } & Omit<React.ComponentProps<typeof Input>, "value" | "aria-label">) {
   const errorId = useId()
+  const hintId = useId()
   return (
     <label className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
       {label}
-      <Input technical ref={firstField ? inputRef : undefined} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} value={value} {...props} />
-      {error && <span id={errorId} className="text-destructive">{error}</span>}
+      <Input technical ref={firstField ? inputRef : undefined} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : hint ? hintId : undefined} value={value} {...props} />
+      {error ? <span id={errorId} className="text-destructive">{error}</span> : hint && <span id={hintId} className="font-normal">{hint}</span>}
     </label>
   )
 }
@@ -134,7 +137,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   const [draft, setDraft] = useState(editor.draft)
   const [errors, setErrors] = useState<ComputerValidationErrors>({})
   const firstField = useRef<HTMLInputElement>(null)
-  const container = useRef<HTMLDivElement>(null)
+  const container = useRef<HTMLFormElement>(null)
   const blockedReasonId = useId()
   // Bumped by each failed Save so focus moves to the first invalid field once it renders.
   const [failedValidation, setFailedValidation] = useState(0)
@@ -242,8 +245,15 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     else onSave(builtInNewVm && startsWithComputer ? { ...draft, desktop: { startWithComputer: true } } : draft)
   }
 
+  // Escape cancels the edit unless it is already being dismissed by something else.
+  function cancelOnEscape(event: React.KeyboardEvent) {
+    if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || saving || stopPending) return
+    event.preventDefault()
+    onCancel()
+  }
+
   return (
-    <div ref={container} className="grid min-w-0 gap-3 p-3" data-testid={`computer-editor-${draft.id}`}>
+    <form ref={container} noValidate className="grid min-w-0 gap-3 p-3" data-testid={`computer-editor-${draft.id}`} onSubmit={(event) => { event.preventDefault(); if (!saving && !deletedElsewhere && !blockedReason) save() }} onKeyDown={cancelOnEscape}>
       <div className="flex min-w-0 items-center gap-2">
         <Monitor className="size-4 shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 text-xs font-semibold">Computer details</span>
@@ -287,6 +297,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         readOnly={created}
         className={created ? "opacity-60" : undefined}
         error={errors.name}
+        hint={created ? undefined : "1–32 lowercase letters, numbers, or hyphens, starting with a letter."}
         autoComplete="off"
         maxLength={32}
         onChange={(event) => update({ name: event.target.value })}
@@ -296,11 +307,11 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
       {editor.displayAfterID && <p className="text-[11px] text-muted-foreground">Creates a new empty computer with the same settings. Files are not included.</p>}
 
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-        <p className="col-span-full text-[11px] text-muted-foreground">CPUs and Memory set the startup allocation; ceilings set the maximum. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
-        <SelectField custom label="CPUs" value={draft.cpus} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.cpus} onChange={(cpus) => update({ cpus } as Partial<SetupComputerConfiguration>)} />
-        <SelectField custom label="CPUs ceiling" value={draft.maxCPUs} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.maxCPUs} onChange={(maxCPUs) => update({ maxCPUs } as Partial<SetupComputerConfiguration>)} />
-        <SelectField custom label="Memory" value={draft.memoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.memoryGiB} onChange={(memoryGiB) => update({ memoryGiB } as Partial<SetupComputerConfiguration>)} />
-        <SelectField custom label="Memory ceiling" value={draft.maxMemoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.maxMemoryGiB} onChange={(maxMemoryGiB) => update({ maxMemoryGiB } as Partial<SetupComputerConfiguration>)} />
+        <p className="col-span-full text-[11px] text-muted-foreground">"At start" values are what the computer begins with; the maximums are the most it can use. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
+        <SelectField custom label="CPUs at start" value={draft.cpus} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.cpus} onChange={(cpus) => update({ cpus } as Partial<SetupComputerConfiguration>)} />
+        <SelectField custom label="Maximum CPUs" value={draft.maxCPUs} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.maxCPUs} onChange={(maxCPUs) => update({ maxCPUs } as Partial<SetupComputerConfiguration>)} />
+        <SelectField custom label="Memory at start" value={draft.memoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.memoryGiB} onChange={(memoryGiB) => update({ memoryGiB } as Partial<SetupComputerConfiguration>)} />
+        <SelectField custom label="Maximum memory" value={draft.maxMemoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.maxMemoryGiB} onChange={(maxMemoryGiB) => update({ maxMemoryGiB } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom readOnly={created} label="Workspace disk" value={draft.workspaceStorageGiB} values={supportedStorageGiB} max={runtimeLimits.storageGiB} suffix="GiB" error={errors.workspaceStorageGiB} onChange={(workspaceStorageGiB) => update({ workspaceStorageGiB } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom readOnly={created} label="Runtime disk" value={draft.runtimeStorageGiB} values={supportedStorageGiB} max={runtimeLimits.storageGiB} suffix="GiB" error={errors.runtimeStorageGiB} onChange={(runtimeStorageGiB) => update({ runtimeStorageGiB } as Partial<SetupComputerConfiguration>)} />
       </div>
@@ -334,9 +345,9 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         </div>
       </InlineConfirmation> : <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>Cancel</Button>
-        <Button ref={saveButton} type="button" size="sm" disabled={saving || deletedElsewhere || Boolean(blockedReason)} aria-describedby={blockedReason && !saving ? blockedReasonId : undefined} onClick={() => save()}>{!editor.originalID ? (saving ? "Creating…" : "Create") : saving ? "Saving…" : requiresStop ? "Stop and save…" : "Save"}</Button>
+        <Button ref={saveButton} type="submit" size="sm" disabled={saving || deletedElsewhere || Boolean(blockedReason)} aria-describedby={blockedReason && !saving ? blockedReasonId : undefined}>{!editor.originalID ? (saving ? "Creating…" : "Create") : saving ? "Saving…" : requiresStop ? "Stop and save…" : "Save"}</Button>
       </div>}
       {errors.form && <p className="text-xs text-destructive" role="alert">{errors.form}</p>}
-    </div>
+    </form>
   )
 }
