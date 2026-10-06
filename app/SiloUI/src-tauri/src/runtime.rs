@@ -45,7 +45,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(180);
 const STOP_TIMEOUT: Duration = Duration::from_secs(45);
 /// How long a runtime child may take to exit after SIGTERM before it is killed.
-const RUNTIME_TERMINATE_GRACE: Duration = Duration::from_secs(5);
+const RUNTIME_TERMINATE_GRACE: Duration = Duration::from_secs(2);
 const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 pub(crate) const WORKSPACE_MOUNT: &str = "/workspace";
 const MAX_COMPUTER_COUNT: usize = 64;
@@ -1681,7 +1681,13 @@ fn spawn_runtime(
         lock.mark_inherited_by_child();
     }
     let mut stop_child = |child: &mut std::process::Child| {
-        if crate::child_process::terminate_child(child, RUNTIME_TERMINATE_GRACE).is_ok() {
+        // Quit and session end keep their own deadlines, so they kill without a grace.
+        let grace = if shutdown::quitting() {
+            Duration::ZERO
+        } else {
+            RUNTIME_TERMINATE_GRACE
+        };
+        if crate::child_process::terminate_child(child, grace).is_ok() {
             if let Some(lock) = worker_lock.as_mut() {
                 lock.mark_child_exited();
             }
@@ -1746,7 +1752,9 @@ fn spawn_runtime(
                     > MAX_OUTPUT_BYTES
             };
             if too_large(stdout_file) || too_large(stderr_file) {
-                stop_child(&mut child);
+                if exited.is_none() {
+                    stop_child(&mut child);
+                }
                 return Err(RuntimeError::Failed {
                     operation: operation_name(args),
                     exit_code: None,

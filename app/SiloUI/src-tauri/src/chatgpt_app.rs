@@ -828,12 +828,33 @@ struct TarStream {
     children: Vec<Child>,
     stdout: std::process::ChildStdout,
     finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// When the stream was last read or answered; the stall watchdog reads it.
+    activity: std::sync::Arc<std::sync::Mutex<Instant>>,
 }
 
 /// A short tool run (version or member listing) that must not hang extraction.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
-/// The longest one unpacking may take before its tools are stopped.
-const UNPACK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// How long unpacking may go without reading or delivering data before its tools are stopped.
+const UNPACK_STALL: Duration = Duration::from_secs(10 * 60);
+
+/// Returns once `finished` is set or `activity` is older than `limit`.
+fn watch_for_stall(
+    finished: &std::sync::atomic::AtomicBool,
+    activity: &std::sync::Mutex<Instant>,
+    limit: Duration,
+    poll: Duration,
+) {
+    loop {
+        if finished.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let last = *activity.lock().unwrap_or_else(|p| p.into_inner());
+        if last.elapsed() >= limit {
+            return;
+        }
+        std::thread::sleep(poll);
+    }
+}
 
 /// Runs `command` with piped stdout and discarded stderr, killing it at `timeout`.
 fn output_with_timeout(
@@ -875,23 +896,18 @@ fn output_with_timeout(
 }
 
 impl TarStream {
-    /// Stops the tools if unpacking has not finished by `UNPACK_TIMEOUT`, which
+    /// Stops the tools if unpacking makes no progress for `UNPACK_STALL`, which
     /// ends a read blocked on a stalled tool.
     fn guarded(children: Vec<Child>, stdout: std::process::ChildStdout) -> Self {
         let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let activity = std::sync::Arc::new(std::sync::Mutex::new(Instant::now()));
         let pids: Vec<libc::pid_t> = children
             .iter()
             .filter_map(|child| libc::pid_t::try_from(child.id()).ok())
             .collect();
-        let watched = finished.clone();
+        let (watched, seen) = (finished.clone(), activity.clone());
         std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + UNPACK_TIMEOUT;
-            while std::time::Instant::now() < deadline {
-                if watched.load(std::sync::atomic::Ordering::SeqCst) {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-            }
+            watch_for_stall(&watched, &seen, UNPACK_STALL, Duration::from_millis(500));
             if !watched.load(std::sync::atomic::Ordering::SeqCst) {
                 for pid in pids {
                     // SAFETY: the tools are reaped only after `finished` is set, so
@@ -904,6 +920,7 @@ impl TarStream {
             children,
             stdout,
             finished,
+            activity,
         }
     }
 
@@ -982,7 +999,13 @@ impl TarStream {
 
 impl Read for TarStream {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-        self.stdout.read(buffer)
+        let touch = |activity: &std::sync::Mutex<Instant>| {
+            *activity.lock().unwrap_or_else(|p| p.into_inner()) = Instant::now();
+        };
+        touch(&self.activity);
+        let count = self.stdout.read(buffer);
+        touch(&self.activity);
+        count
     }
 }
 
@@ -2427,6 +2450,34 @@ mod tool_timeout_tests {
             output_with_timeout(Command::new("sleep").arg("30"), Duration::from_millis(200));
         assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn the_stall_watchdog_waits_while_there_is_activity_and_fires_when_idle() {
+        use std::sync::{atomic::AtomicBool, Arc, Mutex};
+        let finished = Arc::new(AtomicBool::new(false));
+        let activity = Arc::new(Mutex::new(Instant::now()));
+        let (f, a) = (finished.clone(), activity.clone());
+        let watcher = std::thread::spawn(move || {
+            let started = Instant::now();
+            watch_for_stall(
+                &f,
+                &a,
+                Duration::from_millis(300),
+                Duration::from_millis(10),
+            );
+            started.elapsed()
+        });
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(100));
+            *activity.lock().unwrap() = Instant::now();
+        }
+        let elapsed = watcher.join().unwrap();
+        assert!(
+            elapsed >= Duration::from_millis(800),
+            "activity postponed it"
+        );
+        assert!(!finished.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]
