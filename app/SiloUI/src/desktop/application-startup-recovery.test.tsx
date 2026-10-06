@@ -7,6 +7,7 @@ const native = vi.hoisted(() => ({
   production: {
     loadConfiguration: vi.fn(() => new Promise<void>(() => undefined)),
     initialize: vi.fn(async () => {}),
+    watchNetwork: vi.fn(() => () => {}),
     drainSetup: vi.fn(async () => {}),
     dispose: vi.fn(),
   },

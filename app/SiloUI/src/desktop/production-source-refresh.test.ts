@@ -135,6 +135,32 @@ describe("network reads", () => {
   })
 })
 
+describe("ambient network watch", () => {
+  it("reads at most every 30 seconds and on events, and stops when released", async () => {
+    vi.useFakeTimers()
+    const mock = bridge()
+    const store = createProductionSource(mock.bridge)
+    try {
+      await store.initialize()
+      const stop = store.watchNetwork({ ambient: true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mock.count("read_network_state")).toBe(1)
+      await store.refresh()
+      expect(mock.count("read_network_state")).toBe(1)
+      await vi.advanceTimersByTimeAsync(31_000)
+      await store.refresh()
+      expect(mock.count("read_network_state")).toBe(2)
+      mock.handlers.get("silo://network-state-changed")!()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mock.count("read_network_state")).toBe(3)
+      stop()
+      await vi.advanceTimersByTimeAsync(31_000)
+      await store.refresh()
+      expect(mock.count("read_network_state")).toBe(3)
+    } finally { store.dispose() }
+  })
+})
+
 describe("operation queue polling", () => {
   it("reads the queue on each poll tick and recovers after a failed read", async () => {
     vi.useFakeTimers()

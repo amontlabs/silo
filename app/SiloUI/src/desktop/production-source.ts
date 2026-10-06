@@ -381,6 +381,8 @@ const REFRESH_GATE_TIMEOUT_MS = 60_000
 const RETURN_REFRESH_MIN_AGE_MS = 2_000
 /** A consumer of network data that polls keeps the source reading it for this long after its last request. */
 const NETWORK_INTEREST_MS = 30_000
+/** An ambient watcher (a window whose menus list open sites) reads network services at most this often. */
+const NETWORK_AMBIENT_INTERVAL_MS = 30_000
 
 /** Defers a state read while the owning device changes computer configuration. */
 export function isUpdateInProgress(cause: unknown) {
@@ -439,6 +441,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   let network: NetworkState | undefined
   let networkError: string | null = null
   let networkWatchers = 0
+  let networkAmbientWatchers = 0
+  let lastNetworkReadAt = 0
   let networkInterestUntil = 0
   const networkReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
   const networkFailures = new Map<string, { delay: number; nextRead: number }>()
@@ -593,21 +597,23 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function readNetwork(options?: { background?: boolean }): Promise<void> {
+    lastNetworkReadAt = Date.now()
     return Promise.all([readNetworkOwner("", options?.background), ...devices.map(device => readNetworkOwner(device.id, options?.background))]).then(() => {})
   }
   /** Network services are read only for a consumer that shows them: a watcher, or a page that requested them recently. */
-  function networkWanted() { return networkWatchers > 0 || Date.now() < networkInterestUntil }
+  function networkWanted() { return networkWatchers > 0 || networkAmbientWatchers > 0 || Date.now() < networkInterestUntil }
   /** A consumer's own request: it also marks network data as wanted while that consumer keeps asking. */
   function refreshNetwork(options?: { background?: boolean }): Promise<void> {
     networkInterestUntil = Date.now() + NETWORK_INTEREST_MS
     return readNetwork(options)
   }
-  /** Keeps network services read with every refresh until the returned function is called. */
-  function watchNetwork(): () => void {
-    networkWatchers++
+  /** Keeps network services read until the returned function is called: with every refresh, or when `ambient`, at most every 30s and on network events. */
+  function watchNetwork(options?: { ambient?: boolean }): () => void {
+    const ambient = options?.ambient === true
+    if (ambient) networkAmbientWatchers++; else networkWatchers++
     void readNetwork()
     let watching = true
-    return () => { if (watching) { watching = false; networkWatchers-- } }
+    return () => { if (watching) { watching = false; if (ambient) networkAmbientWatchers--; else networkWatchers-- } }
   }
   function refreshOperationQueue(): Promise<void> {
     if (operationQueueRequest) { operationQueueDirty = true; return operationQueueRequest }
@@ -1123,7 +1129,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (source && activeConfiguration) source = { ...source, computerConfigurationOperation: activeConfiguration }
     localStateUpdating = configurationUpdating
     publish({ ...snapshot, source, backup, loading: configurationUpdating && !source, error, localUpdating: configurationUpdating && source !== null && (snapshot.source === null || snapshot.localUpdating === true) })
-    if (networkWatchers > 0) void readNetwork({ background })
+    if (networkWatchers > 0 || (networkAmbientWatchers > 0 && Date.now() - lastNetworkReadAt >= NETWORK_AMBIENT_INTERVAL_MS)) void readNetwork({ background })
     // One remote read per refresh; one that started during this refresh is recent enough.
     if (remotePasses === remotePassesAtStart) void refreshDevices(false, background)
   }

@@ -81,7 +81,8 @@ async function start() {
   void production.loadConfiguration()
   // Live state does not depend on the settings, so it loads while they do.
   void production.initialize().then(
-    () => { if (statusPanel) track(production.watchNetwork()) },
+    // Both windows list open sites in their computer menus, which come from network services.
+    () => { track(production.watchNetwork({ ambient: !statusPanel })) },
     (error: unknown) => console.error("Silo live updates:", error),
   )
   const systemIntegrations = createDesktopSystemIntegrationStore(settings)
