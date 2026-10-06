@@ -4730,7 +4730,9 @@ fn application_source_for_computers(
 ) -> Result<ApplicationSource, RuntimeError> {
     let secrets = crate::secrets::snapshot().map_err(RuntimeError::Unavailable)?;
     // Journal read failures are reported as an Activity warning by read() below.
-    let mut failures = runtime_activity::failures(paths).unwrap_or_default();
+    let (mut failures, history) = runtime_activity::failures_and_read(paths);
+    let mut pending_revocations =
+        crate::secrets::pending_names_by_computer().map_err(RuntimeError::Unavailable)?;
     for computer in &mut computers {
         computer.lifecycle_failure = failures.remove(computer.configuration.id());
         match checkpoints::load(paths, computer.configuration.id()) {
@@ -4756,9 +4758,9 @@ fn application_source_for_computers(
                     });
             }
         }
-        computer.pending_secret_revocations =
-            crate::secrets::pending_names(computer.configuration.name())
-                .map_err(RuntimeError::Unavailable)?;
+        computer.pending_secret_revocations = pending_revocations
+            .remove(computer.configuration.name())
+            .unwrap_or_default();
         if !computer.pending_secret_revocations.is_empty() {
             let warning = secret_revocation_warning(&computer.pending_secret_revocations);
             if let Some(attention) = &mut computer.attention {
@@ -4784,7 +4786,7 @@ fn application_source_for_computers(
             .filter_map(|secret| secret["name"].as_str().map(str::to_owned))
             .collect();
     }
-    let mut activities = runtime_activity::read(paths)?;
+    let mut activities = history?;
     activities.extend(crate::secrets::activities().map_err(RuntimeError::Unavailable)?);
     activities.sort_by(|a, b| b["occurredAt"].as_str().cmp(&a["occurredAt"].as_str()));
     activities.truncate(200);
