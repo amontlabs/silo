@@ -249,18 +249,38 @@ pub(crate) struct LifecycleFailureView {
     lifecycle_failure_diagnostic: Option<String>,
 }
 
+#[cfg(test)]
 pub(super) fn failures(
     paths: &RuntimePaths,
 ) -> Result<HashMap<String, LifecycleFailureView>, RuntimeError> {
+    Ok(failures_in(&events(paths)?))
+}
+
+/// The lifecycle failures and the activity history from one reading of the journal.
+pub(super) fn failures_and_read(
+    paths: &RuntimePaths,
+) -> (
+    HashMap<String, LifecycleFailureView>,
+    Result<Vec<Value>, RuntimeError>,
+) {
+    let journal = events(paths);
+    let failures = journal
+        .as_ref()
+        .map(|journal| failures_in(journal))
+        .unwrap_or_default();
+    (failures, read_journal(paths, journal))
+}
+
+fn failures_in(journal: &[Event]) -> HashMap<String, LifecycleFailureView> {
     let mut latest = HashMap::new();
-    for event in events(paths)? {
+    for event in journal {
         // Legacy records remain in Activity, but cannot be attributed safely to
         // a current computer: names can be reused after deletion or restoration.
         if !event.computer_id.is_empty() {
             latest.insert(event.computer_id.clone(), event);
         }
     }
-    Ok(latest
+    latest
         .into_iter()
         .filter_map(|(name, event)| {
             let label = match event.action.as_str() {
@@ -268,7 +288,7 @@ pub(super) fn failures(
                 "stop" => "Stop",
                 _ => "Restart",
             };
-            let (summary, diagnostic) = failure_parts(&event).filter(|_| !event.dismissed)?;
+            let (summary, diagnostic) = failure_parts(event).filter(|_| !event.dismissed)?;
             Some((
                 name,
                 LifecycleFailureView {
@@ -277,7 +297,7 @@ pub(super) fn failures(
                 },
             ))
         })
-        .collect())
+        .collect()
 }
 
 pub(super) fn acknowledge_failure(
@@ -318,7 +338,15 @@ fn history_warning(kind: &str) -> Value {
     serde_json::json!({"id": format!("{kind}-history-unavailable"), "category": "system", "title": "Activity history unavailable", "detail": format!("Silo could not read its {kind} activity history."), "occurredAt": timestamp(activity_timestamp()), "time": timestamp(activity_timestamp()), "tone": "warning", "status": "completed"})
 }
 
+#[cfg(test)]
 pub(super) fn read(paths: &RuntimePaths) -> Result<Vec<Value>, RuntimeError> {
+    read_journal(paths, events(paths))
+}
+
+fn read_journal(
+    paths: &RuntimePaths,
+    journal: Result<Vec<Event>, RuntimeError>,
+) -> Result<Vec<Value>, RuntimeError> {
     let mut warnings = Vec::new();
     let mut result: Vec<Value> = read_activity(paths, false).unwrap_or_else(|_| { warnings.push(history_warning("setup")); Vec::new() }).into_iter().enumerate().map(|(index, event)| {
         let mut entry = serde_json::json!({"id": format!("setup-{}-{}-{}-{index}", event.request_id, event.timestamp, event.step), "category": "computer", "title": event.message, "detail": "Computer setup", "occurredAt": timestamp(event.timestamp), "time": timestamp(event.timestamp), "tone": if event.level == "error" { "danger" } else if event.level == "warning" { "warning" } else { "neutral" }, "status": "completed", "computer": event.computer});
@@ -330,7 +358,7 @@ pub(super) fn read(paths: &RuntimePaths) -> Result<Vec<Value>, RuntimeError> {
         }
         entry
     }).collect();
-    result.extend(events(paths).unwrap_or_else(|_| { warnings.push(history_warning("computer")); Vec::new() }).into_iter().map(|event| {
+    result.extend(journal.unwrap_or_else(|_| { warnings.push(history_warning("computer")); Vec::new() }).into_iter().map(|event| {
         let interrupted = !event.completed && (event.process != std::process::id() || event.process_session != process_session());
         let failed = event.failure.is_some();
         if event.cancelled {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::{self, File},
     io::Read,
     path::PathBuf,
@@ -688,13 +688,23 @@ fn remove_from_store(id: &str) -> Result<(), String> {
 }
 
 pub(crate) fn pending_names(computer: &str) -> Result<Vec<String>, String> {
-    Ok(load()?
-        .pending_revocations
+    Ok(pending_names_by_computer()?
+        .remove(computer)
+        .unwrap_or_default())
+}
+
+/// Every computer's names awaiting revocation, from one reading of the settings.
+pub(crate) fn pending_names_by_computer() -> Result<HashMap<String, Vec<String>>, String> {
+    let mut names: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for record in load()?.pending_revocations {
+        names
+            .entry(record.computer)
+            .or_default()
+            .insert(record.name);
+    }
+    Ok(names
         .into_iter()
-        .filter(|record| record.computer == computer)
-        .map(|record| record.name)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+        .map(|(computer, names)| (computer, names.into_iter().collect()))
         .collect())
 }
 
