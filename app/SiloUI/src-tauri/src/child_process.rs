@@ -10,6 +10,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// Ask a child to stop with SIGTERM so it can clean up, and SIGKILL it only if
 /// it is still running after `grace`. Returns the result of reaping the child.
 pub(crate) fn terminate_child(child: &mut Child, grace: Duration) -> io::Result<ExitStatus> {
+    // A reaped child's PID may already belong to another process.
+    if let Ok(Some(status)) = child.try_wait() {
+        return Ok(status);
+    }
     if let Ok(pid) = libc::pid_t::try_from(child.id()) {
         // SAFETY: the child has not been reaped (no successful wait yet), so
         // its PID still names this process's own child.
@@ -39,6 +43,19 @@ mod tests {
         let status = terminate_child(&mut child, Duration::from_secs(5)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(4));
         assert!(!status.success());
+    }
+
+    #[test]
+    fn an_already_reaped_child_is_not_signalled() {
+        let mut child = Command::new("sh").args(["-c", "exit 3"]).spawn().unwrap();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        let again = terminate_child(&mut child, Duration::from_secs(5)).unwrap();
+        assert_eq!(again.code(), status.code());
     }
 
     #[test]
