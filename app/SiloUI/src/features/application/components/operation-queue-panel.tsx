@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 
 import { dismissOperationToast, showOperationProgress } from "@/lib/operation-toast"
+import { useClock } from "@/lib/use-clock"
 
 import {
   emptyOperationQueue,
@@ -34,17 +35,6 @@ function CancelOperationButton({ entry, onCancel }: { entry: OperationEntry; onC
   )
 }
 
-/** Re-renders on an interval so a shown toast keeps its elapsed time and stuck flag current. */
-function useNow(active: boolean, intervalMs = 1000): number {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!active) return
-    const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
-    return () => window.clearInterval(timer)
-  }, [active, intervalMs])
-  return now
-}
-
 /** Step line for the operation-queue toast: a stuck warning, else a summary of waiting entries. */
 function queueStep(queue: OperationQueue, now: number, full: OperationQueue = queue): string | undefined {
   if (queue.running.some((entry) => isOperationStuck(entry, now))) return "Taking longer than expected"
@@ -70,7 +60,7 @@ export function OperationQueueToast({ queue, onCancel }: { queue?: OperationQueu
   const earliest = active ? Math.min(...[...running, ...waiting].map((entry) => entry.sinceMs)) : 0
   const [debouncedSince, setDebouncedSince] = useState<number>()
   const show = active && debouncedSince === earliest
-  const now = useNow(show)
+  const now = useClock(show)
 
   useEffect(() => {
     if (!active) {
