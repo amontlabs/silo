@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { LoaderCircle } from "lucide-react"
 import { Dialog } from "radix-ui"
-import { useSettings } from "@/features/preferences/settings-store"
+import { useSettingsSelector } from "@/features/preferences/settings-store"
 import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
 import { cn } from "@/lib/utils"
@@ -23,7 +23,7 @@ export function ShutdownBoundary({ children, compact = false, pendingWork }: { c
   const [quitting, setQuitting] = useState(false)
   const [queue, setQueue] = useState<OperationQueue>(emptyOperationQueue)
   const previousFocus = useRef<HTMLElement | null>(null)
-  const { settings } = useSettings()
+  const reduceMotion = useSettingsSelector((view) => view.settings.reduceMotion)
   useEffect(() => {
     let disposed = false
     let receivedEvent = false
@@ -98,7 +98,7 @@ export function ShutdownBoundary({ children, compact = false, pendingWork }: { c
         >
           <Dialog.Title className="sr-only">Quitting Silo</Dialog.Title>
           <div role="status" className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-            <LoaderCircle aria-hidden="true" strokeWidth={1.5} className={cn("size-6 text-muted-foreground", !settings.reduceMotion && "animate-spin motion-reduce:animate-none")} />
+            <LoaderCircle aria-hidden="true" strokeWidth={1.5} className={cn("size-6 text-muted-foreground", !reduceMotion && "animate-spin motion-reduce:animate-none")} />
             <Dialog.Description className="text-[13px] font-medium text-foreground">{waitingLabel ?? pendingWork ?? (stopping ? `${stopping}…` : "Stopping local computers…")}</Dialog.Description>
             {waitingLabel && (cancellable.length > 0
               ? <Button type="button" size="sm" variant="outline" onClick={cancelAndQuit}>Cancel and quit</Button>
