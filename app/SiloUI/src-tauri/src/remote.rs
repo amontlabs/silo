@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::AppHandle;
+pub(crate) mod multiplex;
 mod operations;
 /// Appends the key read from input to `authorized_keys` once. sshd runs this with the
 /// account's login shell, so the POSIX script is handed to `sh` in single quotes, which
@@ -438,6 +439,11 @@ pub async fn remove_device(app: AppHandle, device_id: String) -> Result<(), Stri
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = config_lock();
         let mut config = read_config()?;
+        let address = config
+            .devices
+            .iter()
+            .find(|h| h.id == device_id)
+            .map(|h| h.address.clone());
         // Keep the device available for retry if its local key cleanup fails.
         if let Ok(paths) = crate::runtime::runtime_paths(&app) {
             crate::ssh_connection::forget_device(&paths.home, &device_id)?;
@@ -445,6 +451,9 @@ pub async fn remove_device(app: AppHandle, device_id: String) -> Result<(), Stri
         config.devices.retain(|h| h.id != device_id);
         save_config(&config)?;
         drop(_guard);
+        if let Some(address) = address {
+            multiplex::close(&address);
+        }
         poll_succeeded(&device_id);
         crate::remote_network::close_device(&device_id);
         crate::desktop_viewer::close_device(&device_id);
@@ -811,6 +820,7 @@ pub async fn setup_device_key(app: AppHandle, address: String) -> Result<(), Str
         crate::applications::open_terminal(&app, &application, &command)?;
         // Offer Silo's key alone again once it is installed there.
         remember_identity(address, Identity::SiloOnly);
+        multiplex::close(address);
         Ok(())
     })
     .await
@@ -1098,6 +1108,7 @@ fn exchange(address: &str, request: &Value, deadline: Instant) -> Result<Value, 
     with_identity_fallback(address, key.is_some(), |identity| {
         let mut command =
             ssh_with_identity(address, key.as_deref(), identity).map_err(Failure::Failed)?;
+        multiplex::share(&mut command, address);
         command.args([
             "--",
             address,
@@ -1105,6 +1116,27 @@ fn exchange(address: &str, request: &Value, deadline: Instant) -> Result<Value, 
         ]);
         run_exchange(command, request, deadline)
     })
+}
+/// How often the size of the reply and of ssh's diagnostics is checked while waiting.
+const OUTPUT_CHECK_INTERVAL: Duration = Duration::from_millis(250);
+/// Blocks until process `pid`, a child of this process, has exited, without reaping it,
+/// so the pid cannot be reused while another thread may still signal it.
+fn wait_for_exit(pid: u32) {
+    loop {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if result == 0 || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+        {
+            return;
+        }
+    }
 }
 /// Sends one framed request through `command` (ssh running the bridge) and reads the reply.
 fn run_exchange(
@@ -1125,41 +1157,37 @@ fn run_exchange(
         .spawn()
         .map_err(failed)?;
     // Input stays open until the reply: the bridge takes its end to mean this device left.
-    let mut input = child.stdin.take();
-    let monitored = (|| {
-        if let Some(input) = &input {
-            nonblocking(input).map_err(Failure::Failed)?;
+    // A writer thread holds it, so a stalled pipe never delays the deadline.
+    let input = child.stdin.take();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let writer = thread::spawn(move || {
+        if let Some(mut input) = input {
+            // SSH's exit status and stderr explain a failed pipe.
+            if input.write_all(&frame).and_then(|_| input.flush()).is_ok() {
+                let _ = released.recv();
+            }
         }
-        let mut sent = 0;
-        loop {
-            if let Some(exit) = child.try_wait().map_err(failed)? {
-                return Ok(exit);
+    });
+    let (exited, exit_signal) = std::sync::mpsc::channel::<()>();
+    let pid = child.id();
+    let waiter = thread::spawn(move || {
+        wait_for_exit(pid);
+        let _ = exited.send(());
+    });
+    let monitored = (|| loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match exit_signal.recv_timeout(remaining.min(OUTPUT_CHECK_INTERVAL)) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return child.wait().map_err(failed)
             }
-            if Instant::now() > deadline
-                || stdout.metadata().map_err(failed)?.len()
-                    > (LIMIT + 4 + REPLY_PREAMBLE.len() + REPLY_SEARCH_LIMIT) as u64
-                || stderr.metadata().map_err(failed)?.len() > 65536
-            {
-                return Err(Failure::Failed("Remote operation timed out. Its outcome is unknown; reconnect and inspect before issuing another change.".into()));
-            }
-            if sent < frame.len() {
-                if let Some(writer) = &mut input {
-                    match writer.write(&frame[sent..]) {
-                        Ok(count) if count > 0 => {
-                            sent += count;
-                            continue;
-                        }
-                        Err(error)
-                            if matches!(
-                                error.kind(),
-                                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                            ) => {}
-                        // SSH's exit status and stderr explain a failed pipe.
-                        _ => input = None,
-                    }
-                }
-            }
-            thread::sleep(Duration::from_millis(40));
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if Instant::now() > deadline
+            || stdout.metadata().map_err(failed)?.len()
+                > (LIMIT + 4 + REPLY_PREAMBLE.len() + REPLY_SEARCH_LIMIT) as u64
+            || stderr.metadata().map_err(failed)?.len() > 65536
+        {
+            return Err(Failure::Failed("Remote operation timed out. Its outcome is unknown; reconnect and inspect before issuing another change.".into()));
         }
     })();
     let exit = match monitored {
@@ -1167,10 +1195,15 @@ fn run_exchange(
         Err(error) => {
             let _ = child.kill();
             let _ = child.wait();
+            drop(release);
+            let _ = writer.join();
+            let _ = waiter.join();
             return Err(error);
         }
     };
-    drop(input);
+    drop(release);
+    let _ = writer.join();
+    let _ = waiter.join();
     if !exit.success() {
         let mut stderr = stderr;
         let mut text = String::new();
@@ -1547,10 +1580,29 @@ fn offline_at(device: &str, now: Instant) -> Option<String> {
         })
         .map(|entry| entry.last_error.clone())
 }
+/// A device that failed repeatedly or was refused keeps no shared SSH connection.
+fn closes_shared_connection(failure: &PollFailure) -> bool {
+    !matches!(failure, PollFailure::Transient)
+}
+fn close_shared_connection(device: &str) {
+    let address = existing_directory()
+        .and_then(|dir| read_stored_config_in(&dir))
+        .ok()
+        .flatten()
+        .and_then(|config| config.devices.into_iter().find(|h| h.id == device))
+        .map(|device| device.address);
+    if let Some(address) = address {
+        multiplex::close(&address);
+    }
+}
 /// Applies a failed poll: one blip closes nothing; repeated failures close live tunnels
 /// (reopened on the same local ports later) and desktop viewers; a revoked device loses all.
 pub(crate) fn close_after_failed_poll(device: &str, error: &BridgeError) {
-    match poll_failed(device, error) {
+    let failure = poll_failed(device, error);
+    if closes_shared_connection(&failure) {
+        close_shared_connection(device);
+    }
+    match failure {
         PollFailure::Transient => {}
         PollFailure::Disconnected => {
             crate::remote_network::disconnect_device(device);
@@ -4249,6 +4301,13 @@ mod identity_tests {
                 "Missing {line}: {resolved}"
             );
         }
+    }
+
+    #[test]
+    fn only_repeated_failures_and_refusals_close_the_shared_connection() {
+        assert!(!closes_shared_connection(&PollFailure::Transient));
+        assert!(closes_shared_connection(&PollFailure::Disconnected));
+        assert!(closes_shared_connection(&PollFailure::Revoked));
     }
 
     #[test]
