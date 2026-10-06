@@ -149,15 +149,37 @@ fn startup_failure_title(count: usize) -> String {
     }
 }
 
+/// Reports a panic in the launch sequence, which would otherwise end it silently.
+struct PanicReport<'a>(&'a AppHandle);
+
+impl Drop for PanicReport<'_> {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        crate::notifications::notify(
+            self.0,
+            crate::notifications::failure(
+                "startup:panic",
+                "Silo couldn\u{2019}t finish starting",
+                "Launch stopped unexpectedly. Computers selected to start at launch may not have started. Start them manually.",
+                None,
+            ),
+        );
+    }
+}
+
 // Called once by native app setup, never by a webview mount, refresh or reopen.
 pub(crate) fn install(app: &AppHandle) {
     app.manage(StartupState::default());
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<StartupState>();
-        let Ok(_active) = state.active.lock() else {
-            return;
-        };
+        let _active = state
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _panic_report = PanicReport(&app);
         if crate::runtime_migration::blocks_operations(&app) {
             return;
         }

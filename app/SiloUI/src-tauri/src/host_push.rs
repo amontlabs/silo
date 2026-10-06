@@ -238,7 +238,7 @@ pub(crate) fn discover(
         } else {
             DISCOVERY_FIRST_WAIT
         };
-    let mut entries = lock.lock().map_err(|_| "Repository state unavailable.")?;
+    let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     loop {
         let entry = entries.entry(key.clone()).or_default();
         if let Some((started, result)) = &entry.last {
@@ -257,7 +257,7 @@ pub(crate) fn discover(
             let (paths, name, key) = (paths.clone(), name.to_owned(), key.clone());
             thread::spawn(move || {
                 let started = Instant::now();
-                let result = discover_uncached(&paths, &name);
+                let result = contain_panic(|| discover_uncached(&paths, &name));
                 let (lock, changed) = discoveries();
                 let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 if entries.len() > 64 {
@@ -282,9 +282,14 @@ pub(crate) fn discover(
         }
         entries = changed
             .wait_timeout(entries, wait_until - now)
-            .map_err(|_| "Repository state unavailable.")?
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .0;
     }
+}
+/// A panicking discovery still reports a result, so its entry stops running.
+fn contain_panic(work: impl FnOnce() -> Result<Vec<Value>, String>) -> Result<Vec<Value>, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("Repository discovery failed unexpectedly.".into()))
 }
 // The guest deadline and runtime output budget bound discovery. An entry-count
 // cutoff discards every result when a computer contains many Git worktrees.
@@ -1313,6 +1318,13 @@ fn finished_result(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_panicking_discovery_reports_an_error() {
+        let result = super::contain_panic(|| panic!("discovery bug"));
+        assert!(result.is_err());
+        assert_eq!(super::contain_panic(|| Ok(Vec::new())), Ok(Vec::new()));
+    }
+
     #[test]
     fn dismissal_removes_finished_results_but_preserves_active_pushes() {
         let mut entries = std::collections::HashMap::new();

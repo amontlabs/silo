@@ -275,7 +275,8 @@ pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(schedule::POLL_INTERVAL).await;
-            let _ = check(app.clone(), true).await;
+            // Each check runs as its own task, so a panic ends only that check.
+            let _ = tauri::async_runtime::spawn(check(app.clone(), true)).await;
         }
     });
     Ok(())
@@ -445,6 +446,10 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Snapshot, String> {
         let _ = app.emit("silo://update-state", &state.snapshot);
         previous
     };
+    let mut checking = CheckingGuard {
+        app: app.clone(),
+        previous: Some(previous_phase.clone()),
+    };
     let result = async {
         app.updater_builder()
             .timeout(Duration::from_secs(30))
@@ -453,6 +458,7 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Snapshot, String> {
             .await
     }
     .await;
+    checking.previous = None;
     match result {
         Ok(update) => modify(&app, |s| {
             s.schedule.completed(SystemTime::now(), true);
@@ -491,6 +497,35 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Snapshot, String> {
             })
         }
     }
+}
+
+/// Leaves the "checking" phase when a check is dropped or panics before it settles.
+struct CheckingGuard {
+    app: AppHandle,
+    previous: Option<String>,
+}
+impl Drop for CheckingGuard {
+    fn drop(&mut self) {
+        let Some(previous) = self.previous.take() else {
+            return;
+        };
+        let controller = self.app.state::<Controller>();
+        let mut state = controller
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if abandon_check(&mut state.snapshot, previous) {
+            let _ = self.app.emit("silo://update-state", &state.snapshot);
+        }
+    }
+}
+/// Restore the phase before an abandoned check; any other phase is untouched.
+fn abandon_check(snapshot: &mut Snapshot, previous: String) -> bool {
+    if snapshot.phase != "checking" {
+        return false;
+    }
+    snapshot.phase = previous;
+    true
 }
 
 fn check_error_message(error: &tauri_plugin_updater::Error) -> &'static str {
@@ -906,6 +941,16 @@ mod tests {
             "The update service returned invalid release information. Try again later."
         );
     }
+    #[test]
+    fn an_abandoned_check_restores_the_previous_phase() {
+        let mut checking = snapshot("checking");
+        assert!(abandon_check(&mut checking, "available".into()));
+        assert_eq!(checking.phase, "available");
+        let mut downloading = snapshot("downloading");
+        assert!(!abandon_check(&mut downloading, "idle".into()));
+        assert_eq!(downloading.phase, "downloading");
+    }
+
     fn snapshot(phase: &str) -> Snapshot {
         Snapshot {
             phase: phase.into(),
