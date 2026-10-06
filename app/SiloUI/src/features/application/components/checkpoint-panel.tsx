@@ -11,7 +11,7 @@ import { runCheckpointOperation } from "@/features/application/model/checkpoint-
 import { ForkBody } from "./fork-popover"
 import type { ApplicationActions, ApplicationComputer } from "@/features/application/model/application-source"
 import type { CheckpointUsage, ComputerCheckpoint } from "@/features/application/model/checkpoint-source"
-import { formatStorageBytes } from "@/features/application/model/workspace-storage"
+import { formatBinaryBytes } from "@/lib/format-bytes"
 
 function suggestedName(now = new Date()) {
   // Always English: the UI copy is English, so the system locale must not leak month names.
@@ -27,7 +27,7 @@ type CheckpointUsageEntry = CheckpointUsage["checkpoints"][number]
 
 function deleteDescription(checkpoint: ComputerCheckpoint, info: CheckpointUsageEntry | undefined) {
   const recovery = checkpoint.reason === "before-restore" ? "This is the recovery point saved before a Restore; you can no longer undo the Restore it was saved for. " : ""
-  const freed = info?.sizeBytes != null ? `, freeing up to ${formatStorageBytes(info.sizeBytes)}` : ""
+  const freed = info?.sizeBytes != null ? `, freeing up to ${formatBinaryBytes(info.sizeBytes)}` : ""
   return `${recovery}Its saved state is removed from this device${freed}. This can’t be undone.`
 }
 
@@ -239,7 +239,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
               detail={<>
                 <time dateTime={checkpoint.createdAt} title={formatAbsoluteTime(checkpoint.createdAt)}>{formatRelativeTime(checkpoint.createdAt) || formatAbsoluteTime(checkpoint.createdAt)}</time>
                 {" · "}{checkpointTag(checkpoint)}
-                {info?.sizeBytes != null && <>{" · "}{formatStorageBytes(info.sizeBytes)}</>}
+                {info?.sizeBytes != null && <>{" · "}{formatBinaryBytes(info.sizeBytes)}</>}
                 {info?.usedBy?.length ? <>{" · "}Used by {info.usedBy.join(", ")}</> : null}
                 {info?.deleteBlocker && <span className="block text-muted-foreground">{info.deleteBlocker}</span>}
               </>}

@@ -87,7 +87,7 @@ function popover() {
 async function expectDeleteDialog() {
   const dialog = popover()
   expect(await dialog.findByText("Delete dev permanently?")).toBeVisible()
-  expect(await dialog.findByText("Its files (4.2 GiB) and 2 checkpoints will be deleted. This can't be undone.")).toBeVisible()
+  expect(await dialog.findByText("Its files (4.20 GiB) and 2 checkpoints will be deleted. This can't be undone.")).toBeVisible()
   const remove = dialog.getByRole("button", { name: "Delete permanently" })
   expect(remove.className).toContain("destructive")
   expect(dialog.getByRole("button", { name: "Cancel" })).toBeVisible()

@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { formatStorageBytes as formatBytes, type WorkspaceStorageState } from '../model/workspace-storage'
+import { formatBinaryBytes as formatBytes } from '@/lib/format-bytes'
+import type { WorkspaceStorageState } from '../model/workspace-storage'
 import { HardDrive, Database, Folder, Gauge, RefreshCw, History, ChevronDown, Check, CircleAlert, Layers, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/lib/error-message'

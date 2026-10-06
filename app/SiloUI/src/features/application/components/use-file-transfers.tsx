@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
 import { errorMessage } from "@/lib/error-message"
 import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
-import { baseName, formatBytes, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
+import { formatDecimalBytes } from "@/lib/format-bytes"
+import { baseName, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
 export interface FileTransferControls {
   /** True while a transfer runs: the computer's side allows one at a time. */
@@ -52,7 +53,7 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
       const known = progress.bytesTotal > 0
       showOperationProgress(current.id, {
         title: `${current.verb} ${current.label}`,
-        step: [progress.name && `“${progress.name}”`, progress.fileCount > 1 && `${progress.fileIndex + 1} of ${progress.fileCount}`, known && `${formatBytes(progress.bytesDone)} of ${formatBytes(progress.bytesTotal)}`].filter(Boolean).join(" · "),
+        step: [progress.name && `“${progress.name}”`, progress.fileCount > 1 && `${progress.fileIndex + 1} of ${progress.fileCount}`, known && `${formatDecimalBytes(progress.bytesDone)} of ${formatDecimalBytes(progress.bytesTotal)}`].filter(Boolean).join(" · "),
         progress: known ? progress.bytesDone / progress.bytesTotal : null,
         cancel: { onCancel: () => void api.cancel(current.id).catch(() => {}) },
       })

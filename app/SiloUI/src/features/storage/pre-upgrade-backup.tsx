@@ -3,7 +3,7 @@ import { errorMessage } from "@/lib/error-message"
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { z } from "zod"
 
-import { formatStorageBytes } from "@/features/application/model/workspace-storage"
+import { formatBinaryBytes } from "@/lib/format-bytes"
 
 /**
  * The previous computer storage, kept after an upgrade that converted every computer. Silo deletes it
@@ -155,7 +155,7 @@ export function usePreUpgradeBackupBackend() {
 
 /** Allocated bytes in binary units, as the Storage tab shows them. */
 export function formatBackupSize(size: PreUpgradeBackupSize) {
-  return size === "measuring" ? "Calculating size…" : size === "unavailable" ? "Size unavailable" : formatStorageBytes(size)
+  return size === "measuring" ? "Calculating size…" : size === "unavailable" ? "Size unavailable" : formatBinaryBytes(size)
 }
 
 /** The local calendar date of the instant Silo deletes the backup: a date, not a countdown. */
@@ -175,7 +175,7 @@ export function automaticDeletionSentence(backup: PreUpgradeBackup) {
 
 /** Shared by every "Delete now" confirmation. Deleting is permanent, so it names what goes and what stays. */
 export function deleteConfirmation(size: PreUpgradeBackupSize) {
-  const freed = typeof size === "number" ? `frees up to ${formatStorageBytes(size)}` : "frees its disk space"
+  const freed = typeof size === "number" ? `frees up to ${formatBinaryBytes(size)}` : "frees its disk space"
   return {
     title: "Delete the pre-upgrade backup permanently?",
     description: `This deletes the copy of your computers from before the upgrade and ${freed}. It can't be undone. Your current computers aren't affected.`,
