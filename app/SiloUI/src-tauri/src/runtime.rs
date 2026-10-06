@@ -2835,19 +2835,31 @@ fn enrich_application_state(
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
-            for computer in &mut source.computers {
-                if matches!(computer.state, ComputerState::Running)
+            let scanned = |computer: &ApplicationComputer| {
+                matches!(computer.state, ComputerState::Running)
                     && !computer.settling
                     && computer.freshness == Freshness::Fresh
-                {
+            };
+            crate::host_push::prefetch(
+                paths,
+                source
+                    .computers
+                    .iter()
+                    .filter(|computer| scanned(computer))
+                    .map(|computer| (computer.configuration.name(), computer.configuration.id())),
+            );
+            let first_deadline = crate::host_push::first_discovery_deadline();
+            for computer in &mut source.computers {
+                if scanned(computer) {
                     let name = computer.configuration.name();
                     let key = format!("{}:{}", paths.home.display(), computer.configuration.id());
                     match single_flight(key, || {
-                        crate::host_push::discover(
+                        crate::host_push::discover_until(
                             paths,
                             name,
                             computer.configuration.id(),
                             refresh,
+                            first_deadline,
                         )
                     }) {
                         Ok(repositories) => computer.repositories = repositories,
