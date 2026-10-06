@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
 import { expect, it, vi } from "vitest"
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }))
@@ -16,7 +16,7 @@ vi.mock("react-dom/client", async () => {
 })
 vi.mock("./dependencies", () => ({ createNativeDependencyStore: vi.fn() }))
 vi.mock("./production-source", () => ({ createProductionSource: () => ({
-  loadConfiguration: async () => {}, initialize: async () => {}, drainSetup: async () => {},
+  loadConfiguration: async () => {}, initialize: async () => {}, watchNetwork: () => () => {}, drainSetup: async () => {},
 }) }))
 vi.mock("./system-integrations", () => ({
   createDesktopSystemIntegrationStore: () => ({}), connectSystemIntegrationLifecycle: vi.fn(),
@@ -51,7 +51,10 @@ it("boots the actual status entry with discovered apps and refreshes defaults wi
     }
     throw new Error(`Unexpected command: ${command}`)
   })
-  await act(async () => { await import("../main") })
+  // The tree mounts, then reads the applications on its own: those updates arrive outside any act scope.
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  environment.IS_REACT_ACT_ENVIRONMENT = false
+  await import("../main")
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent('"editor":"Zed"'))
   expect(screen.getByRole("status")).toHaveTextContent('"browser":"Zen"')
   expect(screen.getByRole("status")).toHaveTextContent('"terminal":"Custom Terminal"')
@@ -61,4 +64,5 @@ it("boots the actual status entry with discovered apps and refreshes defaults wi
   expect(screen.getByRole("status")).toHaveTextContent('"editorPath":"/Applications/Cursor.app"')
   expect(screen.getByRole("status")).toHaveTextContent('"terminal":"Custom Terminal"')
   expect(native.invoke.mock.calls.map(([command]) => command)).not.toContain("update_settings")
+  environment.IS_REACT_ACT_ENVIRONMENT = true
 })

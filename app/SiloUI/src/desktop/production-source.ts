@@ -296,6 +296,43 @@ function canonicalKey(value: unknown): string {
     : item)
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * `next` with every part that equals the same part of `previous` replaced by that part, so unchanged
+ * rows keep their identity and the result is `previous` itself when nothing changed. Only plain data
+ * is compared; a property holding `undefined` counts as absent.
+ */
+export function shareStructure<T>(previous: unknown, next: T): T {
+  if (Object.is(previous, next)) return next
+  if (Array.isArray(next)) {
+    if (!Array.isArray(previous)) return next
+    let same = previous.length === next.length
+    const items = next.map((item, index) => {
+      const shared = shareStructure(previous[index], item)
+      if (shared !== previous[index]) same = false
+      return shared
+    })
+    return (same ? previous : items) as T
+  }
+  if (!isPlainObject(next) || !isPlainObject(previous)) return next
+  let same = true
+  const shared: Record<string, unknown> = {}
+  for (const key of Object.keys(next)) {
+    const item = next[key]
+    if (item === undefined) { if (previous[key] !== undefined) same = false; shared[key] = undefined; continue }
+    const kept = shareStructure(previous[key], item)
+    if (kept !== previous[key]) same = false
+    shared[key] = kept
+  }
+  if (same) for (const key of Object.keys(previous)) if (previous[key] !== undefined && !(key in shared)) { same = false; break }
+  return (same ? previous : shared) as T
+}
+
 function unavailableBackup(message: string): BackupState {
   return { snapshotId: `unavailable:${message}`, availability: "unavailable", availabilityMessage: message, requiredSpaceGB: 0, archives: [], operation: null }
 }
@@ -338,6 +375,15 @@ const PUSH_STATUS_INTERVAL_MS = 2_000
 const PUSH_STATUS_MAX_INTERVAL_MS = 30_000
 const PUSH_STATUS_ATTEMPTS = 8
 
+/** A refresh that has not finished by then stops holding back polling and focus refreshes; its late result still applies unless a newer read did. */
+const REFRESH_GATE_TIMEOUT_MS = 60_000
+/** Returning to the window within this time of the last finished read does not read again. */
+const RETURN_REFRESH_MIN_AGE_MS = 2_000
+/** A consumer of network data that polls keeps the source reading it for this long after its last request. */
+const NETWORK_INTEREST_MS = 30_000
+/** An ambient watcher (a window whose menus list open sites) reads network services at most this often. */
+const NETWORK_AMBIENT_INTERVAL_MS = 30_000
+
 /** Defers a state read while the owning device changes computer configuration. */
 export function isUpdateInProgress(cause: unknown) {
   return hasBridgeErrorCode(cause, "update_in_progress")
@@ -353,7 +399,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     error: null,
   }
   let view = snapshot
-  let viewKey = JSON.stringify(view)
   type SetupItem = NonNullable<OnboardingSource["setupQueue"]>[number]
   type SetupJob = { items: SetupItem[]; activityId: string }
   let setupJobs: SetupJob[] = []
@@ -395,6 +440,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   const sshReadRevisions = new Map<string, number>()
   let network: NetworkState | undefined
   let networkError: string | null = null
+  let networkWatchers = 0
+  let networkAmbientWatchers = 0
+  let lastNetworkReadAt = 0
+  let networkInterestUntil = 0
   const networkReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
   const networkFailures = new Map<string, { delay: number; nextRead: number }>()
   const networkReadRevisions = new Map<string, number>()
@@ -404,6 +453,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   let operationQueueDirty = false
   let disposed = false
   let activeRefreshes = 0
+  let lastRefreshFinishedAt = 0
   /** Bumped whenever newer state is published outside a read: reads started earlier are dropped. */
   let refreshSequence = 0
   let readSequence = 0
@@ -546,8 +596,24 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     return entry.promise
   }
 
-  function refreshNetwork(options?: { background?: boolean }): Promise<void> {
+  function readNetwork(options?: { background?: boolean }): Promise<void> {
+    lastNetworkReadAt = Date.now()
     return Promise.all([readNetworkOwner("", options?.background), ...devices.map(device => readNetworkOwner(device.id, options?.background))]).then(() => {})
+  }
+  /** Network services are read only for a consumer that shows them: a watcher, or a page that requested them recently. */
+  function networkWanted() { return networkWatchers > 0 || networkAmbientWatchers > 0 || Date.now() < networkInterestUntil }
+  /** A consumer's own request: it also marks network data as wanted while that consumer keeps asking. */
+  function refreshNetwork(options?: { background?: boolean }): Promise<void> {
+    networkInterestUntil = Date.now() + NETWORK_INTEREST_MS
+    return readNetwork(options)
+  }
+  /** Keeps network services read until the returned function is called: with every refresh, or when `ambient`, at most every 30s and on network events. */
+  function watchNetwork(options?: { ambient?: boolean }): () => void {
+    const ambient = options?.ambient === true
+    if (ambient) networkAmbientWatchers++; else networkWatchers++
+    void readNetwork()
+    let watching = true
+    return () => { if (watching) { watching = false; if (ambient) networkAmbientWatchers--; else networkWatchers-- } }
   }
   function refreshOperationQueue(): Promise<void> {
     if (operationQueueRequest) { operationQueueDirty = true; return operationQueueRequest }
@@ -605,7 +671,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       ++refreshSequence
       if (snapshot.source) publish({ ...snapshot, source: { ...snapshot.source, secrets } })
     }
-    void refresh()
+    refreshFromEvent()
   }
 
   // `snapshot` is the base state: the local application source as last read or
@@ -616,12 +682,11 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   function publish(next: ProductionSnapshot) {
     if (disposed) return
     snapshot = next
-    const nextView = derive(next)
-    // Native reads return fresh objects even when the serialized state is unchanged.
-    const nextKey = JSON.stringify(nextView)
-    if (nextKey === viewKey) return
+    // Native reads return fresh objects even when the state is unchanged: rows that did not
+    // change keep their identity, and a view with no changed row is not published.
+    const nextView = shareStructure(view, derive(next))
+    if (nextView === view) return
     view = nextView
-    viewKey = nextKey
     listeners.forEach((listener) => listener())
   }
 
@@ -974,10 +1039,23 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     }
   }
 
+  // A read that never answers must not hold polling and event refreshes back for good: after
+  // REFRESH_GATE_TIMEOUT_MS the refresh stops counting as active and its caller continues. The
+  // read itself keeps running, and its result is still ordered by its sequence number.
   async function refresh(refreshRepositories = false, background = false) {
     activeRefreshes++
-    try { await readSnapshots(refreshRepositories, background) }
-    finally { activeRefreshes-- }
+    let released = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const release = () => { if (!released) { released = true; activeRefreshes--; clearTimeout(timer) } }
+    const stalled = new Promise<void>(resolve => { timer = setTimeout(() => { release(); resolve() }, REFRESH_GATE_TIMEOUT_MS) })
+    try { await Promise.race([readSnapshots(refreshRepositories, background), stalled]) }
+    finally { release(); lastRefreshFinishedAt = Date.now() }
+  }
+
+  /** Refreshes when the window comes back, unless a read is running or one finished moments ago. */
+  async function refreshOnReturn() {
+    if (document.visibilityState === "hidden" || activeRefreshes > 0 || Date.now() - lastRefreshFinishedAt < RETURN_REFRESH_MIN_AGE_MS) return
+    await refresh()
   }
 
   // Reads may overlap. A read's result is dropped when a mutation published newer
@@ -1051,13 +1129,13 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (source && activeConfiguration) source = { ...source, computerConfigurationOperation: activeConfiguration }
     localStateUpdating = configurationUpdating
     publish({ ...snapshot, source, backup, loading: configurationUpdating && !source, error, localUpdating: configurationUpdating && source !== null && (snapshot.source === null || snapshot.localUpdating === true) })
-    void refreshNetwork({ background })
+    if (networkWatchers > 0 || (networkAmbientWatchers > 0 && Date.now() - lastNetworkReadAt >= NETWORK_AMBIENT_INTERVAL_MS)) void readNetwork({ background })
     // One remote read per refresh; one that started during this refresh is recent enough.
     if (remotePasses === remotePassesAtStart) void refreshDevices(false, background)
   }
 
   async function onWindowFocus() {
-    await refresh()
+    await refreshOnReturn()
     if (disposed || !refreshRepositoriesOnReturn) return
     refreshRepositoriesOnReturn = false
     if (snapshot.source?.github.state === "connected") {
@@ -1079,7 +1157,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (disposed) return
     try {
       const subscriptions: Array<[string, EventHandler]> = [
-        ["silo://network-state-changed", () => { void refreshNetwork() }],
+        ["silo://network-state-changed", () => { if (networkWanted()) void readNetwork() }],
         ["silo://operation-queue-changed", () => { void refreshOperationQueue() }],
         ["silo://application-state-changed", refreshFromEvent],
         ["desktop:status-opened", refreshFromEvent],
@@ -1105,11 +1183,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           if (parsed.data.step === "computer-verification" && activeComputerJob) setJobStatus(activeComputerJob, ["computerVerify"], "running")
         }],
       ]
-      for (const [event, handler] of subscriptions) {
-        const stop = await native.listen(event, payload => { if (!disposed) handler(payload) })
-        if (disposed) { stop(); return }
-        unlisten.push(stop)
+      const results = await Promise.allSettled(subscriptions.map(([event, handler]) => native.listen(event, payload => { if (!disposed) handler(payload) })))
+      const stops = results.flatMap(result => result.status === "fulfilled" ? [result.value] : [])
+      const failure = results.find(result => result.status === "rejected")
+      if (disposed || failure) {
+        stops.forEach(stop => stop())
+        if (disposed) return
+        throw (failure as PromiseRejectedResult).reason
       }
+      unlisten.push(...stops)
     } catch (cause) {
       unlisten.splice(0).forEach((stop) => stop())
       if (disposed) return
@@ -1127,15 +1209,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       // window (the closed main window, the unopened status panel) does no polling,
       // including remote SSH snapshots; slow reads finish before another poll, and
       // each refresh reads remote devices once when it completes.
-      if (document.visibilityState === "hidden" || activeRefreshes > 0) return
+      if (document.visibilityState === "hidden") return
+      void refreshOperationQueue()
+      if (activeRefreshes > 0) return
       void refresh(false, true)
     }, 10_000)
     await Promise.all([refresh(), readSetupActivity(), refreshDevices(), refreshOperationQueue()])
   }
 
-  function onVisibilityChange() {
-    if (document.visibilityState !== "hidden" && activeRefreshes === 0) void refresh()
-  }
+  function onVisibilityChange() { void refreshOnReturn() }
 
   // Native state events arrive in bursts. Run at most one refresh at a time and
   // one trailing refresh for everything that arrived while it was running.
@@ -1898,7 +1980,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     // A new operation replaces the previous result, here and in the runtime (E-49),
     // so it does not come back after a relaunch.
     const previous = view.backup.operation
-    if (previous?.kind === "result" && previous !== localBackupOperation) {
+    if (previous?.kind === "result" && !(localBackupOperation && shareStructure(previous, localBackupOperation) === previous)) {
       dismissedBackupResults.add(backupResultKey(view.backup, previous))
       void native.invoke("dismiss_backup_operation", { expectedOperation: previous, expectedOperationId: view.backup.operationId ?? null }).catch(() => {})
     }
@@ -1996,7 +2078,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       const operation = view.backup.operation
       if (operation?.kind !== "result") return
       // A rejected start is reported only here; the runtime has nothing to dismiss.
-      if (operation === localBackupOperation) {
+      // The view reuses an equal earlier object, so compare by content.
+      if (localBackupOperation && shareStructure(operation, localBackupOperation) === operation) {
         localBackupOperation = null
         publish({ ...snapshot, backup: { ...snapshot.backup, operation: snapshot.backup.operation === operation ? null : snapshot.backup.operation } })
         return
@@ -2076,6 +2159,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
     },
     refresh,
+    watchNetwork,
     configureConfigurations,
     submitSetupStep,
     verifySetupIdentities,

@@ -37,7 +37,7 @@ describe("native migration boundary", () => {
     expect(screen.getByText("Full log: /tmp/silo-migration.log")).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Retry migration" }))
     expect(await screen.findByText("Normal application")).toBeVisible()
-    expect(native.invoke.mock.calls).toEqual([["read_runtime_migration_state"], ["retry_runtime_migration"], ["read_runtime_migration_state"], ["read_pre_upgrade_backup"]])
+    expect(native.invoke.mock.calls).toEqual([["read_runtime_migration_state"], ["read_runtime_migration_state"], ["retry_runtime_migration"], ["read_runtime_migration_state"], ["read_pre_upgrade_backup"]])
     expect(native.listen).toHaveBeenCalledWith("silo://application-state-changed", expect.any(Function))
   })
 
@@ -55,7 +55,7 @@ describe("native migration boundary", () => {
     fireEvent.click(screen.getByRole("checkbox"))
     fireEvent.click(continueButton)
     expect(await screen.findByText("Normal application")).toBeVisible()
-    expect(native.invoke.mock.calls).toEqual([["read_runtime_migration_state"], ["continue_after_migration_failure"], ["read_pre_upgrade_backup"]])
+    expect(native.invoke.mock.calls).toEqual([["read_runtime_migration_state"], ["read_runtime_migration_state"], ["continue_after_migration_failure"], ["read_pre_upgrade_backup"]])
   })
 
   it("tells the user about the pre-upgrade backup through the native commands, once", async () => {

@@ -398,6 +398,7 @@ it("backs off failed device snapshots independently and refreshes immediately on
       expect(reads("healthy")).toBe(healthy + delay / 10_000)
     }
     failing = false
+    await vi.advanceTimersByTimeAsync(2_000)
     window.dispatchEvent(new Event("focus"))
     await vi.advanceTimersByTimeAsync(0)
     expect(reads("broken")).toBe(++failedReads)
@@ -440,6 +441,7 @@ it("backs off failed device-list polling while local state stays fresh", async (
       expect(reads("read_application_state")).toBe(localReads + delay / 10_000)
     }
     failing = false
+    await vi.advanceTimersByTimeAsync(2_000)
     window.dispatchEvent(new Event("focus"))
     await vi.advanceTimersByTimeAsync(0)
     expect(reads("device_list")).toBe(++calls)

@@ -22,8 +22,8 @@ function productionGraph(entry: string): string[] {
     if (seen.has(file)) return
     seen.add(file)
     const text = readFileSync(file, "utf8")
-    for (const match of text.matchAll(/(?:import|export)\s+(?:type\s+)?(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g)) {
-      const dependency = resolveSource(match[1], file)
+    for (const match of text.matchAll(/(?:(?:import|export)\s+(?:type\s+)?(?:[^"']*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\))/g)) {
+      const dependency = resolveSource(match[1] ?? match[2], file)
       if (dependency) visit(dependency)
     }
   }
