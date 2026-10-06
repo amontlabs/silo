@@ -275,7 +275,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
         </ListCard>
       )}
 
-      {!actions.createCheckpoint && <p className="text-muted-foreground">Checkpoint operations are unavailable in this build.</p>}
+      {!actions.createCheckpoint && <p className="text-muted-foreground">Checkpoints cannot be created or restored here. Use the Silo desktop app instead.</p>}
 
     </section>
   </TooltipProvider>

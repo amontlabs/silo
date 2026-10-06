@@ -79,7 +79,8 @@ describe("onboarding restart recovery", () => {
     const first = createMemorySettingsStore({}, { currentStep: "computers", computers: [configuration], unfinishedComputerEditor: null, computerSelections: {}, computerIdentities: {} })
     const handlers = { ...actions(), submitStep: vi.fn() }
     const view = render(onboarding(first, handlers, { scenario: "complete" }))
-    await user.click(screen.getByRole("button", { name: `Delete ${configuration.name}` }))
+    await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+    await user.click(screen.getByRole("menuitem", { name: `Delete ${configuration.name}` }))
     await user.click(screen.getByRole("button", { name: /^Delete permanently$/ }))
     expect(screen.queryByRole("button", { name: `Delete ${configuration.name}` })).not.toBeInTheDocument()
     expect(first.getSnapshot().onboardingDraft?.computers).toEqual([])
@@ -188,8 +189,9 @@ describe("onboarding restart recovery", () => {
     if (pushes.getAttribute("aria-checked") === "false") await user.click(pushes)
 
     await user.click(screen.getByRole("tab", { name: /Computers/ }))
-    await user.click(screen.getByRole("button", { name: "Edit dev" }))
-    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+    await user.click(screen.getByRole("button", { name: `More actions for dev` }))
+    await user.click(screen.getByRole("menuitem", { name: `Edit dev` }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
     await user.click(screen.getByRole("button", { name: "Save" }))
     await user.click(screen.getByRole("button", { name: "Reorder personal" }))
     await user.keyboard("{ArrowUp}{ArrowUp}")

@@ -57,13 +57,14 @@ it("returns focus to Add when a new computer editor is cancelled", async () => {
   expect(add).toHaveFocus()
 })
 
-it("returns focus to the row's edit control when its editor is cancelled", async () => {
+it("returns focus to the row's actions menu when its editor is cancelled", async () => {
   const configuration = productionComputerDefaults[0]
   const user = userEvent.setup()
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={vi.fn()} /></TooltipProvider>)
-  await user.click(screen.getByRole("button", { name: `Edit ${configuration.name}` }))
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
   await user.click(screen.getByRole("button", { name: "Cancel" }))
-  expect(screen.getByRole("button", { name: `Edit ${configuration.name}` })).toHaveFocus()
+  expect(screen.getByRole("button", { name: `More actions for ${configuration.name}` })).toHaveFocus()
 })
 
 it("returns focus to the row menu when edits opened from that menu are discarded", async () => {
@@ -80,9 +81,10 @@ it("returns focus to the source row when a duplicate editor is cancelled", async
   const configuration = productionComputerDefaults[0]
   const user = userEvent.setup()
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={vi.fn()} /></TooltipProvider>)
-  await user.click(screen.getByRole("button", { name: `Duplicate settings for ${configuration.name}` }))
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Duplicate settings for ${configuration.name}` }))
   await user.click(screen.getByRole("button", { name: "Cancel" }))
-  expect(screen.getByRole("button", { name: `Edit ${configuration.name}` })).toHaveFocus()
+  expect(screen.getByRole("button", { name: `More actions for ${configuration.name}` })).toHaveFocus()
 })
 
 it("returns focus to the row after a successful asynchronous save", async () => {
@@ -90,9 +92,10 @@ it("returns focus to the row after a successful asynchronous save", async () => 
   const user = userEvent.setup()
   const onCommitComputer = vi.fn().mockResolvedValue(undefined)
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={vi.fn()} onCommitComputer={onCommitComputer} /></TooltipProvider>)
-  await user.click(screen.getByRole("button", { name: `Edit ${configuration.name}` }))
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
   await user.click(screen.getByRole("button", { name: "Save" }))
-  await waitFor(() => expect(screen.getByRole("button", { name: `Edit ${configuration.name}` })).toHaveFocus())
+  await waitFor(() => expect(screen.getByRole("button", { name: `More actions for ${configuration.name}` })).toHaveFocus())
   expect(onCommitComputer).toHaveBeenCalledOnce()
 })
 
@@ -102,7 +105,8 @@ it("preserves focus moved outside the editor while a save settles", async () => 
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]}
     onConfigurationsChange={() => screen.getByRole("button", { name: "Other action" }).focus()}
     footer={<button type="button">Other action</button>} /></TooltipProvider>)
-  await user.click(screen.getByRole("button", { name: `Edit ${configuration.name}` }))
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
   await user.click(screen.getByRole("button", { name: "Save" }))
   expect(screen.getByRole("button", { name: "Other action" })).toHaveFocus()
 })

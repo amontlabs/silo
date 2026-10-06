@@ -82,14 +82,15 @@ it.each(["configuration lock", "offline device"])("blocks deletion when a %s app
   expect(save).not.toHaveBeenCalled()
 })
 
-it("closes the hover-action delete confirmation on one Escape after hovering its trigger", async () => {
+it("closes the delete confirmation on one Escape after hovering its menu trigger", async () => {
   const configuration = productionComputerDefaults[0]
   const save = vi.fn()
   const user = userEvent.setup()
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={save} isComputerRunning={() => false} /></TooltipProvider>)
-  const trigger = screen.getByRole("button", { name: `Delete ${configuration.name}` })
+  const trigger = screen.getByRole("button", { name: `More actions for ${configuration.name}` })
   await user.hover(trigger)
   await user.click(trigger)
+  await user.click(screen.getByRole("menuitem", { name: `Delete ${configuration.name}` }))
   expect(await screen.findByText(`Delete ${configuration.name} permanently?`)).toBeVisible()
   await user.keyboard("{Escape}")
   await waitFor(() => expect(screen.queryByText(`Delete ${configuration.name} permanently?`)).not.toBeInTheDocument())

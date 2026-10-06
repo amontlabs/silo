@@ -16,7 +16,7 @@ describe("onboarding preparation interactions", () => {
       "Supported OS", "Virtualization",
     ])
     expect(view.dependencies[1].items.map(({ name }) => name)).toEqual([
-      "MicroSandbox runtime", "Git", "Git LFS",
+      "Computer runtime", "Git", "Git LFS",
     ])
     expect(view.dependencies[1].items[0].check).toMatchObject({
       id: "runtime-microsandbox",

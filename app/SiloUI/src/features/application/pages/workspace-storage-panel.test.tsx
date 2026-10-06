@@ -203,7 +203,7 @@ it("explains each measurement and the automatic reclaim policy in visible text",
   expect(screen.getByText(/Freeing up space does not shrink it/)).toBeVisible()
   expect(screen.getByText(/Used inside the computer/)).toBeVisible()
   expect(screen.getByText(/The most the computer can hold/)).toBeVisible()
-  expect(screen.getByTitle(/Silo frees space automatically after 7 days of running/)).toBeVisible()
+  expect(screen.getByText(/Silo does this automatically after 7 days of running/)).toBeVisible()
 })
 
 it("expands a failed reclaim's error inline from its Details button", async () => {

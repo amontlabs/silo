@@ -3,6 +3,7 @@ import { formatStorageBytes as formatBytes, type WorkspaceStorageState } from '.
 import { HardDrive, Database, Folder, Gauge, RefreshCw, History, ChevronDown, Check, CircleAlert, Layers, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { dismissOperationToast, errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess } from '@/lib/operation-toast'
+import { DisabledReason } from '../components/disabled-reason'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 
 type ReclaimEntry = WorkspaceStorageState['history'][number]
@@ -185,12 +186,12 @@ function ReclaimControls({ where, latest, running, disabled, onReclaim }: { wher
   return <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/40 p-3">
     <div className="grid gap-0.5">
       <span className="font-medium">Unused space</span>
-      <span title={`Releases unused blocks ${where}; files and capacity stay the same. Silo frees space automatically after 7 days of running, or when the computer stops once 24 hours have passed, and waits 24 hours after a failed attempt.`} className="text-[11px] leading-4 text-muted-foreground">Freed automatically</span>
+      <span className="max-w-md text-[11px] leading-4 text-muted-foreground">Releases unused blocks {where}; files and capacity stay the same. Silo does this automatically after 7 days of running, or when the computer stops once 24 hours have passed, and waits 24 hours after a failed attempt.</span>
     </div>
     <span className={`ml-auto text-right tabular-nums ${latest?.error ? 'text-destructive/80' : 'text-muted-foreground'}`}>{result}</span>
-    <span title={running ? undefined : 'Start the computer first.'}>
+    <DisabledReason reason={disabled && !running ? 'Start the computer first.' : undefined}>
       <Button variant="outline" size="xs" disabled={disabled} onClick={onReclaim}>Free up space</Button>
-    </span>
+    </DisabledReason>
   </div>
 }
 

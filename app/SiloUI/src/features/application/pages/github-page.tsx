@@ -364,11 +364,12 @@ export function GitHubPage({
     </div>
   ) : undefined
 
-  const accessToggle = <Button type="button" variant="outline" size="xs" disabled={applying} onClick={toggleAccess}>{accessEnabled ? "Disable access" : "Enable access"}</Button>
+  const accessToggle = <Button type="button" variant="outline" size="xs" disabled={applying} onClick={toggleAccess}>{accessEnabled ? "Disable for all computers" : "Enable for all computers"}</Button>
   const connectedActions = (
     <InlineConfirmation active={confirmingDisconnect} onDismiss={() => setConfirmingDisconnect(false)}>
       {confirmingDisconnect ? (
         <>
+          <span className="max-w-xs text-[11px] text-muted-foreground">Revokes Silo's GitHub authorization and removes repository access from every computer on this device.</span>
           <Button type="button" variant="ghost" size="xs" onClick={() => setConfirmingDisconnect(false)}>Cancel</Button>
           <Button type="button" variant="destructive" size="xs" onClick={disconnect}>Disconnect</Button>
         </>
@@ -413,7 +414,7 @@ export function GitHubPage({
         onResetComputerIdentity={resetIdentity}
         connectedTitle={`Connected as @${source.github.account ?? "unknown"}`}
         connectedDetail={accessEnabled
-          ? "Repository credentials are scoped to each computer."
+          ? "Repository credentials are scoped to each computer. Disabling access turns GitHub off for every computer on this device."
           : "GitHub access is off for every computer, including computers that use a personal token."}
         connectedActions={connectedActions}
         notice={catalogNotice}

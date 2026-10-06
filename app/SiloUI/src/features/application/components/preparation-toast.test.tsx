@@ -36,7 +36,7 @@ describe("PreparationToast", () => {
     const { emit } = mount({ image: task("running"), lcu: task("pending") })
     await act(async () => { await vi.advanceTimersByTimeAsync(PREPARATION_SHOW_DELAY_MS + 50) })
     expect(screen.getByText("Preparing Silo")).toBeInTheDocument()
-    expect(screen.getAllByText("Preparing the VM image (first time only)").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Preparing the computer image (first time only)").length).toBeGreaterThan(0)
     expect(dismiss).not.toHaveBeenCalledWith("preparation")
     emit({ image: task("ready"), lcu: task("ready") })
     await act(async () => { await vi.advanceTimersByTimeAsync(PREPARATION_HIDE_DELAY_MS + 50) })
@@ -53,9 +53,9 @@ describe("PreparationToast", () => {
   })
 
   it("shows a short message with Retry when something fails", async () => {
-    const { backend } = mount({ image: task("ready"), lcu: task("failed", { message: "Silo could not download LCU. Check your network connection, then retry.", retryable: true }) })
+    const { backend } = mount({ image: task("ready"), lcu: task("failed", { message: "Silo could not download the computer use tools. Check your connection, then retry.", retryable: true }) })
     expect(await screen.findByText("Silo could not finish preparing")).toBeInTheDocument()
-    expect(screen.getByText(/Silo could not download LCU/)).toBeInTheDocument()
+    expect(screen.getByText(/Silo could not download the computer use tools/)).toBeInTheDocument()
     await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(screen.getByRole("button", { name: "Retry" }))
     expect(backend.retry).toHaveBeenCalledOnce()
   })
