@@ -1,6 +1,6 @@
 import { ErrorDetails } from "@/components/error-details"
 import { configurationFailureDiagnostic } from "@/features/application/model/configuration-failure"
-import { lifecycleGuard, type LifecyclePrompt } from "@/features/application/model/lifecycle-guard"
+import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/features/application/model/lifecycle-guard"
 import { computerTarget } from "@/features/application/model/connections"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
@@ -204,6 +204,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   const target = computerTarget(computer)
               const availability = computerAvailability(computer, source)
               const pending = confirmation?.computer === target ? confirmation : null
+              const pendingPrompt = pending ? interruptionPrompt(computer, pending.action) : null
               const pendingSecrets = !computer.device ? source.secrets.filter((secret) => secret.state === "restart-required" && secret.computers.includes(configuration.name)).map(({ name }) => name) : []
               const activity = source.activities.find((item) => item.category === "computer" && item.computer === target && item.status === "running")
               const review = computer.state === "failed" || computer.attention?.level === "error"
@@ -252,7 +253,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   </div>
                 </ListRowDetails>}
                 {pending && <ListRowDetails label={`${pending.action === "stop" ? "Stop" : "Restart"} ${configuration.name}?`} className="gap-2 pl-0">
-                  <p className="text-[11px] text-muted-foreground">{pending.action === "stop" ? "Stop" : "Restart"} {configuration.name}{computer.device ? ` on ${computer.device.name}` : ""}? Running processes will be interrupted.</p>
+                  <p className="text-[11px] text-muted-foreground">{pendingPrompt?.title} {pendingPrompt?.description}</p>
                   <div className="flex justify-end gap-1.5">
                     <Button variant="ghost" size="xs" onClick={() => setConfirmation(null)}>Cancel</Button>
                     <Button variant="destructive" size="xs" disabled={pending.action === "stop" ? !availability.canStop : !availability.canRestart} onClick={() => {
@@ -269,7 +270,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
         </ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center">
           <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
           <p className="text-[13px] font-medium">No computers yet</p>
-          <p className="text-[11px] text-muted-foreground">Add your first computer in Silo.</p>
+          <p className="text-[11px] text-muted-foreground">Open Silo to create your first computer.</p>
         </div>}
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">

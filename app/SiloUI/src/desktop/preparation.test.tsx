@@ -15,13 +15,13 @@ describe("describePreparation", () => {
 
   it("names the running items in the order they are prepared", () => {
     const items = describePreparation(status(task("running", { fraction: 25 }), task("running")), { state: "downloading", receivedBytes: 62, totalBytes: 100 })
-    expect(items.map(item => item.text)).toEqual(["Downloading the VM image · 25%", "Downloading LCU", "Downloading ChatGPT for Linux · 62%"])
+    expect(items.map(item => item.text)).toEqual(["Downloading the computer image · 25%", "Downloading the computer use tools", "Downloading ChatGPT for Linux · 62%"])
     expect(items.map(item => item.progress)).toEqual([0.25, null, 0.62])
   })
 
   it("says the image is being prepared once its download is over", () => {
     const items = describePreparation(status(task("running")), null)
-    expect(items.map(item => item.text)).toEqual(["Preparing the VM image (first time only)"])
+    expect(items.map(item => item.text)).toEqual(["Preparing the computer image (first time only)"])
     expect(items[0].progress).toBeNull()
   })
 

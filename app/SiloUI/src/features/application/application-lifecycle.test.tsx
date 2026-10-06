@@ -252,7 +252,7 @@ it("keeps committed detail pages stable while an edit is being applied", async (
   expect(overview.getByRole("combobox", { name: "Runtime disk" })).toBeDisabled()
   await user.hover(overview.getByLabelText(/Workspace disk: .*read-only/))
   expect(await screen.findByRole("tooltip")).toHaveTextContent("Disk size is read-only.")
-  await user.selectOptions(overview.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(overview.getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(overview.getByRole("button", { name: "Stop and save…" }))
   await user.click(overview.getByRole("button", { name: "Stop and save" }))
 
