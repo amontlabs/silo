@@ -27,7 +27,7 @@ it("reuses the compact onboarding GitHub editor without redundant page framing",
   expect(github.queryByText("Manage the account and repository access available inside each computer.")).not.toBeInTheDocument()
   expect(github.queryByRole("heading", { name: "Repository access" })).not.toBeInTheDocument()
   expect(github.getByText("Connected as @taylor")).toBeVisible()
-  expect(github.getByRole("button", { name: "Disable access" })).toBeVisible()
+  expect(github.getByRole("button", { name: "Disable for all computers" })).toBeVisible()
   expect(github.getByRole("button", { name: "Disconnect" })).toBeVisible()
   expect(github.queryByRole("button", { name: "Clear repositories" })).not.toBeInTheDocument()
   const clearDevRepositories = github.getByRole("button", { name: "Clear repositories from dev" })
@@ -180,7 +180,7 @@ it("settles a newer GitHub revision even when its completion matches the previou
   application.rerender(<GitHubPanel source={completed} actions={application.actions} />)
   expect(await screen.findByText("GitHub settings applied")).toBeVisible()
   expect(screen.queryByText("Applying repository access…")).not.toBeInTheDocument()
-  expect(github.getByRole("button", { name: "Disable access" })).toBeEnabled()
+  expect(github.getByRole("button", { name: "Disable for all computers" })).toBeEnabled()
 })
 
 
@@ -194,7 +194,7 @@ it("stops applying and permits correction when a native GitHub save rejects", as
   expect(await screen.findByText(/Invalid Git identity settings\./)).toBeVisible()
   expect(screen.queryByText("Applying repository access…")).not.toBeInTheDocument()
   expect(github.getByRole("button", { name: /GitHub settings not applied for dev/ })).toBeVisible()
-  expect(github.getByRole("button", { name: "Disable access" })).toBeEnabled()
+  expect(github.getByRole("button", { name: "Disable for all computers" })).toBeEnabled()
 })
 
 
@@ -306,10 +306,10 @@ it("applies access toggles immediately and confirms clearing one computer's repo
   )
 
   const disabledPanel = within(appPanel("GitHub"))
-  expect(disabledPanel.getByRole("button", { name: "Enable access" })).toBeVisible()
+  expect(disabledPanel.getByRole("button", { name: "Enable for all computers" })).toBeVisible()
   expect(disabledPanel.getByRole("table", { name: "Selected repositories for dev" })).toBeVisible()
   expect(disabledPanel.getByRole("button", { name: "Clear repositories from dev" })).toBeDisabled()
-  await disabled.user.click(disabledPanel.getByRole("button", { name: "Enable access" }))
+  await disabled.user.click(disabledPanel.getByRole("button", { name: "Enable for all computers" }))
   expect(disabled.actions.setGitHubAccessEnabled).toHaveBeenCalledWith(true)
 })
 
@@ -347,7 +347,7 @@ it("keeps a successful GitHub apply notification until it is closed", async () =
 
     const succeeded = applicationSourceForScenario("running", "connected", undefined, undefined, undefined, undefined, undefined, 0, "succeeded")
     succeeded.github.policyRevision = 5
-    fireEvent.click(screen.getByRole("button", { name: "Disable access" }))
+    fireEvent.click(screen.getByRole("button", { name: "Disable for all computers" }))
     application.rerender(<GitHubPanel source={succeeded} actions={application.actions} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(50) })
     expect(screen.getByText("GitHub settings applied")).toBeVisible()

@@ -279,7 +279,8 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
   const extraGithub = (computer.githubRepositories ?? []).filter(name => !repositories.some(repo => repo.path.endsWith(name)))
   const hasRepositories = repositories.length > 0 || extraGithub.length > 0
 
-  const resourceTitle = `CPUs: ${configuration.cpus} · Memory: ${configuration.memoryGiB} GiB · Disk: ${configuration.workspaceStorageGiB} GiB`
+  const resourceTitle = `CPUs at start: ${configuration.cpus} (maximum ${configuration.maxCPUs}) · Memory at start: ${configuration.memoryGiB} GiB (maximum ${configuration.maxMemoryGiB} GiB)`
+  const diskDetail = `Workspace disk: ${configuration.workspaceStorageGiB} GiB · Runtime disk: ${configuration.runtimeStorageGiB} GiB`
 
   return <div className="grid gap-5">
     <Section label="Resources">
@@ -287,7 +288,7 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
         <ListRow
           icon={<ListRowIcon aria-hidden="true"><Cpu className="size-3.5" /></ListRowIcon>}
           title={resourceTitle}
-          detail="Allocated to this computer"
+          detail={diskDetail}
           actions={onEdit ? <Button type="button" variant="outline" size="xs" onClick={onEdit}>Edit</Button> : undefined}
         />
       </ListCard>

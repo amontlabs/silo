@@ -41,7 +41,8 @@ export function SshAccessRow({ computer, access, save, connection, stale, embedd
   const handlers = useRef<{ change: typeof change; connect: typeof connect } | null>(null)
   useLayoutEffect(() => { handlers.current = { change, connect } })
   useEffect(() => () => { sequence.current++; handlers.current = null }, [])
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ field: "port" | "address"; message: string } | null>(null)
+  const errorId = `${id}-error`
   const [copied, setCopied] = useState<string | null>(null)
   useEffect(() => {
     if (!copied) return
@@ -93,16 +94,17 @@ export function SshAccessRow({ computer, access, save, connection, stale, embedd
   const editor = access && ((port !== null || address !== null) && <form noValidate className="flex flex-wrap items-end gap-2" onSubmit={event => {
             event.preventDefault()
             const value = Number(port ?? access.port)
-            if (!Number.isInteger(value) || value < 1 || value > 65535) { setError("Enter a port from 1 to 65535."); return }
+            if (!Number.isInteger(value) || value < 1 || value > 65535) { setError({ field: "port", message: "Enter a port from 1 to 65535." }); return }
             if (address !== null) {
               const octets = address.split(".")
-              if (octets.length !== 4 || octets.some(octet => !/^\d{1,3}$/.test(octet) || Number(octet) > 255) || address === "0.0.0.0" || address.startsWith("127.")) { setError("Choose a specific LAN or VPN IPv4 address on the host device."); return }
+              if (octets.length !== 4 || octets.some(octet => !/^\d{1,3}$/.test(octet) || Number(octet) > 255) || address === "0.0.0.0" || address.startsWith("127.")) { setError({ field: "address", message: `Choose a specific LAN or VPN IPv4 address on ${access.deviceName}.` }); return }
             }
             void change({ port: value, ...(address !== null ? { bindAddress: address } : {}) }).then(ok => { if (ok) { setPort(null); setAddress(null) } })
           }}>
-            {port !== null && <label className="grid gap-1">Port<Input technical autoFocus aria-label="SSH port" type="number" min={1} max={65535} value={port} onChange={event => setPort(event.target.value)} className="w-24" disabled={blocked} /></label>}
-            {address !== null && <label className="grid gap-1">Network address<Input technical autoFocus={port === null} aria-label="LAN or VPN address" list={`${id}-addresses`} value={address} onChange={event => setAddress(event.target.value)} disabled={blocked} /><datalist id={`${id}-addresses`}>{networkAddresses.map(value => <option key={value} value={value} />)}</datalist></label>}
+            {port !== null && <label className="grid gap-1">Port<Input technical autoFocus aria-label="SSH port" aria-invalid={error?.field === "port"} aria-describedby={error?.field === "port" ? errorId : undefined} type="number" min={1} max={65535} value={port} onChange={event => setPort(event.target.value)} className="w-24" disabled={blocked} /></label>}
+            {address !== null && <label className="grid gap-1">Network address<Input technical autoFocus={port === null} aria-label="LAN or VPN address" aria-invalid={error?.field === "address"} aria-describedby={error?.field === "address" ? errorId : undefined} list={`${id}-addresses`} value={address} onChange={event => setAddress(event.target.value)} disabled={blocked} /><datalist id={`${id}-addresses`}>{networkAddresses.map(value => <option key={value} value={value} />)}</datalist></label>}
             <Button type="submit" size="xs" variant="outline" disabled={blocked}>Save</Button><Button type="button" size="xs" variant="ghost" disabled={busy} onClick={() => { setPort(null); setAddress(null); setError(null) }}>Cancel</Button>
+            {error && <p id={errorId} role="alert" className="basis-full text-destructive">{error.message}</p>}
           </form>)
 
   const content = <>
@@ -158,7 +160,6 @@ export function SshAccessRow({ computer, access, save, connection, stale, embedd
         })}
 
       </>}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
     </fieldset>
   </>
   return embedded ? <TooltipProvider delayDuration={150}>{content}</TooltipProvider> : <Collapsible className="rounded-lg border border-border bg-card">{header}<CollapsibleContent>{content}</CollapsibleContent></Collapsible>
@@ -178,7 +179,7 @@ export function SshAccessBadges({ access, stale = false, onOpen }: { access?: Ss
     : unknown ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400"
     : network ? "border-blue-500/15 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"
   const name = access.state === "listening" && !unknown ? label : `${label}: ${status}`
-  const className = `inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-[9px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`
+  const className = `inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`
   const content = <>{failed || unknown ? <TriangleAlert className="size-3" aria-hidden="true" /> : network && <ConnectionIcon kind="ssh" network className="size-3" />}{failed ? "SSH error" : "SSH"}</>
   return <TooltipProvider delayDuration={150}><Tooltip><TooltipTrigger asChild>
     {onOpen
