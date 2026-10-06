@@ -791,6 +791,7 @@ describe("overlapping state reads", () => {
     const store = createProductionSource(mock.native)
     try {
       await store.initialize()
+      await store.applicationActions.refreshNetwork!()
       expect(store.getSnapshot().source!.deviceCapacity).toEqual(capacity)
       expect(store.getSnapshot().source!.computers[0]).toMatchObject({ freshness: "stale", ports: [{ host: "dev.localhost", hostPort: 43000 }] })
     } finally { store.dispose() }

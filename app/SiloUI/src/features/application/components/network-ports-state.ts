@@ -62,9 +62,15 @@ export function useNetworkPorts({ computers, network, error, actions, active }: 
   useEffect(() => {
     if (!active || !refreshNetwork) return
     const refresh = (background = false) => { if (document.visibilityState !== "hidden") void refreshNetwork({ background }) }
-    const onReturn = () => refresh()
+    // Focus and visibility changes arrive together when the window returns: one refresh covers both.
+    let lastReturn = 0
+    const onReturn = () => {
+      if (Date.now() - lastReturn < 1000) return
+      lastReturn = Date.now()
+      refresh()
+    }
     refresh()
-    const timer = window.setInterval(() => refresh(true), 5000)
+    const timer = window.setInterval(() => refresh(true), 12_000)
     window.addEventListener("focus", onReturn)
     document.addEventListener("visibilitychange", onReturn)
     return () => { clearInterval(timer); window.removeEventListener("focus", onReturn); document.removeEventListener("visibilitychange", onReturn) }
