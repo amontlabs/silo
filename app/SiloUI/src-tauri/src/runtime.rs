@@ -60,8 +60,11 @@ pub fn read_operation_queue() -> operation_gate::OperationQueue {
 /// Ask to cancel a queued or running operation by its queue id. A waiting operation
 /// leaves the queue; a running operation is stopped only when it opted in as cancellable.
 #[tauri::command]
-pub fn cancel_operation(id: u64) -> Result<(), BridgeError> {
-    OPERATIONS.cancel(id).map_err(BridgeError::from)
+pub async fn cancel_operation(id: u64) -> Result<(), BridgeError> {
+    // A running operation that has not yet opted in is awaited for a grace period.
+    tauri::async_runtime::spawn_blocking(move || OPERATIONS.cancel(id).map_err(BridgeError::from))
+        .await
+        .map_err(|_| BridgeError::from("Silo could not cancel the operation."))?
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
