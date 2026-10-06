@@ -8,7 +8,12 @@
 //! so restores, forks and imports carry it. See docs/SiloUI-WORKING-ACCOUNT.md.
 use crate::runtime::{self, RuntimeError, RuntimePaths, RuntimeRunner};
 use serde_json::Value;
-use std::time::Duration;
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime},
+};
 
 pub(crate) const USER: &str = "silo";
 
@@ -125,17 +130,42 @@ pub(crate) fn inspect_user(paths: &RuntimePaths, name: &str) -> Result<&'static 
     Ok(USER)
 }
 
+/// The executables (by path, size and modification time) that reported support for the
+/// account; only a success is remembered.
+fn supported_runtimes() -> &'static Mutex<HashSet<(PathBuf, u64, Option<SystemTime>)>> {
+    static SUPPORTED: OnceLock<Mutex<HashSet<(PathBuf, u64, Option<SystemTime>)>>> =
+        OnceLock::new();
+    SUPPORTED.get_or_init(Default::default)
+}
+
 pub(crate) fn require_runtime(paths: &RuntimePaths) -> Result<(), String> {
+    const UNSUPPORTED: &str = "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo.";
+    let identity = std::fs::metadata(&paths.executable).ok().map(|metadata| {
+        (
+            paths.executable.clone(),
+            metadata.len(),
+            metadata.modified().ok(),
+        )
+    });
+    if let Some(identity) = &identity {
+        if supported_runtimes()
+            .lock()
+            .is_ok_and(|supported| supported.contains(identity))
+        {
+            return Ok(());
+        }
+    }
     let output = runtime::run_msb(
         paths,
         &["--silo-working-account-protocol".into()],
         Duration::from_secs(10),
     )
-    .map_err(|_| {
-        "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo."
-    })?;
+    .map_err(|_| UNSUPPORTED)?;
     if output.stdout.trim() != "1" {
-        return Err("The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo.".into());
+        return Err(UNSUPPORTED.into());
+    }
+    if let (Some(identity), Ok(mut supported)) = (identity, supported_runtimes().lock()) {
+        supported.insert(identity);
     }
     Ok(())
 }
@@ -414,6 +444,37 @@ mod tests {
             error.contains("Relaunch Silo") && error.contains("repair or update Silo"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn a_supported_runtime_is_probed_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let paths = RuntimePaths {
+            executable: root.join("msb"),
+            library: root.join("msb"),
+            home: root.join("home"),
+            storage_home: None,
+            guest_image: root.join("image"),
+            metadata: root.join("computers.json"),
+            volumes: root.join("volumes"),
+        };
+        let probes = root.join("probes");
+        std::fs::write(
+            &paths.executable,
+            format!(
+                "#!/bin/sh\necho probe >>'{}'\nprintf '1\\n'\n",
+                probes.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&paths.executable, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        for _ in 0..3 {
+            require_runtime(&paths).unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(&probes).unwrap().lines().count(), 1);
     }
 
     #[test]
