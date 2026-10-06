@@ -827,19 +827,92 @@ fn verify_package(path: &Path, asset: &Asset) -> Result<(), Error> {
 struct TarStream {
     children: Vec<Child>,
     stdout: std::process::ChildStdout,
+    finished: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// A short tool run (version or member listing) that must not hang extraction.
+const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+/// The longest one unpacking may take before its tools are stopped.
+const UNPACK_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Runs `command` with piped stdout and discarded stderr, killing it at `timeout`.
+fn output_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> std::io::Result<std::process::Output> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdout = child.stdout.take().expect("piped");
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        bytes
+    });
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the tool did not finish in time",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: reader.join().unwrap_or_default(),
+        stderr: Vec::new(),
+    })
 }
 
 impl TarStream {
+    /// Stops the tools if unpacking has not finished by `UNPACK_TIMEOUT`, which
+    /// ends a read blocked on a stalled tool.
+    fn guarded(children: Vec<Child>, stdout: std::process::ChildStdout) -> Self {
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pids: Vec<libc::pid_t> = children
+            .iter()
+            .filter_map(|child| libc::pid_t::try_from(child.id()).ok())
+            .collect();
+        let watched = finished.clone();
+        std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + UNPACK_TIMEOUT;
+            while std::time::Instant::now() < deadline {
+                if watched.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            if !watched.load(std::sync::atomic::Ordering::SeqCst) {
+                for pid in pids {
+                    // SAFETY: the tools are reaped only after `finished` is set, so
+                    // an unset flag means these PIDs still name this stream's children.
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                }
+            }
+        });
+        Self {
+            children,
+            stdout,
+            finished,
+        }
+    }
+
     fn open(deb: &Path) -> Result<Self, Error> {
         let missing =
             || Error::fatal("Silo could not find the system tool that unpacks .deb files.");
         if cfg!(target_os = "macos") {
             let tar = "/usr/bin/tar";
-            let list = Command::new(tar)
-                .arg("-tf")
-                .arg(deb)
-                .stderr(Stdio::null())
-                .output()
+            let list = output_with_timeout(Command::new(tar).arg("-tf").arg(deb), TOOL_TIMEOUT)
                 .map_err(|_| missing())?;
             let member = String::from_utf8_lossy(&list.stdout)
                 .lines()
@@ -859,11 +932,7 @@ impl TarStream {
             let tool = ["/usr/bin/dpkg-deb", "dpkg-deb"]
                 .into_iter()
                 .find(|candidate| {
-                    Command::new(candidate)
-                        .arg("--version")
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status()
+                    output_with_timeout(Command::new(candidate).arg("--version"), TOOL_TIMEOUT)
                         .is_ok()
                 })
                 .ok_or_else(missing)?;
@@ -875,10 +944,7 @@ impl TarStream {
                 .spawn()
                 .map_err(|_| missing())?;
             let stdout = child.stdout.take().expect("piped");
-            Ok(Self {
-                children: vec![child],
-                stdout,
-            })
+            Ok(Self::guarded(vec![child], stdout))
         }
     }
 
@@ -894,15 +960,14 @@ impl TarStream {
                 let _ = first.wait();
             })?;
         let stdout = second.stdout.take().expect("piped");
-        Ok(Self {
-            children: vec![first, second],
-            stdout,
-        })
+        Ok(Self::guarded(vec![first, second], stdout))
     }
 
     /// Reads the rest of the stream, then requires every tool to have succeeded.
     fn finish(mut self) -> Result<(), Error> {
         let _ = std::io::copy(&mut self.stdout, &mut std::io::sink());
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let mut ok = true;
         for child in &mut self.children {
             ok &= child.wait().is_ok_and(|status| status.success());
@@ -923,6 +988,8 @@ impl Read for TarStream {
 
 impl Drop for TarStream {
     fn drop(&mut self) {
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         for child in &mut self.children {
             let _ = child.kill();
             let _ = child.wait();
@@ -2348,3 +2415,25 @@ pub(crate) async fn chatgpt_app_retry(
 mod auto;
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, unix))]
+mod tool_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn a_tool_that_does_not_finish_is_stopped() {
+        let started = Instant::now();
+        let result =
+            output_with_timeout(Command::new("sleep").arg("30"), Duration::from_millis(200));
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_tool_that_finishes_returns_its_output() {
+        let output =
+            output_with_timeout(Command::new("echo").arg("listing"), TOOL_TIMEOUT).unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "listing");
+    }
+}

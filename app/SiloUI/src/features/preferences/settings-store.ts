@@ -17,6 +17,8 @@ export interface SettingsBackend {
   updateSettings: (patch: SettingsPatch) => Promise<SettingsSnapshot>
   updateOnboardingDraft: (draft: OnboardingDraft | null) => Promise<SettingsSnapshot>
   flush: () => Promise<void>
+  /** Set a write-protected settings file aside and start from defaults. */
+  resetProtected?: () => Promise<SettingsSnapshot>
 }
 
 type Change = { kind: "settings"; patch: SettingsPatch } | { kind: "draft"; draft: OnboardingDraft | null }
@@ -208,6 +210,17 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
         } while (pending.length || draining)
       } catch (error) { failed(error) }
     },
+    canResetProtected: backend.resetProtected !== undefined,
+    async resetProtected() {
+      if (!backend.resetProtected) return
+      try {
+        const snapshot = await backend.resetProtected()
+        transportError = null
+        rejection = null
+        receive(snapshot)
+        publish()
+      } catch (error) { failed(error) }
+    },
     dispose() { disposed = true; unsubscribe?.(); listeners.clear() },
   }
 }
@@ -253,5 +266,5 @@ export function useSettings(initialSettings?: SettingsPatch) {
   })
   const store = inherited ?? local
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush }
+  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush, canResetProtected: store.canResetProtected, resetProtected: store.resetProtected }
 }

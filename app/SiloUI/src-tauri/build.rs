@@ -57,6 +57,7 @@ fn main() {
             "update_onboarding_draft",
             "import_legacy_theme",
             "flush_settings",
+            "reset_protected_settings",
             "begin_settings_flush",
             "complete_settings_flush",
             "device_list",

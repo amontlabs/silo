@@ -6,6 +6,7 @@ mod bridge_error;
 mod bundled_tools;
 mod channel;
 mod chatgpt_app;
+mod child_process;
 mod clipboard;
 #[cfg(test)]
 mod command_permissions_tests;
@@ -189,6 +190,7 @@ fn main() {
             settings::update_onboarding_draft,
             settings::import_legacy_theme,
             settings::flush_settings,
+            settings::reset_protected_settings,
             settings::begin_settings_flush,
             settings::complete_settings_flush,
             settings::cancel_settings_flush,

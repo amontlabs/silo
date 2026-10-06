@@ -98,24 +98,8 @@ impl MsbRunner for SystemMsbRunner {
     }
 }
 
-/// Ask a cancelled or timed-out command to stop with SIGTERM so it can clean
-/// up, and SIGKILL it only if it is still running after `grace`.
 fn stop_child(child: &mut std::process::Child, grace: Duration) {
-    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
-        // SAFETY: the child has not been reaped (no successful wait yet), so
-        // its PID still names this process's own child.
-        unsafe { libc::kill(pid, libc::SIGTERM) };
-        let deadline = Instant::now() + grace;
-        while Instant::now() < deadline {
-            match child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) => thread::sleep(COMMAND_POLL_INTERVAL),
-                Err(_) => break,
-            }
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    let _ = crate::child_process::terminate_child(child, grace);
 }
 
 fn run_msb_process(
@@ -190,7 +174,16 @@ fn run_msb_process(
             let _ = stderr_reader.join();
             return Err(BackupError::CommandTimeout);
         }
-        if let Some(status) = child.try_wait().map_err(BackupError::Io)? {
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(error) => {
+                stop_child(&mut child, grace);
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(BackupError::Io(error));
+            }
+        };
+        if let Some(status) = status {
             let (stdout, stdout_truncated) = stdout_reader
                 .join()
                 .map_err(|_| BackupError::Io(io::Error::other("stdout reader failed")))??;
