@@ -224,7 +224,10 @@ fn rewrite_response_head(head: &[u8], port: u16) -> Option<Vec<u8>> {
     }
     let mut lines = body.split("\r\n");
     let status = lines.next()?;
-    if !status.starts_with("HTTP/1.") {
+    // Interim (1xx) responses are refused: only the final head is rewritten, and a
+    // second head after an interim one would reach the page unmodified.
+    let code = status.strip_prefix("HTTP/1.")?.split(' ').nth(1)?;
+    if code.len() != 3 || !code.bytes().all(|b| b.is_ascii_digit()) || code.starts_with('1') {
         return None;
     }
     let mut out = format!("{status}\r\n");
@@ -1746,10 +1749,46 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nX: a\rb\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nX: a\0b\r\n\r\n",
             b"garbage\r\n\r\n",
+            b"HTTP/1.1 103 Early Hints\r\n\r\n",
+            b"HTTP/1.1 100 Continue\r\n\r\n",
+            b"HTTP/1.1 101 Switching Protocols\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nX: a\r\n",
         ] {
             assert!(rewrite_response_head(malformed, 1).is_none());
         }
+    }
+
+    #[test]
+    fn an_interim_response_cannot_smuggle_an_unpoliced_final_response() {
+        let (_directory, upstream, socket) = guest();
+        let proxy = Proxy::start(socket, 6901, "silo", "password").unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = upstream.accept().unwrap();
+            let mut data = Vec::new();
+            let mut byte = [0];
+            while !data.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                data.push(byte[0]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 103 Early Hints\r\n\r\nHTTP/1.1 200 OK\r\nContent-Security-Policy: default-src *\r\nConnection: close\r\n\r\nok")
+                .unwrap();
+        });
+        let mut socket = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            socket,
+            "GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nCookie: {}={}\r\n\r\n",
+            proxy.port, proxy.cookie_name, proxy.token
+        )
+        .unwrap();
+        let mut received = String::new();
+        socket.read_to_string(&mut received).unwrap();
+        assert!(received.starts_with("HTTP/1.1 502"));
+        assert!(!received.contains("default-src *"));
+        worker.join().unwrap();
     }
 
     #[test]
