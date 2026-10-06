@@ -277,11 +277,20 @@ pub(crate) trait RuntimeRunner {
         args: &[String],
         timeout: Duration,
     ) -> Result<CommandOutput, RuntimeError>;
+
+    /// This runner as one that independent calls may share across threads, when it is.
+    fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+        None
+    }
 }
 
 pub(crate) struct ProcessRunner;
 
 impl RuntimeRunner for ProcessRunner {
+    fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+        Some(self)
+    }
+
     fn run(
         &self,
         paths: &RuntimePaths,
@@ -4374,6 +4383,9 @@ enum Unread {
     Failed(RuntimeError),
 }
 
+/// Most computers a read inspects at once.
+const READ_PARALLELISM: usize = 4;
+
 const INVENTORY_MISMATCH: &str = "Silo's saved computer configuration does not match its managed runtime state. No computer operation was performed.";
 
 /// List and inspect every configured computer. Only a failure that no single computer
@@ -4402,37 +4414,69 @@ fn read_rows(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Vec<Row
         let listed = listed_names.contains(configuration.name());
         checkpoints::pending_view(paths, configuration.id(), listed).unwrap_or(!listed)
     };
-    let mut rows = Vec::with_capacity(metadata.computers.len());
+    let mut pending = Vec::new();
+    let mut rows: Vec<Option<Row>> = Vec::with_capacity(metadata.computers.len());
     for configuration in metadata.computers.iter().cloned() {
         let listed = listed_names.contains(configuration.name());
-        let row = match (from_record(&configuration), listed) {
-            (true, false) => Row {
+        rows.push(match (from_record(&configuration), listed) {
+            (true, false) => Some(Row {
                 computer: checkpoints::pending_computer(configuration)?,
                 unread: None,
-            },
-            (true, true) | (false, false) => Row {
+            }),
+            (true, true) | (false, false) => Some(Row {
                 computer: unread_computer(configuration),
                 unread: Some(Unread::Mismatch),
-            },
+            }),
             (false, true) => {
-                match inspect_computer(runner, paths, configuration.name()).and_then(|inspected| {
-                    ensure_managed(&inspected)?;
-                    Ok(inspected)
-                }) {
-                    Ok(inspected) => Row {
-                        computer: application_computer(paths, configuration, &inspected),
-                        unread: None,
-                    },
-                    Err(error) => Row {
-                        computer: unread_computer(configuration),
-                        unread: Some(Unread::Failed(error)),
-                    },
-                }
+                pending.push((rows.len(), configuration));
+                None
             }
-        };
-        rows.push(row);
+        });
     }
-    Ok(rows)
+    let inspect = |configuration: &ComputerConfiguration, runner: &dyn RuntimeRunner| {
+        inspect_computer(runner, paths, configuration.name()).and_then(|inspected| {
+            ensure_managed(&inspected)?;
+            Ok(inspected)
+        })
+    };
+    let mut inspections = Vec::with_capacity(pending.len());
+    match runner.concurrent() {
+        Some(shared) => {
+            for batch in pending.chunks(READ_PARALLELISM) {
+                std::thread::scope(|scope| {
+                    let handles: Vec<_> = batch
+                        .iter()
+                        .map(|(_, configuration)| scope.spawn(|| inspect(configuration, shared)))
+                        .collect();
+                    for handle in handles {
+                        inspections.push(handle.join().unwrap_or_else(|_| {
+                            Err(RuntimeError::Unavailable(
+                                "Reading the computer stopped unexpectedly.".into(),
+                            ))
+                        }));
+                    }
+                });
+            }
+        }
+        None => inspections.extend(
+            pending
+                .iter()
+                .map(|(_, configuration)| inspect(configuration, runner)),
+        ),
+    }
+    for ((index, configuration), inspection) in pending.into_iter().zip(inspections) {
+        rows[index] = Some(match inspection {
+            Ok(inspected) => Row {
+                computer: application_computer(paths, configuration, &inspected),
+                unread: None,
+            },
+            Err(error) => Row {
+                computer: unread_computer(configuration),
+                unread: Some(Unread::Failed(error)),
+            },
+        });
+    }
+    Ok(rows.into_iter().flatten().collect())
 }
 
 /// Publish rows. `settled(id)` is true when no operation touched the computer during the read.
@@ -9843,6 +9887,67 @@ exit 9
             response.computers[1].repositories.is_empty(),
             "a stopped computer lists no repositories"
         );
+    }
+
+    #[test]
+    fn a_concurrent_runner_inspects_computers_together_and_keeps_their_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _test_state = crate::test_support::global_state();
+        struct Concurrent {
+            paths: RuntimePaths,
+            in_flight: AtomicUsize,
+            peak: AtomicUsize,
+        }
+        impl RuntimeRunner for Concurrent {
+            fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+                Some(self)
+            }
+            fn run(
+                &self,
+                _paths: &RuntimePaths,
+                args: &[String],
+                _timeout: Duration,
+            ) -> Result<CommandOutput, RuntimeError> {
+                let value = if args[0] == "inspect" {
+                    let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    self.peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(200));
+                    self.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let configuration = if args[1] == "dev" {
+                        computer()
+                    } else {
+                        second_computer()
+                    };
+                    inspect_named(&self.paths, &configuration, "Running")
+                } else {
+                    json!([{"name": "dev"}, {"name": "work"}])
+                };
+                Ok(CommandOutput {
+                    stdout: value.to_string(),
+                    stderr: String::new(),
+                })
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let runner = Concurrent {
+            paths: paths.clone(),
+            in_flight: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+        };
+        let rows = read_rows(&runner, &paths).unwrap();
+        assert_eq!(runner.peak.load(Ordering::SeqCst), 2);
+        let names: Vec<_> = rows
+            .iter()
+            .map(|row| row.computer.configuration.name())
+            .collect();
+        assert_eq!(names, ["dev", "work"]);
+        assert!(rows.iter().all(|row| row.unread.is_none()));
     }
 
     #[test]
