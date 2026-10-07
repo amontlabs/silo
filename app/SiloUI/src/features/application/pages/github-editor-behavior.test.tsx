@@ -40,7 +40,7 @@ it("reuses the compact onboarding GitHub editor without redundant page framing",
 
   const editor = github.getByRole("region", { name: "Computer Git identity and repository access" })
   expect(editor).toBeVisible()
-  expect(editor).toHaveClass("min-h-0", "flex-1")
+  expect(editor).toHaveClass("min-h-0", "flex-initial")
   expect(editor.querySelector(".divide-y")).not.toBeNull()
 
   for (const computer of ["dev", "playgrounds", "personal"]) {

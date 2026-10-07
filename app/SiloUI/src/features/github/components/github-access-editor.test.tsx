@@ -29,6 +29,19 @@ describe("GitHubAccessEditor", () => {
     expect(onCommit).toHaveBeenCalledOnce()
   })
 
+  it("sizes the computer list to its content instead of filling the page", () => {
+    render(<GitHubAccessEditor
+      computers={[{ name: "dev" }]} connectionState="disconnected"
+      repositoryOptions={[]} computerSelections={{}} computerIdentities={{}}
+      currentDeviceGitIdentity={null} onConnect={vi.fn()}
+      onComputerSelectionsChange={vi.fn()} onComputerIdentityChange={vi.fn()} onResetComputerIdentity={vi.fn()}
+      onComputerRepositoryAccessChange={vi.fn()}
+    />)
+    const list = screen.getByRole("region", { name: "Computer Git identity and repository access" })
+    expect(list).not.toHaveClass("flex-1")
+    expect(list).toHaveClass("min-h-0")
+  })
+
   it.each(["ArrowDown", "ArrowUp", "Enter", "Escape"])("keeps repository selection unchanged for composing %s", async (key) => {
     const user = userEvent.setup()
     const onSelections = vi.fn()
