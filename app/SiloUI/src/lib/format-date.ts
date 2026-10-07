@@ -12,8 +12,9 @@ function dateFormat(options: Intl.DateTimeFormatOptions, locale: string | undefi
   return (value: DateInput): string => {
     const date = value instanceof Date ? value : new Date(value)
     if (Number.isNaN(date.getTime())) return "Invalid Date"
-    formatter ??= new Intl.DateTimeFormat(locale, options)
-    return formatter.format(date)
+    // The system locale and time zone can change during a session, so only the fixed locale is cached.
+    const format = locale === undefined ? new Intl.DateTimeFormat(locale, options) : formatter ??= new Intl.DateTimeFormat(locale, options)
+    return format.format(date)
   }
 }
 

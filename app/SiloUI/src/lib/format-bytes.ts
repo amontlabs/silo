@@ -1,8 +1,10 @@
-/** Binary units, as the host allocation figures are measured. */
+const trimmed = (value: number, digits: number) => Number(value.toFixed(digits)).toString()
+
+/** Binary units, as the host allocation figures are measured; whole values drop their decimals. */
 export function formatBinaryBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`
-  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(1)} MiB`
+  if (bytes < 1024 ** 2) return `${trimmed(bytes / 1024, 1)} KiB`
+  return bytes >= 1024 ** 3 ? `${trimmed(bytes / 1024 ** 3, 2)} GiB` : `${trimmed(bytes / 1024 ** 2, 1)} MiB`
 }
 
 /** Decimal units, as file managers show the size of a file being transferred. */

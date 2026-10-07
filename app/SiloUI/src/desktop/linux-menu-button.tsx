@@ -1,6 +1,6 @@
-import { isLinux } from "@/lib/platform"
 import { invoke, isTauri } from "@tauri-apps/api/core"
 import { Menu } from "lucide-react"
+import { isLinux } from "@/lib/platform"
 import { Button } from "@/components/ui/button"
 import { showActionFailure } from "@/lib/operation-toast"
 

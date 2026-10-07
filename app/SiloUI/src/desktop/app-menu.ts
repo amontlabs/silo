@@ -1,7 +1,7 @@
-import { isMac } from "@/lib/platform"
 import { useEffect, useEffectEvent, useState } from "react"
 import { invoke, isTauri } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { isMac } from "@/lib/platform"
 import { desktopShortcutCommand } from "@/lib/shortcuts"
 
 export interface AppMenuState {

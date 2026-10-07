@@ -1,11 +1,11 @@
-import { isMac } from "@/lib/platform"
-import { errorMessage } from "@/lib/error-message"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { invoke, isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import "./index.css"
+import { isMac } from "@/lib/platform"
+import { errorMessage } from "@/lib/error-message"
 import { SiloWindow } from "@/components/silo-window"
 import { createComputerUseBridge, nativeComputerUseBackend } from "@/desktop/computer-use-bridge"
 import { createPreparationStore, nativePreparationBackend, PreparationProvider } from "@/desktop/preparation"

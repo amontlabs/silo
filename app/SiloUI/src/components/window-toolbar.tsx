@@ -1,8 +1,8 @@
-import { isMac } from "@/lib/platform"
 import type { ComponentProps, ReactNode, RefObject } from "react"
 import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { PanelLeft } from "lucide-react"
+import { isMac } from "@/lib/platform"
 import { LinuxMenuButton } from "@/desktop/linux-menu-button"
 
 import type { KeyboardShortcut } from "@/lib/shortcuts"

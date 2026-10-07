@@ -95,7 +95,7 @@ it("lists the pre-upgrade backup under Storage, after the other sections, until 
   const headings = screen.getAllByRole("heading", { level: 3 }).map(heading => heading.textContent)
   expect(headings.slice(-2)).toEqual(["Accessibility", "Storage"])
   expect(storage).toHaveTextContent("Pre-upgrade backup")
-  expect(await screen.findByText("12.40 GiB · deleted on October 15, 2026")).toBeVisible()
+  expect(await screen.findByText("12.4 GiB · deleted on October 15, 2026")).toBeVisible()
   await user.click(screen.getByRole("button", { name: "Delete now" }))
   await user.click(await screen.findByRole("button", { name: "Delete permanently" }))
   await waitFor(() => expect(screen.queryByRole("region", { name: "Storage" })).not.toBeInTheDocument())

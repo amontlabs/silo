@@ -29,10 +29,8 @@ export function useComputerOperations({ source, actions, computers, committedCom
     return onConfigurationsChange(next, baseline ? base : undefined)
   }
 
-  // The computer editing callbacks, shared by the list and the detail page's in-place editor
-  // and delete dialog so both commit, delete, and validate through exactly the same paths.
-  // This device's own order of the list, local and remote computers alike.
   const { updateSettings } = useSettingsStore()
+  // This device's own order of the list, local and remote computers alike.
   const computerOrder = useSettingsSelector((view) => view.settings.computerOrder)
   const orderRanks = computerOrderRanks(computerOrder)
   const orderRank = (configuration: SetupComputerConfiguration) => {
