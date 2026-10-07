@@ -2,19 +2,21 @@ import { useLifecycleToasts } from "../model/use-lifecycle-toasts"
 import { ForkBody } from "../components/fork-popover"
 import { runCheckpointOperation, syncCheckpointProgress } from "../model/checkpoint-operation-toast"
 import { useSshAccessRefresh } from "./use-ssh-access-refresh"
+import { attentionPriority, configurationRowView, displayComputers } from "./overview-configuration"
+import { ConfigurationDetail, ConfigurationIcon } from "./overview-configuration-row"
+import { ComputerActions } from "./overview-computer-actions"
 import { SshAccessBadges } from "./ssh-access-panel"
 import { StatusFolderPicker } from "@/features/status-bar/status-folder-picker"
-import { computerAvailability, type ComputerAvailability } from "../model/computer-availability"
+import { computerAvailability } from "../model/computer-availability"
 import { DisabledReason } from "../components/disabled-reason"
 import type { ComputerCommandRequest } from "../components/application-commands"
-import { LifecycleControl } from "../components/lifecycle-control"
-import { lifecycleGuard, type LifecycleAction, type LifecycleGuard } from "../model/lifecycle-guard"
+import { lifecycleGuard, type LifecycleAction } from "../model/lifecycle-guard"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { parseRemoteComputerTarget, computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
-import { CircleAlert, Code, Download, GitFork, HardDrive, History, KeyRound, Loader2, Monitor, Play, RotateCw, Square, Terminal } from "lucide-react"
+import { Code, Download, GitFork, HardDrive, History, KeyRound, Loader2, Monitor, RotateCw, Terminal } from "lucide-react"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
@@ -28,19 +30,18 @@ import { ErrorDetails } from "@/components/error-details"
 import { ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent } from "@/contracts/silo"
+import type { SetupComputerConfiguration } from "@/contracts/silo"
 import { ComputerStateLabel } from "@/features/application/components/application-ui"
 import { ComputerStatus } from "@/features/application/components/computer-status"
 import type {
   ApplicationActions,
   ApplicationSource,
   ApplicationComputer,
-  ComputerConfigurationOperation,
   ComputerDetailTab,
 } from "@/features/application/model/application-source"
 import { ComputerConfigurationList } from "@/features/computers/components/computer-configuration-list"
 import type { DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
-import { ComputerAction, type ComputerIconState } from "@/features/computers/components/computer-list"
+import { ComputerAction } from "@/features/computers/components/computer-list"
 
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerBusyReason, computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
@@ -53,186 +54,6 @@ export interface ComputerPageRequest {
   token: number
   computerId: string
   request: ComputerCommandRequest
-}
-
-const attentionPriority: Record<ComputerIconState, number> = {
-  error: 0,
-  warning: 1,
-  normal: 2,
-}
-
-interface ConfigurationRowView {
-  status: "running" | "failed"
-  message: string
-  diagnostic?: string
-  completedSteps?: number
-  recovery?: string
-  retryable: boolean
-}
-
-const configurationSteps = new Set([
-  "computer-configuration",
-  "computer-networking",
-  "computer-verification",
-])
-
-function emptyComputer(configuration: SetupComputerConfiguration): ApplicationComputer {
-  return {
-    configuration,
-    purpose: "New computer",
-    state: "stopped",
-    stateDetail: "Not configured",
-    freshness: "fresh",
-    repositories: [],
-    files: [],
-    ports: [],
-    logs: [],
-    githubRepositories: [],
-    secretNames: [],
-  }
-}
-
-function displayComputers(source: ApplicationSource): ApplicationComputer[] {
-  const operation = source.computerConfigurationOperation
-  if (!operation) return source.computers
-  const committedIDs = new Set(source.computers.map(({ configuration }) => configuration.id))
-  const candidatesByID = new Map(operation.candidate.computers.map((configuration) => [configuration.id, configuration]))
-  return [
-    ...source.computers.map((computer) => ({
-      ...computer,
-      configuration: candidatesByID.get(computer.configuration.id) ?? computer.configuration,
-    })),
-    ...operation.candidate.computers
-      .filter(({ id }) => !committedIDs.has(id))
-      .map(emptyComputer),
-  ]
-}
-
-function latestSafeEvent(operation: ComputerConfigurationOperation, computer: string): SiloProgressEvent | undefined {
-  const activeRevision = operation.progressEvents.findLast(({ revision }) => revision)?.revision
-  return operation.progressEvents.findLast((event) => (
-    event.safeForDisplay
-    && event.computer === computer
-    && (!activeRevision || !event.revision || event.revision === activeRevision)
-  ))
-}
-
-function configurationRowView(
-  computer: ApplicationComputer,
-  committedComputer: ApplicationComputer | undefined,
-  operation: ComputerConfigurationOperation,
-): ConfigurationRowView | undefined {
-  const candidate = operation.candidate.computers.find(({ id }) => id === computer.configuration.id)
-  const candidateName = candidate?.name ?? computer.configuration.name
-  const removed = Boolean(committedComputer && !candidate)
-  const addedOrChanged = !committedComputer || JSON.stringify(setupComputerConfigurationSchema.parse(committedComputer.configuration)) !== JSON.stringify(candidate && setupComputerConfigurationSchema.parse(candidate))
-  const errorTargetsComputer = operation.status === "failed"
-    && (operation.error.computer === candidateName || (!operation.error.computer && (removed || addedOrChanged)))
-
-  if (errorTargetsComputer) {
-    return {
-      status: "failed",
-      message: operation.error.message,
-      diagnostic: configurationFailureDiagnostic(operation, candidateName),
-      recovery: operation.error.recovery ?? undefined,
-      retryable: operation.error.retryable,
-    }
-  }
-  if (operation.status === "failed") return undefined
-  if (removed) {
-    return {
-      status: "running",
-      message: "Deleting the computer’s files and checkpoints.",
-      retryable: false,
-    }
-  }
-
-  const latest = latestSafeEvent(operation, candidateName)
-  if (!latest && !addedOrChanged) return undefined
-  if (!latest) {
-    return {
-      status: "running",
-      message: "Preparing computer configuration.",
-      completedSteps: 0,
-      retryable: false,
-    }
-  }
-
-  const completedSteps = new Set(operation.progressEvents
-    .filter((event) => event.computer === candidateName && event.step && event.fraction === 1 && configurationSteps.has(event.step))
-    .map(({ step }) => step)).size
-  return {
-    status: "running",
-    message: latest.message,
-    completedSteps,
-    retryable: false,
-  }
-}
-
-function ConfigurationIcon({ failed }: { failed: boolean }) {
-  return (
-    <ListRowIcon aria-hidden="true" className={failed
-      ? "mt-1 self-start bg-destructive/10 text-destructive"
-      : undefined}
-    >
-      {failed
-        ? <CircleAlert className="size-3.5" aria-hidden="true" />
-        : <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
-    </ListRowIcon>
-  )
-}
-
-function ConfigurationDetail({ view }: { view: ConfigurationRowView }) {
-  const failed = view.status === "failed"
-  const progressLabel = view.completedSteps === undefined ? undefined : `${view.completedSteps} of 3 steps complete`
-  if (!failed) {
-    return (
-      <div role="status" aria-live="polite" aria-atomic="true" className="relative h-4 min-w-0">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="min-w-0 flex-1 truncate" title={view.message}>{view.message}</span>
-          {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
-        </div>
-        {view.completedSteps !== undefined && (
-          <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="absolute inset-x-0 -bottom-1 h-0.5" />
-        )}
-      </div>
-    )
-  }
-  return (
-    <div
-      role={failed ? "alert" : "status"}
-      aria-live={failed ? "assertive" : "polite"}
-      aria-atomic="true"
-      className="grid gap-1.5 py-0.5"
-    >
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <ErrorDetails className="flex-1 text-destructive" message={view.message} diagnostic={view.diagnostic} fallbackSummary="Computer changes failed." />
-        {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
-      </div>
-      {view.completedSteps !== undefined && (
-        <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="mt-0.5" />
-      )}
-      {view.recovery && <p className="text-[10px] text-muted-foreground">{view.recovery}</p>}
-    </div>
-  )
-}
-
-/** The row's Start or Stop control, through the shared lifecycle guard. */
-function ComputerActions({ computer, availability, readOnly, guard }: { computer: ApplicationComputer; availability: ComputerAvailability; readOnly: boolean; guard: LifecycleGuard }) {
-  const { configuration } = computer
-  const action = computer.state === "running" || computer.state === "starting" ? "stop" : "start"
-  const enabled = !readOnly && (action === "stop" ? availability.canStop : availability.canStart)
-  const asks = enabled && guard.check(computer, action).kind === "confirm"
-  return <>
-    {Boolean(computer.pendingSecretRevocations?.length) && <LifecycleControl guard={guard} computer={computer} action="restart" disabled={readOnly || !availability.canRestart} reason={readOnly ? undefined : availability.reasons.restart}>
-      {({ onClick, disabled }) => <ComputerAction label={`Restart ${configuration.name}`} disabled={disabled} onClick={onClick}><RotateCw /></ComputerAction>}
-    </LifecycleControl>}
-    <LifecycleControl guard={guard} computer={computer} action={action} disabled={!enabled} reason={readOnly ? undefined : availability.reasons[action]}>
-      {({ onClick, disabled }) => action === "stop"
-        ? <ComputerAction label={`Stop ${configuration.name}`} tooltip={asks ? `Stop ${configuration.name}…` : undefined} disabled={disabled} onClick={onClick}><Square /></ComputerAction>
-        : <ComputerAction label={`Start ${configuration.name}`} tooltip={asks ? `Start ${configuration.name}…` : undefined} disabled={disabled} onClick={onClick}><Play /></ComputerAction>}
-    </LifecycleControl>
-  </>
 }
 
 export function OverviewPage({ active = true, readOnly = false, notifyOperations = true,
