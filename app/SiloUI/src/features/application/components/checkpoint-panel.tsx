@@ -178,7 +178,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
           confirmLabel="Create"
           canSubmit={!locked && name.trim().length > 0}
           onSubmit={create}
-          fields={<Input aria-label="Checkpoint name" className="h-7 text-xs" maxLength={80} value={name} placeholder="Checkpoint name" onChange={event => setName(event.target.value)} />}
+          fields={<Input size="sm" aria-label="Checkpoint name" maxLength={80} value={name} placeholder="Checkpoint name" onChange={event => setName(event.target.value)} />}
         >
           <Button size="xs" variant="outline" className="shrink-0" disabled={locked}>New checkpoint</Button>
         </FormPopover>}

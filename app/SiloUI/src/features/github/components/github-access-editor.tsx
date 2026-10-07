@@ -348,10 +348,10 @@ export function GitHubAccessEditor({
                           <TooltipContent>Name and email used for Git commits in this computer.</TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
-                      <Input technical
+                      <Input size="sm" technical
                         aria-label={`Git name for ${name}`}
                         autoComplete="off"
-                        className="h-7 min-w-0 flex-[0.8] rounded-md px-2 text-[11px] md:text-[11px]"
+                        className="flex-[0.8]"
                         placeholder="Name"
                         disabled={computerDisabled}
                         value={identity.name}
@@ -361,10 +361,10 @@ export function GitHubAccessEditor({
                           if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur()
                         }}
                       />
-                      <Input technical
+                      <Input size="sm" technical
                         aria-label={`Git email for ${name}`}
                         autoComplete="off"
-                        className="h-7 min-w-0 flex-[1.2] rounded-md px-2 text-[11px] md:text-[11px]"
+                        className="flex-[1.2]"
                         inputMode="email"
                         placeholder="Email"
                         type="email"

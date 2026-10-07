@@ -72,7 +72,7 @@ export function GeneralPage({
           <SettingRow icon={Paintbrush} title="Theme" description="Choose an appearance or follow your system." control={
             <div className="w-40 max-w-[45%] shrink-0">
               <Select value={theme} onValueChange={setTheme}>
-                <SelectTrigger className="h-7 text-[11px]" aria-label="Theme"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label="Theme"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="system">System</SelectItem>
                   <SelectItem value="dark">Dark</SelectItem>

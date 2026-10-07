@@ -90,7 +90,8 @@ export function FilterCombobox<Value extends string>({
               aria-expanded={open}
               aria-controls={listboxId}
               aria-activedescendant={open && results[activeIndex] ? `${listboxId}-${activeIndex}` : undefined}
-              className={cn("pl-8 text-xs", compact ? "h-7 w-36" : "h-8 w-48")}
+              size={compact ? "sm" : undefined}
+              className={cn("pl-8", compact ? "w-36" : "w-48")}
               placeholder={placeholder}
               value={query}
               onFocus={event => { if (!isRestoringFocus(event.currentTarget)) setOpen(true) }}

@@ -108,7 +108,7 @@ export function ApplicationPreferenceFields({
         onValueChange={(selection) => { void update(kind, selection) }}
         onOpenChange={(open) => { if (open) void refresh().catch((error: unknown) => console.error("Silo application discovery:", error)) }}
       >
-        <SelectTrigger className={compact ? "h-7 text-[11px]" : undefined} aria-label={label} aria-invalid={failures[kind] ? true : undefined} aria-describedby={failures[kind] ? errorId(kind) : undefined}>
+        <SelectTrigger size={compact ? "sm" : undefined} aria-label={label} aria-invalid={failures[kind] ? true : undefined} aria-describedby={failures[kind] ? errorId(kind) : undefined}>
           <SelectValue>{useSystemDefault ? <ApplicationOptionLabel kind={kind} name={systemDefault ? `${systemDefault.name} (default)` : "System default (not set)"} icon={systemDefault?.icon} /> : undefined}</SelectValue>
         </SelectTrigger>
         <SelectContent className="w-max min-w-[var(--radix-select-trigger-width)] max-w-[min(24rem,var(--radix-select-content-available-width))]">

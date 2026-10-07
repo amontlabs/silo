@@ -85,12 +85,12 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <div className="grid content-start gap-1">
         <label htmlFor={`${id}-name`} className="text-[11px] font-medium text-muted-foreground">Name</label>
-        <Input technical id={`${id}-name`} value={draft.name} disabled={Boolean(secret)} autoComplete="off" spellCheck={false} autoCapitalize="off" className="font-mono text-xs md:text-xs" placeholder="SERVICE_TOKEN" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? `${id}-name-error` : undefined} onChange={(event) => update({ name: event.target.value })} />
+        <Input technical id={`${id}-name`} value={draft.name} disabled={Boolean(secret)} autoComplete="off" spellCheck={false} autoCapitalize="off" className="font-mono" placeholder="SERVICE_TOKEN" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? `${id}-name-error` : undefined} onChange={(event) => update({ name: event.target.value })} />
         {fieldError("name")}
       </div>
       <div className="grid content-start gap-1">
         <label htmlFor={`${id}-value`} className="text-[11px] font-medium text-muted-foreground">{secret ? "Replacement value" : "Value"}</label>
-        <Input technical id={`${id}-value`} type="password" value={draft.value} autoComplete="new-password" spellCheck={false} autoCapitalize="off" className="text-xs md:text-xs" aria-invalid={Boolean(errors.value)} aria-describedby={errors.value ? `${id}-value-error` : secret ? `${id}-value-hint` : undefined} onChange={(event) => update({ value: event.target.value })} />
+        <Input technical id={`${id}-value`} type="password" value={draft.value} autoComplete="new-password" spellCheck={false} autoCapitalize="off" aria-invalid={Boolean(errors.value)} aria-describedby={errors.value ? `${id}-value-error` : secret ? `${id}-value-hint` : undefined} onChange={(event) => update({ value: event.target.value })} />
         {secret && <p id={`${id}-value-hint`} className="text-[11px] text-muted-foreground">Leave blank to keep the current value.</p>}
         {fieldError("value")}
       </div>
@@ -114,7 +114,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     </fieldset>
     <div className="grid gap-1">
       <label htmlFor={`${id}-domains`} className="text-[11px] font-medium text-muted-foreground">Allowed domains</label>
-      <Input technical id={`${id}-domains`} value={draft.domains} autoComplete="off" spellCheck={false} autoCapitalize="off" className="text-xs md:text-xs" placeholder="api.example.com, *.example.com" aria-invalid={Boolean(errors.domains)} aria-describedby={`${id}-domains-hint${errors.domains ? ` ${id}-domains-error` : ""}`} onChange={(event) => update({ domains: event.target.value, allowAnyDomain: false })} />
+      <Input technical id={`${id}-domains`} value={draft.domains} autoComplete="off" spellCheck={false} autoCapitalize="off" placeholder="api.example.com, *.example.com" aria-invalid={Boolean(errors.domains)} aria-describedby={`${id}-domains-hint${errors.domains ? ` ${id}-domains-error` : ""}`} onChange={(event) => update({ domains: event.target.value, allowAnyDomain: false })} />
       <p id={`${id}-domains-hint`} className="text-[11px] text-muted-foreground">Separate hosts with commas. Use * to allow any HTTPS destination.</p>
       {fieldError("domains")}
     </div>
