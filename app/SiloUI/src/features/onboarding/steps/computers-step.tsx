@@ -1,28 +1,23 @@
-import { LoaderCircle, RotateCw } from "lucide-react"
+import { RotateCw } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { ActivityOutput } from "@/features/onboarding/components/activity-output"
+import { StatusLabel } from "@/features/onboarding/components/status-label"
+import { computerStatuses } from "@/features/onboarding/components/status-presentation"
 import { StatusIcon } from "@/features/onboarding/components/status-icon"
 import { ComputerConfigurationList } from "@/features/computers/components/computer-configuration-list"
 import { computerSummary } from "@/features/computers/model/computer-summary"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
-import type { ComputerProgressView, ComputerView } from "@/features/onboarding/model/onboarding-state"
+import type { ComputerProgressView } from "@/features/onboarding/model/onboarding-state"
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
-import { cn } from "@/lib/utils"
+import { progressStatuses, statusTones } from "@/components/status-tone"
 
 function formatElapsed(seconds: number): string {
   const minutes = Math.floor(seconds / 60)
   const remainder = Math.floor(seconds % 60)
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
-}
-
-const computerStatusLabel: Record<ComputerView["status"], string> = {
-  waiting: "Waiting",
-  working: "In progress",
-  ready: "Complete",
-  failed: "Failed",
 }
 
 export function ComputersStep({ onConnectDevice, configurations, progress, onConfigurationsChange, onRetry, initialEditorDraft, onEditorDraftChange }: {
@@ -50,11 +45,7 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
           className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex"
           role={failed ? "alert" : "status"}
           aria-live="polite"
-          icon={<ListRowIcon className={cn(
-            failed && "bg-destructive/10 text-destructive",
-            running && "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-            complete && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-          )}><StatusIcon status={progress.status} className="size-3.5" /></ListRowIcon>}
+          icon={<ListRowIcon className={progress.status === "waiting" ? undefined : statusTones[progressStatuses[progress.status].tone].chip}><StatusIcon status={progress.status} className="size-3.5" /></ListRowIcon>}
           title={<h3>{title}</h3>}
           detail={configurations.length === 0 ? "Continue setup without a computer. Add one from Computers whenever you’re ready." : <>{progress.currentComputer && <span className="font-medium">{progress.currentComputer} · </span>}{progress.currentMessage}</>}
           detailClassName="whitespace-normal break-words select-text"
@@ -64,11 +55,11 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
         />
         <ListRowDetails label="Computer setup details">
           {progress.fraction !== undefined && <Progress value={progress.fraction * 100} aria-label="Computer setup progress" />}
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
             <span>{progress.completedOperations} of {progress.totalOperations} operations complete</span>
             <span aria-label="Elapsed time" className="shrink-0 font-mono tabular-nums">{formatElapsed(progress.elapsedSeconds)}</span>
           </div>
-          {failed && <p className="text-[11px] leading-4 text-muted-foreground select-text">{progress.recovery ?? "Resolve the reported computer issue, then retry setup."}</p>}
+          {failed && <p className="text-caption leading-4 text-muted-foreground select-text">{progress.recovery ?? "Resolve the reported computer issue, then retry setup."}</p>}
         </ListRowDetails>
         <ActivityOutput events={progress.visibleEvents} error={progress.activityError} embedded />
       </ListCard>
@@ -89,10 +80,7 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
               busy: state === "working",
               tone: state === "failed" ? "error" : state === "working" ? "starting" : state === "ready" ? "running" : "stopped",
               iconState: state === "failed" ? "error" : "normal",
-              badge: <span className={cn(
-                "inline-flex shrink-0 items-center gap-1 text-[10px] font-normal",
-                state === "failed" ? "text-destructive" : state === "working" ? "text-amber-700 dark:text-amber-400" : state === "ready" ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
-              )}>{state === "working" && <LoaderCircle className="size-2.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{computerStatusLabel[state]}</span>,
+              badge: <StatusLabel {...computerStatuses[state]} busy={state === "working"} />,
               detail: <span title={summary}>{summary}{status && state !== "ready" && status.detail !== "Waiting" ? ` · ${status.detail}` : ""}</span>,
               detailClassName: state === "failed" ? "whitespace-normal break-words" : undefined,
             }

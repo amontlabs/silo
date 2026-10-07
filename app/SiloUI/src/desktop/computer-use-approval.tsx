@@ -142,7 +142,7 @@ export function ComputerUseApprovalSwitch({ approval, label = "Allow without ask
   if (!approval || !computerUse) return null
   const status = approvalStatus(computerUse, approval.running)
   return <span className="flex shrink-0 items-center gap-2">
-    {status.applying && <span role="status" className="text-[11px] text-muted-foreground">Applying…</span>}
+    {status.applying && <span role="status" className="text-caption text-muted-foreground">Applying…</span>}
     <Switch aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy} checked={computerUse.approval === "auto"} disabled={approval.busy || computerUse.approval === "unknown"}
       onCheckedChange={checked => approval.setApproval(checked ? "auto" : "ask")} />
   </span>

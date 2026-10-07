@@ -1,9 +1,12 @@
-import { ChevronRight, Code, Cpu, GitBranch, Globe, KeyRound, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 import { useId, type MouseEvent, type ReactNode } from "react"
 
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
+import { SectionHeading } from "@/components/page"
 import { ListHeader, listHeadingClassName } from "@/components/list-header"
-import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { EmptyState } from "@/components/empty-state"
+import { InlineAlert } from "@/components/inline-alert"
+import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -33,6 +36,7 @@ import { useSecretsManager } from "@/features/application/components/secrets-man
 import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/components/network-ports"
 import { networkAddress, networkPortState, useNetworkPorts } from "@/features/application/components/network-ports-state"
 import { ComputerUseSection } from "@/desktop/computer-use-panel"
+import { PortStateLabel } from "@/features/application/components/application-ui"
 import { cn } from "@/lib/utils"
 
 /** Everything the detail page needs to edit or delete this computer in place, sharing the
@@ -117,7 +121,7 @@ function DetailSubtitle({ computer, source, readOnly, pendingSecrets, sshAccess,
 function Section({ label, action, children }: { label: string; action?: ReactNode; children: ReactNode }) {
   return <section className="grid gap-1.5">
     <div className="flex min-h-6 items-center justify-between gap-2">
-      <h3 className="text-xs font-medium">{label}</h3>
+      <SectionHeading>{label}</SectionHeading>
       {action}
     </div>
     {children}
@@ -136,7 +140,7 @@ function ViewAllAction({ label, onClick }: { label: string; onClick: () => void 
     type="button"
     aria-label={label}
     onClick={onClick}
-    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-[11px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-caption text-muted-foreground hover:text-foreground focus-ring"
   >
     View all<ChevronRight className="size-3" aria-hidden="true" />
   </button>
@@ -174,11 +178,7 @@ function SecretsSection({ computer, source, actions, onNavigate }: { computer: A
       {adding && <div className="border-b border-border"><AddSecretEditor manager={manager} /></div>}
       {computerSecrets.length > 0
         ? <ul className="divide-y divide-border" aria-label={`Secrets for ${configuration.name}`}>{computerSecrets.map(secret => <SecretRow key={secret.id} secret={secret} manager={manager} />)}</ul>
-        : !adding && <ListRow
-              icon={<ListRowIcon aria-hidden="true"><KeyRound className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No secrets assigned.</span>}
-              detail=""
-            />}
+        : !adding && <EmptyState variant="inline" title="No secrets assigned" />}
     </ListCard>
   </Section>
 }
@@ -210,11 +210,12 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
   </div>
 
   return <Section label="Ports" action={action}>
-    {(controller.error || controller.errors.length > 0) && <div role="alert" className="mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/20 px-3 py-2 text-xs text-destructive">
+    {(controller.error || controller.errors.length > 0) && <InlineAlert className="mb-2 flex items-center justify-between gap-3">
       <span>{controller.error || controller.errors.join(" · ")}</span>
       {actions.refreshNetwork && <Button size="sm" variant="ghost" onClick={() => void actions.refreshNetwork?.()}>Retry</Button>}
-    </div>}
-    {loading && <p role="status" aria-label="Loading ports" className="text-xs text-muted-foreground">Checking network services…</p>}
+    </InlineAlert>}
+    {loading && hasPorts && <span role="status" aria-label="Loading ports" className="sr-only">Checking network services…</span>}
+    {loading && !hasPorts && !draft && <ListCard><ListRowSkeleton label="Loading ports" /></ListCard>}
     {(hasPorts || draft || (!hasDiscoveryError && !loading)) && <ListCard>
       {draft && !draft.editing && <div className="border-b border-border">{inlineForm}</div>}
       {useLive
@@ -230,8 +231,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 title={<span className="truncate font-mono" title={address ? `${port.port} → ${address}` : `Port ${port.port}`}>{address ? `${port.port} → ${address}` : `Port ${port.port}`}</span>}
                 detailClassName="whitespace-normal"
                 detail={<span className="inline-flex flex-wrap items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-emerald-500" : "bg-muted-foreground/50")} aria-hidden="true" />
-                  <span className={stateText === "Reachable" ? "text-emerald-700 dark:text-emerald-400" : undefined}>{stateText}</span>
+                  <PortStateLabel state={stateText} />
                   {port.message && <span className={port.state === "unknown" ? "text-destructive" : "text-muted-foreground"}>· {port.message}</span>}
                 </span>}
                 actions={<div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -239,11 +239,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 </div>}
               />
             })}</div>
-          : !draft && <ListRow
-              icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No ports</span>}
-              detail=""
-            />
+          : !draft && <EmptyState variant="inline" title="No ports" />
         : fallbackPorts.length > 0
           ? <div className="divide-y divide-border">{fallbackPorts.map(port => {
               const cachedPort: NetworkPort = {
@@ -258,17 +254,10 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 key={port.port}
                 icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
                 title={<span className="truncate" title={title}>{title}</span>}
-                detail={<span className="inline-flex items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-emerald-500" : "bg-muted-foreground/50")} aria-hidden="true" />
-                  {stateText}
-                </span>}
+                detail={<PortStateLabel state={stateText} />}
               />
             })}</div>
-          : <ListRow
-              icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No ports</span>}
-              detail=""
-            />}
+          : <EmptyState variant="inline" title="No ports" />}
     </ListCard>}
   </Section>
 }
@@ -311,11 +300,7 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
             title={<span className="truncate" title={name}>{name}</span>}
             detail="Clones on next start"
           />)}
-        </> : <ListRow
-          icon={<ListRowIcon aria-hidden="true"><GitBranch className="size-3.5" /></ListRowIcon>}
-          title={<span className="font-normal text-muted-foreground">No repositories cloned yet.</span>}
-          detail=""
-        />}
+        </> : <EmptyState variant="inline" title="No repositories cloned yet" />}
       </ListCard>
     </Section>
 
@@ -415,7 +400,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
     <div className="flex h-full min-h-0 flex-col">
       <ListHeader
         heading={<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1">
-          <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none")} onClick={controls.onBack}>Computers</button>
+          <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-ring")} onClick={controls.onBack}>Computers</button>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className={cn(listHeadingClassName, "truncate")} title={configuration.name}>{configuration.name}</span>
         </nav>}
@@ -435,7 +420,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>}
       />
 
-      {Boolean(computer.pendingSecretRevocations?.length) && <div role="note" aria-label="Pending secret revocation" className="flex items-center gap-2 border-b border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+      {Boolean(computer.pendingSecretRevocations?.length) && <div role="note" aria-label="Pending secret revocation" className="flex items-center gap-2 border-b border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
         <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
         <p className="min-w-0 flex-1 break-words">May still have access to {computer.pendingSecretRevocations!.join(", ")} until it restarts.</p>
         <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="restart" disabled={controls.readOnly || !restartAvailability.canRestart} reason={controls.readOnly ? undefined : restartAvailability.reasons.restart}>
@@ -454,7 +439,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
                 capacity={editing.deviceId ? undefined : deviceCapacityFrom(source.deviceCapacity)}
                 deviceName={computer.device?.name}
                 deviceId={editing.deviceId}
-                editorHeader={editingContext?.devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={editing.deviceId} disabled={Boolean(editing.editor.originalID) || editing.committing} onChange={event => editing.setDeviceId(event.target.value)}><option value="">This device</option>{editingContext.devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}
+                editorHeader={editingContext?.devices ? <label className="grid gap-1 text-caption text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={editing.deviceId} disabled={Boolean(editing.editor.originalID) || editing.committing} onChange={event => editing.setDeviceId(event.target.value)}><option value="">This device</option>{editingContext.devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}
                 focusRequest={editing.editorFocusRequest}
                 created={Boolean(editing.editor.originalID && editingContext?.isComputerCreated?.(configuration))}
                 running={Boolean(editing.editor.originalID && editingContext?.isComputerRunning?.(configuration))}

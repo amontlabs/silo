@@ -160,7 +160,7 @@ function ConflictDialog({ pending }: { pending: PendingConflict | null }) {
         event.preventDefault()
         restoreFocus(previousFocus.current)
       }} className="fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 gap-2 rounded-xl border border-border bg-popover p-4 text-xs text-popover-foreground shadow-2xl outline-none">
-        <AlertDialog.Title className="text-[13px] font-medium">{subject} in this folder</AlertDialog.Title>
+        <AlertDialog.Title className="text-ui font-medium">{subject} in this folder</AlertDialog.Title>
         <AlertDialog.Description className="text-muted-foreground">
           {names.length > 1 && <span className="mb-1 block max-h-24 overflow-y-auto break-all">{names.map(name => `“${name}”`).join(", ")}</span>}
           Replace {names.length === 1 ? "it" : "them"} with the files you chose, or keep both and add a number to the new {names.length === 1 ? "name" : "names"}.

@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
-import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, KeyRound, LayoutDashboard, Loader2, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
+import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, KeyRound, LayoutDashboard, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
 
 import { ShortcutBadge } from "@/components/shortcut-badge"
 import { shortcutFor, type KeyboardShortcut } from "@/lib/shortcuts"
@@ -7,9 +7,11 @@ import { SiloMark } from "@/components/silo-mark"
 import { SiloWindow } from "@/components/silo-window"
 import { Toaster } from "@/components/ui/sonner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { ApplicationTitleBar } from "@/features/application/components/application-title-bar"
 import { useSidebarDisclosure } from "@/hooks/use-sidebar-disclosure"
 import type { ActiveRuntimeRepairPresentation, ApplicationTab, SettingsSection, ComputerSection } from "@/features/application/model/application-source"
+import { sidebarItemActiveClass, sidebarItemClass, sidebarItemLevels } from "@/components/sidebar-item"
 import { cn } from "@/lib/utils"
 import "./application-shell.css"
 
@@ -40,10 +42,7 @@ const settingsItems = [
 
 function NavigationLoadingIndicator({ loading, collapsed }: { loading: boolean; collapsed: boolean }) {
   if (!loading) return null
-  const spinner = <Loader2 data-navigation-loading-indicator aria-hidden="true" className={cn(
-    "shrink-0 animate-spin motion-reduce:animate-none",
-    collapsed ? "absolute -top-1 -right-1 size-2 rounded-full bg-sidebar ring-2 ring-sidebar" : "size-3.5",
-  )} />
+  const spinner = <Spinner data-navigation-loading-indicator className={collapsed ? "absolute -top-1 -right-1 size-2 rounded-full bg-sidebar ring-2 ring-sidebar" : undefined} />
   return collapsed ? spinner : <span className="grid size-5 shrink-0 place-items-center">{spinner}</span>
 }
 
@@ -59,10 +58,10 @@ const attentionLabel = ({ errors, warnings }: SidebarAttention) => countLabel(er
 function AttentionMark({ attention, collapsed }: { attention: SidebarAttention; collapsed: boolean }) {
   const error = attention.errors > 0
   return collapsed
-    ? <span data-navigation-attention aria-hidden="true" className={cn("absolute top-1 right-1 size-1.5 rounded-full", error ? "bg-destructive" : "bg-amber-500")} />
+    ? <span data-navigation-attention aria-hidden="true" className={cn("absolute top-1 right-1 size-1.5 rounded-full", error ? "bg-destructive" : "bg-warning")} />
     : <span data-navigation-attention aria-hidden="true" className={cn(
-      "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1 text-[10px] leading-none font-semibold tabular-nums",
-      error ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+      "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1 text-caption leading-none font-semibold tabular-nums",
+      error ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/20 bg-warning/10 text-warning",
     )}>{attention.errors + attention.warnings}</span>
 }
 
@@ -123,17 +122,18 @@ function NavigationButton({
       aria-describedby={describedBy}
       onClick={onClick}
       className={cn(
-        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
+        sidebarItemClass,
+        sidebarItemLevels.primary,
         tone === "danger"
-          ? "text-destructive hover:bg-destructive/[0.07] hover:text-destructive"
+          ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
           : tone === "warning"
-            ? "text-amber-700 hover:bg-amber-500/[0.08] hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-400"
-          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            ? "text-warning hover:bg-warning/10 hover:text-warning"
+            : undefined,
         active && (tone === "danger"
           ? "bg-destructive/10 font-medium text-destructive"
           : tone === "warning"
-            ? "bg-amber-500/10 font-medium text-amber-800 dark:text-amber-300"
-          : "bg-sidebar-accent font-medium text-sidebar-accent-foreground"),
+            ? "bg-warning/10 font-medium text-warning"
+            : sidebarItemActiveClass),
         reserveDisclosure && "sidebar-primary-with-disclosure",
       )}
     >
@@ -194,7 +194,7 @@ function DisclosureNavigationItem({
           aria-hidden={collapsed || undefined}
           tabIndex={collapsed ? -1 : undefined}
           onClick={onToggle}
-          className="sidebar-disclosure absolute top-1 right-1 z-10 grid size-8 place-items-center rounded-md text-foreground/65 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70"
+          className="sidebar-disclosure absolute top-1 right-1 z-10 grid size-8 place-items-center rounded-md text-foreground/65 hover:bg-sidebar-accent hover:text-foreground focus-ring"
         >
           <ChevronRight className={cn("size-4 transition-transform", expanded && "rotate-90")} />
         </button>
@@ -234,8 +234,9 @@ function SubNavigation<Section extends string>({
           aria-keyshortcuts={shortcutFor(id === "overview" ? "go-computers" : id === "general" ? "settings" : `go-${id}`)?.aria}
           onClick={() => onSelect(id)}
           className={cn(
-            "group/sidebar-item sidebar-secondary relative flex h-8 w-full min-w-0 items-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
-            active && section === id && "bg-muted font-medium text-foreground",
+            sidebarItemClass,
+            sidebarItemLevels.secondary,
+            active && section === id && sidebarItemActiveClass,
           )}
         >
           <span className="relative flex shrink-0">
@@ -246,7 +247,7 @@ function SubNavigation<Section extends string>({
           {collapsed && attention?.section === id && <span
             role="status"
             aria-label={attentionLabel(attention)}
-            className={cn("absolute top-1 right-1 size-1.5 rounded-full", attention.errors > 0 ? "bg-destructive" : "bg-amber-500")}
+            className={cn("absolute top-1 right-1 size-1.5 rounded-full", attention.errors > 0 ? "bg-destructive" : "bg-warning")}
           />}
           {!collapsed && attention?.section === id && (
             <span className="flex shrink-0 items-center gap-1">
@@ -257,7 +258,7 @@ function SubNavigation<Section extends string>({
                       <span
                         role="status"
                         aria-label={errorsLabel(attention.errors)}
-                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-destructive"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 px-1 text-caption leading-none font-semibold tabular-nums text-destructive"
                       >
                         {attention.errors}
                       </span>
@@ -271,7 +272,7 @@ function SubNavigation<Section extends string>({
                       <span
                         role="status"
                         aria-label={warningsLabel(attention.warnings)}
-                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-amber-700 dark:text-amber-400"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-warning/20 bg-warning/10 px-1 text-caption leading-none font-semibold tabular-nums text-warning"
                       >
                         {attention.warnings}
                       </span>

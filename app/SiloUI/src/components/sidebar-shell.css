@@ -1,6 +1,8 @@
 .silo-window {
-  --sidebar-width: 13.5rem;
-  --toolbar-width: 13.5rem;
+  --sidebar-expanded-width: 13.5rem;
+  --sidebar-collapsed-width: 3.5rem;
+  --sidebar-width: var(--sidebar-expanded-width);
+  --toolbar-width: var(--sidebar-expanded-width);
   --collapsed-toolbar-width: 11.4375rem;
   --sidebar-motion: 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -10,7 +12,7 @@
 }
 
 .silo-window.sidebar-pinned-collapsed {
-  --sidebar-width: 3.5rem;
+  --sidebar-width: var(--sidebar-collapsed-width);
   --toolbar-width: var(--collapsed-toolbar-width);
 }
 
@@ -48,13 +50,13 @@
 .silo-sidebar {
   position: relative;
   z-index: 10;
-  width: 13.5rem;
+  width: var(--sidebar-expanded-width);
   padding-inline: 8px;
   transition: width var(--sidebar-motion), padding var(--sidebar-motion), box-shadow var(--sidebar-motion);
 }
 
 .silo-sidebar[data-collapsed="true"] {
-  width: 3.5rem;
+  width: var(--sidebar-collapsed-width);
   padding-inline: 8px;
 }
 

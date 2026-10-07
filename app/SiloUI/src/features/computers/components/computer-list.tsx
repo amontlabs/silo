@@ -4,6 +4,7 @@ import type { ComponentProps, ReactNode } from "react"
 import { CircleAlert, TriangleAlert } from "lucide-react"
 
 import { ListRow, ListRowIcon } from "@/components/list-row"
+import { statusTones, type StatusTone } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -11,6 +12,14 @@ import { cn } from "@/lib/utils"
 
 export type ComputerIconState = "normal" | "warning" | "error"
 export type ComputerRowTone = "running" | "starting" | "stopped" | "warning" | "error"
+
+const computerRowTones: Record<ComputerRowTone, StatusTone> = {
+  running: "success",
+  starting: "warning",
+  stopped: "neutral",
+  warning: "warning",
+  error: "danger",
+}
 
 export function ComputerList({ label, className, children, ...props }: {
   label: string
@@ -33,7 +42,7 @@ function ComputerIcon({ state, remote }: { state: ComputerIconState; remote: boo
   return (
     <ListRowIcon
       className={cn(
-        state === "warning" && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        state === "warning" && "bg-warning/10 text-warning",
         state === "error" && "bg-destructive/10 text-destructive",
       )}
       data-computer-icon-state={state}
@@ -87,12 +96,7 @@ export function ComputerListRow({
       onOpen={onOpen}
       className={cn(
         "computer-row",
-        !tone && "hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "running" && "bg-emerald-500/[0.035] hover:bg-emerald-500/[0.07] focus-within:bg-emerald-500/[0.07]",
-        tone === "starting" && "bg-amber-500/[0.035] hover:bg-amber-500/[0.07] focus-within:bg-amber-500/[0.07]",
-        tone === "stopped" && "bg-muted/15 hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "warning" && "bg-amber-500/[0.04] hover:bg-amber-500/[0.08] focus-within:bg-amber-500/[0.08]",
-        tone === "error" && "bg-destructive/[0.035] hover:bg-destructive/[0.07] focus-within:bg-destructive/[0.07]",
+        statusTones[tone ? computerRowTones[tone] : "neutral"].row,
       )}
       data-computer-row-tone={tone}
       leading={leading}
@@ -100,7 +104,7 @@ export function ComputerListRow({
       title={
         <>
           {onOpen
-            ? <button type="button" aria-label={`Open ${name}`} title={name} onClick={onOpen} className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">{name}</button>
+            ? <button type="button" aria-label={`Open ${name}`} title={name} onClick={onOpen} className="min-w-0 truncate rounded-sm text-left focus-ring">{name}</button>
             : <span className="truncate" title={name}>{name}</span>}
           {kindBadge}
           {badge}
@@ -108,7 +112,7 @@ export function ComputerListRow({
       }
       detail={detail}
       detailClassName={cn(
-        iconState === "warning" && "text-amber-700 dark:text-amber-400",
+        iconState === "warning" && "text-warning",
         iconState === "error" && "text-destructive",
         detailClassName,
       )}

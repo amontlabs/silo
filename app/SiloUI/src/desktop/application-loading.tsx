@@ -4,6 +4,7 @@ import type { SetupComputerConfiguration } from "@/contracts/silo"
 import { SiloMark } from "@/components/silo-mark"
 import { Button } from "@/components/ui/button"
 import { ListCard, ListRowIcon } from "@/components/list-row"
+import { PageContainer } from "@/components/page"
 import { desktopCommand } from "@/desktop/commands"
 import { useStatusPanelSize } from "@/desktop/use-status-panel-size"
 import { ApplicationShell } from "@/features/application/components/application-shell"
@@ -31,8 +32,8 @@ const unavailable = () => {}
 function StatusPanelFrame({ busy = false, children }: { busy?: boolean; children: ReactNode }) {
   const content = useRef<HTMLDivElement>(null)
   useStatusPanelSize(content)
-  return <div ref={content} role="dialog" aria-label="Silo" aria-busy={busy || undefined} className="silo-window flex max-h-[520px] w-[380px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground">
-    <div className="flex max-h-[518px] shrink-0 flex-col overflow-hidden">
+  return <div ref={content} role="dialog" aria-label="Silo" aria-busy={busy || undefined} className="silo-window status-panel flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground">
+    <div className="status-panel-page flex shrink-0 flex-col overflow-hidden">
       {children}
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">
         <Button variant="ghost" size="sm" className="gap-2" onClick={() => { void desktopCommand("open_main") }}><SiloMark data-icon="inline-start" /><span>Open Silo</span></Button>
@@ -46,8 +47,8 @@ function StatusPanelFrame({ busy = false, children }: { busy?: boolean; children
 export function StatusPanelUnavailable({ message, retry, checking = false }: { message: string; retry?: () => void; checking?: boolean }) {
   return <StatusPanelFrame>
     <div role="alert" className="grid justify-items-center gap-1.5 px-4 py-6 text-center">
-      <p className="text-[13px] font-medium">Silo could not load</p>
-      <p className="whitespace-pre-wrap text-[11px] text-muted-foreground select-text">{message}</p>
+      <p className="text-ui font-medium">Silo could not load</p>
+      <p className="whitespace-pre-wrap text-caption text-muted-foreground select-text">{message}</p>
       {retry && <Button type="button" variant="outline" size="xs" className="mt-1" disabled={checking} onClick={retry}>{checking ? "Checking…" : "Retry"}</Button>}
     </div>
   </StatusPanelFrame>
@@ -61,19 +62,19 @@ export function ApplicationLoading({ configurations, statusPanel = false }: { co
     <div className="shrink-0 px-2 pt-2" />
     <div className="min-h-0 overflow-y-auto overscroll-contain px-2 pb-2">{configurations.length ? <ListCard className="border-0"><ol aria-label="Computers" className="divide-y">
       {configurations.map((configuration) => <ComputerListItem key={configuration.id}><ComputerListRow name={configuration.name} detail={detail} actions={<LoadingControls />} /></ComputerListItem>)}
-    </ol></ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center"><ListRowIcon><Monitor className="size-3.5" /></ListRowIcon><p className="text-[13px] font-medium">Loading computers…</p></div>}</div>
+    </ol></ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center"><ListRowIcon><Monitor className="size-3.5" /></ListRowIcon><p className="text-ui font-medium">Loading computers…</p></div>}</div>
   </StatusPanelFrame>
   return <ApplicationShell activeTab="computers" computerSection="overview" settingsSection="general"
     systemIssueStatus={null} computerAttention={{ errors: 0, warnings: 0 }} navigationDisabled
     onTabChange={unavailable} onComputerSectionChange={unavailable} onSettingsSectionChange={unavailable}
     canGoBack={false} canGoForward={false} onGoBack={unavailable} onGoForward={unavailable}
     reduceMotion={settings.reduceMotion} commandMenu={<ApplicationCommandMenu commands={[]} disabled />}>
-    <div aria-busy="true" className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer aria-busy="true" className="flex h-full min-h-0 flex-col">
       <span role="status" className="sr-only">Loading computer state</span>
       <div className="min-h-0 flex-1">
         <ComputerConfigurationList configurations={configurations} onConfigurationsChange={unavailable} interactionDisabled
           getRowPresentation={() => ({ detail, actions: <LoadingControls />, busy: true })} />
       </div>
-    </div>
+    </PageContainer>
   </ApplicationShell>
 }

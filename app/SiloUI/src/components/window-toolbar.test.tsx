@@ -31,6 +31,19 @@ describe("window controls", () => {
     }
   })
 
+  it("draws neutral controls on Linux instead of macOS traffic lights", () => {
+    vi.mocked(isTauri).mockReturnValue(true)
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64")
+    render(<WindowControls />)
+    const buttons = screen.getAllByRole("button")
+    expect(buttons).toHaveLength(3)
+    for (const button of buttons) {
+      expect(button.className).not.toMatch(/#[0-9a-f]{6}/i)
+      expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true")
+    }
+    expect(screen.getByRole("button", { name: "Close window" })).toHaveClass("hover:text-destructive")
+  })
+
   it("leaves room for the macOS system controls without drawing duplicates", () => {
     vi.mocked(isTauri).mockReturnValue(true)
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel")

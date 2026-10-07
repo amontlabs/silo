@@ -1,10 +1,12 @@
-import { AlertCircle, Check, LoaderCircle, RefreshCw } from "lucide-react"
+import { AlertCircle, Check, RefreshCw } from "lucide-react"
 import { useState } from "react"
 
 import { DisclosureHeader } from "@/components/disclosure-header"
 import { ListCard, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
+import { statusTones } from "@/components/status-tone"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
+import { Spinner } from "@/components/ui/spinner"
 import { SetupNotice } from "@/features/onboarding/components/setup-notice"
 import type { DependencyGroupView } from "@/features/onboarding/model/onboarding-state"
 
@@ -30,9 +32,9 @@ export function DependencyDisclosure({ group, onRetry }: { group: DependencyGrou
       <ListCard>
         <DisclosureHeader
           icon={
-            <ListRowIcon className={group.status === "failed" ? "bg-destructive/10 text-destructive" : group.status === "running" ? "" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}>
+            <ListRowIcon className={group.status === "running" ? undefined : statusTones[group.status === "failed" ? "danger" : "success"].chip}>
               {group.status === "running"
-                ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-label="Checking" />
+                ? <Spinner aria-label="Checking" />
                 : group.status === "failed"
                 ? <AlertCircle className="size-3.5" aria-label="Check failed" />
                 : <Check className="size-3.5" aria-label="All checks passed" />}
@@ -60,13 +62,13 @@ export function DependencyDisclosure({ group, onRetry }: { group: DependencyGrou
                 return (
                   <div key={item.name} className="grid grid-cols-[1rem_1fr] gap-1.5">
                     {pending
-                      ? <LoaderCircle className="mt-0.5 size-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" aria-label="Checking" />
+                      ? <Spinner className="mt-0.5 text-muted-foreground" aria-label="Checking" />
                       : failed
                       ? <AlertCircle className="mt-0.5 size-3.5 text-destructive" aria-label="Failed" />
                       : <Check className="mt-0.5 size-3.5 text-muted-foreground" aria-label="Checked" />}
                     <div className="min-w-0">
-                      <div className="text-[13px] leading-4 font-medium text-foreground">{item.name}</div>
-                      <div className="truncate whitespace-nowrap text-[11px] leading-4 text-muted-foreground">{itemCaption}</div>
+                      <div className="text-ui leading-4 font-medium text-foreground">{item.name}</div>
+                      <div className="truncate whitespace-nowrap text-caption leading-4 text-muted-foreground" title={itemCaption}>{itemCaption}</div>
                     </div>
                   </div>
                 )

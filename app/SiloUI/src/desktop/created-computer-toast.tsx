@@ -24,7 +24,7 @@ export function CreatedComputerApprovalSwitch({ computer }: { computer: string }
     <div className="flex items-center justify-between gap-3">
       <label htmlFor={switchId}>Allow without asking</label>
       <span className="flex shrink-0 items-center gap-2">
-        {status?.applying && <span role="status" className="text-[11px] text-muted-foreground">Applying…</span>}
+        {status?.applying && <span role="status" className="text-caption text-muted-foreground">Applying…</span>}
         <Switch id={switchId} checked={computerUse?.approval === "auto"} disabled={!computerUse || approval.busy || computerUse.approval === "unknown"}
           onCheckedChange={checked => approval.setApproval(checked ? "auto" : "ask")} />
       </span>

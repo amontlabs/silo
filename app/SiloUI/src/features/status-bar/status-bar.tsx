@@ -1,14 +1,16 @@
+import { EmptyState } from "@/components/empty-state"
 import { ErrorDetails } from "@/components/error-details"
 import { configurationFailureDiagnostic } from "@/features/application/model/configuration-failure"
 import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/features/application/model/lifecycle-guard"
 import { computerTarget } from "@/features/application/model/connections"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { CircleAlert, Code, GitBranch, Loader2, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { CircleAlert, Code, GitBranch, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { SiloMark } from "@/components/silo-mark"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ComputerStateLabel } from "@/features/application/components/application-ui"
 import { RepositoryPushButton, RepositoryPushFeedback } from "@/features/application/components/repository-push-feedback"
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
@@ -32,7 +34,7 @@ function OperationIssue({ title, detail, actionLabel, actionText = "Details", to
       <ListRow
         icon={tone === "error"
           ? <ListRowIcon className="bg-destructive/10 text-destructive"><CircleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>
-          : <ListRowIcon className="bg-amber-500/10 text-amber-600 dark:text-amber-400"><TriangleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>}
+          : <ListRowIcon className="bg-warning/10 text-warning"><TriangleAlert className="size-3.5" aria-hidden="true" /></ListRowIcon>}
         title={title}
         detail={detail}
         detailClassName="whitespace-normal break-words"
@@ -59,7 +61,7 @@ function RepositoryPushes({ computer, source, actions }: { computer: Application
         // invisible or bidirectional characters revealed: a basename could imitate another.
         const path = visibleText(repository.path)
         return <div key={repository.path} className="flex min-h-6 min-w-0 items-center gap-2" role="group" aria-label={`${path} in ${computer.configuration.name}`}>
-          <span className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-muted-foreground" title={path}>
+          <span className="flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground" title={path}>
             <GitBranch className="size-3 shrink-0" aria-hidden="true" />
             <span className="truncate">{path}</span>
           </span>
@@ -142,13 +144,13 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   }
 
   if (folders && computerAvailability(folders, source).canOpen) {
-    return <div key="folders" className="status-page status-page-forward flex max-h-[518px] shrink-0 flex-col overflow-hidden">
+    return <div key="folders" className="status-page status-page-forward status-panel-page flex shrink-0 flex-col overflow-hidden">
       <StatusFolderPicker listDirectory={actions.listComputerDirectory} computer={folders} editor={source.preferences.editor} onBack={() => { setFolderComputer(null); focusContent() }} onOpen={(path) => actions.openEditor(computerTarget(folders), path)} />
     </div>
   }
 
   return (
-    <div key="computers" className={cn("status-page flex max-h-[518px] shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
+    <div key="computers" className={cn("status-page status-panel-page flex shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
       <div className="shrink-0 px-2 pt-2">
         {lifecycleIssue && <OperationIssue
           title={lifecycleIssue.title}
@@ -219,11 +221,11 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   tone={computer.freshness === "stale" ? "warning" : lifecycle?.error ? "error" : computerRowTone(computer)}
                   icon={availability.busy ? <span className="relative shrink-0">
                     <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
-                    <span className="absolute -top-1 -right-1 grid size-3.5 place-items-center rounded-full bg-background"><Loader2 className="size-2.5 animate-spin" aria-hidden="true" /></span>
+                    <span className="absolute -top-1 -right-1 grid size-3.5 place-items-center rounded-full bg-background"><Spinner size="sm" /></span>
                   </span> : undefined}
                   detail={<span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span className="truncate" title={availability.busy ? activity?.title ?? computer.stateDetail : detail}>
-                      {availability.busy ? <span className="font-medium text-amber-700 dark:text-amber-400">{computer.lifecycleAction ? (computer.lifecycleAction === "restart" ? "Restarting…" : computer.lifecycleAction === "stop" ? "Stopping…" : "Starting…") : activity?.title ?? (computer.state === "starting" ? computer.stateDetail : "Working…")}</span> : <><ComputerStateLabel state={computer.state} />{detail && <span> · {detail}</span>}</>}
+                      {availability.busy ? <span className="font-medium text-warning">{computer.lifecycleAction ? (computer.lifecycleAction === "restart" ? "Restarting…" : computer.lifecycleAction === "stop" ? "Stopping…" : "Starting…") : activity?.title ?? (computer.state === "starting" ? computer.stateDetail : "Working…")}</span> : <><ComputerStateLabel state={computer.state} />{detail && <span> · {detail}</span>}</>}
                     </span>
                     {pendingSecrets.length > 0 && <SecretChangesLabel computer={configuration.name} state={computer.state} secrets={pendingSecrets} />}
                   </span>}
@@ -242,8 +244,8 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                 />
                 <RepositoryPushes computer={computer} source={source} actions={actions} />
                 {startPrompt?.target === target && <ListRowDetails label={startPrompt.prompt.title} className="gap-2 pl-0">
-                  <p className="text-[11px] font-medium">{startPrompt.prompt.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{startPrompt.prompt.description}</p>
+                  <p className="text-caption font-medium">{startPrompt.prompt.title}</p>
+                  <p className="text-caption text-muted-foreground">{startPrompt.prompt.description}</p>
                   <div className="flex justify-end gap-1.5">
                     <Button variant="ghost" size="xs" onClick={() => setStartPrompt(null)}>Cancel</Button>
                     <Button size="xs" disabled={!availability.canStart} onClick={() => {
@@ -253,7 +255,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   </div>
                 </ListRowDetails>}
                 {pending && <ListRowDetails label={`${pending.action === "stop" ? "Stop" : "Restart"} ${configuration.name}?`} className="gap-2 pl-0">
-                  <p className="text-[11px] text-muted-foreground">{pendingPrompt?.title} {pendingPrompt?.description}</p>
+                  <p className="text-caption text-muted-foreground">{pendingPrompt?.title} {pendingPrompt?.description}</p>
                   <div className="flex justify-end gap-1.5">
                     <Button variant="ghost" size="xs" onClick={() => setConfirmation(null)}>Cancel</Button>
                     <Button variant="destructive" size="xs" disabled={pending.action === "stop" ? !availability.canStop : !availability.canRestart} onClick={() => {
@@ -267,11 +269,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
               </ComputerListItem>
             })}
           </ol>
-        </ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center">
-          <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
-          <p className="text-[13px] font-medium">No computers yet</p>
-          <p className="text-[11px] text-muted-foreground">Open Silo to create your first computer.</p>
-        </div>}
+        </ListCard> : <EmptyState variant="inline" className="py-8" icon={<Monitor />} title="No computers yet" description="Open Silo to create your first computer." />}
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">
         {quitPending && stoppedByQuit.length

@@ -19,7 +19,7 @@ export function ListHeader({ heading, subtitle, actions, className, ...props }: 
     <div className={cn("mb-3 flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2 text-xs", className)} {...props}>
       <div className="min-w-0">
         {heading}
-        {subtitle != null && <div className="text-[11px] text-muted-foreground">{subtitle}</div>}
+        {subtitle != null && <div className="text-caption text-muted-foreground">{subtitle}</div>}
       </div>
       {actions}
     </div>

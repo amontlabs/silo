@@ -74,7 +74,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
           emptyMessage="No matching filters." compact className="min-w-0 flex-1"
         />
         {hasDates && <Button type="button" size="xs" variant="ghost" aria-label="Edit date filter" onClick={editDates} className="max-w-full text-muted-foreground">
-          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate">{rangeLabel(since, until)}</span>
+          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate" title={rangeLabel(since, until)}>{rangeLabel(since, until)}</span>
         </Button>}
       </div>
     </PopoverAnchor>
@@ -102,7 +102,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
           <Input technical aria-label={`${field.label} date`} placeholder="YYYY-MM-DD" value={field.date} autoComplete="off" spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={event => { field.setDate(event.target.value); setError("") }} className="h-8 font-mono text-xs" />
           <Input technical aria-label={`${field.label} time`} placeholder="HH:mm" value={field.time} autoComplete="off" spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={event => { field.setTime(event.target.value); setError("") }} className="h-8 font-mono text-xs" />
         </fieldset>)}
-        <p className="text-[11px] leading-relaxed text-muted-foreground">Either date can be left blank. Leave times blank to include the full day.</p>
+        <p className="text-caption leading-relaxed text-muted-foreground">Either date can be left blank. Leave times blank to include the full day.</p>
         {error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end gap-2"><Button type="button" size="xs" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" size="xs">Apply</Button></div>
       </form>

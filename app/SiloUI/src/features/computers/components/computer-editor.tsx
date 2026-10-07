@@ -3,8 +3,10 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { Monitor, Square } from "lucide-react"
 
 import { InlineConfirmation } from "@/components/inline-confirmation"
+import { InlineAlert } from "@/components/inline-alert"
 import { restoreFocus } from "@/lib/focus"
 import { Button } from "@/components/ui/button"
+import { fieldVariants } from "@/components/ui/field"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
@@ -44,7 +46,7 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
   const errorId = useId()
   const describedBy = error ? errorId : undefined
   const field = (
-    <div className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
+    <div className="grid min-w-0 gap-1 text-caption font-medium text-muted-foreground">
       {label}
       <select
         disabled={readOnly}
@@ -52,7 +54,7 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
         // With a custom value, the number input holds it and takes focus on failed validation.
         aria-invalid={Boolean(error) && !isCustom}
         aria-describedby={describedBy}
-        className="h-8 min-w-0 rounded-lg border border-input bg-background px-2 text-xs text-foreground disabled:cursor-default disabled:opacity-60 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive"
+        className={fieldVariants()}
         value={isCustom ? "custom" : value}
         onChange={(event) => {
           const selected = event.target.value
@@ -79,7 +81,7 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
     </div>
   )
   return readOnly ? (
-    <TooltipProvider><Tooltip><TooltipTrigger asChild><div role="group" tabIndex={0} aria-label={`${label}: ${value} ${suffix}, read-only`} className="rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50">{field}</div></TooltipTrigger>
+    <TooltipProvider><Tooltip><TooltipTrigger asChild><div role="group" tabIndex={0} aria-label={`${label}: ${value} ${suffix}, read-only`} className="rounded-md focus-ring">{field}</div></TooltipTrigger>
       <TooltipContent>Disk size is read-only.</TooltipContent>
     </Tooltip></TooltipProvider>
   ) : field
@@ -97,7 +99,7 @@ function TextField({ label, value, error, hint, firstField = false, inputRef, ..
   const errorId = useId()
   const hintId = useId()
   return (
-    <label className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
+    <label className="grid min-w-0 gap-1 text-caption font-medium text-muted-foreground">
       {label}
       <Input technical ref={firstField ? inputRef : undefined} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : hint ? hintId : undefined} value={value} {...props} />
       {error ? <span id={errorId} className="text-destructive">{error}</span> : hint && <span id={hintId} className="font-normal">{hint}</span>}
@@ -263,21 +265,21 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
 
       {editorHeader}
       {deletedElsewhere ? (
-        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/[.06] px-3 py-2 text-xs text-destructive">This computer no longer exists.</p>
+        <InlineAlert>This computer no longer exists.</InlineAlert>
       ) : conflict ? (
-        <div role="alert" className="grid gap-2 rounded-md border border-destructive/30 bg-destructive/[.06] px-3 py-2 text-xs text-destructive">
+        <InlineAlert>
           <p>This computer changed since you opened it.</p>
           <div className="flex justify-end gap-2">
             <Button type="button" size="xs" variant="outline" disabled={saving} onClick={onDiscard}>Discard my edits</Button>
             <Button type="button" size="xs" disabled={saving} onClick={onReview}>Review changes</Button>
           </div>
-        </div>
+        </InlineAlert>
       ) : divergent ? (
-        <p role="status" className="rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <InlineAlert tone="warning" role="status">
           This computer was changed elsewhere.{changedFields.length > 0 ? ` Updated: ${changedFields.map(computerFieldLabel).join(", ")}.` : ""}
-        </p>
+        </InlineAlert>
       ) : review ? (
-        <div role="status" aria-label="Review changes" className="grid gap-1 rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <InlineAlert tone="warning" role="status" aria-label="Review changes" className="gap-1">
           <p>Your edits are kept on top of the latest settings.</p>
           {review.conflicts.length > 0 && <>
             <p>Also changed elsewhere:</p>
@@ -287,7 +289,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
           </>}
           {review.adopted.length > 0 && <p>Updated from elsewhere: {review.adopted.join(", ")}.</p>}
           <p>Save to apply your edits, or Cancel to keep the latest settings.</p>
-        </div>
+        </InlineAlert>
       ) : null}
       {/* Lock every field while saving so edits typed after Save aren't silently discarded. */}
       <fieldset disabled={saving} className="m-0 grid min-w-0 gap-3 border-0 p-0">
@@ -297,7 +299,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         label="Computer name"
         value={draft.name}
         readOnly={created}
-        className={created ? "opacity-60" : undefined}
+        className={created ? "opacity-50" : undefined}
         error={errors.name}
         hint={created ? undefined : "1–32 lowercase letters, numbers, or hyphens, starting with a letter."}
         autoComplete="off"
@@ -305,11 +307,11 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         onChange={(event) => update({ name: event.target.value })}
       />
 
-      {created && <p className="text-[11px] text-muted-foreground">Existing computers cannot be renamed or have their disks resized. To use a different disk size, create a new computer and transfer your data.</p>}
-      {editor.displayAfterID && <p className="text-[11px] text-muted-foreground">Creates a new empty computer with the same settings. Files are not included.</p>}
+      {created && <p className="text-caption text-muted-foreground">Existing computers cannot be renamed or have their disks resized. To use a different disk size, create a new computer and transfer your data.</p>}
+      {editor.displayAfterID && <p className="text-caption text-muted-foreground">Creates a new empty computer with the same settings. Files are not included.</p>}
 
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-        <p className="col-span-full text-[11px] text-muted-foreground">"At start" values are what the computer begins with; the maximums are the most it can use. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
+        <p className="col-span-full text-caption text-muted-foreground">"At start" values are what the computer begins with; the maximums are the most it can use. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
         <SelectField custom label="CPUs at start" value={draft.cpus} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.cpus} onChange={(cpus) => update({ cpus } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom label="Maximum CPUs" value={draft.maxCPUs} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.maxCPUs} onChange={(maxCPUs) => update({ maxCPUs } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom label="Memory at start" value={draft.memoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.memoryGiB} onChange={(memoryGiB) => update({ memoryGiB } as Partial<SetupComputerConfiguration>)} />
@@ -320,26 +322,26 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
 
       {!builtInDesktop && !builtInNewVm && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         {!created && computerUse && remoteOwner && (newVmSupport === "no"
-          ? <p className="text-[11px] text-muted-foreground">Update Silo on {ownerName} for built-in computer use. Until then, the optional Linux desktop is available.</p>
-          : newVmSupport === "checking" ? <p role="status" className="text-[11px] text-muted-foreground">Checking {ownerName}…</p> : null)}
+          ? <p className="text-caption text-muted-foreground">Update Silo on {ownerName} for built-in computer use. Until then, the optional Linux desktop is available.</p>
+          : newVmSupport === "checking" ? <p role="status" className="text-caption text-muted-foreground">Checking {ownerName}…</p> : null)}
         {desktopInstalled ? <label className="flex items-center justify-between gap-3 text-xs">
-          <span>Start desktop with computer<span className="mt-1 block text-[11px] text-muted-foreground">When off, start the desktop from its viewer.</span></span>
+          <span>Start desktop with computer<span className="mt-1 block text-caption text-muted-foreground">When off, start the desktop from its viewer.</span></span>
           <Switch aria-label="Start desktop with computer" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />
         </label> : created ? <div className="flex items-center justify-between gap-3">
-          <div className="text-xs">Linux desktop<p className="mt-1 text-[11px] text-muted-foreground">Use graphical applications in this computer.</p></div>
+          <div className="text-xs">Linux desktop<p className="mt-1 text-caption text-muted-foreground">Use graphical applications in this computer.</p></div>
           {draft.desktop ? <span className="text-xs text-muted-foreground">Installs when you save</span> : <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => update({ desktop: { startWithComputer: true } })}>Add Linux desktop</Button>}
         </div> : <label className="flex items-start gap-2 text-xs">
           <Checkbox aria-label="Linux desktop" checked={Boolean(draft.desktop)} disabled={saving} onCheckedChange={checked => update({ desktop: checked === true ? { startWithComputer: true } : undefined })} />
-          <span>Linux desktop<span className="mt-1 block text-[11px] text-muted-foreground">Run graphical applications. Starts with the computer.</span></span>
+          <span>Linux desktop<span className="mt-1 block text-caption text-muted-foreground">Run graphical applications. Starts with the computer.</span></span>
         </label>}
       </section>}
       </fieldset>
 
       <p role={saving ? "status" : undefined} aria-live="polite" aria-atomic="true" className="sr-only">{saving ? `Saving ${draft.name}…` : ""}</p>
-      {blockedReason && !saving && <p id={blockedReasonId} role="status" className="text-right text-[11px] text-muted-foreground">{blockedReason}</p>}
+      {blockedReason && !saving && <p id={blockedReasonId} role="status" className="text-right text-caption text-muted-foreground">{blockedReason}</p>}
       {stopPending ? <InlineConfirmation active onDismiss={dismissStop}>
         <div role="group" aria-label={`Stop ${stopTarget} and save?`} className="grid gap-2 rounded-md border border-border px-3 py-2">
-          <p className="text-[11px] text-muted-foreground">Stop {stopTarget} and save? Running processes will be interrupted. The new settings apply when you start it again.</p>
+          <p className="text-caption text-muted-foreground">Stop {stopTarget} and save? Running processes will be interrupted. The new settings apply when you start it again.</p>
           <div className="flex justify-end gap-1.5">
             <Button ref={cancelStop} type="button" variant="ghost" size="xs" onClick={dismissStop}>Cancel</Button>
             <Button type="button" variant="destructive" size="xs" onClick={() => { setConfirmingStop(false); save(true) }}><Square />Stop and save</Button>

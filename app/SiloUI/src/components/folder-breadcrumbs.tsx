@@ -5,7 +5,7 @@ import { DropdownMenu } from "radix-ui"
 import { useReduceMotion } from "@/components/ui/reduce-motion"
 import { visibleText } from "@/lib/visible-text"
 
-const crumbClass = "min-w-0 truncate rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+const crumbClass = "min-w-0 truncate rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-ring-inset"
 
 export function FolderBreadcrumbs({ segments, onNavigate }: {
   segments: string[]
@@ -46,7 +46,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
   }
   const separator = <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 
-  return <nav ref={container} aria-label="Folder path" className="relative min-w-0 overflow-hidden text-[11px]">
+  return <nav ref={container} aria-label="Folder path" className="relative min-w-0 overflow-hidden text-caption">
     <div ref={measurement} aria-hidden="true" className="pointer-events-none invisible absolute flex w-max items-center gap-0.5 whitespace-nowrap">
       {labels.map((label, index) => <span key={index} className="flex shrink-0 items-center gap-0.5">
         {index > 0 && separator}<span className="px-1 py-1">{label}</span>
@@ -57,7 +57,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
         {(!layout.collapsed || layout.rootVisible) && <>{crumb(0)}{separator}</>}
         {hidden.length > 0 && <>
           <DropdownMenu.Root>
-            <DropdownMenu.Trigger className="shrink-0 rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label="Show parent folders">
+            <DropdownMenu.Trigger className="shrink-0 rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-ring-inset" aria-label="Show parent folders">
               <MoreHorizontal className="size-4" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -73,7 +73,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
                   const ancestor = labels.slice(0, index + 1).join("/")
                   return <DropdownMenu.Item key={ancestor} title={ancestor} onSelect={() => { selectedAncestor.current = true; onNavigate(segments.slice(0, index)) }}
                     className="cursor-default rounded px-2 py-1.5 text-xs outline-none data-[highlighted]:bg-accent">
-                    <span className="block max-w-64 truncate">{label}</span>
+                    <span className="block max-w-64 truncate" title={label}>{label}</span>
                   </DropdownMenu.Item>
                 })}
               </DropdownMenu.Content>

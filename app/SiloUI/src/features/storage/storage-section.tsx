@@ -2,6 +2,7 @@ import { useRef } from "react"
 import { HardDrive } from "lucide-react"
 
 import { ConfirmPopover } from "@/components/confirm-popover"
+import { SectionHeading } from "@/components/page"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { runWithOperationToast, showActionFailure } from "@/lib/operation-toast"
@@ -34,7 +35,7 @@ export function StorageSection() {
   const show = () => state.reveal().catch((cause: unknown) => showActionFailure("Could not show the pre-upgrade backup", cause))
 
   return <section className="grid gap-2" aria-label="Storage">
-    <h3 className="text-xs font-medium">Storage</h3>
+    <SectionHeading>Storage</SectionHeading>
     <ListCard>
       <ListRow
         icon={<ListRowIcon aria-hidden="true"><HardDrive className="size-3.5" /></ListRowIcon>}

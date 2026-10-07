@@ -7,7 +7,7 @@ import { ComputerFileTree } from "@/features/application/components/computer-fil
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
 import { memo, useMemo, useState } from "react"
-import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Loader2, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
+import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
 import { DisclosureHeader } from "@/components/disclosure-header"
 import { EmptyState } from "@/components/empty-state"
@@ -15,10 +15,13 @@ import { ErrorDetails } from "@/components/error-details"
 import { FilterCombobox, type FilterOption } from "@/components/filter-combobox"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { StatusBadge } from "@/components/status-badge"
+import { statusTones } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
+import { PageContainer } from "@/components/page"
 import { RepositoryPushButton, RepositoryPushFeedback, type PushRepository } from "@/features/application/components/repository-push-feedback"
 import { useRepositoryPushToasts } from "@/features/application/components/use-repository-push-toasts"
 import type { OperationQueue } from "@/features/application/model/operation-queue"
@@ -125,7 +128,7 @@ function Files({
             title="Repositories"
             titleClassName="text-sm font-medium"
             label={`${repositoriesOpen ? "Collapse" : "Expand"} repositories`}
-            actions={<Button variant="ghost" size="icon" className="size-6" aria-label="Refresh repositories" title="Refresh repositories" disabled={refreshing || !onRefreshRepositories} onClick={() => void refreshRepositories()}><RefreshCw aria-hidden="true" className={cn("size-3.5", refreshing && "motion-safe:animate-spin")} /></Button>}
+            actions={<Button variant="ghost" size="icon" className="size-6" aria-label="Refresh repositories" title="Refresh repositories" disabled={refreshing || !onRefreshRepositories} onClick={() => void refreshRepositories()}><RefreshCw aria-hidden="true" className={cn("size-3.5", refreshing && "motion-safe:animate-spin motion-reduce:animate-none")} /></Button>}
             controlsLabel="Repository pane controls"
           />
           <CollapsibleContent className="file-pane-content-motion min-h-0 flex-1" data-files-pane-content="repositories">
@@ -139,7 +142,7 @@ function Files({
                     const canPush = computerAvailability(computer, source).canOpen
                     const label = computer.device ? `${computer.configuration.name} on ${computer.device.name}` : computer.configuration.name
                     return (
-                      <div key={`${computer.configuration.id}:${repository.path}`} role="listitem" aria-busy={operation?.status === "pushing" || undefined} className="group/folder transition-colors hover:bg-muted/35 focus-within:bg-muted/35">
+                      <div key={`${computer.configuration.id}:${repository.path}`} role="listitem" aria-busy={operation?.status === "pushing" || undefined} className="group/folder transition-colors row-hover">
                         <ListRow
                           data-repository-header
                           icon={<ListRowIcon aria-hidden="true"><GitBranch className="size-3.5" /></ListRowIcon>}
@@ -230,25 +233,19 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
       data-activity-id={item.id}
       data-activity-status={item.status}
       className={cn(
-        "hover:bg-muted/35 select-text",
-        item.status === "running" && "bg-primary/[0.025]",
-        item.tone === "warning" && "bg-amber-500/[0.035]",
-        item.tone === "danger" && "bg-destructive/[0.025]",
+        "select-text",
+        item.status === "running" ? "bg-primary/5 row-hover" : item.tone === "warning" || item.tone === "danger" ? statusTones[item.tone].row : "row-hover",
       )}
       icon={
-        <ListRowIcon aria-hidden="true" className={cn(
-          item.tone === "success" && "bg-emerald-500/10",
-          item.tone === "warning" && "bg-amber-500/10",
-          item.tone === "danger" && "bg-destructive/10",
-        )}>
+        <ListRowIcon aria-hidden="true" className={item.tone === "neutral" ? undefined : statusTones[item.tone].chip}>
           {item.status === "running"
-            ? <Loader2 className="size-3.5 animate-spin text-primary motion-reduce:animate-none" />
+            ? <Spinner className="text-primary" />
             : item.tone === "danger"
               ? <CircleAlert className="size-3.5 text-destructive" />
               : item.tone === "warning"
-                ? <TriangleAlert className="size-3.5 text-amber-600 dark:text-amber-400" />
+                ? <TriangleAlert className="size-3.5 text-warning" />
                 : item.tone === "success"
-                  ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                  ? <Check className="size-3.5 text-success" />
                   : <Activity className="size-3.5" />}
         </ListRowIcon>
       }
@@ -264,14 +261,14 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
           {item.status === "running" && item.progress !== undefined && (
             <div className="flex max-w-sm items-center gap-2 pt-1">
               <Progress value={item.progress * 100} aria-label={item.progressLabel ?? `${item.title} progress`} />
-              <span className="w-8 shrink-0 text-right text-[10px] tabular-nums">{Math.round(item.progress * 100)}%</span>
+              <span className="w-8 shrink-0 text-right text-caption tabular-nums">{Math.round(item.progress * 100)}%</span>
             </div>
           )}
         </div>
       }
       actions={
         <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1" data-activity-meta>
-          <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{formatLocalActivityTime(item.occurredAt)}</time>
+          <time dateTime={item.occurredAt} className="text-caption text-muted-foreground">{formatLocalActivityTime(item.occurredAt)}</time>
           <div className="flex flex-wrap justify-end gap-1">
             {item.computer && (computer
               ? <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />
@@ -408,24 +405,24 @@ export function ComputersPage({
   const hasComputers = computers.length > 0
   if (!hasComputers && section !== "activity") {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
+      <PageContainer>
         <EmptyState
           icon={<Boxes />}
           title="No computers yet"
           description="Create a computer to browse its files, logs and network ports here."
-          action={onCreateComputer && <Button variant="outline" size="xs" onClick={onCreateComputer}><Plus aria-hidden="true" data-icon="inline-start" />New computer</Button>}
+          action={onCreateComputer && <Button size="xs" onClick={onCreateComputer}><Plus aria-hidden="true" data-icon="inline-start" />New computer</Button>}
         />
-      </div>
+      </PageContainer>
     )
   }
 
   return (
-    <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
+    <PageContainer className={cn("grid h-full min-h-0 gap-4 overflow-hidden", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
       {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <LazyBoundary><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></LazyBoundary>}
       {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></LazyBoundary>}
       {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={showActivityLogs} />}
-    </div>
+    </PageContainer>
   )
 }

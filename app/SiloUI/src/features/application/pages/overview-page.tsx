@@ -17,17 +17,19 @@ import { computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
-import { Code, Download, GitFork, HardDrive, History, KeyRound, Loader2, Monitor, RotateCw, Terminal } from "lucide-react"
+import { Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, RotateCw, Terminal } from "lucide-react"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
 import type { MenuAction, MenuPopovers } from "@/components/actions-menu"
+import { InlineAlert } from "@/components/inline-alert"
+import { PageContainer } from "@/components/page"
+import { Spinner } from "@/components/ui/spinner"
 import { ConfirmBody } from "@/components/confirm-popover"
 import type { BackupController, VerifiedExport } from "../model/backup-source"
 import { computerNamesOnDevice, type ComputerCheckpoint } from "../model/checkpoint-source"
 
 import { configurationFailureDiagnostic } from "../model/configuration-failure"
-import { ErrorDetails } from "@/components/error-details"
 import { ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -302,9 +304,9 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
 
   const { folderComputer, showFolderPicker, openFolderPicker, closeFolderPicker, menuRequest } = useComputerPageRequest({ active, selectedId, activeComputerTab, computerRequest, onComputerRequestHandled, openComputer, computers, source })
   if (folderComputer && showFolderPicker) {
-    return <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    return <PageContainer className="flex h-full min-h-0 flex-col">
       <StatusFolderPicker key={folderComputer.configuration.id} computer={folderComputer} editor={source.preferences.editor} listDirectory={actions.listComputerDirectory} onBack={closeFolderPicker} onOpen={(path) => actions.openEditor(computerTarget(folderComputer), path)} />
-    </div>
+    </PageContainer>
   }
 
   function detailControls(computer: ApplicationComputer): ComputerDetailControls {
@@ -357,7 +359,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         {detailComputer ? (
           // Keyed per computer so edit drafts, delete confirmations and panel state never carry over.
@@ -365,10 +367,9 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
         ) : (
           <>
             {connecting && actions.connectDevice && <div className="mb-3"><ConnectDeviceForm connect={actions.connectDevice} authorize={actions.authorizeDevice} setupKey={actions.setupDeviceKey} onClose={() => setConnecting(false)} /></div>}
-            {configurationOperation?.status === "failed" && <div className="mb-3 rounded-md border border-destructive/30 p-3">
-              <div role="alert" className="text-sm text-destructive"><ErrorDetails message={configurationOperation.error.message} diagnostic={configurationFailureDiagnostic(configurationOperation)} fallbackSummary="Computer changes failed." /></div>
-              <Button variant="outline" size="sm" className="mt-2" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
-            </div>}
+            {configurationOperation?.status === "failed" && <InlineAlert className="mb-3" error={{ message: configurationOperation.error.message, diagnostic: configurationFailureDiagnostic(configurationOperation), fallbackSummary: "Computer changes failed." }}>
+              <Button variant="outline" size="sm" className="justify-self-start" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
+            </InlineAlert>}
             <ComputerConfigurationList
               newComputerRequest={readOnly ? undefined : newComputerRequest}
               onNewComputerRequestHandled={onNewComputerRequestHandled}
@@ -449,7 +450,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                   deleteDetails: computer ? deleteDetails(computer) : undefined,
                   busy: computerOperationBusy || Boolean(computer?.device?.busy),
                   suppressInteractions: computer ? changesBlocked(computer) : false,
-                  icon: computerOperationBusy ? <ListRowIcon aria-hidden="true"><Loader2 className="size-3.5 animate-spin" /></ListRowIcon> : undefined,
+                  icon: computerOperationBusy ? <ListRowIcon aria-hidden="true"><Spinner /></ListRowIcon> : undefined,
                   iconState: computer?.lifecycleFailure && !computer.lifecycleFailureCancelled ? "error" as const : visualState,
                   tone: computerOperationBusy ? "starting" as const : computer?.lifecycleFailure && !computer.lifecycleFailureCancelled ? "error" as const : computerRowTone(computer),
                   detail: checkpointOperation ? <div role="status" aria-live="polite" aria-atomic="true" className="grid gap-1.5 py-0.5">
@@ -461,7 +462,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                         {computer ? <ComputerStatus computer={computer} source={source} readOnly={readOnly} onCancel={actions.cancelOperation} /> : <ComputerStateLabel state={state} />}
                         {computer?.attention && <> · {computer.attention.message}</>}
                       </span>
-                      {computer?.canDismissError && state === "failed" && <Button size="xs" variant="ghost" className="h-4 rounded px-1 text-[10px] font-normal" aria-label={`Dismiss ${configuration.name} error`} disabled={configurationLocked || computerOperationBusy || computer.freshness === "stale"} onClick={() => actions.dismissComputerError(computerTarget(computer))}>Dismiss</Button>}
+                      {computer?.canDismissError && state === "failed" && <Button size="xs" variant="ghost" className="h-4 rounded px-1 text-caption font-normal" aria-label={`Dismiss ${configuration.name} error`} disabled={configurationLocked || computerOperationBusy || computer.freshness === "stale"} onClick={() => actions.dismissComputerError(computerTarget(computer))}>Dismiss</Button>}
                     </span>
                   ),
                   actions: <>
@@ -476,6 +477,6 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
           </>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

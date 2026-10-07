@@ -99,10 +99,10 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   const devBadge = within(devRepository).getByLabelText("dev, Running")
   expect(devBadge).toBeVisible()
   expect(devBadge).toHaveAttribute("data-slot", "status-badge")
-  expect(devBadge).toHaveClass("h-5", "items-center", "justify-center", "text-[10px]")
+  expect(devBadge).toHaveClass("h-5", "items-center", "justify-center", "text-caption")
   expect(devBadge.querySelector('[data-slot="status-badge-indicator"]')).toHaveClass("grid", "size-2", "place-items-center")
   expect(devBadge.querySelector('[data-slot="status-badge-label"]')).toHaveTextContent("dev")
-  expect(devRepository.querySelector('[data-computer-state-dot="running"]')).toHaveClass("bg-emerald-500")
+  expect(devRepository.querySelector('[data-computer-state-dot="running"]')).toHaveClass("bg-success")
   expect(within(playgroundsRepository).getByLabelText("playgrounds, Stopped")).toBeVisible()
   expect(playgroundsRepository.querySelector('[data-computer-state-dot="stopped"]')).toHaveClass("bg-muted-foreground/55")
   const repositoryHeader = devRepository.querySelector("[data-repository-header]") as HTMLElement
@@ -163,7 +163,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   expect(within(logs).getByLabelText("personal, Stopped")).toBeVisible()
 
   const playgroundsRow = within(logs).getByLabelText("playgrounds, Stopped").closest('[role="row"]') as HTMLElement
-  expect(playgroundsRow).toHaveClass("hover:bg-muted/55", "focus-within:bg-muted/55")
+  expect(playgroundsRow).toHaveClass("row-hover")
   const playgroundsCells = within(playgroundsRow).getAllByRole("cell")
   expect(playgroundsCells[0]).toHaveTextContent("17:02:11")
   expect(playgroundsCells[1]).toHaveTextContent("silo Computer stopped cleanly")
@@ -294,12 +294,12 @@ it("shows one truthful network table and uses the selected browser for opening p
   const rows = within(network).getAllByRole("row").slice(1)
   expect(rows).toHaveLength(3)
   expect(within(rows[0]).getByText("3000")).toBeVisible()
-  expect(within(rows[0]).getByText("Reachable")).toHaveClass("text-emerald-700")
+  expect(within(rows[0]).getByText("Reachable")).toHaveClass("text-success")
   expect(within(rows[0]).getByText("http://127.0.0.1:3000")).toBeVisible()
   expect(within(rows[0]).getByLabelText("dev, Running")).toBeVisible()
   expect(within(rows[1]).getByText("Waiting for service")).toBeVisible()
 
-  expect(rows[0]).toHaveClass("hover:bg-muted/55", "focus-within:bg-muted/55")
+  expect(rows[0]).toHaveClass("row-hover")
   const open = within(rows[0]).getByRole("button", { name: "Open port 3000 in browser" })
   const actions = open.closest('[role="cell"]') as HTMLElement
   expect(actions).not.toHaveClass("opacity-0", "group-hover/network-row:opacity-100", "group-focus-within/network-row:opacity-100")
@@ -482,8 +482,8 @@ it("keeps a failed push as a small in-row label with details and retry", async (
 
 
 it.each([
-  ["running", "Running", "running", "bg-emerald-500"],
-  ["starting", "Starting", "starting", "bg-amber-500"],
+  ["running", "Running", "running", "bg-success"],
+  ["starting", "Starting", "starting", "bg-warning"],
   ["stopped", "Stopped", "stopped", "bg-muted-foreground/55"],
   ["error", "Failed", "failed", "bg-destructive"],
 ] as const)("colors repository computer badges for the %s fixture", async (mode, label, state, className) => {
