@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useState } from "react"
 import { History, ShieldCheck, TriangleAlert } from "lucide-react"
 import { ActionsMenu } from "@/components/actions-menu"
+import { SectionHeading } from "@/components/page"
 import { ConfirmBody, ConfirmPopover, FormPopover } from "@/components/confirm-popover"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
@@ -169,7 +170,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
   return <TooltipProvider delayDuration={250}>
     <section aria-label={`Checkpoints for ${computer.configuration.name}`} aria-busy={busy || undefined} className="grid gap-1.5 text-xs">
       <div className="flex min-h-6 items-center justify-between gap-2">
-        <h3 className="text-xs font-medium">Checkpoints</h3>
+        <SectionHeading>Checkpoints</SectionHeading>
         {actions.createCheckpoint && <FormPopover
           open={createOpen}
           onOpenChange={open => { if (!open || !locked) { setCreateOpen(open); if (open) setName(suggestedName()) } }}

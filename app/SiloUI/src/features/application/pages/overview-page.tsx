@@ -19,6 +19,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
 import type { MenuAction, MenuPopovers } from "@/components/actions-menu"
+import { PageContainer } from "@/components/page"
 import { ConfirmBody } from "@/components/confirm-popover"
 import type { BackupController, VerifiedExport } from "../model/backup-source"
 import { computerNamesOnDevice, type ComputerCheckpoint } from "../model/checkpoint-source"
@@ -575,9 +576,9 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // Adjusting state while rendering: the picker is dropped before it could reappear.
   if (folderPicker && !showFolderPicker) setFolderPicker(null)
   if (folderComputer && showFolderPicker) {
-    return <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    return <PageContainer className="flex h-full min-h-0 flex-col">
       <StatusFolderPicker key={folderComputer.configuration.id} computer={folderComputer} editor={source.preferences.editor} listDirectory={actions.listComputerDirectory} onBack={() => setFolderPicker(null)} onOpen={(path) => actions.openEditor(computerTarget(folderComputer), path)} />
-    </div>
+    </PageContainer>
   }
 
   function detailControls(computer: ApplicationComputer): ComputerDetailControls {
@@ -630,7 +631,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   }
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
         {detailComputer ? (
           // Keyed per computer so edit drafts, delete confirmations and panel state never carry over.
@@ -749,6 +750,6 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
           </>
         )}
       </div>
-    </div>
+    </PageContainer>
   )
 }

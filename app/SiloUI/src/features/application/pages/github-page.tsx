@@ -8,6 +8,7 @@ import { githubFailure } from "./github-failure"
 import { InlineConfirmation } from "@/components/inline-confirmation"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { PageContainer } from "@/components/page"
 import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 import type {
   ApplicationActions,
@@ -383,7 +384,7 @@ export function GitHubPage({
   )
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <p className="text-caption text-muted-foreground">GitHub access for computers on this device.</p>
         {connectionState !== "connected" && tokenConnected && accessToggle}
@@ -426,6 +427,6 @@ export function GitHubPage({
         confirmRepositoryClear
         busy={applying}
       />
-    </div>
+    </PageContainer>
   )
 }

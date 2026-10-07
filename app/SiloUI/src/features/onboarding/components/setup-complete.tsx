@@ -2,6 +2,7 @@ import { useLayoutEffect } from "react"
 import { Bell, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power } from "lucide-react"
 
 import { FilterCombobox } from "@/components/filter-combobox"
+import { SectionHeading } from "@/components/page"
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
@@ -46,7 +47,7 @@ export function SetupComplete({ configurations, githubSummary }: {
         />
       </ListCard>
       <section aria-labelledby="setup-preferences-title" className="grid gap-2">
-        <h3 id="setup-preferences-title" className="text-xs font-medium">Stay informed</h3>
+        <SectionHeading id="setup-preferences-title">Stay informed</SectionHeading>
         <ListCard divided>
           <div>
             <ListRow

@@ -1,6 +1,7 @@
 import { Clock3, GitBranch, Pencil, Play, RotateCw, UserRound } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { SectionHeading } from "@/components/page"
 import { statusTones } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -78,7 +79,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
 
       <section aria-labelledby="review-configurations-heading" className="min-w-0">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 id="review-configurations-heading" className="text-xs font-medium">Computers</h3>
+          <SectionHeading id="review-configurations-heading">Computers</SectionHeading>
           {onEditStep && <Button type="button" variant="ghost" size="xs" onClick={() => onEditStep("computers")} aria-label="Edit computers"><Pencil aria-hidden="true" />Edit</Button>}
         </div>
         <ComputerList label="Computers">
@@ -105,7 +106,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
 
       <section aria-labelledby="review-preferences-heading">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 id="review-preferences-heading" className="text-xs font-medium">GitHub and Git identity</h3>
+          <SectionHeading id="review-preferences-heading">GitHub and Git identity</SectionHeading>
           {onEditStep && <Button type="button" variant="ghost" size="xs" onClick={() => onEditStep("github")} aria-label="Edit GitHub and Git identity"><Pencil aria-hidden="true" />Edit</Button>}
         </div>
         <ListCard divided>

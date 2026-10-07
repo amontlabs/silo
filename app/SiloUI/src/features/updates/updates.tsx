@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Download, RefreshCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { SectionHeading } from "@/components/page"
 import { Switch } from "@/components/ui/switch"
 import { InlineConfirmation } from "@/components/inline-confirmation"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
@@ -36,7 +37,7 @@ export function UpdatesCard() {
   }
   const percent = state?.totalBytes ? Math.min(100, Math.round(state.downloadedBytes / state.totalBytes * 100)) : undefined
   return <section className="grid gap-2" aria-label="Updates">
-    <h3 className="text-xs font-medium">Updates</h3>
+    <SectionHeading>Updates</SectionHeading>
     <ListCard divided>
       <div>
         <ListRow icon={<ListRowIcon><Download aria-hidden="true" className="size-3.5" /></ListRowIcon>}

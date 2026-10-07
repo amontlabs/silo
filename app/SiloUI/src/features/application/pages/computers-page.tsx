@@ -20,6 +20,7 @@ import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { PageContainer } from "@/components/page"
 import { RepositoryPushButton, RepositoryPushFeedback, type PushRepository } from "@/features/application/components/repository-push-feedback"
 import { useRepositoryPushToasts } from "@/features/application/components/use-repository-push-toasts"
 import type { OperationQueue } from "@/features/application/model/operation-queue"
@@ -404,24 +405,24 @@ export function ComputersPage({
   const hasComputers = computers.length > 0
   if (!hasComputers && section !== "activity") {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
+      <PageContainer>
         <EmptyState
           icon={<Boxes />}
           title="No computers yet"
           description="Create a computer to browse its files, logs and network ports here."
           action={onCreateComputer && <Button variant="outline" size="xs" onClick={onCreateComputer}><Plus aria-hidden="true" data-icon="inline-start" />New computer</Button>}
         />
-      </div>
+      </PageContainer>
     )
   }
 
   return (
-    <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
+    <PageContainer className={cn("grid h-full min-h-0 gap-4 overflow-hidden", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
       {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <Suspense fallback={null}><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></Suspense>}
       {section === "network" && <Suspense fallback={null}><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></Suspense>}
       {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={showActivityLogs} />}
-    </div>
+    </PageContainer>
   )
 }

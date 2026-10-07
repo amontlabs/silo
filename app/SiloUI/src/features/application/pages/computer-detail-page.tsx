@@ -2,6 +2,7 @@ import { ChevronRight, Code, Cpu, GitBranch, Globe, KeyRound, Monitor, Play, Plu
 import { useId, type MouseEvent, type ReactNode } from "react"
 
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
+import { SectionHeading } from "@/components/page"
 import { ListHeader, listHeadingClassName } from "@/components/list-header"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
@@ -118,7 +119,7 @@ function DetailSubtitle({ computer, source, readOnly, pendingSecrets, sshAccess,
 function Section({ label, action, children }: { label: string; action?: ReactNode; children: ReactNode }) {
   return <section className="grid gap-1.5">
     <div className="flex min-h-6 items-center justify-between gap-2">
-      <h3 className="text-xs font-medium">{label}</h3>
+      <SectionHeading>{label}</SectionHeading>
       {action}
     </div>
     {children}

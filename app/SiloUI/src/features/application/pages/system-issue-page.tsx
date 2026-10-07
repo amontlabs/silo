@@ -2,12 +2,13 @@ import { CircleAlert, RotateCw } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
+import { PageContainer, PageHeader } from "@/components/page"
 import type { ActiveRuntimeRepairPresentation, ApplicationActions } from "@/features/application/model/application-source"
 
 export function SystemIssuePage({ issue, actions }: { issue: ActiveRuntimeRepairPresentation; actions: ApplicationActions }) {
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-5 sm:px-6 sm:py-6">
-      <h2 className="text-xs font-medium">System issue</h2>
+    <PageContainer className="grid gap-4">
+      <PageHeader title="System issue" />
       <ListCard role="alert" aria-live="polite">
         <ListRow
           className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 row-hover sm:flex"
@@ -28,6 +29,6 @@ export function SystemIssuePage({ issue, actions }: { issue: ActiveRuntimeRepair
           <p className="text-caption text-muted-foreground whitespace-pre-line">{issue.recovery ?? "Retry checks. If the runtime is still unavailable, quit and reopen Silo."}</p>
         </ListRowDetails>
       </ListCard>
-    </div>
+    </PageContainer>
   )
 }

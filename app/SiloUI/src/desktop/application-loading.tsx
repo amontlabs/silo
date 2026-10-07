@@ -4,6 +4,7 @@ import type { SetupComputerConfiguration } from "@/contracts/silo"
 import { SiloMark } from "@/components/silo-mark"
 import { Button } from "@/components/ui/button"
 import { ListCard, ListRowIcon } from "@/components/list-row"
+import { PageContainer } from "@/components/page"
 import { desktopCommand } from "@/desktop/commands"
 import { useStatusPanelSize } from "@/desktop/use-status-panel-size"
 import { ApplicationShell } from "@/features/application/components/application-shell"
@@ -68,12 +69,12 @@ export function ApplicationLoading({ configurations, statusPanel = false }: { co
     onTabChange={unavailable} onComputerSectionChange={unavailable} onSettingsSectionChange={unavailable}
     canGoBack={false} canGoForward={false} onGoBack={unavailable} onGoForward={unavailable}
     reduceMotion={settings.reduceMotion} commandMenu={<ApplicationCommandMenu commands={[]} disabled />}>
-    <div aria-busy="true" className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer aria-busy="true" className="flex h-full min-h-0 flex-col">
       <span role="status" className="sr-only">Loading computer state</span>
       <div className="min-h-0 flex-1">
         <ComputerConfigurationList configurations={configurations} onConfigurationsChange={unavailable} interactionDisabled
           getRowPresentation={() => ({ detail, actions: <LoadingControls />, busy: true })} />
       </div>
-    </div>
+    </PageContainer>
   </ApplicationShell>
 }

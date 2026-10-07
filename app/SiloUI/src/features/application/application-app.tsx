@@ -35,6 +35,7 @@ import { ComputersPage, computerSectionPages } from "@/features/application/page
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
+import { PageContainer } from "@/components/page"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
   const attentionByComputer = new Map(source.computers.map((computer) => [
@@ -468,11 +469,11 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
             <GeneralPageView source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} active={visibleTab === "settings" && settingsSection === "general"} />
           </PanelContent>
         </div>
-        <div hidden={settingsSection !== "connections"} className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
+        <PageContainer hidden={settingsSection !== "connections"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "connections"}>
             <ConnectionsSettingsView source={source} actions={actions} />
           </PanelContent>
-        </div>
+        </PageContainer>
         <div hidden={settingsSection !== "notifications"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "notifications"}><NotificationsPageView /></PanelContent>
         </div>

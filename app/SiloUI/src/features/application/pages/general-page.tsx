@@ -5,6 +5,7 @@ import { useLayoutEffect } from "react"
 import { Accessibility, Paintbrush, Power } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
+import { PageContainer, PageHeader, SectionHeading } from "@/components/page"
 import { FilterCombobox } from "@/components/filter-combobox"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
@@ -63,11 +64,12 @@ export function GeneralPage({
   }, [store, source.computers, source.preferences.startupComputerIds])
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-5 sm:px-6 sm:py-6">
+    <PageContainer className="grid gap-4">
+      <PageHeader title="General" />
       <SettingsSaveNotice />
       <UpdatesCard />
       <section className="grid gap-2">
-        <h3 className="text-xs font-medium">Appearance</h3>
+        <SectionHeading>Appearance</SectionHeading>
         <ListCard>
           <SettingRow icon={Paintbrush} title="Theme" description="Choose an appearance or follow your system." control={
             <div className="w-40 max-w-[45%] shrink-0">
@@ -84,7 +86,7 @@ export function GeneralPage({
         </ListCard>
       </section>
       <section className="grid gap-2">
-        <h3 className="text-xs font-medium">Startup</h3>
+        <SectionHeading>Startup</SectionHeading>
         <ListCard divided>
           <div>
             <SettingRow icon={Power} title="Launch Silo at login" description="Keep computer status and notifications available." control={<Switch checked={integrations.loginEnabled} disabled={!integrations.initialized || integrations.loginPending || integrations.loginItem.state === "error" || integrations.loginItem.state === "unavailable"} onCheckedChange={(enabled) => { void integrations.setLaunchAtLogin(enabled) }} aria-label="Launch Silo at login" />} />
@@ -117,17 +119,17 @@ export function GeneralPage({
         </ListCard>
       </section>
       <section className="grid gap-2">
-        <h3 className="text-xs font-medium">Applications</h3>
+        <SectionHeading>Applications</SectionHeading>
         <ListCard divided>
           <ApplicationPreferenceFields compact value={applicationPreferences} onChange={onApplicationPreferencesChange} />
         </ListCard>
       </section>
       <section className="grid gap-2">
-        <h3 className="text-xs font-medium">Accessibility</h3>
+        <SectionHeading>Accessibility</SectionHeading>
         <ListCard><SettingRow icon={Accessibility} title="Reduce motion" description="Disable nonessential interface animation." control={<Switch checked={reduceMotion} onCheckedChange={onReduceMotionChange} aria-label="Reduce motion" />} /></ListCard>
       </section>
       <div className="grid gap-4 empty:hidden"><ComputerUseSettings source={source} active={active} /></div>
       <StorageSection />
-    </div>
+    </PageContainer>
   )
 }

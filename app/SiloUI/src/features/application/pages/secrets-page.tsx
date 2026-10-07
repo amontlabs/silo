@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/empty-state"
 import { ListCard } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { PageContainer, PageHeader } from "@/components/page"
 import { AddSecretEditor, SecretRow } from "@/features/application/components/secrets-management"
 import { useSecretsManager } from "@/features/application/components/secrets-manager"
 import type { ApplicationSource, SecretConfigurationRequest } from "@/features/application/model/application-source"
@@ -18,16 +19,14 @@ export function SecretsPage({ source, onSaveSecret, onRemoveSecret, onRetrySecre
   const manager = useSecretsManager({ source, onSaveSecret, onRemoveSecret, onRetrySecret })
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-2 px-4 py-5 sm:px-6 sm:py-6">
-      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-xs font-medium">Secrets</h2>
-          <p className="text-caption text-muted-foreground"><span>{secrets.length} configured</span> · This device</p>
-        </div>
-        <Button type="button" variant="outline" size="xs" aria-label="Add secret" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget)}>
+    <PageContainer className="grid gap-2">
+      <PageHeader
+        title="Secrets"
+        subtitle={<><span>{secrets.length} configured</span> · This device</>}
+        actions={<Button type="button" variant="outline" size="xs" aria-label="Add secret" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget)}>
           <Plus aria-hidden="true" data-icon="inline-start" /> Add
-        </Button>
-      </header>
+        </Button>}
+      />
       {manager.editor && !manager.editor.secret && <ListCard><AddSecretEditor manager={manager} /></ListCard>}
       {secrets.length > 0 ? (
         <TooltipProvider delayDuration={150}>
@@ -38,6 +37,6 @@ export function SecretsPage({ source, onSaveSecret, onRemoveSecret, onRetrySecre
           </ListCard>
         </TooltipProvider>
       ) : <EmptyState icon={<KeyRound />} title="No secrets configured." />}
-    </div>
+    </PageContainer>
   )
 }
