@@ -73,7 +73,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
                   const ancestor = labels.slice(0, index + 1).join("/")
                   return <DropdownMenu.Item key={ancestor} title={ancestor} onSelect={() => { selectedAncestor.current = true; onNavigate(segments.slice(0, index)) }}
                     className="cursor-default rounded px-2 py-1.5 text-xs outline-none data-[highlighted]:bg-accent">
-                    <span className="block max-w-64 truncate">{label}</span>
+                    <span className="block max-w-64 truncate" title={label}>{label}</span>
                   </DropdownMenu.Item>
                 })}
               </DropdownMenu.Content>

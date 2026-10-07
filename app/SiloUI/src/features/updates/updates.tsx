@@ -49,9 +49,9 @@ export function UpdatesCard() {
             {confirm && installing && state ? <span className="flex shrink-0 gap-1.5">
               <Button size="xs" variant="outline" disabled={busy} onClick={updates.cancelInstall}>Cancel</Button>
               <Button size="xs" disabled={busy || !state.canInstall} onClick={() => updates.install(true)}>Stop computers and update</Button>
-            </span> : state?.phase === "available" && state.packageKind === "debian" ? <Button size="xs" variant="outline" disabled={busy || !state.canInstall} onClick={requestInstall}>Update</Button>
-              : state?.phase === "available" ? <Button size="xs" variant="outline" disabled={busy} onClick={state.packageKind === "manual" ? updates.openRelease : updates.download}>{state.packageKind === "manual" ? "View installers on GitHub" : "Download update"}</Button>
-              : state?.phase === "ready" ? <Button size="xs" variant="outline" disabled={busy || !state.canInstall} onClick={requestInstall}>Restart and update</Button>
+            </span> : state?.phase === "available" && state.packageKind === "debian" ? <Button size="xs" disabled={busy || !state.canInstall} onClick={requestInstall}>Update</Button>
+              : state?.phase === "available" ? <Button size="xs" disabled={busy} onClick={state.packageKind === "manual" ? updates.openRelease : updates.download}>{state.packageKind === "manual" ? "View installers on GitHub" : "Download update"}</Button>
+              : state?.phase === "ready" ? <Button size="xs" disabled={busy || !state.canInstall} onClick={requestInstall}>Restart and update</Button>
                 : error || state?.phase === "downloading" || state?.phase === "installing" ? null : <Button size="xs" variant="outline" disabled={busy || !state} onClick={updates.check}><RefreshCw aria-hidden="true" className="size-3" />Check for updates</Button>}
           </InlineConfirmation>} />
         {confirm && installing && state && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.runningComputers.join(", ")} will stop and restart after updating. Save your work before continuing.</p>}

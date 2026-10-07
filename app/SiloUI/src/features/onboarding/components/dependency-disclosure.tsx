@@ -68,7 +68,7 @@ export function DependencyDisclosure({ group, onRetry }: { group: DependencyGrou
                       : <Check className="mt-0.5 size-3.5 text-muted-foreground" aria-label="Checked" />}
                     <div className="min-w-0">
                       <div className="text-ui leading-4 font-medium text-foreground">{item.name}</div>
-                      <div className="truncate whitespace-nowrap text-caption leading-4 text-muted-foreground">{itemCaption}</div>
+                      <div className="truncate whitespace-nowrap text-caption leading-4 text-muted-foreground" title={itemCaption}>{itemCaption}</div>
                     </div>
                   </div>
                 )

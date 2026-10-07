@@ -72,7 +72,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
           emptyMessage="No matching filters." compact className="min-w-0 flex-1"
         />
         {hasDates && <Button type="button" size="xs" variant="ghost" aria-label="Edit date filter" onClick={editDates} className="max-w-full text-muted-foreground">
-          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate">{rangeLabel(since, until)}</span>
+          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate" title={rangeLabel(since, until)}>{rangeLabel(since, until)}</span>
         </Button>}
       </div>
     </PopoverAnchor>

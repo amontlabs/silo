@@ -32,6 +32,7 @@ export function ComputerBadge({ name, state, device }: { name: string; state: Co
   return (
     <TooltipProvider delayDuration={150}><Tooltip><TooltipTrigger asChild><StatusBadge
       indicator={<ComputerStateDot state={state} />}
+      revealLabel={false}
       role="group"
       aria-label={`${name}, ${stateLabel}${device ? `, on ${device.name}` : ""}`}
       tabIndex={0}

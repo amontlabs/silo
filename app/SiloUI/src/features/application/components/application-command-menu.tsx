@@ -116,7 +116,7 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
                 command.run()
               }} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-xs outline-none select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground">
                 <command.icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{command.label}</span>
+                <span className="truncate" title={command.label}>{command.label}</span>
               </Command.Item>)}
             </Command.Group>)}
           </Command.List>

@@ -410,7 +410,7 @@ export function ComputersPage({
           icon={<Boxes />}
           title="No computers yet"
           description="Create a computer to browse its files, logs and network ports here."
-          action={onCreateComputer && <Button variant="outline" size="xs" onClick={onCreateComputer}><Plus aria-hidden="true" data-icon="inline-start" />New computer</Button>}
+          action={onCreateComputer && <Button size="xs" onClick={onCreateComputer}><Plus aria-hidden="true" data-icon="inline-start" />New computer</Button>}
         />
       </PageContainer>
     )

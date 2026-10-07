@@ -6,6 +6,7 @@ import { InlineConfirmation } from "@/components/inline-confirmation"
 import { InlineAlert } from "@/components/inline-alert"
 import { restoreFocus } from "@/lib/focus"
 import { Button } from "@/components/ui/button"
+import { fieldVariants } from "@/components/ui/field"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
@@ -53,7 +54,7 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
         // With a custom value, the number input holds it and takes focus on failed validation.
         aria-invalid={Boolean(error) && !isCustom}
         aria-describedby={describedBy}
-        className="h-8 min-w-0 rounded-lg border border-input bg-background px-2 text-xs text-foreground disabled:cursor-default disabled:opacity-60 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive"
+        className={fieldVariants()}
         value={isCustom ? "custom" : value}
         onChange={(event) => {
           const selected = event.target.value
@@ -298,7 +299,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         label="Computer name"
         value={draft.name}
         readOnly={created}
-        className={created ? "opacity-60" : undefined}
+        className={created ? "opacity-50" : undefined}
         error={errors.name}
         hint={created ? undefined : "1–32 lowercase letters, numbers, or hyphens, starting with a letter."}
         autoComplete="off"

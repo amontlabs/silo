@@ -16,7 +16,7 @@ function ApplicationOptionLabel({ kind, name, icon }: { kind: ApplicationKind; n
   const Fallback = kind === "terminal" ? SquareTerminal : kind === "editor" ? Code2 : Compass
   return <span className="flex min-w-0 items-center gap-2">
     {icon ? <img src={icon} alt="" aria-hidden="true" draggable={false} className="size-4 shrink-0 object-contain" /> : <Fallback className="size-4 shrink-0" aria-hidden="true" />}
-    <span className="truncate">{name}</span>
+    <span className="truncate" title={name}>{name}</span>
   </span>
 }
 
