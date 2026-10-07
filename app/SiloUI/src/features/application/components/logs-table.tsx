@@ -15,6 +15,8 @@ interface LogsTableProps {
   hasOlder: boolean
   active: boolean
   scrollTop: number
+  /** Changes whenever the owner sets `scrollTop`, even to the value it already held. */
+  scrollEpoch?: number
   /** `notify: false` reports plain scrolling, which needs no re-render of the owner. */
   onScrollTopChange: (scrollTop: number, notify?: boolean) => void
   onLoadOlder: () => void
@@ -99,16 +101,16 @@ function Spacer({ height }: { height: number }) {
   return height > 0 ? <tr aria-hidden="true"><td colSpan={5} style={{ height }} className="border-0 p-0" /></tr> : null
 }
 
-export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrollTop, onScrollTopChange, onLoadOlder, expandedRows, onExpandedRowsChange }: LogsTableProps) {
+export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrollTop, scrollEpoch = 0, onScrollTopChange, onLoadOlder, expandedRows, onExpandedRowsChange }: LogsTableProps) {
   const viewport = useRef<HTMLDivElement>(null)
   const requestedRows = useRef<LogRow[] | undefined>(undefined)
   const [viewportHeight, setViewportHeight] = useState(520)
   // The window of rendered rows follows the scroll position; state changes only when the first visible row does.
   const [windowTop, setWindowTop] = useState(scrollTop)
-  const [seenScrollTop, setSeenScrollTop] = useState(scrollTop)
-  if (seenScrollTop !== scrollTop) { setSeenScrollTop(scrollTop); setWindowTop(scrollTop) }
+  const [seenScroll, setSeenScroll] = useState({ scrollTop, scrollEpoch })
+  if (seenScroll.scrollTop !== scrollTop || seenScroll.scrollEpoch !== scrollEpoch) { setSeenScroll({ scrollTop, scrollEpoch }); setWindowTop(scrollTop) }
   const liveTop = useRef(scrollTop)
-  useLayoutEffect(() => { liveTop.current = scrollTop }, [scrollTop])
+  useLayoutEffect(() => { liveTop.current = scrollTop }, [scrollTop, scrollEpoch])
   const keys = useMemo(() => rows.map(rowKey), [rows])
   const layout = useMemo(() => {
     const offsets = [0], positions: number[] = []
@@ -153,7 +155,7 @@ export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrol
   })
   useLayoutEffect(() => {
     if (viewport.current && viewport.current.scrollTop !== scrollTop) viewport.current.scrollTop = scrollTop
-  }, [scrollTop, active, loading])
+  }, [scrollTop, scrollEpoch, active, loading])
   useEffect(() => {
     const element = viewport.current
     if (!element) return

@@ -3,6 +3,18 @@ import { describe, expect, it } from "vitest"
 import { createMemorySettingsStore, SettingsProvider, shallowEqual, useSettingsSelector } from "./settings-store"
 
 describe("useSettingsSelector", () => {
+  it("applies a selector that closes over changing props", () => {
+    const store = createMemorySettingsStore({ theme: "dark" })
+    function Pick({ field }: { field: "theme" | "browser" }) {
+      return <p>{String(useSettingsSelector((view) => view.settings[field]))}</p>
+    }
+    const view = render(<SettingsProvider store={store}><Pick field="theme" /></SettingsProvider>)
+    expect(view.getByText("dark")).toBeInTheDocument()
+    view.rerender(<SettingsProvider store={store}><Pick field="browser" /></SettingsProvider>)
+    expect(view.queryByText("dark")).not.toBeInTheDocument()
+    expect(view.getByText(String(store.getSnapshot().settings.browser))).toBeInTheDocument()
+  })
+
   it("re-renders only when the selected value changes", async () => {
     const store = createMemorySettingsStore()
     let renders = 0

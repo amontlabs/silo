@@ -5,7 +5,7 @@ import { FolderActions } from "@/features/application/components/folder-actions"
 import { ComputerFileTree } from "@/features/application/components/computer-file-tree"
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
-import { memo, Suspense, useMemo, useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Loader2, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
 import { DisclosureHeader } from "@/components/disclosure-header"
@@ -29,6 +29,7 @@ import { showActionFailure } from "@/lib/operation-toast"
 import { cn } from "@/lib/utils"
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { lazyPage } from "@/features/application/components/lazy-page"
+import { LazyBoundary } from "@/features/application/components/panel-content"
 
 const logsPage = lazyPage(() => import("./logs-page"), "Logs")
 const networkPage = lazyPage(() => import("./network-page"), "NetworkPage")
@@ -423,8 +424,8 @@ export function ComputersPage({
     <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
       {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
-      {section === "logs" && <Suspense fallback={null}><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></Suspense>}
-      {section === "network" && <Suspense fallback={null}><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></Suspense>}
+      {section === "logs" && <LazyBoundary><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></LazyBoundary>}
+      {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></LazyBoundary>}
       {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={showActivityLogs} />}
     </div>
   )

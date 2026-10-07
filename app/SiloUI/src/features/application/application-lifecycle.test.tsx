@@ -270,7 +270,7 @@ it("keeps committed detail pages stable while an edit is being applied", async (
 
   await user.click(navigation.getByRole("button", { name: "Settings" }))
   const settings = within(appPanel("Settings"))
-  await user.click(settings.getByRole("switch", { name: "Start computers at launch" }))
+  await user.click(await settings.findByRole("switch", { name: "Start computers at launch" }))
   expect(settings.getByRole("button", { name: "Remove dev" })).toBeVisible()
   expect(actions.saveComputerConfiguration).toHaveBeenLastCalledWith(expect.objectContaining({
     computers: expect.arrayContaining([expect.objectContaining({ name: "dev", cpus: 4 })]),
@@ -514,12 +514,12 @@ it("renders the native app domains in the polished Silo shell", async () => {
 
   await user.click(navigation.getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
-  expect(github.getByText("Connected as @taylor")).toBeVisible()
+  expect(await github.findByText("Connected as @taylor")).toBeVisible()
   expect(github.getByRole("region", { name: "Computer Git identity and repository access" })).toBeVisible()
 
   await user.click(navigation.getByRole("button", { name: "Secrets" }))
   const secrets = within(appPanel("Secrets"))
-  expect(secrets.getByText("DATABASE_URL")).toBeVisible()
+  expect(await secrets.findByText("DATABASE_URL")).toBeVisible()
   expect(secrets.queryByRole("alert")).not.toBeInTheDocument()
   const secretList = within(secrets.getByRole("list", { name: "Configured secrets" }))
   const pendingSecret = secretList.getAllByRole("listitem").find((row) => row.textContent?.includes("DATABASE_URL"))!
@@ -538,7 +538,7 @@ it("applies Reduce motion to tooltips outside the app window and restores animat
     await user.click(navigation.getByRole("button", { name: "Settings" }))
     await user.click(screen.getByRole("switch", { name: "Reduce motion" }))
     await user.click(navigation.getByRole("button", { name: "Secrets" }))
-    act(() => screen.getByRole("button", { name: "Edit PACKAGE_TOKEN" }).focus())
+    const edit = await screen.findByRole("button", { name: "Edit PACKAGE_TOKEN" }); act(() => edit.focus())
 
     const tooltip = screen.getByRole("tooltip", { name: "Edit PACKAGE_TOKEN" }).closest<HTMLElement>('[data-slot="tooltip-content"]')!
     expect(tooltip).not.toBeNull()
