@@ -22,7 +22,7 @@ export function NotificationsPage() {
       <h2 className="text-xs font-medium">Notifications</h2>
       <ListCard>
         <ListRow
-          className="hover:bg-muted/35 focus-within:bg-muted/35"
+          className="row-hover"
           icon={<ListRowIcon aria-hidden="true"><Bell className="size-3.5" /></ListRowIcon>}
           title={<h3>Enable notifications</h3>}
           detail="Silo sends system notifications while its window is in the background. While you're using Silo, results appear in the app."
@@ -43,7 +43,7 @@ export function NotificationsPage() {
           {categories.map(({ id, label, detail, icon: Icon }) => (
             <ListRow
               key={id}
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
               title={<h4>{label}</h4>}
               detail={detail}

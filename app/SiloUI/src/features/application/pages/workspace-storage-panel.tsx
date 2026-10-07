@@ -133,7 +133,7 @@ function WorkspaceStorageContent({ computerId, computerName, running, deviceName
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" aria-label="Refresh storage" disabled={busy || disabled} onClick={() => void load(false)}>
-              <RefreshCw className={busy && !reclaiming ? 'animate-spin' : undefined} />
+              <RefreshCw className={busy && !reclaiming ? 'animate-spin motion-reduce:animate-none' : undefined} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Refresh storage measurements</TooltipContent>

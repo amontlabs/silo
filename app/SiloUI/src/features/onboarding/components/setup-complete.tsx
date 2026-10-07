@@ -50,7 +50,7 @@ export function SetupComplete({ configurations, githubSummary }: {
         <ListCard divided>
           <div>
             <ListRow
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Power className="size-3.5" /></ListRowIcon>}
               title="Launch Silo at login"
               detail={null}
@@ -66,7 +66,7 @@ export function SetupComplete({ configurations, githubSummary }: {
             {integrations.loginEnabled && (
               <ListRowDetails label="Startup preferences" className="mx-0 gap-0 px-0 py-1">
                 <ListRow
-                  className="py-1.5 hover:bg-muted/35 focus-within:bg-muted/35"
+                  className="py-1.5 row-hover"
                   icon={<ListRowIcon aria-hidden="true"><Boxes className="size-3.5" /></ListRowIcon>}
                   title={<span className="text-xs">Start computers at launch</span>}
                   detail={null}
@@ -92,7 +92,7 @@ export function SetupComplete({ configurations, githubSummary }: {
           </div>
           <div>
             <ListRow
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Bell className="size-3.5" /></ListRowIcon>}
               title="Enable notifications"
               detail={null}
@@ -110,7 +110,7 @@ export function SetupComplete({ configurations, githubSummary }: {
                 {notificationCategories.map(({ id, label, icon: Icon }) => (
                   <ListRow
                     key={id}
-                    className="py-1.5 hover:bg-muted/35 focus-within:bg-muted/35"
+                    className="py-1.5 row-hover"
                     icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
                     title={<span className="text-xs">{label}</span>}
                     detail={null}

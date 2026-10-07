@@ -39,7 +39,7 @@ function ApplicationPreferenceRow({
 }) {
   return (
     <ListRow
-      className={compact ? "hover:bg-muted/35 focus-within:bg-muted/35" : "gap-3 px-0 py-3 first:pt-0 last:pb-0"}
+      className={compact ? "row-hover" : "gap-3 px-0 py-3 first:pt-0 last:pb-0"}
       icon={compact ? <ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon> : <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       title={<div className={compact ? undefined : "text-sm"}>{title}</div>}
       detail={<>{description}{error && <span id={errorId} role="alert" className="mt-0.5 block text-destructive">{error}</span>}</>}

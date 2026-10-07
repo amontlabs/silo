@@ -14,7 +14,7 @@ import { parseRemoteComputerTarget, computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
-import { CircleAlert, Code, Download, GitFork, HardDrive, History, KeyRound, Loader2, Monitor, Play, RotateCw, Square, Terminal } from "lucide-react"
+import { CircleAlert, Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, Play, RotateCw, Square, Terminal } from "lucide-react"
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
@@ -28,6 +28,7 @@ import { ErrorDetails } from "@/components/error-details"
 import { ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Spinner } from "@/components/ui/spinner"
 import { setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent } from "@/contracts/silo"
 import { ComputerStateLabel } from "@/features/application/components/application-ui"
 import { ComputerStatus } from "@/features/application/components/computer-status"
@@ -177,7 +178,7 @@ function ConfigurationIcon({ failed }: { failed: boolean }) {
     >
       {failed
         ? <CircleAlert className="size-3.5" aria-hidden="true" />
-        : <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+        : <Spinner />}
     </ListRowIcon>
   )
 }
@@ -721,7 +722,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                   deleteDetails: computer ? deleteDetails(computer) : undefined,
                   busy: computerOperationBusy || Boolean(computer?.device?.busy),
                   suppressInteractions: computer ? changesBlocked(computer) : false,
-                  icon: computerOperationBusy ? <ListRowIcon aria-hidden="true"><Loader2 className="size-3.5 animate-spin" /></ListRowIcon> : undefined,
+                  icon: computerOperationBusy ? <ListRowIcon aria-hidden="true"><Spinner /></ListRowIcon> : undefined,
                   iconState: computer?.lifecycleFailure && !computer.lifecycleFailureCancelled ? "error" as const : visualState,
                   tone: computerOperationBusy ? "starting" as const : computer?.lifecycleFailure && !computer.lifecycleFailureCancelled ? "error" as const : computerRowTone(computer),
                   detail: checkpointOperation ? <div role="status" aria-live="polite" aria-atomic="true" className="grid gap-1.5 py-0.5">

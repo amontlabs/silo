@@ -10,7 +10,7 @@ export function SystemIssuePage({ issue, actions }: { issue: ActiveRuntimeRepair
       <h2 className="text-xs font-medium">System issue</h2>
       <ListCard role="alert" aria-live="polite">
         <ListRow
-          className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 hover:bg-muted/35 focus-within:bg-muted/35 sm:flex"
+          className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 row-hover sm:flex"
           icon={<ListRowIcon aria-hidden="true" className="bg-destructive/10 text-destructive"><CircleAlert className="size-3.5" /></ListRowIcon>}
           title={<h3>Silo runtime is unavailable</h3>}
           detail={issue.reason}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
-import { Check, ExternalLink, GitBranch, Info, LoaderCircle, RotateCcw, Search, Trash2, X } from "lucide-react"
+import { Check, ExternalLink, GitBranch, Info, RotateCcw, Search, Trash2, X } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { DisclosureHeader } from "@/components/disclosure-header"
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 
 export type GitHubConnectionState = "disconnected" | "connecting" | "connected"
 
@@ -284,14 +285,14 @@ export function GitHubAccessEditor({
         aria-live={connectionState === "connecting" ? "polite" : undefined}
       >
         <ListRow
-          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex ${compactConnection ? "hover:bg-muted/35 focus-within:bg-muted/35" : connectionState === "connected" ? "gap-x-3 p-0" : "gap-x-3 p-4"}`}
+          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex ${compactConnection ? "row-hover" : connectionState === "connected" ? "gap-x-3 p-0" : "gap-x-3 p-4"}`}
           icon={
             <ListRowIcon
               aria-hidden="true"
               className={`${compactConnection ? "" : "size-9 rounded-full"} ${connectionState === "connected" ? "bg-success/10 text-success" : ""}`}
             >
               {connectionState === "connected" ? <Check className={compactConnection ? "size-3.5" : "size-4"} />
-                : connectionState === "connecting" ? <LoaderCircle className={`${compactConnection ? "size-3.5" : "size-4"} animate-spin motion-reduce:animate-none`} />
+                : connectionState === "connecting" ? <Spinner className={compactConnection ? undefined : "size-4"} />
                   : <GitBranch className={compactConnection ? "size-3.5" : "size-4"} />}
             </ListRowIcon>
           }

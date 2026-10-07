@@ -4,6 +4,7 @@ import type { ComponentProps, ReactNode } from "react"
 import { CircleAlert, TriangleAlert } from "lucide-react"
 
 import { ListRow, ListRowIcon } from "@/components/list-row"
+import { statusTones, type StatusTone } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -11,6 +12,14 @@ import { cn } from "@/lib/utils"
 
 export type ComputerIconState = "normal" | "warning" | "error"
 export type ComputerRowTone = "running" | "starting" | "stopped" | "warning" | "error"
+
+const computerRowTones: Record<ComputerRowTone, StatusTone> = {
+  running: "success",
+  starting: "warning",
+  stopped: "neutral",
+  warning: "warning",
+  error: "danger",
+}
 
 export function ComputerList({ label, className, children, ...props }: {
   label: string
@@ -87,12 +96,7 @@ export function ComputerListRow({
       onOpen={onOpen}
       className={cn(
         "computer-row",
-        !tone && "hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "running" && "bg-success/[0.035] hover:bg-success/[0.07] focus-within:bg-success/[0.07]",
-        tone === "starting" && "bg-warning/[0.035] hover:bg-warning/[0.07] focus-within:bg-warning/[0.07]",
-        tone === "stopped" && "bg-muted/15 hover:bg-muted/35 focus-within:bg-muted/35",
-        tone === "warning" && "bg-warning/[0.04] hover:bg-warning/[0.08] focus-within:bg-warning/[0.08]",
-        tone === "error" && "bg-destructive/[0.035] hover:bg-destructive/[0.07] focus-within:bg-destructive/[0.07]",
+        statusTones[tone ? computerRowTones[tone] : "neutral"].row,
       )}
       data-computer-row-tone={tone}
       leading={leading}

@@ -115,7 +115,7 @@ describe("setup progress and review presentation", () => {
     expect(screen.getByRole("group", { name: "GitHub access" })).toHaveTextContent(label)
     expect(author).toHaveTextContent("Alex · alex@example.com")
     for (const row of [author, screen.getByRole("group", { name: "GitHub access" })]) {
-      expect(row.classList.contains("bg-success/[0.035]")).toBe(status === "succeeded")
+      expect(row.classList.contains("bg-success/5")).toBe(status === "succeeded")
     }
     if (status === "failed") expect(author).toHaveTextContent("Git identity could not be verified.")
   })

@@ -1,7 +1,8 @@
-import { AlertCircle, Check, LoaderCircle } from "lucide-react"
+import { AlertCircle, Check } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import type { PresentationStatus } from "@/features/onboarding/model/onboarding-state"
+import { Spinner } from "@/components/ui/spinner"
 
 interface StatusIconProps {
   status: PresentationStatus
@@ -17,7 +18,7 @@ export function StatusIcon({ status, waitingLabel, className }: StatusIconProps)
     return <AlertCircle aria-label="Failed" className={cn("size-4 text-destructive", className)} />
   }
   if (status === "running") {
-    return <LoaderCircle aria-label="In progress" className={cn("size-4 animate-spin motion-reduce:animate-none text-warning", className)} />
+    return <Spinner label="In progress" className={cn("size-4 text-warning", className)} />
   }
   return (
     <span

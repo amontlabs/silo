@@ -33,6 +33,7 @@ import { useSecretsManager } from "@/features/application/components/secrets-man
 import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/components/network-ports"
 import { networkAddress, networkPortState, useNetworkPorts } from "@/features/application/components/network-ports-state"
 import { ComputerUseSection } from "@/desktop/computer-use-panel"
+import { PortStateLabel } from "@/features/application/components/application-ui"
 import { cn } from "@/lib/utils"
 
 /** Everything the detail page needs to edit or delete this computer in place, sharing the
@@ -230,8 +231,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 title={<span className="truncate font-mono" title={address ? `${port.port} → ${address}` : `Port ${port.port}`}>{address ? `${port.port} → ${address}` : `Port ${port.port}`}</span>}
                 detailClassName="whitespace-normal"
                 detail={<span className="inline-flex flex-wrap items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-success" : "bg-muted-foreground/50")} aria-hidden="true" />
-                  <span className={stateText === "Reachable" ? "text-success" : undefined}>{stateText}</span>
+                  <PortStateLabel state={stateText} />
                   {port.message && <span className={port.state === "unknown" ? "text-destructive" : "text-muted-foreground"}>· {port.message}</span>}
                 </span>}
                 actions={<div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -258,10 +258,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 key={port.port}
                 icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
                 title={<span className="truncate" title={title}>{title}</span>}
-                detail={<span className="inline-flex items-center gap-1.5">
-                  <span className={cn("size-1.5 rounded-full", stateText === "Reachable" ? "bg-success" : "bg-muted-foreground/50")} aria-hidden="true" />
-                  {stateText}
-                </span>}
+                detail={<PortStateLabel state={stateText} />}
               />
             })}</div>
           : <ListRow

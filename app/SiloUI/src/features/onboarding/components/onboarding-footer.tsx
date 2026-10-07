@@ -1,6 +1,7 @@
-import { AlertCircle, Check, Clock3, LoaderCircle } from "lucide-react"
+import { AlertCircle, Check, Clock3 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import type { OnboardingStep, OnboardingViewModel } from "@/features/onboarding/model/onboarding-state"
 
 interface OnboardingFooterProps {
@@ -55,7 +56,7 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
       <div className="flex min-w-0 flex-[1_1_12rem] items-start gap-2 text-xs leading-5 text-muted-foreground" aria-live="polite">
         {(failed || blocker?.action === "start") && !completed ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
           : complete || stepComplete ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
-            : checkingDependencies || runningItem ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+            : checkingDependencies || runningItem ? <Spinner className="mt-0.5 shrink-0" />
               : <Clock3 className="mt-0.5 size-3.5 shrink-0" />}
         <span className="break-words">{statusText}</span>
       </div>

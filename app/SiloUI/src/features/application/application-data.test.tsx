@@ -163,7 +163,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   expect(within(logs).getByLabelText("personal, Stopped")).toBeVisible()
 
   const playgroundsRow = within(logs).getByLabelText("playgrounds, Stopped").closest('[role="row"]') as HTMLElement
-  expect(playgroundsRow).toHaveClass("hover:bg-muted/55", "focus-within:bg-muted/55")
+  expect(playgroundsRow).toHaveClass("row-hover")
   const playgroundsCells = within(playgroundsRow).getAllByRole("cell")
   expect(playgroundsCells[0]).toHaveTextContent("17:02:11")
   expect(playgroundsCells[1]).toHaveTextContent("silo Computer stopped cleanly")
@@ -299,7 +299,7 @@ it("shows one truthful network table and uses the selected browser for opening p
   expect(within(rows[0]).getByLabelText("dev, Running")).toBeVisible()
   expect(within(rows[1]).getByText("Waiting for service")).toBeVisible()
 
-  expect(rows[0]).toHaveClass("hover:bg-muted/55", "focus-within:bg-muted/55")
+  expect(rows[0]).toHaveClass("row-hover")
   const open = within(rows[0]).getByRole("button", { name: "Open port 3000 in browser" })
   const actions = open.closest('[role="cell"]') as HTMLElement
   expect(actions).not.toHaveClass("opacity-0", "group-hover/network-row:opacity-100", "group-focus-within/network-row:opacity-100")

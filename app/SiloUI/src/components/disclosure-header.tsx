@@ -20,7 +20,7 @@ export function DisclosureHeader({ title, detail, icon, actions, label, controls
   return <div
     role={controlsLabel ? "group" : undefined}
     aria-label={controlsLabel}
-    className={cn("relative flex min-w-0 items-center rounded-md px-2 py-2 transition-colors hover:bg-muted/35", className)}
+    className={cn("relative flex min-w-0 items-center rounded-md px-2 py-2 transition-colors row-hover", className)}
     {...props}
   >
     <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-6">

@@ -1,13 +1,16 @@
-import { Clock3, GitBranch, LoaderCircle, Pencil, Play, RotateCw, UserRound } from "lucide-react"
+import { Clock3, GitBranch, Pencil, Play, RotateCw, UserRound } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { statusTones } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { StatusLabel } from "@/features/onboarding/components/status-label"
+import { reviewQueueStatuses } from "@/features/onboarding/components/status-presentation"
 import { SetupNotice } from "@/features/onboarding/components/setup-notice"
 import { ComputerList, ComputerListItem, ComputerListRow } from "@/features/computers/components/computer-list"
 import { computerSummary } from "@/features/computers/model/computer-summary"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
 import type { OnboardingViewModel, ReviewQueueItemView, ComputerView } from "@/features/onboarding/model/onboarding-state"
-import { cn } from "@/lib/utils"
 
 interface ReviewStepProps {
   computerRetryable: boolean
@@ -37,7 +40,7 @@ function FinishBlockerNotice({ blocker, onStartComputer, onRefresh }: { blocker:
   return <ListCard role="status" aria-live="polite">
     <ListRow
       className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex"
-      icon={<ListRowIcon aria-hidden="true">{blocker.action === null ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Clock3 className="size-3.5" />}</ListRowIcon>}
+      icon={<ListRowIcon aria-hidden="true">{blocker.action === null ? <Spinner /> : <Clock3 className="size-3.5" />}</ListRowIcon>}
       title={<h3>Finish is unavailable</h3>}
       detail={blocker.message}
       detailClassName="whitespace-normal break-words"
@@ -46,19 +49,8 @@ function FinishBlockerNotice({ blocker, onStartComputer, onRefresh }: { blocker:
   </ListCard>
 }
 
-const statusLabel: Record<ReviewQueueItemView["status"], string> = {
-  idle: "Not started",
-  queued: "Waiting",
-  running: "In progress",
-  succeeded: "Complete",
-  failed: "Failed",
-}
-
 function ValidationBadge({ status }: { status: ReviewQueueItemView["status"] }) {
-  return <span className={cn(
-    "inline-flex shrink-0 items-center gap-1 text-[10px] font-normal",
-    status === "failed" ? "text-destructive" : status === "running" ? "text-warning" : status === "succeeded" ? "text-success" : "text-muted-foreground",
-  )}>{status === "running" && <LoaderCircle className="size-2.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{statusLabel[status]}</span>
+  return <StatusLabel {...reviewQueueStatuses[status]} busy={status === "running"} />
 }
 
 export function ReviewStep({ computerRetryable, queueItems, configurations, computers, identitySummary, githubSummary, githubConnected = true, errorMessage, errorRecovery, onRetryComputerSetup, onEditStep, finishBlocker, onStartComputer, onRefresh }: ReviewStepProps) {
@@ -125,7 +117,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
             role="group"
             aria-label={title}
-            className={complete ? "bg-success/[0.035] hover:bg-success/[0.07] focus-within:bg-success/[0.07]" : undefined}
+            className={complete ? statusTones.success.row : undefined}
             title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-[10px] font-normal text-muted-foreground">Skipped</span>}</>}
             detail={title === "Git identity" && identityFailure?.failure ? `${detail} · ${identityFailure.failure}` : detail}
             detailClassName={title === "Git identity" && identityFailure ? "whitespace-normal break-words text-destructive" : undefined}

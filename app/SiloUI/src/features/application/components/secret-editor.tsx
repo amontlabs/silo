@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { KeyRound, LoaderCircle } from "lucide-react"
+import { KeyRound } from "lucide-react"
 
 import { FilterCombobox } from "@/components/filter-combobox"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest } from "../model/application-source"
 import { secretConfiguration, type SecretDraft, type SecretValidationErrors } from "../model/secret-configuration"
 
@@ -126,7 +127,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     {saveError && <p role="alert" className="text-[11px] text-destructive">{saveError}</p>}
     <div className="flex justify-end gap-2">
       <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>Cancel</Button>
-      <Button type="submit" size="sm" disabled={saving || settingsChanged}>{saving && <LoaderCircle className="animate-spin" aria-hidden="true" />}{saving ? "Saving…" : saveError ? "Retry" : "Save"}</Button>
+      <Button type="submit" size="sm" disabled={saving || settingsChanged}>{saving && <Spinner />}{saving ? "Saving…" : saveError ? "Retry" : "Save"}</Button>
     </div>
   </form>
 }

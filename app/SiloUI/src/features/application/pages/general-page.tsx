@@ -21,7 +21,7 @@ import { useSystemIntegrations } from "@/features/preferences/system-integration
 function SettingRow({ icon: Icon, title, description, control }: { icon: typeof Power; title: string; description: string; control: React.ReactNode }) {
   return (
     <ListRow
-      className="hover:bg-muted/35 focus-within:bg-muted/35"
+      className="row-hover"
       icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
       title={<h4>{title}</h4>}
       detail={description}

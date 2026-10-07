@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CircleAlert, CircleCheck, Loader2, RotateCw } from "lucide-react"
+import { CircleAlert, CircleCheck, RotateCw } from "lucide-react"
 
 import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import { commitLabel, pushTarget, shortCommit } from "@/features/application/model/repository-push"
 import type { ApplicationRepository, RepositoryPushOperation, RepositoryPushTarget } from "@/features/application/model/application-source"
 
@@ -70,7 +71,7 @@ export function RepositoryPushFeedback({
   if (operation.status === "pushing") {
     return (
       <div className="flex h-6 items-center gap-1.5 text-xs text-muted-foreground" role="status" aria-live="polite" aria-atomic="true">
-        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        <Spinner />
         {operation.message ?? `Pushing ${commitLabel(operation.commitCount)}…`}
       </div>
     )

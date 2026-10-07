@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, KeyRound, Loader2 } from "lucide-react"
+import { Check, KeyRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { dismissOperationToast, showActionFailure } from "@/lib/operation-toast"
 import { restoreFocus } from "@/lib/focus"
@@ -74,7 +75,7 @@ export function PersonalTokenConnection({ status, onSave, onRemove }: {
     finally { operation.current.pending = false; if (operation.current.mounted) setBusy(false) }
   }
   return <ListCard className="shrink-0">
-    <ListRow icon={<ListRowIcon>{busy ? <Loader2 className="size-3.5 animate-spin" /> : connected ? <Check className="size-3.5 text-success" /> : <KeyRound className="size-3.5" />}</ListRowIcon>}
+    <ListRow icon={<ListRowIcon>{busy ? <Spinner /> : connected ? <Check className="size-3.5 text-success" /> : <KeyRound className="size-3.5" />}</ListRowIcon>}
       title={<h3 className="text-sm">{connected ? `Token connected as @${status.account}` : "Personal access token"}</h3>}
       detail={status?.message ?? (connected ? "Available to computers that select Use token." : "Connect a token with the GitHub permissions you choose.")}
       actions={<div className="flex gap-1">

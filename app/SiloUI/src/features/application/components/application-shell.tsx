@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
-import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, KeyRound, LayoutDashboard, Loader2, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
+import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, KeyRound, LayoutDashboard, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
 
 import { ShortcutBadge } from "@/components/shortcut-badge"
 import { shortcutFor, type KeyboardShortcut } from "@/lib/shortcuts"
@@ -7,6 +7,7 @@ import { SiloMark } from "@/components/silo-mark"
 import { SiloWindow } from "@/components/silo-window"
 import { Toaster } from "@/components/ui/sonner"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { ApplicationTitleBar } from "@/features/application/components/application-title-bar"
 import { useSidebarDisclosure } from "@/hooks/use-sidebar-disclosure"
 import type { ActiveRuntimeRepairPresentation, ApplicationTab, SettingsSection, ComputerSection } from "@/features/application/model/application-source"
@@ -40,10 +41,7 @@ const settingsItems = [
 
 function NavigationLoadingIndicator({ loading, collapsed }: { loading: boolean; collapsed: boolean }) {
   if (!loading) return null
-  const spinner = <Loader2 data-navigation-loading-indicator aria-hidden="true" className={cn(
-    "shrink-0 animate-spin motion-reduce:animate-none",
-    collapsed ? "absolute -top-1 -right-1 size-2 rounded-full bg-sidebar ring-2 ring-sidebar" : "size-3.5",
-  )} />
+  const spinner = <Spinner data-navigation-loading-indicator className={collapsed ? "absolute -top-1 -right-1 size-2 rounded-full bg-sidebar ring-2 ring-sidebar" : undefined} />
   return collapsed ? spinner : <span className="grid size-5 shrink-0 place-items-center">{spinner}</span>
 }
 

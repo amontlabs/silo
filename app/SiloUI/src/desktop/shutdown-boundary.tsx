@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { LoaderCircle } from "lucide-react"
+import {  } from "lucide-react"
 import { Dialog } from "radix-ui"
 import { useSettingsSelector } from "@/features/preferences/settings-store"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { restoreFocus } from "@/lib/focus"
 import { cn } from "@/lib/utils"
 import {
@@ -98,7 +99,7 @@ export function ShutdownBoundary({ children, compact = false, pendingWork }: { c
         >
           <Dialog.Title className="sr-only">Quitting Silo</Dialog.Title>
           <div role="status" className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
-            <LoaderCircle aria-hidden="true" strokeWidth={1.5} className={cn("size-6 text-muted-foreground", !reduceMotion && "animate-spin motion-reduce:animate-none")} />
+            <Spinner reduceMotion={reduceMotion} strokeWidth={1.5} className="size-6 text-muted-foreground" />
             <Dialog.Description className="text-[13px] font-medium text-foreground">{waitingLabel ?? pendingWork ?? (stopping ? `${stopping}…` : "Stopping local computers…")}</Dialog.Description>
             {waitingLabel && (cancellable.length > 0
               ? <Button type="button" size="sm" variant="outline" onClick={cancelAndQuit}>Cancel and quit</Button>

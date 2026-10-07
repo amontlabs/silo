@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { AlertCircle, LoaderCircle } from "lucide-react"
+import { AlertCircle } from "lucide-react"
 import { z } from "zod"
 import { SiloWindow } from "@/components/silo-window"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { MigrationBackupGate } from "@/desktop/migration-backup-notice"
 import { desktopPreUpgradeBackupBackend } from "@/desktop/pre-upgrade-backup"
 import { desktopTransferResultNoticeBackend } from "@/desktop/transfer-result-notice"
@@ -152,7 +153,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
   return <SiloWindow title="Silo" label="Silo migration">
     <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-6 py-8">
       <div className="flex items-start gap-3">
-        {failed || error ? <AlertCircle aria-hidden="true" className="mt-0.5 size-5 text-destructive" /> : <LoaderCircle aria-hidden="true" className="mt-0.5 size-5 animate-spin motion-reduce:animate-none" />}
+        {failed || error ? <AlertCircle aria-hidden="true" className="mt-0.5 size-5 text-destructive" /> : <Spinner className="mt-0.5 size-5" />}
         <div>
           <h1 className="text-lg font-semibold">{failed ? "Some computers could not be migrated" : error ? "Migration status is unavailable" : "Updating your computers"}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{state?.stage ?? "Checking saved computers…"}</p>

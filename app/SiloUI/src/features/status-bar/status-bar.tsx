@@ -4,11 +4,12 @@ import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/feat
 import { computerTarget } from "@/features/application/model/connections"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { CircleAlert, Code, GitBranch, Loader2, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { CircleAlert, Code, GitBranch, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { SiloMark } from "@/components/silo-mark"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ComputerStateLabel } from "@/features/application/components/application-ui"
 import { RepositoryPushButton, RepositoryPushFeedback } from "@/features/application/components/repository-push-feedback"
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
@@ -219,7 +220,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   tone={computer.freshness === "stale" ? "warning" : lifecycle?.error ? "error" : computerRowTone(computer)}
                   icon={availability.busy ? <span className="relative shrink-0">
                     <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
-                    <span className="absolute -top-1 -right-1 grid size-3.5 place-items-center rounded-full bg-background"><Loader2 className="size-2.5 animate-spin" aria-hidden="true" /></span>
+                    <span className="absolute -top-1 -right-1 grid size-3.5 place-items-center rounded-full bg-background"><Spinner size="sm" /></span>
                   </span> : undefined}
                   detail={<span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                     <span className="truncate" title={availability.busy ? activity?.title ?? computer.stateDetail : detail}>
