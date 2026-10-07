@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { errorMessage } from "@/lib/error-message"
-import { showActionFailure, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { showActionFailure, showOperationFailure } from "@/lib/operation-toast"
+import { runToastedOperation } from "@/lib/run-toasted-operation"
 import { computerTarget } from "@/features/application/model/connections"
 import type { ApplicationActions, ApplicationComputer, NetworkPort, NetworkState } from "@/features/application/model/application-source"
 
@@ -44,7 +45,9 @@ export function useNetworkPorts({ computers, network, error, actions, active }: 
   const [fieldErrors, setFieldErrors] = useState<{ port?: string; hostPort?: string; computer?: string }>({})
   const [connecting, setConnecting] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const pending = useRef(false)
+  // The ref gates re-entry synchronously; `busy` mirrors it for rendering. Only `setInFlight` writes either.
+  const inFlight = useRef(false)
+  const setInFlight = (value: boolean) => { inFlight.current = value; setBusy(value) }
   const [confirm, setConfirm] = useState<string | null>(null)
   const refreshNetwork = actions.refreshNetwork
   const currentComputers = useRef<ApplicationComputer[] | null>(computers)
@@ -78,28 +81,25 @@ export function useNetworkPorts({ computers, network, error, actions, active }: 
 
   /** Runs a port operation with the shared loading → success/failure notifications. Failures offer Retry. */
   async function run(id: string, identity: PortOperationIdentity, copy: { loading: string; step?: string; success: string; failure: string }, operation: () => Promise<void>, onSuccess?: () => void): Promise<boolean> {
-    if (pending.current) return false
+    if (inFlight.current) return false
     if (!hasCurrentComputer(identity)) {
       showOperationFailure(id, copy.failure, { description: changedComputer, native: false })
       return false
     }
-    pending.current = true
-    setBusy(true)
+    setInFlight(true)
     const computer = identity.displayName
     const location = identity.device ? `${computer} · ${identity.device.name}` : computer
     const noticeComputer = { id: identity.computerId, name: computer }
-    showOperationProgress(id, { title: `${copy.loading} · ${location}`, step: `${copy.step ?? copy.loading} · ${location}`, progress: null, computer })
     try {
-      await operation()
-      showOperationSuccess(id, `${copy.success} · ${location}`, { computer, noticeComputer })
-      setConfirm(null)
-      onSuccess?.()
-      return true
-    } catch (cause) {
-      const message = errorMessage(cause, { fallback: "The port could not be updated." })
-      showOperationFailure(id, `${copy.failure} · ${location}`, { description: message, retry: () => void run(id, identity, copy, operation, onSuccess), computer, noticeComputer })
-      return false
-    } finally { pending.current = false; setBusy(false) }
+      return await runToastedOperation({
+        id,
+        progress: { title: `${copy.loading} · ${location}`, step: `${copy.step ?? copy.loading} · ${location}`, progress: null, computer },
+        work: operation,
+        success: { title: `${copy.success} · ${location}`, computer, noticeComputer },
+        failure: { title: `${copy.failure} · ${location}`, fallback: "The port could not be updated.", retry: () => void run(id, identity, copy, operation, onSuccess), computer, noticeComputer },
+        onSuccess: () => { setConfirm(null); onSuccess?.() },
+      })
+    } finally { setInFlight(false) }
   }
 
   /** Opening is instant, so it has no loading phase: a failure stays until closed, with Retry. */

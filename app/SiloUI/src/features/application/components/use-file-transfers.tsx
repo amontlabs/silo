@@ -3,8 +3,8 @@ import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
-import { errorMessage } from "@/lib/error-message"
-import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { dismissOperationToast, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { runToastedOperation } from "@/lib/run-toasted-operation"
 import { formatDecimalBytes } from "@/lib/format-bytes"
 import { baseName, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
@@ -76,9 +76,7 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
     const id = nextId()
     active.current = { id, label, verb }
     try {
-      await work(id)
-    } catch (error) {
-      showOperationFailure(id, `${verb === "Uploading" ? "Upload" : "Download"} failed`, { description: errorMessage(error), native: false })
+      await runToastedOperation({ id, work: () => work(id), failure: { title: `${verb === "Uploading" ? "Upload" : "Download"} failed`, native: false } })
     } finally {
       active.current = null
       running.current = false
