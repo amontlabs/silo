@@ -24,6 +24,24 @@ const MAX_AGE: Duration = Duration::from_secs(600);
 /// A `sockaddr_un` path holds 103 bytes on macOS, and OpenSSH appends 17 more while it
 /// creates the socket.
 const MAX_CONTROL_PATH: usize = 103 - 17;
+/// How a master is asked to end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Control {
+    /// Ends the master and its sessions at once.
+    Exit,
+    /// Stops accepting sessions and lets running ones finish.
+    Stop,
+}
+
+impl Control {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Exit => "exit",
+            Self::Stop => "stop",
+        }
+    }
+}
+
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 
 static STARTED: Mutex<BTreeMap<String, Instant>> = Mutex::new(BTreeMap::new());
@@ -44,7 +62,9 @@ pub(super) fn control_path_in(dir: &Path, address: &str) -> Option<PathBuf> {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let path = dir.join(name);
-    (path.as_os_str().len() <= MAX_CONTROL_PATH).then_some(path)
+    // ssh expands `%` tokens in a ControlPath.
+    (path.as_os_str().len() <= MAX_CONTROL_PATH && !path.to_string_lossy().contains('%'))
+        .then_some(path)
 }
 
 /// The options that share one master per address, started on first use.
@@ -91,25 +111,25 @@ fn retire_if_old(address: &str, path: &Path, now: Instant) {
         }
     };
     if old {
-        exit(path);
+        exit(path, Control::Stop);
     }
 }
 
-/// The command that asks the master at `path` to exit. It reads no configuration and
+/// The command that asks the master at `path` to end as `control` says. It reads no configuration and
 /// cannot connect anywhere: a missing or dead socket makes it fail at once.
-pub(super) fn exit_command(path: &Path) -> Command {
+pub(super) fn exit_command(path: &Path, control: Control) -> Command {
     let mut command = Command::new("/usr/bin/ssh");
     let mut path_option = OsString::from("ControlPath=");
     path_option.push(path);
     command
         .args(["-F", "none", "-o"])
         .arg(path_option)
-        .args(["-O", "exit", "--", "silo"]);
+        .args(["-O", control.name(), "--", "silo"]);
     command
 }
 
-fn exit(path: &Path) {
-    let Ok(mut child) = exit_command(path)
+fn exit(path: &Path, control: Control) {
+    let Ok(mut child) = exit_command(path, control)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -138,8 +158,7 @@ pub(super) fn close(address: &str) {
 fn close_in(dir: &Path, address: &str) {
     crate::sync::lock_or_recover(&STARTED, "remote SSH masters").remove(address);
     if let Some(path) = control_path_in(dir, address) {
-        exit(&path);
-        let _ = fs::remove_file(&path);
+        exit(&path, Control::Exit);
     }
 }
 
@@ -157,7 +176,7 @@ fn close_all_in(dir: &Path) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        exit(&path);
+        exit(&path, Control::Exit);
         let _ = fs::remove_file(&path);
     }
 }
@@ -220,7 +239,7 @@ mod tests {
 
     #[test]
     fn exit_commands_only_talk_to_the_control_socket() {
-        let command = exit_command(Path::new("/private/mux/abc"));
+        let command = exit_command(Path::new("/private/mux/abc"), Control::Exit);
         assert_eq!(
             arguments(&command),
             [
@@ -237,6 +256,24 @@ mod tests {
     }
 
     #[test]
+    fn recycling_stops_the_master_while_closing_exits_it() {
+        let path = Path::new("/private/mux/abc");
+        assert_eq!(
+            arguments(&exit_command(path, Control::Stop))[4..6],
+            ["-O", "stop"]
+        );
+        assert_eq!(
+            arguments(&exit_command(path, Control::Exit))[4..6],
+            ["-O", "exit"]
+        );
+    }
+
+    #[test]
+    fn a_path_with_a_percent_is_not_shared() {
+        assert!(control_path_in(Path::new("/tmp/100%/mux"), "office").is_none());
+    }
+
+    #[test]
     fn closing_a_device_or_quitting_removes_the_sockets() {
         let _test_state = crate::test_support::global_state();
         let dir = tempfile::tempdir().unwrap();
@@ -246,7 +283,7 @@ mod tests {
         fs::write(&studio, "").unwrap();
         retire_if_old("office", &office, Instant::now());
         close_in(dir.path(), "office");
-        assert!(!office.exists() && studio.exists());
+        assert!(studio.exists());
         assert!(
             !crate::sync::lock_or_recover(&STARTED, "remote SSH masters").contains_key("office")
         );

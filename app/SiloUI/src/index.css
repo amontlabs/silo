@@ -473,3 +473,10 @@ html.native-status body {
     animation: none !important;
   }
 }
+
+/* Toast text, such as an error message, can be selected and copied. */
+.silo-toaster [data-sonner-toast] [data-title],
+.silo-toaster [data-sonner-toast] [data-description] {
+  -webkit-user-select: text;
+  user-select: text;
+}

@@ -198,6 +198,17 @@ describe("logs table", () => {
     expect(screen.getByText("record 96")).toBeInTheDocument()
   })
 
+  it("returns to the top when the owner resets the scroll position without it changing in props", () => {
+    const properties = props(rows(200))
+    const view = render(<LogsTable {...properties} scrollEpoch={0} />)
+    measure(520, 10_432)
+    fireEvent.scroll(viewport(), { target: { scrollTop: 5000 } })
+    expect(screen.queryByText("record 0")).not.toBeInTheDocument()
+    view.rerender(<LogsTable {...properties} scrollTop={0} scrollEpoch={1} />)
+    expect(viewport().scrollTop).toBe(0)
+    expect(screen.getByText("record 0")).toBeInTheDocument()
+  })
+
   it("keeps short result sets visible when a previous scroll offset exceeds their height", () => {
     render(<LogsTable {...props(rows(5))} scrollTop={10_000} />)
     expect(screen.getByText("record 0")).toBeInTheDocument()

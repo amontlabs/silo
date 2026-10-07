@@ -5,6 +5,7 @@ import { InlineAlert } from "@/components/inline-alert"
 import { SectionHeading } from "@/components/page"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { formatBinaryBytes } from "@/lib/format-bytes"
 import { Switch } from "@/components/ui/switch"
 import { InlineConfirmation } from "@/components/inline-confirmation"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
@@ -57,7 +58,7 @@ export function UpdatesCard() {
         {confirm && installing && state && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.runningComputers.join(", ")} will stop and restart after updating. Save your work before continuing.</p>}
         {state?.phase === "downloading" && <div className="px-2 pb-2">
           <Progress value={percent} aria-label="Update download" aria-valuetext={percent === undefined ? `${state.downloadedBytes.toLocaleString()} bytes downloaded` : `${percent}%`} />
-          <p className="mt-1 text-caption text-muted-foreground">{percent === undefined ? `${(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded` : `${percent}%`}</p>
+          <p className="mt-1 text-caption text-muted-foreground">{percent === undefined ? `${formatBinaryBytes(state.downloadedBytes)} downloaded` : `${percent}%`}</p>
         </div>}
         {error && <InlineAlert className="mx-2 mb-2 gap-0 p-2">
           <div className="flex items-center justify-between gap-2"><p>{error}</p>{!confirm && state?.retryAction !== "relaunch" && <Button size="xs" variant="outline" disabled={busy || (installing && !state?.canInstall)} onClick={retry}>Retry</Button>}</div>

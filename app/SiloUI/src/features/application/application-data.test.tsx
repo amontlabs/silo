@@ -268,7 +268,7 @@ it("shows one truthful network table and uses the selected browser for opening p
 
   await application.user.click(navigation.getByRole("button", { name: "Settings" }))
   const settings = within(appPanel("Settings"))
-  const browser = settings.getByRole("combobox", { name: "Browser" })
+  const browser = await settings.findByRole("combobox", { name: "Browser" })
   await application.user.click(browser)
   await application.user.click(screen.getByRole("option", { name: "Firefox" }))
 

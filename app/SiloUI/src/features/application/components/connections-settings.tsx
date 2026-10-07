@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { useEffect, useRef, useState } from "react"
 import { CopyButton } from "@/components/copy-button"
 import { PageHeader } from "@/components/page"
@@ -26,7 +27,7 @@ export function ConnectDeviceForm({ connect, authorize, setupKey, onClose }: { s
   }, [])
   async function attempt(action: () => Promise<void>, kind: "connect" | "authorize" | "setupKey" = "connect") {
     setOperation(kind)
-    try { await action() } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause)) } finally { if (mounted.current) setOperation(null) }
+    try { await action() } catch (cause) { if (mounted.current) setError(errorMessage(cause)) } finally { if (mounted.current) setOperation(null) }
   }
   return <form aria-label="Connect device" className="grid gap-3 rounded-lg border p-3" onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing && !busy) { event.preventDefault(); onClose() } }} onSubmit={async event => {
     event.preventDefault()

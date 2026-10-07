@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode, RefObject } from "react"
 import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Minus, PanelLeft, Square, X } from "lucide-react"
+import { isMac } from "@/lib/platform"
 import { LinuxMenuButton } from "@/desktop/linux-menu-button"
 
 import type { KeyboardShortcut } from "@/lib/shortcuts"
@@ -11,7 +12,7 @@ import { cn } from "@/lib/utils"
 
 export function WindowControls() {
   const desktop = isTauri()
-  if (desktop && navigator.platform.startsWith("Mac")) {
+  if (desktop && isMac()) {
     // macOS draws its system controls over this space in the webview.
     return <div className="h-3.5 w-[3.625rem] shrink-0" aria-hidden="true" data-window-controls />
   }

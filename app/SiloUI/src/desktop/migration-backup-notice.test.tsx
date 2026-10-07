@@ -20,7 +20,7 @@ describe("migration complete: pre-upgrade backup", () => {
     expect(await screen.findByRole("heading", { name: "Your computers were updated" })).toBeVisible()
     expect(screen.queryByText("Normal application")).not.toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Pre-upgrade backup" })).toBeVisible()
-    expect(await screen.findByText("12.40 GiB")).toBeVisible()
+    expect(await screen.findByText("12.4 GiB")).toBeVisible()
     // A date, not a countdown.
     expect(screen.getByText("Silo deletes it automatically on October 15, 2026.")).toBeVisible()
     expect(screen.queryByText(/\bdays?\b/i)).not.toBeInTheDocument()

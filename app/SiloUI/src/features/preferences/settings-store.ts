@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { createContext, createElement, useContext, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { onboardingDraftSchema, type OnboardingDraft } from "@/features/onboarding/model/onboarding-draft"
 import { defaultSettings, readSettingsOverrides, settingsPatchSchema, type Settings, type SettingsPatch } from "./model/settings"
@@ -24,12 +25,11 @@ export interface SettingsBackend {
 type Change = { kind: "settings"; patch: SettingsPatch } | { kind: "draft"; draft: OnboardingDraft | null }
 export interface SettingsView extends Omit<SettingsSnapshot, "settings"> { settings: Settings }
 
-function errorText(error: unknown) { return error instanceof Error ? error.message : String(error) }
 /**
  * The native store validated and refused the change (`settings.rs` update and
  * update_draft). Resending it can never succeed, unlike a failed delivery.
  */
-function isRejection(error: unknown) { return /^Invalid (settings change|onboarding draft)$/.test(errorText(error)) }
+function isRejection(error: unknown) { return /^Invalid (settings change|onboarding draft)$/.test(errorMessage(error)) }
 
 export function createSettingsStore(backend: SettingsBackend, initialSettings: SettingsPatch = {}, initialSnapshot?: SettingsSnapshot) {
   const defaults = { ...defaultSettings, ...initialSettings }
@@ -88,7 +88,7 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
   }
 
   function failed(error: unknown) {
-    transportError = errorText(error)
+    transportError = errorMessage(error)
     console.error("Silo settings:", transportError)
     publish()
   }
@@ -113,7 +113,7 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
             // Roll back the refused change instead of resending it forever, which
             // would also block every later change behind it.
             pending.shift()
-            rejection = errorText(error)
+            rejection = errorMessage(error)
             console.error("Silo settings: change rejected:", rejection)
             publish()
             continue
@@ -280,17 +280,17 @@ export function useSettingsStore(initialSettings?: SettingsPatch) {
  */
 export function useSettingsSelector<T>(select: (view: SettingsView) => T, isEqual: (a: T, b: T) => boolean = Object.is, initialSettings?: SettingsPatch): T {
   const store = useSettingsStore(initialSettings)
-  const memo = useRef<{ view: SettingsView; value: T } | null>(null)
+  const memo = useRef<{ view: SettingsView; select: typeof select; value: T } | null>(null)
   const getSelection = () => {
     const view = store.getSnapshot()
     const previous = memo.current
-    if (previous && previous.view === view) return previous.value
+    if (previous && previous.view === view && previous.select === select) return previous.value
     const value = select(view)
     if (previous && isEqual(previous.value, value)) {
-      memo.current = { view, value: previous.value }
+      memo.current = { view, select, value: previous.value }
       return previous.value
     }
-    memo.current = { view, value }
+    memo.current = { view, select, value }
     return value
   }
   return useSyncExternalStore(store.subscribe, getSelection)

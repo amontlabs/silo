@@ -1,393 +1,42 @@
 import { isLifecycleStep, type LifecycleStep } from "@/features/application/model/lifecycle-progress"
-import { bridgeErrorMessage, hasBridgeErrorCode } from "@/contracts/bridge-error"
-import { defaultSettings, settingSchemas } from "@/features/preferences/model/settings"
 import { workspaceStorageStateSchema } from "@/features/application/model/workspace-storage"
-import { isUnsupportedRemote, logPageSchema } from "@/features/application/model/logs"
+import { logPageSchema } from "@/features/application/model/logs"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
+import { directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, secretShape } from "./production-schemas"
+export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
-import { siloBootstrapResultSchema, siloProgressEventSchema, siloProtocolErrorSchema, setupComputerConfigurationRequestSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
-import type { OnboardingCompletionRequest, OnboardingSource } from "@/features/onboarding/model/onboarding-source"
-import type { SshAccessComputer, SshAccessState, NetworkState, ApplicationActions, ApplicationActivity, ApplicationFileEntry, ApplicationPort, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
-import { operationQueueSchema, isCancelledError, cancelledActionLabel, type OperationQueue } from "@/features/application/model/operation-queue"
+import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
+import type { OnboardingCompletionRequest } from "@/features/onboarding/model/onboarding-source"
+import type { ApplicationActions, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
+import { operationQueueSchema, isCancelledError, type OperationQueue } from "@/features/application/model/operation-queue"
 import { deriveComputerChanges, isStaleConfigurationError, type ComputerConfigurationChange } from "@/features/application/model/computer-change"
-import { ExportIncompleteError, type BackupArchive, type BackupController, type BackupOperation, type BackupState, type VerifiedExport } from "@/features/application/model/backup-source"
+import type { BackupController, BackupState } from "@/features/application/model/backup-source"
 import { checkpointUsageSchema, type ComputerCheckpointOperation } from "@/features/application/model/checkpoint-source"
 import type { StatusBarActions, StatusBarRoute } from "@/features/status-bar/status-bar-types"
 
 import { downloadOutcomeSchema, transferProgressEvent, transferProgressSchema, uploadOutcomeSchema, uploadSelectionSchema } from "@/features/application/model/file-transfer"
 import { deviceSchema, connectionsStatusSchema, remoteComputerTarget, parseRemoteComputerTarget, computerTarget, type Device, type ConnectionsStatus } from "@/features/application/model/connections"
 
-type EventHandler = (event?: { payload: unknown }) => void
+import type { ProductionContext } from "./production-context"
+import { createBackupControls } from "./production-backup"
+import { createDeviceServices } from "./production-services"
+import { createSetupQueue } from "./production-setup-queue"
+import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
+import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
-export interface ProductionBridge {
-  invoke: <T>(command: string, arguments_?: Record<string, unknown>) => Promise<T>
-  listen: (event: string, handler: EventHandler) => Promise<() => void>
-}
+export type { ProductionBridge, ProductionSnapshot } from "./production-types"
+export { isUpdateInProgress, shareStructure } from "./production-helpers"
 
 const bridge: ProductionBridge = {
   invoke: (command, arguments_) => invoke(command, arguments_),
   listen: (event, handler) => listen(event, handler),
 }
 
-const sshAccessShape = z.object({ computers: z.array(z.object({
-  computer: z.string(), user: z.string().optional(), enabled: z.boolean(), port: z.number().int(), bindAddress: z.string(), keys: z.array(z.string()),
-  state: z.enum(["disabled", "waiting", "listening", "error"]), message: z.string().nullable(), fingerprint: z.string().nullable(), deviceName: z.string(), addresses: z.array(z.string()),
-})) })
-
-const githubStateShape = z.object({
-  personalToken: z.object({ state: z.enum(["connected", "disconnected"]), saved: z.boolean(), account: z.string().optional(), message: z.string().optional() }).optional(),
-  policyRevision: z.number().int().nonnegative().optional(),
-  state: z.enum(["disconnected", "connecting", "connected"]),
-  account: z.string().nullish().transform((value) => value ?? undefined),
-  accessEnabled: z.boolean().optional(),
-  deviceIdentity: z.object({ name: z.string(), email: z.string() }).nullable().optional(),
-  repositoryCatalog: z.array(z.string()).optional(),
-  repositoryCatalogStatus: z.discriminatedUnion("status", [
-    z.object({ status: z.literal("available") }),
-    z.object({ status: z.literal("unavailable"), message: z.string(), canRetry: z.boolean() }),
-  ]).optional(),
-  computers: z.array(z.object({
-    computer: z.string(), identity: z.object({ name: z.string(), email: z.string(), apply: z.boolean() }),
-    authenticationMethod: z.enum(["oauth", "token"]).nullish().transform(value => value ?? undefined),
-    repositoryMode: z.enum(["selected", "all"]).default("selected"), allRepositoriesAllowChanges: z.boolean().default(false),
-    repositories: z.array(z.object({ repository: z.string(), allowPushes: z.boolean() })),
-  })).optional(),
-  computerOperations: z.array(z.discriminatedUnion("status", [
-    z.object({ computer: z.string(), status: z.literal("applying"), message: z.string() }),
-    z.object({ computer: z.string(), status: z.literal("succeeded"), message: z.string() }),
-    z.object({ computer: z.string(), status: z.literal("failed"), message: z.string(), canRetry: z.literal(true), diagnosticDetails: z.string().optional() }),
-  ])).optional(),
-})
-
-const directoryPageShape = z.object({
-  snapshotId: z.string().min(1),
-  entries: z.array(z.object({ name: z.string().min(1), path: z.string().startsWith("/workspace/"), kind: z.enum(["folder", "file", "symlink"]) }).strict()).max(200),
-  nextOffset: z.number().int().nonnegative().nullable(),
-}).strict()
-
-const secretShape = z.object({
-  id: z.string(), name: z.string(), computers: z.array(z.string()), allowedDomains: z.array(z.string()),
-  state: z.enum(["active", "applying", "restart-required"]), pendingComputers: z.array(z.string()).optional(),
-  error: z.string().nullish().transform((value) => value ?? undefined), removing: z.boolean().optional(),
-})
-
-const checkpointShape = z.object({
-  id: z.string().min(1), name: z.string().min(1),
-  // The Rust checkpoint journal stores Unix milliseconds (the same u64
-  // contract as activity timestamps); normalize at the native boundary for
-  // the UI's ISO timestamp model. String values remain accepted for remotes.
-  createdAt: z.union([
-    z.string().datetime(),
-    z.number().int().nonnegative().max(8.64e15).transform(value => new Date(value).toISOString()),
-  ]),
-  scope: z.enum(["full", "disk"]), reason: z.enum(["manual", "before-restore"]),
-  sizeBytes: z.number().int().nonnegative().optional(),
-})
-const checkpointOperationShape = z.object({
-  kind: z.enum(["capture", "fork", "restore", "delete"]), status: z.enum(["running", "failed"]),
-  stage: z.string(), error: z.string().optional(),
-})
-const unfinishedRestoreShape = z.object({
-  checkpointId: z.string().min(1), checkpointName: z.string().nullish(), phase: z.enum(["capturing", "secured"]),
-})
-const pendingCheckpointRestoreShape = z.object({
-  checkpointId: z.string().min(1), sourceComputer: z.string().min(1), state: z.enum(["full", "disk"]),
-})
-
-/** An enum that maps a value from a newer Silo to a fallback instead of rejecting the whole state. */
-function tolerantEnum<const T extends readonly [string, ...string[]]>(values: T, fallback: T[number]) {
-  return z.string().transform((value): T[number] => (values as readonly string[]).includes(value) ? value : fallback)
-}
-
-/** A list that drops entries it cannot read instead of rejecting the state around it. */
-function tolerantArray<T extends z.ZodType>(item: T) {
-  return z.array(z.unknown()).transform(items => items.flatMap((entry): z.output<T>[] => {
-    const parsed = item.safeParse(entry)
-    return parsed.success ? [parsed.data] : []
-  }))
-}
-
-const computerStates = ["running", "starting", "stopped", "failed"] as const
-const repositoryShape = z.object({ path: z.string(), branch: z.string(), ahead: z.number().int().nonnegative(), behind: z.number().int().nonnegative(), dirty: z.boolean(), repository: z.string().nullable().optional(), head: z.string().nullable().optional() })
-const fileEntryShape: z.ZodType<ApplicationFileEntry> = z.lazy(() => z.object({ name: z.string(), kind: z.enum(["folder", "file"]), children: z.array(fileEntryShape).optional() }))
-const computerPortShape = z.object({
-  port: z.number().int().min(1).max(65535), listening: z.boolean().nullable(),
-  hostPort: z.number().int().min(1).max(65535).nullish(), scheme: z.enum(["http", "https"]).nullish(), configured: z.boolean().optional(),
-})
-const logShape = z.object({ line: z.string(), occurredAt: z.string() })
-const attentionShape = z.object({ level: tolerantEnum(["warning", "error"], "warning"), message: z.string() })
-
-// Fields from a newer Silo pass through untouched, so editing never drops them.
-const configurationShape = z.object({
-  id: z.string().min(1), name: z.string().min(1),
-  cpus: z.number().int().positive(), maxCPUs: z.number().int().positive(), memoryGiB: z.number().int().positive(), maxMemoryGiB: z.number().int().positive(),
-  workspaceStorageGiB: z.number().int().positive(), runtimeStorageGiB: z.number().int().positive(),
-  desktop: z.object({ startWithComputer: z.boolean(), builtIn: z.boolean().optional() }).optional(),
-}).passthrough()
-
-const computerShape = z.object({
-  configuration: configurationShape,
-  purpose: z.string(),
-  // A state from a newer Silo is shown as the last reported detail, marked stale below.
-  state: z.string(),
-  stateDetail: z.string(),
-  canDismissError: z.boolean().optional(),
-  lifecycleFailure: z.string().optional(),
-  lifecycleFailureDiagnostic: z.string().optional(),
-  attention: attentionShape.nullish().transform(value => value ?? undefined),
-  freshness: tolerantEnum(["fresh", "stale"], "stale"),
-  repositories: tolerantArray(repositoryShape), files: tolerantArray(fileEntryShape), ports: tolerantArray(computerPortShape), logs: tolerantArray(logShape),
-  githubRepositories: z.array(z.string()), secretNames: z.array(z.string()),
-  pendingSecretRevocations: z.array(z.string()).optional(),
-  checkpoints: tolerantArray(checkpointShape).optional(),
-  checkpointOperation: checkpointOperationShape.nullable().optional().catch(null),
-  pendingCheckpointRestore: pendingCheckpointRestoreShape.nullable().optional().catch(null),
-  unfinishedRestore: unfinishedRestoreShape.nullable().optional().catch(null),
-  settling: z.boolean().optional(),
-}).passthrough().transform(computer => (computerStates as readonly string[]).includes(computer.state)
-  ? { ...computer, state: computer.state as (typeof computerStates)[number] }
-  : { ...computer, state: "stopped" as const, freshness: "stale" as const, attention: computer.attention ?? { level: "warning" as const, message: "This version of Silo cannot show this computer's current state. Update Silo to see it." } })
-
-const computersShape = z.array(computerShape)
-
-const activityShape = z.object({
-  id: z.string().min(1),
-  category: tolerantEnum(["computer", "git", "backup", "secrets", "github", "system"], "system"),
-  title: z.string(), detail: z.string(), occurredAt: z.string(), time: z.string(),
-  diagnostic: z.string().optional(), partial: z.boolean().optional(),
-  tone: tolerantEnum(["success", "neutral", "warning", "danger"], "neutral"),
-  status: tolerantEnum(["running", "completed"], "completed"),
-  computer: z.string().nullish().transform(value => value ?? undefined),
-  progress: z.number().optional(), progressLabel: z.string().optional(),
-  cancelled: z.boolean().optional(),
-})
-
-const pushTargetShape = z.object({ repository: z.string().min(1), branch: z.string().min(1), commit: z.string().min(1) })
-const pushFields = { operationId: z.string().optional(), computer: z.string().min(1), repositoryPath: z.string().min(1), commitCount: z.number().int().nonnegative(), target: pushTargetShape.optional() }
-const pushOperationShape = z.discriminatedUnion("status", [
-  z.object({ ...pushFields, status: z.literal("pushing"), message: z.string().optional() }),
-  z.object({ ...pushFields, status: z.literal("unknown"), message: z.string() }),
-  z.object({ ...pushFields, status: z.literal("succeeded") }),
-  z.object({ ...pushFields, status: z.literal("failed"), message: z.string(), diagnosticDetails: z.string().optional() }),
-])
-
-const runtimeRepairShape = z.object({
-  status: tolerantEnum(["needed", "unavailable"], "unavailable"), reason: z.string(), recovery: z.string().optional(), checking: z.boolean().optional(),
-})
-
-const computerConfigurationOperationFields = {
-  id: z.string().min(1),
-  candidate: setupComputerConfigurationRequestSchema,
-  progressEvents: z.array(siloProgressEventSchema),
-}
-const computerConfigurationOperationShape = z.discriminatedUnion("status", [
-  z.object({ ...computerConfigurationOperationFields, status: z.literal("applying"), result: z.null(), error: z.null() }),
-  z.object({ ...computerConfigurationOperationFields, status: z.literal("awaiting-approval"), result: siloBootstrapResultSchema, error: z.null() }),
-  z.object({ ...computerConfigurationOperationFields, status: z.literal("failed"), result: z.null(), error: siloProtocolErrorSchema }),
-])
-
-const preferencesShape = z.object({
-  terminal: z.string(), editor: z.string(), browser: z.string(), launchAtLogin: z.boolean(),
-  startComputersAtLaunch: z.boolean(), reduceMotion: z.boolean(),
-  startupComputerIds: settingSchemas.startupComputerIds.optional().catch(undefined),
-  terminalPath: settingSchemas.terminalPath.optional().catch(undefined),
-  editorPath: settingSchemas.editorPath.optional().catch(undefined),
-  browserPath: settingSchemas.browserPath.optional().catch(undefined),
-  terminalUseSystemDefault: settingSchemas.terminalUseSystemDefault.optional().catch(undefined),
-  editorUseSystemDefault: settingSchemas.editorUseSystemDefault.optional().catch(undefined),
-  browserUseSystemDefault: settingSchemas.browserUseSystemDefault.optional().catch(undefined),
-}).passthrough()
-const backupSummaryShape = z.object({ lastArchive: z.string(), completedLabel: z.string(), compressedSize: z.string(), destination: z.string() })
-
-// Every field the UI dereferences is validated here. Lists that only enrich the
-// view (activities, pushes, repositories, logs) drop an entry they cannot read,
-// and enums tolerate values from a newer Silo, so one unknown value never
-// rejects a whole device's state or throws while it is being shown.
-const applicationSourceShape = z.object({
-  runtimeRepair: runtimeRepairShape.nullable(),
-  deviceCapacity: z.object({ logicalCpus: z.number().int().positive(), physicalMemoryBytes: z.number().int().positive(), maxMemoryGib: z.number().int().positive() }).optional().catch(undefined),
-  computers: computersShape,
-  activities: tolerantArray(activityShape),
-  // The runtime does not report an operation in progress; the source tracks its own.
-  computerConfigurationOperation: computerConfigurationOperationShape.nullable().catch(null),
-  repositoryPushOperations: tolerantArray(pushOperationShape),
-  github: githubStateShape,
-  secrets: z.array(secretShape),
-  // Native runtime state no longer duplicates preference or backup stores (D-20).
-  // Older owners and fixtures may still supply these legacy presentation fields.
-  backup: backupSummaryShape.default({ lastArchive: "", completedLabel: "", compressedSize: "", destination: "" }),
-  preferences: preferencesShape.default(() => ({ ...defaultSettings, startupComputerIds: undefined })),
-}).passthrough()
-
-// Another device's GitHub, secrets, export and preference state is never shown
-// here, so a newer shape of those must not make its computers unavailable.
-const remoteApplicationSourceShape = applicationSourceShape.extend({
-  github: githubStateShape.catch({ state: "disconnected" as const, account: undefined }),
-  secrets: tolerantArray(secretShape),
-  backup: backupSummaryShape.catch({ lastArchive: "", completedLabel: "", compressedSize: "", destination: "" }),
-  preferences: preferencesShape.catch({ terminal: "", editor: "", browser: "", launchAtLogin: false, startComputersAtLaunch: false, reduceMotion: false }),
-})
-
-const backupArchiveShape = z.object({
-  name: z.string().min(1), archivePath: z.string().min(1), completedLabel: z.string(), size: z.string(), destination: z.string(), computers: z.array(z.string()),
-  checkpointName: z.string().optional(),
-}).strict()
-const backupPhaseShape = z.object({ title: z.string(), detail: z.string(), tone: z.enum(["waiting", "running", "succeeded", "failed"]) }).strict()
-const backupOperationShape = z.discriminatedUnion("kind", [
-  z.object({ operation: z.enum(["backup", "restore"]), archive: backupArchiveShape, runningNames: z.array(z.string()), targetName: z.string().optional(), kind: z.literal("running"), progress: z.number().min(0).max(100), indeterminate: z.boolean().optional(), canCancel: z.boolean().optional(), phases: z.array(backupPhaseShape) }).strict(),
-  z.object({ operation: z.enum(["backup", "restore"]), archive: backupArchiveShape, runningNames: z.array(z.string()), targetName: z.string().optional(), kind: z.literal("result"), outcome: z.enum(["success", "failed", "cancelled"]), title: z.string(), message: z.string(), detail: z.string().optional() }).strict(),
-])
-const backupStateShape = z.object({
-  snapshotId: z.string(), operationId: z.string().optional(), availability: z.enum(["available", "unavailable"]), availabilityMessage: z.string().optional(),
-  requiredSpaceGB: z.number().nonnegative().optional(), availableSpaceGB: z.number().nonnegative().optional(),
-  unsupportedStorage: z.object({ computer: z.string(), label: z.string() }).strict().optional(),
-  destination: z.string().optional(),
-  archives: z.array(backupArchiveShape), operation: backupOperationShape.nullable(),
-  resultUnseen: z.boolean().optional(),
-}).strict()
-const archiveInspectionShape = z.object({ archive: backupArchiveShape, valid: z.boolean(), reason: z.string().optional() }).strict()
-
-const networkStateShape = z.object({ computers: z.array(z.object({
-  computer: z.string(), error: z.string().nullable(), host: z.string().regex(/^[a-z0-9-]{1,63}\.localhost$/).nullable().optional(), ports: z.array(z.object({
-    configuredHostPort: z.number().int().min(1).max(65535).nullable().optional(),
-    port: z.number().int().min(1).max(65535), hostPort: z.number().int().min(1).max(65535).nullable(),
-    scheme: z.enum(["http", "https"]).nullable(), state: z.enum(["reachable", "waiting", "unpublished", "unknown"]),
-    configured: z.boolean(), message: z.string().nullable().optional(),
-  })),
-})) })
-
-export function parseSshAccessState(input: unknown): SshAccessState {
-  return sshAccessShape.parse(input)
-}
-
-export function parseNetworkState(input: unknown): NetworkState {
-  return networkStateShape.parse(input)
-}
-
-export function parseApplicationSource(input: unknown): ApplicationSource {
-  return applicationSourceShape.parse(input)
-}
-
-/** Another device's snapshot, which may come from an older or newer Silo. */
-export function parseRemoteApplicationSource(input: unknown): ApplicationSource {
-  return remoteApplicationSourceShape.parse(input)
-}
-
-export function parseBackupState(input: unknown): BackupState {
-  return backupStateShape.parse(input) as BackupState
-}
-
-function errorMessage(error: unknown): string {
-  const message = bridgeErrorMessage(error)
-  if (message) return message
-  if (error instanceof Error && error.message.trim()) return error.message
-  const text = String(error).trim()
-  return text || "Silo could not complete the action. Retry; if it fails again, relaunch Silo."
-}
-
-/** A JSON key that does not depend on object property order. */
-function canonicalKey(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) => item && typeof item === "object" && !Array.isArray(item)
-    ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
-    : item)
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object") return false
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
-}
-
-/**
- * `next` with every part that equals the same part of `previous` replaced by that part, so unchanged
- * rows keep their identity and the result is `previous` itself when nothing changed. Only plain data
- * is compared; a property holding `undefined` counts as absent.
- */
-export function shareStructure<T>(previous: unknown, next: T): T {
-  if (Object.is(previous, next)) return next
-  if (Array.isArray(next)) {
-    if (!Array.isArray(previous)) return next
-    let same = previous.length === next.length
-    const items = next.map((item, index) => {
-      const shared = shareStructure(previous[index], item)
-      if (shared !== previous[index]) same = false
-      return shared
-    })
-    return (same ? previous : items) as T
-  }
-  if (!isPlainObject(next) || !isPlainObject(previous)) return next
-  let same = true
-  const shared: Record<string, unknown> = {}
-  for (const key of Object.keys(next)) {
-    const item = next[key]
-    if (item === undefined) { if (previous[key] !== undefined) same = false; shared[key] = undefined; continue }
-    const kept = shareStructure(previous[key], item)
-    if (kept !== previous[key]) same = false
-    shared[key] = kept
-  }
-  if (same) for (const key of Object.keys(previous)) if (previous[key] !== undefined && !(key in shared)) { same = false; break }
-  return (same ? previous : shared) as T
-}
-
-function unavailableBackup(message: string): BackupState {
-  return { snapshotId: `unavailable:${message}`, availability: "unavailable", availabilityMessage: message, requiredSpaceGB: 0, archives: [], operation: null }
-}
-
-export interface ProductionSnapshot {
-  savedConfigurations?: SetupComputerConfiguration[]
-  setupQueue: NonNullable<OnboardingSource["setupQueue"]>
-  setupStartedAt?: number
-  setupFinishedAt?: number
-  setupEvents: SiloProgressEvent[]
-  setupActivity?: SiloProgressEvent[]
-  setupActivityError?: string
-  setupCandidate?: SetupComputerConfigurationRequest
-  /** The setup work Quit is waiting for while it drains setup. */
-  setupDrain?: string
-  /** `source` is a shell for connected devices while this device's computers update. */
-  localUpdating?: boolean
-  source: ApplicationSource | null
-  backup: BackupState
-  loading: boolean
-  error: string | null
-}
-
 export const localUpdatingNotice = "Computers on this device are updating. They appear here when the update finishes."
-
-type ListedDevice = z.infer<typeof deviceSchema>
-type LifecycleAction = "start" | "stop" | "restart"
-const lifecycleActions: LifecycleAction[] = ["start", "stop", "restart"]
-
-/** Runtime lifecycle activity ids, bare or wrapped by the remote activity prefix. */
-function isLifecycleActivity(id: string) {
-  return id.startsWith("lifecycle-") || /^silo-remote-activity:[^:]*:lifecycle-/.test(id)
-}
-
-/** How long a caller waits for one device's snapshot before showing its last known state as stale. */
-const REMOTE_READ_WAIT_MS = 15_000
-
-/** Push status polling: the normal interval, the backoff ceiling, and unanswered checks before giving up. */
-const PUSH_STATUS_INTERVAL_MS = 2_000
-const PUSH_STATUS_MAX_INTERVAL_MS = 30_000
-const PUSH_STATUS_ATTEMPTS = 8
-
-/** A refresh that has not finished by then stops holding back polling and focus refreshes; its late result still applies unless a newer read did. */
-const REFRESH_GATE_TIMEOUT_MS = 60_000
-/** Returning to the window within this time of the last finished read does not read again. */
-const RETURN_REFRESH_MIN_AGE_MS = 2_000
-/** A consumer of network data that polls keeps the source reading it for this long after its last request. */
-const NETWORK_INTEREST_MS = 30_000
-/** An ambient watcher (a window whose menus list open sites) reads network services at most this often. */
-const NETWORK_AMBIENT_INTERVAL_MS = 30_000
-
-/** Defers a state read while the owning device changes computer configuration. */
-export function isUpdateInProgress(cause: unknown) {
-  return hasBridgeErrorCode(cause, "update_in_progress")
-}
 
 export function createProductionSource(native: ProductionBridge = bridge) {
   let snapshot: ProductionSnapshot = {
@@ -399,12 +48,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     error: null,
   }
   let view = snapshot
-  type SetupItem = NonNullable<OnboardingSource["setupQueue"]>[number]
-  type SetupJob = { items: SetupItem[]; activityId: string }
-  let setupJobs: SetupJob[] = []
-  let activeComputerJob: SetupJob | undefined
-  let setupTail: Promise<unknown> = Promise.resolve()
-  let acceptingSetup = true
   let lastComputerJob: { key: string; promise: Promise<ApplicationSource> } | undefined
   let identityVerificationSequence = 0
   let lastVerificationKey: string | undefined
@@ -432,22 +75,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   const slowDevices = new Set<string>()
   const remoteFailures = new Map<string, { delay: number; nextRead: number }>()
   let remoteTimer: ReturnType<typeof setInterval> | undefined
-  let sshAccess: SshAccessState | undefined
-  let sshAccessError: string | null = null
-  const sshReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
-  const sshFailures = new Map<string, { delay: number; nextRead: number }>()
-  const sshSaveRevisions = new Map<string, number>()
-  const sshReadRevisions = new Map<string, number>()
-  let network: NetworkState | undefined
-  let networkError: string | null = null
-  let networkWatchers = 0
-  let networkAmbientWatchers = 0
-  let lastNetworkReadAt = 0
-  let networkInterestUntil = 0
-  const networkReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
-  const networkFailures = new Map<string, { delay: number; nextRead: number }>()
-  const networkReadRevisions = new Map<string, number>()
-  const networkSaveRevisions = new Map<string, number>()
   let operationQueue: OperationQueue | undefined
   let operationQueueRequest: Promise<void> | undefined
   let operationQueueDirty = false
@@ -478,143 +105,12 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   const pendingLifecycle = new Map<string, "start" | "stop" | "restart" | "dismiss-error">()
   const lifecycleSteps = new Map<string, LifecycleStep>()
   const computerFailures = new Map<string, { computerId: string; action: string; message: string; cancelled: boolean }>()
-  let pendingBackupOperation = false
-  let localBackupOperation: BackupOperation | null = null
-  const dismissedBackupResults = new Set<string>()
-  // Exports awaiting their own result (E-59). Each sees every backend backup
-  // state read, with the read's sequence, or null when the source is disposed.
-  const exportWaiters = new Set<(state: BackupState | null, sequence: number) => void>()
+  const context: ProductionContext = { native, snapshot: () => snapshot, publish: next => publish(next), disposed: () => disposed }
+  const setup = createSetupQueue(context)
+  const services = createDeviceServices({ ...context, devices: () => devices, remoteSnapshots, localName: () => connections?.name, live: () => live })
+  const backups = createBackupControls({ ...context, view: () => view, bumpRefreshSequence: () => { ++refreshSequence }, readSequence: () => readSequence, refresh: () => refresh(), reportActionFailure, reportUnavailable })
+  const { enqueue: enqueueSetup, setStatus: setSetupStatus, setJobStatus, recordGitHubActivity, delay: setupDelay, drain: drainSetup } = setup
 
-  /** Identity of one repository's push across native results, pending pushes and dismissals. */
-  function pushKey(computer: string, repositoryPath: string) { return `${computer}\u0000${repositoryPath}` }
-  function computerOwner(target: string) { return parseRemoteComputerTarget(target)?.deviceId ?? "" }
-  function unavailableSshRows(deviceId: string, deviceName: string, message: string): SshAccessComputer[] {
-    const cached = sshAccess?.computers.filter(row => computerOwner(row.computer) === deviceId) ?? []
-    const computers = deviceId ? remoteSnapshots.get(deviceId)?.computers ?? [] : snapshot.source?.computers.filter(w => !w.device) ?? []
-    const rows = new Map(cached.map(row => [row.computer, row]))
-    for (const computer of computers) {
-      const target = deviceId ? remoteComputerTarget(deviceId, computer.configuration.id) : computer.configuration.name
-      if (!rows.has(target)) rows.set(target, { computer: target, enabled: false, port: 2222, bindAddress: "127.0.0.1", keys: [], state: "error", message, fingerprint: null, deviceName, addresses: [] })
-    }
-    return [...rows.values()].map(row => ({ ...row, unavailable: message }))
-  }
-  /** Each service read gets the same bounded wait as a device-state read. */
-  function waitForService<T>(read: Promise<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("Device is not responding.")), REMOTE_READ_WAIT_MS)
-    })
-    return Promise.race([read, timeout]).finally(() => clearTimeout(timer))
-  }
-
-  function readSshOwner(owner: string, background = false): Promise<void> {
-    if (background && (sshFailures.get(owner)?.nextRead ?? 0) > Date.now()) return Promise.resolve()
-    const pending = sshReads.get(owner)
-    if (pending) { if (!background) pending.dirty = true; return pending.promise }
-    const entry = { dirty: false, promise: Promise.resolve() }
-    entry.promise = (async () => { do {
-      entry.dirty = false
-      const revision = sshReadRevisions.get(owner)
-      const device = devices.find(item => item.id === owner)
-      let rows: SshAccessComputer[]
-      let unavailable: string | null = null
-      try {
-        if (owner && !device?.connected) throw new Error("Device is offline.")
-        const result = parseSshAccessState(await waitForService(native.invoke(owner ? "remote_ssh_access_state" : "read_ssh_access_state", owner ? { deviceId: owner } : undefined)))
-        if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("SSH response belongs to another device.")
-        rows = result.computers
-        sshFailures.delete(owner)
-      } catch (cause) {
-        const delay = Math.min((sshFailures.get(owner)?.delay ?? 5000) * 2, 60_000)
-        sshFailures.set(owner, { delay, nextRead: Date.now() + delay })
-        unavailable = !owner ? "Could not check SSH access."
-          : isUnsupportedRemote(cause) ? `Update Silo on ${device?.name} to manage SSH access. That version does not support remote SSH management.`
-          : `SSH status on ${device?.name} is unavailable. Reconnect and refresh before changing access.`
-        rows = unavailableSshRows(owner, device?.name ?? connections?.name ?? "This device", unavailable)
-      }
-      if (disposed) return
-      if (revision !== sshReadRevisions.get(owner)) continue
-      const current = devices.find(item => item.id === owner)
-      if (owner && !current) return
-      if (owner && !current?.connected) rows = unavailableSshRows(owner, current!.name, `SSH status on ${current!.name} is unavailable. Reconnect and refresh before changing access.`)
-      sshAccess = { computers: [...(sshAccess?.computers.filter(row => computerOwner(row.computer) !== owner) ?? []), ...rows] }
-      if (!owner) sshAccessError = unavailable
-      publish({ ...snapshot })
-    } while (entry.dirty && !disposed) })().finally(() => { if (sshReads.get(owner) === entry) sshReads.delete(owner) })
-    sshReads.set(owner, entry)
-    return entry.promise
-  }
-
-  function refreshSshAccess(options?: { background?: boolean }): Promise<void> {
-    return Promise.all([readSshOwner("", options?.background), ...devices.map(device => readSshOwner(device.id, options?.background))]).then(() => {})
-  }
-
-  function unavailableNetworkRows(owner: string, error: string): NetworkState["computers"] {
-    const rows = new Map((network?.computers.filter(row => computerOwner(row.computer) === owner) ?? []).map(row => [row.computer, row]))
-    const computers = owner ? remoteSnapshots.get(owner)?.computers ?? [] : snapshot.source?.computers ?? []
-    for (const computer of computers) {
-      const target = owner ? remoteComputerTarget(owner, computer.configuration.id) : computer.configuration.name
-      if (!rows.has(target)) rows.set(target, { computer: target, ports: [], error })
-    }
-    return [...rows.values()].map(row => ({ ...row, error }))
-  }
-
-  // Events received during an owner's read request one follow-up for that owner.
-  function readNetworkOwner(owner: string, background = false): Promise<void> {
-    if (background && (networkFailures.get(owner)?.nextRead ?? 0) > Date.now()) return Promise.resolve()
-    const pending = networkReads.get(owner)
-    if (pending) { if (!background) pending.dirty = true; return pending.promise }
-    const entry = { dirty: false, promise: Promise.resolve() }
-    entry.promise = (async () => { do {
-      entry.dirty = false
-      const revision = networkReadRevisions.get(owner)
-      const device = devices.find(item => item.id === owner)
-      let rows: NetworkState["computers"]
-      let unavailable: string | null = null
-      try {
-        if (owner && !device?.connected) throw new Error(`${device?.name} is offline. Reconnect to see network services.`)
-        const result = parseNetworkState(await waitForService(native.invoke(owner ? "remote_network_state" : "read_network_state", owner ? { deviceId: owner } : undefined)))
-        if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("Network response belongs to another device.")
-        rows = result.computers
-        networkFailures.delete(owner)
-      } catch (cause) {
-        const delay = Math.min((networkFailures.get(owner)?.delay ?? 5000) * 2, 60_000)
-        networkFailures.set(owner, { delay, nextRead: Date.now() + delay })
-        unavailable = !owner ? "Could not check network services." : isUnsupportedRemote(cause) ? `Update Silo on ${device?.name} to see network services.` : errorMessage(cause)
-        rows = unavailableNetworkRows(owner, unavailable)
-      }
-      if (disposed) return
-      if (revision !== networkReadRevisions.get(owner)) continue
-      const current = devices.find(item => item.id === owner)
-      if (owner && !current) return
-      if (owner && !current?.connected) rows = unavailableNetworkRows(owner, `${current!.name} is offline. Reconnect to see network services.`)
-      network = { computers: [...(network?.computers.filter(row => computerOwner(row.computer) !== owner) ?? []), ...rows] }
-      if (!owner) networkError = unavailable
-      publish({ ...snapshot })
-    } while (entry.dirty && !disposed) })().finally(() => { if (networkReads.get(owner) === entry) networkReads.delete(owner) })
-    networkReads.set(owner, entry)
-    return entry.promise
-  }
-
-  function readNetwork(options?: { background?: boolean }): Promise<void> {
-    lastNetworkReadAt = Date.now()
-    return Promise.all([readNetworkOwner("", options?.background), ...devices.map(device => readNetworkOwner(device.id, options?.background))]).then(() => {})
-  }
-  /** Network services are read only for a consumer that shows them: a watcher, or a page that requested them recently. */
-  function networkWanted() { return networkWatchers > 0 || networkAmbientWatchers > 0 || Date.now() < networkInterestUntil }
-  /** A consumer's own request: it also marks network data as wanted while that consumer keeps asking. */
-  function refreshNetwork(options?: { background?: boolean }): Promise<void> {
-    networkInterestUntil = Date.now() + NETWORK_INTEREST_MS
-    return readNetwork(options)
-  }
-  /** Keeps network services read until the returned function is called: with every refresh, or when `ambient`, at most every 30s and on network events. */
-  function watchNetwork(options?: { ambient?: boolean }): () => void {
-    const ambient = options?.ambient === true
-    if (ambient) networkAmbientWatchers++; else networkWatchers++
-    void readNetwork()
-    let watching = true
-    return () => { if (watching) { watching = false; if (ambient) networkAmbientWatchers--; else networkWatchers-- } }
-  }
   function refreshOperationQueue(): Promise<void> {
     if (operationQueueRequest) { operationQueueDirty = true; return operationQueueRequest }
     operationQueueRequest = (async () => { do {
@@ -629,36 +125,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
     } while (operationQueueDirty && !disposed) })().finally(() => { operationQueueRequest = undefined })
     return operationQueueRequest
-  }
-
-  async function changeNetwork(command: string, arguments_: Record<string, unknown>) {
-    const target = arguments_.computer as string
-    const remote = parseRemoteComputerTarget(target)
-    const owner = remote?.deviceId ?? ""
-    const revision = (networkSaveRevisions.get(target) ?? 0) + 1
-    networkSaveRevisions.set(target, revision)
-    networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-    const { computer: _computer, ...rest } = arguments_
-    let result: NetworkState
-    try {
-      result = parseNetworkState(await native.invoke(remote ? `remote_${command}` : command, remote ? { ...rest, ...remote } : arguments_))
-      if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("Network response belongs to another device.")
-    } catch (cause) {
-      networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-      if (!disposed) void readNetworkOwner(owner)
-      throw cause
-    }
-    if (disposed) return
-    networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-    if (revision !== networkSaveRevisions.get(target)) {
-      void readNetworkOwner(owner)
-      return
-    }
-    // A device-wide reply can carry older rows for unrelated computer saves.
-    const retained = network?.computers.filter(row => row.computer !== target) ?? []
-    network = { computers: [...retained, ...result.computers.filter(row => row.computer === target)] }
-    if (!owner) networkError = null
-    publish({ ...snapshot })
   }
 
   async function changeSecret(command: string, arguments_: Record<string, unknown>) {
@@ -690,60 +156,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     listeners.forEach((listener) => listener())
   }
 
-  // A cancelled start, stop or restart is recorded by the runtime (D-26) as a
-  // lifecycle activity with `cancelled: true`, not as a failure; older devices
-  // still report it as "<Action> failed: … was cancelled.". Both render as the
-  // neutral cancelled state the action itself shows, after a reload or on a peer.
-  function lastCancelledLifecycle(activities: ApplicationActivity[]) {
-    const latest = new Map<string, ApplicationActivity>()
-    for (const activity of activities) {
-      if (activity.category !== "computer" || !activity.computer || !isLifecycleActivity(activity.id)) continue
-      const known = latest.get(activity.computer)
-      if (!known || activity.occurredAt > known.occurredAt) latest.set(activity.computer, activity)
-    }
-    const cancelled = new Map<string, LifecycleAction>()
-    for (const [target, activity] of latest) {
-      const action = activity.cancelled ? lifecycleActions.find(candidate => cancelledActionLabel(candidate) === activity.title) : undefined
-      if (action) cancelled.set(target, action)
-    }
-    return cancelled
-  }
-
-  function reportedCancellation(computer: ApplicationComputer, cancelledAction: LifecycleAction | undefined): Partial<ApplicationComputer> {
-    if (computer.lifecycleFailure) return {}
-    return cancelledAction ? { lifecycleFailure: "The action was cancelled.", lifecycleFailureAction: cancelledAction, lifecycleFailureCancelled: true } : {}
-  }
-
-  /** Stable identity of an export/import result: the runtime's operation id, else its defining fields. */
-  function backupResultKey(state: BackupState, operation: BackupOperation) {
-    if (state.operationId) return `operation:${state.operationId}`
-    return JSON.stringify([operation.operation, operation.kind, operation.archive.archivePath, operation.archive.name, operation.targetName ?? null, operation.kind === "result" ? operation.outcome : null, operation.kind === "result" ? operation.title : null])
-  }
-
-  function derivePorts(row: NetworkState["computers"][number] | undefined, reachable: boolean): ApplicationPort[] {
-    return (row?.ports ?? []).map(port => ({ port: port.port, listening: reachable && !row?.error && port.state === "reachable", hostPort: port.hostPort, scheme: port.scheme, configured: port.configured, host: row?.host }))
-  }
-
   function withPendingCheckpoint(computer: ApplicationComputer, target: string): ApplicationComputer {
     const pending = pendingCheckpointOperations.get(target)
     return pending ? { ...computer, checkpointOperation: computer.checkpointOperation?.status === "running" ? computer.checkpointOperation : pending } : computer
   }
 
   function derive(base: ProductionSnapshot): ProductionSnapshot {
-    let operation = base.backup.operation
-    if (operation?.kind === "result" && dismissedBackupResults.has(backupResultKey(base.backup, operation))) operation = null
-    if (localBackupOperation && operation !== localBackupOperation) {
-      if (!operation) operation = localBackupOperation
-      else {
-        localBackupOperation = null
-        if (operation.kind === "running") dismissedBackupResults.clear()
-      }
-    }
-    // The marker belongs to the result the runtime reported, not to one dismissed here or replaced by a local operation.
-    const { resultUnseen, ...reported } = base.backup
-    const next = { ...base, backup: { ...reported, operation, ...(resultUnseen && operation === base.backup.operation && { resultUnseen }) } }
+    const next = { ...base, backup: backups.derive(base.backup) }
     if (!base.source) return next
-    const networkRows = new Map((network?.computers ?? []).map(row => [row.computer, row]))
+    const networkRows = new Map((services.network()?.computers ?? []).map(row => [row.computer, row]))
     const computers = base.source.computers.filter(computer => !computer.device).map(computer => ({
       ...withPendingCheckpoint(computer, computer.configuration.name),
       ports: derivePorts(networkRows.get(computer.configuration.name), true),
@@ -795,7 +216,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     }
     const cancelledActions = lastCancelledLifecycle(activities)
     return { ...next, source: { ...base.source,
-      devices, connections, connectionsError, devicesError, network, networkError, sshAccess, sshAccessError, operationQueue,
+      devices, connections, connectionsError, devicesError, network: services.network(), networkError: services.networkError(), sshAccess: services.sshAccess(), sshAccessError: services.sshAccessError(), operationQueue,
       repositoryPushOperations: pushes,
       activities,
       computers: computers.map(({ lifecycleAction: _reported, ...computer }) => {
@@ -962,11 +383,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           const host = listedDevices.find(host => host.id === id)
           if (!host || host.address !== knownDevices.find(previous => previous.id === id)?.address) remoteFailures.delete(id)
         }
-        for (const failures of [sshFailures, networkFailures]) for (const id of failures.keys()) {
-          if (!id) continue
+        services.forgetFailures(id => {
           const host = listedDevices.find(host => host.id === id)
-          if (!host || host.address !== knownDevices.find(previous => previous.id === id)?.address) failures.delete(id)
-        }
+          return !host || host.address !== knownDevices.find(previous => previous.id === id)?.address
+        })
         knownDevices = listedDevices
         devices = listedDevices.flatMap(host => {
           const known = devices.find(item => item.id === host.id)
@@ -1096,7 +516,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       catch (cause) { backup = unreadableBackup(`Silo returned invalid export and import state: ${errorMessage(cause)} Refresh to confirm the operation result.`) }
     } else backup = unreadableBackup(`Silo could not read export and import state: ${errorMessage(backupResult.reason)} Refresh to confirm the operation result.`)
     if (disposed || epoch !== refreshSequence) return
-    if (backendBackup) { const state = backendBackup; exportWaiters.forEach(waiter => waiter(state, sequence)) }
+    if (backendBackup) { backups.notifyRead(backendBackup, sequence) }
     const applicationCurrent = sequence > appliedApplicationRead
     const backupCurrent = sequence > appliedBackupRead
     if (!applicationCurrent && !backupCurrent && !reportedSource) return
@@ -1129,7 +549,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (source && activeConfiguration) source = { ...source, computerConfigurationOperation: activeConfiguration }
     localStateUpdating = configurationUpdating
     publish({ ...snapshot, source, backup, loading: configurationUpdating && !source, error, localUpdating: configurationUpdating && source !== null && (snapshot.source === null || snapshot.localUpdating === true) })
-    if (networkWatchers > 0 || (networkAmbientWatchers > 0 && Date.now() - lastNetworkReadAt >= NETWORK_AMBIENT_INTERVAL_MS)) void readNetwork({ background })
+    if (services.networkReadDue()) void services.readNetwork({ background })
     // One remote read per refresh; one that started during this refresh is recent enough.
     if (remotePasses === remotePassesAtStart) void refreshDevices(false, background)
   }
@@ -1157,7 +577,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (disposed) return
     try {
       const subscriptions: Array<[string, EventHandler]> = [
-        ["silo://network-state-changed", () => { if (networkWanted()) void readNetwork() }],
+        ["silo://network-state-changed", () => { if (services.networkWanted()) void services.readNetwork() }],
         ["silo://operation-queue-changed", () => { void refreshOperationQueue() }],
         ["silo://application-state-changed", refreshFromEvent],
         ["desktop:status-opened", refreshFromEvent],
@@ -1165,7 +585,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
         // so setup and computer configuration must be accepted again.
         ["silo://shutdown-state-changed", (event) => {
           if (event?.payload !== false) return
-          acceptingSetup = true
+          setup.resume()
           if (snapshot.setupDrain) publish({ ...snapshot, setupDrain: undefined })
         }],
         ["silo://lifecycle-progress", (event) => {
@@ -1180,7 +600,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           const progressEvents = [...activeConfiguration.progressEvents, parsed.data]
           activeConfiguration = { ...activeConfiguration, progressEvents }
           publish({ ...snapshot, setupEvents: progressEvents, setupActivity: progressEvents, source: snapshot.source ? { ...snapshot.source, computerConfigurationOperation: activeConfiguration } : null })
-          if (parsed.data.step === "computer-verification" && activeComputerJob) setJobStatus(activeComputerJob, ["computerVerify"], "running")
+          if (parsed.data.step === "computer-verification" && setup.activeComputerJob) setJobStatus(setup.activeComputerJob, ["computerVerify"], "running")
         }],
       ]
       const results = await Promise.allSettled(subscriptions.map(([event, handler]) => native.listen(event, payload => { if (!disposed) handler(payload) })))
@@ -1333,55 +753,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       })
   }
 
-  function projectSetupJobs() {
-    publish({ ...snapshot, setupQueue: snapshot.setupQueue.map((item) => {
-      const states = setupJobs.flatMap((job) => job.items.filter(({ id }) => id === item.id))
-      return states.find(({ status }) => status === "running") ?? states.find(({ status }) => status === "queued") ?? states.at(-1) ?? item
-    }) })
-  }
-
-  function setSetupStatus(ids: SetupQueueItemID[], status: SetupItem["status"], failure?: string) {
-    setupJobs = setupJobs.filter((job) => !job.items.some(({ id }) => ids.includes(id)) || job.items.some(({ status }) => status === "running" || status === "queued"))
-    publish({ ...snapshot, setupQueue: snapshot.setupQueue.map((item) => ids.includes(item.id) ? { id: item.id, status, ...(failure && { failure }) } : item) })
-    projectSetupJobs()
-  }
-
-  function setJobStatus(job: SetupJob, ids: SetupQueueItemID[], status: SetupItem["status"], failure?: string) {
-    job.items = job.items.map((item) => ids.includes(item.id) ? { id: item.id, status, ...(failure && { failure }) } : item)
-    projectSetupJobs()
-  }
-
-  function recordGitHubActivity(requestId: string, phase: "github" | "identity", message: string, failed = false) {
-    const event: SiloProgressEvent = { schemaVersion: 1, type: "progress", requestId, phase, step: `${phase}-setup`, timestamp: Date.now(), level: failed ? "error" : "info", message, safeForDisplay: true }
-    publish({ ...snapshot, setupActivity: [...(snapshot.setupActivity ?? []), event].slice(-500) })
-  }
-
-  function enqueueSetup<T>(ids: SetupQueueItemID[], work: (job: SetupJob) => Promise<T>, activityId = crypto.randomUUID()): Promise<T> {
-    setSetupStatus(ids, "queued")
-    const activityPhase = ids.includes("githubRun") ? "github" : ids.includes("identityRun") ? "identity" : null
-    const activityLabel = activityPhase === "github" ? "GitHub access" : "Git identity"
-    const job: SetupJob = { activityId, items: ids.map((id) => ({ id, status: "queued" })) }
-    setupJobs.push(job)
-    projectSetupJobs()
-    const promise = setupTail.then(async () => {
-      if (disposed) throw new Error("Silo was closed before the setup task started.")
-      setJobStatus(job, [ids[0]], "running")
-      if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: applying settings.`)
-      try {
-        const result = await work(job)
-        setJobStatus(job, ids, "succeeded")
-        if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: setup complete.`)
-        return result
-      } catch (cause) {
-        setJobStatus(job, ids, "failed", errorMessage(cause))
-        if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: setup failed. Review the reported error before retrying.`, true)
-        throw cause
-      }
-    })
-    setupTail = promise.catch(() => {})
-    return promise
-  }
-
   // The committed local computer inventory the user is editing from. Targeted changes carry
   // this as their `expected` baseline so a queued edit applies to fresh state.
   function committedConfigurations(): SetupComputerConfiguration[] {
@@ -1397,7 +768,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     | { kind: "retry"; computer?: string }
 
   function configureConfigurations(request: SetupComputerConfigurationRequest, action?: ConfigureAction): Promise<ApplicationSource> {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     const resolved: ConfigureAction = action ?? { kind: "changes", changes: deriveComputerChanges(committedConfigurations(), request.computers) }
     // A no-op submission changes nothing; resolve with the current source untouched.
     if (resolved.kind === "changes" && resolved.changes.length === 0) {
@@ -1412,7 +783,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     lastGitHubJob = undefined
     setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
     const promise = enqueueSetup(["computerRun", "computerVerify"], async (job) => {
-      activeComputerJob = job
+      setup.activeComputerJob = job
       setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
       ++operationSequence
       const requestId = crypto.randomUUID()
@@ -1452,7 +823,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           publish({ ...snapshot, setupActivity: [...(snapshot.setupActivity ?? []), event] })
         }
         activeRequestId = null
-        activeComputerJob = undefined
+        setup.activeComputerJob = undefined
         publish({ ...snapshot, setupFinishedAt: Math.floor(Date.now() / 1000) })
       }
     })
@@ -1469,7 +840,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (key === lastVerificationKey) return
     const sequence = ++identityVerificationSequence
     if (snapshot.setupQueue.some(({ status }) => status === "queued" || status === "running")) {
-      await setupTail
+      await setup.settled()
       if (disposed || sequence !== identityVerificationSequence) return
       return verifySetupIdentities(request)
     }
@@ -1491,12 +862,12 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function submitSetupStep(step: "computers" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     ++identityVerificationSequence
     const current = snapshot.source
     const configurationsUnchanged = current && current.computers.length > 0
       && !current.computerConfigurationOperation && !activeConfiguration
-      && !setupJobs.some((job) => job.items.some(({ status }) => status === "running" || status === "queued"))
+      && !setup.isBusy()
       && current.computers.every(({ freshness, state }) => freshness === "fresh" && state !== "failed" && state !== "starting")
       && JSON.stringify(current.computers.map(({ configuration }) => setupComputerConfigurationSchema.parse(configuration))) === JSON.stringify(request.computerConfiguration.computers.map((configuration) => setupComputerConfigurationSchema.parse(configuration)))
     // Initial setup and continues send the specific creations/edits as one batch. When
@@ -1555,43 +926,11 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function finishSetup(request: OnboardingCompletionRequest, markComplete: () => Promise<void>) {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     const preceding = submitSetupStep("github", request)
     void preceding.catch(() => {})
     if (replacesEveryComputer(request)) return preceding
     return enqueueSetup(["completion"], async () => { await preceding; await markComplete() })
-  }
-
-  // Setup waits (GitHub access polling) end early when Quit drains setup.
-  const setupWaits = new Set<() => void>()
-  function setupDelay(ms: number) {
-    return new Promise<void>((resolve) => {
-      const done = () => { window.clearTimeout(timer); setupWaits.delete(done); resolve() }
-      const timer = window.setTimeout(done, ms)
-      setupWaits.add(done)
-    })
-  }
-
-  /** What Quit is waiting for while setup drains, for the shutdown overlay. */
-  function pendingSetupWork(): string | undefined {
-    const pending = new Set(setupJobs.flatMap((job) => job.items.filter(({ status }) => status === "running" || status === "queued").map(({ id }) => id)))
-    const steps = [
-      (pending.has("computerRun") || pending.has("computerVerify")) && "creating computers",
-      (pending.has("identityRun") || pending.has("identityVerify")) && "applying Git identities",
-      (pending.has("githubRun") || pending.has("githubVerify")) && "verifying GitHub access",
-      pending.has("completion") && "saving setup",
-    ].filter((step): step is string => Boolean(step))
-    return steps.length ? `Finishing setup (${steps.join(", ")})…` : undefined
-  }
-
-  async function drainSetup() {
-    acceptingSetup = false
-    // Accepted setup finishes, but nothing waits minutes for GitHub to confirm access.
-    ;[...setupWaits].forEach((wake) => wake())
-    const pending = pendingSetupWork()
-    if (pending) publish({ ...snapshot, setupDrain: pending })
-    try { await setupTail }
-    finally { if (snapshot.setupDrain) publish({ ...snapshot, setupDrain: undefined }) }
   }
 
   function saveComputerConfiguration(request: SetupComputerConfigurationRequest, baseline?: SetupComputerConfiguration[]): Promise<void> {
@@ -1613,7 +952,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     const quitting = () => new Error("Silo is quitting. GitHub access was not verified; Continue after reopening Silo to check again.")
     while (true) {
       if (disposed) throw new Error("Silo closed before GitHub access was verified.")
-      if (!acceptingSetup) throw quitting()
+      if (!setup.isAccepting()) throw quitting()
       if (revision !== undefined && (github.policyRevision !== revision || (snapshot.source?.github.policyRevision ?? revision) > revision)) throw new Error("GitHub settings changed during setup. Continue again to verify the latest settings.")
       const operations = computers.map((computer) => github.computerOperations?.find((operation) => operation.computer === computer))
       const failure = operations.find((operation) => operation?.status === "failed")
@@ -1622,7 +961,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       if (Date.now() >= deadline) throw new Error("GitHub access has not been verified in every computer. Retry to check again.")
       await setupDelay(500)
       if (disposed) throw new Error("Silo closed before GitHub access was verified.")
-      if (!acceptingSetup) throw quitting()
+      if (!setup.isAccepting()) throw quitting()
       github = githubStateShape.parse(await native.invoke("read_github_state"))
       if (!githubMutationPending && snapshot.source && (github.policyRevision ?? 0) >= (snapshot.source.github.policyRevision ?? 0)) publish({ ...snapshot, source: { ...snapshot.source, github } })
     }
@@ -1794,32 +1133,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     retrySecret: (id: string) => changeSecret("retry_secret", { id }),
     readWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("read_workspace_storage", { computerId })),
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
-    refreshSshAccess,
+    refreshSshAccess: services.refreshSshAccess,
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })
     },
-    saveSshAccess: async request => {
-      const remote = parseRemoteComputerTarget(request.computer)
-      const owner = remote?.deviceId ?? ""
-      if (sshAccess?.computers.find(row => row.computer === request.computer)?.unavailable || (remote && !devices.find(device => device.id === remote.deviceId)?.connected)) throw new Error("Refresh SSH status before changing access.")
-      const revision = (sshSaveRevisions.get(request.computer) ?? 0) + 1
-      sshSaveRevisions.set(request.computer, revision)
-      sshReadRevisions.set(owner, (sshReadRevisions.get(owner) ?? 0) + 1)
-      const { computer: _computer, ...settings } = request
-      const result = parseSshAccessState(await native.invoke(remote ? "remote_save_ssh_access" : "save_ssh_access", remote ? { ...remote, ...settings } : { ...request }))
-      if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("SSH response belongs to another device.")
-      if (disposed || sshSaveRevisions.get(request.computer) !== revision) return
-      if (remote && !devices.find(device => device.id === remote.deviceId)?.connected) return
-      sshReadRevisions.set(owner, (sshReadRevisions.get(owner) ?? 0) + 1)
-      const retained = sshAccess?.computers.filter(row => row.computer !== request.computer) ?? []
-      sshAccess = { computers: [...retained, ...result.computers.filter(row => row.computer === request.computer)] }
-      if (!remote) sshAccessError = null
-      publish({ ...snapshot })
-    },
-    refreshNetwork,
-    saveNetworkPort: request => changeNetwork("save_network_port", { ...request }),
-    removeNetworkPort: (computer, port) => changeNetwork("remove_network_port", { computer, port }),
+    saveSshAccess: services.saveSshAccess,
+    refreshNetwork: services.refreshNetwork,
+    saveNetworkPort: request => services.changeNetwork("save_network_port", { ...request }),
+    removeNetworkPort: (computer, port) => services.changeNetwork("remove_network_port", { computer, port }),
     openNetworkPort,
     authorizeDevice: address => native.invoke<void>("authorize_device", { address }),
     setupDeviceKey: address => native.invoke<void>("setup_device_key", { address }),
@@ -1971,137 +1293,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     retryGitHubRepositoryCatalog: () => { void githubMutation("refresh_github_repositories").catch(() => {}) },
   }
 
-  function backupFailure(operation: "backup" | "restore", archive: BackupArchive, message: string, targetName?: string): BackupOperation {
-    return { operation, archive, runningNames: [], targetName, kind: "result", outcome: "failed", title: `${operation === "backup" ? "Export" : "Import"} failed`, message, detail: "No successful result was recorded." }
-  }
-
-  function showPendingBackup(operation: "backup" | "restore", archive: BackupArchive, targetName?: string) {
-    ++refreshSequence
-    // A new operation replaces the previous result, here and in the runtime (E-49),
-    // so it does not come back after a relaunch.
-    const previous = view.backup.operation
-    if (previous?.kind === "result" && !(localBackupOperation && shareStructure(previous, localBackupOperation) === previous)) {
-      dismissedBackupResults.add(backupResultKey(view.backup, previous))
-      void native.invoke("dismiss_backup_operation", { expectedOperation: previous, expectedOperationId: view.backup.operationId ?? null }).catch(() => {})
-    }
-    localBackupOperation = { operation, archive, targetName, runningNames: [], kind: "running", progress: 0, indeterminate: true, canCancel: false,
-      phases: [{ title: operation === "backup" ? "Preparing export" : "Checking export file", detail: operation === "backup" ? "Preparing the selected computers." : "Verifying the export file before importing it.", tone: "running" }],
-    }
-    publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-  }
-
-  /** Checks an export file under a request id so aborting `signal` stops the check (E-27).
-   * The check changes no state, so no refresh follows it. */
-  async function inspectBackupArchive(archivePath: string, signal?: AbortSignal) {
-    signal?.throwIfAborted()
-    const requestId = crypto.randomUUID()
-    const cancel = () => { void native.invoke("cancel_backup_inspection", { requestId }).catch(() => undefined) }
-    signal?.addEventListener("abort", cancel, { once: true })
-    try { return archiveInspectionShape.parse(await native.invoke("inspect_backup_archive", { archivePath, requestId })) }
-    finally { signal?.removeEventListener("abort", cancel) }
-  }
-
-  /** Settles with the result the backend reports under `operationId`. A state read
-   * that began after the export started and shows another id means the result is gone. */
-  function waitForExport(operationId: string): Promise<VerifiedExport> {
-    // Reads are numbered as they start: one numbered after this began knows the export.
-    const startedAfter = readSequence
-    return new Promise((resolve, reject) => {
-      const waiter = (state: BackupState | null, sequence: number) => {
-        const operation = state?.operation
-        if (state?.operationId === operationId && operation?.kind !== "result") return
-        if (state && state.operationId !== operationId && sequence <= startedAfter) return
-        exportWaiters.delete(waiter)
-        if (state?.operationId === operationId && operation?.kind === "result") {
-          if (operation.operation === "backup" && operation.outcome === "success") resolve({ operationId, archive: operation.archive })
-          else reject(new ExportIncompleteError(operation.outcome === "cancelled" ? "cancelled" : "failed", operation.message, operationId))
-          return
-        }
-        reject(new ExportIncompleteError("unavailable", state
-          ? "Silo no longer reports this export's result. Check the export folder before relying on it."
-          : "Silo stopped tracking this export before it finished.", operationId))
-      }
-      if (disposed) waiter(null, readSequence)
-      else exportWaiters.add(waiter)
-    })
-  }
-
-  const backupActions: BackupController["actions"] = {
-    async chooseDestination() {
-      const selected = await native.invoke<string | null>("choose_backup_destination")
-      if (selected) await refresh()
-      return selected
-    },
-    async chooseArchive(onSelected, signal) {
-      const archivePath = await native.invoke<string | null>("choose_backup_archive")
-      if (!archivePath || signal?.aborted) return null
-      onSelected?.(archivePath)
-      return inspectBackupArchive(archivePath, signal)
-    },
-    inspectArchive: (archive, signal) => inspectBackupArchive(archive.archivePath, signal),
-    startBackup(destination, computers, checkpointId) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") return
-      backupActions.exportAndVerify(destination, computers, checkpointId).catch(() => undefined)
-    },
-    async exportAndVerify(destination, computers, checkpointId) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") throw new ExportIncompleteError("busy", "Another export or import is running.")
-      pendingBackupOperation = true
-      const archive: BackupArchive = { name: "Export file", archivePath: "", completedLabel: "Not completed", size: "Unknown", destination, computers }
-      showPendingBackup("backup", archive)
-      let operationId: string
-      try { operationId = z.string().min(1).parse(await native.invoke("start_backup", { destination, computers, ...(checkpointId && { checkpointId }) })) }
-      catch (cause) {
-        localBackupOperation = backupFailure("backup", archive, errorMessage(cause))
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-        throw new ExportIncompleteError("rejected", errorMessage(cause))
-      }
-      finally { pendingBackupOperation = false }
-      const completion = waitForExport(operationId)
-      if (localBackupOperation?.kind === "running") dismissedBackupResults.clear()
-      void refresh()
-      return completion
-    },
-    startRestore(archive, newName, sourceName) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") return
-      pendingBackupOperation = true
-      showPendingBackup("restore", archive, newName)
-      void native.invoke("start_restore", { archivePath: archive.archivePath, newName, ...(sourceName && { sourceName }) }).then(() => { if (localBackupOperation?.kind === "running") dismissedBackupResults.clear(); return refresh() }).catch((cause) => {
-        localBackupOperation = backupFailure("restore", archive, errorMessage(cause), newName)
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-      }).finally(() => { pendingBackupOperation = false })
-    },
-    cancelOperation() { void native.invoke("cancel_backup_operation").then(() => refresh()).catch((cause) => reportUnavailable(`Export or import cancellation failed: ${errorMessage(cause)} The operation may still be running.`)) },
-    async revealArchive(archive) {
-      await native.invoke("reveal_backup_archive", { archivePath: archive.archivePath })
-    },
-    dismissOperation() {
-      const operation = view.backup.operation
-      if (operation?.kind !== "result") return
-      // A rejected start is reported only here; the runtime has nothing to dismiss.
-      // The view reuses an equal earlier object, so compare by content.
-      if (localBackupOperation && shareStructure(operation, localBackupOperation) === operation) {
-        localBackupOperation = null
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: snapshot.backup.operation === operation ? null : snapshot.backup.operation } })
-        return
-      }
-      const key = backupResultKey(view.backup, operation)
-      dismissedBackupResults.add(key)
-      publish({ ...snapshot })
-      const restore = () => { dismissedBackupResults.delete(key); publish({ ...snapshot }) }
-      void native.invoke("dismiss_backup_operation", { expectedOperation: operation, expectedOperationId: view.backup.operationId ?? null })
-        .then((value) => {
-          if (z.boolean().parse(value)) return
-          // The runtime still holds a result (it changed, or is still being resolved): show it.
-          restore()
-          void refresh()
-        })
-        .catch((cause: unknown) => {
-          restore()
-          reportActionFailure("backup-dismiss", "Could not dismiss the result", errorMessage(cause))
-        })
-    },
-  }
-
   const statusActions: StatusBarActions = {
     listComputerDirectory: applicationActions.listComputerDirectory,
     startComputer: applicationActions.startComputer,
@@ -2159,16 +1350,16 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
     },
     refresh,
-    watchNetwork,
+    watchNetwork: services.watchNetwork,
     configureConfigurations,
     submitSetupStep,
     verifySetupIdentities,
     finishSetup,
     drainSetup,
     applicationActions,
-    backupActions,
+    backupActions: backups.actions,
     statusActions,
-    dispose() { exportWaiters.forEach(waiter => waiter(null, refreshSequence)); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setupWaits.forEach(wake => wake()); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
+    dispose() { backups.close(); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setup.wake(); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
   }
 }
 

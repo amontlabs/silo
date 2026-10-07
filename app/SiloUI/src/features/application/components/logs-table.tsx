@@ -1,3 +1,4 @@
+import { formatLocalTimeOfDay, formatMonthDay } from "@/lib/format-date"
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { CopyButton } from "@/components/copy-button"
 import { DisclosureIndicator, disclosureTriggerStateClass } from "@/components/disclosure-indicator"
@@ -15,6 +16,8 @@ interface LogsTableProps {
   hasOlder: boolean
   active: boolean
   scrollTop: number
+  /** Changes whenever the owner sets `scrollTop`, even to the value it already held. */
+  scrollEpoch?: number
   /** `notify: false` reports plain scrolling, which needs no re-render of the owner. */
   onScrollTopChange: (scrollTop: number, notify?: boolean) => void
   onLoadOlder: () => void
@@ -57,12 +60,12 @@ function LogRecord({ row, rowIndex, open, onOpenChange, onHeightChange }: {
   }, [open, entry.line])
   const embedded = /^(\d{2}:\d{2}:\d{2})\s{2,}(.*)$/.exec(entry.line)
   const timestamp = new Date(entry.occurredAt)
-  const time = embedded?.[1] ?? timestamp.toLocaleTimeString()
+  const time = embedded?.[1] ?? formatLocalTimeOfDay(timestamp)
   const label = `log from ${computer.configuration.name} at ${time}`
   return <Collapsible asChild open={open} onOpenChange={onOpenChange}>
     <tbody ref={element} role="rowgroup" className="collapsible-motion">
       <tr role="row" aria-rowindex={rowIndex} style={{ height: ROW_HEIGHT }} className="group/log-row border-b border-border row-hover">
-        <td role="cell" title={entry.guestTimestamp ? `${entry.occurredAt} (time reported by the computer)` : entry.occurredAt} className="px-3 font-mono whitespace-nowrap text-muted-foreground"><time dateTime={entry.occurredAt}>{time}</time><span className="block text-caption">{timestamp.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></td>
+        <td role="cell" title={entry.guestTimestamp ? `${entry.occurredAt} (time reported by the computer)` : entry.occurredAt} className="px-3 font-mono whitespace-nowrap text-muted-foreground"><time dateTime={entry.occurredAt}>{time}</time><span className="block text-caption">{formatMonthDay(timestamp)}</span></td>
         <td role="cell" title={`${entry.source}${entry.session ? ` · session ${entry.session}` : ""}\n${entry.line}`} className="max-w-0 truncate px-3 font-mono">{embedded?.[2] ?? entry.line}</td>
         <td role="cell" className="px-3 whitespace-nowrap"><ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} /></td>
         <td role="cell" className="px-3 whitespace-nowrap text-muted-foreground">{entry.source}</td>
@@ -99,16 +102,16 @@ function Spacer({ height }: { height: number }) {
   return height > 0 ? <tr aria-hidden="true"><td colSpan={5} style={{ height }} className="border-0 p-0" /></tr> : null
 }
 
-export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrollTop, onScrollTopChange, onLoadOlder, expandedRows, onExpandedRowsChange }: LogsTableProps) {
+export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrollTop, scrollEpoch = 0, onScrollTopChange, onLoadOlder, expandedRows, onExpandedRowsChange }: LogsTableProps) {
   const viewport = useRef<HTMLDivElement>(null)
   const requestedRows = useRef<LogRow[] | undefined>(undefined)
   const [viewportHeight, setViewportHeight] = useState(520)
   // The window of rendered rows follows the scroll position; state changes only when the first visible row does.
   const [windowTop, setWindowTop] = useState(scrollTop)
-  const [seenScrollTop, setSeenScrollTop] = useState(scrollTop)
-  if (seenScrollTop !== scrollTop) { setSeenScrollTop(scrollTop); setWindowTop(scrollTop) }
+  const [seenScroll, setSeenScroll] = useState({ scrollTop, scrollEpoch })
+  if (seenScroll.scrollTop !== scrollTop || seenScroll.scrollEpoch !== scrollEpoch) { setSeenScroll({ scrollTop, scrollEpoch }); setWindowTop(scrollTop) }
   const liveTop = useRef(scrollTop)
-  useLayoutEffect(() => { liveTop.current = scrollTop }, [scrollTop])
+  useLayoutEffect(() => { liveTop.current = scrollTop }, [scrollTop, scrollEpoch])
   const keys = useMemo(() => rows.map(rowKey), [rows])
   const layout = useMemo(() => {
     const offsets = [0], positions: number[] = []
@@ -153,7 +156,7 @@ export function LogsTable({ rows, loading, loadingOlder, hasOlder, active, scrol
   })
   useLayoutEffect(() => {
     if (viewport.current && viewport.current.scrollTop !== scrollTop) viewport.current.scrollTop = scrollTop
-  }, [scrollTop, active, loading])
+  }, [scrollTop, scrollEpoch, active, loading])
   useEffect(() => {
     const element = viewport.current
     if (!element) return

@@ -791,12 +791,18 @@ fn document_path() -> Option<PathBuf> {
 fn load(app: &tauri::AppHandle) -> Result<Document, String> {
     load_at(&path(app)?)
 }
-type FileIdentity = (u64, Option<std::time::SystemTime>, u64);
+type FileIdentity = (u64, Option<std::time::SystemTime>, u64, i64, i64);
 static OBSERVED: Mutex<Option<(std::path::PathBuf, FileIdentity, Document)>> = Mutex::new(None);
 fn file_identity(path: &std::path::Path) -> Option<FileIdentity> {
     use std::os::unix::fs::MetadataExt;
     let metadata = fs::metadata(path).ok()?;
-    Some((metadata.len(), metadata.modified().ok(), metadata.ino()))
+    Some((
+        metadata.len(),
+        metadata.modified().ok(),
+        metadata.ino(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ))
 }
 /// The saved configuration for a state refresh: reparsed only when the file changed (or
 /// was saved by this process), since every refresh reads it.
@@ -3474,14 +3480,18 @@ mod tests {
         };
         write(1);
         assert_eq!(super::load_observed(&path).unwrap().revision, 1);
-        // An unchanged file is served from the cache, even where its bytes were altered in
-        // place without touching its size, time or identity.
+        // An unchanged file keeps its cached reading.
+        assert_eq!(
+            super::OBSERVED.lock().unwrap().as_ref().unwrap().1,
+            super::file_identity(&path).unwrap()
+        );
+        // A change in place, even one that keeps the size and modification time, is seen.
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         let modified = file.metadata().unwrap().modified().unwrap();
         let original = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, original.replace("\"revision\":1", "\"revision\":2")).unwrap();
         file.set_modified(modified).unwrap();
-        assert_eq!(super::load_observed(&path).unwrap().revision, 1);
+        assert_eq!(super::load_observed(&path).unwrap().revision, 2);
         // A save replaces the file and the next read sees it.
         write(3);
         assert_eq!(super::load_observed(&path).unwrap().revision, 3);

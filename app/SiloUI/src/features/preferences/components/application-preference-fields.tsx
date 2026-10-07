@@ -5,7 +5,7 @@ import { ListRow, ListRowIcon } from "@/components/list-row"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { matchesApplication, useApplications, type ApplicationKind } from "@/features/preferences/application-catalog"
-import { errorMessage } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
 
 const chooseApplication = "__silo-choose-application__"
 const unavailableApplication = "__silo-unavailable-application__"
@@ -58,7 +58,7 @@ export function ApplicationPreferenceFields({
   compact?: boolean
   onChange: (value: ApplicationPreferenceSelection) => void
 }) {
-  const { catalog, refresh, choose, available } = useApplications()
+  const { catalog, refresh, choose, available, loaded } = useApplications()
   const errorIdPrefix = useId()
   // A failed pick keeps the previous choice; say so beside the select rather than only
   // in the console, and clear it on the next change of that application.
@@ -105,6 +105,7 @@ export function ApplicationPreferenceFields({
     return (
       <Select
         value={useSystemDefault ? systemDefaultApplication : selected?.path ?? unavailableApplication}
+        disabled={!loaded}
         onValueChange={(selection) => { void update(kind, selection) }}
         onOpenChange={(open) => { if (open) void refresh().catch((error: unknown) => console.error("Silo application discovery:", error)) }}
       >
@@ -113,7 +114,7 @@ export function ApplicationPreferenceFields({
         </SelectTrigger>
         <SelectContent className="w-max min-w-[var(--radix-select-trigger-width)] max-w-[min(24rem,var(--radix-select-content-available-width))]">
           <SelectItem value={systemDefaultApplication} disabled={!systemDefault}><ApplicationOptionLabel kind={kind} name={`System default (${systemDefault?.name ?? "not set"})`} icon={systemDefault?.icon} /></SelectItem>
-          {!useSystemDefault && !selected && <SelectItem value={unavailableApplication} disabled><ApplicationOptionLabel kind={kind} name={`${value[kind]} (unavailable)`} /></SelectItem>}
+          {loaded && !useSystemDefault && !selected && <SelectItem value={unavailableApplication} disabled><ApplicationOptionLabel kind={kind} name={`${value[kind]} (unavailable)`} /></SelectItem>}
           {catalog[kind].map((application) => <SelectItem key={application.path} value={application.path}><ApplicationOptionLabel kind={kind} name={application.name} icon={application.icon} /></SelectItem>)}
           <SelectItem value={chooseApplication} disabled={!available}>Choose…</SelectItem>
         </SelectContent>
