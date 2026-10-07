@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react"
 
 import { PersonalTokenConnection } from "@/features/github/components/personal-token-connection"
 import { CopyButton } from "@/components/copy-button"
+import { InlineAlert } from "@/components/inline-alert"
 import { githubFailure } from "./github-failure"
 
 import { InlineConfirmation } from "@/components/inline-confirmation"
@@ -358,11 +359,11 @@ export function GitHubPage({
   }
 
   const catalogNotice = source.github.repositoryCatalogStatus?.status === "unavailable" ? (
-    <div className="flex items-center gap-3 rounded-md border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs" role="alert">
+    <InlineAlert className="flex items-center gap-3">
       <TriangleAlert className="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
       <span className="min-w-0 flex-1">{source.github.repositoryCatalogStatus.message}</span>
       {source.github.repositoryCatalogStatus.canRetry && <Button type="button" variant="outline" size="xs" onClick={() => actions.retryGitHubRepositoryCatalog?.()}>Retry repositories</Button>}
-    </div>
+    </InlineAlert>
   ) : undefined
 
   const accessToggle = <Button type="button" variant="outline" size="xs" disabled={applying} onClick={toggleAccess}>{accessEnabled ? "Disable for all computers" : "Enable for all computers"}</Button>

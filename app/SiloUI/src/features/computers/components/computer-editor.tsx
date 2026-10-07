@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { Monitor, Square } from "lucide-react"
 
 import { InlineConfirmation } from "@/components/inline-confirmation"
+import { InlineAlert } from "@/components/inline-alert"
 import { restoreFocus } from "@/lib/focus"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -263,21 +264,21 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
 
       {editorHeader}
       {deletedElsewhere ? (
-        <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/[.06] px-3 py-2 text-xs text-destructive">This computer no longer exists.</p>
+        <InlineAlert>This computer no longer exists.</InlineAlert>
       ) : conflict ? (
-        <div role="alert" className="grid gap-2 rounded-md border border-destructive/30 bg-destructive/[.06] px-3 py-2 text-xs text-destructive">
+        <InlineAlert>
           <p>This computer changed since you opened it.</p>
           <div className="flex justify-end gap-2">
             <Button type="button" size="xs" variant="outline" disabled={saving} onClick={onDiscard}>Discard my edits</Button>
             <Button type="button" size="xs" disabled={saving} onClick={onReview}>Review changes</Button>
           </div>
-        </div>
+        </InlineAlert>
       ) : divergent ? (
-        <p role="status" className="rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2 text-xs text-warning">
+        <InlineAlert tone="warning" role="status">
           This computer was changed elsewhere.{changedFields.length > 0 ? ` Updated: ${changedFields.map(computerFieldLabel).join(", ")}.` : ""}
-        </p>
+        </InlineAlert>
       ) : review ? (
-        <div role="status" aria-label="Review changes" className="grid gap-1 rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2 text-xs text-warning">
+        <InlineAlert tone="warning" role="status" aria-label="Review changes" className="gap-1">
           <p>Your edits are kept on top of the latest settings.</p>
           {review.conflicts.length > 0 && <>
             <p>Also changed elsewhere:</p>
@@ -287,7 +288,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
           </>}
           {review.adopted.length > 0 && <p>Updated from elsewhere: {review.adopted.join(", ")}.</p>}
           <p>Save to apply your edits, or Cancel to keep the latest settings.</p>
-        </div>
+        </InlineAlert>
       ) : null}
       {/* Lock every field while saving so edits typed after Save aren't silently discarded. */}
       <fieldset disabled={saving} className="m-0 grid min-w-0 gap-3 border-0 p-0">

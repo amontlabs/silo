@@ -19,6 +19,7 @@ import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "rea
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
 import type { MenuAction, MenuPopovers } from "@/components/actions-menu"
+import { InlineAlert } from "@/components/inline-alert"
 import { PageContainer } from "@/components/page"
 import { ConfirmBody } from "@/components/confirm-popover"
 import type { BackupController, VerifiedExport } from "../model/backup-source"
@@ -639,10 +640,9 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
         ) : (
           <>
             {connecting && actions.connectDevice && <div className="mb-3"><ConnectDeviceForm connect={actions.connectDevice} authorize={actions.authorizeDevice} setupKey={actions.setupDeviceKey} onClose={() => setConnecting(false)} /></div>}
-            {configurationOperation?.status === "failed" && <div className="mb-3 rounded-md border border-destructive/30 p-3">
-              <div role="alert" className="text-sm text-destructive"><ErrorDetails message={configurationOperation.error.message} diagnostic={configurationFailureDiagnostic(configurationOperation)} fallbackSummary="Computer changes failed." /></div>
-              <Button variant="outline" size="sm" className="mt-2" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
-            </div>}
+            {configurationOperation?.status === "failed" && <InlineAlert className="mb-3" error={{ message: configurationOperation.error.message, diagnostic: configurationFailureDiagnostic(configurationOperation), fallbackSummary: "Computer changes failed." }}>
+              <Button variant="outline" size="sm" className="justify-self-start" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
+            </InlineAlert>}
             <ComputerConfigurationList
               newComputerRequest={readOnly ? undefined : newComputerRequest}
               onNewComputerRequestHandled={onNewComputerRequestHandled}

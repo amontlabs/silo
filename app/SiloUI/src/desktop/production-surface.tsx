@@ -13,6 +13,7 @@ import type { ApplicationActions, ApplicationSource } from "@/features/applicati
 import type { BackupController } from "@/features/application/model/backup-source"
 import type { SiloPreflightCheck } from "@/contracts/silo"
 import { SiloWindow } from "@/components/silo-window"
+import { InlineAlert } from "@/components/inline-alert"
 import { useDependencyStore, type DependencyStore } from "@/desktop/dependencies"
 import { ProductionOnboarding } from "@/desktop/production-onboarding"
 import { localUpdatingNotice, useProductionSource, type ProductionSource } from "@/desktop/production-source"
@@ -32,7 +33,7 @@ export function Unavailable({ message, retry, retryLabel = "Retry checks", check
   return (
     <SiloWindow title="Silo" label="Silo unavailable">
       <div className="grid flex-1 place-items-center p-6">
-        <div className="max-w-lg rounded-lg border border-destructive/25 bg-destructive/[.06] p-4" role="alert">
+        <InlineAlert size="lg" className="max-w-lg gap-0 rounded-lg">
           <h1 className="text-sm font-semibold">Silo could not load</h1>
           {checks.length ? checks.map((check) => (
             <div key={check.id} className="mt-2 text-xs">
@@ -41,7 +42,7 @@ export function Unavailable({ message, retry, retryLabel = "Retry checks", check
             </div>
           )) : <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{message}</p>}
           {retry && <button type="button" disabled={checking} className="mt-3 rounded-md border px-3 py-1.5 text-xs disabled:opacity-50" onClick={retry}>{checking ? "Checking…" : retryLabel}</button>}
-        </div>
+        </InlineAlert>
       </div>
     </SiloWindow>
   )

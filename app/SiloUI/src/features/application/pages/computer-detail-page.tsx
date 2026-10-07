@@ -5,6 +5,7 @@ import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/ac
 import { SectionHeading } from "@/components/page"
 import { ListHeader, listHeadingClassName } from "@/components/list-header"
 import { EmptyState } from "@/components/empty-state"
+import { InlineAlert } from "@/components/inline-alert"
 import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -209,10 +210,10 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
   </div>
 
   return <Section label="Ports" action={action}>
-    {(controller.error || controller.errors.length > 0) && <div role="alert" className="mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/20 px-3 py-2 text-xs text-destructive">
+    {(controller.error || controller.errors.length > 0) && <InlineAlert className="mb-2 flex items-center justify-between gap-3">
       <span>{controller.error || controller.errors.join(" · ")}</span>
       {actions.refreshNetwork && <Button size="sm" variant="ghost" onClick={() => void actions.refreshNetwork?.()}>Retry</Button>}
-    </div>}
+    </InlineAlert>}
     {loading && hasPorts && <span role="status" aria-label="Loading ports" className="sr-only">Checking network services…</span>}
     {loading && !hasPorts && !draft && <ListCard><ListRowSkeleton label="Loading ports" /></ListCard>}
     {(hasPorts || draft || (!hasDiscoveryError && !loading)) && <ListCard>

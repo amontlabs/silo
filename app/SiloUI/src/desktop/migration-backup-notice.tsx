@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import { CircleCheck, HardDrive, TriangleAlert } from "lucide-react"
 
 import { ConfirmPopover } from "@/components/confirm-popover"
+import { InlineAlert } from "@/components/inline-alert"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { SiloWindow } from "@/components/silo-window"
 import { Button } from "@/components/ui/button"
@@ -83,7 +84,7 @@ function BackupNotice({ state, result, onContinue }: { state: PreUpgradeBackupSt
         <p className="text-xs text-muted-foreground">{preUpgradeBackupContents} Going back to an earlier version of Silo isn't supported, so keep it only to check or copy something from before the upgrade. To show it or delete it later, open Settings, General, Storage.</p>
       </> : <p role="status" className="text-sm">The pre-upgrade backup was deleted.</p>}
       {result && <TransferResult result={result} />}
-      {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/[.06] p-3 text-sm text-destructive">{error}</p>}
+      {error && <InlineAlert size="lg">{error}</InlineAlert>}
       <div><Button size="sm" disabled={opening} onClick={() => { setOpening(true); void onContinue() }}>Open Silo</Button></div>
     </main>
   </SiloWindow>

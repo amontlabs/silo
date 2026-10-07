@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Download, RefreshCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { InlineAlert } from "@/components/inline-alert"
 import { SectionHeading } from "@/components/page"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -58,10 +59,10 @@ export function UpdatesCard() {
           <Progress value={percent} aria-label="Update download" aria-valuetext={percent === undefined ? `${state.downloadedBytes.toLocaleString()} bytes downloaded` : `${percent}%`} />
           <p className="mt-1 text-caption text-muted-foreground">{percent === undefined ? `${(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded` : `${percent}%`}</p>
         </div>}
-        {error && <div role="alert" className="mx-2 mb-2 rounded-md border border-destructive/25 bg-destructive/[.06] p-2 text-xs">
+        {error && <InlineAlert className="mx-2 mb-2 gap-0 p-2">
           <div className="flex items-center justify-between gap-2"><p>{error}</p>{!confirm && state?.retryAction !== "relaunch" && <Button size="xs" variant="outline" disabled={busy || (installing && !state?.canInstall)} onClick={retry}>Retry</Button>}</div>
           {state?.errorDetails && <details className="mt-1 text-caption text-muted-foreground"><summary className="cursor-pointer">Details</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.errorDetails}</p></details>}
-        </div>}
+        </InlineAlert>}
         {state?.packageKind === "manual" && state.phase === "available" && <details className="px-2 pb-2 text-caption text-muted-foreground">
           <summary className="cursor-pointer">How to install</summary>
           <div className="mt-1 grid gap-2">

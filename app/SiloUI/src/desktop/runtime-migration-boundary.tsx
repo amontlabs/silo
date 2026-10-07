@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { AlertCircle } from "lucide-react"
 import { z } from "zod"
 import { SiloWindow } from "@/components/silo-window"
+import { InlineAlert } from "@/components/inline-alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { MigrationBackupGate } from "@/desktop/migration-backup-notice"
@@ -160,7 +161,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
         </div>
       </div>
       {state && <p role="status" className="text-xs text-muted-foreground">{state.migratedCount} of {state.totalCount} migrated{state.failedCount ? ` · ${state.failedCount} failed` : ""}</p>}
-      {(state?.error || error) && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/[.06] p-3 text-sm text-destructive">{error ?? state?.error}</p>}
+      {(state?.error || error) && <InlineAlert size="lg">{error ?? state?.error}</InlineAlert>}
       {error && !failed && <div><Button size="sm" disabled={busy} onClick={() => { setError(null); setSubscriptionError(null); setSubscribed(false); setAttempt(value => value + 1) }}>Retry</Button></div>}
       {state && <section aria-label="Migration log" className="min-h-0 rounded-md border bg-muted/30">
         <div className="flex items-center justify-between border-b px-3 py-2"><h2 className="text-xs font-medium">Live migration log</h2><Button size="xs" variant="ghost" onClick={() => setShowLogs(value => !value)}>{showLogs ? "Hide logs" : "Show logs"}</Button></div>
