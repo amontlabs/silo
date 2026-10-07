@@ -10,7 +10,7 @@ import { archiveInspectionShape, directoryPageShape, githubStateShape, parseAppl
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
-import type { OnboardingCompletionRequest, OnboardingSource } from "@/features/onboarding/model/onboarding-source"
+import type { OnboardingCompletionRequest } from "@/features/onboarding/model/onboarding-source"
 import type { SshAccessComputer, SshAccessState, NetworkState, ApplicationActions, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
 import { operationQueueSchema, isCancelledError, type OperationQueue } from "@/features/application/model/operation-queue"
 import { deriveComputerChanges, isStaleConfigurationError, type ComputerConfigurationChange } from "@/features/application/model/computer-change"
@@ -21,6 +21,8 @@ import type { StatusBarActions, StatusBarRoute } from "@/features/status-bar/sta
 import { downloadOutcomeSchema, transferProgressEvent, transferProgressSchema, uploadOutcomeSchema, uploadSelectionSchema } from "@/features/application/model/file-transfer"
 import { deviceSchema, connectionsStatusSchema, remoteComputerTarget, parseRemoteComputerTarget, computerTarget, type Device, type ConnectionsStatus } from "@/features/application/model/connections"
 
+import type { ProductionContext } from "./production-context"
+import { createSetupQueue } from "./production-setup-queue"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
 import { NETWORK_AMBIENT_INTERVAL_MS, NETWORK_INTEREST_MS, PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, backupFailure, backupResultKey, canonicalKey, computerOwner, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
@@ -44,12 +46,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     error: null,
   }
   let view = snapshot
-  type SetupItem = NonNullable<OnboardingSource["setupQueue"]>[number]
-  type SetupJob = { items: SetupItem[]; activityId: string }
-  let setupJobs: SetupJob[] = []
-  let activeComputerJob: SetupJob | undefined
-  let setupTail: Promise<unknown> = Promise.resolve()
-  let acceptingSetup = true
   let lastComputerJob: { key: string; promise: Promise<ApplicationSource> } | undefined
   let identityVerificationSequence = 0
   let lastVerificationKey: string | undefined
@@ -129,6 +125,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   // Exports awaiting their own result (E-59). Each sees every backend backup
   // state read, with the read's sequence, or null when the source is disposed.
   const exportWaiters = new Set<(state: BackupState | null, sequence: number) => void>()
+
+  const context: ProductionContext = { native, snapshot: () => snapshot, publish: next => publish(next), disposed: () => disposed }
+  const setup = createSetupQueue(context)
+  const { enqueue: enqueueSetup, setStatus: setSetupStatus, setJobStatus, recordGitHubActivity, delay: setupDelay, drain: drainSetup } = setup
 
   function unavailableSshRows(deviceId: string, deviceName: string, message: string): SshAccessComputer[] {
     const cached = sshAccess?.computers.filter(row => computerOwner(row.computer) === deviceId) ?? []
@@ -774,7 +774,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
         // so setup and computer configuration must be accepted again.
         ["silo://shutdown-state-changed", (event) => {
           if (event?.payload !== false) return
-          acceptingSetup = true
+          setup.resume()
           if (snapshot.setupDrain) publish({ ...snapshot, setupDrain: undefined })
         }],
         ["silo://lifecycle-progress", (event) => {
@@ -789,7 +789,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           const progressEvents = [...activeConfiguration.progressEvents, parsed.data]
           activeConfiguration = { ...activeConfiguration, progressEvents }
           publish({ ...snapshot, setupEvents: progressEvents, setupActivity: progressEvents, source: snapshot.source ? { ...snapshot.source, computerConfigurationOperation: activeConfiguration } : null })
-          if (parsed.data.step === "computer-verification" && activeComputerJob) setJobStatus(activeComputerJob, ["computerVerify"], "running")
+          if (parsed.data.step === "computer-verification" && setup.activeComputerJob) setJobStatus(setup.activeComputerJob, ["computerVerify"], "running")
         }],
       ]
       const results = await Promise.allSettled(subscriptions.map(([event, handler]) => native.listen(event, payload => { if (!disposed) handler(payload) })))
@@ -942,55 +942,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       })
   }
 
-  function projectSetupJobs() {
-    publish({ ...snapshot, setupQueue: snapshot.setupQueue.map((item) => {
-      const states = setupJobs.flatMap((job) => job.items.filter(({ id }) => id === item.id))
-      return states.find(({ status }) => status === "running") ?? states.find(({ status }) => status === "queued") ?? states.at(-1) ?? item
-    }) })
-  }
-
-  function setSetupStatus(ids: SetupQueueItemID[], status: SetupItem["status"], failure?: string) {
-    setupJobs = setupJobs.filter((job) => !job.items.some(({ id }) => ids.includes(id)) || job.items.some(({ status }) => status === "running" || status === "queued"))
-    publish({ ...snapshot, setupQueue: snapshot.setupQueue.map((item) => ids.includes(item.id) ? { id: item.id, status, ...(failure && { failure }) } : item) })
-    projectSetupJobs()
-  }
-
-  function setJobStatus(job: SetupJob, ids: SetupQueueItemID[], status: SetupItem["status"], failure?: string) {
-    job.items = job.items.map((item) => ids.includes(item.id) ? { id: item.id, status, ...(failure && { failure }) } : item)
-    projectSetupJobs()
-  }
-
-  function recordGitHubActivity(requestId: string, phase: "github" | "identity", message: string, failed = false) {
-    const event: SiloProgressEvent = { schemaVersion: 1, type: "progress", requestId, phase, step: `${phase}-setup`, timestamp: Date.now(), level: failed ? "error" : "info", message, safeForDisplay: true }
-    publish({ ...snapshot, setupActivity: [...(snapshot.setupActivity ?? []), event].slice(-500) })
-  }
-
-  function enqueueSetup<T>(ids: SetupQueueItemID[], work: (job: SetupJob) => Promise<T>, activityId = crypto.randomUUID()): Promise<T> {
-    setSetupStatus(ids, "queued")
-    const activityPhase = ids.includes("githubRun") ? "github" : ids.includes("identityRun") ? "identity" : null
-    const activityLabel = activityPhase === "github" ? "GitHub access" : "Git identity"
-    const job: SetupJob = { activityId, items: ids.map((id) => ({ id, status: "queued" })) }
-    setupJobs.push(job)
-    projectSetupJobs()
-    const promise = setupTail.then(async () => {
-      if (disposed) throw new Error("Silo was closed before the setup task started.")
-      setJobStatus(job, [ids[0]], "running")
-      if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: applying settings.`)
-      try {
-        const result = await work(job)
-        setJobStatus(job, ids, "succeeded")
-        if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: setup complete.`)
-        return result
-      } catch (cause) {
-        setJobStatus(job, ids, "failed", errorMessage(cause))
-        if (activityPhase) recordGitHubActivity(activityId, activityPhase, `${activityLabel}: setup failed. Review the reported error before retrying.`, true)
-        throw cause
-      }
-    })
-    setupTail = promise.catch(() => {})
-    return promise
-  }
-
   // The committed local computer inventory the user is editing from. Targeted changes carry
   // this as their `expected` baseline so a queued edit applies to fresh state.
   function committedConfigurations(): SetupComputerConfiguration[] {
@@ -1006,7 +957,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     | { kind: "retry"; computer?: string }
 
   function configureConfigurations(request: SetupComputerConfigurationRequest, action?: ConfigureAction): Promise<ApplicationSource> {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     const resolved: ConfigureAction = action ?? { kind: "changes", changes: deriveComputerChanges(committedConfigurations(), request.computers) }
     // A no-op submission changes nothing; resolve with the current source untouched.
     if (resolved.kind === "changes" && resolved.changes.length === 0) {
@@ -1021,7 +972,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     lastGitHubJob = undefined
     setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
     const promise = enqueueSetup(["computerRun", "computerVerify"], async (job) => {
-      activeComputerJob = job
+      setup.activeComputerJob = job
       setSetupStatus(["identityRun", "identityVerify", "githubRun", "githubVerify", "completion"], "idle")
       ++operationSequence
       const requestId = crypto.randomUUID()
@@ -1061,7 +1012,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           publish({ ...snapshot, setupActivity: [...(snapshot.setupActivity ?? []), event] })
         }
         activeRequestId = null
-        activeComputerJob = undefined
+        setup.activeComputerJob = undefined
         publish({ ...snapshot, setupFinishedAt: Math.floor(Date.now() / 1000) })
       }
     })
@@ -1078,7 +1029,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (key === lastVerificationKey) return
     const sequence = ++identityVerificationSequence
     if (snapshot.setupQueue.some(({ status }) => status === "queued" || status === "running")) {
-      await setupTail
+      await setup.settled()
       if (disposed || sequence !== identityVerificationSequence) return
       return verifySetupIdentities(request)
     }
@@ -1100,12 +1051,12 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function submitSetupStep(step: "computers" | "github", request: OnboardingCompletionRequest): Promise<unknown> {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     ++identityVerificationSequence
     const current = snapshot.source
     const configurationsUnchanged = current && current.computers.length > 0
       && !current.computerConfigurationOperation && !activeConfiguration
-      && !setupJobs.some((job) => job.items.some(({ status }) => status === "running" || status === "queued"))
+      && !setup.isBusy()
       && current.computers.every(({ freshness, state }) => freshness === "fresh" && state !== "failed" && state !== "starting")
       && JSON.stringify(current.computers.map(({ configuration }) => setupComputerConfigurationSchema.parse(configuration))) === JSON.stringify(request.computerConfiguration.computers.map((configuration) => setupComputerConfigurationSchema.parse(configuration)))
     // Initial setup and continues send the specific creations/edits as one batch. When
@@ -1164,43 +1115,11 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function finishSetup(request: OnboardingCompletionRequest, markComplete: () => Promise<void>) {
-    if (!acceptingSetup) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
+    if (!setup.isAccepting()) return Promise.reject(new Error("Silo is quitting. Setup was not submitted."))
     const preceding = submitSetupStep("github", request)
     void preceding.catch(() => {})
     if (replacesEveryComputer(request)) return preceding
     return enqueueSetup(["completion"], async () => { await preceding; await markComplete() })
-  }
-
-  // Setup waits (GitHub access polling) end early when Quit drains setup.
-  const setupWaits = new Set<() => void>()
-  function setupDelay(ms: number) {
-    return new Promise<void>((resolve) => {
-      const done = () => { window.clearTimeout(timer); setupWaits.delete(done); resolve() }
-      const timer = window.setTimeout(done, ms)
-      setupWaits.add(done)
-    })
-  }
-
-  /** What Quit is waiting for while setup drains, for the shutdown overlay. */
-  function pendingSetupWork(): string | undefined {
-    const pending = new Set(setupJobs.flatMap((job) => job.items.filter(({ status }) => status === "running" || status === "queued").map(({ id }) => id)))
-    const steps = [
-      (pending.has("computerRun") || pending.has("computerVerify")) && "creating computers",
-      (pending.has("identityRun") || pending.has("identityVerify")) && "applying Git identities",
-      (pending.has("githubRun") || pending.has("githubVerify")) && "verifying GitHub access",
-      pending.has("completion") && "saving setup",
-    ].filter((step): step is string => Boolean(step))
-    return steps.length ? `Finishing setup (${steps.join(", ")})…` : undefined
-  }
-
-  async function drainSetup() {
-    acceptingSetup = false
-    // Accepted setup finishes, but nothing waits minutes for GitHub to confirm access.
-    ;[...setupWaits].forEach((wake) => wake())
-    const pending = pendingSetupWork()
-    if (pending) publish({ ...snapshot, setupDrain: pending })
-    try { await setupTail }
-    finally { if (snapshot.setupDrain) publish({ ...snapshot, setupDrain: undefined }) }
   }
 
   function saveComputerConfiguration(request: SetupComputerConfigurationRequest, baseline?: SetupComputerConfiguration[]): Promise<void> {
@@ -1222,7 +1141,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     const quitting = () => new Error("Silo is quitting. GitHub access was not verified; Continue after reopening Silo to check again.")
     while (true) {
       if (disposed) throw new Error("Silo closed before GitHub access was verified.")
-      if (!acceptingSetup) throw quitting()
+      if (!setup.isAccepting()) throw quitting()
       if (revision !== undefined && (github.policyRevision !== revision || (snapshot.source?.github.policyRevision ?? revision) > revision)) throw new Error("GitHub settings changed during setup. Continue again to verify the latest settings.")
       const operations = computers.map((computer) => github.computerOperations?.find((operation) => operation.computer === computer))
       const failure = operations.find((operation) => operation?.status === "failed")
@@ -1231,7 +1150,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       if (Date.now() >= deadline) throw new Error("GitHub access has not been verified in every computer. Retry to check again.")
       await setupDelay(500)
       if (disposed) throw new Error("Silo closed before GitHub access was verified.")
-      if (!acceptingSetup) throw quitting()
+      if (!setup.isAccepting()) throw quitting()
       github = githubStateShape.parse(await native.invoke("read_github_state"))
       if (!githubMutationPending && snapshot.source && (github.policyRevision ?? 0) >= (snapshot.source.github.policyRevision ?? 0)) publish({ ...snapshot, source: { ...snapshot.source, github } })
     }
@@ -1773,7 +1692,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     applicationActions,
     backupActions,
     statusActions,
-    dispose() { exportWaiters.forEach(waiter => waiter(null, refreshSequence)); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setupWaits.forEach(wake => wake()); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
+    dispose() { exportWaiters.forEach(waiter => waiter(null, refreshSequence)); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setup.wake(); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
   }
 }
 
