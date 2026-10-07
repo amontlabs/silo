@@ -6,11 +6,14 @@ it.each([
   [0, "0 B"],
   [1, "1 B"],
   [1023, "1023 B"],
-  [1024, "1.0 KiB"],
-  [4096, "4.0 KiB"],
-  [1024 ** 2, "1.0 MiB"],
-  [1024 ** 3, "1.00 GiB"],
-  [1024 ** 4, "1024.00 GiB"],
+  [1024, "1 KiB"],
+  [4096, "4 KiB"],
+  [1536, "1.5 KiB"],
+  [512 * 1024 ** 2, "512 MiB"],
+  [4.25 * 1024 ** 3, "4.25 GiB"],
+  [1024 ** 2, "1 MiB"],
+  [1024 ** 3, "1 GiB"],
+  [1024 ** 4, "1024 GiB"],
 ])("formats %i bytes in binary units as %s", (bytes, expected) => {
   expect(formatBinaryBytes(bytes)).toBe(expected)
 })
