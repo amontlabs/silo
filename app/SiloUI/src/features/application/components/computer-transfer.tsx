@@ -1,3 +1,4 @@
+import { isMac } from "@/lib/platform"
 import { errorMessage } from "@/lib/error-message"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
@@ -10,7 +11,7 @@ import { ImportPopover, type ImportReview } from "@/features/application/compone
  * notification tied to backend truth across navigation. */
 const TRANSFER_TOAST_ID = "backup-operation"
 
-const revealLabel = () => (navigator.platform.startsWith("Mac") ? "Show in Finder" : "Show in folder")
+const revealLabel = () => (isMac() ? "Show in Finder" : "Show in folder")
 
 const stepState: Record<BackupPhase["tone"], OperationStep["state"]> = { succeeded: "done", running: "current", waiting: "pending", failed: "failed" }
 

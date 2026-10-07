@@ -1,3 +1,4 @@
+import { isMac } from "@/lib/platform"
 import { errorMessage } from "@/lib/error-message"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
@@ -29,7 +30,7 @@ const desktop = isTauri()
 const windowLabel = desktop ? getCurrentWindow().label : ""
 const statusPanel = windowLabel === "status"
 document.documentElement.classList.toggle("native-status", statusPanel)
-document.documentElement.classList.toggle("native-material", windowLabel === "main" && /Mac/.test(navigator.platform))
+document.documentElement.classList.toggle("native-material", windowLabel === "main" && isMac())
 const settings = createDesktopSettingsStore({}, !statusPanel)
 const production = createProductionSource()
 // One root for the session: the loading shell, a startup failure, Retry and the app

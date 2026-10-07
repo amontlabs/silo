@@ -1,3 +1,5 @@
+import { isMac } from "@/lib/platform"
+
 export interface KeyboardShortcut { keys: string[]; aria: string }
 
 const shortcutKeys: Readonly<Record<string, string>> = {
@@ -6,10 +8,10 @@ const shortcutKeys: Readonly<Record<string, string>> = {
   settings: ",", search: "K", "toggle-sidebar": "B", "go-back": "[", "go-forward": "]", "new-computer": "N",
 }
 
-export function shortcutFor(action: string, platform = navigator.platform): KeyboardShortcut | undefined {
+export function shortcutFor(action: string, platform?: string): KeyboardShortcut | undefined {
   const key = shortcutKeys[action]
   if (!key) return undefined
-  const mac = platform.startsWith("Mac")
+  const mac = platform === undefined ? isMac() : platform.startsWith("Mac")
   return { keys: [mac ? "⌘" : "Ctrl", key], aria: `${mac ? "Meta" : "Control"}+${key}` }
 }
 
