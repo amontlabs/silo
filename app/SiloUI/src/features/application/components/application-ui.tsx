@@ -35,7 +35,7 @@ export function ComputerBadge({ name, state, device }: { name: string; state: Co
       role="group"
       aria-label={`${name}, ${stateLabel}${device ? `, on ${device.name}` : ""}`}
       tabIndex={0}
-      className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="focus-ring"
     >
       {device ? `${name} · ${device.name}` : name}
     </StatusBadge></TooltipTrigger><TooltipContent>{stateLabel} on {device?.name ?? "this device"}</TooltipContent></Tooltip></TooltipProvider>

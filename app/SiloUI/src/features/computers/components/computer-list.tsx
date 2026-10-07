@@ -104,7 +104,7 @@ export function ComputerListRow({
       title={
         <>
           {onOpen
-            ? <button type="button" aria-label={`Open ${name}`} title={name} onClick={onOpen} className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">{name}</button>
+            ? <button type="button" aria-label={`Open ${name}`} title={name} onClick={onOpen} className="min-w-0 cursor-pointer truncate rounded-sm text-left focus-ring">{name}</button>
             : <span className="truncate" title={name}>{name}</span>}
           {kindBadge}
           {badge}

@@ -341,7 +341,7 @@ export function GitHubAccessEditor({
                             <span
                               tabIndex={0}
                               aria-label={`About Git identity for ${name}`}
-                              className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                              className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground focus-ring"
                             >
                               <GitBranch aria-hidden="true" className="size-3.5" />
                             </span>

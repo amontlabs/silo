@@ -95,7 +95,7 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
           {filtered.length > 0 ? <ul aria-label="Folders" className="divide-y">
             {filtered.map((entry) => (
               <li key={entry.name}>
-                <button type="button" className="flex min-h-9 w-full items-center gap-2 px-2.5 text-left text-xs hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => navigate([...segments, entry.name])}>
+                <button type="button" className="flex min-h-9 w-full items-center gap-2 px-2.5 text-left text-xs hover:bg-muted/50 focus-ring-inset" onClick={() => navigate([...segments, entry.name])}>
                   <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate" title={visibleText(entry.name)}>{visibleText(entry.name)}</span>
                   <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />

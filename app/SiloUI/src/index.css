@@ -159,6 +159,14 @@ html.dark {
   }
 }
 
+@utility focus-ring-inset {
+  outline: none;
+  &:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+}
+
 /* The one hover and keyboard-focus tint for rows in lists. */
 @utility row-hover {
   @media (hover: hover) {

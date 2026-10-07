@@ -121,7 +121,7 @@ function NavigationButton({
       aria-describedby={describedBy}
       onClick={onClick}
       className={cn(
-        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
+        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-ui focus-ring",
         tone === "danger"
           ? "text-destructive hover:bg-destructive/[0.07] hover:text-destructive"
           : tone === "warning"
@@ -192,7 +192,7 @@ function DisclosureNavigationItem({
           aria-hidden={collapsed || undefined}
           tabIndex={collapsed ? -1 : undefined}
           onClick={onToggle}
-          className="sidebar-disclosure absolute top-1 right-1 z-10 grid size-8 place-items-center rounded-md text-foreground/65 hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70"
+          className="sidebar-disclosure absolute top-1 right-1 z-10 grid size-8 place-items-center rounded-md text-foreground/65 hover:bg-sidebar-accent hover:text-foreground focus-ring"
         >
           <ChevronRight className={cn("size-4 transition-transform", expanded && "rotate-90")} />
         </button>
@@ -232,7 +232,7 @@ function SubNavigation<Section extends string>({
           aria-keyshortcuts={shortcutFor(id === "overview" ? "go-computers" : id === "general" ? "settings" : `go-${id}`)?.aria}
           onClick={() => onSelect(id)}
           className={cn(
-            "group/sidebar-item sidebar-secondary relative flex h-8 w-full min-w-0 items-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
+            "group/sidebar-item sidebar-secondary relative flex h-8 w-full min-w-0 items-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-ring",
             active && section === id && "bg-muted font-medium text-foreground",
           )}
         >

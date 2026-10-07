@@ -325,7 +325,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         aria-label={`Reorder ${configuration.name}`}
                         aria-describedby={reorderHelpId}
                         aria-disabled={reorderDisabled || undefined}
-                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-40"
+                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground focus-ring hover:bg-muted active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-50"
                         onKeyDown={(event) => { if (!reorderDisabled) handleReorderKey(event, configuration) }}
                         onDragStart={(event) => {
                           if (reorderDisabled) { event.preventDefault(); return }

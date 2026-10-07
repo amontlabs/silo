@@ -171,7 +171,7 @@ export function FilterCombobox<Value extends string>({
               aria-label={`Remove ${option.label}`}
               onClick={() => removeValue(option.value)}
               className={cn(
-                "grid shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "grid shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground focus-ring",
                 compact ? "size-5" : "size-6",
               )}
             >

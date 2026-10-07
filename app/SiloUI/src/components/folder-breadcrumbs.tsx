@@ -5,7 +5,7 @@ import { DropdownMenu } from "radix-ui"
 import { useReduceMotion } from "@/components/ui/reduce-motion"
 import { visibleText } from "@/lib/visible-text"
 
-const crumbClass = "min-w-0 truncate rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+const crumbClass = "min-w-0 truncate rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-ring-inset"
 
 export function FolderBreadcrumbs({ segments, onNavigate }: {
   segments: string[]
@@ -57,7 +57,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
         {(!layout.collapsed || layout.rootVisible) && <>{crumb(0)}{separator}</>}
         {hidden.length > 0 && <>
           <DropdownMenu.Root>
-            <DropdownMenu.Trigger className="shrink-0 rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label="Show parent folders">
+            <DropdownMenu.Trigger className="shrink-0 rounded px-1 py-1 text-muted-foreground hover:bg-muted focus-ring-inset" aria-label="Show parent folders">
               <MoreHorizontal className="size-4" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>

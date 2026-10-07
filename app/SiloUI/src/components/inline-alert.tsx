@@ -23,7 +23,7 @@ export function InlineAlert({ tone = "danger", size = "md", error, className, ch
   error?: ComponentProps<typeof ErrorDetails>
 }) {
   return (
-    <div role="alert" data-slot="inline-alert" data-tone={tone} className={cn("grid min-w-0 gap-2 rounded-md border text-foreground", tones[tone], sizes[size], className)} {...props}>
+    <div role="alert" data-slot="inline-alert" data-tone={tone} className={cn("grid min-w-0 gap-2 rounded-md border text-foreground select-text", tones[tone], sizes[size], className)} {...props}>
       {children}
       {error && <ErrorDetails {...error} />}
     </div>

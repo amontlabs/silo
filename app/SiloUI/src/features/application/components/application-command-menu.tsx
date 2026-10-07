@@ -103,7 +103,7 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
           <div className="flex items-center gap-3 border-b border-border px-4">
             <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             <Command.Input aria-label="Search commands" placeholder="Search pages, computers, and actions…" autoFocus autoComplete="off" spellCheck={false} className="h-12 min-w-0 flex-1 bg-transparent text-ui outline-none placeholder:text-muted-foreground" />
-            <Dialog.Close aria-label="Close commands" className="rounded border border-border px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">Esc</Dialog.Close>
+            <Dialog.Close aria-label="Close commands" className="rounded border border-border px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-muted focus-ring">Esc</Dialog.Close>
           </div>
           <Command.List className="max-h-[min(22rem,50dvh)] overflow-y-auto overscroll-contain scroll-py-2 p-1.5" label="Commands">
             <Command.Empty className="px-4 py-10 text-center text-xs text-muted-foreground">No commands found.</Command.Empty>

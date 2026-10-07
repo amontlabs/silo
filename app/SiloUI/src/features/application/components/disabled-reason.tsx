@@ -11,7 +11,7 @@ export function DisabledReason({ reason, children }: { reason?: string; children
   if (!reason) return children
   return <Tooltip>
     <TooltipTrigger asChild>
-      <span className="inline-flex rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50" tabIndex={0} role="group" aria-label={reason} data-disabled-reason="">{children}</span>
+      <span className="inline-flex rounded-lg focus-ring" tabIndex={0} role="group" aria-label={reason} data-disabled-reason="">{children}</span>
     </TooltipTrigger>
     <TooltipContent>{reason}</TooltipContent>
   </Tooltip>

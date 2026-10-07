@@ -76,7 +76,7 @@ function LogRecord({ row, rowIndex, open, onOpenChange, onHeightChange }: {
           <CollapsibleContent role="region" aria-label={`Log details from ${computer.configuration.name} at ${time}`} className="overflow-hidden">
             <div className="border-b border-border bg-muted/20 px-3 py-3">
               <p className="mb-2 text-caption text-muted-foreground">{entry.occurredAt}{entry.guestTimestamp ? " (time reported by the computer)" : ""} · {entry.source}{entry.session ? ` · Session ${entry.session}` : ""}</p>
-              <pre role="group" tabIndex={0} aria-label={`Log message from ${computer.configuration.name} at ${time}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 select-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">{entry.line}</pre>
+              <pre role="group" tabIndex={0} aria-label={`Log message from ${computer.configuration.name} at ${time}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 select-text focus-ring-inset">{entry.line}</pre>
             </div>
           </CollapsibleContent>
         </td>

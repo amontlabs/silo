@@ -35,7 +35,7 @@ export function ListRow({
   const content = (
     <>
       <div data-slot="list-row-title" className="flex min-w-0 items-center gap-1.5 text-ui leading-4 font-medium">{title}</div>
-      {detail != null && <div className={cn("truncate text-caption leading-4 text-muted-foreground", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>}
+      {detail != null && <div className={cn("truncate text-caption leading-4 text-muted-foreground select-text", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>}
     </>
   )
   return (

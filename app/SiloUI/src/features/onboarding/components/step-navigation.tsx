@@ -61,7 +61,7 @@ export function StepNavigation({ status, collapsed, completed, ...props }: StepN
                 aria-describedby={`setup-step-${id}-status`}
                 aria-busy={status[id] === "running" || undefined}
                 data-appearance="borderless"
-                className="sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md border-0 bg-transparent py-2 text-ui text-muted-foreground shadow-none data-[state=active]:shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70"
+                className="sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md border-0 bg-transparent py-2 text-ui text-muted-foreground shadow-none data-[state=active]:shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-ring"
               >
                 <span className="relative flex shrink-0">
                   <Icon aria-hidden="true" className="size-4" />

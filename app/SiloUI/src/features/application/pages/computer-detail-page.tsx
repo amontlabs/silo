@@ -140,7 +140,7 @@ function ViewAllAction({ label, onClick }: { label: string; onClick: () => void 
     type="button"
     aria-label={label}
     onClick={onClick}
-    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-caption text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-caption text-muted-foreground hover:text-foreground focus-ring"
   >
     View all<ChevronRight className="size-3" aria-hidden="true" />
   </button>
@@ -400,7 +400,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
     <div className="flex h-full min-h-0 flex-col">
       <ListHeader
         heading={<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1">
-          <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none")} onClick={controls.onBack}>Computers</button>
+          <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-ring")} onClick={controls.onBack}>Computers</button>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className={cn(listHeadingClassName, "truncate")} title={configuration.name}>{configuration.name}</span>
         </nav>}

@@ -37,7 +37,7 @@ export function LogDisclosure({ title, output, outputLabel, controlsLabel, empty
       />}
     />
     <CollapsibleContent className="collapsible-content-motion">
-      <pre role="region" tabIndex={0} className="max-h-32 overflow-auto whitespace-pre-wrap break-words border-t border-border bg-zinc-950 px-3 py-2.5 font-mono text-caption leading-5 text-zinc-200 select-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring dark:bg-black" aria-label={outputLabel ?? title}>{output || emptyMessage}</pre>
+      <pre role="region" tabIndex={0} className="max-h-32 overflow-auto whitespace-pre-wrap break-words border-t border-border bg-terminal px-3 py-2.5 font-mono text-caption leading-5 text-terminal-foreground select-text focus-ring-inset" aria-label={outputLabel ?? title}>{output || emptyMessage}</pre>
     </CollapsibleContent>
   </Collapsible>
 }

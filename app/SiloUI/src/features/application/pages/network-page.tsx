@@ -37,7 +37,7 @@ export function NetworkPage({ computers, browser, network, error, actions, activ
           const address = networkAddress(port, host)
           const state = networkPortState(computer, port, rowError)
           return <div key={key} role="row" className={`${grid} row-hover`}>
-            <span role="cell" className="font-mono font-medium">{port.port}</span><span role="cell" className="hidden min-w-0 font-mono text-muted-foreground sm:block">{address ? <Tooltip><TooltipTrigger asChild><span className="block truncate">{address}</span></TooltipTrigger><TooltipContent>{address}</TooltipContent></Tooltip> : "—"}</span>
+            <span role="cell" className="font-mono font-medium">{port.port}</span><span role="cell" className="hidden min-w-0 font-mono text-muted-foreground sm:block">{address ? <Tooltip><TooltipTrigger asChild><span className="block truncate select-text">{address}</span></TooltipTrigger><TooltipContent>{address}</TooltipContent></Tooltip> : "—"}</span>
             <span role="cell"><PortStateLabel state={state} /></span>
             <span role="cell"><ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} /></span>
             <span role="cell" className="flex justify-end gap-1"><NetworkPortRowActions controller={controller} computer={computer} port={port} state={state} browser={browser} host={host} /></span>
