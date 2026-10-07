@@ -13,12 +13,13 @@ const sizes = { sm: "size-3", md: "size-3.5" } as const
 export function Spinner({ size = "md", label, reduceMotion, className, ...props }: Omit<ComponentProps<typeof LoaderCircle>, "size"> & { size?: keyof typeof sizes; label?: string; reduceMotion?: boolean }) {
   const inheritedReduceMotion = useReduceMotion()
   const still = reduceMotion ?? inheritedReduceMotion
+  const labelled = Boolean(label || props["aria-label"] || props["aria-labelledby"])
   return (
     <LoaderCircle
       data-slot="spinner"
-      aria-hidden={label ? undefined : true}
+      aria-hidden={labelled ? undefined : true}
       aria-label={label}
-      role={label ? "img" : undefined}
+      role={labelled ? "img" : undefined}
       className={cn("shrink-0", sizes[size], !still && "animate-spin motion-reduce:animate-none", className)}
       {...props}
     />
