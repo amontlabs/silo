@@ -22,7 +22,7 @@ export function SecretsPage({ source, onSaveSecret, onRemoveSecret, onRetrySecre
       <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xs font-medium">Secrets</h2>
-          <p className="text-[11px] text-muted-foreground"><span>{secrets.length} configured</span> · This device</p>
+          <p className="text-caption text-muted-foreground"><span>{secrets.length} configured</span> · This device</p>
         </div>
         <Button type="button" variant="outline" size="xs" aria-label="Add secret" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget)}>
           <Plus aria-hidden="true" data-icon="inline-start" /> Add

@@ -376,7 +376,7 @@ export function GitHubAccessEditor({
                           if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur()
                         }}
                       />
-                      <label className="flex shrink-0 items-center gap-1 text-[11px]">
+                      <label className="flex shrink-0 items-center gap-1 text-caption">
                         <Checkbox
                           aria-label={`Apply Git identity to ${name}`}
                           checked={identity.apply}
@@ -460,7 +460,7 @@ export function GitHubAccessEditor({
                         )}
                         {access.repositoryMode !== "all" && selections.length > 0 && (
                           <div role="table" aria-label={`Selected repositories for ${name}`} className="overflow-hidden rounded-md border border-border">
-                            <div role="row" className={`grid ${repositoryGridColumns} items-center gap-2 bg-muted/50 px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground`}>
+                            <div role="row" className={`grid ${repositoryGridColumns} items-center gap-2 bg-muted/50 px-2 py-1.5 text-left text-caption font-medium text-muted-foreground`}>
                               <span role="columnheader">Repository</span>
                               <span role="columnheader" className="flex items-center justify-start gap-0.5 text-left">
                                 Allow GitHub changes

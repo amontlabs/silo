@@ -55,11 +55,11 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
         />
         <ListRowDetails label="Computer setup details">
           {progress.fraction !== undefined && <Progress value={progress.fraction * 100} aria-label="Computer setup progress" />}
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
             <span>{progress.completedOperations} of {progress.totalOperations} operations complete</span>
             <span aria-label="Elapsed time" className="shrink-0 font-mono tabular-nums">{formatElapsed(progress.elapsedSeconds)}</span>
           </div>
-          {failed && <p className="text-[11px] leading-4 text-muted-foreground select-text">{progress.recovery ?? "Resolve the reported computer issue, then retry setup."}</p>}
+          {failed && <p className="text-caption leading-4 text-muted-foreground select-text">{progress.recovery ?? "Resolve the reported computer issue, then retry setup."}</p>}
         </ListRowDetails>
         <ActivityOutput events={progress.visibleEvents} error={progress.activityError} embedded />
       </ListCard>

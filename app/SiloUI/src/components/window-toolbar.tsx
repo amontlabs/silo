@@ -32,7 +32,7 @@ export function WindowTitleBar({ title }: { title: string }) {
   const dragRegion = isTauri() || undefined
   return <header aria-label="Window toolbar" data-tauri-drag-region={dragRegion} className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-background px-3 select-none">
     <WindowControls />
-    <h1 data-tauri-drag-region={dragRegion} className="text-[13px] font-medium">{title}</h1>
+    <h1 data-tauri-drag-region={dragRegion} className="text-ui font-medium">{title}</h1>
     <div data-tauri-drag-region={dragRegion} className="flex justify-end"><LinuxMenuButton /></div>
   </header>
 }
@@ -85,7 +85,7 @@ export function WindowToolbar({ title, sidebarId, collapsed, previewing, toggleR
       <span aria-hidden="true" data-tauri-drag-region={dragRegion} className="silo-toolbar-divider" />
     </div>
     <div data-tauri-drag-region={dragRegion} className="flex min-w-0 flex-1 items-center">
-      {children ? <div data-tauri-drag-region={dragRegion} className="mx-auto flex w-full max-w-4xl items-center px-4 sm:px-6">{children}</div> : <h1 data-tauri-drag-region={dragRegion} className="px-4 text-[13px] font-medium sm:px-6">{title}</h1>}
+      {children ? <div data-tauri-drag-region={dragRegion} className="mx-auto flex w-full max-w-4xl items-center px-4 sm:px-6">{children}</div> : <h1 data-tauri-drag-region={dragRegion} className="px-4 text-ui font-medium sm:px-6">{title}</h1>}
     </div>
     <LinuxMenuButton disabled={sidebarDisabled} />
   </header>

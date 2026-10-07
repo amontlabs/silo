@@ -33,8 +33,8 @@ export function ListRow({
 } & Omit<ComponentProps<"div">, "title" | "children">) {
   const content = (
     <>
-      <div data-slot="list-row-title" className="flex min-w-0 items-center gap-1.5 text-[13px] leading-4 font-medium">{title}</div>
-      <div className={cn("truncate text-[11px] leading-4 text-muted-foreground", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>
+      <div data-slot="list-row-title" className="flex min-w-0 items-center gap-1.5 text-ui leading-4 font-medium">{title}</div>
+      <div className={cn("truncate text-caption leading-4 text-muted-foreground", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>
     </>
   )
   return (

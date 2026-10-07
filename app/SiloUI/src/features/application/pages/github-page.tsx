@@ -104,11 +104,11 @@ function ComputerSyncStatus({ operation }: { operation: GitHubComputerOperation 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" size="xs" className="h-6 gap-1 px-1.5 text-[11px] text-destructive hover:text-destructive" aria-label={`GitHub settings not applied for ${operation.computer}. View details`}>
+        <Button type="button" variant="ghost" size="xs" className="h-6 gap-1 px-1.5 text-caption text-destructive hover:text-destructive" aria-label={`GitHub settings not applied for ${operation.computer}. View details`}>
           <TriangleAlert className="size-3" aria-hidden="true" />Not applied
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 space-y-2 p-3 text-[11px]">
+      <PopoverContent className="w-80 space-y-2 p-3 text-caption">
         <p className="font-medium">{failure.message}</p>
         <p className="whitespace-pre-wrap leading-5">{failure.details}</p>
         <CopyButton variant="ghost" size="xs" value={failure.details} labels={{ idle: "Copy details", copied: "Details copied", failed: "Copy failed" }} text={{ idle: "Copy details", copied: "Copied", failed: "Copy failed" }} />
@@ -369,7 +369,7 @@ export function GitHubPage({
     <InlineConfirmation active={confirmingDisconnect} onDismiss={() => setConfirmingDisconnect(false)}>
       {confirmingDisconnect ? (
         <>
-          <span className="max-w-xs text-[11px] text-muted-foreground">Revokes Silo's GitHub authorization and removes repository access from every computer on this device.</span>
+          <span className="max-w-xs text-caption text-muted-foreground">Revokes Silo's GitHub authorization and removes repository access from every computer on this device.</span>
           <Button type="button" variant="ghost" size="xs" onClick={() => setConfirmingDisconnect(false)}>Cancel</Button>
           <Button type="button" variant="destructive" size="xs" onClick={disconnect}>Disconnect</Button>
         </>
@@ -385,7 +385,7 @@ export function GitHubPage({
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col px-4 py-5 sm:px-6 sm:py-6">
       <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
-        <p className="text-[11px] text-muted-foreground">GitHub access for computers on this device.</p>
+        <p className="text-caption text-muted-foreground">GitHub access for computers on this device.</p>
         {connectionState !== "connected" && tokenConnected && accessToggle}
       </div>
       <GitHubAccessEditor

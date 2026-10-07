@@ -12,7 +12,7 @@ export function SecretChangesLabel({ computer, state, secrets, inline = false }:
           aria-label={stopped ? `Secret changes apply on next start for ${computer}` : `Restart required for ${computer}`}
           className={inline
             ? "cursor-help rounded-sm text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-            : "shrink-0 cursor-help rounded-full bg-warning/10 px-1.5 py-0.5 text-[9px] font-medium text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring/60"}
+            : "shrink-0 cursor-help rounded-full bg-warning/10 px-1.5 py-0.5 text-caption font-medium text-warning outline-none focus-visible:ring-2 focus-visible:ring-ring/60"}
         >
           {stopped ? "Applies on next start" : "Restart required"}
         </span>

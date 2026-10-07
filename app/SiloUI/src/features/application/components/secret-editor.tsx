@@ -48,7 +48,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
   }
 
   function fieldError(field: keyof SecretDraft) {
-    return errors[field] && <span id={`${id}-${field}-error`} className="text-[11px] text-destructive" role="alert">{errors[field]}</span>
+    return errors[field] && <span id={`${id}-${field}-error`} className="text-caption text-destructive" role="alert">{errors[field]}</span>
   }
 
   return <form ref={formRef} aria-label={title} className="grid min-w-0 gap-3 p-3" noValidate onSubmit={(event) => {
@@ -73,7 +73,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     }
   }}>
     <h3 className="flex min-w-0 items-center gap-2 text-xs font-semibold"><KeyRound className="size-4 shrink-0" aria-hidden="true" /><span className="break-all">{title}</span></h3>
-    {settingsChanged && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-[11px]">
+    {settingsChanged && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-caption">
       <p role="alert">This secret changed while you were editing. Reload its current settings before saving.</p>
       <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => {
         if (!secret) return
@@ -84,19 +84,19 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     <fieldset disabled={saving || settingsChanged} className="grid min-w-0 gap-3">
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <div className="grid content-start gap-1">
-        <label htmlFor={`${id}-name`} className="text-[11px] font-medium text-muted-foreground">Name</label>
+        <label htmlFor={`${id}-name`} className="text-caption font-medium text-muted-foreground">Name</label>
         <Input technical id={`${id}-name`} value={draft.name} disabled={Boolean(secret)} autoComplete="off" spellCheck={false} autoCapitalize="off" className="font-mono" placeholder="SERVICE_TOKEN" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? `${id}-name-error` : undefined} onChange={(event) => update({ name: event.target.value })} />
         {fieldError("name")}
       </div>
       <div className="grid content-start gap-1">
-        <label htmlFor={`${id}-value`} className="text-[11px] font-medium text-muted-foreground">{secret ? "Replacement value" : "Value"}</label>
+        <label htmlFor={`${id}-value`} className="text-caption font-medium text-muted-foreground">{secret ? "Replacement value" : "Value"}</label>
         <Input technical id={`${id}-value`} type="password" value={draft.value} autoComplete="new-password" spellCheck={false} autoCapitalize="off" aria-invalid={Boolean(errors.value)} aria-describedby={errors.value ? `${id}-value-error` : secret ? `${id}-value-hint` : undefined} onChange={(event) => update({ value: event.target.value })} />
-        {secret && <p id={`${id}-value-hint`} className="text-[11px] text-muted-foreground">Leave blank to keep the current value.</p>}
+        {secret && <p id={`${id}-value-hint`} className="text-caption text-muted-foreground">Leave blank to keep the current value.</p>}
         {fieldError("value")}
       </div>
     </div>
     <fieldset className="grid min-w-0 gap-2">
-      <legend className="mb-2 text-[11px] font-medium text-muted-foreground">Computers</legend>
+      <legend className="mb-2 text-caption font-medium text-muted-foreground">Computers</legend>
       <FilterCombobox
         options={computers.map(({ configuration }) => ({ value: configuration.name, label: configuration.name }))}
         selectedValues={new Set(draft.computers)}
@@ -113,18 +113,18 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
       {fieldError("computers")}
     </fieldset>
     <div className="grid gap-1">
-      <label htmlFor={`${id}-domains`} className="text-[11px] font-medium text-muted-foreground">Allowed domains</label>
+      <label htmlFor={`${id}-domains`} className="text-caption font-medium text-muted-foreground">Allowed domains</label>
       <Input technical id={`${id}-domains`} value={draft.domains} autoComplete="off" spellCheck={false} autoCapitalize="off" placeholder="api.example.com, *.example.com" aria-invalid={Boolean(errors.domains)} aria-describedby={`${id}-domains-hint${errors.domains ? ` ${id}-domains-error` : ""}`} onChange={(event) => update({ domains: event.target.value, allowAnyDomain: false })} />
-      <p id={`${id}-domains-hint`} className="text-[11px] text-muted-foreground">Separate hosts with commas. Use * to allow any HTTPS destination.</p>
+      <p id={`${id}-domains-hint`} className="text-caption text-muted-foreground">Separate hosts with commas. Use * to allow any HTTPS destination.</p>
       {fieldError("domains")}
     </div>
-    {anyDomain && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-[11px] text-warning">
+    {anyDomain && <div className="grid gap-2 rounded-md bg-warning/10 p-2.5 text-caption text-warning">
       <p>Any HTTPS server could receive this secret.</p>
       <label className="flex items-center gap-2"><Checkbox checked={draft.allowAnyDomain} aria-invalid={Boolean(errors.allowAnyDomain)} aria-describedby={errors.allowAnyDomain ? `${id}-allowAnyDomain-error` : undefined} onCheckedChange={(checked) => update({ allowAnyDomain: checked === true })} />Allow any HTTPS destination</label>
       {fieldError("allowAnyDomain")}
     </div>}
     </fieldset>
-    {saveError && <p role="alert" className="text-[11px] text-destructive">{saveError}</p>}
+    {saveError && <p role="alert" className="text-caption text-destructive">{saveError}</p>}
     <div className="flex justify-end gap-2">
       <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>Cancel</Button>
       <Button type="submit" size="sm" disabled={saving || settingsChanged}>{saving && <Spinner />}{saving ? "Saving…" : saveError ? "Retry" : "Save"}</Button>

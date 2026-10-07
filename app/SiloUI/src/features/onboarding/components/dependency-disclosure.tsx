@@ -67,8 +67,8 @@ export function DependencyDisclosure({ group, onRetry }: { group: DependencyGrou
                       ? <AlertCircle className="mt-0.5 size-3.5 text-destructive" aria-label="Failed" />
                       : <Check className="mt-0.5 size-3.5 text-muted-foreground" aria-label="Checked" />}
                     <div className="min-w-0">
-                      <div className="text-[13px] leading-4 font-medium text-foreground">{item.name}</div>
-                      <div className="truncate whitespace-nowrap text-[11px] leading-4 text-muted-foreground">{itemCaption}</div>
+                      <div className="text-ui leading-4 font-medium text-foreground">{item.name}</div>
+                      <div className="truncate whitespace-nowrap text-caption leading-4 text-muted-foreground">{itemCaption}</div>
                     </div>
                   </div>
                 )

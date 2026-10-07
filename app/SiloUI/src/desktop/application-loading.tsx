@@ -46,8 +46,8 @@ function StatusPanelFrame({ busy = false, children }: { busy?: boolean; children
 export function StatusPanelUnavailable({ message, retry, checking = false }: { message: string; retry?: () => void; checking?: boolean }) {
   return <StatusPanelFrame>
     <div role="alert" className="grid justify-items-center gap-1.5 px-4 py-6 text-center">
-      <p className="text-[13px] font-medium">Silo could not load</p>
-      <p className="whitespace-pre-wrap text-[11px] text-muted-foreground select-text">{message}</p>
+      <p className="text-ui font-medium">Silo could not load</p>
+      <p className="whitespace-pre-wrap text-caption text-muted-foreground select-text">{message}</p>
       {retry && <Button type="button" variant="outline" size="xs" className="mt-1" disabled={checking} onClick={retry}>{checking ? "Checking…" : "Retry"}</Button>}
     </div>
   </StatusPanelFrame>
@@ -61,7 +61,7 @@ export function ApplicationLoading({ configurations, statusPanel = false }: { co
     <div className="shrink-0 px-2 pt-2" />
     <div className="min-h-0 overflow-y-auto overscroll-contain px-2 pb-2">{configurations.length ? <ListCard className="border-0"><ol aria-label="Computers" className="divide-y">
       {configurations.map((configuration) => <ComputerListItem key={configuration.id}><ComputerListRow name={configuration.name} detail={detail} actions={<LoadingControls />} /></ComputerListItem>)}
-    </ol></ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center"><ListRowIcon><Monitor className="size-3.5" /></ListRowIcon><p className="text-[13px] font-medium">Loading computers…</p></div>}</div>
+    </ol></ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center"><ListRowIcon><Monitor className="size-3.5" /></ListRowIcon><p className="text-ui font-medium">Loading computers…</p></div>}</div>
   </StatusPanelFrame>
   return <ApplicationShell activeTab="computers" computerSection="overview" settingsSection="general"
     systemIssueStatus={null} computerAttention={{ errors: 0, warnings: 0 }} navigationDisabled

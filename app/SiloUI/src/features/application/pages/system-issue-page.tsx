@@ -25,7 +25,7 @@ export function SystemIssuePage({ issue, actions }: { issue: ActiveRuntimeRepair
           }
         />
         <ListRowDetails label="Recovery instructions">
-          <p className="text-[11px] text-muted-foreground whitespace-pre-line">{issue.recovery ?? "Retry checks. If the runtime is still unavailable, quit and reopen Silo."}</p>
+          <p className="text-caption text-muted-foreground whitespace-pre-line">{issue.recovery ?? "Retry checks. If the runtime is still unavailable, quit and reopen Silo."}</p>
         </ListRowDetails>
       </ListCard>
     </div>

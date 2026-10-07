@@ -59,7 +59,7 @@ function AttentionMark({ attention, collapsed }: { attention: SidebarAttention; 
   return collapsed
     ? <span data-navigation-attention aria-hidden="true" className={cn("absolute top-1 right-1 size-1.5 rounded-full", error ? "bg-destructive" : "bg-warning")} />
     : <span data-navigation-attention aria-hidden="true" className={cn(
-      "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1 text-[10px] leading-none font-semibold tabular-nums",
+      "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1 text-caption leading-none font-semibold tabular-nums",
       error ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/20 bg-warning/10 text-warning",
     )}>{attention.errors + attention.warnings}</span>
 }
@@ -121,7 +121,7 @@ function NavigationButton({
       aria-describedby={describedBy}
       onClick={onClick}
       className={cn(
-        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
+        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-ui focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/70",
         tone === "danger"
           ? "text-destructive hover:bg-destructive/[0.07] hover:text-destructive"
           : tone === "warning"
@@ -255,7 +255,7 @@ function SubNavigation<Section extends string>({
                       <span
                         role="status"
                         aria-label={errorsLabel(attention.errors)}
-                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-destructive"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 px-1 text-caption leading-none font-semibold tabular-nums text-destructive"
                       >
                         {attention.errors}
                       </span>
@@ -269,7 +269,7 @@ function SubNavigation<Section extends string>({
                       <span
                         role="status"
                         aria-label={warningsLabel(attention.warnings)}
-                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-warning/20 bg-warning/10 px-1 text-[10px] leading-none font-semibold tabular-nums text-warning"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-warning/20 bg-warning/10 px-1 text-caption leading-none font-semibold tabular-nums text-warning"
                       >
                         {attention.warnings}
                       </span>

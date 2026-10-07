@@ -12,7 +12,7 @@ export function StatusBadge({ indicator, children, className, ...props }: Status
       {...props}
       data-slot="status-badge"
       className={cn(
-        "inline-flex h-5 max-w-full shrink-0 items-center justify-center gap-1 rounded-full border border-border bg-muted/45 px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-muted-foreground",
+        "inline-flex h-5 max-w-full shrink-0 items-center justify-center gap-1 rounded-full border border-border bg-muted/45 px-1.5 text-caption leading-4 font-medium whitespace-nowrap text-muted-foreground",
         className,
       )}
     >

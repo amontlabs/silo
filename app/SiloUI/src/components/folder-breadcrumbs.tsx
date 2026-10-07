@@ -46,7 +46,7 @@ export function FolderBreadcrumbs({ segments, onNavigate }: {
   }
   const separator = <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 
-  return <nav ref={container} aria-label="Folder path" className="relative min-w-0 overflow-hidden text-[11px]">
+  return <nav ref={container} aria-label="Folder path" className="relative min-w-0 overflow-hidden text-caption">
     <div ref={measurement} aria-hidden="true" className="pointer-events-none invisible absolute flex w-max items-center gap-0.5 whitespace-nowrap">
       {labels.map((label, index) => <span key={index} className="flex shrink-0 items-center gap-0.5">
         {index > 0 && separator}<span className="px-1 py-1">{label}</span>

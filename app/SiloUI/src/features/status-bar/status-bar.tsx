@@ -60,7 +60,7 @@ function RepositoryPushes({ computer, source, actions }: { computer: Application
         // invisible or bidirectional characters revealed: a basename could imitate another.
         const path = visibleText(repository.path)
         return <div key={repository.path} className="flex min-h-6 min-w-0 items-center gap-2" role="group" aria-label={`${path} in ${computer.configuration.name}`}>
-          <span className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-muted-foreground" title={path}>
+          <span className="flex min-w-0 flex-1 items-center gap-1 text-caption text-muted-foreground" title={path}>
             <GitBranch className="size-3 shrink-0" aria-hidden="true" />
             <span className="truncate">{path}</span>
           </span>
@@ -243,8 +243,8 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                 />
                 <RepositoryPushes computer={computer} source={source} actions={actions} />
                 {startPrompt?.target === target && <ListRowDetails label={startPrompt.prompt.title} className="gap-2 pl-0">
-                  <p className="text-[11px] font-medium">{startPrompt.prompt.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{startPrompt.prompt.description}</p>
+                  <p className="text-caption font-medium">{startPrompt.prompt.title}</p>
+                  <p className="text-caption text-muted-foreground">{startPrompt.prompt.description}</p>
                   <div className="flex justify-end gap-1.5">
                     <Button variant="ghost" size="xs" onClick={() => setStartPrompt(null)}>Cancel</Button>
                     <Button size="xs" disabled={!availability.canStart} onClick={() => {
@@ -254,7 +254,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
                   </div>
                 </ListRowDetails>}
                 {pending && <ListRowDetails label={`${pending.action === "stop" ? "Stop" : "Restart"} ${configuration.name}?`} className="gap-2 pl-0">
-                  <p className="text-[11px] text-muted-foreground">{pendingPrompt?.title} {pendingPrompt?.description}</p>
+                  <p className="text-caption text-muted-foreground">{pendingPrompt?.title} {pendingPrompt?.description}</p>
                   <div className="flex justify-end gap-1.5">
                     <Button variant="ghost" size="xs" onClick={() => setConfirmation(null)}>Cancel</Button>
                     <Button variant="destructive" size="xs" disabled={pending.action === "stop" ? !availability.canStop : !availability.canRestart} onClick={() => {
@@ -270,8 +270,8 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
           </ol>
         </ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center">
           <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
-          <p className="text-[13px] font-medium">No computers yet</p>
-          <p className="text-[11px] text-muted-foreground">Open Silo to create your first computer.</p>
+          <p className="text-ui font-medium">No computers yet</p>
+          <p className="text-caption text-muted-foreground">Open Silo to create your first computer.</p>
         </div>}
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">

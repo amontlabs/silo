@@ -260,14 +260,14 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
           {item.status === "running" && item.progress !== undefined && (
             <div className="flex max-w-sm items-center gap-2 pt-1">
               <Progress value={item.progress * 100} aria-label={item.progressLabel ?? `${item.title} progress`} />
-              <span className="w-8 shrink-0 text-right text-[10px] tabular-nums">{Math.round(item.progress * 100)}%</span>
+              <span className="w-8 shrink-0 text-right text-caption tabular-nums">{Math.round(item.progress * 100)}%</span>
             </div>
           )}
         </div>
       }
       actions={
         <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1" data-activity-meta>
-          <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{formatActivityTime(item.occurredAt)}</time>
+          <time dateTime={item.occurredAt} className="text-caption text-muted-foreground">{formatActivityTime(item.occurredAt)}</time>
           <div className="flex flex-wrap justify-end gap-1">
             {item.computer && (computer
               ? <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />

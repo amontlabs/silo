@@ -62,7 +62,7 @@ function LogRecord({ row, rowIndex, open, onOpenChange, onHeightChange }: {
   return <Collapsible asChild open={open} onOpenChange={onOpenChange}>
     <tbody ref={element} role="rowgroup" className="collapsible-motion">
       <tr role="row" aria-rowindex={rowIndex} style={{ height: ROW_HEIGHT }} className="group/log-row border-b border-border row-hover">
-        <td role="cell" title={entry.guestTimestamp ? `${entry.occurredAt} (time reported by the computer)` : entry.occurredAt} className="px-3 font-mono whitespace-nowrap text-muted-foreground"><time dateTime={entry.occurredAt}>{time}</time><span className="block text-[10px]">{timestamp.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></td>
+        <td role="cell" title={entry.guestTimestamp ? `${entry.occurredAt} (time reported by the computer)` : entry.occurredAt} className="px-3 font-mono whitespace-nowrap text-muted-foreground"><time dateTime={entry.occurredAt}>{time}</time><span className="block text-caption">{timestamp.toLocaleDateString("en", { month: "short", day: "numeric" })}</span></td>
         <td role="cell" title={`${entry.source}${entry.session ? ` · session ${entry.session}` : ""}\n${entry.line}`} className="max-w-0 truncate px-3 font-mono">{embedded?.[2] ?? entry.line}</td>
         <td role="cell" className="px-3 whitespace-nowrap"><ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} /></td>
         <td role="cell" className="px-3 whitespace-nowrap text-muted-foreground">{entry.source}</td>
@@ -75,7 +75,7 @@ function LogRecord({ row, rowIndex, open, onOpenChange, onHeightChange }: {
         <td role="cell" colSpan={5} className="max-w-0 p-0">
           <CollapsibleContent role="region" aria-label={`Log details from ${computer.configuration.name} at ${time}`} className="overflow-hidden">
             <div className="border-b border-border bg-muted/20 px-3 py-3">
-              <p className="mb-2 text-[10px] text-muted-foreground">{entry.occurredAt}{entry.guestTimestamp ? " (time reported by the computer)" : ""} · {entry.source}{entry.session ? ` · Session ${entry.session}` : ""}</p>
+              <p className="mb-2 text-caption text-muted-foreground">{entry.occurredAt}{entry.guestTimestamp ? " (time reported by the computer)" : ""} · {entry.source}{entry.session ? ` · Session ${entry.session}` : ""}</p>
               <pre role="group" tabIndex={0} aria-label={`Log message from ${computer.configuration.name} at ${time}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 select-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">{entry.line}</pre>
             </div>
           </CollapsibleContent>

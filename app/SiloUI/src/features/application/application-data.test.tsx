@@ -99,7 +99,7 @@ it("uses one global computer filter across Files, Logs, Network, and Activity", 
   const devBadge = within(devRepository).getByLabelText("dev, Running")
   expect(devBadge).toBeVisible()
   expect(devBadge).toHaveAttribute("data-slot", "status-badge")
-  expect(devBadge).toHaveClass("h-5", "items-center", "justify-center", "text-[10px]")
+  expect(devBadge).toHaveClass("h-5", "items-center", "justify-center", "text-caption")
   expect(devBadge.querySelector('[data-slot="status-badge-indicator"]')).toHaveClass("grid", "size-2", "place-items-center")
   expect(devBadge.querySelector('[data-slot="status-badge-label"]')).toHaveTextContent("dev")
   expect(devRepository.querySelector('[data-computer-state-dot="running"]')).toHaveClass("bg-success")

@@ -23,7 +23,7 @@ export function EditorIncludeNotice() {
         <h2 id="editor-include-notice-title" className="font-medium">Add a line to your SSH configuration</h2>
         <p className="mt-0.5 text-muted-foreground">Silo couldn't update your SSH config, which links to a file it can't change. Add this line at the top so editors reconnect to your current computers.</p>
         <div className="mt-2 flex items-start gap-2">
-          <code className="min-w-0 flex-1 select-all break-all rounded border bg-background/60 px-2 py-1 font-mono text-[11px]">{line}</code>
+          <code className="min-w-0 flex-1 select-all break-all rounded border bg-background/60 px-2 py-1 font-mono text-caption">{line}</code>
           <CopyButton size="xs" variant="outline" value={line} labels={{ idle: "Copy line to add", copied: "Line copied", failed: "Copy failed" }} text={{ idle: "Copy", copied: "Copied", failed: "Copy failed" }} />
         </div>
         <Button size="xs" variant="outline" className="mt-2" onClick={dismiss}>Got it</Button>

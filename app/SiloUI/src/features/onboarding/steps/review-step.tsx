@@ -91,7 +91,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             return <ComputerListItem key={configuration.id} aria-busy={state === "working"}>
               <ComputerListRow
                 name={configuration.name}
-                leading={<span className="w-5 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>}
+                leading={<span className="w-5 shrink-0 text-center font-mono text-caption tabular-nums text-muted-foreground">{index + 1}</span>}
                 tone={state === "failed" ? "error" : state === "working" ? "starting" : state === "ready" ? "running" : "stopped"}
                 iconState={state === "failed" ? "error" : "normal"}
                 badge={<ValidationBadge status={status} />}
@@ -118,7 +118,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             role="group"
             aria-label={title}
             className={complete ? statusTones.success.row : undefined}
-            title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-[10px] font-normal text-muted-foreground">Skipped</span>}</>}
+            title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-caption font-normal text-muted-foreground">Skipped</span>}</>}
             detail={title === "Git identity" && identityFailure?.failure ? `${detail} · ${identityFailure.failure}` : detail}
             detailClassName={title === "Git identity" && identityFailure ? "whitespace-normal break-words text-destructive" : undefined}
           />)}

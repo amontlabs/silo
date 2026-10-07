@@ -23,7 +23,7 @@ export function StatusIcon({ status, waitingLabel, className }: StatusIconProps)
   return (
     <span
       aria-label="Waiting"
-      className={cn("grid size-4 place-items-center rounded-full border border-border text-[9px] text-muted-foreground", className)}
+      className={cn("grid size-4 place-items-center rounded-full border border-border text-caption text-muted-foreground", className)}
     >
       {waitingLabel}
     </span>

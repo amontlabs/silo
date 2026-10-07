@@ -100,7 +100,7 @@ export function ShutdownBoundary({ children, compact = false, pendingWork }: { c
           <Dialog.Title className="sr-only">Quitting Silo</Dialog.Title>
           <div role="status" className="flex max-w-sm flex-col items-center gap-3 px-6 text-center">
             <Spinner reduceMotion={reduceMotion} strokeWidth={1.5} className="size-6 text-muted-foreground" />
-            <Dialog.Description className="text-[13px] font-medium text-foreground">{waitingLabel ?? pendingWork ?? (stopping ? `${stopping}…` : "Stopping local computers…")}</Dialog.Description>
+            <Dialog.Description className="text-ui font-medium text-foreground">{waitingLabel ?? pendingWork ?? (stopping ? `${stopping}…` : "Stopping local computers…")}</Dialog.Description>
             {waitingLabel && (cancellable.length > 0
               ? <Button type="button" size="sm" variant="outline" onClick={cancelAndQuit}>Cancel and quit</Button>
               : <p className="text-xs text-muted-foreground">Quit will finish once this work completes.</p>)}

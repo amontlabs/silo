@@ -123,7 +123,7 @@ function FailedPush({ operation, repositoryPath, repository, onPush, disabled }:
             ? <ConfirmBody {...pushConfirmation(target, repository.ahead)} onConfirm={() => onPush(target)} onClose={() => change(false)} />
             : <>
               <p className="text-destructive">{operation.message}</p>
-              {operation.diagnosticDetails && <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[10px] leading-4 whitespace-pre-wrap text-muted-foreground">{operation.diagnosticDetails}</pre>}
+              {operation.diagnosticDetails && <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-caption leading-4 whitespace-pre-wrap text-muted-foreground">{operation.diagnosticDetails}</pre>}
               <Button className="justify-self-start" variant="outline" size="xs" disabled={disabled || !target} title={target ? undefined : UNCONFIRMABLE} onClick={() => setConfirming(true)} aria-label={`Retry push for ${repositoryPath}`}>
                 <RotateCw aria-hidden="true" />
                 Retry

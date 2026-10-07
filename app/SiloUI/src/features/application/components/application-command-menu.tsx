@@ -102,12 +102,12 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
         {confirming?.confirm ? <CommandConfirmationPanel command={confirming} onCancel={() => setConfirming(null)} onConfirm={() => { if (disabled) return; setOpen(false); confirming.run() }} /> : <Command label="Search commands" filter={filterItem} loop vimBindings={false}>
           <div className="flex items-center gap-3 border-b border-border px-4">
             <Search aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-            <Command.Input aria-label="Search commands" placeholder="Search pages, computers, and actions…" autoFocus autoComplete="off" spellCheck={false} className="h-12 min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground" />
-            <Dialog.Close aria-label="Close commands" className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">Esc</Dialog.Close>
+            <Command.Input aria-label="Search commands" placeholder="Search pages, computers, and actions…" autoFocus autoComplete="off" spellCheck={false} className="h-12 min-w-0 flex-1 bg-transparent text-ui outline-none placeholder:text-muted-foreground" />
+            <Dialog.Close aria-label="Close commands" className="rounded border border-border px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring">Esc</Dialog.Close>
           </div>
           <Command.List className="max-h-[min(22rem,50dvh)] overflow-y-auto overscroll-contain scroll-py-2 p-1.5" label="Commands">
             <Command.Empty className="px-4 py-10 text-center text-xs text-muted-foreground">No commands found.</Command.Empty>
-            {groups.map((group) => <Command.Group key={group} value={group.replaceAll(" ", "-")} heading={group} className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
+            {groups.map((group) => <Command.Group key={group} value={group.replaceAll(" ", "-")} heading={group} className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-caption [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">
               {commands.filter((command) => command.group === group).map((command) => <Command.Item key={command.id} value={command.id} keywords={[command.label, ...(command.keywords ?? [])]} onSelect={() => {
                 if (disabled) return
                 if (command.confirm) { setConfirming(command.id); return }
@@ -120,7 +120,7 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
               </Command.Item>)}
             </Command.Group>)}
           </Command.List>
-          <div aria-hidden="true" className="flex items-center gap-4 border-t border-border bg-muted/30 px-4 py-2 text-[10px] text-muted-foreground">
+          <div aria-hidden="true" className="flex items-center gap-4 border-t border-border bg-muted/30 px-4 py-2 text-caption text-muted-foreground">
             <span className="flex items-center gap-1"><ArrowUp className="size-3" /><ArrowDown className="size-3" /> Navigate</span>
             <span className="flex items-center gap-1"><CornerDownLeft className="size-3" /> Run command</span>
           </div>
@@ -134,7 +134,7 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
 function CommandConfirmationPanel({ command, onCancel, onConfirm }: { command: ApplicationCommand; onCancel: () => void; onConfirm: () => void }) {
   const confirm = command.confirm!
   return <div role="group" aria-label={confirm.title} className="grid gap-2 p-4 text-xs">
-    <p className="text-[13px] font-medium">{confirm.title}</p>
+    <p className="text-ui font-medium">{confirm.title}</p>
     <p className="text-muted-foreground">{confirm.description}</p>
     <div className="mt-1 flex justify-end gap-2">
       <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>

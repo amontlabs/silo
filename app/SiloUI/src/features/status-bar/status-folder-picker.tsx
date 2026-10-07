@@ -80,8 +80,8 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
       <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
         <Button ref={back} variant="ghost" size="icon-xs" aria-label="Back to computers" onClick={onBack}><ArrowLeft /></Button>
         <div className="min-w-0">
-          <h2 className="truncate text-[13px] font-medium" title={`${computer.configuration.name} folders`}>{computer.configuration.name} folders</h2>
-          <p className="text-[11px] text-muted-foreground">Choose a folder to open in {editor}</p>
+          <h2 className="truncate text-ui font-medium" title={`${computer.configuration.name} folders`}>{computer.configuration.name} folders</h2>
+          <p className="text-caption text-muted-foreground">Choose a folder to open in {editor}</p>
         </div>
       </header>
       <div className="grid min-h-0 flex-auto content-start gap-2 overflow-y-auto p-3">

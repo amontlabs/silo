@@ -88,7 +88,7 @@ export function SshAccessRow({ computer, access, save, connection, stale, embedd
   const header = <div className="flex items-center gap-3 px-3 py-2">
       <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />
       <span className={cn("rounded border px-1.5 py-0.5", !stale && access?.state === "error" ? "border-destructive/20 text-destructive" : "border-border text-muted-foreground")}>{badge}{access?.enabled && external ? " · Network" : ""}</span>
-      <Tooltip><TooltipTrigger asChild><CollapsibleTrigger asChild><Button variant="ghost" size="icon-xs" className="group ml-auto w-auto gap-0.5 px-1.5 text-[11px]" aria-label={`SSH access controls for ${computer.configuration.name}`}>SSH access<ChevronDown className="size-2.5 transition-transform group-aria-expanded:rotate-180" /></Button></CollapsibleTrigger></TooltipTrigger><TooltipContent>SSH access controls</TooltipContent></Tooltip>
+      <Tooltip><TooltipTrigger asChild><CollapsibleTrigger asChild><Button variant="ghost" size="icon-xs" className="group ml-auto w-auto gap-0.5 px-1.5 text-caption" aria-label={`SSH access controls for ${computer.configuration.name}`}>SSH access<ChevronDown className="size-2.5 transition-transform group-aria-expanded:rotate-180" /></Button></CollapsibleTrigger></TooltipTrigger><TooltipContent>SSH access controls</TooltipContent></Tooltip>
     </div>
 
   const editor = access && ((port !== null || address !== null) && <form noValidate className="flex flex-wrap items-end gap-2" onSubmit={event => {
@@ -179,7 +179,7 @@ export function SshAccessBadges({ access, stale = false, onOpen }: { access?: Ss
     : unknown ? "border-warning/20 bg-warning/10 text-warning"
     : network ? "border-blue-500/15 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"
   const name = access.state === "listening" && !unknown ? label : `${label}: ${status}`
-  const className = `inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`
+  const className = `inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-caption font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`
   const content = <>{failed || unknown ? <TriangleAlert className="size-3" aria-hidden="true" /> : network && <ConnectionIcon kind="ssh" network className="size-3" />}{failed ? "SSH error" : "SSH"}</>
   return <TooltipProvider delayDuration={150}><Tooltip><TooltipTrigger asChild>
     {onOpen

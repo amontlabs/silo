@@ -183,7 +183,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
           <Button size="xs" variant="outline" className="shrink-0" disabled={locked}>New checkpoint</Button>
         </FormPopover>}
       </div>
-      <p className="text-[11px] text-muted-foreground">Checkpoints let you rewind this computer. Restore replaces its current files; Fork creates a new stopped computer with a copy of its files.</p>
+      <p className="text-caption text-muted-foreground">Checkpoints let you rewind this computer. Restore replaces its current files; Fork creates a new stopped computer with a copy of its files.</p>
 
       {staleFailure && <p className="text-muted-foreground">Last checkpoint operation failed: <span className="text-destructive">{staleFailure}</span></p>}
 

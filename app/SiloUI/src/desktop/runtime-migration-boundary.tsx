@@ -164,7 +164,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
       {error && !failed && <div><Button size="sm" disabled={busy} onClick={() => { setError(null); setSubscriptionError(null); setSubscribed(false); setAttempt(value => value + 1) }}>Retry</Button></div>}
       {state && <section aria-label="Migration log" className="min-h-0 rounded-md border bg-muted/30">
         <div className="flex items-center justify-between border-b px-3 py-2"><h2 className="text-xs font-medium">Live migration log</h2><Button size="xs" variant="ghost" onClick={() => setShowLogs(value => !value)}>{showLogs ? "Hide logs" : "Show logs"}</Button></div>
-        {showLogs && <div className="p-3"><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]" aria-live="polite">{state.logs.length ? state.logs.join("\n") : "Waiting for migration output…"}</pre>{state.logPath && <p className="mt-2 break-all text-[11px] text-muted-foreground">Full log: {state.logPath}</p>}</div>}
+        {showLogs && <div className="p-3"><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-caption" aria-live="polite">{state.logs.length ? state.logs.join("\n") : "Waiting for migration output…"}</pre>{state.logPath && <p className="mt-2 break-all text-caption text-muted-foreground">Full log: {state.logPath}</p>}</div>}
       </section>}
       {failed && state && <div className="space-y-3 rounded-md border border-warning/30 bg-warning/[.05] p-3 text-xs">
         <p>Review the logs and retry. You can back up your work yourself before continuing. Continuing leaves unmigrated originals in place; affected computers may be unavailable in the new runtime.</p>

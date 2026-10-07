@@ -50,18 +50,18 @@ export function UpdatesCard() {
               : state?.phase === "ready" ? <Button size="xs" variant="outline" disabled={busy || !state.canInstall} onClick={requestInstall}>Restart and update</Button>
                 : error || state?.phase === "downloading" || state?.phase === "installing" ? null : <Button size="xs" variant="outline" disabled={busy || !state} onClick={updates.check}><RefreshCw aria-hidden="true" className="size-3" />Check for updates</Button>}
           </InlineConfirmation>} />
-        {confirm && installing && state && <p className="px-2 pb-2 text-[11px] text-muted-foreground">{state.runningComputers.join(", ")} will stop and restart after updating. Save your work before continuing.</p>}
+        {confirm && installing && state && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.runningComputers.join(", ")} will stop and restart after updating. Save your work before continuing.</p>}
         {state?.phase === "downloading" && <div className="px-2 pb-2">
           <div role="progressbar" aria-label="Update download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={percent === undefined ? `${state.downloadedBytes.toLocaleString()} bytes downloaded` : `${percent}%`} className="h-1 overflow-hidden rounded-full bg-muted">
             <div className={percent === undefined ? "h-full w-1/3 animate-pulse bg-primary motion-reduce:animate-none" : "h-full bg-primary"} style={percent === undefined ? undefined : { width: `${percent}%` }} />
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">{percent === undefined ? `${(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded` : `${percent}%`}</p>
+          <p className="mt-1 text-caption text-muted-foreground">{percent === undefined ? `${(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded` : `${percent}%`}</p>
         </div>}
         {error && <div role="alert" className="mx-2 mb-2 rounded-md border border-destructive/25 bg-destructive/[.06] p-2 text-xs">
           <div className="flex items-center justify-between gap-2"><p>{error}</p>{!confirm && state?.retryAction !== "relaunch" && <Button size="xs" variant="outline" disabled={busy || (installing && !state?.canInstall)} onClick={retry}>Retry</Button>}</div>
-          {state?.errorDetails && <details className="mt-1 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Details</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.errorDetails}</p></details>}
+          {state?.errorDetails && <details className="mt-1 text-caption text-muted-foreground"><summary className="cursor-pointer">Details</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.errorDetails}</p></details>}
         </div>}
-        {state?.packageKind === "manual" && state.phase === "available" && <details className="px-2 pb-2 text-[11px] text-muted-foreground">
+        {state?.packageKind === "manual" && state.phase === "available" && <details className="px-2 pb-2 text-caption text-muted-foreground">
           <summary className="cursor-pointer">How to install</summary>
           <div className="mt-1 grid gap-2">
             <p>Quit Silo before installing. Quitting stops local computers.</p>
@@ -71,8 +71,8 @@ export function UpdatesCard() {
             <code className="whitespace-pre-wrap break-words">sudo apt install /path/to/silo.deb</code>
           </div>
         </details>}
-        {state?.packageKind === "debian" && state.phase === "available" && <p className="px-2 pb-2 text-[11px] text-muted-foreground">{state.installBlockReason ?? "Your system will ask for authentication. Silo will update and restart."}</p>}
-        {state?.releaseNotes && state.availableVersion && <details className="px-2 pb-2 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Release notes</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.releaseNotes}</p></details>}
+        {state?.packageKind === "debian" && state.phase === "available" && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.installBlockReason ?? "Your system will ask for authentication. Silo will update and restart."}</p>}
+        {state?.releaseNotes && state.availableVersion && <details className="px-2 pb-2 text-caption text-muted-foreground"><summary className="cursor-pointer">Release notes</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.releaseNotes}</p></details>}
       </div>
       <ListRow icon={<ListRowIcon><RefreshCw aria-hidden="true" className="size-3.5" /></ListRowIcon>} title="Automatically check for updates" detail="Checks after launch, when you return to Silo, and daily. Failed checks retry automatically. You choose when to download and install."
         detailClassName="whitespace-normal" actions={<Switch aria-label="Automatically check for updates" checked={state?.automaticChecks ?? false} disabled={!state || busy} onCheckedChange={updates.setAutomaticChecks} />} />

@@ -137,7 +137,7 @@ function ViewAllAction({ label, onClick }: { label: string; onClick: () => void 
     type="button"
     aria-label={label}
     onClick={onClick}
-    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-[11px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+    className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-caption text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
   >
     View all<ChevronRight className="size-3" aria-hidden="true" />
   </button>
@@ -451,7 +451,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
                 capacity={editing.deviceId ? undefined : deviceCapacityFrom(source.deviceCapacity)}
                 deviceName={computer.device?.name}
                 deviceId={editing.deviceId}
-                editorHeader={editingContext?.devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={editing.deviceId} disabled={Boolean(editing.editor.originalID) || editing.committing} onChange={event => editing.setDeviceId(event.target.value)}><option value="">This device</option>{editingContext.devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}
+                editorHeader={editingContext?.devices ? <label className="grid gap-1 text-caption text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={editing.deviceId} disabled={Boolean(editing.editor.originalID) || editing.committing} onChange={event => editing.setDeviceId(event.target.value)}><option value="">This device</option>{editingContext.devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}
                 focusRequest={editing.editorFocusRequest}
                 created={Boolean(editing.editor.originalID && editingContext?.isComputerCreated?.(configuration))}
                 running={Boolean(editing.editor.originalID && editingContext?.isComputerRunning?.(configuration))}

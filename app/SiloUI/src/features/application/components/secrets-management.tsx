@@ -40,13 +40,13 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
         icon={<ListRowIcon aria-hidden="true"><KeyRound className="size-3.5" /></ListRowIcon>}
         title={<div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <h3 className="break-all font-mono">{secret.name}</h3>
-          {secret.state === "applying" && <span role="status" className="text-[10px] text-muted-foreground">{secret.removing ? "Removing…" : "Applying…"}</span>}
+          {secret.state === "applying" && <span role="status" className="text-caption text-muted-foreground">{secret.removing ? "Removing…" : "Applying…"}</span>}
           {secret.state === "restart-required" && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+            <span className="inline-flex items-center gap-1 text-caption text-warning">
               <RotateCw className="size-3" aria-hidden="true" />Restart to apply{secret.pendingComputers?.length ? `: ${secret.pendingComputers.join(", ")}` : ""}
             </span>
           )}
-          {secret.removing && secret.state !== "applying" && <span className="text-[10px] text-muted-foreground">Removal pending</span>}
+          {secret.removing && secret.state !== "applying" && <span className="text-caption text-muted-foreground">Removal pending</span>}
         </div>}
         detailClassName="whitespace-normal"
         detail={<div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -58,7 +58,7 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
                 : <StatusBadge key={name} indicator={<Box className="size-2" />}>{name}</StatusBadge>
             })}
           </div>
-          <p className="flex min-w-0 items-start gap-1 text-[11px] text-muted-foreground" aria-label={`Allowed domains for ${secret.name}`}>
+          <p className="flex min-w-0 items-start gap-1 text-caption text-muted-foreground" aria-label={`Allowed domains for ${secret.name}`}>
             <Globe className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
             <span className="break-all">{secret.allowedDomains.join(", ") || "No allowed domains"}</span>
           </p>
@@ -79,7 +79,7 @@ export function SecretRow({ secret, manager }: { secret: ApplicationSecret; mana
           </ConfirmPopover>
         </div>}
       />
-      {failure && <div className="flex items-center justify-between gap-3 px-3 pb-3 text-[11px] text-destructive">
+      {failure && <div className="flex items-center justify-between gap-3 px-3 pb-3 text-caption text-destructive">
         <p role="alert">{failure}</p>
         <Button variant="outline" size="xs" disabled={disabled || (!manager.onRetrySecret && manager.operationError?.id !== secret.id)} onClick={() => { const action = manager.operationError?.id === secret.id ? manager.operationError.action : manager.onRetrySecret; if (action) void manager.runOperation(secret.id, action) }}>
           {working && <Spinner />}Retry

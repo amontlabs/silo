@@ -191,7 +191,7 @@ function ConfigurationDetail({ view }: { view: ConfigurationRowView }) {
       <div role="status" aria-live="polite" aria-atomic="true" className="relative h-4 min-w-0">
         <div className="flex min-w-0 items-center gap-3">
           <span className="min-w-0 flex-1 truncate" title={view.message}>{view.message}</span>
-          {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
+          {progressLabel && <span className="shrink-0 text-caption text-muted-foreground">{progressLabel}</span>}
         </div>
         {view.completedSteps !== undefined && (
           <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="absolute inset-x-0 -bottom-1 h-0.5" />
@@ -208,12 +208,12 @@ function ConfigurationDetail({ view }: { view: ConfigurationRowView }) {
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <ErrorDetails className="flex-1 text-destructive" message={view.message} diagnostic={view.diagnostic} fallbackSummary="Computer changes failed." />
-        {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
+        {progressLabel && <span className="shrink-0 text-caption text-muted-foreground">{progressLabel}</span>}
       </div>
       {view.completedSteps !== undefined && (
         <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="mt-0.5" />
       )}
-      {view.recovery && <p className="text-[10px] text-muted-foreground">{view.recovery}</p>}
+      {view.recovery && <p className="text-caption text-muted-foreground">{view.recovery}</p>}
     </div>
   )
 }
@@ -734,7 +734,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                         {computer ? <ComputerStatus computer={computer} source={source} readOnly={readOnly} onCancel={actions.cancelOperation} /> : <ComputerStateLabel state={state} />}
                         {computer?.attention && <> · {computer.attention.message}</>}
                       </span>
-                      {computer?.canDismissError && state === "failed" && <Button size="xs" variant="ghost" className="h-4 rounded px-1 text-[10px] font-normal" aria-label={`Dismiss ${configuration.name} error`} disabled={configurationLocked || computerOperationBusy || computer.freshness === "stale"} onClick={() => actions.dismissComputerError(computerTarget(computer))}>Dismiss</Button>}
+                      {computer?.canDismissError && state === "failed" && <Button size="xs" variant="ghost" className="h-4 rounded px-1 text-caption font-normal" aria-label={`Dismiss ${configuration.name} error`} disabled={configurationLocked || computerOperationBusy || computer.freshness === "stale"} onClick={() => actions.dismissComputerError(computerTarget(computer))}>Dismiss</Button>}
                     </span>
                   ),
                   actions: <>

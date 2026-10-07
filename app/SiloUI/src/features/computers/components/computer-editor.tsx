@@ -44,7 +44,7 @@ function SelectField({ label, value, values, suffix, max, error, readOnly = fals
   const errorId = useId()
   const describedBy = error ? errorId : undefined
   const field = (
-    <div className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
+    <div className="grid min-w-0 gap-1 text-caption font-medium text-muted-foreground">
       {label}
       <select
         disabled={readOnly}
@@ -97,7 +97,7 @@ function TextField({ label, value, error, hint, firstField = false, inputRef, ..
   const errorId = useId()
   const hintId = useId()
   return (
-    <label className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
+    <label className="grid min-w-0 gap-1 text-caption font-medium text-muted-foreground">
       {label}
       <Input technical ref={firstField ? inputRef : undefined} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : hint ? hintId : undefined} value={value} {...props} />
       {error ? <span id={errorId} className="text-destructive">{error}</span> : hint && <span id={hintId} className="font-normal">{hint}</span>}
@@ -305,11 +305,11 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         onChange={(event) => update({ name: event.target.value })}
       />
 
-      {created && <p className="text-[11px] text-muted-foreground">Existing computers cannot be renamed or have their disks resized. To use a different disk size, create a new computer and transfer your data.</p>}
-      {editor.displayAfterID && <p className="text-[11px] text-muted-foreground">Creates a new empty computer with the same settings. Files are not included.</p>}
+      {created && <p className="text-caption text-muted-foreground">Existing computers cannot be renamed or have their disks resized. To use a different disk size, create a new computer and transfer your data.</p>}
+      {editor.displayAfterID && <p className="text-caption text-muted-foreground">Creates a new empty computer with the same settings. Files are not included.</p>}
 
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-        <p className="col-span-full text-[11px] text-muted-foreground">"At start" values are what the computer begins with; the maximums are the most it can use. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
+        <p className="col-span-full text-caption text-muted-foreground">"At start" values are what the computer begins with; the maximums are the most it can use. The Workspace disk holds /workspace; the Runtime disk holds the operating system and installed applications.</p>
         <SelectField custom label="CPUs at start" value={draft.cpus} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.cpus} onChange={(cpus) => update({ cpus } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom label="Maximum CPUs" value={draft.maxCPUs} values={cpuPresets} max={maximums.cpus} suffix="CPUs" error={errors.maxCPUs} onChange={(maxCPUs) => update({ maxCPUs } as Partial<SetupComputerConfiguration>)} />
         <SelectField custom label="Memory at start" value={draft.memoryGiB} values={memoryPresets} max={maximums.memoryGiB} suffix="GiB" error={errors.memoryGiB} onChange={(memoryGiB) => update({ memoryGiB } as Partial<SetupComputerConfiguration>)} />
@@ -320,26 +320,26 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
 
       {!builtInDesktop && !builtInNewVm && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         {!created && computerUse && remoteOwner && (newVmSupport === "no"
-          ? <p className="text-[11px] text-muted-foreground">Update Silo on {ownerName} for built-in computer use. Until then, the optional Linux desktop is available.</p>
-          : newVmSupport === "checking" ? <p role="status" className="text-[11px] text-muted-foreground">Checking {ownerName}…</p> : null)}
+          ? <p className="text-caption text-muted-foreground">Update Silo on {ownerName} for built-in computer use. Until then, the optional Linux desktop is available.</p>
+          : newVmSupport === "checking" ? <p role="status" className="text-caption text-muted-foreground">Checking {ownerName}…</p> : null)}
         {desktopInstalled ? <label className="flex items-center justify-between gap-3 text-xs">
-          <span>Start desktop with computer<span className="mt-1 block text-[11px] text-muted-foreground">When off, start the desktop from its viewer.</span></span>
+          <span>Start desktop with computer<span className="mt-1 block text-caption text-muted-foreground">When off, start the desktop from its viewer.</span></span>
           <Switch aria-label="Start desktop with computer" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />
         </label> : created ? <div className="flex items-center justify-between gap-3">
-          <div className="text-xs">Linux desktop<p className="mt-1 text-[11px] text-muted-foreground">Use graphical applications in this computer.</p></div>
+          <div className="text-xs">Linux desktop<p className="mt-1 text-caption text-muted-foreground">Use graphical applications in this computer.</p></div>
           {draft.desktop ? <span className="text-xs text-muted-foreground">Installs when you save</span> : <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => update({ desktop: { startWithComputer: true } })}>Add Linux desktop</Button>}
         </div> : <label className="flex items-start gap-2 text-xs">
           <Checkbox aria-label="Linux desktop" checked={Boolean(draft.desktop)} disabled={saving} onCheckedChange={checked => update({ desktop: checked === true ? { startWithComputer: true } : undefined })} />
-          <span>Linux desktop<span className="mt-1 block text-[11px] text-muted-foreground">Run graphical applications. Starts with the computer.</span></span>
+          <span>Linux desktop<span className="mt-1 block text-caption text-muted-foreground">Run graphical applications. Starts with the computer.</span></span>
         </label>}
       </section>}
       </fieldset>
 
       <p role={saving ? "status" : undefined} aria-live="polite" aria-atomic="true" className="sr-only">{saving ? `Saving ${draft.name}…` : ""}</p>
-      {blockedReason && !saving && <p id={blockedReasonId} role="status" className="text-right text-[11px] text-muted-foreground">{blockedReason}</p>}
+      {blockedReason && !saving && <p id={blockedReasonId} role="status" className="text-right text-caption text-muted-foreground">{blockedReason}</p>}
       {stopPending ? <InlineConfirmation active onDismiss={dismissStop}>
         <div role="group" aria-label={`Stop ${stopTarget} and save?`} className="grid gap-2 rounded-md border border-border px-3 py-2">
-          <p className="text-[11px] text-muted-foreground">Stop {stopTarget} and save? Running processes will be interrupted. The new settings apply when you start it again.</p>
+          <p className="text-caption text-muted-foreground">Stop {stopTarget} and save? Running processes will be interrupted. The new settings apply when you start it again.</p>
           <div className="flex justify-end gap-1.5">
             <Button ref={cancelStop} type="button" variant="ghost" size="xs" onClick={dismissStop}>Cancel</Button>
             <Button type="button" variant="destructive" size="xs" onClick={() => { setConfirmingStop(false); save(true) }}><Square />Stop and save</Button>
