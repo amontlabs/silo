@@ -6,6 +6,7 @@ import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { progressStatuses, statusTones } from "@/components/status-tone"
+import { sidebarItemClass, sidebarItemLevels } from "@/components/sidebar-item"
 import { cn } from "@/lib/utils"
 import type { OnboardingStep, PresentationStatus } from "@/features/onboarding/model/onboarding-state"
 
@@ -61,7 +62,7 @@ export function StepNavigation({ status, collapsed, completed, ...props }: StepN
                 aria-describedby={`setup-step-${id}-status`}
                 aria-busy={status[id] === "running" || undefined}
                 data-appearance="borderless"
-                className="sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md border-0 bg-transparent py-2 text-ui text-muted-foreground shadow-none data-[state=active]:shadow-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-ring"
+                className={cn(sidebarItemClass, sidebarItemLevels.primary, "border-0 bg-transparent shadow-none data-[state=active]:shadow-none")}
               >
                 <span className="relative flex shrink-0">
                   <Icon aria-hidden="true" className="size-4" />

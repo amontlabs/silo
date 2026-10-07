@@ -32,8 +32,8 @@ const unavailable = () => {}
 function StatusPanelFrame({ busy = false, children }: { busy?: boolean; children: ReactNode }) {
   const content = useRef<HTMLDivElement>(null)
   useStatusPanelSize(content)
-  return <div ref={content} role="dialog" aria-label="Silo" aria-busy={busy || undefined} className="silo-window flex max-h-[520px] w-[380px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground">
-    <div className="flex max-h-[518px] shrink-0 flex-col overflow-hidden">
+  return <div ref={content} role="dialog" aria-label="Silo" aria-busy={busy || undefined} className="silo-window status-panel flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground">
+    <div className="status-panel-page flex shrink-0 flex-col overflow-hidden">
       {children}
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">
         <Button variant="ghost" size="sm" className="gap-2" onClick={() => { void desktopCommand("open_main") }}><SiloMark data-icon="inline-start" /><span>Open Silo</span></Button>

@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { ApplicationTitleBar } from "@/features/application/components/application-title-bar"
 import { useSidebarDisclosure } from "@/hooks/use-sidebar-disclosure"
 import type { ActiveRuntimeRepairPresentation, ApplicationTab, SettingsSection, ComputerSection } from "@/features/application/model/application-source"
+import { sidebarItemActiveClass, sidebarItemClass, sidebarItemLevels } from "@/components/sidebar-item"
 import { cn } from "@/lib/utils"
 import "./application-shell.css"
 
@@ -121,17 +122,18 @@ function NavigationButton({
       aria-describedby={describedBy}
       onClick={onClick}
       className={cn(
-        "group/sidebar-item sidebar-primary relative flex h-10 w-full min-w-0 flex-none items-center gap-2 rounded-md py-2 text-ui focus-ring",
+        sidebarItemClass,
+        sidebarItemLevels.primary,
         tone === "danger"
-          ? "text-destructive hover:bg-destructive/[0.07] hover:text-destructive"
+          ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
           : tone === "warning"
             ? "text-warning hover:bg-warning/10 hover:text-warning"
-          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+            : undefined,
         active && (tone === "danger"
           ? "bg-destructive/10 font-medium text-destructive"
           : tone === "warning"
             ? "bg-warning/10 font-medium text-warning"
-          : "bg-sidebar-accent font-medium text-sidebar-accent-foreground"),
+            : sidebarItemActiveClass),
         reserveDisclosure && "sidebar-primary-with-disclosure",
       )}
     >
@@ -232,8 +234,9 @@ function SubNavigation<Section extends string>({
           aria-keyshortcuts={shortcutFor(id === "overview" ? "go-computers" : id === "general" ? "settings" : `go-${id}`)?.aria}
           onClick={() => onSelect(id)}
           className={cn(
-            "group/sidebar-item sidebar-secondary relative flex h-8 w-full min-w-0 items-center gap-2 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-ring",
-            active && section === id && "bg-muted font-medium text-foreground",
+            sidebarItemClass,
+            sidebarItemLevels.secondary,
+            active && section === id && sidebarItemActiveClass,
           )}
         >
           <span className="relative flex shrink-0">

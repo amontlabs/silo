@@ -144,13 +144,13 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   }
 
   if (folders && computerAvailability(folders, source).canOpen) {
-    return <div key="folders" className="status-page status-page-forward flex max-h-[518px] shrink-0 flex-col overflow-hidden">
+    return <div key="folders" className="status-page status-page-forward status-panel-page flex shrink-0 flex-col overflow-hidden">
       <StatusFolderPicker listDirectory={actions.listComputerDirectory} computer={folders} editor={source.preferences.editor} onBack={() => { setFolderComputer(null); focusContent() }} onOpen={(path) => actions.openEditor(computerTarget(folders), path)} />
     </div>
   }
 
   return (
-    <div key="computers" className={cn("status-page flex max-h-[518px] shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
+    <div key="computers" className={cn("status-page status-panel-page flex shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
       <div className="shrink-0 px-2 pt-2">
         {lifecycleIssue && <OperationIssue
           title={lifecycleIssue.title}

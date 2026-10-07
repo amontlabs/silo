@@ -60,7 +60,7 @@ export function StatusBar({ source, actions, defaultOpen = false }: { source: Ap
           align="end"
           sideOffset={8}
           collisionPadding={10}
-          className="silo-window flex max-h-[min(520px,var(--radix-popover-content-available-height))] w-[380px] max-w-[calc(100vw-20px)] flex-col overflow-hidden rounded-xl p-0 shadow-lg"
+          className="silo-window status-panel flex max-h-[min(var(--status-panel-height),var(--radix-popover-content-available-height))] max-w-[calc(100vw-20px)] flex-col overflow-hidden rounded-xl p-0 shadow-lg"
           data-reduce-motion={source.preferences.reduceMotion}
           onOpenAutoFocus={(event) => { event.preventDefault(); content.current?.focus() }}
         >

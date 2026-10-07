@@ -265,6 +265,22 @@ html.dark {
   }
 }
 
+/* The status panel's size; the native window is resized to its content up to this height
+   (desktop/use-status-panel-size.ts), and the page inside leaves room for the panel's border. */
+@layer components {
+  .status-panel {
+    --status-panel-width: 380px;
+    --status-panel-height: 520px;
+    --status-panel-border: 2px;
+    width: var(--status-panel-width);
+    max-height: var(--status-panel-height);
+  }
+
+  .status-panel-page {
+    max-height: calc(var(--status-panel-height) - var(--status-panel-border));
+  }
+}
+
 /* Let the rounded status panel define the native window's visible outline. */
 html.native-status,
 html.native-status body {
