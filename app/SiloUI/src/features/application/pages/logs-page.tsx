@@ -28,7 +28,7 @@ export function Logs({ computers, query, onQueryChange, actions, active, window:
     return () => window.clearTimeout(timer)
   }, [query, loader])
   const invalidRange = Boolean(since && until && since > until)
-  const { results, rows, historyLimited, unsupportedNotice, busy, loadingOlder, error, ready, hasOlder, refresh, follow, retry, loadOlder, scrollTop, setScrollTop, expandedRows, setExpandedRows } = useLogHistory({ computers, loader, active, query: searchQuery, source, since, until, invalidRange })
+  const { results, rows, historyLimited, unsupportedNotice, busy, loadingOlder, error, ready, hasOlder, refresh, follow, retry, loadOlder, scrollTop, scrollEpoch, setScrollTop, expandedRows, setExpandedRows } = useLogHistory({ computers, loader, active, query: searchQuery, source, since, until, invalidRange })
   useEffect(() => {
     if (!following || !active || busy || invalidRange || error) return
     // Schedule after completion so a slow owner cannot be starved by overlapping scans.
@@ -76,6 +76,7 @@ export function Logs({ computers, query, onQueryChange, actions, active, window:
       hasOlder={hasOlder && !busy && !error}
       active={active && !following}
       scrollTop={scrollTop}
+      scrollEpoch={scrollEpoch}
       onScrollTopChange={setScrollTop}
       expandedRows={expandedRows}
       onExpandedRowsChange={setExpandedRows}

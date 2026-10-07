@@ -24,6 +24,8 @@ type Snapshot = {
   ready: boolean
   error: string
   scrollTop: number
+  /** Counts the times the store itself set `scrollTop`, as opposed to following the viewport. */
+  scrollEpoch: number
   expandedRows: ReadonlyMap<string, number>
   historyLimited: boolean
 }
@@ -104,7 +106,7 @@ class HistoryStore {
   private cache: Map<string, HistoryStore>
   private loader: LogLoader
   private requests: { computer: ApplicationComputer; request: LogQuery }[]
-  private snapshot: Snapshot = { results: [], busy: false, loadingOlder: false, ready: false, error: "", scrollTop: 0, expandedRows: new Map(), historyLimited: false }
+  private snapshot: Snapshot = { results: [], busy: false, loadingOlder: false, ready: false, error: "", scrollTop: 0, scrollEpoch: 0, expandedRows: new Map(), historyLimited: false }
   private listeners = new Set<() => void>()
   private errors = new Map<string, string>()
   private failedPaging = new Set<string>()
@@ -128,7 +130,8 @@ class HistoryStore {
     return () => { this.lastUsedAt = Date.now(); this.listeners.delete(listener); prune(this.cache) }
   }
   private update(change: Partial<Snapshot>) {
-    this.snapshot = { ...this.snapshot, ...change }
+    const scrollEpoch = "scrollTop" in change ? this.snapshot.scrollEpoch + 1 : this.snapshot.scrollEpoch
+    this.snapshot = { ...this.snapshot, ...change, scrollEpoch }
     for (const listener of this.listeners) listener()
   }
   private errorMessage() {

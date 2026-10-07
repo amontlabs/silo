@@ -267,17 +267,17 @@ export function useSettingsStore(initialSettings?: SettingsPatch) {
  */
 export function useSettingsSelector<T>(select: (view: SettingsView) => T, isEqual: (a: T, b: T) => boolean = Object.is, initialSettings?: SettingsPatch): T {
   const store = useSettingsStore(initialSettings)
-  const memo = useRef<{ view: SettingsView; value: T } | null>(null)
+  const memo = useRef<{ view: SettingsView; select: typeof select; value: T } | null>(null)
   const getSelection = () => {
     const view = store.getSnapshot()
     const previous = memo.current
-    if (previous && previous.view === view) return previous.value
+    if (previous && previous.view === view && previous.select === select) return previous.value
     const value = select(view)
     if (previous && isEqual(previous.value, value)) {
-      memo.current = { view, value: previous.value }
+      memo.current = { view, select, value: previous.value }
       return previous.value
     }
-    memo.current = { view, value }
+    memo.current = { view, select, value }
     return value
   }
   return useSyncExternalStore(store.subscribe, getSelection)
