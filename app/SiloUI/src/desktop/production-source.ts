@@ -1,17 +1,17 @@
 import { isLifecycleStep, type LifecycleStep } from "@/features/application/model/lifecycle-progress"
 import { workspaceStorageStateSchema } from "@/features/application/model/workspace-storage"
-import { isUnsupportedRemote, logPageSchema } from "@/features/application/model/logs"
+import { logPageSchema } from "@/features/application/model/logs"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { archiveInspectionShape, directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState, secretShape } from "./production-schemas"
+import { archiveInspectionShape, directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, secretShape } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
 import type { OnboardingCompletionRequest } from "@/features/onboarding/model/onboarding-source"
-import type { SshAccessComputer, SshAccessState, NetworkState, ApplicationActions, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
+import type { ApplicationActions, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
 import { operationQueueSchema, isCancelledError, type OperationQueue } from "@/features/application/model/operation-queue"
 import { deriveComputerChanges, isStaleConfigurationError, type ComputerConfigurationChange } from "@/features/application/model/computer-change"
 import { ExportIncompleteError, type BackupArchive, type BackupController, type BackupOperation, type BackupState, type VerifiedExport } from "@/features/application/model/backup-source"
@@ -22,9 +22,10 @@ import { downloadOutcomeSchema, transferProgressEvent, transferProgressSchema, u
 import { deviceSchema, connectionsStatusSchema, remoteComputerTarget, parseRemoteComputerTarget, computerTarget, type Device, type ConnectionsStatus } from "@/features/application/model/connections"
 
 import type { ProductionContext } from "./production-context"
+import { createDeviceServices } from "./production-services"
 import { createSetupQueue } from "./production-setup-queue"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
-import { NETWORK_AMBIENT_INTERVAL_MS, NETWORK_INTEREST_MS, PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, backupFailure, backupResultKey, canonicalKey, computerOwner, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
+import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, backupFailure, backupResultKey, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
 export type { ProductionBridge, ProductionSnapshot } from "./production-types"
 export { isUpdateInProgress, shareStructure } from "./production-helpers"
@@ -73,22 +74,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   const slowDevices = new Set<string>()
   const remoteFailures = new Map<string, { delay: number; nextRead: number }>()
   let remoteTimer: ReturnType<typeof setInterval> | undefined
-  let sshAccess: SshAccessState | undefined
-  let sshAccessError: string | null = null
-  const sshReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
-  const sshFailures = new Map<string, { delay: number; nextRead: number }>()
-  const sshSaveRevisions = new Map<string, number>()
-  const sshReadRevisions = new Map<string, number>()
-  let network: NetworkState | undefined
-  let networkError: string | null = null
-  let networkWatchers = 0
-  let networkAmbientWatchers = 0
-  let lastNetworkReadAt = 0
-  let networkInterestUntil = 0
-  const networkReads = new Map<string, { dirty: boolean; promise: Promise<void> }>()
-  const networkFailures = new Map<string, { delay: number; nextRead: number }>()
-  const networkReadRevisions = new Map<string, number>()
-  const networkSaveRevisions = new Map<string, number>()
   let operationQueue: OperationQueue | undefined
   let operationQueueRequest: Promise<void> | undefined
   let operationQueueDirty = false
@@ -128,136 +113,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   const context: ProductionContext = { native, snapshot: () => snapshot, publish: next => publish(next), disposed: () => disposed }
   const setup = createSetupQueue(context)
+  const services = createDeviceServices({ ...context, devices: () => devices, remoteSnapshots, localName: () => connections?.name, live: () => live })
   const { enqueue: enqueueSetup, setStatus: setSetupStatus, setJobStatus, recordGitHubActivity, delay: setupDelay, drain: drainSetup } = setup
 
-  function unavailableSshRows(deviceId: string, deviceName: string, message: string): SshAccessComputer[] {
-    const cached = sshAccess?.computers.filter(row => computerOwner(row.computer) === deviceId) ?? []
-    const computers = deviceId ? remoteSnapshots.get(deviceId)?.computers ?? [] : snapshot.source?.computers.filter(w => !w.device) ?? []
-    const rows = new Map(cached.map(row => [row.computer, row]))
-    for (const computer of computers) {
-      const target = deviceId ? remoteComputerTarget(deviceId, computer.configuration.id) : computer.configuration.name
-      if (!rows.has(target)) rows.set(target, { computer: target, enabled: false, port: 2222, bindAddress: "127.0.0.1", keys: [], state: "error", message, fingerprint: null, deviceName, addresses: [] })
-    }
-    return [...rows.values()].map(row => ({ ...row, unavailable: message }))
-  }
-  /** Each service read gets the same bounded wait as a device-state read. */
-  function waitForService<T>(read: Promise<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("Device is not responding.")), REMOTE_READ_WAIT_MS)
-    })
-    return Promise.race([read, timeout]).finally(() => clearTimeout(timer))
-  }
-
-  function readSshOwner(owner: string, background = false): Promise<void> {
-    if (background && (sshFailures.get(owner)?.nextRead ?? 0) > Date.now()) return Promise.resolve()
-    const pending = sshReads.get(owner)
-    if (pending) { if (!background) pending.dirty = true; return pending.promise }
-    const entry = { dirty: false, promise: Promise.resolve() }
-    entry.promise = (async () => { do {
-      entry.dirty = false
-      const revision = sshReadRevisions.get(owner)
-      const device = devices.find(item => item.id === owner)
-      let rows: SshAccessComputer[]
-      let unavailable: string | null = null
-      try {
-        if (owner && !device?.connected) throw new Error("Device is offline.")
-        const result = parseSshAccessState(await waitForService(native.invoke(owner ? "remote_ssh_access_state" : "read_ssh_access_state", owner ? { deviceId: owner } : undefined)))
-        if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("SSH response belongs to another device.")
-        rows = result.computers
-        sshFailures.delete(owner)
-      } catch (cause) {
-        const delay = Math.min((sshFailures.get(owner)?.delay ?? 5000) * 2, 60_000)
-        sshFailures.set(owner, { delay, nextRead: Date.now() + delay })
-        unavailable = !owner ? "Could not check SSH access."
-          : isUnsupportedRemote(cause) ? `Update Silo on ${device?.name} to manage SSH access. That version does not support remote SSH management.`
-          : `SSH status on ${device?.name} is unavailable. Reconnect and refresh before changing access.`
-        rows = unavailableSshRows(owner, device?.name ?? connections?.name ?? "This device", unavailable)
-      }
-      if (disposed) return
-      if (revision !== sshReadRevisions.get(owner)) continue
-      const current = devices.find(item => item.id === owner)
-      if (owner && !current) return
-      if (owner && !current?.connected) rows = unavailableSshRows(owner, current!.name, `SSH status on ${current!.name} is unavailable. Reconnect and refresh before changing access.`)
-      sshAccess = { computers: [...(sshAccess?.computers.filter(row => computerOwner(row.computer) !== owner) ?? []), ...rows] }
-      if (!owner) sshAccessError = unavailable
-      publish({ ...snapshot })
-    } while (entry.dirty && !disposed) })().finally(() => { if (sshReads.get(owner) === entry) sshReads.delete(owner) })
-    sshReads.set(owner, entry)
-    return entry.promise
-  }
-
-  function refreshSshAccess(options?: { background?: boolean }): Promise<void> {
-    return Promise.all([readSshOwner("", options?.background), ...devices.map(device => readSshOwner(device.id, options?.background))]).then(() => {})
-  }
-
-  function unavailableNetworkRows(owner: string, error: string): NetworkState["computers"] {
-    const rows = new Map((network?.computers.filter(row => computerOwner(row.computer) === owner) ?? []).map(row => [row.computer, row]))
-    const computers = owner ? remoteSnapshots.get(owner)?.computers ?? [] : snapshot.source?.computers ?? []
-    for (const computer of computers) {
-      const target = owner ? remoteComputerTarget(owner, computer.configuration.id) : computer.configuration.name
-      if (!rows.has(target)) rows.set(target, { computer: target, ports: [], error })
-    }
-    return [...rows.values()].map(row => ({ ...row, error }))
-  }
-
-  // Events received during an owner's read request one follow-up for that owner.
-  function readNetworkOwner(owner: string, background = false): Promise<void> {
-    if (background && (networkFailures.get(owner)?.nextRead ?? 0) > Date.now()) return Promise.resolve()
-    const pending = networkReads.get(owner)
-    if (pending) { if (!background) pending.dirty = true; return pending.promise }
-    const entry = { dirty: false, promise: Promise.resolve() }
-    entry.promise = (async () => { do {
-      entry.dirty = false
-      const revision = networkReadRevisions.get(owner)
-      const device = devices.find(item => item.id === owner)
-      let rows: NetworkState["computers"]
-      let unavailable: string | null = null
-      try {
-        if (owner && !device?.connected) throw new Error(`${device?.name} is offline. Reconnect to see network services.`)
-        const result = parseNetworkState(await waitForService(native.invoke(owner ? "remote_network_state" : "read_network_state", owner ? { deviceId: owner } : undefined)))
-        if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("Network response belongs to another device.")
-        rows = result.computers
-        networkFailures.delete(owner)
-      } catch (cause) {
-        const delay = Math.min((networkFailures.get(owner)?.delay ?? 5000) * 2, 60_000)
-        networkFailures.set(owner, { delay, nextRead: Date.now() + delay })
-        unavailable = !owner ? "Could not check network services." : isUnsupportedRemote(cause) ? `Update Silo on ${device?.name} to see network services.` : errorMessage(cause)
-        rows = unavailableNetworkRows(owner, unavailable)
-      }
-      if (disposed) return
-      if (revision !== networkReadRevisions.get(owner)) continue
-      const current = devices.find(item => item.id === owner)
-      if (owner && !current) return
-      if (owner && !current?.connected) rows = unavailableNetworkRows(owner, `${current!.name} is offline. Reconnect to see network services.`)
-      network = { computers: [...(network?.computers.filter(row => computerOwner(row.computer) !== owner) ?? []), ...rows] }
-      if (!owner) networkError = unavailable
-      publish({ ...snapshot })
-    } while (entry.dirty && !disposed) })().finally(() => { if (networkReads.get(owner) === entry) networkReads.delete(owner) })
-    networkReads.set(owner, entry)
-    return entry.promise
-  }
-
-  function readNetwork(options?: { background?: boolean }): Promise<void> {
-    lastNetworkReadAt = Date.now()
-    return Promise.all([readNetworkOwner("", options?.background), ...devices.map(device => readNetworkOwner(device.id, options?.background))]).then(() => {})
-  }
-  /** Network services are read only for a consumer that shows them: a watcher, or a page that requested them recently. */
-  function networkWanted() { return networkWatchers > 0 || networkAmbientWatchers > 0 || Date.now() < networkInterestUntil }
-  /** A consumer's own request: it also marks network data as wanted while that consumer keeps asking. */
-  function refreshNetwork(options?: { background?: boolean }): Promise<void> {
-    networkInterestUntil = Date.now() + NETWORK_INTEREST_MS
-    return readNetwork(options)
-  }
-  /** Keeps network services read until the returned function is called: with every refresh, or when `ambient`, at most every 30s and on network events. */
-  function watchNetwork(options?: { ambient?: boolean }): () => void {
-    const ambient = options?.ambient === true
-    if (ambient) networkAmbientWatchers++; else networkWatchers++
-    // Before live updates start, the first refresh reads network services for the watcher.
-    if (live && !disposed) void readNetwork()
-    let watching = true
-    return () => { if (watching) { watching = false; if (ambient) networkAmbientWatchers--; else networkWatchers-- } }
-  }
   function refreshOperationQueue(): Promise<void> {
     if (operationQueueRequest) { operationQueueDirty = true; return operationQueueRequest }
     operationQueueRequest = (async () => { do {
@@ -272,36 +130,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
     } while (operationQueueDirty && !disposed) })().finally(() => { operationQueueRequest = undefined })
     return operationQueueRequest
-  }
-
-  async function changeNetwork(command: string, arguments_: Record<string, unknown>) {
-    const target = arguments_.computer as string
-    const remote = parseRemoteComputerTarget(target)
-    const owner = remote?.deviceId ?? ""
-    const revision = (networkSaveRevisions.get(target) ?? 0) + 1
-    networkSaveRevisions.set(target, revision)
-    networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-    const { computer: _computer, ...rest } = arguments_
-    let result: NetworkState
-    try {
-      result = parseNetworkState(await native.invoke(remote ? `remote_${command}` : command, remote ? { ...rest, ...remote } : arguments_))
-      if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("Network response belongs to another device.")
-    } catch (cause) {
-      networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-      if (!disposed) void readNetworkOwner(owner)
-      throw cause
-    }
-    if (disposed) return
-    networkReadRevisions.set(owner, (networkReadRevisions.get(owner) ?? 0) + 1)
-    if (revision !== networkSaveRevisions.get(target)) {
-      void readNetworkOwner(owner)
-      return
-    }
-    // A device-wide reply can carry older rows for unrelated computer saves.
-    const retained = network?.computers.filter(row => row.computer !== target) ?? []
-    network = { computers: [...retained, ...result.computers.filter(row => row.computer === target)] }
-    if (!owner) networkError = null
-    publish({ ...snapshot })
   }
 
   async function changeSecret(command: string, arguments_: Record<string, unknown>) {
@@ -352,7 +180,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     const { resultUnseen, ...reported } = base.backup
     const next = { ...base, backup: { ...reported, operation, ...(resultUnseen && operation === base.backup.operation && { resultUnseen }) } }
     if (!base.source) return next
-    const networkRows = new Map((network?.computers ?? []).map(row => [row.computer, row]))
+    const networkRows = new Map((services.network()?.computers ?? []).map(row => [row.computer, row]))
     const computers = base.source.computers.filter(computer => !computer.device).map(computer => ({
       ...withPendingCheckpoint(computer, computer.configuration.name),
       ports: derivePorts(networkRows.get(computer.configuration.name), true),
@@ -404,7 +232,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     }
     const cancelledActions = lastCancelledLifecycle(activities)
     return { ...next, source: { ...base.source,
-      devices, connections, connectionsError, devicesError, network, networkError, sshAccess, sshAccessError, operationQueue,
+      devices, connections, connectionsError, devicesError, network: services.network(), networkError: services.networkError(), sshAccess: services.sshAccess(), sshAccessError: services.sshAccessError(), operationQueue,
       repositoryPushOperations: pushes,
       activities,
       computers: computers.map(({ lifecycleAction: _reported, ...computer }) => {
@@ -571,11 +399,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
           const host = listedDevices.find(host => host.id === id)
           if (!host || host.address !== knownDevices.find(previous => previous.id === id)?.address) remoteFailures.delete(id)
         }
-        for (const failures of [sshFailures, networkFailures]) for (const id of failures.keys()) {
-          if (!id) continue
+        services.forgetFailures(id => {
           const host = listedDevices.find(host => host.id === id)
-          if (!host || host.address !== knownDevices.find(previous => previous.id === id)?.address) failures.delete(id)
-        }
+          return !host || host.address !== knownDevices.find(previous => previous.id === id)?.address
+        })
         knownDevices = listedDevices
         devices = listedDevices.flatMap(host => {
           const known = devices.find(item => item.id === host.id)
@@ -738,7 +565,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (source && activeConfiguration) source = { ...source, computerConfigurationOperation: activeConfiguration }
     localStateUpdating = configurationUpdating
     publish({ ...snapshot, source, backup, loading: configurationUpdating && !source, error, localUpdating: configurationUpdating && source !== null && (snapshot.source === null || snapshot.localUpdating === true) })
-    if (networkWatchers > 0 || (networkAmbientWatchers > 0 && Date.now() - lastNetworkReadAt >= NETWORK_AMBIENT_INTERVAL_MS)) void readNetwork({ background })
+    if (services.networkReadDue()) void services.readNetwork({ background })
     // One remote read per refresh; one that started during this refresh is recent enough.
     if (remotePasses === remotePassesAtStart) void refreshDevices(false, background)
   }
@@ -766,7 +593,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     if (disposed) return
     try {
       const subscriptions: Array<[string, EventHandler]> = [
-        ["silo://network-state-changed", () => { if (networkWanted()) void readNetwork() }],
+        ["silo://network-state-changed", () => { if (services.networkWanted()) void services.readNetwork() }],
         ["silo://operation-queue-changed", () => { void refreshOperationQueue() }],
         ["silo://application-state-changed", refreshFromEvent],
         ["desktop:status-opened", refreshFromEvent],
@@ -1322,32 +1149,15 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     retrySecret: (id: string) => changeSecret("retry_secret", { id }),
     readWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("read_workspace_storage", { computerId })),
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
-    refreshSshAccess,
+    refreshSshAccess: services.refreshSshAccess,
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })
     },
-    saveSshAccess: async request => {
-      const remote = parseRemoteComputerTarget(request.computer)
-      const owner = remote?.deviceId ?? ""
-      if (sshAccess?.computers.find(row => row.computer === request.computer)?.unavailable || (remote && !devices.find(device => device.id === remote.deviceId)?.connected)) throw new Error("Refresh SSH status before changing access.")
-      const revision = (sshSaveRevisions.get(request.computer) ?? 0) + 1
-      sshSaveRevisions.set(request.computer, revision)
-      sshReadRevisions.set(owner, (sshReadRevisions.get(owner) ?? 0) + 1)
-      const { computer: _computer, ...settings } = request
-      const result = parseSshAccessState(await native.invoke(remote ? "remote_save_ssh_access" : "save_ssh_access", remote ? { ...remote, ...settings } : { ...request }))
-      if (result.computers.some(row => computerOwner(row.computer) !== owner)) throw new Error("SSH response belongs to another device.")
-      if (disposed || sshSaveRevisions.get(request.computer) !== revision) return
-      if (remote && !devices.find(device => device.id === remote.deviceId)?.connected) return
-      sshReadRevisions.set(owner, (sshReadRevisions.get(owner) ?? 0) + 1)
-      const retained = sshAccess?.computers.filter(row => row.computer !== request.computer) ?? []
-      sshAccess = { computers: [...retained, ...result.computers.filter(row => row.computer === request.computer)] }
-      if (!remote) sshAccessError = null
-      publish({ ...snapshot })
-    },
-    refreshNetwork,
-    saveNetworkPort: request => changeNetwork("save_network_port", { ...request }),
-    removeNetworkPort: (computer, port) => changeNetwork("remove_network_port", { computer, port }),
+    saveSshAccess: services.saveSshAccess,
+    refreshNetwork: services.refreshNetwork,
+    saveNetworkPort: request => services.changeNetwork("save_network_port", { ...request }),
+    removeNetworkPort: (computer, port) => services.changeNetwork("remove_network_port", { computer, port }),
     openNetworkPort,
     authorizeDevice: address => native.invoke<void>("authorize_device", { address }),
     setupDeviceKey: address => native.invoke<void>("setup_device_key", { address }),
@@ -1683,7 +1493,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
     },
     refresh,
-    watchNetwork,
+    watchNetwork: services.watchNetwork,
     configureConfigurations,
     submitSetupStep,
     verifySetupIdentities,
