@@ -5,6 +5,7 @@ import { useSshAccessRefresh } from "./use-ssh-access-refresh"
 import { attentionPriority, configurationRowView, displayComputers } from "./overview-configuration"
 import { ConfigurationDetail, ConfigurationIcon } from "./overview-configuration-row"
 import { ComputerActions } from "./overview-computer-actions"
+import { useComputerOperations } from "./use-computer-operations"
 import { SshAccessBadges } from "./ssh-access-panel"
 import { StatusFolderPicker } from "@/features/status-bar/status-folder-picker"
 import { computerAvailability } from "../model/computer-availability"
@@ -12,7 +13,7 @@ import { DisabledReason } from "../components/disabled-reason"
 import type { ComputerCommandRequest } from "../components/application-commands"
 import { lifecycleGuard, type LifecycleAction } from "../model/lifecycle-guard"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
-import { parseRemoteComputerTarget, computerTarget } from "../model/connections"
+import { computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
@@ -44,10 +45,8 @@ import type { DeleteComputerDetails } from "@/features/computers/components/dele
 import { ComputerAction } from "@/features/computers/components/computer-list"
 
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
-import { computerBusyReason, computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
+import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
-import { nextComputerOrder, computerOrderKey, computerOrderRanks } from "@/features/computers/model/computer-order"
-import { useSettingsSelector, useSettingsStore } from "@/features/preferences/settings-store"
 
 /** A command palette request carried out on a computer's page. */
 export interface ComputerPageRequest {
@@ -152,9 +151,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   }
   const configurationOperation = source.computerConfigurationOperation
   const configurationLocked = readOnly || configurationOperation !== null
-  const getComputerDeviceId = (configuration: SetupComputerConfiguration) => parseRemoteComputerTarget(configuration.id)?.deviceId ?? computers.get(configuration.id)?.device?.id
-  const localOnly = (list: readonly SetupComputerConfiguration[]) => list.filter(configuration => !getComputerDeviceId(configuration))
-  const localConfigurations = localOnly(configurations)
+  const { getComputerDeviceId, orderRank, reorderComputers, commitComputer, deleteComputer, changeConfigurations, validateComputerOperation, isComputerCreated, isComputerRunning, configurationBusyReason } = useComputerOperations({ source, actions, computers, committedComputers, configurations, onConfigurationsChange })
 
   // Return to the list if the open computer disappeared (deleted, or removed by a refresh).
   // Controlled navigation replaces its history entries in place (the app forgets missing
@@ -166,65 +163,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { if (detailMissing) returnToList() }, [detailMissing])
 
-  // Build the save from the baseline the editor started from (falling back to the live
-  // local list) so the change carries the right `expected` state and does not drag other
-  // computers' concurrent edits into this one.
-  function updateLocal(configuration: SetupComputerConfiguration, original?: SetupComputerConfiguration, baseline?: SetupComputerConfiguration[]) {
-    const base = baseline ? localOnly(baseline) : localConfigurations
-    const next = original ? base.map(item => item.id === original.id ? configuration : item) : [...base, configuration]
-    return onConfigurationsChange(next, baseline ? base : undefined)
-  }
-
-  // The computer editing callbacks, shared by the list and the detail page's in-place editor
-  // and delete dialog so both commit, delete, and validate through exactly the same paths.
-  // This device's own order of the list, local and remote computers alike.
-  const { updateSettings } = useSettingsStore()
-  const computerOrder = useSettingsSelector((view) => view.settings.computerOrder)
-  const orderRanks = computerOrderRanks(computerOrder)
-  const orderRank = (configuration: SetupComputerConfiguration) => {
-    const computer = computers.get(configuration.id)
-    return computer ? orderRanks.get(computerOrderKey(computer)) : undefined
-  }
-  const reorderComputers = (ids: string[]) => {
-    const shown = ids.flatMap(id => { const computer = computers.get(id); return computer ? [computerOrderKey(computer)] : [] })
-    void updateSettings({ computerOrder: nextComputerOrder(computerOrder, shown) })
-  }
-  const commitComputer = actions.saveRemoteComputer ? async (configuration: SetupComputerConfiguration, original: SetupComputerConfiguration | undefined, deviceId: string, baseline?: SetupComputerConfiguration[]) => {
-    if (deviceId) await actions.saveRemoteComputer!(deviceId, configuration, original)
-    else await updateLocal(configuration, original, baseline)
-  } : undefined
-  const deleteComputer = actions.deleteRemoteComputer ? async (configuration: SetupComputerConfiguration, baseline?: SetupComputerConfiguration[]) => {
-    const device = computers.get(configuration.id)?.device
-    if (device) {
-      if (!device.connected) throw new Error(`${device.name} is offline. Reconnect to it before deleting ${configuration.name}.`)
-      await actions.deleteRemoteComputer!(device.id, configuration)
-    } else {
-      const base = baseline ? localOnly(baseline) : localConfigurations
-      await onConfigurationsChange(base.filter(item => item.id !== configuration.id), baseline ? base : undefined)
-    }
-  } : undefined
-  const changeConfigurations = (next: SetupComputerConfiguration[], baseline?: SetupComputerConfiguration[]) => {
-    if (source.computerOperationsUnavailable) { notifyOperationUnavailable(); return }
-    return onConfigurationsChange(localOnly(next), baseline ? localOnly(baseline) : undefined)
-  }
-  const validateComputerOperation = (configuration: SetupComputerConfiguration, isNew: boolean, deviceId?: string) => {
-    const device = computers.get(configuration.id)?.device ?? source.devices?.find(device => device.id === deviceId)
-    if (deviceId && !device) return "The selected device was removed. Choose another device before saving."
-    if (device) return device.busy ? `${device.name} is updating. Wait before changing ${configuration.name}.` : device.connected ? undefined : `${device.name} is offline. Reconnect to it before changing ${configuration.name}.`
-    if (source.computerOperationsUnavailable) return source.computerOperationsUnavailable
-    const notice = source.resourceNotice
-    if (!isNew || notice?.kind !== "create-storage" || configuration.name !== notice.computer) return undefined
-    return `Not enough storage to create ${configuration.name}. About ${notice.requiredGB} GiB is needed on ${notice.volume}; ${notice.availableGB} GiB is available. No computer was created.`
-  }
-  const isComputerCreated = (configuration: SetupComputerConfiguration) => committedComputers.has(configuration.id)
-  const isComputerRunning = (configuration: SetupComputerConfiguration) => computers.get(configuration.id)?.state === "running"
   const latestDeleteState = useRef({ source, readOnly })
   useEffect(() => { latestDeleteState.current = { source, readOnly } }, [source, readOnly])
-  const configurationBusyReason = (configuration: SetupComputerConfiguration) => computerBusyReason(computers.get(configuration.id))
-
-  function notifyOperationUnavailable() {
-    showActionFailure("Computer operation unavailable", source.computerOperationsUnavailable ?? "Computer operations are unavailable.", undefined, { native: false })
-  }
 
   // Every lifecycle request from this page (row, computer page, menus, toasts) goes through the
   // shared guard: unavailable Computer operations are reported and memory pressure asks first.
