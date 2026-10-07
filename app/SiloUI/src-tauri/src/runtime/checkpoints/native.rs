@@ -402,6 +402,54 @@ pub(crate) fn silo_member(key: &Key) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+/// Removes `<snapshots>/<group>` when it holds only the group's empty head record and its
+/// lock, and no other process holds that lock. Anything else in the directory is left alone.
+pub(crate) fn remove_empty_group(paths: &RuntimePaths, group: &str) {
+    use std::os::unix::io::AsRawFd;
+    const HEAD: &str = "group.json";
+    const LOCK: &str = ".group.lock";
+    let directory = paths.home.join("snapshots").join(group);
+    let is_directory = |path: &Path| fs::symlink_metadata(path).is_ok_and(|m| m.is_dir());
+    let is_file = |path: &Path| fs::symlink_metadata(path).is_ok_and(|m| m.is_file());
+    if group.is_empty() || group.contains(['/', '\\']) || group.starts_with('.') {
+        return;
+    }
+    if !is_directory(&directory) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return;
+    };
+    let only_bookkeeping = entries
+        .filter_map(Result::ok)
+        .all(|entry| matches!(entry.file_name().to_str(), Some(HEAD | LOCK)));
+    let (head, lock) = (directory.join(HEAD), directory.join(LOCK));
+    if !only_bookkeeping || !is_file(&head) || (lock.exists() && !is_file(&lock)) {
+        return;
+    }
+    let empty = fs::File::open(&head)
+        .ok()
+        .and_then(|file| {
+            let mut bytes = Vec::new();
+            file.take(4096).read_to_end(&mut bytes).ok()?;
+            serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+        })
+        .is_some_and(|value| value["head"].is_null());
+    if !empty {
+        return;
+    }
+    let held = fs::OpenOptions::new().write(true).open(&lock).ok();
+    // SAFETY: the open file owns this descriptor for the duration of the call.
+    if held.as_ref().is_some_and(
+        |file| unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0,
+    ) {
+        return;
+    }
+    let _ = fs::remove_file(&head);
+    let _ = fs::remove_file(&lock);
+    let _ = fs::remove_dir(&directory);
+}
+
 /// Host allocation of a member's artifact directory, when it lies inside the runtime's
 /// snapshot store. Symlinks are never followed.
 pub(crate) fn artifact_bytes(paths: &RuntimePaths, member: &Member) -> Option<u64> {

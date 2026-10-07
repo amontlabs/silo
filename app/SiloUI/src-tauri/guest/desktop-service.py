@@ -1251,6 +1251,26 @@ def supervise():
                 (RUN / 'supervisor.json').unlink(missing_ok=True)
 
 
+def sealed_connection(pad_hex):
+    """The connection with its password XORed against the caller's one-time pad.
+
+    The command's output is recorded in the computer's execution log, so the password
+    never appears there in the clear.
+    """
+    connection = read('connection.json')
+    if not isinstance(connection, dict) or not isinstance(connection.get('password'), str):
+        raise RuntimeError('Desktop connection credentials are invalid')
+    if not re.fullmatch(r'(?:[0-9a-f]{2})+', pad_hex):
+        raise RuntimeError('Usage: silo-desktop connection-sealed <one-time pad in hex>')
+    pad = bytes.fromhex(pad_hex)
+    password = connection['password'].encode()
+    if len(pad) < len(password):
+        raise RuntimeError('The one-time pad is shorter than the password')
+    sealed = bytes(a ^ b for a, b in zip(password, pad))
+    return {'port': connection.get('port'), 'username': connection.get('username', USER),
+            'sealed': sealed.hex()}
+
+
 def main():
     global USER, HOME
     if os.geteuid() != 0:
@@ -1281,8 +1301,8 @@ def main():
                 marker.write_text(epoch)
         if action == 'status':
             pass
-        elif action == 'connection':
-            print(json.dumps(read('connection.json')))
+        elif action == 'connection-sealed':
+            print(json.dumps(sealed_connection(sys.argv[2] if len(sys.argv) > 2 else '')))
             return
         elif action == 'start':
             start()
@@ -1302,7 +1322,7 @@ def main():
             if read('config.json', {'autoStart': True})['autoStart']:
                 start()
         else:
-            raise RuntimeError('Usage: silo-desktop status|connection|start|stop|restart|restart-streamer|boot|autostart true|false')
+            raise RuntimeError('Usage: silo-desktop status|connection-sealed|start|stop|restart|restart-streamer|boot|autostart true|false')
         print(json.dumps(status()))
 
 
