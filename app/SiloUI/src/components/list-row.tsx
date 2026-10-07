@@ -19,6 +19,7 @@ export function ListRow({
   leading,
   actions,
   detailClassName,
+  selectable,
   onOpen,
   className,
   ...props
@@ -31,11 +32,14 @@ export function ListRow({
   detailClassName?: string
   /** Opens the row's own view when the row body is clicked. Put a real button in `title` for keyboard access. */
   onOpen?: () => void
+  /** Whether the title and detail text can be selected. Defaults to off for rows that open on click, so selecting never competes with opening. */
+  selectable?: boolean
 } & Omit<ComponentProps<"div">, "title" | "children">) {
+  const textSelectable = selectable ?? !onOpen
   const content = (
     <>
-      <div data-slot="list-row-title" className="flex min-w-0 items-center gap-1.5 text-ui leading-4 font-medium">{title}</div>
-      {detail != null && <div className={cn("truncate text-caption leading-4 text-muted-foreground select-text", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>}
+      <div data-slot="list-row-title" className={cn("flex min-w-0 items-center gap-1.5 text-ui leading-4 font-medium", textSelectable && "select-text")}>{title}</div>
+      {detail != null && <div className={cn("truncate text-caption leading-4 text-muted-foreground", textSelectable && "select-text", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>}
     </>
   )
   return (

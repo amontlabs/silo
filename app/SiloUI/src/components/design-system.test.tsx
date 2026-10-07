@@ -100,3 +100,21 @@ describe("fields", () => {
     expect(screen.getByRole("combobox", { name: "Pick" })).toHaveClass("h-7", "rounded-md", "text-xs")
   })
 })
+
+describe("Spinner labels", () => {
+  it("is announced when labelled through aria-label", () => {
+    render(<Spinner aria-label="Checking" />)
+    expect(screen.getByRole("img", { name: "Checking" })).not.toHaveAttribute("aria-hidden")
+  })
+})
+
+describe("ListRow text selection", () => {
+  it("selects title and detail unless the row opens on click", () => {
+    const { rerender } = render(<ListRow icon={null} title="Title" detail="Detail" />)
+    expect(screen.getByText("Detail")).toHaveClass("select-text")
+    rerender(<ListRow icon={null} title="Title" detail="Detail" onOpen={() => {}} />)
+    expect(screen.getByText("Detail")).not.toHaveClass("select-text")
+    rerender(<ListRow icon={null} title="Title" detail="Detail" onOpen={() => {}} selectable />)
+    expect(screen.getByText("Detail")).toHaveClass("select-text")
+  })
+})

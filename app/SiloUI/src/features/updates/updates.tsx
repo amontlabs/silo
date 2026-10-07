@@ -64,7 +64,7 @@ export function UpdatesCard() {
           <div className="flex items-center justify-between gap-2"><p>{error}</p>{!confirm && state?.retryAction !== "relaunch" && <Button size="xs" variant="outline" disabled={busy || (installing && !state?.canInstall)} onClick={retry}>Retry</Button>}</div>
           {state?.errorDetails && <details className="mt-1 text-caption text-muted-foreground"><summary>Details</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.errorDetails}</p></details>}
         </InlineAlert>}
-        {state?.packageKind === "manual" && state.phase === "available" && <details className="px-2 pb-2 text-caption text-muted-foreground">
+        {state?.packageKind === "manual" && state.phase === "available" && <details className="px-2 pb-2 text-caption text-muted-foreground select-text">
           <summary>How to install</summary>
           <div className="mt-1 grid gap-2">
             <p>Quit Silo before installing. Quitting stops local computers.</p>
@@ -75,7 +75,7 @@ export function UpdatesCard() {
           </div>
         </details>}
         {state?.packageKind === "debian" && state.phase === "available" && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.installBlockReason ?? "Your system will ask for authentication. Silo will update and restart."}</p>}
-        {state?.releaseNotes && state.availableVersion && <details className="px-2 pb-2 text-caption text-muted-foreground"><summary>Release notes</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.releaseNotes}</p></details>}
+        {state?.releaseNotes && state.availableVersion && <details className="px-2 pb-2 text-caption text-muted-foreground select-text"><summary>Release notes</summary><p className="mt-1 whitespace-pre-wrap break-words">{state.releaseNotes}</p></details>}
       </div>
       <ListRow icon={<ListRowIcon><RefreshCw aria-hidden="true" className="size-3.5" /></ListRowIcon>} title="Automatically check for updates" detail="Checks after launch, when you return to Silo, and daily. Failed checks retry automatically. You choose when to download and install."
         detailClassName="whitespace-normal" actions={<Switch aria-label="Automatically check for updates" checked={state?.automaticChecks ?? false} disabled={!state || busy} onCheckedChange={updates.setAutomaticChecks} />} />

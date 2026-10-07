@@ -4,8 +4,8 @@ import { ErrorDetails } from "@/components/error-details"
 import { cn } from "@/lib/utils"
 
 const tones = {
-  danger: "border-destructive/30 bg-destructive/10",
-  warning: "border-warning/30 bg-warning/10",
+  danger: "border-destructive/30 border-l-destructive border-l-2 bg-destructive/10",
+  warning: "border-warning/30 border-l-warning border-l-2 bg-warning/10",
 } as const
 
 const sizes = {
