@@ -1367,6 +1367,11 @@ fn run_msb_process(
         }
     }
     ensure_runtime_files(paths)?;
+    if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+        if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
+            crate::computer_use::repair_lcu_mount_before_start(paths, computer);
+        }
+    }
     let mut secret_revision = None;
     let general_secrets = if let Some(computer) = github_command_computer(args) {
         secret_revision =
@@ -1627,6 +1632,7 @@ fn spawn_runtime(
     } else {
         None
     };
+    let launched = SystemTime::now();
     let mut worker_lock = if takes_worker_lock(args) {
         Some(runtime_worker_lock(paths, args, timeout)?)
     } else {
@@ -1824,11 +1830,16 @@ fn spawn_runtime(
         } else {
             &stderr_detail
         };
+        let boot_detail = raw_detail
+            .trim()
+            .is_empty()
+            .then(|| boot_failure_detail(paths, args, launched))
+            .flatten();
         return Err(RuntimeError::Failed {
             operation: operation_name(args),
             // A child ended by a signal has no exit status; report it as -1.
             exit_code: Some(status.code().unwrap_or(-1)),
-            detail: clean_detail(raw_detail, &paths.home),
+            detail: clean_detail(boot_detail.as_deref().unwrap_or(raw_detail), &paths.home),
         });
     }
     Ok(CommandOutput { stdout, stderr })
@@ -1891,6 +1902,31 @@ fn operation_name(args: &[String]) -> String {
         Some("inspect") | Some("list") => "Reading computer state".into(),
         _ => "The computer operation".into(),
     }
+}
+
+/// What the runtime recorded in the computer's `boot-error.json` when a start fails without
+/// printing anything, as long as it was written by this attempt (`since`).
+fn boot_failure_detail(paths: &RuntimePaths, args: &[String], since: SystemTime) -> Option<String> {
+    if !matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+        return None;
+    }
+    let name = args.get(1).filter(|name| validate_name(name).is_ok())?;
+    let file = computer_logs(paths, name).join("boot-error.json");
+    let metadata = fs::metadata(&file).ok()?;
+    if metadata.len() > 64 * 1024 || metadata.modified().ok()? < since {
+        return None;
+    }
+    let record: Value = serde_json::from_slice(&fs::read(&file).ok()?).ok()?;
+    let stage = record.get("stage").and_then(Value::as_str)?;
+    let message = record.get("message").and_then(Value::as_str)?;
+    let hint = if stage == "mount" {
+        " A folder Silo shares with the computer could not be mounted. Restart Silo and start the computer again."
+    } else {
+        ""
+    };
+    Some(format!(
+        "the computer failed to boot ({stage}): {message}.{hint}"
+    ))
 }
 
 fn clean_detail(detail: &str, home: &Path) -> String {
@@ -13032,6 +13068,40 @@ exit 9
         let error = remove_computer(&runner, &paths, &computer()).unwrap_err();
         assert!(error.to_string().contains("Stop computer 'dev'"));
         assert_eq!(runner.calls.lock().unwrap().len(), 1);
+    }
+
+    fn write_boot_error(paths: &RuntimePaths, name: &str, record: &str) {
+        let logs = computer_logs(paths, name);
+        fs::create_dir_all(&logs).unwrap();
+        fs::write(logs.join("boot-error.json"), record).unwrap();
+    }
+
+    const MOUNT_BOOT_ERROR: &str = r#"{"t":"2026-10-07T10:00:00Z","stage":"mount","errno":2,"message":"mount opt_silo_lc_7be8715d: No such file or directory (os error 2)"}"#;
+
+    #[test]
+    fn a_silent_boot_failure_reports_the_recorded_mount_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let before = SystemTime::now() - Duration::from_secs(60);
+        write_boot_error(&paths, "dev", MOUNT_BOOT_ERROR);
+        let detail = boot_failure_detail(&paths, &["start".into(), "dev".into()], before).unwrap();
+        assert!(detail.contains("failed to boot (mount)"), "{detail}");
+        assert!(detail.contains("opt_silo_lc_7be8715d"), "{detail}");
+        assert!(detail.contains("Restart Silo"), "{detail}");
+        assert!(!clean_detail(&detail, &paths.home).contains("did not provide"));
+    }
+
+    #[test]
+    fn a_boot_error_from_an_earlier_attempt_or_another_command_is_not_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_boot_error(&paths, "dev", MOUNT_BOOT_ERROR);
+        let after = SystemTime::now() + Duration::from_secs(60);
+        assert!(boot_failure_detail(&paths, &["start".into(), "dev".into()], after).is_none());
+        let before = SystemTime::now() - Duration::from_secs(60);
+        assert!(boot_failure_detail(&paths, &["stop".into(), "dev".into()], before).is_none());
+        write_boot_error(&paths, "dev", "{ truncated");
+        assert!(boot_failure_detail(&paths, &["start".into(), "dev".into()], before).is_none());
     }
 }
 
