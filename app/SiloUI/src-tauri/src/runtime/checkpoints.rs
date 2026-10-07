@@ -6622,6 +6622,30 @@ mod tests {
         native::remove_empty_group(&paths, "locked");
         assert!(!locked.exists());
 
+        let unlocked = group_directory(&paths, "unlocked", EMPTY_GROUP);
+        fs::remove_file(unlocked.join(".group.lock")).unwrap();
+        native::remove_empty_group(&paths, "unlocked");
+        assert!(unlocked.join("group.json").exists());
+
+        let raced = group_directory(&paths, "raced", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "raced", || {
+            fs::write(raced.join("group.json"), r#"{"head":"snap_new"}"#).unwrap();
+        });
+        assert!(raced.join("group.json").exists() && raced.join(".group.lock").exists());
+
+        let member = group_directory(&paths, "member", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "member", || {
+            fs::create_dir(member.join("snap_new")).unwrap();
+        });
+        assert!(member.join("snap_new").exists());
+
+        let replaced = group_directory(&paths, "replaced", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "replaced", || {
+            fs::remove_file(replaced.join(".group.lock")).unwrap();
+            fs::write(replaced.join(".group.lock"), "").unwrap();
+        });
+        assert!(replaced.join("group.json").exists());
+
         native::remove_empty_group(&paths, "../outside");
         native::remove_empty_group(&paths, "missing");
     }
