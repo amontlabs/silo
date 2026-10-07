@@ -283,6 +283,7 @@ fn main() {
                 remote::start(app.handle().clone());
                 secrets::install(app.handle())?;
                 github::install(app.handle());
+                host_push::install(app.handle());
                 backup_controller::install(app.handle())?;
                 runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;

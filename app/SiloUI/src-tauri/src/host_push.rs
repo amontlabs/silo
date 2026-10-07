@@ -25,8 +25,17 @@ struct Discovery {
     /// The last rows predate a change to a repository; they are served only when a newer
     /// read does not finish in time.
     stale: bool,
+    /// What a caller was last given while a newer read was still in flight.
+    served: Option<Result<Vec<Value>, String>>,
 }
 impl Discovery {
+    /// Whether this finished read differs from what callers were given in the meantime.
+    fn differs_from_served(&mut self) -> bool {
+        match (self.served.take(), &self.last) {
+            (Some(served), Some((_, result))) => served != *result,
+            _ => false,
+        }
+    }
     fn invalidate(&mut self) {
         self.stale = true;
         self.generation = self.generation.wrapping_add(1);
@@ -38,6 +47,11 @@ impl Discovery {
         }
         self.running = false;
     }
+}
+static NOTIFY_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+/// Lets a finished discovery tell the UI when it changes rows a state read already served.
+pub(crate) fn install(app: &tauri::AppHandle) {
+    let _ = NOTIFY_APP.set(app.clone());
 }
 type Discoveries = (Mutex<HashMap<String, Discovery>>, std::sync::Condvar);
 static DISCOVERIES: OnceLock<Discoveries> = OnceLock::new();
@@ -248,7 +262,14 @@ fn ensure_running(
         }
         let entry = entries.entry(key).or_default();
         entry.finish(generation, started, result);
+        let update = entry.differs_from_served();
+        drop(entries);
         changed.notify_all();
+        if update {
+            if let Some(app) = NOTIFY_APP.get() {
+                let _ = app.emit("silo://application-state-changed", ());
+            }
+        }
     });
 }
 
@@ -329,18 +350,22 @@ pub(crate) fn discover_until(
             }
         }
         ensure_running(&mut entries, paths, name, &key);
-        let entry = &entries[&key];
+        let entry = entries.get_mut(&key).expect("entry exists");
         if !refresh && !entry.stale {
             if let Some((_, result)) = &entry.last {
-                return result.clone();
+                let result = result.clone();
+                entry.served = Some(result.clone());
+                return result;
             }
         }
         let now = Instant::now();
         if now >= wait_until {
-            return match &entry.last {
+            let result = match &entry.last {
                 Some((_, result)) => result.clone(),
                 None => Ok(Vec::new()),
             };
+            entry.served = Some(result.clone());
+            return result;
         }
         entries = changed
             .wait_timeout(entries, wait_until - now)
@@ -1431,6 +1456,7 @@ mod tests {
                 running: false,
                 generation: 0,
                 stale: false,
+                served: None,
             },
         );
         assert_eq!(
@@ -1469,6 +1495,7 @@ mod tests {
                 running: false,
                 generation: 0,
                 stale: false,
+                served: None,
             },
         );
         assert_eq!(
@@ -1703,6 +1730,25 @@ mod tests {
         assert_eq!(rows[0]["ahead"], 3);
         assert!(started.elapsed() < Duration::from_secs(3));
         discoveries().0.lock().unwrap().remove(&key);
+    }
+
+    #[test]
+    fn a_finished_read_is_announced_only_when_it_differs_from_what_was_served() {
+        let rows = |ahead: u64| Ok(vec![json!({"path":"/workspace/repo","ahead":ahead})]);
+        let mut entry = Discovery {
+            running: true,
+            served: Some(rows(1)),
+            ..Discovery::default()
+        };
+        entry.finish(entry.generation, Instant::now(), rows(0));
+        assert!(entry.differs_from_served());
+        entry.running = true;
+        entry.served = Some(rows(0));
+        entry.finish(entry.generation, Instant::now(), rows(0));
+        assert!(!entry.differs_from_served());
+        entry.running = true;
+        entry.finish(entry.generation, Instant::now(), rows(5));
+        assert!(!entry.differs_from_served(), "nothing was served meanwhile");
     }
 
     #[test]
