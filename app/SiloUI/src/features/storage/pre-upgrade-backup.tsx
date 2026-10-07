@@ -1,4 +1,5 @@
 /* oxlint-disable react/only-export-components */
+import { formatLongDate } from "@/lib/format-date"
 import { errorMessage } from "@/lib/error-message"
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { z } from "zod"
@@ -160,7 +161,7 @@ export function formatBackupSize(size: PreUpgradeBackupSize) {
 
 /** The local calendar date of the instant Silo deletes the backup: a date, not a countdown. */
 export function formatDeleteDate(deleteAt: string) {
-  return new Date(deleteAt).toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" })
+  return formatLongDate(deleteAt)
 }
 
 /** "deleted on October 15, 2026", or that it will not be deleted by itself. */

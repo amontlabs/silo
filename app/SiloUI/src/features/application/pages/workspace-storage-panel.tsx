@@ -1,3 +1,4 @@
+import { formatDateTime } from '@/lib/format-date'
 import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { formatBinaryBytes as formatBytes } from '@/lib/format-bytes'
 import type { WorkspaceStorageState } from '../model/workspace-storage'
@@ -10,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 
 type ReclaimEntry = WorkspaceStorageState['history'][number]
 
-function date(at: number) { return new Date(at * 1000).toLocaleString('en', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) }
+function date(at: number) { return formatDateTime(at * 1000) }
 function ago(at: number) {
   const seconds = Math.max(0, Date.now() / 1000 - at)
   const units: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86400], ['hour', 3600], ['minute', 60]]

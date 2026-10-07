@@ -1,3 +1,4 @@
+import { formatMonthDayTime } from "@/lib/format-date"
 import { useEffect, useEffectEvent, useState } from "react"
 import { History, ShieldCheck, TriangleAlert } from "lucide-react"
 import { ActionsMenu } from "@/components/actions-menu"
@@ -14,8 +15,7 @@ import type { CheckpointUsage, ComputerCheckpoint } from "@/features/application
 import { formatBinaryBytes } from "@/lib/format-bytes"
 
 function suggestedName(now = new Date()) {
-  // Always English: the UI copy is English, so the system locale must not leak month names.
-  return `Checkpoint ${now.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`
+  return `Checkpoint ${formatMonthDayTime(now)}`
 }
 
 function checkpointTag(checkpoint: ComputerCheckpoint) {

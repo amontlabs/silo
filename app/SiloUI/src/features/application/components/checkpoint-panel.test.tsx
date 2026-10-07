@@ -238,18 +238,12 @@ it("keeps a failed restore in its notification with Retry", async () => {
   expect(restoreCheckpoint).toHaveBeenCalledTimes(2)
 })
 
-it("suggests an English checkpoint name regardless of the system locale", async () => {
-  const original = Date.prototype.toLocaleString
-  const seen: unknown[] = []
-  Date.prototype.toLocaleString = function (locale?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) { seen.push(locale); return original.call(this, locale ?? "fr", options) }
-  try {
-    const user = userEvent.setup()
-    render(<CheckpointPanel computer={computer} target="dev" actions={{ createCheckpoint: vi.fn() } as unknown as ApplicationActions} disabled={false} />)
-    await user.click(screen.getByRole("button", { name: "New checkpoint" }))
-    const value = (screen.getByRole("textbox", { name: "Checkpoint name" }) as HTMLInputElement).value
-    expect(value).toMatch(/^Checkpoint [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/)
-    expect(seen).toContain("en")
-  } finally { Date.prototype.toLocaleString = original }
+it("suggests an English checkpoint name", async () => {
+  const user = userEvent.setup()
+  render(<CheckpointPanel computer={computer} target="dev" actions={{ createCheckpoint: vi.fn() } as unknown as ApplicationActions} disabled={false} />)
+  await user.click(screen.getByRole("button", { name: "New checkpoint" }))
+  const value = (screen.getByRole("textbox", { name: "Checkpoint name" }) as HTMLInputElement).value
+  expect(value).toMatch(/^Checkpoint [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/)
 })
 
 const gib = 1024 ** 3

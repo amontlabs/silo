@@ -1,3 +1,4 @@
+import { formatLocalActivityTime } from "@/lib/format-date"
 import type { LogWindow } from "./logs-page"
 import { visibleText } from "@/lib/visible-text"
 import { computerTarget } from "@/features/application/model/connections"
@@ -217,8 +218,6 @@ const activityCategoryPresentation = {
   system: { label: "System", icon: Wrench },
 } as const
 
-const activityTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" })
-const formatActivityTime = (occurredAt: string) => activityTimeFormat.format(new Date(occurredAt))
 
 const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { item: ApplicationActivity; computer: ApplicationComputer | undefined; onShowLogs: (activity: ApplicationActivity) => void }) {
   const category = activityCategoryPresentation[item.category]
@@ -271,7 +270,7 @@ const ActivityRow = memo(function ActivityRow({ item, computer, onShowLogs }: { 
       }
       actions={
         <div className="flex max-w-[40%] shrink-0 flex-col items-end gap-1" data-activity-meta>
-          <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{formatActivityTime(item.occurredAt)}</time>
+          <time dateTime={item.occurredAt} className="text-[10px] text-muted-foreground">{formatLocalActivityTime(item.occurredAt)}</time>
           <div className="flex flex-wrap justify-end gap-1">
             {item.computer && (computer
               ? <ComputerBadge name={computer.configuration.name} state={computer.state} device={computer.device} />

@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/lib/format-date"
 import { errorMessage } from "@/lib/error-message"
 import { useId, useRef, useState } from "react"
 import { CalendarDays } from "lucide-react"
@@ -129,6 +130,6 @@ function boundary(date: string, time: string, end: boolean): string {
   return value.toISOString()
 }
 function rangeLabel(since: string, until: string): string {
-  const format = (value: string) => new Date(value).toLocaleString("en", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+  const format = (value: string) => formatDateTime(value)
   return since && until ? `${format(since)} → ${format(until)}` : since ? `Since ${format(since)}` : `Until ${format(until)}`
 }
