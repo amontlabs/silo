@@ -7,6 +7,7 @@ Run with xvfb-run -a dbus-run-session -- python3 scripts/test-linux-desktop.py.
 import json
 import hashlib
 import os
+import platform
 from pathlib import Path
 import signal
 import secrets
@@ -40,6 +41,20 @@ class Options(BaseOptions):
 
     def to_capabilities(self):
         return {"tauri:options": {"application": str(Path(os.environ.get("SILO_LINUX_APPLICATION", ROOT / "src-tauri/target/debug/silo-ui")))}}
+
+
+def stage_unpackaged_runtime_library():
+    """Place the staged libkrunfw where an unpackaged Linux build looks for its bundled runtime library."""
+    application = Path(os.environ.get("SILO_LINUX_APPLICATION", ROOT / "src-tauri/target/debug/silo-ui")).resolve()
+    if application.suffix == ".AppImage" or application.name == "AppRun":
+        return
+    target = {"aarch64": "aarch64-unknown-linux-gnu", "x86_64": "x86_64-unknown-linux-gnu"}[platform.machine()]
+    source = ROOT / "src-tauri/runtime/microsandbox" / target / "lib/libkrunfw.so.5.6.1"
+    if application.parent.name not in ("debug", "release") or not source.is_file():
+        return
+    destination = application.parent / "microsandbox" / target / "lib/libkrunfw.so.5.6.1"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
 
 
 def stop_test_app(environment):
@@ -133,6 +148,7 @@ def run():
                         if process.poll() is not None:
                             raise RuntimeError("tauri-driver exited; inspect desktop-driver.log")
                         time.sleep(.1)
+                stage_unpackaged_runtime_library()
                 browser = webdriver.Remote(f"http://127.0.0.1:{port}", options=Options())
                 wait = WebDriverWait(browser, 45, ignored_exceptions=(StaleElementReferenceException, ElementClickInterceptedException, ElementNotInteractableException))
                 def click(by, value):
@@ -178,7 +194,7 @@ def run():
                 tools_group = browser.find_element(By.CSS_SELECTOR, "button[aria-label='Bundled tools']")
                 assert tools_group.find_elements(By.CSS_SELECTOR, "[aria-label='All checks passed']"), body
                 tools_group.click()
-                for tool_name in ("MicroSandbox runtime", "Git", "Git LFS"):
+                for tool_name in ("Computer runtime", "Git", "Git LFS"):
                     wait.until(lambda _, name=tool_name: any(
                         node.is_displayed() for node in browser.find_elements(By.XPATH, f"//*[normalize-space()='{name}']")
                     ))
