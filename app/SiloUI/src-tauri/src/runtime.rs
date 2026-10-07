@@ -4145,6 +4145,34 @@ fn normalize_request_id(request_id: Option<String>) -> Result<String, String> {
     Ok(request_id)
 }
 
+/// The one computer a setup adds, removes or edits, when it concerns exactly one.
+fn changed_computer(
+    previous: &ComputerConfigurationRequest,
+    request: &ComputerConfigurationRequest,
+) -> Option<String> {
+    let mut changed: Vec<&str> = Vec::new();
+    for computer in &request.computers {
+        if previous.computers.iter().all(|old| old != computer) {
+            changed.push(computer.name());
+        }
+    }
+    for computer in &previous.computers {
+        if request
+            .computers
+            .iter()
+            .all(|new| new.id() != computer.id())
+        {
+            changed.push(computer.name());
+        }
+    }
+    changed.sort_unstable();
+    changed.dedup();
+    match changed.as_slice() {
+        [only] => Some((*only).to_owned()),
+        _ => None,
+    }
+}
+
 /// Validate, save and verify a finalized configuration with the shared journal,
 /// progress events and completion outcome. The caller holds the operation gate and
 /// supplies the exact `request` to persist (a whole-list save or a targeted change
@@ -4184,6 +4212,9 @@ fn apply_configuration_with_progress(
             },
         )
     });
+    let setup_computer = changed_computer(&previous, &request)
+        .or_else(|| retry_computer.clone())
+        .unwrap_or_default();
     let journal = Mutex::new(ActivityJournal::start(paths, request_id)?);
     let publish = |event: ComputerConfigurationProgress| {
         let mut journal = journal.lock().unwrap_or_else(|error| error.into_inner());
@@ -4197,7 +4228,12 @@ fn apply_configuration_with_progress(
         }
         let _ = app.emit_to("main", "silo://computer-configuration-progress", &event);
     };
-    publish(computer_progress(request_id, "setup-started", "", 0));
+    publish(computer_progress(
+        request_id,
+        "setup-started",
+        &setup_computer,
+        0,
+    ));
     let progress = |step: &str, computer: &str, fraction: u8| {
         publish(computer_progress(request_id, step, computer, fraction));
     };
@@ -4230,7 +4266,7 @@ fn apply_configuration_with_progress(
         } else {
             "setup-failed"
         },
-        "",
+        &setup_computer,
         0,
     );
     if let Err(error) = &result {
@@ -4246,7 +4282,7 @@ fn apply_configuration_with_progress(
             .events
             .back()
             .cloned();
-        if let Some(last) = last {
+        if let Some(last) = last.filter(|last| !last.computer.is_empty()) {
             outcome.computer = last.computer;
         }
         outcome.message = format!("Computer setup failed: {}", report.summary);
@@ -13221,6 +13257,39 @@ mod change_configuration_tests {
             runtime_storage_gib: 10,
             desktop: None,
         }
+    }
+
+    #[test]
+    fn a_setup_names_the_one_computer_it_changes() {
+        const A: &str = "00000000-0000-4000-8000-00000000000a";
+        const B: &str = "00000000-0000-4000-8000-00000000000b";
+        let request = |computers| ComputerConfigurationRequest {
+            schema_version: 1,
+            computers,
+        };
+        let (one, two) = (computer(A, "one", 2), computer(B, "two", 2));
+        let empty = request(vec![]);
+        assert_eq!(
+            changed_computer(&empty, &request(vec![one.clone()])).as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(&request(vec![one.clone()]), &empty).as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(
+                &request(vec![one.clone(), two.clone()]),
+                &request(vec![computer(A, "one", 3), two.clone()])
+            )
+            .as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(&request(vec![one.clone()]), &request(vec![one.clone()])),
+            None
+        );
+        assert_eq!(changed_computer(&empty, &request(vec![one, two])), None);
     }
 
     fn upsert(
