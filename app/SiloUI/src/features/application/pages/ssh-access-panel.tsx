@@ -184,7 +184,7 @@ export function SshAccessBadges({ access, stale = false, onOpen }: { access?: Ss
   return <TooltipProvider delayDuration={150}><Tooltip><TooltipTrigger asChild>
     {onOpen
       // Inside a list row, the click opens the SSH tab instead of the row's own page.
-      ? <button type="button" aria-label={name} className={`${className} cursor-pointer hover:brightness-110`} onClick={event => { event.stopPropagation(); onOpen() }}>{content}</button>
+      ? <button type="button" aria-label={name} className={`${className} hover:brightness-110`} onClick={event => { event.stopPropagation(); onOpen() }}>{content}</button>
       : <span tabIndex={0} aria-label={name} className={className}>{content}</span>}
   </TooltipTrigger><TooltipContent>{label} · {status}{onOpen && " · Open SSH settings"}</TooltipContent></Tooltip></TooltipProvider>
 }

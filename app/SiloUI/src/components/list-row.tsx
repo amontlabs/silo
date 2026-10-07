@@ -47,7 +47,7 @@ export function ListRow({
         // controls inside the row keep their own clicks and keys.
         <div
           data-slot="list-row-content"
-          className="min-w-0 flex-1 cursor-pointer text-left"
+          className="min-w-0 flex-1 text-left"
           onClick={(event) => { if (!isInteractiveTarget(event.target, event.currentTarget)) onOpen() }}
         >
           {content}

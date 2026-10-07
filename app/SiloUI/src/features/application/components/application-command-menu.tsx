@@ -114,7 +114,7 @@ export function ApplicationCommandMenu({ commands, disabled = false, openRequest
                 keepFocus.current = Boolean(command.opensPanel)
                 setOpen(false)
                 command.run()
-              }} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-xs outline-none select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground">
+              }} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs outline-none select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground">
                 <command.icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="truncate" title={command.label}>{command.label}</span>
               </Command.Item>)}
