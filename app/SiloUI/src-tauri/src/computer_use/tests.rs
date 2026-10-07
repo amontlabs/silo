@@ -2967,3 +2967,79 @@ fn a_retry_ends_when_the_computer_is_no_longer_the_same_running_instance() {
     assert_eq!(guest.runs.lock().unwrap().len(), 1);
     assert!(!retry_scheduled(&id));
 }
+
+fn lcu_config(host: &Path) -> Value {
+    json!({"mounts":[
+        {"type":"Owned","guest":"/workspace"},
+        {"type":"Bind","host":host.display().to_string(),"guest":"/opt/silo/lcu",
+            "options":{"readonly":true}}
+    ]})
+}
+
+fn lcu_current(root: &Path) -> PathBuf {
+    let current = root.join("current");
+    fs::create_dir_all(&current).unwrap();
+    fs::write(current.join("lcu-0.9.4-linux-x64.tar.gz"), b"archive").unwrap();
+    current
+}
+
+#[test]
+fn a_missing_lcu_mount_source_is_recreated_with_the_current_archive() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    let current = lcu_current(&root);
+    let stale = root.join("0.8.8");
+    assert!(repair_lcu_mount(&lcu_config(&stale), &root, Some(&current)));
+    assert_eq!(
+        fs::read(stale.join("lcu-0.9.4-linux-x64.tar.gz")).unwrap(),
+        b"archive"
+    );
+    assert_eq!(
+        fs::metadata(&stale).unwrap().permissions().mode() & 0o222,
+        0
+    );
+    // Repeating it, or a source that exists, changes nothing.
+    assert!(!repair_lcu_mount(
+        &lcu_config(&stale),
+        &root,
+        Some(&current)
+    ));
+    assert!(!repair_lcu_mount(
+        &lcu_config(&current),
+        &root,
+        Some(&current)
+    ));
+    for folder in [&stale, &current] {
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn a_missing_lcu_folder_still_leaves_the_mount_source_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    fs::create_dir_all(&root).unwrap();
+    let stale = root.join("0.8.8");
+    assert!(repair_lcu_mount(&lcu_config(&stale), &root, None));
+    assert!(stale.is_dir());
+    assert_eq!(fs::read_dir(&stale).unwrap().count(), 0);
+    fs::set_permissions(&stale, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn only_a_folder_directly_under_silos_lcu_folder_is_recreated() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    fs::create_dir_all(&root).unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    for outside in [
+        elsewhere.join("0.8.8"),
+        root.join("nested").join("0.8.8"),
+        root.join(".hidden"),
+    ] {
+        assert!(!repair_lcu_mount(&lcu_config(&outside), &root, None));
+        assert!(!outside.exists());
+    }
+    assert!(!repair_lcu_mount(&json!({"mounts":[]}), &root, None));
+}

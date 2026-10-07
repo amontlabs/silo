@@ -175,6 +175,7 @@ const BODY: &[u8] = b"pinned archive body";
 fn spec_of(version: &str, archive: &str, bytes: u64) -> ArchiveSpec {
     ArchiveSpec {
         version: version.into(),
+        stable_folder: None,
         archive: archive.into(),
         url: format!("https://example.test/{archive}"),
         sha256: format!("{:x}", Sha256::digest(BODY)),
@@ -653,4 +654,35 @@ fn download_progress_is_a_percentage() {
     assert_eq!(percent(50, 200), 25);
     assert_eq!(percent(300, 200), 100);
     assert_eq!(percent(5, 0), 0);
+}
+
+#[test]
+fn the_lcu_archive_keeps_one_folder_across_versions_and_garbage_collection_spares_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    let stable = |version: &str| ArchiveSpec {
+        stable_folder: Some(LCU_FOLDER),
+        ..spec(version)
+    };
+    for version in ["0.8.8", "0.9.4"] {
+        let current = stable(version);
+        download_and_publish(&root, &current, &Fake::serving(BODY), &no_progress)
+            .map_err(|f| f.message)
+            .unwrap();
+        assert_eq!(published(&root, &current).unwrap(), root.join(LCU_FOLDER));
+        assert!(root.join(LCU_FOLDER).join(&current.archive).is_file());
+    }
+    assert!(!root
+        .join(LCU_FOLDER)
+        .join("lcu-0.8.8-linux-x64.tar.gz")
+        .exists());
+    assert_eq!(
+        fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name() != DOWNLOAD_DIR)
+            .count(),
+        1
+    );
+    remove_tree(&root);
 }
