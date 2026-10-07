@@ -1,7 +1,8 @@
 import { useEffect, useEffectEvent, useId, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { deleteComputerDescription, deleteComputerTitle, formatComputerSize } from "@/features/computers/model/delete-computer-copy"
+import { formatBinaryBytes } from "@/lib/format-bytes"
+import { deleteComputerDescription, deleteComputerTitle } from "@/features/computers/model/delete-computer-copy"
 
 /** What the Delete computer dialog states and offers, shared by the list row and the computer page. */
 export interface DeleteComputerDetails {
@@ -37,7 +38,7 @@ export function DeleteComputerBody({ displayName, details = {}, draft = false, o
   useEffect(() => {
     let current = true
     readSize()
-      .then((bytes) => { if (current && bytes !== null) setSize(formatComputerSize(bytes)) })
+      .then((bytes) => { if (current && bytes !== null) setSize(formatBinaryBytes(bytes)) })
       .catch(() => undefined)
     return () => { current = false }
   }, [])

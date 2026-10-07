@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
 
 /**
@@ -62,8 +63,7 @@ export function divergentComputerFields(
  * with this stem, so match on it rather than on the whole sentence.
  */
 export function isStaleConfigurationError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "")
-  return message.includes("changed while your edit was waiting")
+  return errorMessage(error).includes("changed while your edit was waiting")
 }
 
 /**

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { BackupOperationKind } from "@/features/application/model/backup-source"
@@ -35,10 +36,6 @@ export interface TransferResultNoticeState {
   acknowledge: () => Promise<void>
 }
 
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
-
 /**
  * Reads the unseen result while `enabled`, and again whenever Silo reports a change: recovery of an
  * operation that waited for the upgrade finishes after the screen opens. Without a backend there
@@ -62,13 +59,13 @@ export function useTransferResultNotice(backend: TransferResultNoticeBackend | u
         const next = await backend.read()
         if (live && mine === sequence && !acknowledging.current) setNotice(next)
       } catch (cause) {
-        console.error("Silo export and import result:", message(cause))
+        console.error("Silo export and import result:", errorMessage(cause))
       }
     }
     void backend.subscribe(() => { if (live) void refresh() }).then(stop => {
       if (live) unsubscribe = stop
       else stop()
-    }).catch((cause: unknown) => console.error("Silo export and import result:", message(cause))).then(() => {
+    }).catch((cause: unknown) => console.error("Silo export and import result:", errorMessage(cause))).then(() => {
       if (live) void refresh()
     })
     return () => { live = false; unsubscribe?.() }

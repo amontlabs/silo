@@ -1,5 +1,6 @@
 import { isLifecycleStep, type LifecycleStep } from "@/features/application/model/lifecycle-progress"
-import { bridgeErrorMessage, hasBridgeErrorCode } from "@/contracts/bridge-error"
+import { hasBridgeErrorCode } from "@/contracts/bridge-error"
+import { errorMessage as sharedErrorMessage } from "@/lib/error-message"
 import { defaultSettings, settingSchemas } from "@/features/preferences/model/settings"
 import { workspaceStorageStateSchema } from "@/features/application/model/workspace-storage"
 import { isUnsupportedRemote, logPageSchema } from "@/features/application/model/logs"
@@ -282,11 +283,7 @@ export function parseBackupState(input: unknown): BackupState {
 }
 
 function errorMessage(error: unknown): string {
-  const message = bridgeErrorMessage(error)
-  if (message) return message
-  if (error instanceof Error && error.message.trim()) return error.message
-  const text = String(error).trim()
-  return text || "Silo could not complete the action. Retry; if it fails again, relaunch Silo."
+  return sharedErrorMessage(error, { fallback: "Silo could not complete the action. Retry; if it fails again, relaunch Silo." })
 }
 
 /** A JSON key that does not depend on object property order. */

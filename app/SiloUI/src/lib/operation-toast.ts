@@ -1,7 +1,7 @@
 import { createElement, useEffect, useRef, type ReactNode, type MouseEvent } from "react"
 import { toast } from "sonner"
 
-import { bridgeErrorMessage } from "@/contracts/bridge-error"
+import { errorMessage } from "@/lib/error-message"
 import { deliverNotice, type Notice, type NoticeComputer } from "@/desktop/notices"
 import { OperationToastBody, type OperationProgressOptions } from "@/components/operation-toast-body"
 
@@ -45,10 +45,6 @@ interface OperationToastOptions {
   native?: boolean
   /** See `OperationResultOptions.noticeComputer`. */
   noticeComputer?: NoticeComputer
-}
-
-export function errorMessage(error: unknown): string {
-  return bridgeErrorMessage(error) ?? (error instanceof Error ? error.message : String(error))
 }
 
 /**
