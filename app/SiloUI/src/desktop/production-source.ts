@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { archiveInspectionShape, directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, secretShape } from "./production-schemas"
+import { directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, secretShape } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -14,7 +14,7 @@ import type { OnboardingCompletionRequest } from "@/features/onboarding/model/on
 import type { ApplicationActions, ApplicationSource, ApplicationComputer, SecretConfigurationRequest } from "@/features/application/model/application-source"
 import { operationQueueSchema, isCancelledError, type OperationQueue } from "@/features/application/model/operation-queue"
 import { deriveComputerChanges, isStaleConfigurationError, type ComputerConfigurationChange } from "@/features/application/model/computer-change"
-import { ExportIncompleteError, type BackupArchive, type BackupController, type BackupOperation, type BackupState, type VerifiedExport } from "@/features/application/model/backup-source"
+import type { BackupController, BackupState } from "@/features/application/model/backup-source"
 import { checkpointUsageSchema, type ComputerCheckpointOperation } from "@/features/application/model/checkpoint-source"
 import type { StatusBarActions, StatusBarRoute } from "@/features/status-bar/status-bar-types"
 
@@ -22,10 +22,11 @@ import { downloadOutcomeSchema, transferProgressEvent, transferProgressSchema, u
 import { deviceSchema, connectionsStatusSchema, remoteComputerTarget, parseRemoteComputerTarget, computerTarget, type Device, type ConnectionsStatus } from "@/features/application/model/connections"
 
 import type { ProductionContext } from "./production-context"
+import { createBackupControls } from "./production-backup"
 import { createDeviceServices } from "./production-services"
 import { createSetupQueue } from "./production-setup-queue"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
-import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, backupFailure, backupResultKey, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
+import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
 export type { ProductionBridge, ProductionSnapshot } from "./production-types"
 export { isUpdateInProgress, shareStructure } from "./production-helpers"
@@ -104,16 +105,10 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   const pendingLifecycle = new Map<string, "start" | "stop" | "restart" | "dismiss-error">()
   const lifecycleSteps = new Map<string, LifecycleStep>()
   const computerFailures = new Map<string, { computerId: string; action: string; message: string; cancelled: boolean }>()
-  let pendingBackupOperation = false
-  let localBackupOperation: BackupOperation | null = null
-  const dismissedBackupResults = new Set<string>()
-  // Exports awaiting their own result (E-59). Each sees every backend backup
-  // state read, with the read's sequence, or null when the source is disposed.
-  const exportWaiters = new Set<(state: BackupState | null, sequence: number) => void>()
-
   const context: ProductionContext = { native, snapshot: () => snapshot, publish: next => publish(next), disposed: () => disposed }
   const setup = createSetupQueue(context)
   const services = createDeviceServices({ ...context, devices: () => devices, remoteSnapshots, localName: () => connections?.name, live: () => live })
+  const backups = createBackupControls({ ...context, view: () => view, bumpRefreshSequence: () => { ++refreshSequence }, readSequence: () => readSequence, refresh: () => refresh(), reportActionFailure, reportUnavailable })
   const { enqueue: enqueueSetup, setStatus: setSetupStatus, setJobStatus, recordGitHubActivity, delay: setupDelay, drain: drainSetup } = setup
 
   function refreshOperationQueue(): Promise<void> {
@@ -167,18 +162,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
   }
 
   function derive(base: ProductionSnapshot): ProductionSnapshot {
-    let operation = base.backup.operation
-    if (operation?.kind === "result" && dismissedBackupResults.has(backupResultKey(base.backup, operation))) operation = null
-    if (localBackupOperation && operation !== localBackupOperation) {
-      if (!operation) operation = localBackupOperation
-      else {
-        localBackupOperation = null
-        if (operation.kind === "running") dismissedBackupResults.clear()
-      }
-    }
-    // The marker belongs to the result the runtime reported, not to one dismissed here or replaced by a local operation.
-    const { resultUnseen, ...reported } = base.backup
-    const next = { ...base, backup: { ...reported, operation, ...(resultUnseen && operation === base.backup.operation && { resultUnseen }) } }
+    const next = { ...base, backup: backups.derive(base.backup) }
     if (!base.source) return next
     const networkRows = new Map((services.network()?.computers ?? []).map(row => [row.computer, row]))
     const computers = base.source.computers.filter(computer => !computer.device).map(computer => ({
@@ -532,7 +516,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       catch (cause) { backup = unreadableBackup(`Silo returned invalid export and import state: ${errorMessage(cause)} Refresh to confirm the operation result.`) }
     } else backup = unreadableBackup(`Silo could not read export and import state: ${errorMessage(backupResult.reason)} Refresh to confirm the operation result.`)
     if (disposed || epoch !== refreshSequence) return
-    if (backendBackup) { const state = backendBackup; exportWaiters.forEach(waiter => waiter(state, sequence)) }
+    if (backendBackup) { backups.notifyRead(backendBackup, sequence) }
     const applicationCurrent = sequence > appliedApplicationRead
     const backupCurrent = sequence > appliedBackupRead
     if (!applicationCurrent && !backupCurrent && !reportedSource) return
@@ -1309,133 +1293,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     retryGitHubRepositoryCatalog: () => { void githubMutation("refresh_github_repositories").catch(() => {}) },
   }
 
-  function showPendingBackup(operation: "backup" | "restore", archive: BackupArchive, targetName?: string) {
-    ++refreshSequence
-    // A new operation replaces the previous result, here and in the runtime (E-49),
-    // so it does not come back after a relaunch.
-    const previous = view.backup.operation
-    if (previous?.kind === "result" && !(localBackupOperation && shareStructure(previous, localBackupOperation) === previous)) {
-      dismissedBackupResults.add(backupResultKey(view.backup, previous))
-      void native.invoke("dismiss_backup_operation", { expectedOperation: previous, expectedOperationId: view.backup.operationId ?? null }).catch(() => {})
-    }
-    localBackupOperation = { operation, archive, targetName, runningNames: [], kind: "running", progress: 0, indeterminate: true, canCancel: false,
-      phases: [{ title: operation === "backup" ? "Preparing export" : "Checking export file", detail: operation === "backup" ? "Preparing the selected computers." : "Verifying the export file before importing it.", tone: "running" }],
-    }
-    publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-  }
-
-  /** Checks an export file under a request id so aborting `signal` stops the check (E-27).
-   * The check changes no state, so no refresh follows it. */
-  async function inspectBackupArchive(archivePath: string, signal?: AbortSignal) {
-    signal?.throwIfAborted()
-    const requestId = crypto.randomUUID()
-    const cancel = () => { void native.invoke("cancel_backup_inspection", { requestId }).catch(() => undefined) }
-    signal?.addEventListener("abort", cancel, { once: true })
-    try { return archiveInspectionShape.parse(await native.invoke("inspect_backup_archive", { archivePath, requestId })) }
-    finally { signal?.removeEventListener("abort", cancel) }
-  }
-
-  /** Settles with the result the backend reports under `operationId`. A state read
-   * that began after the export started and shows another id means the result is gone. */
-  function waitForExport(operationId: string): Promise<VerifiedExport> {
-    // Reads are numbered as they start: one numbered after this began knows the export.
-    const startedAfter = readSequence
-    return new Promise((resolve, reject) => {
-      const waiter = (state: BackupState | null, sequence: number) => {
-        const operation = state?.operation
-        if (state?.operationId === operationId && operation?.kind !== "result") return
-        if (state && state.operationId !== operationId && sequence <= startedAfter) return
-        exportWaiters.delete(waiter)
-        if (state?.operationId === operationId && operation?.kind === "result") {
-          if (operation.operation === "backup" && operation.outcome === "success") resolve({ operationId, archive: operation.archive })
-          else reject(new ExportIncompleteError(operation.outcome === "cancelled" ? "cancelled" : "failed", operation.message, operationId))
-          return
-        }
-        reject(new ExportIncompleteError("unavailable", state
-          ? "Silo no longer reports this export's result. Check the export folder before relying on it."
-          : "Silo stopped tracking this export before it finished.", operationId))
-      }
-      if (disposed) waiter(null, readSequence)
-      else exportWaiters.add(waiter)
-    })
-  }
-
-  const backupActions: BackupController["actions"] = {
-    async chooseDestination() {
-      const selected = await native.invoke<string | null>("choose_backup_destination")
-      if (selected) await refresh()
-      return selected
-    },
-    async chooseArchive(onSelected, signal) {
-      const archivePath = await native.invoke<string | null>("choose_backup_archive")
-      if (!archivePath || signal?.aborted) return null
-      onSelected?.(archivePath)
-      return inspectBackupArchive(archivePath, signal)
-    },
-    inspectArchive: (archive, signal) => inspectBackupArchive(archive.archivePath, signal),
-    startBackup(destination, computers, checkpointId) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") return
-      backupActions.exportAndVerify(destination, computers, checkpointId).catch(() => undefined)
-    },
-    async exportAndVerify(destination, computers, checkpointId) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") throw new ExportIncompleteError("busy", "Another export or import is running.")
-      pendingBackupOperation = true
-      const archive: BackupArchive = { name: "Export file", archivePath: "", completedLabel: "Not completed", size: "Unknown", destination, computers }
-      showPendingBackup("backup", archive)
-      let operationId: string
-      try { operationId = z.string().min(1).parse(await native.invoke("start_backup", { destination, computers, ...(checkpointId && { checkpointId }) })) }
-      catch (cause) {
-        localBackupOperation = backupFailure("backup", archive, errorMessage(cause))
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-        throw new ExportIncompleteError("rejected", errorMessage(cause))
-      }
-      finally { pendingBackupOperation = false }
-      const completion = waitForExport(operationId)
-      if (localBackupOperation?.kind === "running") dismissedBackupResults.clear()
-      void refresh()
-      return completion
-    },
-    startRestore(archive, newName, sourceName) {
-      if (pendingBackupOperation || view.backup.operation?.kind === "running") return
-      pendingBackupOperation = true
-      showPendingBackup("restore", archive, newName)
-      void native.invoke("start_restore", { archivePath: archive.archivePath, newName, ...(sourceName && { sourceName }) }).then(() => { if (localBackupOperation?.kind === "running") dismissedBackupResults.clear(); return refresh() }).catch((cause) => {
-        localBackupOperation = backupFailure("restore", archive, errorMessage(cause), newName)
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: localBackupOperation } })
-      }).finally(() => { pendingBackupOperation = false })
-    },
-    cancelOperation() { void native.invoke("cancel_backup_operation").then(() => refresh()).catch((cause) => reportUnavailable(`Export or import cancellation failed: ${errorMessage(cause)} The operation may still be running.`)) },
-    async revealArchive(archive) {
-      await native.invoke("reveal_backup_archive", { archivePath: archive.archivePath })
-    },
-    dismissOperation() {
-      const operation = view.backup.operation
-      if (operation?.kind !== "result") return
-      // A rejected start is reported only here; the runtime has nothing to dismiss.
-      // The view reuses an equal earlier object, so compare by content.
-      if (localBackupOperation && shareStructure(operation, localBackupOperation) === operation) {
-        localBackupOperation = null
-        publish({ ...snapshot, backup: { ...snapshot.backup, operation: snapshot.backup.operation === operation ? null : snapshot.backup.operation } })
-        return
-      }
-      const key = backupResultKey(view.backup, operation)
-      dismissedBackupResults.add(key)
-      publish({ ...snapshot })
-      const restore = () => { dismissedBackupResults.delete(key); publish({ ...snapshot }) }
-      void native.invoke("dismiss_backup_operation", { expectedOperation: operation, expectedOperationId: view.backup.operationId ?? null })
-        .then((value) => {
-          if (z.boolean().parse(value)) return
-          // The runtime still holds a result (it changed, or is still being resolved): show it.
-          restore()
-          void refresh()
-        })
-        .catch((cause: unknown) => {
-          restore()
-          reportActionFailure("backup-dismiss", "Could not dismiss the result", errorMessage(cause))
-        })
-    },
-  }
-
   const statusActions: StatusBarActions = {
     listComputerDirectory: applicationActions.listComputerDirectory,
     startComputer: applicationActions.startComputer,
@@ -1500,9 +1357,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     finishSetup,
     drainSetup,
     applicationActions,
-    backupActions,
+    backupActions: backups.actions,
     statusActions,
-    dispose() { exportWaiters.forEach(waiter => waiter(null, refreshSequence)); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setup.wake(); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
+    dispose() { backups.close(); pushPollTimers.forEach(clearTimeout); pushPollTimers.clear(); if (remoteTimer) clearInterval(remoteTimer); disposed = true; setup.wake(); refreshSequence++; unlisten.splice(0).forEach((stop) => stop()); window.removeEventListener("focus", onWindowFocus); document.removeEventListener("visibilitychange", onVisibilityChange); listeners.clear() },
   }
 }
 
