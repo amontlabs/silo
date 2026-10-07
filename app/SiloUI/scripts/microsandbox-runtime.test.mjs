@@ -85,7 +85,12 @@ function runWorker(t, fixture, role) {
 async function waitForFile(path) {
   const deadline = Date.now() + 15000
   while (Date.now() < deadline) {
-    try { return await readFile(path, "utf8") } catch { await delay(10) }
+    // The file exists before its contents are written.
+    try {
+      const content = await readFile(path, "utf8")
+      if (content) return content
+    } catch {}
+    await delay(10)
   }
   throw new Error(`Timed out waiting for ${path}`)
 }
