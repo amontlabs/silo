@@ -1,10 +1,11 @@
-import { ChevronRight, Code, Cpu, GitBranch, Globe, KeyRound, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { ChevronRight, Code, Cpu, GitBranch, Globe, Monitor, Play, Plus, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 import { useId, type MouseEvent, type ReactNode } from "react"
 
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
 import { SectionHeading } from "@/components/page"
 import { ListHeader, listHeadingClassName } from "@/components/list-header"
-import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { EmptyState } from "@/components/empty-state"
+import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -176,11 +177,7 @@ function SecretsSection({ computer, source, actions, onNavigate }: { computer: A
       {adding && <div className="border-b border-border"><AddSecretEditor manager={manager} /></div>}
       {computerSecrets.length > 0
         ? <ul className="divide-y divide-border" aria-label={`Secrets for ${configuration.name}`}>{computerSecrets.map(secret => <SecretRow key={secret.id} secret={secret} manager={manager} />)}</ul>
-        : !adding && <ListRow
-              icon={<ListRowIcon aria-hidden="true"><KeyRound className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No secrets assigned.</span>}
-              detail=""
-            />}
+        : !adding && <EmptyState variant="inline" title="No secrets assigned" />}
     </ListCard>
   </Section>
 }
@@ -216,7 +213,8 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
       <span>{controller.error || controller.errors.join(" · ")}</span>
       {actions.refreshNetwork && <Button size="sm" variant="ghost" onClick={() => void actions.refreshNetwork?.()}>Retry</Button>}
     </div>}
-    {loading && <p role="status" aria-label="Loading ports" className="text-xs text-muted-foreground">Checking network services…</p>}
+    {loading && hasPorts && <span role="status" aria-label="Loading ports" className="sr-only">Checking network services…</span>}
+    {loading && !hasPorts && !draft && <ListCard><ListRowSkeleton label="Loading ports" /></ListCard>}
     {(hasPorts || draft || (!hasDiscoveryError && !loading)) && <ListCard>
       {draft && !draft.editing && <div className="border-b border-border">{inlineForm}</div>}
       {useLive
@@ -240,11 +238,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 </div>}
               />
             })}</div>
-          : !draft && <ListRow
-              icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No ports</span>}
-              detail=""
-            />
+          : !draft && <EmptyState variant="inline" title="No ports" />
         : fallbackPorts.length > 0
           ? <div className="divide-y divide-border">{fallbackPorts.map(port => {
               const cachedPort: NetworkPort = {
@@ -262,11 +256,7 @@ function PortsSection({ computer, source, actions, browser, active, onNavigate }
                 detail={<PortStateLabel state={stateText} />}
               />
             })}</div>
-          : <ListRow
-              icon={<ListRowIcon aria-hidden="true"><Globe className="size-3.5" /></ListRowIcon>}
-              title={<span className="font-normal text-muted-foreground">No ports</span>}
-              detail=""
-            />}
+          : <EmptyState variant="inline" title="No ports" />}
     </ListCard>}
   </Section>
 }
@@ -309,11 +299,7 @@ function OverviewTab({ computer, source, actions, active, onEdit, onNavigate, co
             title={<span className="truncate" title={name}>{name}</span>}
             detail="Clones on next start"
           />)}
-        </> : <ListRow
-          icon={<ListRowIcon aria-hidden="true"><GitBranch className="size-3.5" /></ListRowIcon>}
-          title={<span className="font-normal text-muted-foreground">No repositories cloned yet.</span>}
-          detail=""
-        />}
+        </> : <EmptyState variant="inline" title="No repositories cloned yet" />}
       </ListCard>
     </Section>
 

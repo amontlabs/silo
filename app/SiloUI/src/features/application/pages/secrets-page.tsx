@@ -36,7 +36,7 @@ export function SecretsPage({ source, onSaveSecret, onRemoveSecret, onRetrySecre
             </ul>
           </ListCard>
         </TooltipProvider>
-      ) : <EmptyState icon={<KeyRound />} title="No secrets configured." />}
+      ) : <EmptyState icon={<KeyRound />} title="No secrets configured" />}
     </PageContainer>
   )
 }

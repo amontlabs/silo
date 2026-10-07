@@ -2,6 +2,8 @@ import { useState } from "react"
 import { Download, RefreshCw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SectionHeading } from "@/components/page"
+import { Progress } from "@/components/ui/progress"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { InlineConfirmation } from "@/components/inline-confirmation"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
@@ -41,7 +43,7 @@ export function UpdatesCard() {
     <ListCard divided>
       <div>
         <ListRow icon={<ListRowIcon><Download aria-hidden="true" className="size-3.5" /></ListRowIcon>}
-          title="Silo" detail={state ? description(state) : "Loading update settings…"} detailClassName="whitespace-normal"
+          title="Silo" detail={state ? description(state) : <Skeleton className="h-2.5 w-40" />} detailClassName="whitespace-normal"
           actions={<InlineConfirmation active={confirm} onDismiss={updates.cancelInstall}>
             {confirm && installing && state ? <span className="flex shrink-0 gap-1.5">
               <Button size="xs" variant="outline" disabled={busy} onClick={updates.cancelInstall}>Cancel</Button>
@@ -53,9 +55,7 @@ export function UpdatesCard() {
           </InlineConfirmation>} />
         {confirm && installing && state && <p className="px-2 pb-2 text-caption text-muted-foreground">{state.runningComputers.join(", ")} will stop and restart after updating. Save your work before continuing.</p>}
         {state?.phase === "downloading" && <div className="px-2 pb-2">
-          <div role="progressbar" aria-label="Update download" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={percent === undefined ? `${state.downloadedBytes.toLocaleString()} bytes downloaded` : `${percent}%`} className="h-1 overflow-hidden rounded-full bg-muted">
-            <div className={percent === undefined ? "h-full w-1/3 animate-pulse bg-primary motion-reduce:animate-none" : "h-full bg-primary"} style={percent === undefined ? undefined : { width: `${percent}%` }} />
-          </div>
+          <Progress value={percent} aria-label="Update download" aria-valuetext={percent === undefined ? `${state.downloadedBytes.toLocaleString()} bytes downloaded` : `${percent}%`} />
           <p className="mt-1 text-caption text-muted-foreground">{percent === undefined ? `${(state.downloadedBytes / 1048576).toFixed(1)} MiB downloaded` : `${percent}%`}</p>
         </div>}
         {error && <div role="alert" className="mx-2 mb-2 rounded-md border border-destructive/25 bg-destructive/[.06] p-2 text-xs">

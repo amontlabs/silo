@@ -4,6 +4,7 @@ import { Check, ExternalLink, GitBranch, Info, RotateCcw, Search, Trash2, X } fr
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { DisclosureHeader } from "@/components/disclosure-header"
 import { ConfirmPopover } from "@/components/confirm-popover"
+import { EmptyState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
@@ -184,7 +185,7 @@ function RepositoryCombobox({ computer, repositoryOptions, selectedRepositories,
             <span className="min-w-0 break-all">{repository}</span>
           </button>
         )) : (
-          <p className="px-2 py-1.5 text-xs text-muted-foreground">No repositories found.</p>
+          <EmptyState variant="inline" title="No repositories found" />
         )}
         {searchActions.map((action, index) => (
           <button

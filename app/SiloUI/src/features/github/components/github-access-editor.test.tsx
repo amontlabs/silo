@@ -245,7 +245,7 @@ describe("GitHubAccessEditor", () => {
     expect(onManageRepositories).toHaveBeenCalledOnce()
     onManageRepositories.mockClear()
     await user.type(screen.getByRole("combobox"), "missing-repository")
-    expect(screen.getByText("No repositories found.")).toBeVisible()
+    expect(screen.getByText("No repositories found")).toBeVisible()
     await user.click(screen.getByRole("option", { name: "Add more repositories on GitHub" }))
     expect(onManageRepositories).toHaveBeenCalledOnce()
     await user.click(screen.getByRole("combobox"))

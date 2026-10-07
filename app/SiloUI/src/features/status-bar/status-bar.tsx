@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/empty-state"
 import { ErrorDetails } from "@/components/error-details"
 import { configurationFailureDiagnostic } from "@/features/application/model/configuration-failure"
 import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/features/application/model/lifecycle-guard"
@@ -268,11 +269,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
               </ComputerListItem>
             })}
           </ol>
-        </ListCard> : <div className="grid justify-items-center gap-1.5 py-8 text-center">
-          <ListRowIcon><Monitor className="size-3.5" /></ListRowIcon>
-          <p className="text-ui font-medium">No computers yet</p>
-          <p className="text-caption text-muted-foreground">Open Silo to create your first computer.</p>
-        </div>}
+        </ListCard> : <EmptyState variant="inline" className="py-8" icon={<Monitor />} title="No computers yet" description="Open Silo to create your first computer." />}
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">
         {quitPending && stoppedByQuit.length

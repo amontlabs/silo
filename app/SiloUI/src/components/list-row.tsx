@@ -1,5 +1,6 @@
 import type { ComponentProps, ReactNode } from "react"
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 export function ListCard({ divided = false, className, ...props }: ComponentProps<"div"> & { divided?: boolean }) {
@@ -24,7 +25,7 @@ export function ListRow({
 }: {
   icon: ReactNode
   title: ReactNode
-  detail: ReactNode
+  detail?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
   detailClassName?: string
@@ -34,7 +35,7 @@ export function ListRow({
   const content = (
     <>
       <div data-slot="list-row-title" className="flex min-w-0 items-center gap-1.5 text-ui leading-4 font-medium">{title}</div>
-      <div className={cn("truncate text-caption leading-4 text-muted-foreground", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>
+      {detail != null && <div className={cn("truncate text-caption leading-4 text-muted-foreground", detailClassName)} title={typeof detail === "string" ? detail : undefined}>{detail}</div>}
     </>
   )
   return (
@@ -68,4 +69,17 @@ function isInteractiveTarget(target: EventTarget, container: Element) {
 
 export function ListRowIcon({ className, ...props }: ComponentProps<"span">) {
   return <span className={cn("grid size-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground", className)} {...props} />
+}
+
+/** A loading placeholder with the height of a two-line `ListRow`, so content replacing it does not shift the page. */
+export function ListRowSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" aria-label={label} className="flex min-w-0 items-center gap-1.5 px-2 py-2">
+      <Skeleton className="size-7 rounded-md" />
+      <div className="grid min-w-0 gap-1.5">
+        <Skeleton className="h-3 w-28" />
+        <Skeleton className="h-2.5 w-44 max-w-full" />
+      </div>
+    </div>
+  )
 }

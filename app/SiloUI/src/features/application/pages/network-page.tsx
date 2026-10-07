@@ -3,6 +3,7 @@ import { useId } from "react"
 import { Network, Plus } from "lucide-react"
 import { EmptyState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ComputerBadge, PortStateLabel } from "@/features/application/components/application-ui"
 import { NetworkPortForm, NetworkPortRowActions } from "@/features/application/components/network-ports"
@@ -25,7 +26,7 @@ export function NetworkPage({ computers, browser, network, error, actions, activ
       : <Button variant="outline" size="xs" disabled={!actions.saveNetworkPort || !runningLocalComputers.length || busy} onClick={() => controller.add()}><Plus />Add port</Button>}</div>
 
     {(statusError || errors.length > 0) && <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 px-3 py-2 text-xs text-destructive"><span>{statusError || errors.join(" · ")}</span><Button size="sm" variant="ghost" onClick={() => void actions.refreshNetwork?.()}>Retry</Button></div>}
-    {controller.loading && rows.length === 0 && !statusError && errors.length === 0 && !draft ? <div role="status" aria-label="Loading network" className="space-y-2 rounded-lg border border-border p-3">{[0, 1, 2].map(i => <div key={i} className="h-7 animate-pulse rounded bg-muted motion-reduce:animate-none" />)}</div>
+    {controller.loading && rows.length === 0 && !statusError && errors.length === 0 && !draft ? <div role="status" aria-label="Loading network" className="space-y-2 rounded-lg border border-border p-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-7" />)}</div>
       : rows.length === 0 && !draft ? statusError || errors.length > 0 ? null : <EmptyState icon={<Network />} title={computers.length === 0 ? "No matching computers" : "No ports"} />
       : <div className="flex max-h-full min-h-0 self-start w-full flex-col overflow-hidden rounded-lg border border-border"><div role="table" aria-label="Network" className="flex min-h-0 flex-col text-xs">
         <div role="row" className={`${grid} shrink-0 border-b border-border bg-muted/45 font-medium text-muted-foreground`}><span role="columnheader">Port</span><span role="columnheader" className="hidden sm:block">Address</span><span role="columnheader">State</span><span role="columnheader">Computer</span><span role="columnheader" className="sr-only">Actions</span></div>
