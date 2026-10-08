@@ -51,8 +51,12 @@ that expects the development server. Always rebuild immediately before UI tests.
 The test-only `linux-verification.yml` workflow runs both architectures. It has
 read-only repository permissions and cannot publish packages or releases.
 Evidence and screenshots are stored under ignored `app/SiloUI/test-results/linux/`.
-The AMD64 CI job requires real KVM tests after successful build and desktop
-checks. ARM64 hosted runners have no `/dev/kvm`, so that CI hardware step is
+It restores the patched MicroSandbox build from the cache that
+`warm-release-caches.yml` saves from `main`, and leaves unit tests and lint to
+`ci.yml`. It runs on pull requests that change the app, on `main`, nightly and
+on manual runs. The AMD64 job runs real KVM tests after successful build and
+desktop checks on `main`, nightly and manual runs; pull requests skip them.
+ARM64 hosted runners have no `/dev/kvm`, so that CI hardware step is
 explicitly skipped; the separate local Lima hardware evidence below covers
 ARM64. The hardware script itself exits nonzero when KVM is unavailable,
 rather than marking an unexercised computer workflow successful.

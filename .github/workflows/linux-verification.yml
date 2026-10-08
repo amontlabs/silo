@@ -1,11 +1,29 @@
 name: Linux verification
 
+# Unit tests and lint run in ci.yml. This workflow builds the development app
+# and drives it through native WebKit; the AMD64 job also runs live VM tests
+# on main, nightly and manual runs.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
   push:
-    branches: ['verify-linux-*']
+    branches: [main, 'verify-linux-*']
+    paths:
+      - 'app/SiloUI/**'
+      - '!app/SiloUI/**/*.md'
+      - '!app/SiloUI/.changeset/**'
+      - '!app/SiloUI/docs/**'
+      - '.github/actions/prepare-release-runtime/**'
+      - '.github/workflows/linux-verification.yml'
   pull_request:
-    paths: ['app/SiloUI/**', '.github/workflows/linux-verification.yml']
+    paths:
+      - 'app/SiloUI/**'
+      - '!app/SiloUI/**/*.md'
+      - '!app/SiloUI/.changeset/**'
+      - '!app/SiloUI/docs/**'
+      - '.github/actions/prepare-release-runtime/**'
+      - '.github/workflows/linux-verification.yml'
 
 permissions:
   contents: read
@@ -21,7 +39,7 @@ jobs:
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: app/SiloUI
@@ -54,8 +72,6 @@ jobs:
         with:
           workspaces: app/SiloUI/src-tauri
       - run: npm ci
-      - run: npm test -- --maxWorkers=2
-      - run: npm run lint
       # Restores the patched MicroSandbox build that warm-release-caches.yml
       # saves from main, instead of compiling it on every run.
       - name: Prepare native resources
@@ -64,10 +80,11 @@ jobs:
         with:
           runner: ${{ matrix.runner }}
           target: ${{ runner.arch == 'ARM64' && 'aarch64-unknown-linux-gnu' || 'x86_64-unknown-linux-gnu' }}
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
       - name: Build development Linux application
+        timeout-minutes: 20
         run: npm run desktop:build -- --debug --no-bundle --ci
       - name: Install external WebDriver
+        timeout-minutes: 10
         run: cargo install tauri-driver --version 2.0.6 --locked
       - name: Verify native WebKit onboarding and validation
         timeout-minutes: 10
@@ -75,7 +92,8 @@ jobs:
           SILO_LINUX_APPLICATION_ID: org.silo.dev
         run: xvfb-run -a dbus-run-session -- python3 scripts/test-linux-desktop.py
       - name: Verify real AMD64 hardware runtime operations
-        if: matrix.runner == 'ubuntu-24.04'
+        if: matrix.runner == 'ubuntu-24.04' && github.event_name != 'pull_request'
+        timeout-minutes: 55
         run: |
           if test -e /dev/kvm; then
             sudo -n runuser -u "$(id -un)" -g kvm -- env PATH="$PATH" SILO_GITHUB_APP_SLUG="$SILO_GITHUB_APP_SLUG" SILO_GITHUB_CLIENT_ID="$SILO_GITHUB_CLIENT_ID" SILO_GITHUB_CLIENT_SECRET="$SILO_GITHUB_CLIENT_SECRET" CARGO_PROFILE_DEV_DEBUG="$CARGO_PROFILE_DEV_DEBUG" CARGO_PROFILE_TEST_DEBUG="$CARGO_PROFILE_TEST_DEBUG" CARGO_INCREMENTAL="$CARGO_INCREMENTAL" python3 scripts/test-linux-runtime.py
