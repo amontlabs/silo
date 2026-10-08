@@ -919,17 +919,25 @@ fn live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates() {
     let name = "secrets-test";
     let command = |args: &[&str], material: &Material| -> Result<(), String> {
         let errors = tempfile::NamedTempFile::new().map_err(|_| "capture failed")?;
+        // Secret values reach the runtime as the app sends them: a document on stdin.
+        let document = secret_values_document(material, DISABLED_GITHUB_PROFILE)
+            .map_err(|_| "secret document failed")?;
         let mut child = Command::new(&paths.executable)
             .args(args)
             .env("MSB_HOME", &paths.home)
             .env("MSB_PATH", &paths.executable)
             .env("MSB_LIBKRUNFW_PATH", &paths.library)
-            .env("SILO_GITHUB", DISABLED_GITHUB_PROFILE)
-            .envs(material.iter().map(|(name, value, _)| (name, value)))
+            .env(SECRET_VALUES_STDIN_FLAG, "1")
+            .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(errors.reopen().map_err(|_| "capture failed")?)
             .spawn()
             .map_err(|_| "test command spawn failed")?;
+        if let Some(mut stdin) = child.stdin.take() {
+            thread::spawn(move || {
+                let _ = stdin.write_all(&document);
+            });
+        }
         let deadline = Instant::now() + MUTATION_TIMEOUT;
         loop {
             match child.try_wait() {
