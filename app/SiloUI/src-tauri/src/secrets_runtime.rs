@@ -918,6 +918,7 @@ fn live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates() {
     };
     let name = "secrets-test";
     let command = |args: &[&str], material: &Material| -> Result<(), String> {
+        let errors = tempfile::NamedTempFile::new().map_err(|_| "capture failed")?;
         let mut child = Command::new(&paths.executable)
             .args(args)
             .env("MSB_HOME", &paths.home)
@@ -926,14 +927,22 @@ fn live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates() {
             .env("SILO_GITHUB", DISABLED_GITHUB_PROFILE)
             .envs(material.iter().map(|(name, value, _)| (name, value)))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(errors.reopen().map_err(|_| "capture failed")?)
             .spawn()
             .map_err(|_| "test command spawn failed")?;
         let deadline = Instant::now() + MUTATION_TIMEOUT;
         loop {
             match child.try_wait() {
                 Ok(Some(status)) if status.success() => return Ok(()),
-                Ok(Some(_)) => return Err(format!("test command {} failed", args[0])),
+                Ok(Some(_)) => {
+                    // Fixture values are synthetic, so msb's stderr is safe to report.
+                    let stderr = std::fs::read_to_string(errors.path()).unwrap_or_default();
+                    return Err(format!(
+                        "test command {} failed: {}",
+                        args[0],
+                        stderr.trim()
+                    ));
+                }
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
                 _ => {
                     let _ = child.kill();
