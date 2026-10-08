@@ -86,7 +86,7 @@
     },
     {
       "path": "patches/microsandbox-portable-image-cache-0.7.6.patch",
-      "sha256": "4dcff8f9ea6f25d8c541a1625d7ac8796622c53f7692ce77e8a8442b32e50b9f"
+      "sha256": "c758edcebf05cd53169773827809886b70d3ab6e4dcb2d0300ecad5b795d175b"
     },
     {
       "path": "patches/microsandbox-live-public-ports-0.7.6.patch",
