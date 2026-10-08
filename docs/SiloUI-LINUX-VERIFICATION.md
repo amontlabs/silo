@@ -9,7 +9,7 @@ not prove the WebKit UI, desktop services, or hardware virtualization works.
 | Native | `cargo test --manifest-path src-tauri/Cargo.toml --locked` | Linux application discovery, login entries, settings, resource checks, files, network, GitHub boundary behavior, secrets, and backup validation. |
 | Desktop | `xvfb-run -a dbus-run-session -- python3 scripts/test-linux-desktop.py` | Real WebKit and native IPC in the Dev app, dependency failure gating, page navigation, inline validation and persisted settings. |
 | GNOME integration | `sh scripts/test-linux-gnome.sh` | Real GNOME Wayland, tray reopen/quit, native backup picker and visible notification delivery. |
-| Hardware | `python3 scripts/test-linux-runtime.py` | Real KVM creation, bundled image import/cache reuse, guest tools/identity, backup/restore data round trips, live secret changes and interrupted restart recovery. |
+| Hardware | `python3 scripts/test-linux-runtime.py` | Real KVM creation, downloaded guest image import/cache reuse, guest tools/identity, backup/restore data round trips, live secret changes and interrupted restart recovery. |
 
 Run from `app/SiloUI`. Hardware tests use temporary Silo runtime directories and
 synthetic secret material. They do not touch existing computers. Desktop tests
