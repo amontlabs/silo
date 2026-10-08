@@ -29,7 +29,7 @@ export function preflight(root = appRoot) {
   for (const key of ["sourceCommit", "libkrunfwCommit"]) matches(inputs[key], revision, key)
   for (const key of ["sourceArchiveSha256"]) matches(inputs[key], digest, key)
   requireValue(inputs.features === "net,ssh,embed-binaries", "features (required net,ssh,embed-binaries capability set)")
-  const patchNames = ["microsandbox-silo-network", "microsandbox-restore-policy", "microsandbox-create-stopped", "microsandbox-adopt-owned-disk", "microsandbox-log-retention-desktop-start", "microsandbox-restore-root-capacity", "microsandbox-portable-image-cache", "microsandbox-live-public-ports", "microsandbox-secret-values-stdin", "microsandbox-import-stage-id", "microsandbox-sftp-user", "microsandbox-remove-created", "microsandbox-restore-starting-control", "microsandbox-runtime-instance-id", "microsandbox-checkpoint-fs-state"]
+  const patchNames = ["microsandbox-silo-network", "microsandbox-restore-policy", "microsandbox-create-stopped", "microsandbox-adopt-owned-disk", "microsandbox-log-retention-desktop-start", "microsandbox-restore-root-capacity", "microsandbox-portable-image-cache", "microsandbox-live-public-ports", "microsandbox-secret-values-stdin", "microsandbox-import-stage-id", "microsandbox-sftp-user", "microsandbox-remove-created", "microsandbox-restore-starting-control", "microsandbox-runtime-instance-id", "microsandbox-checkpoint-fs-state", "microsandbox-relay-closed-local-arena"]
   requireValue(Array.isArray(inputs.patches) && inputs.patches.length === patchNames.length, "patches")
   for (const [index, patchInput] of inputs.patches.entries()) {
     keys(patchInput, ["path", "sha256"], `patches[${index}]`)
