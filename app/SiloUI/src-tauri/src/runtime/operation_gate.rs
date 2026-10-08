@@ -556,7 +556,8 @@ impl OperationGate {
         }
     }
 
-    /// Current activity counter; advances each time a visible operation finishes.
+    /// Current activity counter; advances each time a visible operation finishes or
+    /// `signal_activity` is called.
     pub(crate) fn activity(&self) -> u64 {
         *self
             .activity
@@ -578,7 +579,9 @@ impl OperationGate {
         *guard
     }
 
-    fn signal_activity(&self) {
+    /// Advance the activity counter. Also used when something outside the gate, such as a
+    /// computer stopping on its own, should wake observers.
+    pub(crate) fn signal_activity(&self) {
         *self
             .activity
             .lock()

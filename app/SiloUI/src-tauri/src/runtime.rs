@@ -3071,6 +3071,31 @@ pub(crate) fn health_observations(app: &AppHandle) -> crate::health_watch::Readi
     )
 }
 
+/// Longest one exit wait blocks before the health watch starts another. The runtime gets the
+/// same limit, so a wait left behind by a Silo crash still ends on its own.
+const EXIT_WAIT: Duration = Duration::from_secs(10 * 60);
+
+/// Block until the named computer stops or crashes. False when the wait ended any other way
+/// (time limit, runtime unavailable, computer gone). Read-only: it takes no runtime lock and
+/// never creates the runtime home.
+pub(crate) fn wait_for_computer_exit(app: &AppHandle, name: &str) -> bool {
+    let Ok(Some(paths)) = runtime_paths_if_in_use(app) else {
+        return false;
+    };
+    let limit = format!("{}s", EXIT_WAIT.as_secs());
+    let budget = EXIT_WAIT + Duration::from_secs(30);
+    HealthRunner {
+        inner: &ProcessRunner,
+        budget,
+    }
+    .run(
+        &paths,
+        &["wait".into(), name.into(), "--timeout".into(), limit],
+        budget,
+    )
+    .is_ok()
+}
+
 /// User-facing label for a lifecycle action on one computer.
 fn lifecycle_label(action: &str, name: &str) -> String {
     match action {

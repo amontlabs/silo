@@ -5,7 +5,8 @@
 //! unchanged) and the computer was idle around the reading. Anything else is a change Silo
 //! itself made and silently becomes the new baseline.
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
@@ -21,6 +22,9 @@ const SETTLE: Duration = Duration::from_millis(750);
 const MAX_INDIVIDUAL_NOTICES: usize = 3;
 /// Consecutive failed reads before health checks are reported unavailable.
 const FAILURES_BEFORE_UNAVAILABLE: u32 = 2;
+/// An exit wait that ends sooner found the computer already stopped; the readings cover that,
+/// and waking for it could repeat as fast as readings run.
+const MIN_EXIT_WAIT: Duration = Duration::from_secs(1);
 
 pub(crate) struct ComputerReading {
     pub id: String,
@@ -200,15 +204,63 @@ fn runtime_notice(title: &str, body: &str) -> Notice {
     }
 }
 
+/// Computers with an exit wait in progress. A running computer that stops on its own wakes the
+/// watch at once instead of at the next poll; the reading then decides as usual.
+#[derive(Clone, Default)]
+struct ExitWaiters(Arc<Mutex<HashSet<String>>>);
+
+impl ExitWaiters {
+    /// Start one wait for each named computer that has none. `wait` blocks until the computer
+    /// stops (true) or the wait ends otherwise (false); `wake` runs after a real stop.
+    fn arm(
+        &self,
+        names: impl IntoIterator<Item = String>,
+        wait: impl Fn(&str) -> bool + Clone + Send + 'static,
+        wake: impl Fn() + Clone + Send + 'static,
+    ) {
+        for name in names {
+            if !self.lock().insert(name.clone()) {
+                continue;
+            }
+            let (waiters, wait, wake) = (self.clone(), wait.clone(), wake.clone());
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let stopped = wait(&name);
+                waiters.lock().remove(&name);
+                if stopped && started.elapsed() >= MIN_EXIT_WAIT {
+                    wake();
+                }
+            });
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 pub(crate) fn install(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let mut health = HealthState::default();
+        let waiters = ExitWaiters::default();
         loop {
             // Anything finishing during the read wakes the next wait immediately.
             let seen = crate::runtime::OPERATIONS.activity();
             // One bounded read at a time, including while the main window is hidden.
-            for notice in health.observe(crate::runtime::health_observations(&app)) {
+            let reading = crate::runtime::health_observations(&app);
+            if let Reading::Computers(computers) = &reading {
+                let wait_app = app.clone();
+                waiters.arm(
+                    computers
+                        .iter()
+                        .filter(|computer| computer.state == "Running")
+                        .map(|computer| computer.name.clone()),
+                    move |name| crate::runtime::wait_for_computer_exit(&wait_app, name),
+                    || crate::runtime::OPERATIONS.signal_activity(),
+                );
+            }
+            for notice in health.observe(reading) {
                 crate::notifications::notify(&app, notice);
             }
             let woken =
@@ -416,6 +468,69 @@ mod tests {
         state.observe(reading(vec![computer("a", "Stopped", 0, true)]));
         state.observe(Reading::Unavailable);
         assert_eq!(state.poll_interval(), IDLE_FALLBACK);
+    }
+
+    fn eventually(condition: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !condition() {
+            assert!(Instant::now() < deadline, "condition not reached");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_computer_stopping_on_its_own_wakes_the_watch_once_and_can_be_rearmed() {
+        let waiters = ExitWaiters::default();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let released = Arc::new(Mutex::new(released));
+        let started = Arc::new(Mutex::new(Vec::new()));
+        let woken = Arc::new(Mutex::new(0));
+        let wait = {
+            let (released, started) = (Arc::clone(&released), Arc::clone(&started));
+            move |name: &str| {
+                started.lock().unwrap().push(name.to_owned());
+                std::thread::sleep(MIN_EXIT_WAIT);
+                released.lock().unwrap().recv().is_ok()
+            }
+        };
+        let wake = {
+            let woken = Arc::clone(&woken);
+            move || *woken.lock().unwrap() += 1
+        };
+        waiters.arm(["a".to_string()], wait.clone(), wake.clone());
+        // A second reading while the wait is in progress does not start another.
+        waiters.arm(["a".to_string()], wait.clone(), wake.clone());
+        eventually(|| started.lock().unwrap().len() == 1);
+        assert_eq!(*woken.lock().unwrap(), 0);
+
+        release.send(()).unwrap();
+        eventually(|| *woken.lock().unwrap() == 1 && waiters.lock().is_empty());
+        waiters.arm(["a".to_string()], wait, wake);
+        eventually(|| started.lock().unwrap().len() == 2);
+        release.send(()).unwrap();
+        eventually(|| *woken.lock().unwrap() == 2);
+    }
+
+    #[test]
+    fn a_wait_that_ends_without_a_stop_or_at_once_does_not_wake_the_watch() {
+        let waiters = ExitWaiters::default();
+        let woken = Arc::new(Mutex::new(0));
+        let wake = {
+            let woken = Arc::clone(&woken);
+            move || *woken.lock().unwrap() += 1
+        };
+        // Already stopped when armed, then a timed-out or failed wait.
+        waiters.arm(["a".to_string()], |_: &str| true, wake.clone());
+        waiters.arm(
+            ["b".to_string()],
+            |_: &str| {
+                std::thread::sleep(MIN_EXIT_WAIT);
+                false
+            },
+            wake,
+        );
+        eventually(|| waiters.lock().is_empty());
+        assert_eq!(*woken.lock().unwrap(), 0);
     }
 
     #[test]
