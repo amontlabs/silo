@@ -105,8 +105,12 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
     "binaries/msb", "binaries/git", "binaries/git-lfs",
     "binaries/git-remote-http", "binaries/git-remote-https",
   ])
-  assert.deepEqual(linux.bundle.resources, { "runtime/git/ssl/": "git-support/ssl/" })
+  assert.deepEqual(linux.bundle.resources, {
+    "runtime/git/ssl/": "git-support/ssl/",
+    "runtime/microsandbox/": "microsandbox/",
+  })
   assert.deepEqual(packaged.bundle.externalBin, [])
+  assert.deepEqual(packaged.bundle.resources, { "runtime/microsandbox/": null })
   for (const format of ["appimage", "deb", "rpm"]) {
     assert.deepEqual(packaged.bundle.linux[format].files, {
       "/usr/libexec/silo/tools": "runtime/linux-package/tools",

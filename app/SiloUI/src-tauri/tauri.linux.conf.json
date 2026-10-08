@@ -2,7 +2,8 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "resources": {
-      "runtime/git/ssl/": "git-support/ssl/"
+      "runtime/git/ssl/": "git-support/ssl/",
+      "runtime/microsandbox/": "microsandbox/"
     },
     "linux": {
       "deb": {

@@ -2,6 +2,9 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "externalBin": [],
+    "resources": {
+      "runtime/microsandbox/": null
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": true,
