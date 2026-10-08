@@ -214,8 +214,8 @@ def run():
                 browser = webdriver.Remote(f"http://127.0.0.1:{port}", options=Options())
                 wait = WebDriverWait(browser, 45, ignored_exceptions=(StaleElementReferenceException, ElementClickInterceptedException, ElementNotInteractableException))
                 wait.until(main_window)
-                wait.until(lambda _: browser.find_element(By.ID, "application-nav-backup"))
-                for page in ["computers", "github", "secrets", "backup", "settings"]:
+                wait.until(lambda _: browser.find_element(By.ID, "application-nav-settings"))
+                for page in ["computers", "github", "secrets", "settings"]:
                     click(By.ID, f"application-nav-{page}")
                     wait.until(lambda _: browser.find_element(By.ID, f"application-panel-{page}").is_displayed())
                     assert "Silo could not load" not in browser.find_element(By.TAG_NAME, "body").text
