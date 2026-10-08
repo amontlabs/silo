@@ -119,6 +119,10 @@
     {
       "path": "patches/microsandbox-checkpoint-fs-state-0.7.6.patch",
       "sha256": "6346dbdb79002a82526130a30c3c8f8cc17b061de4e9976636510f9f7eb2f885"
+    },
+    {
+      "path": "patches/microsandbox-relay-closed-local-arena-0.7.6.patch",
+      "sha256": "efbed4c5ea7b0e79e3745445b5dd54d5dc30590e530aad3a61840735f960ef10"
     }
   ]
 }
