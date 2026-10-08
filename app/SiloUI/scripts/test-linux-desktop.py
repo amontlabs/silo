@@ -242,7 +242,8 @@ def run():
                 report.append("Login preference writes and disables a real isolated XDG autostart entry")
                 motion = browser.find_element(By.CSS_SELECTOR, "button[aria-label='Reduce motion']")
                 previous = motion.get_attribute("aria-checked")
-                motion.click()
+                # The first-run VM image progress card can cover the end of the page.
+                motion.send_keys(Keys.SPACE)
                 expected = "false" if previous == "true" else "true"
                 wait.until(lambda _: motion.get_attribute("aria-checked") == expected)
                 wait.until(lambda _: json.loads(settings.read_text())["settings"].get("reduceMotion") == (expected == "true"))

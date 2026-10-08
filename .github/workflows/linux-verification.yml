@@ -67,6 +67,7 @@ jobs:
       - name: Install external WebDriver
         run: cargo install tauri-driver --version 2.0.6 --locked
       - name: Verify native WebKit onboarding and validation
+        timeout-minutes: 10
         env:
           SILO_LINUX_APPLICATION_ID: org.silo.dev
         run: xvfb-run -a dbus-run-session -- python3 scripts/test-linux-desktop.py
