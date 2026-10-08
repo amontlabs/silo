@@ -202,7 +202,7 @@ index dcaf951..fabe123 100644
      manifest: &microsandbox_image::snapshot::Manifest,
      metadata: &microsandbox_image::CachedImageMetadata,
 diff --git a/sdk/rust/tests/snapshot_artifact.rs b/sdk/rust/tests/snapshot_artifact.rs
-index 067db7a..da0ac20 100644
+index 067db7a..74d0e2d 100644
 --- a/sdk/rust/tests/snapshot_artifact.rs
 +++ b/sdk/rust/tests/snapshot_artifact.rs
 @@ -7,6 +7,8 @@
@@ -377,7 +377,7 @@ index 067db7a..da0ac20 100644
  #[tokio::test]
  async fn load_rejects_symlink_entries_without_writing_outside_dest() {
      let tmp = TempDir::new().unwrap();
-@@ -2464,6 +2606,72 @@ async fn failed_load_with_conflicting_cache_target_does_not_install_cache_entrie
+@@ -2464,6 +2606,145 @@ async fn failed_load_with_conflicting_cache_target_does_not_install_cache_entrie
      );
  }
  
@@ -445,6 +445,79 @@ index 067db7a..da0ac20 100644
 +            .exists()
 +    );
 +    assert!(import_cache.vmdk_path(&seeded.image_digest).exists());
++}
++
++#[tokio::test]
++async fn load_rejects_existing_image_metadata_for_a_different_image() {
++    let tmp = TempDir::new().unwrap();
++    let export_home = tmp.path().join("export-home");
++    let export_backend = isolated_backend(&export_home).await;
++    let export_cache = microsandbox_image::GlobalCache::new(&export_home.join("cache")).unwrap();
++    let seeded = seed_image_cache(&export_cache).await;
++    let (dir, _) = make_artifact_with_image(
++        tmp.path(),
++        "src-cache-other-image",
++        b"upper",
++        seeded.image_ref.to_string(),
++        seeded.manifest_digest.clone(),
++    );
++    let archive = tmp.path().join("cache-other-image.tar");
++
++    microsandbox::with_backend(
++        export_backend,
++        Box::pin(async {
++            save_snapshot(
++                dir.to_string_lossy().as_ref(),
++                &archive,
++                microsandbox::snapshot::SaveOpts {
++                    with_image: true,
++                    plain_tar: true,
++                    ..Default::default()
++                },
++            )
++            .await
++            .unwrap();
++        }),
++    )
++    .await;
++
++    let import_home = tmp.path().join("import-home");
++    let import_backend = isolated_backend(&import_home).await;
++    let import_cache = microsandbox_image::GlobalCache::new(&import_home.join("cache")).unwrap();
++    let mut metadata = read_cached_metadata(&export_cache, &seeded.image_ref);
++    metadata.layers[0].size_bytes = Some(11);
++    import_cache
++        .write_image_metadata_async(&seeded.image_ref, &metadata)
++        .await
++        .unwrap();
++    let existing_metadata = import_cache.image_metadata_path(&seeded.image_ref);
++    let existing_bytes = std::fs::read(&existing_metadata).unwrap();
++    let dest = tmp.path().join("cache-other-image-dest");
++
++    microsandbox::with_backend(
++        import_backend,
++        Box::pin(async {
++            let err = Snapshot::load(&archive, Some(&dest))
++                .await
++                .expect_err("expected different image metadata to fail import");
++            assert!(
++                err.to_string()
++                    .contains("cache target already exists with different content"),
++                "unexpected error: {err}"
++            );
++        }),
++    )
++    .await;
++
++    assert_eq!(std::fs::read(&existing_metadata).unwrap(), existing_bytes);
++    assert!(!import_cache.layer_erofs_path(&seeded.diff_id).exists());
++}
++
++fn read_cached_metadata(
++    cache: &microsandbox_image::GlobalCache,
++    image_ref: &microsandbox_image::Reference,
++) -> microsandbox_image::CachedImageMetadata {
++    serde_json::from_slice(&std::fs::read(cache.image_metadata_path(image_ref)).unwrap()).unwrap()
 +}
 +
  #[tokio::test]
