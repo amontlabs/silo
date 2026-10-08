@@ -152,11 +152,14 @@ jobs:
         with:
           workspaces: app/SiloUI/src-tauri
       - run: npm ci
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # Restores the patched MicroSandbox build that warm-release-caches.yml
+      # saves from main, instead of compiling it on every run.
+      - name: Prepare native resources
+        timeout-minutes: 30
+        uses: ./.github/actions/prepare-release-runtime
         with:
-          go-version: '1.25.x'
-          cache: false
-      - run: npm run runtime:prepare
+          runner: ${{ matrix.runner }}
+          target: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin' || 'x86_64-unknown-linux-gnu' }}
       # Process-wide state is isolated inside the suite; use default test threads.
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - name: Test patched updater transport and atomic installation

@@ -56,11 +56,14 @@ jobs:
       - run: npm ci
       - run: npm test -- --maxWorkers=2
       - run: npm run lint
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # Restores the patched MicroSandbox build that warm-release-caches.yml
+      # saves from main, instead of compiling it on every run.
+      - name: Prepare native resources
+        timeout-minutes: 30
+        uses: ./.github/actions/prepare-release-runtime
         with:
-          go-version: '1.25.x'
-          cache: false
-      - run: npm run runtime:prepare
+          runner: ${{ matrix.runner }}
+          target: ${{ runner.arch == 'ARM64' && 'aarch64-unknown-linux-gnu' || 'x86_64-unknown-linux-gnu' }}
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
       - name: Build development Linux application
         run: npm run desktop:build -- --debug --no-bundle --ci
