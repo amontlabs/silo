@@ -91,6 +91,29 @@ def stop_test_app(environment):
             time.sleep(.1)
         else:
             raise RuntimeError(f"Smoke app PID {pid} did not exit after SIGTERM")
+    # A relaunch that still finds the single-instance D-Bus name exits at once,
+    # and WebDriver then waits for a window that never opens.
+    identifier = environment.get("SILO_LINUX_APPLICATION_ID", channel_names()["development"]["identifier"])
+    name = f"{identifier}.SingleInstance"
+
+    def bus(method):
+        result = subprocess.run(["dbus-send", "--session", "--print-reply", "--dest=org.freedesktop.DBus",
+                                 "/org/freedesktop/DBus", f"org.freedesktop.DBus.{method}", f"string:{name}"],
+                                env=environment, capture_output=True, text=True, timeout=5)
+        return result.stdout if result.returncode == 0 else None
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if "boolean false" in (bus("NameHasOwner") or ""):
+            return
+        time.sleep(.1)
+    owner = (bus("GetConnectionUnixProcessID") or "").split()
+    pid = owner[-1] if owner else "unknown"
+    try:
+        status = (Path("/proc") / pid / "status").read_text()
+    except OSError:
+        status = "unavailable"
+    raise RuntimeError(f"{name} is still owned by PID {pid} after the smoke app stopped:\n{status}")
 
 
 def run():
