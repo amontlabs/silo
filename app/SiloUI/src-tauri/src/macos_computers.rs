@@ -1230,7 +1230,10 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     // Installations and setups were aborted; they release their machine (and, for a
     // setup, the disk image) before they stop being busy.
     if wait_until(graceful_until(Instant::now(), deadline), &machines)
-        && wait_until(limit(FORCED_QUIT), &everything)
+        && wait_until(
+            limit(FORCED_QUIT).min(graceful_until(Instant::now(), deadline)),
+            &everything,
+        )
     {
         return Ok(());
     }
