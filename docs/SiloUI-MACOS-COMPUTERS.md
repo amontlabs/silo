@@ -6,8 +6,9 @@ MicroSandbox. libkrun cannot boot macOS, so this is a second engine. The
 engine choice, framework limits and Apple's license terms are in
 [macOS guest engine research](research/macos-guest-engine-2026-10-09.md).
 
-This is a first vertical slice: create, start, view, stop and delete. Most
-Linux computer features do not apply yet; see [not covered yet](#not-covered-yet).
+This is a first vertical slice: create, set up for computer use, start, view,
+stop and delete. Most other Linux computer features do not apply yet; see
+[not covered yet](#not-covered-yet).
 
 ## Behaviour
 
@@ -19,11 +20,16 @@ Linux computer features do not apply yet; see [not covered yet](#not-covered-yet
   Silo asks the framework for the newest macOS this Mac can run, downloads that
   restore image from Apple (about 20 GB), and installs it. Progress shows as
   Preparing, Downloading and Installing. The creation form states Apple's
-  two-copy license limit. After installation the user finishes macOS Setup
-  Assistant in the computer's screen.
-- **Start and stop.** Start boots the computer. Stop asks macOS to shut down,
-  as the power button does; Force stop turns it off immediately. A shutdown
-  from inside macOS shows the computer as stopped. Macs run at most two macOS
+  two-copy license limit. After installation Silo sets the computer up for
+  computer use with no clicks ([provisioning](#provisioning-for-computer-use)),
+  shown as Setting up macOS with the current step. A failed setup offers Retry
+  setup, which resumes at the first unfinished step, and Start, so the screen
+  can be inspected.
+- **Start and stop.** Start boots the computer. Stop shuts macOS down over SSH
+  once setup has created the account. Before that it presses the virtual power
+  button, which makes macOS ask for confirmation in the computer's screen; the
+  row says so. Force stop turns the computer off immediately. A shutdown from
+  inside macOS shows the computer as stopped. Macs run at most two macOS
   guests at once; a third start fails with a message saying so. Silo does not
   limit how many macOS computers exist.
 - **Screen.** Show screen opens a Silo window containing a native
@@ -70,15 +76,28 @@ State `setting-up` covers these steps; its detail names the current step.
    screen lock. This ports the offline setup of
    [Lume](https://github.com/trycua/cua/tree/main/libs/lume) (MIT) rather than
    bundling its binary; see the [engine research](research/macos-guest-engine-2026-10-09.md#provisioning).
-2. **First boot.** Silo finds the guest's address in `/var/db/dhcpd_leases` by
-   its MAC address, installs a per-computer SSH key over the password login,
-   and finishes what must run inside the guest (`diskutil apfs updatePreboot /`
-   so Recovery knows the account).
+   Step 1 runs after a first boot that lets macOS write its launchd state:
+   launchd rewrites `disabled.plist` at boot when it did not create it, which
+   discards the Remote Login entry. The patch refuses to run until that file
+   exists, and the first boot is repeated with a longer wait if it does not.
+2. **Finishing the account.** Silo finds the guest's address in
+   `/var/db/dhcpd_leases` by its MAC address and logs in once with the password
+   (OpenSSH's `SSH_ASKPASS`, reading a 0600 file, so the password is never in
+   an argument or environment variable). As root it installs the per-computer
+   SSH key and `/etc/sudoers.d/silo`, fixes ownership, and runs
+   `diskutil apfs updatePreboot` so Recovery knows the account. Files written
+   offline belong to an unknown owner, so anything sudo or sshd checks is
+   written from inside the guest instead.
 3. **System Integrity Protection.** Silo boots the computer into macOS Recovery
    (`startUpFromMacOSRecovery`) in a visible "Setting up" window and types the
    `csrutil disable` sequence into its `VZVirtualMachineView`, then boots
    normally and confirms `csrutil status` over SSH. The key sequence follows
-   cirruslabs' MIT image templates.
+   cirruslabs' MIT image templates. Silo reads the screen by capturing its own
+   window and recognising text with Vision (no Screen Recording permission is
+   needed for a process's own window), answers only a password prompt that
+   names `silo` on the Terminal's last line, and never types when the screen
+   cannot be read. The window drops the user's keyboard and pointer input while
+   it runs.
 4. **Computer use.** Silo downloads two pinned archives once per device
    (`guest/macos/chatgpt-app-lock.json`: the official ChatGPT macOS app from
    OpenAI's Sparkle feed; `guest/macos/lcu-lock.json`: LCU's darwin build),
@@ -124,9 +143,11 @@ State `setting-up` covers these steps; its detail names the current step.
    move text (1 MiB limit) and PNG images (16 MiB) over SSH as the logged-in
    `silo` user, with the same orchestration, limits and messages as the Linux
    desktop viewer ([clipboard behaviour](SiloUI-DESKTOP.md#clipboard-behaviour)).
-   Text goes through `pbcopy` and `pbpaste`, images through `osascript`
-   (`«class PNGf»`); payloads travel on standard input and base64 output, never
-   in the command line. The commands follow Lume's `ClipboardWatcher.swift`
+   Both directions use JavaScript for Automation on `NSPasteboard` with explicit
+   types (`public.utf8-plain-text`, `public.png`), because `pbcopy` and
+   `pbpaste` interpret RTF headers. Payloads travel on standard input and
+   base64 output, never in the command line, and the guest checks sizes before
+   sending. The commands follow Lume's `ClipboardWatcher.swift`
    (MIT, [commit ba4c636](https://github.com/trycua/cua/blob/ba4c6369660ab4a9c4d3d8af942bc53ad376615f/libs/lume/src/Clipboard/ClipboardWatcher.swift)).
    The actions are in the computer row's menu and in the screen window's
    toolbar; the toolbar shows the outcome in the window's subtitle. They need a
@@ -160,7 +181,8 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Checkpoints | None. Framework save/restore state (macOS 14+) is tied to this Mac and needs a paused computer and a configuration that passes `validateSaveRestoreSupportWithError`; disk clones (APFS `clonefile`) are the likely checkpoint route. Not designed yet |
 | Remote computers (Connections) | None. The view must live in the process that runs the computer, so a computer on another device would need a streamed or VNC path, and Apple's license excludes service-style use |
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
-| Unattended setup | None. The user completes Setup Assistant by hand; no account, SSH or automatic login is configured |
+| Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
+| Shared copies of one installation | None. Each computer installs its own macOS (about 21 GB); APFS clones of a set-up template would share blocks |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
 | Export, import and backup | None |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
@@ -178,3 +200,29 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Lume | SSH transfer with `pbcopy`, `pbpaste` and `osascript`, MIT | Chosen: nothing to install, works on macOS 14 |
 | tart-guest-agent | SPICE vdagent in the guest, FSL-1.1-Apache-2.0 | Rejected: the same license family as the excluded Tart |
 | UTM guest tools | spice-vdagent, needs macOS 15 and an interactive approval | Not used |
+
+## Verification
+
+2026-10-09, Silo Dev built from this branch, driven through its UI with a
+macOS 26.6.2 guest on an Apple Silicon Mac running macOS 26.5:
+
+- Create from the Computers editor with Operating system macOS: the restore
+  image download resumed from a partial file and finished at Apple's exact
+  length; installation from the cached image took 3 to 4 minutes.
+- Setup ran without input: first boot, offline account, SSH, Recovery with SIP
+  turned off, ChatGPT app and LCU 0.10.1, about 9 minutes in total. Over SSH
+  the guest reported `csrutil status` disabled, the app and LCU installed, and
+  an LCU MCP call (`cua.getState()`) answered without a permission prompt.
+- The screen window showed the guest below its toolbar, followed window
+  resizing, passed pointer input, and closing it left the computer running.
+- Paste into and Copy from computer moved text both ways.
+- Stop shut the computer down over SSH in about 10 seconds; a shutdown chosen
+  inside macOS also showed it as stopped; Delete removed its files.
+- The Rust suite passed on Ubuntu 24.04 ARM64 with CI's packages.
+
+Live runs found and fixed: a first boot stopped before launchd wrote its state
+(no SSH), an image left attached across a failed detach, an installer still
+holding the auxiliary storage lock, power-button Stop waiting on a dialog, the
+toolbar covering the guest display, and a link check that rejected LCU's own
+archive. Lume's whole-disk detection (`contains("s")`) has the same defect Silo
+fixed and is worth reporting upstream.
