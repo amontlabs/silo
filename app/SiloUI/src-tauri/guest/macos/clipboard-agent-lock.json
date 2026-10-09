@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "tart-guest-agent",
+  "version": "0.10.0",
+  "url": "https://github.com/openai/tart-guest-agent/releases/download/v0.10.0/tart-guest-agent-darwin-all.tar.gz",
+  "sha256": "303a50d452753e36776ce8775e243be580bb3fc3ec8efde154320c37fd65b1a7",
+  "license": "FSL-1.1-Apache-2.0",
+  "minimumMacos": 15,
+  "arguments": ["--run-vdagent"]
+}

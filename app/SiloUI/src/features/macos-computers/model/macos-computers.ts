@@ -15,6 +15,7 @@ export const macosComputerSchema = z.object({
   progress: z.number().min(0).max(1).nullable(),
   detail: z.string().nullable(),
   displayOpen: z.boolean(),
+  clipboard: z.enum(["available", "needs-macos-15"]),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 

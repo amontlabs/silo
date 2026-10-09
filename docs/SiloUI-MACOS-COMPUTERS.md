@@ -85,8 +85,22 @@ State `setting-up` covers these steps; its detail names the current step.
    protects.
 5. **Clipboard.** On macOS 15 or later on both sides, a SPICE agent port
    (`VZSpiceAgentPortAttachment`) and a guest clipboard agent share the
-   clipboard. On macOS 14 the port is omitted and the screen window says
-   clipboard sharing needs macOS 15.
+   clipboard. On macOS 14 the port is omitted and the computer's row says
+   clipboard sharing needs macOS 15. macOS guests ship no SPICE agent. Silo
+   installs the vdagent of [tart-guest-agent](https://github.com/openai/tart-guest-agent)
+   (v0.10.0, the newest release built for macOS 15; later releases need macOS 26),
+   pinned with its SHA-256 in `src-tauri/guest/macos/clipboard-agent-lock.json`.
+   The host downloads and verifies the archive, copies it to
+   `/usr/local/libexec/silo/` and installs `/Library/LaunchAgents/org.silo.clipboard-agent.plist`
+   (`--run-vdagent` only, session type Aqua), so it starts in the `silo`
+   session at automatic login. The release is licensed FSL-1.1-Apache-2.0
+   (copyright Cirrus Labs, now OpenAI): any purpose except a competing
+   commercial product, converting to Apache 2.0 two years after release. Silo
+   downloads the upstream archive for the user's computer and does not
+   redistribute it. The v0.10.0 binary is only ad hoc signed; later releases
+   are Developer ID signed and notarized. UTM's guest tools (spice-vdagent)
+   are the alternative: they ship only inside UTM.app and need an interactive
+   approval prompt. Untested on a running guest.
 
 Per-computer secrets live in `macos-computers/<id>/guest-access/` (mode 0700):
 the account password and the SSH key. Anyone who can read that directory can

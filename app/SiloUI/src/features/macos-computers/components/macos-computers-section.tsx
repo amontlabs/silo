@@ -109,6 +109,7 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
   const detail = <span className="grid gap-1">
     <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
     {computer.state === "failed" && computer.detail && <span role="alert" className="whitespace-normal">{computer.detail}</span>}
+    {!creating && computer.state !== "failed" && computer.clipboard === "needs-macos-15" && <span className="whitespace-normal">Clipboard sharing needs macOS 15 or later on this Mac and the computer.</span>}
     {creating && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
   </span>
 

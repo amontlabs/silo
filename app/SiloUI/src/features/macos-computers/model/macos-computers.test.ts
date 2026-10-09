@@ -11,7 +11,7 @@ import {
   type MacosComputersBackend,
 } from "./macos-computers"
 
-const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false }
+const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, clipboard: "available" }
 const state = { supported: true, unsupportedReason: null, computers: [computer] }
 
 describe("macOS computers payload", () => {

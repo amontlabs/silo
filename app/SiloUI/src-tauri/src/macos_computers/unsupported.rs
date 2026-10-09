@@ -37,6 +37,11 @@ pub(super) fn host_limits() -> HostLimits {
     }
 }
 
+/// The major version of macOS on this host: none.
+pub(super) fn host_macos_major() -> u64 {
+    0
+}
+
 pub(super) fn random_mac() -> String {
     String::new()
 }

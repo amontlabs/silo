@@ -14,7 +14,8 @@ use objc2::{
 };
 use objc2_app_kit::{NSAutoresizingMaskOptions, NSResponder, NSView, NSWindow};
 use objc2_foundation::{
-    NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSString, NSURL,
+    NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSProcessInfo,
+    NSString, NSURL,
 };
 use objc2_virtualization::*;
 use std::{
@@ -248,6 +249,13 @@ pub(super) fn host_limits() -> HostLimits {
     }
 }
 
+/// The major version of macOS on this Mac.
+pub(super) fn host_macos_major() -> u64 {
+    NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion as u64
+}
+
 pub(super) fn random_mac() -> String {
     // SAFETY: A class method without arguments.
     unsafe {
@@ -443,6 +451,18 @@ fn configuration(
         configuration.setEntropyDevices(&NSArray::from_retained_slice(&[
             VZVirtioEntropyDeviceConfiguration::new().into_super(),
         ]));
+
+        if host_macos_major() >= super::guest_clipboard::MINIMUM_MACOS {
+            let spice = VZSpiceAgentPortAttachment::new();
+            spice.setSharesClipboard(true);
+            let port = VZVirtioConsolePortConfiguration::new();
+            port.setName(Some(&VZSpiceAgentPortAttachment::spiceAgentPortName()));
+            port.setIsConsole(false);
+            port.setAttachment(Some(&spice.into_super()));
+            let console = VZVirtioConsoleDeviceConfiguration::new();
+            console.ports().setObject_atIndexedSubscript(Some(&port), 0);
+            configuration.setConsoleDevices(&NSArray::from_retained_slice(&[console.into_super()]));
+        }
 
         configuration.validateWithError().map_err(|error| {
             format!(

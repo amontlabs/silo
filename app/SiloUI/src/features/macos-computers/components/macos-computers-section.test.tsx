@@ -51,6 +51,17 @@ it("renders every state with its label, resources and progress", async () => {
   expect(within(row("broken")).getByRole("alert")).toHaveTextContent("The macOS download did not finish.")
 })
 
+it("notes that clipboard sharing needs macOS 15 only where it is unavailable", async () => {
+  const older: MacosComputer = { ...macosComputerFixtures[3]!, id: "mac-older", name: "older", osVersion: "14.7 (23H124)", clipboard: "needs-macos-15" }
+  renderSection(backendFor([...macosComputerFixtures, older]))
+  await screen.findByRole("heading", { name: "macOS computers" })
+  const note = "Clipboard sharing needs macOS 15 or later on this Mac and the computer."
+  expect(row("older")).toHaveTextContent(note)
+  expect(row("daily")).not.toHaveTextContent(note)
+  expect(row("sequoia-test")).not.toHaveTextContent(note)
+  expect(row("broken")).not.toHaveTextContent(note)
+})
+
 it("offers the actions that fit each state", async () => {
   renderSection(backendFor(macosComputerFixtures))
   await screen.findByRole("heading", { name: "macOS computers" })

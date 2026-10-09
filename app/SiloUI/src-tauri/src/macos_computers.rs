@@ -10,6 +10,7 @@ mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
+mod guest_clipboard;
 mod restore_image;
 mod store;
 
@@ -55,6 +56,7 @@ pub(crate) struct MacosComputer {
     progress: Option<f64>,
     detail: Option<String>,
     display_open: bool,
+    clipboard: guest_clipboard::Clipboard,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -105,6 +107,7 @@ impl Entry {
             progress: self.progress,
             detail: self.detail.clone(),
             display_open: self.display_open,
+            clipboard: guest_clipboard::status_for(&self.record),
         }
     }
 }
@@ -967,6 +970,7 @@ mod tests {
         assert_eq!(json["diskGiB"], 64);
         assert_eq!(json["osVersion"], serde_json::Value::Null);
         assert_eq!(json["displayOpen"], false);
+        assert_eq!(json["clipboard"], "needs-macos-15");
         assert_eq!(json["progress"], 0.25);
         assert!(json.get("detail").is_some());
         let state = serde_json::to_value(MacosComputersState {
