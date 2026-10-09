@@ -189,18 +189,19 @@ pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
 
     set_detail(app, id, "Copying computer use to the computer");
     ensure_live(id)?;
-    stage(&layout, &record, &pins, &lcu_archive)?;
-    let present = access::run(
+    let cancelled = || ensure_live(id).is_err();
+    stage(&layout, &record, &pins, &lcu_archive, &cancelled)?;
+    let present = access::run_cancellable(
         &layout,
         &record,
         &format!("/bin/zsh {STAGE}/{SCRIPT_NAME} app-present"),
-        None,
         APPLY_TIMEOUT,
+        &cancelled,
     )?;
     if present.status != 0 {
         set_detail(app, id, "Copying the ChatGPT app to the computer");
         ensure_live(id)?;
-        access::copy(
+        access::copy_cancellable(
             &layout,
             &record,
             &app_zip,
@@ -209,22 +210,23 @@ pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
                 file_name(&pins.app_asset().url).unwrap_or_default()
             ),
             APP_COPY,
+            &cancelled,
         )?;
     }
 
     set_detail(app, id, "Installing computer use");
     ensure_live(id)?;
-    let output = access::run(
+    let output = access::run_cancellable(
         &layout,
         &record,
         &format!(
             "/bin/zsh {STAGE}/{SCRIPT_NAME} apply --approval {}",
             approval.as_str()
         ),
-        None,
         APPLY_TIMEOUT,
-    )?;
-    // Best effort: the archives are large and the script removes them on success.
+        &cancelled,
+    );
+    // Best effort, also after a cancellation: the archives are large.
     let _ = access::run(
         &layout,
         &record,
@@ -232,6 +234,7 @@ pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
         None,
         QUICK_COMMAND,
     );
+    let output = output?;
     if output.status == 0 {
         Ok(())
     } else {
@@ -279,13 +282,14 @@ fn stage(
     record: &super::store::Record,
     pins: &Pins,
     lcu_archive: &Path,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    let prepared = access::run(
+    let prepared = access::run_cancellable(
         layout,
         record,
         &format!("rm -rf {STAGE} && mkdir -p {STAGE}"),
-        None,
         QUICK_COMMAND,
+        cancelled,
     )?;
     if prepared.status != 0 {
         return Err("Silo could not prepare a folder in the computer.".into());
@@ -298,9 +302,16 @@ fn stage(
         .and_then(|()| fs::write(&pinned, pins.pinned_json()))
         .map_err(|error| super::store::io_error("prepare computer use", &error))?;
     for (file, name) in [(&script, SCRIPT_NAME), (&pinned, PINNED_NAME)] {
-        access::copy(layout, record, file, &format!("{STAGE}/{name}"), SMALL_COPY)?;
+        access::copy_cancellable(
+            layout,
+            record,
+            file,
+            &format!("{STAGE}/{name}"),
+            SMALL_COPY,
+            cancelled,
+        )?;
     }
-    access::copy(
+    access::copy_cancellable(
         layout,
         record,
         lcu_archive,
@@ -309,6 +320,7 @@ fn stage(
             file_name(&pins.lcu_asset().url).unwrap_or_default()
         ),
         SMALL_COPY,
+        cancelled,
     )
 }
 
@@ -321,10 +333,17 @@ fn cached(
     asset: &Asset,
 ) -> Result<PathBuf, String> {
     let name = file_name(&asset.url).ok_or("Silo's computer use information is invalid.")?;
-    let _turn = DOWNLOAD_TURN
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let cancelled = || ensure_live(id).is_err();
+    let _turn = loop {
+        match DOWNLOAD_TURN.try_lock() {
+            Ok(turn) => break turn,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                ensure_live(id)?;
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    };
     for attempt in 0..2 {
         set_detail(app, id, &format!("Downloading {label}"));
         let path =
@@ -557,6 +576,58 @@ mod tests {
                 .trim(),
                 "kTCCServiceAccessibility|com.apple.calculator|0|2|4|1|UNUSED|1|1"
             );
+        }
+
+        fn zsh(args: &[&str], stdin: &str, home: &std::path::Path) -> std::process::Output {
+            use std::io::Write;
+            let mut child = Command::new("/bin/zsh")
+                .arg(SCRIPT_PATH)
+                .args(args)
+                .env("HOME", home)
+                .env("SILO_CU_WORK", home.join("work"))
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(stdin.as_bytes())
+                .unwrap();
+            child.wait_with_output().unwrap()
+        }
+
+        #[test]
+        fn archive_members_must_stay_relative() {
+            let home = tempfile::tempdir().unwrap();
+            let ok = |names: &str| zsh(&["safe-members"], names, home.path()).status.success();
+            assert!(ok(
+                "ChatGPT.app/\nChatGPT.app/Contents/Info.plist\nlcu/bin/..x\n"
+            ));
+            assert!(!ok("/etc/passwd\n"));
+            assert!(!ok("ChatGPT.app/../../x\n"));
+            assert!(!ok("../x\n"));
+            assert!(!ok("a/..\n"));
+            assert!(!ok("..\n"));
+        }
+
+        #[test]
+        fn links_must_stay_inside_the_extracted_folder() {
+            let home = tempfile::tempdir().unwrap();
+            let root = home.path().join("tree");
+            std::fs::create_dir_all(root.join("sub")).unwrap();
+            std::fs::write(root.join("file"), b"x").unwrap();
+            std::os::unix::fs::symlink("../file", root.join("sub/inside")).unwrap();
+            let check = |root: &std::path::Path| {
+                zsh(&["links-inside", root.to_str().unwrap()], "", home.path())
+                    .status
+                    .success()
+            };
+            assert!(check(&root));
+            std::os::unix::fs::symlink("/etc", root.join("sub/outside")).unwrap();
+            assert!(!check(&root));
         }
 
         #[test]

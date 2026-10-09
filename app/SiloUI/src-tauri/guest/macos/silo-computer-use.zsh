@@ -94,6 +94,25 @@ check_sha() { # file expected label
 
 sip_disabled() { [[ $(csrutil status 2>/dev/null) == *"status: disabled"* ]]; }
 
+# MARK: Archives
+
+# Fails unless every member name in the list on stdin is relative and has no `..` component.
+safe_members() {
+  local name
+  while IFS= read -r name; do
+    [[ -n $name && $name != /* && $name != ".." && $name != ../* && $name != */../* && $name != */.. ]] || return 1
+  done
+}
+
+# Fails when a symbolic link under $1 points outside $1.
+links_stay_inside() {
+  local root=${1:A} link target
+  find "$root" -type l -print0 | while IFS= read -r -d '' link; do
+    target=${link:A}
+    [[ $target == $root || $target == $root/* ]] || return 1
+  done
+}
+
 # MARK: ChatGPT app
 
 app_info() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
@@ -118,7 +137,10 @@ install_app() {
   local zip=$STAGE/$(pinned chatgptArchive)
   check_sha "$zip" "$(pinned chatgptSha256)" "The ChatGPT app archive"
   rm -rf "$WORK/app" && mkdir -p "$WORK/app" || fail "could not prepare the ChatGPT app folder"
+  zipinfo -1 "$zip" 2>>"$LOG" | safe_members || fail "the ChatGPT app archive has unsafe paths"
   logged ditto -x -k "$zip" "$WORK/app" || fail "could not unpack the ChatGPT app"
+  [[ $(ls -A "$WORK/app") == ChatGPT.app ]] || fail "the ChatGPT app archive holds more than the app"
+  links_stay_inside "$WORK/app" || fail "the ChatGPT app archive has links that leave the app"
   app_ok "$WORK/app/ChatGPT.app" || fail "the ChatGPT app is not the official signed app"
   # LCU and the Computer Use helper run from /Applications, owned by root.
   if [[ -e $APP ]]; then
@@ -149,7 +171,9 @@ install_lcu() {
   local archive=$STAGE/$(pinned lcuArchive)
   check_sha "$archive" "$(pinned lcuSha256)" "The LCU archive"
   rm -rf "$WORK/lcu" && mkdir -p "$WORK/lcu" || fail "could not prepare the LCU folder"
+  tar -tzf "$archive" 2>>"$LOG" | safe_members || fail "the LCU archive has unsafe paths"
   logged tar -xzf "$archive" -C "$WORK/lcu" || fail "could not unpack LCU"
+  links_stay_inside "$WORK/lcu" || fail "the LCU archive has links that leave its folder"
   local release=$WORK/lcu/${$(pinned lcuArchive)%.tar.gz}
   [[ -x $release/scripts/install.sh ]] || fail "the LCU archive has no installer"
   # The installer verifies the app's signature under a time limit; the first verification after
@@ -265,7 +289,7 @@ register() {
 }
 
 install_agent() {
-  mkdir -p "${AGENT_PLIST:h}"
+  mkdir -p "${AGENT_PLIST:h}" || fail "could not create the LaunchAgents folder"
   cat >"$AGENT_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -275,6 +299,9 @@ install_agent() {
 <key>RunAtLoad</key><true/>
 </dict></plist>
 EOF
+  [[ $? -eq 0 && -s $AGENT_PLIST ]] || fail "could not write the reconcile LaunchAgent"
+  plutil -lint "$AGENT_PLIST" >>"$LOG" 2>&1 || fail "the reconcile LaunchAgent is not a valid property list"
+  # Without a login session yet, bootstrap fails; launchd loads the agent at the next login.
   launchctl bootout "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1
   launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST" >>"$LOG" 2>&1 ||
     log "the reconcile agent starts at the next login"
@@ -292,7 +319,7 @@ apply() {
   write_ledger || fail "could not write the Screen Recording approvals"
   restart_tccd
   register
-  logged "$LCU" doctor
+  logged "$LCU" doctor || fail "lcu doctor reported a problem"
   rm -rf "$WORK"
   write_receipt ready ""
   say "Computer use is ready"
@@ -311,6 +338,12 @@ case $command in
     ;;
   status)
     cat "$RECEIPT" 2>/dev/null || print '{"state":"none"}'
+    ;;
+  safe-members)
+    safe_members
+    ;;
+  links-inside)
+    links_stay_inside "$1"
     ;;
   grant)
     mkdir -p "$WORK"

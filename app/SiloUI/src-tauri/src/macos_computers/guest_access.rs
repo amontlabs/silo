@@ -33,6 +33,7 @@ const POLL: Duration = Duration::from_secs(3);
 pub(crate) const OUTPUT_TOO_LARGE: &str = "The command in the computer printed too much.";
 pub(super) const CANCELLED: &str = "Setup was cancelled.";
 
+#[derive(Debug)]
 pub(crate) struct CommandOutput {
     pub status: i32,
     pub stdout: String,
@@ -441,6 +442,27 @@ pub(super) fn run_with_password(
     )
 }
 
+/// Like `run`, but stops the command and fails with `CANCELLED` soon after `cancel` returns true.
+pub(crate) fn run_cancellable(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<CommandOutput, String> {
+    let account = account(layout)?;
+    let address = guest_address(&record.mac_address)?;
+    exec_until(
+        SSH,
+        &ssh_args(layout, record, &account, address, command, Auth::Key),
+        None,
+        timeout,
+        &environment(layout, Auth::Key)?,
+        None,
+        Some(cancel),
+    )
+}
+
 fn run_as(
     layout: &Layout,
     record: &Record,
@@ -472,15 +494,28 @@ pub(crate) fn copy(
     remote: &str,
     timeout: Duration,
 ) -> Result<(), String> {
+    copy_cancellable(layout, record, local, remote, timeout, &|| false)
+}
+
+/// Like `copy`, but stops the transfer and fails with `CANCELLED` soon after `cancel` returns true.
+pub(crate) fn copy_cancellable(
+    layout: &Layout,
+    record: &Record,
+    local: &Path,
+    remote: &str,
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), String> {
     let account = account(layout)?;
     let address = guest_address(&record.mac_address)?;
-    let output = exec(
+    let output = exec_until(
         SCP,
         &scp_args(layout, record, &account, address, local, remote),
         None,
         timeout,
         &[],
         None,
+        Some(cancel),
     )?;
     if output.status == 0 {
         Ok(())
@@ -500,6 +535,19 @@ fn exec(
     timeout: Duration,
     envs: &[(String, String)],
     max_stdout: Option<usize>,
+) -> Result<CommandOutput, String> {
+    exec_until(program, args, stdin, timeout, envs, max_stdout, None)
+}
+
+/// `exec` that also kills the tool and fails with `CANCELLED` once `cancel` returns true.
+fn exec_until(
+    program: &str,
+    args: &[String],
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    envs: &[(String, String)],
+    max_stdout: Option<usize>,
+    cancel: Option<&dyn Fn() -> bool>,
 ) -> Result<CommandOutput, String> {
     let mut child = Command::new(program)
         .args(args)
@@ -530,6 +578,11 @@ fn exec(
             let _ = child.kill();
             let _ = child.wait();
             return Err(OUTPUT_TOO_LARGE.into());
+        }
+        if cancel.is_some_and(|cancelled| cancelled()) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(CANCELLED.into());
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -807,6 +860,23 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_cancelled_command_is_killed_promptly() {
+        let started = Instant::now();
+        let error = exec_until(
+            "/bin/sleep",
+            &["30".to_string()],
+            None,
+            Duration::from_secs(60),
+            &[],
+            None,
+            Some(&|| started.elapsed() > Duration::from_millis(200)),
+        )
+        .unwrap_err();
+        assert_eq!(error, CANCELLED);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
