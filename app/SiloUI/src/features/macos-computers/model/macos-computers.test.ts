@@ -184,4 +184,46 @@ describe("createMacosComputersStore", () => {
     expect(store.getSnapshot()).toMatchObject({ state, error: null })
     stop()
   })
+
+  it("applies only the newest of overlapping reads", async () => {
+    const { value } = backend()
+    const finishers: Array<(value: unknown) => void> = []
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
+    value.read = vi.fn(() => new Promise(resolve => { finishers.push(resolve) }))
+    const first = store.refresh()
+    const second = store.refresh()
+    finishers[1]({ ...state, computers: [{ ...computer, state: "running" }] })
+    await second
+    finishers[0](state)
+    await first
+    expect(store.getSnapshot().state?.computers[0].state).toBe("running")
+    stop()
+  })
+
+  it("treats an unreadable first read as a failed read", async () => {
+    const { value } = backend()
+    value.read = vi.fn().mockResolvedValueOnce({ nonsense: true }).mockResolvedValue(state)
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().error).toMatch(/unreadable/))
+    expect(store.getSnapshot().state).toBeNull()
+    await store.refresh()
+    expect(store.getSnapshot()).toMatchObject({ state, error: null })
+    stop()
+  })
+
+  it("reads again after a malformed event and clears the warning", async () => {
+    const { value, emit } = backend()
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
+    value.read = vi.fn(async () => ({ ...state, computers: [{ ...computer, state: "running" }] }))
+    emit({ nonsense: true })
+    expect(store.getSnapshot().warning).toBeTruthy()
+    await vi.waitFor(() => expect(store.getSnapshot().state?.computers[0].state).toBe("running"))
+    expect(store.getSnapshot().warning).toBeNull()
+    stop()
+  })
 })

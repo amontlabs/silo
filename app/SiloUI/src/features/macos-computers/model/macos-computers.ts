@@ -72,6 +72,8 @@ function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "The state of macOS computers could not be read."
 }
 
+const unreadableMessage = "The state of the macOS computers was unreadable."
+
 const listenRetryMs = (attempt: number) => Math.min(30_000, 1_000 * 2 ** attempt)
 
 /**
@@ -88,6 +90,7 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   let generation = 0
   let eventCount = 0
   let listening = false
+  let readCount = 0
 
   function publish(next: MacosComputersSnapshot) {
     snapshot = next
@@ -97,16 +100,20 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   function accept(value: unknown, fromEvent: boolean) {
     const parsed = macosComputersStateSchema.safeParse(value)
     if (parsed.success) publish({ state: parsed.data, error: null, warning: fromEvent || listening ? null : snapshot.warning })
-    else publish({ ...snapshot, warning: "An update to the macOS computers was unreadable. Refreshing…" })
+    else if (fromEvent && snapshot.state) publish({ ...snapshot, warning: "An update to the macOS computers was unreadable. Refreshing…" })
+    else publish({ ...snapshot, error: unreadableMessage })
   }
 
   async function read(mine: number) {
     const startedAfter = eventCount
+    const sequence = ++readCount
+    // Only the newest read, with no event since it started, reflects the latest state.
+    const current = () => mine === generation && eventCount === startedAfter && sequence === readCount
     try {
       const value = await backend.read()
-      if (mine === generation && eventCount === startedAfter) accept(value, false)
+      if (current()) accept(value, false)
     } catch (error) {
-      if (mine === generation && eventCount === startedAfter) publish({ ...snapshot, error: failureMessage(error) })
+      if (current()) publish({ ...snapshot, error: failureMessage(error) })
     }
   }
 

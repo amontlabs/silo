@@ -238,3 +238,12 @@ it("warns about a malformed update and keeps the computers", async () => {
   expect(await screen.findByRole("status")).toHaveTextContent("unreadable")
   expect(screen.getByText("daily")).toBeVisible()
 })
+
+it("shows Retry when the first read is unreadable", async () => {
+  const backend = { ...backendFor([]), read: vi.fn().mockResolvedValueOnce({ nonsense: true }).mockResolvedValue({ supported: true, unsupportedReason: null, computers: [] }) }
+  const user = userEvent.setup()
+  renderSection(backend)
+  expect(await screen.findByRole("alert")).toHaveTextContent("unreadable")
+  await user.click(screen.getByRole("button", { name: "Retry" }))
+  expect(await screen.findByRole("heading", { name: "macOS computers" })).toBeVisible()
+})
