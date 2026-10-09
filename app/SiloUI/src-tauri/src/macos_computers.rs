@@ -837,6 +837,15 @@ fn shutdown_accepted(result: &Result<guest_access::CommandOutput, String>) -> bo
     )
 }
 
+/// When Quit stops waiting for guests to shut down: `GRACEFUL_QUIT` from `now` at most, and never
+/// into the last `FORCED_QUIT` before `deadline`, which the forced stop needs.
+fn graceful_until(now: Instant, deadline: Option<Instant>) -> Instant {
+    let at = now + GRACEFUL_QUIT;
+    deadline.map_or(at, |deadline| {
+        at.min(deadline.checked_sub(FORCED_QUIT).unwrap_or(now).max(now))
+    })
+}
+
 /// How long Quit may spend on SSH shutdowns: `QUIT_SHUTDOWN_TIMEOUT` at most, and never so
 /// long that less than `FORCED_QUIT` of the time left is kept for the forced stop. `None` when
 /// too little time is left to try at all.
@@ -1220,7 +1229,9 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     let everything: Vec<&String> = busy.iter().map(|(id, _, _)| id).collect();
     // Installations and setups were aborted; they release their machine (and, for a
     // setup, the disk image) before they stop being busy.
-    if wait_until(limit(GRACEFUL_QUIT), &machines) && wait_until(limit(FORCED_QUIT), &everything) {
+    if wait_until(graceful_until(Instant::now(), deadline), &machines)
+        && wait_until(limit(FORCED_QUIT), &everything)
+    {
         return Ok(());
     }
     // A machine that ignored the request, or a setup stuck in a guest command, still holds its machine.
@@ -1265,6 +1276,24 @@ mod tests {
         assert!(!shutdown_accepted(&output(1, "SILO_SHUTDOWN\n")));
         assert!(SSH_SHUTDOWN.starts_with("echo SILO_SHUTDOWN;"));
         assert!(!shutdown_accepted(&Err("took too long".into())));
+    }
+
+    #[test]
+    fn the_graceful_wait_leaves_the_forced_stop_its_time() {
+        let now = Instant::now();
+        let secs = Duration::from_secs;
+        assert_eq!(graceful_until(now, None), now + GRACEFUL_QUIT);
+        assert_eq!(
+            graceful_until(now, Some(now + secs(600))),
+            now + GRACEFUL_QUIT
+        );
+        assert_eq!(
+            graceful_until(now, Some(now + FORCED_QUIT + secs(10))),
+            now + secs(10)
+        );
+        assert_eq!(graceful_until(now, Some(now + FORCED_QUIT)), now);
+        assert_eq!(graceful_until(now, Some(now + secs(1))), now);
+        assert_eq!(graceful_until(now, Some(now)), now);
     }
 
     #[test]
