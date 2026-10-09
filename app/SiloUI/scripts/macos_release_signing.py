@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 
 TOOLS = ('silo-ui', 'msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
+# macOS computers run Virtualization.framework inside the app process itself.
+APP_REQUIRED_ENTITLEMENTS = ('com.apple.security.virtualization',)
 RUNTIME_ENTITLEMENTS = {
     'com.apple.security.hypervisor': True,
     'com.apple.security.cs.disable-library-validation': True,
@@ -67,6 +69,10 @@ def verify_bundle(app):
                 raise RuntimeError('The VM helper has unexpected runtime entitlements.')
         elif entitlements.get('com.apple.security.cs.disable-library-validation'):
             raise RuntimeError('Only the constrained VM helper may have the library-loading exception.')
+        if name == 'silo-ui':
+            for key in APP_REQUIRED_ENTITLEMENTS:
+                if entitlements.get(key) is not True:
+                    raise RuntimeError(f'Silo must be signed with {key}.')
     with tempfile.TemporaryDirectory(prefix='silo-verify-') as temporary:
         directory = Path(temporary)
         entitlements, constraint = policy_files(app, directory)
