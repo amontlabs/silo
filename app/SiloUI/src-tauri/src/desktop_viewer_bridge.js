@@ -270,6 +270,23 @@
   // A shortcut chord goes out with the modifiers the guest holds released first,
   // so Ctrl+Shift+C or Command+V arrives as a bare Ctrl+C or Ctrl+V.
   const sendShortcut = (frames, nonce) => acknowledge(nonce, deliver(frames, true))
+  // Sends the reset frames and, in the same task, arms a one-shot listener so
+  // the next resize of this page hands the size and density back to the
+  // window. A newer reset replaces a pending listener.
+  let followResize = null
+  const resetScreen = (frames, nonce) => {
+    const outcome = deliver(frames, false)
+    if (outcome === "ok") {
+      if (followResize) unlisten("resize", followResize)
+      followResize = () => {
+        unlisten("resize", followResize)
+        followResize = null
+        nativePost({ type: "resetResolutionToWindow" }, location.origin)
+      }
+      listen("resize", followResize)
+    }
+    return acknowledge(nonce, outcome)
+  }
   // Answers with the next announcement that differs from the one cached when the
   // request started, or after the timeout with the last one announced (kind
   // `none` when there is none). Selkies answers REQUEST_CLIPBOARD at once, so a
@@ -400,7 +417,6 @@
   window.addEventListener("message", event => {
     if (event.origin === location.origin && event.data && event.data.type === "pipelineStatusUpdate") applyAudio()
   })
-  let followResize = null
   const methods = {
     sendFrames,
     sendShortcut,
@@ -415,17 +431,7 @@
       if (active === true) for (const delay of [500, 1500, 3000]) setTimeout(applyAudio, delay)
     },
     resetResolutionToWindow: () => nativePost({ type: "resetResolutionToWindow" }, location.origin),
-    // One-shot: the next resize of this page hands the size and density back
-    // to the window. A newer call replaces a pending one.
-    followWindowOnResize: () => {
-      if (followResize) unlisten("resize", followResize)
-      followResize = () => {
-        unlisten("resize", followResize)
-        followResize = null
-        nativePost({ type: "resetResolutionToWindow" }, location.origin)
-      }
-      listen("resize", followResize)
-    },
+    resetScreen,
   }
   const bridge = freeze({
     invoke(method, args) {

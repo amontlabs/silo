@@ -186,7 +186,9 @@ describe("host bridge page helper", () => {
     const listener = (event: MessageEvent) => messages.push(event.data)
     window.addEventListener("message", listener)
     const settle = () => new Promise(resolve => setTimeout(resolve, 30))
-    expect(call("followWindowOnResize")).toBe(true)
+    const reset = ["r,1440x900,primary", "s,96"]
+    expect(call("resetScreen", reset)).toBe(true)
+    expect(socket.sent.slice(-2)).toEqual(reset)
     await settle()
     expect(messages).toEqual([])
     window.dispatchEvent(new Event("resize"))
@@ -195,12 +197,25 @@ describe("host bridge page helper", () => {
     expect(messages).toEqual([{ type: "resetResolutionToWindow" }])
 
     messages.length = 0
-    call("followWindowOnResize")
-    call("followWindowOnResize")
+    call("resetScreen", reset)
+    call("resetScreen", reset)
     window.dispatchEvent(new Event("resize"))
     await settle()
     window.removeEventListener("message", listener)
     expect(messages).toEqual([{ type: "resetResolutionToWindow" }])
+  })
+
+  it("arms nothing when the reset frames are refused or the socket is closed", async () => {
+    const messages: unknown[] = []
+    const listener = (event: MessageEvent) => messages.push(event.data)
+    window.addEventListener("message", listener)
+    expect(call("resetScreen", ["s,192"])).toBe(false)
+    setTransport(null)
+    expect(call("resetScreen", ["r,1440x900,primary", "s,96"])).toBe(false)
+    window.dispatchEvent(new Event("resize"))
+    await new Promise(resolve => setTimeout(resolve, 30))
+    window.removeEventListener("message", listener)
+    expect(messages).toEqual([])
   })
 
   it("re-applies the wanted mute and volume when the audio pipeline reports in", async () => {
