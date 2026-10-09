@@ -36,14 +36,12 @@ class SelkiesDisplayPatchTests(unittest.TestCase):
                 'source': digest(SYNTHETIC),
                 'patched': digest(PATCH.transform_source(SYNTHETIC)),
                 'replacements': PATCH.REPLACEMENTS,
-                'earlier': {},
             },
             'websockets_mode.py': {
                 'source': digest(SYNTHETIC_WEBSOCKETS),
                 'patched': digest(PATCH.transform_source(
                     SYNTHETIC_WEBSOCKETS, PATCH.WEBSOCKETS_REPLACEMENTS)),
                 'replacements': PATCH.WEBSOCKETS_REPLACEMENTS,
-                'earlier': {},
             },
         }
 
@@ -75,20 +73,6 @@ class SelkiesDisplayPatchTests(unittest.TestCase):
                 self.assertEqual({n: (root / n).read_bytes() for n in modules}, before)
                 self.assertEqual(set(os.listdir(root)), set(modules))
 
-    def test_earlier_patch_result_gets_only_the_remaining_fragments(self):
-        modules = self.synthetic_modules()
-        earlier = SYNTHETIC
-        for old, new in PATCH.SCALING_REPLACEMENTS:
-            earlier = earlier.replace(old, new, 1)
-        modules['display_utils.py']['earlier'] = {digest(earlier): PATCH.FIT_REPLACEMENTS}
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / 'display_utils.py').write_bytes(earlier)
-            (root / 'websockets_mode.py').write_bytes(SYNTHETIC_WEBSOCKETS)
-            self.assertEqual(PATCH.patch_package(root, 'arm64', modules), 'patched')
-            self.assertEqual(digest((root / 'display_utils.py').read_bytes()),
-                             modules['display_utils.py']['patched'])
-
     def test_transform_requires_every_exact_fragment(self):
         with self.assertRaisesRegex(ValueError, 'expected source fragments'):
             PATCH.transform_source(b'changed source')
@@ -118,12 +102,6 @@ class PinnedUpstreamTests(unittest.TestCase):
         patched = PATCH.transform_source(self.source)
         self.assertEqual(digest(patched), spec['patched'])
         compile(patched, 'display_utils.py', 'exec')
-        earlier = self.source
-        for old, new in PATCH.SCALING_REPLACEMENTS:
-            earlier = earlier.replace(old, new, 1)
-        (earlier_digest, remaining), = spec['earlier'].items()
-        self.assertEqual(digest(earlier), earlier_digest)
-        self.assertEqual(digest(PATCH.transform_source(earlier, remaining)), spec['patched'])
 
     def test_websockets_mode_patches_to_the_recorded_hash_and_fits_the_initial_size(self):
         spec = PATCH.MODULES['websockets_mode.py']

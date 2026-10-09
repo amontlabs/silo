@@ -220,22 +220,17 @@ INITIAL_NEW = b'''                    target_h = old_display_height if old_displ
 WEBSOCKETS_REPLACEMENTS = ((IMPORT_OLD, IMPORT_NEW), (INITIAL_OLD, INITIAL_NEW))
 
 # Each patched module with its pinned 2.0.0 source hash, the hash after the
-# patch, and the fragments rewritten. `earlier` maps the result of a previous
-# version of this patch to the fragments still to apply on top of it.
+# patch, and the fragments rewritten.
 MODULES = {
     'display_utils.py': {
         'source': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
         'patched': '5e31a80db3511e2a16830c8dcd5bbe3ccc5003fec227e1bbb64716f3c9d1ce84',
         'replacements': REPLACEMENTS,
-        'earlier': {
-            '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9': FIT_REPLACEMENTS,
-        },
     },
     'websockets_mode.py': {
         'source': '1d86b0092fc9f24ccec1e862bf94309021b9136344916ac7836565e1a4c4cebc',
         'patched': '5de8017e68901b42090b1e5252d7774f5164bc7cf1c60139583775af7cef4319',
         'replacements': WEBSOCKETS_REPLACEMENTS,
-        'earlier': {},
     },
 }
 SUPPORTED_ARCHITECTURES = ('amd64', 'arm64')
@@ -269,13 +264,9 @@ def plan_file(path, name, spec):
     digest = sha256(source)
     if digest == spec['patched']:
         return None
-    if digest == spec['source']:
-        replacements = spec['replacements']
-    elif digest in spec['earlier']:
-        replacements = spec['earlier'][digest]
-    else:
+    if digest != spec['source']:
         raise ValueError(f'Selkies module {name} source hash is not the pinned 2.0.0 module')
-    updated = transform_source(source, replacements)
+    updated = transform_source(source, spec['replacements'])
     if sha256(updated) != spec['patched']:
         raise ValueError(f'Selkies patch result hash mismatch for {name}')
     return updated
