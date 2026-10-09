@@ -1,0 +1,40 @@
+diff --git a/crates/runtime/lib/runner/metrics.rs b/crates/runtime/lib/runner/metrics.rs
+index 03afac23..0231e02b 100644
+--- a/crates/runtime/lib/runner/metrics.rs
++++ b/crates/runtime/lib/runner/metrics.rs
+@@ -109,7 +109,7 @@ pub async fn run_metrics_sampler(spec: MetricsSamplerSpec) {
+     } = spec;
+     let interval = Duration::from_millis(interval_ms.get());
+     let upper_stale_after = upper_filesystem_stale_after(interval);
+-    let mut previous = paired_snapshot(&krun_metrics);
++    let mut previous = paired_snapshot(&krun_metrics).await;
+     let upper_host_path = upper_host_path.as_deref();
+     let mut last_cpu_percent: Option<f32> = None;
+ 
+@@ -138,7 +138,7 @@ pub async fn run_metrics_sampler(spec: MetricsSamplerSpec) {
+     loop {
+         tokio::time::sleep(interval).await;
+ 
+-        let current = paired_snapshot(&krun_metrics);
++        let current = paired_snapshot(&krun_metrics).await;
+         let wall_secs = current
+             .at
+             .checked_duration_since(previous.at)
+@@ -212,7 +212,16 @@ struct PairedSnapshot {
+     uncertainty: Duration,
+ }
+ 
+-fn paired_snapshot(krun_metrics: &msb_krun::MetricsHandle) -> PairedSnapshot {
++/// Take the snapshot on the blocking pool: it scans host residency of the whole guest memory
++/// mapping, which can hold a runtime worker for hundreds of milliseconds.
++async fn paired_snapshot(krun_metrics: &msb_krun::MetricsHandle) -> PairedSnapshot {
++    let krun_metrics = krun_metrics.clone();
++    tokio::task::spawn_blocking(move || paired_snapshot_blocking(&krun_metrics))
++        .await
++        .expect("metrics snapshot task failed")
++}
++
++fn paired_snapshot_blocking(krun_metrics: &msb_krun::MetricsHandle) -> PairedSnapshot {
+     let before = Instant::now();
+     let metrics = krun_metrics.aggregate_snapshot();
+     let after = Instant::now();
