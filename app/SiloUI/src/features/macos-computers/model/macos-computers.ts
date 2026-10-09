@@ -1,6 +1,8 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import { z } from "zod"
 
+import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
+
 export const macosComputerStates = ["preparing", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
 export type MacosComputerState = (typeof macosComputerStates)[number]
 
@@ -39,12 +41,17 @@ export interface MacosComputerRequest {
 
 export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "setup"
 
+/** Which way an explicit clipboard transfer goes: this Mac to the computer, or back. */
+export type MacosClipboardDirection = "paste-into" | "copy-from"
+
 /** What the section needs from its host: the native commands in production, fixtures in the browser preview. */
 export interface MacosComputersBackend {
   read(): Promise<unknown>
   create(request: MacosComputerRequest): Promise<unknown>
   action(id: string, action: MacosComputerAction): Promise<void>
   openDisplay(id: string): Promise<void>
+  /** Transfers the clipboard once and resolves to the outcome. */
+  clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
   /** Subscribes to state changes; resolves to an unsubscribe function. */
   listen(handler: (state: unknown) => void): Promise<() => void>
 }
@@ -65,6 +72,7 @@ export interface MacosComputersStore {
   create(request: MacosComputerRequest): Promise<void>
   action(id: string, action: MacosComputerAction): Promise<void>
   openDisplay(id: string): Promise<void>
+  clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
 }
 
 const initialSnapshot: MacosComputersSnapshot = { state: null, error: null, warning: null }
@@ -181,6 +189,7 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
     },
     action: (id, action) => readAfter(backend.action(id, action)),
     openDisplay: id => backend.openDisplay(id),
+    clipboard: (id, direction) => backend.clipboard(id, direction),
   }
 }
 

@@ -9,10 +9,15 @@
 use super::store::{self, HostLimits, Layout, Record};
 use block2::RcBlock;
 use objc2::{
-    define_class, msg_send, rc::Retained, runtime::ProtocolObject, AnyThread, DefinedClass,
-    MainThreadMarker, MainThreadOnly,
+    define_class, msg_send,
+    rc::Retained,
+    runtime::{AnyObject, ProtocolObject},
+    sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
-use objc2_app_kit::{NSAutoresizingMaskOptions, NSResponder, NSView, NSWindow};
+use objc2_app_kit::{
+    NSAutoresizingMaskOptions, NSResponder, NSToolbar, NSToolbarDelegate, NSToolbarDisplayMode,
+    NSToolbarItem, NSView, NSWindow,
+};
 use objc2_foundation::{
     NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSString, NSURL,
 };
@@ -46,6 +51,9 @@ struct Slot {
 thread_local! {
     /// Main thread only: framework objects are not `Send`.
     static SLOTS: RefCell<HashMap<String, Slot>> = RefCell::new(HashMap::new());
+    /// Main thread only: the toolbar delegate of each open screen window, which the toolbar
+    /// and its buttons hold weakly.
+    static TOOLBARS: RefCell<HashMap<String, Retained<ToolbarDelegate>>> = RefCell::new(HashMap::new());
 }
 
 struct DelegateState {
@@ -822,13 +830,135 @@ pub(super) fn machine_states(app: &AppHandle) -> Result<Vec<(String, MachineStat
 
 // MARK: Display
 
+const PASTE_ITEM: &str = "silo.paste-into-computer";
+const COPY_ITEM: &str = "silo.copy-from-computer";
+
+fn toolbar_item_ids() -> Retained<NSArray<NSString>> {
+    NSArray::from_retained_slice(&[
+        NSString::from_str(PASTE_ITEM),
+        NSString::from_str(COPY_ITEM),
+    ])
+}
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements; the delegate state is immutable.
+    #[unsafe(super = NSObject)]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = DelegateState]
+    struct ToolbarDelegate;
+
+    unsafe impl NSObjectProtocol for ToolbarDelegate {}
+
+    impl ToolbarDelegate {
+        #[unsafe(method(pasteIntoComputer:))]
+        fn paste_into_computer(&self, _sender: Option<&AnyObject>) {
+            let state = self.ivars();
+            super::guest_clipboard::spawn_from_display(
+                &state.app,
+                &state.id,
+                super::guest_clipboard::Direction::PasteInto,
+            );
+        }
+
+        #[unsafe(method(copyFromComputer:))]
+        fn copy_from_computer(&self, _sender: Option<&AnyObject>) {
+            let state = self.ivars();
+            super::guest_clipboard::spawn_from_display(
+                &state.app,
+                &state.id,
+                super::guest_clipboard::Direction::CopyFrom,
+            );
+        }
+    }
+
+    unsafe impl NSToolbarDelegate for ToolbarDelegate {
+        #[unsafe(method_id(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:))]
+        fn item_for_identifier(
+            &self,
+            _toolbar: &NSToolbar,
+            identifier: &NSString,
+            _inserted: bool,
+        ) -> Retained<NSToolbarItem> {
+            let (label, tip, action) = match identifier.to_string().as_str() {
+                PASTE_ITEM => (
+                    "Paste into Computer",
+                    "Put this Mac's clipboard on the computer's clipboard",
+                    sel!(pasteIntoComputer:),
+                ),
+                COPY_ITEM => (
+                    "Copy from Computer",
+                    "Put the computer's clipboard on this Mac's clipboard",
+                    sel!(copyFromComputer:),
+                ),
+                _ => ("", "", sel!(copyFromComputer:)),
+            };
+            // SAFETY: Main thread; the target is this delegate, kept alive by TOOLBARS, and
+            // the action is one of its methods.
+            unsafe {
+                let item = NSToolbarItem::initWithItemIdentifier(NSToolbarItem::alloc(self.mtm()), identifier);
+                item.setLabel(&NSString::from_str(label));
+                item.setToolTip(Some(&NSString::from_str(tip)));
+                item.setTarget(Some(self));
+                item.setAction(Some(action));
+                item
+            }
+        }
+
+        #[unsafe(method_id(toolbarDefaultItemIdentifiers:))]
+        fn default_items(&self, _toolbar: &NSToolbar) -> Retained<NSArray<NSString>> {
+            toolbar_item_ids()
+        }
+
+        #[unsafe(method_id(toolbarAllowedItemIdentifiers:))]
+        fn allowed_items(&self, toolbar: &NSToolbar) -> Retained<NSArray<NSString>> {
+            toolbar_item_ids()
+        }
+    }
+);
+
+/// Adds the clipboard buttons to `native`'s toolbar. Call on the main thread.
+fn install_toolbar(mtm: MainThreadMarker, app: &AppHandle, id: &str, native: &NSWindow) {
+    let delegate = mtm.alloc::<ToolbarDelegate>().set_ivars(DelegateState {
+        app: app.clone(),
+        id: id.to_string(),
+    });
+    // SAFETY: A plain NSObject subclass initialised through its superclass.
+    let delegate: Retained<ToolbarDelegate> = unsafe { msg_send![super(delegate), init] };
+    let toolbar = NSToolbar::initWithIdentifier(
+        mtm.alloc::<NSToolbar>(),
+        &NSString::from_str("silo.macos-display"),
+    );
+    toolbar.setDisplayMode(NSToolbarDisplayMode::LabelOnly);
+    toolbar.setAllowsUserCustomization(false);
+    toolbar.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+    native.setToolbar(Some(&toolbar));
+    TOOLBARS.with(|toolbars| toolbars.borrow_mut().insert(id.to_string(), delegate));
+}
+
+/// Shows `text` under the title of the computer's screen window; empty clears it.
+pub(super) fn set_display_subtitle(app: &AppHandle, id: &str, text: &str) {
+    let (app_handle, label, text) = (app.clone(), super::display_label(id), text.to_string());
+    let _ = app.run_on_main_thread(move || {
+        use tauri::Manager;
+        let Some(window) = app_handle.get_webview_window(&label) else {
+            return;
+        };
+        let Ok(pointer) = window.ns_window() else {
+            return;
+        };
+        // SAFETY: Main thread; Tauri owns the NSWindow, which outlives this closure.
+        let native = unsafe { &*pointer.cast::<NSWindow>() };
+        native.setSubtitle(&NSString::from_str(&text));
+    });
+}
+
 /// Adds the machine's screen to `window`, filling its content view.
 pub(super) fn attach_display(
     app: &AppHandle,
     id: &str,
     window: &tauri::WebviewWindow,
 ) -> Result<(), String> {
-    let (id, window) = (id.to_string(), window.clone());
+    let (id, window, handle) = (id.to_string(), window.clone(), app.clone());
     on_main(app, move |mtm| {
         SLOTS.with(|slots| {
             let mut slots = slots.borrow_mut();
@@ -838,6 +968,7 @@ pub(super) fn attach_display(
                 .map_err(|_| "Silo could not open the display.".to_string())?;
             // Tauri owns the NSWindow; this closure runs on its AppKit thread.
             let native = unsafe { &*pointer.cast::<NSWindow>() };
+            install_toolbar(mtm, &handle, &id, native);
             let content = native
                 .contentView()
                 .ok_or("Silo could not open the display.")?;
@@ -871,6 +1002,7 @@ pub(super) fn attach_display(
 pub(super) fn detach_display(app: &AppHandle, id: &str) {
     let id = id.to_string();
     let _ = app.run_on_main_thread(move || {
+        TOOLBARS.with(|toolbars| toolbars.borrow_mut().remove(&id));
         SLOTS.with(|slots| {
             if let Some(slot) = slots.borrow_mut().get_mut(&id) {
                 if let Some(view) = slot.view.take() {

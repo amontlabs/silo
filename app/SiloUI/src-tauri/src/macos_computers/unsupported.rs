@@ -82,6 +82,8 @@ pub(super) fn attach_display(
 
 pub(super) fn detach_display(_app: &AppHandle, _id: &str) {}
 
+pub(super) fn set_display_subtitle(_app: &AppHandle, _id: &str, _text: &str) {}
+
 pub(super) fn release_slot(_id: &str) {}
 
 pub(super) fn defer(work: impl FnOnce() + Send + 'static) {

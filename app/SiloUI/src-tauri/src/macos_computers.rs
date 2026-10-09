@@ -462,6 +462,20 @@ pub(crate) async fn open_macos_display(
     blocking(move || open_display(&app, &id)).await
 }
 
+/// Pastes this Mac's clipboard into a running computer, or copies the computer's
+/// clipboard to this Mac. Only the main window can start it.
+#[tauri::command]
+pub(crate) async fn macos_computer_clipboard(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    direction: guest_clipboard::Direction,
+) -> Result<crate::viewer_clipboard::Report, String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || guest_clipboard::run(&app, &id, direction)).await
+}
+
 // MARK: Create
 
 fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, String> {

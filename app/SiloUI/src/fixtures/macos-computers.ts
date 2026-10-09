@@ -35,6 +35,9 @@ export function createFixtureMacosComputersBackend(initial: readonly MacosComput
       else update(id, { state: action === "start" ? "running" : "stopped", displayOpen: false, setupComplete: true })
     },
     openDisplay: async id => update(id, { displayOpen: true }),
+    clipboard: async (_id, direction) => direction === "paste-into"
+      ? { action: "paste", status: "pasted", content: "text", message: null }
+      : { action: "copy", status: "copied", content: "text", message: null },
   }
 }
 

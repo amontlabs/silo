@@ -141,6 +141,7 @@ fn main() {
             macos_computers::create_macos_computer,
             macos_computers::macos_computer_action,
             macos_computers::open_macos_display,
+            macos_computers::macos_computer_clipboard,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,

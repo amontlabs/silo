@@ -66,7 +66,7 @@ pub(crate) struct Report {
 }
 
 impl Report {
-    fn new(action: Action, status: Status, content: Option<Content>) -> Self {
+    pub(crate) fn new(action: Action, status: Status, content: Option<Content>) -> Self {
         Self {
             action,
             status,
@@ -75,7 +75,7 @@ impl Report {
         }
     }
 
-    fn failed(action: Action, message: impl Into<String>) -> Self {
+    pub(crate) fn failed(action: Action, message: impl Into<String>) -> Self {
         Self {
             message: Some(message.into()),
             ..Self::new(action, Status::Failed, None)
@@ -212,9 +212,9 @@ pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
 /// Viewers with a transfer in progress; a second request for the same viewer is refused.
 static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-struct ActiveGuard(String);
+pub(crate) struct ActiveGuard(String);
 impl ActiveGuard {
-    fn acquire(label: &str) -> Option<Self> {
+    pub(crate) fn acquire(label: &str) -> Option<Self> {
         let mut active = ACTIVE.get_or_init(Default::default).lock().ok()?;
         active
             .insert(label.to_string())
