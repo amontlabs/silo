@@ -96,18 +96,26 @@ way the web client patcher patches its asset: it accepts only the pinned 2.0.0 f
 keeping mode and owner, is idempotent, and exits non-zero with a message on any
 other file. `_run_xfconf` then treats a density that is a whole multiple of 96 from
 2x up as an integer `/Gdk/WindowScalingFactor` with `/Xft/DPI` at 96 and
-`/Gtk/CursorThemeSize` 32 (any other density stays on the font DPI alone, as before).
+`/Gtk/CursorThemeSize` sized from the full density (`round(dpi / 96 * 32)`, 64 at 192 DPI),
+because GTK passes it to Xcursor without the window scale and Selkies divides the captured
+cursor by the viewer density (any other density stays on the font DPI alone, as before).
 A lowered scale is written before the DPI and a raised one after it, so the session
 never renders at the product of the old and new factors. If `xfwm4 /general/theme`
 is `Default`, `Default-hdpi` or `Default-xhdpi` it becomes `Default-xhdpi` at scale 2
 or more and `Default` otherwise (best effort; other themes are left alone).
 `desktop_dpi()`, which `restore_dpi` uses at startup, returns the stored font DPI
 times the stored scale, so a restart re-applies the same 2x state instead of
-collapsing to 1x. This mirrors Selkies' MATE path and is a candidate upstream fix.
+collapsing to 1x. A streamer-only restart keeps that density; a fresh desktop session does
+not: before Xvfb and Xfce start, `silo-desktop` resets the `silo` account's persisted
+`xsettings.xml` (`Xft/DPI` 96, `Gdk/WindowScalingFactor` 1, `Gtk/CursorThemeSize` 32) and an
+`xfwm4.xml` stock theme to `Default`, so an agent with no viewer gets the 1440x900 screen at
+1x. Only existing integer and stock-theme properties are edited (no symlinks followed,
+owner and mode kept, atomic replace). This mirrors Selkies' MATE path and is a candidate upstream fix.
 
 **Recipe 4.** `recipeVersion` in `desktop-streamer-lock.json` is 4. The service
 accepts receipts 1, 2, 3 and 4. An older receipt is a runnable desktop with an
-optional update: the helper reports `updateAvailable` and leaves `updateRequired`
+optional update (a rerun of `setup-desktop.sh install` on such a computer first applies
+both Selkies patches, so the new flags never meet unpatched Selkies): the helper reports `updateAvailable` and leaves `updateRequired`
 false. `updateRequired` is only for a receipt the service cannot run (invalid or
 unknown revision), where Start is replaced by "Update desktop".
 

@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import tempfile
 from types import SimpleNamespace
@@ -1228,6 +1229,122 @@ class StreamerLaunch(unittest.TestCase):
                      '--mode=websockets', '--enable-dual-mode=false|locked'):
             self.assertIn(flag, argv)
         self.assertEqual(len({arg.split('=')[0] for arg in argv}), len(argv))
+
+
+class DesktopDensityReset(unittest.TestCase):
+    XSETTINGS = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xsettings" version="1.0">'
+        '<property name="Xft" type="empty"><property name="DPI" type="int" value="96"/></property>'
+        '<property name="Gdk" type="empty"><property name="WindowScalingFactor" type="int" value="2"/></property>'
+        '<property name="Gtk" type="empty"><property name="CursorThemeSize" type="int" value="64"/>'
+        '<property name="FontName" type="string" value="Sans 10"/></property></channel>\n')
+    XFWM4 = ('<?xml version="1.0" encoding="UTF-8"?>\n<channel name="xfwm4" version="1.0">'
+             '<property name="general" type="empty"><property name="theme" type="string" value="{}"/>'
+             '</property></channel>\n')
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name) / 'home'
+        self.channels = self.home / '.config/xfce4/xfconf/xfce-perchannel-xml'
+        self.channels.mkdir(parents=True)
+        self.account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+
+    def values(self, name, *path):
+        root = service.ElementTree.parse(self.channels / name).getroot()
+        return service.xfconf_property(root, path).get('value')
+
+    def test_viewer_density_returns_to_the_stock_values(self):
+        (self.channels / 'xsettings.xml').write_text(self.XSETTINGS.replace('value="96"', 'value="192"', 1))
+        (self.channels / 'xfwm4.xml').write_text(self.XFWM4.format('Default-xhdpi'))
+        (self.channels / 'xsettings.xml').chmod(0o640)
+        service.reset_desktop_density(self.account, self.home)
+        self.assertEqual(self.values('xsettings.xml', 'Xft', 'DPI'), '96')
+        self.assertEqual(self.values('xsettings.xml', 'Gdk', 'WindowScalingFactor'), '1')
+        self.assertEqual(self.values('xsettings.xml', 'Gtk', 'CursorThemeSize'), '32')
+        self.assertEqual(self.values('xsettings.xml', 'Gtk', 'FontName'), 'Sans 10')
+        self.assertEqual(self.values('xfwm4.xml', 'general', 'theme'), 'Default')
+        self.assertEqual(stat.S_IMODE((self.channels / 'xsettings.xml').stat().st_mode), 0o640)
+        self.assertEqual({path.name for path in self.channels.iterdir()}, {'xsettings.xml', 'xfwm4.xml'})
+
+    def test_custom_theme_and_missing_files_or_properties_are_left_alone(self):
+        service.reset_desktop_density(self.account, self.home)
+        self.assertEqual(list(self.channels.iterdir()), [])
+        (self.channels / 'xsettings.xml').write_text('<channel name="xsettings"><property name="Net" type="empty"/></channel>')
+        (self.channels / 'xfwm4.xml').write_text(self.XFWM4.format('Greybird'))
+        before = {path.name: path.read_bytes() for path in self.channels.iterdir()}
+        service.reset_desktop_density(self.account, self.home)
+        self.assertEqual({path.name: path.read_bytes() for path in self.channels.iterdir()}, before)
+        service.reset_desktop_density(self.account, self.home / 'absent')
+
+    def test_stock_themes_follow_the_reset_and_already_stock_files_are_not_rewritten(self):
+        for theme in ('Default-hdpi', 'Default-xhdpi'):
+            (self.channels / 'xfwm4.xml').write_text(self.XFWM4.format(theme))
+            service.reset_desktop_density(self.account, self.home)
+            self.assertEqual(self.values('xfwm4.xml', 'general', 'theme'), 'Default')
+        before = (self.channels / 'xfwm4.xml').stat().st_ino
+        service.reset_desktop_density(self.account, self.home)
+        self.assertEqual((self.channels / 'xfwm4.xml').stat().st_ino, before)
+
+    def test_symbolic_links_are_not_followed(self):
+        target = Path(self.temp.name) / 'target.xml'
+        target.write_text(self.XSETTINGS)
+        (self.channels / 'xsettings.xml').symlink_to(target)
+        with self.assertRaises(OSError):
+            service.reset_desktop_density(self.account, self.home)
+        self.assertEqual(target.read_text(), self.XSETTINGS)
+        outside = Path(self.temp.name) / 'outside'
+        shutil.copytree(self.home / '.config', outside / '.config')
+        (outside / '.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml').write_text(self.XSETTINGS)
+        link = Path(self.temp.name) / 'linked-home'
+        link.symlink_to(outside)
+        with self.assertRaises(OSError):
+            service.reset_desktop_density(self.account, link)
+
+    def test_file_owned_by_another_account_is_refused(self):
+        (self.channels / 'xsettings.xml').write_text(self.XSETTINGS)
+        with self.assertRaisesRegex(RuntimeError, 'owned by the desktop account'):
+            service.reset_desktop_density(SimpleNamespace(pw_uid=os.getuid() + 1), self.home)
+
+    def test_new_file_is_synced_before_replacing_and_the_directory_after(self):
+        (self.channels / 'xsettings.xml').write_text(self.XSETTINGS)
+        events = []
+        fsync, replace = os.fsync, os.replace
+        with patch.object(service.os, 'fsync', side_effect=lambda fd: (events.append('sync'), fsync(fd))[1]), \
+             patch.object(service.os, 'replace', side_effect=lambda *a, **k: (events.append('replace'), replace(*a, **k))[1]):
+            service.reset_desktop_density(self.account, self.home)
+        self.assertEqual(events, ['sync', 'replace', 'sync'])
+
+    def test_fresh_session_resets_before_processes_start_and_a_failure_does_not_stop_it(self):
+        for failing in (False, True):
+            order = []
+
+            def reset(_account, failing=failing):
+                order.append('reset')
+                if failing:
+                    raise RuntimeError('unsafe')
+
+            def start(*_args, **_kwargs):
+                order.append('start')
+
+            with tempfile.TemporaryDirectory() as run, \
+                 patch.object(service, 'RUN', Path(run)), \
+                 patch.object(service, 'streamer_backend', return_value='selkies'), \
+                 patch.object(service, 'LOG', Path(run) / 'log'), \
+                 patch.object(service, 'identity', return_value='supervisor-start'), \
+                 patch.object(service.signal, 'signal'), \
+                 patch.object(service.pwd, 'getpwnam', return_value='account'), \
+                 patch.object(service, 'reset_desktop_density', side_effect=reset), \
+                 patch.object(service, 'start_session_processes', side_effect=start), \
+                 patch.object(service, 'supervise_selkies_stream'), \
+                 patch.object(service, 'stop_selkies_processes'):
+                service.supervise_selkies()
+                self.assertFalse((Path(run) / 'failed').exists())
+            self.assertEqual(order, ['reset', 'start'])
+
+    def test_streamer_restart_keeps_the_density(self):
+        for restart_path in (service.supervise_selkies_stream, service.restart_selkies_streamer):
+            self.assertNotIn('reset_desktop_density', restart_path.__code__.co_names)
 
 
 class DesktopStartSize(unittest.TestCase):

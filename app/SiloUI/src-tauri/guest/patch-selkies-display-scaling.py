@@ -13,8 +13,8 @@ SOURCE_SHA256 = {
     'arm64': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
 }
 PATCHED_SHA256 = {
-    'amd64': '152035265fe57f3e9a2db1a9bb38d3c51db9e8c4427036a65cef9ee74fafef20',
-    'arm64': '152035265fe57f3e9a2db1a9bb38d3c51db9e8c4427036a65cef9ee74fafef20',
+    'amd64': '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9',
+    'arm64': '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9',
 }
 
 # XFCE has no fractional scaling, so a client density that is a whole multiple
@@ -71,7 +71,10 @@ SETTINGS_OLD = b'''    cmd_dpi = [
 '''
 SETTINGS_NEW = b'''    scale = dpi_value // 96 if dpi_value >= 192 and dpi_value % 96 == 0 else 1
     font_dpi = dpi_value // scale
-    cursor_size = int(round(font_dpi / 96 * 32))
+    # GTK hands the cursor size to Xcursor without the window scale, and the
+    # captured cursor bitmap is divided by the viewer density, so size it from
+    # the full density.
+    cursor_size = int(round(dpi_value / 96 * 32))
 
     async def read_setting(channel: str, prop: str) -> Optional[str]:
         try:
@@ -113,7 +116,7 @@ SETTINGS_NEW = b'''    scale = dpi_value // 96 if dpi_value >= 192 and dpi_value
         if not await run_command(cmd, success_msg, failure_msg):
             return False
 
-    logger.debug(f"Attempting to set cursor size to: {cursor_size} (based on DPI {font_dpi})")
+    logger.debug(f"Attempting to set cursor size to: {cursor_size} (based on DPI {dpi_value})")
     cmd_cursor = [
         "xfconf-query", "-c", "xsettings", "-p", "/Gtk/CursorThemeSize",
         "-s", str(cursor_size), "--create", "-t", "int"
