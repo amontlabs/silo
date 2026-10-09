@@ -3,7 +3,7 @@
 use std::{
     collections::HashSet,
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
     time::Duration,
@@ -11,7 +11,18 @@ use std::{
 
 const EXTENSION: &str = "ipsw";
 const PARTIAL_SUFFIX: &str = ".partial";
-const CHUNK: usize = 1024 * 1024;
+/// How long a download may receive nothing before the attempt fails and can resume.
+const STALL: Duration = if cfg!(test) {
+    Duration::from_millis(600)
+} else {
+    Duration::from_secs(60)
+};
+/// How often a waiting download looks for cancellation.
+const POLL: Duration = if cfg!(test) {
+    Duration::from_millis(100)
+} else {
+    Duration::from_secs(2)
+};
 const ATTEMPTS: usize = 4;
 const RETRY_DELAY: Duration = if cfg!(test) {
     Duration::from_millis(10)
@@ -131,10 +142,9 @@ fn plan_response(
     }
 }
 
-fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
-        .timeout(None)
         .tcp_keepalive(Duration::from_secs(30))
         .build()
         .map_err(|_| "Silo could not prepare the macOS download.".into())
@@ -189,7 +199,43 @@ enum Attempt {
 }
 
 fn attempt_download(
-    client: &reqwest::blocking::Client,
+    client: &reqwest::Client,
+    url: &str,
+    partial: &Path,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(), Attempt> {
+    tauri::async_runtime::block_on(attempt_async(client, url, partial, cancelled, progress))
+}
+
+/// Waits for `future`, noticing cancellation every `POLL` and giving up after
+/// `STALL` without it finishing.
+async fn patiently<F: std::future::Future>(
+    future: F,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<F::Output, Attempt> {
+    let mut future = std::pin::pin!(future);
+    let mut idle = Duration::ZERO;
+    loop {
+        match tokio::time::timeout(POLL, future.as_mut()).await {
+            Ok(output) => return Ok(output),
+            Err(_) => {
+                if cancelled() {
+                    return Err(Attempt::Cancelled);
+                }
+                idle += POLL;
+                if idle >= STALL {
+                    return Err(Attempt::Retry(
+                        "The macOS download stopped receiving data.".into(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+async fn attempt_async(
+    client: &reqwest::Client,
     url: &str,
     partial: &Path,
     cancelled: &dyn Fn() -> bool,
@@ -200,12 +246,14 @@ fn attempt_download(
     };
     let mut existing = fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
     let mut use_range = existing > 0;
-    let (response, plan) = loop {
+    let (mut response, plan) = loop {
         let mut request = client.get(url);
         if use_range {
             request = request.header(reqwest::header::RANGE, format!("bytes={existing}-"));
         }
-        let response = request.send().map_err(|error| interrupted(&error))?;
+        let response = patiently(request.send(), cancelled)
+            .await?
+            .map_err(|error| interrupted(&error))?;
         let header = |name| {
             response
                 .headers()
@@ -245,22 +293,18 @@ fn attempt_download(
         .open(partial)
         .map_err(|error| Attempt::Fatal(super::store::io_error("save the download", &error)))?;
     let mut written = if appending { existing } else { 0 };
-    let mut body = response;
-    let mut buffer = vec![0u8; CHUNK];
     progress(written, total);
     loop {
         if cancelled() {
             return Err(Attempt::Cancelled);
         }
-        let read = body
-            .read(&mut buffer)
+        let chunk = patiently(response.chunk(), cancelled)
+            .await?
             .map_err(|error| interrupted(&error))?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read])
+        let Some(chunk) = chunk else { break };
+        file.write_all(&chunk)
             .map_err(|error| Attempt::Fatal(super::store::io_error("save the download", &error)))?;
-        written += read as u64;
+        written += chunk.len() as u64;
         progress(written, total);
     }
     drop(file);
@@ -511,6 +555,52 @@ mod tests {
         let file = fetch(&server, dir.path()).unwrap();
         assert_eq!(fs::read(file).unwrap(), IMAGE);
         assert_eq!(server.requests.lock().unwrap()[1], None);
+    }
+
+    /// Accepts connections and never answers, keeping them open.
+    fn silent_server(connections: usize) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://{}/Test_1.0_Restore.ipsw",
+            listener.local_addr().unwrap()
+        );
+        let handle = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for _ in 0..connections {
+                match listener.accept() {
+                    Ok((stream, _)) => held.push(stream),
+                    Err(_) => return,
+                }
+            }
+            std::thread::sleep(Duration::from_secs(3));
+        });
+        (url, handle)
+    }
+
+    #[test]
+    fn a_stalled_connection_fails_the_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, _server) = silent_server(ATTEMPTS);
+        let started = std::time::Instant::now();
+        let result = download(&url, dir.path(), &|| false, &mut |_, _| {});
+        assert!(matches!(result, Err(DownloadError::Failed(_))));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!dir.path().join("Test_1.0_Restore.ipsw").exists());
+    }
+
+    #[test]
+    fn cancelling_a_stalled_download_is_noticed_quickly() {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, _server) = silent_server(1);
+        let begun = std::time::Instant::now();
+        let result = download(
+            &url,
+            dir.path(),
+            &|| begun.elapsed() > Duration::from_millis(250),
+            &mut |_, _| {},
+        );
+        assert_eq!(result, Err(DownloadError::Cancelled));
+        assert!(begun.elapsed() < Duration::from_millis(550));
     }
 
     #[test]
