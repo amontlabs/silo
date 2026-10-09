@@ -230,6 +230,12 @@ fn installer_script(action: &str) -> String {
             "SILO_SELKIES_WEB_CLIENT_PATCH_EOF",
         ),
         (
+            "SILO_SELKIES_DISPLAY_PATCH_SOURCE",
+            "patch-selkies-display-scaling.py",
+            include_str!("../guest/patch-selkies-display-scaling.py"),
+            "SILO_SELKIES_DISPLAY_PATCH_EOF",
+        ),
+        (
             "SILO_DESKTOP_PACKAGES_SOURCE",
             "desktop-packages.txt",
             include_str!("../guest/desktop-packages.txt"),
@@ -1463,6 +1469,8 @@ mod tests {
         assert!(script.contains("desktop-streamer-lock.json"));
         assert!(script.contains("SILO_SELKIES_WEB_CLIENT_PATCH_SOURCE"));
         assert!(script.contains("patch-selkies-web-client.py"));
+        assert!(script.contains("SILO_SELKIES_DISPLAY_PATCH_SOURCE"));
+        assert!(script.contains("patch-selkies-display-scaling.py"));
         assert!(script.contains("set -- install\n"));
         assert!(script.ends_with("/usr/local/bin/silo-desktop autostart false\n"));
     }
@@ -1924,6 +1932,12 @@ mod tests {
             assert_eq!(status["updateAvailable"], true);
             assert_eq!(status["updateRequired"], false);
         }
+        let recipe_three = recipe_status(
+            old_helper(json!(false)),
+            "{\"backend\":\"selkies\",\"recipeVersion\":3}",
+        );
+        assert_eq!(recipe_three["updateAvailable"], true);
+        assert_eq!(recipe_three["updateRequired"], false);
         // A helper that reports the selkies backend has validated the receipt; with a
         // current receipt nothing is available.
         let current = format!("{{\"backend\":\"selkies\",\"recipeVersion\":{bundled}}}");
