@@ -23,11 +23,14 @@ Linux computer features do not apply yet; see [not covered yet](#not-covered-yet
 - **Start and stop.** Start boots the computer. Stop asks macOS to shut down,
   as the power button does; Force stop turns it off immediately. A shutdown
   from inside macOS shows the computer as stopped. Macs run at most two macOS
-  guests at once; a third start fails with a message saying so.
+  guests at once; a third start fails with a message saying so. Silo does not
+  limit how many macOS computers exist.
 - **Screen.** Show screen opens a Silo window containing a native
   `VZVirtualMachineView`: frames, keyboard, trackpad and audio come straight
   from the framework, with no encoder, network transport or webview. The guest
-  display follows the window size. Closing the window keeps the computer
+  has Apple's paravirtualized GPU (`VZMacGraphicsDeviceConfiguration`, Metal
+  inside the guest) and a virtio sound device playing through the Mac's output.
+  The guest display follows the window size (`automaticallyReconfiguresDisplay`). Closing the window keeps the computer
   running; stopping the computer closes it.
 - **Delete.** Delete removes a stopped or failed computer and its disk. During
   creation the same action cancels it.
