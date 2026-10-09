@@ -76,8 +76,8 @@ function NewMacosComputer({ store, existingNames, capacity }: { store: MacosComp
       {field("Name", "name", name, setName, false)}
       <div className="grid grid-cols-3 gap-2">
         {field("CPUs", "cpus", cpus, setCpus, true)}
-        {field("Memory (GB)", "memoryGiB", memory, setMemory, true)}
-        {field("Disk (GB)", "diskGiB", disk, setDisk, true)}
+        {field("Memory (GiB)", "memoryGiB", memory, setMemory, true)}
+        {field("Disk (GiB)", "diskGiB", disk, setDisk, true)}
       </div>
       <p className="text-[11px] text-muted-foreground">{macosLicenseNotice}</p>
     </div>}
@@ -153,9 +153,15 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
 export function MacosComputersSection({ capacity }: { capacity?: DeviceCapacity }) {
   const macos = useMacosComputers()
   const headingId = useId()
-  const state = macos?.snapshot.state
-  if (!macos || !state?.supported) return null
-  const { store } = macos
+  if (!macos) return null
+  const { store, snapshot: { state, error, warning } } = macos
+  const problem = error && <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/30 p-2 text-xs text-destructive">
+    <span className="min-w-0">Could not read the macOS computers. {error}</span>
+    <Button type="button" variant="outline" size="xs" onClick={() => void store.refresh()}>Retry</Button>
+  </div>
+  // Without a successful read, whether this Mac supports macOS computers is unknown.
+  if (!state) return problem ? <div className="shrink-0" data-testid="macos-computers">{problem}</div> : null
+  if (!state.supported) return null
   const count = state.computers.length
   return <div role="group" aria-labelledby={headingId} className="shrink-0" data-testid="macos-computers">
     <ListHeader
@@ -163,7 +169,9 @@ export function MacosComputersSection({ capacity }: { capacity?: DeviceCapacity 
       subtitle={`${count} ${count === 1 ? "computer" : "computers"} on this device`}
       actions={<NewMacosComputer store={store} existingNames={state.computers.map(({ name }) => name)} capacity={capacity} />}
     />
-    {count > 0 && <ComputerList label="macOS computers" className="max-h-full min-h-0">
+    {problem}
+    {warning && <p role="status" className="mb-2 text-[11px] text-amber-700 dark:text-amber-400">{warning}</p>}
+    {count > 0 && <ComputerList label="macOS computers" className="max-h-80">
       {state.computers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={store} />)}
     </ComputerList>}
   </div>

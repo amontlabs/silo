@@ -641,8 +641,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               <div role="alert" className="text-sm text-destructive"><ErrorDetails message={configurationOperation.error.message} diagnostic={configurationFailureDiagnostic(configurationOperation)} fallbackSummary="Computer changes failed." /></div>
               <Button variant="outline" size="sm" className="mt-2" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
             </div>}
-            <div className="flex h-full min-h-0 flex-col gap-4">
-            <div className="min-h-0 flex-1">
+            <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
+            <div className="min-h-64 flex-1">
             <ComputerConfigurationList
               newComputerRequest={readOnly ? undefined : newComputerRequest}
               onNewComputerRequestHandled={onNewComputerRequestHandled}
