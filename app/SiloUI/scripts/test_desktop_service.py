@@ -1225,7 +1225,7 @@ class StreamerLaunch(unittest.TestCase):
                      '--audio-enabled=true', '--audio-bitrate=64000',
                      '--microphone-enabled=false|locked', '--ui-sidebar-show-audio-settings=false',
                      '--enable-resize=true', '--use-css-scaling=false|locked',
-                     '--video-streaming-mode=false',
+                     '--video-streaming-mode=false', '--framerate=60,8-60',
                      '--mode=websockets', '--enable-dual-mode=false|locked'):
             self.assertIn(flag, argv)
         self.assertEqual(len({arg.split('=')[0] for arg in argv}), len(argv))

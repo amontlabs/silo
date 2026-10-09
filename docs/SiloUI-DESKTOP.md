@@ -65,6 +65,7 @@ suffix stops the client changing it. `enable_clipboard` is a string
 | `--enable-resize` | `true` | The screen follows the viewer window. |
 | `--use-css-scaling` | `false\|locked` | The client sends the window size in device pixels and its DPI (a 1192x736 point window on a Retina display requests 2384x1472 at 192 DPI), so the guest renders at the display's full resolution. The display-scaling patch below turns that DPI into a correctly scaled Xfce. |
 | `--video-streaming-mode` | `false` | Selkies' "Turbo" mode is off: frames are encoded only when the screen changes, instead of continuously. An idle desktop at 2x costs about 4% of a core rather than 60%, with no added latency. |
+| `--framerate` | `60,8-60` | 60 fps by default and at most; the frame-size cap below assumes it. 120 fps lowered no latency in measurements. |
 | `--mode`, `--enable-dual-mode` | `websockets`, `false\|locked` | The client cannot switch to WebRTC. |
 
 **Screen size.** Xvfb 21.1 caps RandR at the size it was started with, so it starts
@@ -112,12 +113,15 @@ not: before Xvfb and Xfce start, `silo-desktop` resets the `silo` account's pers
 1x. Only existing integer and stock-theme properties are edited (no symlinks followed,
 owner and mode kept, atomic replace). This mirrors Selkies' MATE path and is a candidate upstream fix.
 
-The same patch caps the screen at H.264 level 5.2's maximum frame size (36864 macroblocks of
-16x16, about 9.4 Mpx), the largest the browsers' H.264 decoders accept; above it the macOS
-WebKit decoder refuses the stream. `fit_frame_size` in `display_utils.py` scales a larger
-requested size down at the same aspect ratio (each side rounded down to even), for both viewer
-resizes (`parse_resize_dims`) and the initial size in `websockets_mode.py`. In a very large
-window (a fullscreen Retina viewer asking for about 4080x2508) the viewer detects the smaller
+The same patch caps the screen so a 60 fps stream stays within H.264 level 5.2 (2,073,600
+macroblocks per second, so at most 34560 macroblocks of 16x16 per frame, about 8.8 Mpx, for
+example 3840x2160); beyond it x264 signals a higher level and the macOS WebKit decoder refuses
+the stream (verified live: 4080x2412 and 3960x2338 both failed). `fit_frame_size` in
+`display_utils.py` scales a larger requested size down at the same aspect ratio (each side
+rounded down to even), for both viewer resizes (`parse_resize_dims`) and the initial size in
+`websockets_mode.py`. `--framerate=60,8-60` keeps clients from raising the rate past the cap's
+assumption. In a very large window (a fullscreen Retina viewer asking for about 4080x2508) the
+viewer detects the smaller
 realized resolution and shows a slightly scaled picture fitted to the window.
 
 **Recipe 4.** `recipeVersion` in `desktop-streamer-lock.json` is 4. The service

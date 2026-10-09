@@ -607,7 +607,7 @@ def launch_selkies_streamer(account, environment):
             f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
             '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
             '--enable-resize=true', '--use-css-scaling=false|locked',
-            '--video-streaming-mode=false',
+            '--video-streaming-mode=false', '--framerate=60,8-60',
             '--enable-clipboard=true', '--enable-binary-clipboard=true',
             '--clipboard-seamless=false', '--file-transfers=none',
             '--audio-enabled=true', '--audio-bitrate=64000',

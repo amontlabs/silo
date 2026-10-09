@@ -157,12 +157,13 @@ SCALING_REPLACEMENTS = (
     (REGEX_OLD, REGEX_NEW), (DOC_OLD, DOC_NEW), (READ_OLD, READ_NEW),
 )
 
-# A screen above H.264 level 5.2's maximum frame size makes the browsers'
-# decoders refuse the stream, so every size a client can request is fitted.
+# A screen beyond H.264 level 5.2 at 60 fps makes x264 signal a higher level,
+# which the browsers' decoders refuse, so every size a client can request is fitted.
 FIT_HELPER_OLD = b'''def parse_resize_dims(res_str: str) -> Optional[Tuple[int, int]]:
 '''
-FIT_HELPER_NEW = b'''# H.264 level 5.2's maximum frame size in 16x16 macroblocks, the largest the browsers' H.264 decoders accept.
-MAX_FRAME_MACROBLOCKS = 36864
+FIT_HELPER_NEW = b'''# The largest frame, in 16x16 macroblocks, that keeps a 60 fps stream within H.264 level 5.2
+# (2,073,600 macroblocks per second), the highest level the browsers' H.264 decoders accept.
+MAX_FRAME_MACROBLOCKS = 34560
 
 
 def fit_frame_size(w: int, h: int) -> Tuple[int, int]:
@@ -224,7 +225,7 @@ WEBSOCKETS_REPLACEMENTS = ((IMPORT_OLD, IMPORT_NEW), (INITIAL_OLD, INITIAL_NEW))
 MODULES = {
     'display_utils.py': {
         'source': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
-        'patched': '5e31a80db3511e2a16830c8dcd5bbe3ccc5003fec227e1bbb64716f3c9d1ce84',
+        'patched': 'e0b7a35b65647a11d1407125c7360642d5f46acc601079c521cae026bc729758',
         'replacements': REPLACEMENTS,
     },
     'websockets_mode.py': {

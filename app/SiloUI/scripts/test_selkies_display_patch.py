@@ -128,9 +128,9 @@ class PinnedUpstreamTests(unittest.TestCase):
     def test_fit_frame_size_keeps_fitting_sizes_and_scales_large_ones(self):
         namespace = self.fit_namespace()
         fit, limit = namespace['fit_frame_size'], namespace['MAX_FRAME_MACROBLOCKS']
-        self.assertEqual(limit, 36864)
+        self.assertEqual(limit, 34560)
         self.assertEqual(fit(1440, 900), (1440, 900))
-        self.assertEqual(fit(3840, 2400), (3840, 2400))
+        self.assertEqual(fit(3840, 2160), (3840, 2160))
         for w, h in ((4080, 2508), (4080, 4080), (7680, 4320), (4080, 1000), (4318, 4318)):
             fw, fh = fit(w, h)
             self.assertEqual((fw % 2, fh % 2), (0, 0))
@@ -143,7 +143,7 @@ class PinnedUpstreamTests(unittest.TestCase):
         self.assertEqual(parse('1440x900'), (1440, 900))
         self.assertEqual(parse('8000x5000')[0] % 2, 0)
         width, height = parse('4080x2508')
-        self.assertLessEqual(-(-width // 16) * -(-height // 16), 36864)
+        self.assertLessEqual(-(-width // 16) * -(-height // 16), 34560)
         self.assertIsNone(parse('0x600'))
         self.assertIsNone(parse('bad'))
 
