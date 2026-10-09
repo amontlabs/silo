@@ -95,6 +95,16 @@ pub(super) fn read_screen(_app: &AppHandle, _id: &str) -> Result<Vec<TextLine>, 
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn clear_last_screen(_id: &str) {}
+
+pub(super) fn save_last_screen(
+    _id: &str,
+    _png: &std::path::Path,
+    _keep_image: impl FnOnce(&[TextLine]) -> bool,
+) -> Option<(Vec<TextLine>, bool)> {
+    None
+}
+
 pub(super) fn lock_input(_app: &AppHandle, _id: &str, _subtitle: &str) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }

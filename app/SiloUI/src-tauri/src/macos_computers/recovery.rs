@@ -16,8 +16,9 @@ use super::engine;
 use super::guest_access::CANCELLED;
 use super::input::{self, KeyEvent, Keyboard, Modifier, PointerKind, TextLine};
 use super::store::Layout;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 const ATTEMPTS: usize = 2;
 const POLL: Duration = Duration::from_millis(1500);
@@ -54,6 +55,7 @@ pub(super) fn disable_sip(
         if cancelled() {
             return Err(CANCELLED.into());
         }
+        engine::clear_last_screen(id);
         engine::start_in_recovery(app, &record, &layout)?;
         let outcome = prepare_window(app, id, &title).and_then(|()| {
             let _lock = InputLock { app, id };
@@ -63,6 +65,9 @@ pub(super) fn disable_sip(
         match outcome {
             Ok(()) => return finish(app, id, cancelled),
             Err(error) => {
+                if !matches!(error, Failure::Cancelled) {
+                    record_failure(app, id, &account.password, &error);
+                }
                 stop(app, id);
                 match error {
                     Failure::Cancelled => return Err(CANCELLED.into()),
@@ -73,6 +78,94 @@ pub(super) fn disable_sip(
         }
     }
     Err(failure)
+}
+
+/// Keeps the last screen of a failed attempt for diagnosis and says where in
+/// the log. The folder is Silo's log folder for the computer; the UI gets the
+/// error message only.
+fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
+    let (Failure::Retry(message) | Failure::Fatal(message)) = error else {
+        return;
+    };
+    let saved = app
+        .path()
+        .app_log_dir()
+        .ok()
+        .and_then(|logs| save_evidence(&logs.join("macos-computers").join(id), id, password));
+    match saved {
+        Some(path) => eprintln!(
+            "macOS computer setup: turning off System Integrity Protection failed ({message}) Last screen: {}",
+            path.display()
+        ),
+        None => eprintln!(
+            "macOS computer setup: turning off System Integrity Protection failed ({message}) No screen was captured."
+        ),
+    }
+}
+
+/// How many failed attempts' files stay in a computer's evidence folder.
+const EVIDENCE_KEPT: usize = 6;
+
+/// Writes the recognized text of the last screen, and its image unless it shows
+/// the password, into `dir`. Returns the file to look at.
+fn save_evidence(dir: &Path, id: &str, password: &str) -> Option<PathBuf> {
+    std::fs::create_dir_all(dir).ok()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let png = dir.join(format!("sip-failure-{stamp:012}.png"));
+    let text = dir.join(format!("sip-failure-{stamp:012}.txt"));
+    let (lines, saved) =
+        engine::save_last_screen(id, &png, |lines| !redacted_rows(lines, password).1)?;
+    let (rows, _) = redacted_rows(&lines, password);
+    std::fs::write(&text, rows).ok()?;
+    prune_evidence(dir, EVIDENCE_KEPT);
+    Some(if saved { png } else { text })
+}
+
+/// The recognized rows of a screen, top to bottom and in lower case, with every
+/// row that contains the password replaced; and whether any did.
+fn redacted_rows(lines: &[TextLine], password: &str) -> (String, bool) {
+    let secret = password.to_lowercase();
+    let mut shown = false;
+    let rows: Vec<String> = Screen::new(lines.to_vec())
+        .rows
+        .into_iter()
+        .map(|row| {
+            if !secret.is_empty() && row.text.contains(&secret) {
+                shown = true;
+                "[redacted]".to_string()
+            } else {
+                row.text
+            }
+        })
+        .collect();
+    (rows.join("\n"), shown)
+}
+
+/// Deletes the oldest evidence files beyond `kept` attempts (two files each).
+fn prune_evidence(dir: &Path, kept: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("sip-failure-"))
+        })
+        .collect();
+    let attempts: std::collections::BTreeSet<_> =
+        files.iter().filter_map(|path| path.file_stem()).collect();
+    let excess = attempts.len().saturating_sub(kept);
+    let old: std::collections::BTreeSet<_> = attempts.into_iter().take(excess).collect();
+    for path in &files {
+        if path.file_stem().is_some_and(|stem| old.contains(stem)) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn prepare_window(app: &AppHandle, id: &str, title: &str) -> Result<(), Failure> {
@@ -579,10 +672,15 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
         driver.pause(Duration::from_secs(1))?;
     }
     driver.press(input::RETURN)?;
+    // The choice is made once. The list stays on screen for a few seconds after
+    // Return on a slow start, and choosing again would count from English and
+    // pick another language, which turns Recovery into one Silo cannot read.
+    let mut chosen = false;
     driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
         if screen.contains("utilities") {
             Check::Found(())
-        } else if screen.is_language_list() {
+        } else if screen.is_language_list() && !chosen {
+            chosen = true;
             screen
                 .line_equal("english")
                 .map_or(Check::Press(input::RETURN), |english| {
@@ -841,6 +939,9 @@ mod tests {
         prompt_user: &'static str,
         cancel_confirm: bool,
         language_list: bool,
+        /// How long the language list stays after the language is chosen.
+        language_lag: Duration,
+        chosen_at: Option<Duration>,
         downs: usize,
         keys: Vec<String>,
     }
@@ -877,6 +978,8 @@ mod tests {
                 prompt_user: "silo",
                 cancel_confirm: false,
                 language_list: false,
+                language_lag: Duration::ZERO,
+                chosen_at: None,
                 downs: 0,
                 keys: Vec::new(),
             }
@@ -982,11 +1085,11 @@ mod tests {
                         (Phase::Language, input::DOWN) => self.downs += 1,
                         (Phase::Language, input::RETURN) => {
                             // Without English chosen, Recovery would come up localized.
-                            self.enter(if self.downs == 2 {
-                                Phase::Booting
+                            if self.downs == 2 {
+                                self.chosen_at = Some(self.now);
                             } else {
-                                Phase::Halted
-                            });
+                                self.enter(Phase::Halted);
+                            }
                         }
                         (Phase::Main, input::KEY_T) if self.shortcut_works => {
                             self.keys.push("shortcut".into());
@@ -1019,6 +1122,11 @@ mod tests {
 
         fn pause(&mut self, duration: Duration) {
             self.now += duration;
+            if let Some(at) = self.chosen_at {
+                if self.phase == Phase::Language && self.now >= at + self.language_lag {
+                    self.enter(Phase::Booting);
+                }
+            }
             if self.phase == Phase::Booting && self.now >= self.entered + Duration::from_secs(6) {
                 self.phase = Phase::Main;
             }
@@ -1081,6 +1189,66 @@ mod tests {
         run(&mut guest, "silo", "secret", &never).unwrap();
         assert_eq!(guest.phase, Phase::Halted);
         assert!(lines_typed(&guest).contains(&"secret".to_string()));
+    }
+
+    #[test]
+    fn a_language_list_that_lingers_after_the_choice_is_not_answered_again() {
+        let mut guest = Recovery::new();
+        guest.language_list = true;
+        guest.language_lag = Duration::from_secs(9);
+        run(&mut guest, "silo", "secret", &never).unwrap();
+        assert_eq!(guest.phase, Phase::Halted);
+        assert_eq!(guest.downs, 2);
+        assert!(lines_typed(&guest).contains(&"secret".to_string()));
+    }
+
+    #[test]
+    fn evidence_hides_rows_with_the_password_and_the_image_that_shows_it() {
+        let lines = vec![
+            line("Recovery", 0.1, 0.9),
+            line("my Secret", 0.1, 0.8),
+            line("-bash-3.2#", 0.1, 0.7),
+        ];
+        let (text, shown) = redacted_rows(&lines, "secret");
+        assert!(shown);
+        assert_eq!(text, "recovery\n[redacted]\n-bash-3.2#");
+        let (text, shown) = redacted_rows(&lines, "other");
+        assert!(!shown);
+        assert!(text.contains("my secret"));
+        assert!(!redacted_rows(&lines, "").1);
+    }
+
+    #[test]
+    fn old_evidence_is_pruned_by_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        for stamp in 1..=4 {
+            for extension in ["png", "txt"] {
+                std::fs::write(
+                    dir.path()
+                        .join(format!("sip-failure-{stamp:012}.{extension}")),
+                    "",
+                )
+                .unwrap();
+            }
+        }
+        std::fs::write(dir.path().join("other.txt"), "").unwrap();
+        prune_evidence(dir.path(), 2);
+        let mut names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "other.txt",
+                "sip-failure-000000000003.png",
+                "sip-failure-000000000003.txt",
+                "sip-failure-000000000004.png",
+                "sip-failure-000000000004.txt"
+            ]
+        );
     }
 
     #[test]

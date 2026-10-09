@@ -1176,7 +1176,38 @@ pub(super) fn read_screen(app: &AppHandle, id: &str) -> Result<Vec<TextLine>, St
         ))
     })?;
     let image = guest_screen::capture(number, geometry)?;
-    guest_screen::recognize(&image)
+    let lines = guest_screen::recognize(&image)?;
+    if let Ok(mut last) = LAST_SCREENS.lock() {
+        last.insert(id.to_string(), (image, lines.clone()));
+    }
+    Ok(lines)
+}
+
+/// The most recent capture of each computer's screen with its recognized text,
+/// kept so a failed setup can say what it was looking at.
+static LAST_SCREENS: Mutex<
+    std::collections::BTreeMap<String, (guest_screen::Capture, Vec<TextLine>)>,
+> = Mutex::new(std::collections::BTreeMap::new());
+
+/// Forgets the last capture of the computer's screen.
+pub(super) fn clear_last_screen(id: &str) {
+    if let Ok(mut last) = LAST_SCREENS.lock() {
+        last.remove(id);
+    }
+}
+
+/// The last recognized text of the computer's screen, and whether the image
+/// was written to `png`. The image is written only when `keep_image` agrees to
+/// the text (a screen that shows a secret is never saved).
+pub(super) fn save_last_screen(
+    id: &str,
+    png: &Path,
+    keep_image: impl FnOnce(&[TextLine]) -> bool,
+) -> Option<(Vec<TextLine>, bool)> {
+    let last = LAST_SCREENS.lock().ok()?;
+    let (image, lines) = last.get(id)?;
+    let saved = keep_image(lines) && image.write_png(png).is_ok();
+    Some((lines.clone(), saved))
 }
 
 thread_local! {

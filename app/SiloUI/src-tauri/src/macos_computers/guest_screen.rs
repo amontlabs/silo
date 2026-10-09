@@ -63,6 +63,27 @@ impl ViewGeometry {
 #[link(name = "Vision", kind = "framework")]
 extern "C" {}
 
+#[link(name = "ImageIO", kind = "framework")]
+extern "C" {
+    fn CGImageDestinationCreateWithURL(
+        url: *const AnyObject,
+        kind: *const AnyObject,
+        count: usize,
+        options: *const AnyObject,
+    ) -> *mut AnyObject;
+    fn CGImageDestinationAddImage(
+        destination: *mut AnyObject,
+        image: *mut CGImage,
+        properties: *const AnyObject,
+    );
+    fn CGImageDestinationFinalize(destination: *mut AnyObject) -> bool;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFRelease(object: *const AnyObject);
+}
+
 /// An image of a window, released on drop.
 pub(super) struct Capture(*mut CGImage);
 
@@ -131,6 +152,36 @@ pub(super) fn capture(window_number: isize, geometry: ViewGeometry) -> Result<Ca
         return Err("The computer's screen could not be captured.".into());
     }
     Ok(Capture(cropped))
+}
+
+impl Capture {
+    /// Writes the image to `path` as a PNG.
+    pub(super) fn write_png(&self, path: &std::path::Path) -> Result<(), String> {
+        let url =
+            objc2_foundation::NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let kind = NSString::from_str("public.png");
+        // SAFETY: The URL and type are toll-free bridged to their Core Foundation
+        // counterparts; the destination is created, finalized and released here.
+        unsafe {
+            let destination = CGImageDestinationCreateWithURL(
+                Retained::as_ptr(&url).cast(),
+                Retained::as_ptr(&kind).cast(),
+                1,
+                std::ptr::null(),
+            );
+            if destination.is_null() {
+                return Err("The screen image could not be saved.".into());
+            }
+            CGImageDestinationAddImage(destination, self.0, std::ptr::null());
+            let written = CGImageDestinationFinalize(destination);
+            CFRelease(destination);
+            if written {
+                Ok(())
+            } else {
+                Err("The screen image could not be saved.".into())
+            }
+        }
+    }
 }
 
 /// Reads the text in a capture, top to bottom. Callable from any thread.
