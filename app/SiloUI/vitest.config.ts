@@ -15,6 +15,7 @@ const nodeTests = [
   "src/desktop/{editor-include,linux-desktop-state,native-contracts,production-source-validation,transfer-result-notice}.test.ts",
   "src/features/application/components/application-commands.test.ts",
   "src/features/computers/model/*.test.ts",
+  "src/features/macos-computers/model/*.test.ts",
   "src/features/status-bar/computer-menu-items.test.ts",
   "src/fixtures/{application-scenarios,directory-loader,log-pages}.test.ts",
   "src/fixtures/{application-scenarios,scenarios}.test.tsx",
