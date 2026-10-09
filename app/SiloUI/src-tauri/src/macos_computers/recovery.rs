@@ -151,10 +151,17 @@ fn classify(text: &str) -> Option<Prompt> {
     latest.map(|(_, prompt)| prompt)
 }
 
-/// The user in "enter password for user <name>:".
+/// Whether a user is the placeholder macOS uses while no account exists.
+fn is_setup_user(name: &str) -> bool {
+    name.starts_with('_') || name.contains("mbsetupuser")
+}
+
+/// The user in "enter password for user <name>:". Recognition may break the
+/// line between "user" and the name.
 fn password_user(text: &str) -> Option<String> {
-    const LEAD: &str = "password for user ";
-    let rest = &text[text.rfind(LEAD)? + LEAD.len()..];
+    const LEAD: &str = "password for user";
+    let flat = text.replace('\n', " ");
+    let rest = flat[flat.rfind(LEAD)? + LEAD.len()..].trim_start();
     let name: String = rest
         .chars()
         .take_while(|c| !c.is_whitespace() && *c != ':')
@@ -368,8 +375,6 @@ fn run<G: Guest>(guest: &mut G, user: &str, password: &str) -> Result<(), Failur
     };
     pick_options(&mut driver)?;
     open_terminal(&mut driver)?;
-    driver.type_line("clear")?;
-    driver.guest.pause(Duration::from_secs(1));
     driver.type_line("csrutil disable")?;
     answer_prompts(&mut driver, user, password).map_err(Failure::fatal)?;
     driver.guest.pause(Duration::from_secs(2));
@@ -491,7 +496,7 @@ fn answer_prompts<G: Guest>(
                 driver.type_line(user)?;
             }
             Some(Prompt::Password(who)) => {
-                if !named && who.as_deref().is_some_and(|who| who.starts_with('_')) {
+                if !named && who.as_deref().is_some_and(is_setup_user) {
                     return Err(Failure::Fatal(format!(
                         "Recovery asked for the password of {}, not of {user}, so it does not know the account. {}",
                         who.unwrap_or_default(),
@@ -534,6 +539,15 @@ mod tests {
     #[test]
     fn a_password_prompt_names_its_user() {
         let text = "[y/n]: y\nenter password for user _mbsetupuser:";
+        assert_eq!(
+            classify(text),
+            Some(Prompt::Password(Some("_mbsetupuser".into())))
+        );
+    }
+
+    #[test]
+    fn a_user_name_on_the_next_line_is_still_read() {
+        let text = "[y/n]: y\nenter password for user\n_mbsetupuser:";
         assert_eq!(
             classify(text),
             Some(Prompt::Password(Some("_mbsetupuser".into())))
@@ -739,7 +753,7 @@ mod tests {
         assert_eq!(guest.phase, Phase::Halted);
         assert_eq!(
             lines_typed(&guest),
-            ["clear", "csrutil disable", "y", "silo", "secret", "halt"]
+            ["csrutil disable", "y", "silo", "secret", "halt"]
         );
         assert!(guest.keys.contains(&"shortcut".to_string()));
     }
@@ -752,7 +766,7 @@ mod tests {
         assert_eq!(guest.phase, Phase::Halted);
         assert_eq!(
             lines_typed(&guest),
-            ["clear", "csrutil disable", "y", "secret", "halt"]
+            ["csrutil disable", "y", "secret", "halt"]
         );
     }
 
