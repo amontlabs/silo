@@ -125,6 +125,14 @@ pub(super) fn reconcile_disk(
     }
 }
 
+/// The disk size asked for, as the backing file has it: a copy's file is made that long when
+/// it is cloned and nothing changes it, so every attempt reconciles against the same target.
+pub(super) fn requested_gib(disk: &std::path::Path) -> Result<u64, String> {
+    std::fs::metadata(disk)
+        .map(|meta| meta.len() / GIB)
+        .map_err(|error| super::store::io_error("read the disk's size", &error))
+}
+
 /// The measurement a script printed.
 pub(super) fn unallocated(stdout: &str) -> Option<u64> {
     stdout
@@ -334,6 +342,51 @@ mod tests {
                 short: true
             }
         );
+    }
+
+    #[test]
+    fn a_retry_reconciles_against_the_same_target_until_verified() {
+        let dir = tempfile::tempdir().unwrap();
+        let disk = dir.path().join("disk.img");
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&disk)
+            .and_then(|file| file.set_len(128 * GIB))
+            .unwrap();
+        // 128 GiB asked for, 60 GiB left unexpanded; verification then fails, so the
+        // record keeps its value and the file is untouched.
+        let first = reconcile_disk(requested_gib(&disk).unwrap(), 64, Some(60 * GIB));
+        assert_eq!(
+            first,
+            Disk {
+                gib: 68,
+                short: true
+            }
+        );
+        assert_eq!(requested_gib(&disk).unwrap(), 128);
+        // A Retry without a successful expansion reaches the same answer.
+        let without = reconcile_disk(requested_gib(&disk).unwrap(), 64, Some(60 * GIB));
+        assert_eq!(without, first);
+        // A Retry whose expansion worked reaches the full size, not the earlier reduction.
+        let with = reconcile_disk(requested_gib(&disk).unwrap(), 64, Some(0));
+        assert_eq!(
+            with,
+            Disk {
+                gib: 128,
+                short: false
+            }
+        );
+        // An unreadable measurement is not mistaken for a smaller target either.
+        assert_eq!(
+            reconcile_disk(requested_gib(&disk).unwrap(), 64, None),
+            Disk {
+                gib: 64,
+                short: true
+            }
+        );
+        assert_eq!(requested_gib(&disk).unwrap(), 128);
     }
 
     #[test]

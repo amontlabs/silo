@@ -204,10 +204,12 @@ impl Provision<'_> {
         let template_login = self.layout.clone().with_access(access);
         self.say("Personalizing the computer")?;
         let mut shortfall = None;
-        let requested = record.disk_gib;
+        // The backing file's length is the target, whatever the record says after an attempt.
+        let requested = personalize::requested_gib(&self.layout.disk())?;
         let template_gib = lease.template.meta.disk_gib;
         let grow = requested > template_gib;
         let mut unallocated = None;
+        let mut reconciled = None;
         // The guest's host keys are about to change.
         guest_access::reset_host_keys(self.layout)?;
         self.start_machine()?;
@@ -257,10 +259,7 @@ impl Provision<'_> {
                     disk.gib
                 ));
             }
-            if disk.gib != record.disk_gib {
-                record.disk_gib = disk.gib;
-                self.persist(record)?;
-            }
+            reconciled = Some(disk.gib);
         }
         self.shut_down()?;
         guest_access::reset_host_keys(self.layout)?;
@@ -269,6 +268,10 @@ impl Provision<'_> {
         self.verify_sip_disabled()?;
         self.verify_personalized()?;
         self.shut_down()?;
+        // Only a verified computer records the size it really has.
+        if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
+            record.disk_gib = gib;
+        }
         self.mark(record, |setup| setup.needs_personalizing = false)?;
         // The computer is usable and complete; the message stays as its failure detail.
         shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
@@ -319,14 +322,6 @@ impl Provision<'_> {
             }
             std::thread::sleep(SSH_POLL);
         }
-    }
-
-    /// Saves `record` and shows it.
-    fn persist(&self, record: &Record) -> Result<(), Stop> {
-        store::save(self.layout, record)?;
-        let saved = record.clone();
-        super::update(self.app, &self.id, |entry| entry.record = saved);
-        Ok(())
     }
 
     /// Runs the root script with the account's password, which is the only
