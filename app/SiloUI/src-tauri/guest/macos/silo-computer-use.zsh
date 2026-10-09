@@ -106,10 +106,14 @@ safe_members() {
 
 # Fails when a symbolic link under $1 does not resolve to a path inside $1; a dangling link fails.
 links_stay_inside() {
-  local root=${1:A} link target
+  # Judged on the link text alone, without following links: a link may point at a file that only
+  # exists after installation (LCU's `node` link goes through `app`), but never outside the tree.
+  local root=${1:A} link text candidate target
   find "$root" -type l -print0 | while IFS= read -r -d '' link; do
-    [[ -e $link ]] || return 1
-    target=${link:A}
+    text=$(readlink "$link") || return 1
+    [[ -n $text && $text != /* ]] || return 1
+    candidate=${link:h}/$text
+    target=${candidate:a}
     [[ $target == $root || $target == $root/* ]] || return 1
   done
 }

@@ -632,6 +632,12 @@ mod tests {
             std::os::unix::fs::symlink("/nonexistent-target", root.join("sub/dangling")).unwrap();
             assert!(!check(&root));
             std::fs::remove_file(root.join("sub/dangling")).unwrap();
+            // LCU's `node` link points through `app`, which only exists after installation.
+            std::os::unix::fs::symlink("../app/node", root.join("sub/later")).unwrap();
+            assert!(check(&root));
+            std::os::unix::fs::symlink("../../missing", root.join("sub/escape")).unwrap();
+            assert!(!check(&root));
+            std::fs::remove_file(root.join("sub/escape")).unwrap();
             std::os::unix::fs::symlink("../..", root.join("sub/parent")).unwrap();
             assert!(!check(&root.join("sub")));
         }
