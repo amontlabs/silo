@@ -1,5 +1,6 @@
 //! The AppKit, Core Graphics and Vision side of driving a guest's display
-//! window: synthesized input events, an image of the window and the text in it.
+//! window: synthesized input events, an image of the machine's screen and the
+//! text in it. Only the screen is captured, never the window's title bar.
 //!
 //! Silo's own window is captured with `CGWindowListCreateImage`, which needs no
 //! Screen Recording permission for a window of the calling process. The function
@@ -12,7 +13,7 @@ use objc2::{
     runtime::{AnyClass, AnyObject},
     Encoding, RefEncode,
 };
-use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSWindow};
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 use objc2_foundation::{
     NSArray, NSDictionary, NSError, NSPoint, NSProcessInfo, NSRect, NSSize, NSString,
 };
@@ -37,6 +38,26 @@ unsafe impl RefEncode for CGImage {
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGImageRelease(image: *mut CGImage);
+    fn CGImageGetWidth(image: *mut CGImage) -> usize;
+    fn CGImageGetHeight(image: *mut CGImage) -> usize;
+    fn CGImageCreateWithImageInRect(image: *mut CGImage, rect: NSRect) -> *mut CGImage;
+}
+
+/// Where the machine's screen sits in its window, in points with the origin at
+/// the window's bottom left.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ViewGeometry {
+    pub window: NSSize,
+    pub view: NSRect,
+}
+
+impl ViewGeometry {
+    pub(super) fn of(window: &NSWindow, view: &NSView) -> Self {
+        Self {
+            window: window.frame().size,
+            view: view.convertRect_toView(view.bounds(), None),
+        }
+    }
 }
 
 #[link(name = "Vision", kind = "framework")]
@@ -69,9 +90,9 @@ fn capture_function() -> Option<CaptureFunction> {
     })
 }
 
-/// Captures the window with this number, including its title bar. Callable from
-/// any thread.
-pub(super) fn capture(window_number: isize) -> Result<Capture, String> {
+/// Captures the part of the window with this number that shows the machine's
+/// screen, leaving out the title bar. Callable from any thread.
+pub(super) fn capture(window_number: isize, geometry: ViewGeometry) -> Result<Capture, String> {
     let function = capture_function().ok_or("This macOS cannot capture Silo's windows.")?;
     let everything = NSRect::new(
         NSPoint::new(f64::INFINITY, f64::INFINITY),
@@ -87,10 +108,29 @@ pub(super) fn capture(window_number: isize) -> Result<Capture, String> {
         )
     };
     if image.is_null() {
-        Err("The computer's window could not be captured.".into())
-    } else {
-        Ok(Capture(image))
+        return Err("The computer's window could not be captured.".into());
     }
+    let whole = Capture(image);
+    // SAFETY: Plain Core Graphics calls on a valid image.
+    let (width, height) = unsafe { (CGImageGetWidth(whole.0), CGImageGetHeight(whole.0)) };
+    let (scale_x, scale_y) = (
+        width as f64 / geometry.window.width,
+        height as f64 / geometry.window.height,
+    );
+    let view = geometry.view;
+    let crop = NSRect::new(
+        NSPoint::new(
+            view.origin.x * scale_x,
+            (geometry.window.height - view.origin.y - view.size.height) * scale_y,
+        ),
+        NSSize::new(view.size.width * scale_x, view.size.height * scale_y),
+    );
+    // SAFETY: The rectangle is in the image's pixel space; the result is owned.
+    let cropped = unsafe { CGImageCreateWithImageInRect(whole.0, crop) };
+    if cropped.is_null() {
+        return Err("The computer's screen could not be captured.".into());
+    }
+    Ok(Capture(cropped))
 }
 
 /// Reads the text in a capture, top to bottom. Callable from any thread.
@@ -172,16 +212,24 @@ pub(super) fn deliver_keys(window: &NSWindow, events: &[KeyEvent]) -> Result<(),
     Ok(())
 }
 
-/// Sends a pointer event at a position given as fractions of the window's frame,
-/// measured from its bottom left.
+/// Sends a pointer event at a position given as fractions of the machine's
+/// screen, measured from its bottom left.
 pub(super) fn deliver_pointer(
     window: &NSWindow,
+    view: &NSView,
     kind: PointerKind,
     x: f64,
     y: f64,
 ) -> Result<(), String> {
-    let size = window.frame().size;
-    let location = NSPoint::new(x * size.width, y * size.height);
+    let bounds = view.bounds();
+    let y = if view.isFlipped() { 1.0 - y } else { y };
+    let location = view.convertPoint_toView(
+        NSPoint::new(
+            bounds.origin.x + x * bounds.size.width,
+            bounds.origin.y + y * bounds.size.height,
+        ),
+        None,
+    );
     let (event_type, pressure) = match kind {
         PointerKind::Move => (NSEventType::MouseMoved, 0.0),
         PointerKind::Down => (NSEventType::LeftMouseDown, 1.0),

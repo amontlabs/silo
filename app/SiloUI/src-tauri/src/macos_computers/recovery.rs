@@ -2,13 +2,18 @@
 //!
 //! Recovery has no command channel, so Silo plays the keyboard: it starts the
 //! computer in Recovery in a visible "Setting up" window, reads the screen by
-//! recognizing text in an image of that window, opens Terminal, answers
-//! `csrutil disable` and halts the guest. Each step waits for the text that
-//! proves the previous one worked instead of sleeping, and falls back to timed
-//! waits only when the screen cannot be read at all. The key sequence follows
-//! cirruslabs' macos-image-templates and the prompts follow Lume's `sip`
-//! command (both MIT).
+//! recognizing text in an image of the machine's display, opens Terminal,
+//! answers `csrutil disable` and halts the guest. Every step waits for the text
+//! that proves the previous one worked. When the screen cannot be read, nothing
+//! more is typed and the setup stops. The key sequence follows cirruslabs'
+//! macos-image-templates and the prompts follow Lume's `sip` command (both MIT).
+//!
+//! While the sequence runs, the window drops the user's own keyboard and
+//! pointer input over the display and says so in its title bar, so stray input
+//! cannot reach the guest. Credentials are typed only when the last line of the
+//! Terminal is a prompt that names the computer's account.
 use super::engine;
+use super::guest_access::CANCELLED;
 use super::input::{self, KeyEvent, Keyboard, Modifier, PointerKind, TextLine};
 use super::store::Layout;
 use std::time::{Duration, Instant};
@@ -17,40 +22,50 @@ use tauri::AppHandle;
 const ATTEMPTS: usize = 2;
 const POLL: Duration = Duration::from_millis(1500);
 const KEY_GAP: Duration = Duration::from_millis(30);
-const PICKER_WAIT: Duration = Duration::from_secs(120);
-const RECOVERY_WAIT: Duration = Duration::from_secs(150);
+/// The longest a pause runs before the cancellation flag is looked at again.
+const CANCEL_SLICE: Duration = Duration::from_millis(250);
+const PICKER_WAIT: Duration = Duration::from_secs(240);
+const RECOVERY_WAIT: Duration = Duration::from_secs(240);
+const SHORTCUT_WAIT: Duration = Duration::from_secs(8);
 const TERMINAL_WAIT: Duration = Duration::from_secs(15);
 const PROMPT_WAIT: Duration = Duration::from_secs(45);
 const RESULT_WAIT: Duration = Duration::from_secs(90);
 const HALT_WAIT: Duration = Duration::from_secs(120);
 const STOP_WAIT: Duration = Duration::from_secs(30);
-/// Screen reads that fail in a row before the screen counts as unreadable.
+/// Screen reads that fail in a row before the setup gives up.
 const UNREADABLE_AFTER: usize = 5;
-/// How much of the last screen an error quotes.
-const QUOTE: usize = 300;
+const LOCKED_SUBTITLE: &str = "Silo is setting up this computer. Please don't type.";
 
 /// Turns off System Integrity Protection on the stopped computer `id` and
-/// leaves it stopped. The computer's account must exist with the stored password.
-pub(super) fn disable_sip(app: &AppHandle, id: &str) -> Result<(), String> {
+/// leaves it stopped. The computer's account must exist with the stored
+/// password. `cancelled` is polled between steps; once it is true the computer
+/// is force-stopped and the error is `guest_access::CANCELLED`.
+pub(super) fn disable_sip(
+    app: &AppHandle,
+    id: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), String> {
     let (record, _) = super::computer(id)?;
     let layout = Layout::new(&super::app_data(app)?, id);
     let account = super::guest_access::account(&layout)?;
     let title = format!("Setting up {}", record.name);
     let mut failure = String::new();
     for attempt in 1..=ATTEMPTS {
+        if cancelled() {
+            return Err(CANCELLED.into());
+        }
         engine::start_in_recovery(app, &record, &layout)?;
-        let outcome = super::show_display(app, id, &title)
-            .and_then(|()| engine::focus_display(app, id).map(|_| ()))
-            .map_err(Failure::Fatal)
-            .and_then(|()| {
-                let mut guest = LiveGuest::new(app, id);
-                run(&mut guest, &account.user, &account.password)
-            });
+        let outcome = prepare_window(app, id, &title).and_then(|()| {
+            let _lock = InputLock { app, id };
+            let mut guest = LiveGuest::new(app, id);
+            run(&mut guest, &account.user, &account.password, cancelled)
+        });
         match outcome {
-            Ok(()) => return finish(app, id),
+            Ok(()) => return finish(app, id, cancelled),
             Err(error) => {
                 stop(app, id);
                 match error {
+                    Failure::Cancelled => return Err(CANCELLED.into()),
                     Failure::Retry(message) if attempt < ATTEMPTS => failure = message,
                     Failure::Retry(message) | Failure::Fatal(message) => return Err(message),
                 }
@@ -60,16 +75,43 @@ pub(super) fn disable_sip(app: &AppHandle, id: &str) -> Result<(), String> {
     Err(failure)
 }
 
-/// Waits for the halted guest to stop, forcing it if it does not.
-fn finish(app: &AppHandle, id: &str) -> Result<(), String> {
-    if engine::wait_until_stopped(app, id, HALT_WAIT) {
-        return Ok(());
+fn prepare_window(app: &AppHandle, id: &str, title: &str) -> Result<(), Failure> {
+    super::show_display(app, id, title)
+        .and_then(|()| engine::focus_display(app, id))
+        .and_then(|_| engine::lock_input(app, id, LOCKED_SUBTITLE))
+        .map_err(Failure::Fatal)
+}
+
+/// Gives the window its input back when the sequence ends, however it ends.
+struct InputLock<'a> {
+    app: &'a AppHandle,
+    id: &'a str,
+}
+
+impl Drop for InputLock<'_> {
+    fn drop(&mut self) {
+        engine::unlock_input(self.app, self.id);
+    }
+}
+
+/// Waits for the halted guest to stop and be released, forcing it if it does
+/// not stop in time or the setup is cancelled.
+fn finish(app: &AppHandle, id: &str, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+    let deadline = Instant::now() + HALT_WAIT;
+    while Instant::now() < deadline {
+        if cancelled() {
+            stop(app, id);
+            return Err(CANCELLED.into());
+        }
+        if engine::wait_until_stopped(app, id, Duration::from_secs(1)) {
+            return Ok(());
+        }
     }
     stop(app, id);
     Err("The computer did not shut down after System Integrity Protection was changed.".into())
 }
 
-/// Force-stops the computer and waits for it to be gone.
+/// Force-stops the computer and waits for its machine to be released.
 fn stop(app: &AppHandle, id: &str) {
     let _ = engine::force_stop(app, id);
     let _ = engine::wait_until_stopped(app, id, STOP_WAIT);
@@ -77,25 +119,86 @@ fn stop(app: &AppHandle, id: &str) {
 
 // MARK: Screens
 
-/// The recognized text of one capture of the guest's screen.
-struct Screen {
-    lines: Vec<TextLine>,
-    /// Lower-case text, one line per row, top to bottom.
+/// Lines of recognized text that share a row of the screen, left to right.
+struct Row {
     text: String,
 }
 
+/// The recognized text of one capture of the guest's screen.
+struct Screen {
+    lines: Vec<TextLine>,
+    /// Lower-case rows, top to bottom.
+    rows: Vec<Row>,
+}
+
 impl Screen {
-    fn new(lines: Vec<TextLine>) -> Self {
-        let text = lines
-            .iter()
-            .map(|line| line.text.to_lowercase())
-            .collect::<Vec<_>>()
-            .join("\n");
-        Self { lines, text }
+    fn new(mut lines: Vec<TextLine>) -> Self {
+        lines.sort_by(|a, b| (b.y + b.height).total_cmp(&(a.y + a.height)));
+        let mut grouped: Vec<Vec<&TextLine>> = Vec::new();
+        for line in &lines {
+            let center = line.y + line.height / 2.0;
+            match grouped.last_mut() {
+                Some(row)
+                    if row.iter().any(|other| {
+                        (other.y + other.height / 2.0 - center).abs()
+                            < 0.5 * other.height.max(line.height)
+                    }) =>
+                {
+                    row.push(line)
+                }
+                _ => grouped.push(vec![line]),
+            }
+        }
+        let rows = grouped
+            .into_iter()
+            .map(|mut row| {
+                row.sort_by(|a, b| a.x.total_cmp(&b.x));
+                Row {
+                    text: row
+                        .iter()
+                        .map(|line| line.text.to_lowercase())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                }
+            })
+            .collect();
+        Self { lines, rows }
     }
 
     fn contains(&self, needle: &str) -> bool {
-        self.text.contains(needle)
+        self.rows.iter().any(|row| row.text.contains(needle))
+    }
+
+    /// The first line whose text is exactly `text`, ignoring case.
+    fn line_equal(&self, text: &str) -> Option<&TextLine> {
+        self.lines
+            .iter()
+            .find(|line| line.text.trim().to_lowercase() == text)
+    }
+
+    /// The language list Recovery shows first on a computer with no language
+    /// set: language names in their own languages. The list does not depend on
+    /// the language it is shown in.
+    fn is_language_list(&self) -> bool {
+        self.line_equal("english").is_some()
+            && ["español", "français", "deutsch"]
+                .into_iter()
+                .any(|name| self.line_equal(name).is_some())
+    }
+
+    /// How many list items sit above `item`: lines centered on it and as tall
+    /// as it, which leaves out the larger heading. The first item is the one
+    /// selected when the list appears.
+    fn list_items_above(&self, item: &TextLine) -> usize {
+        let center = item.x + item.width / 2.0;
+        self.lines
+            .iter()
+            .filter(|line| {
+                line.y > item.y
+                    && (line.x + line.width / 2.0 - center).abs() < 0.1
+                    && (line.height - item.height).abs() < 0.2 * item.height
+            })
+            .count()
     }
 
     /// The first line that starts with `prefix`.
@@ -104,10 +207,53 @@ impl Screen {
             .iter()
             .find(|line| line.text.to_lowercase().starts_with(prefix))
     }
+
+    /// The rows inside the Terminal window: those below its title bar, or every
+    /// row when no title bar is recognized.
+    fn terminal_rows(&self) -> &[Row] {
+        let title = self
+            .rows
+            .iter()
+            .rposition(|row| row.text.contains("terminal") && row.text.contains('×'));
+        title.map_or(&self.rows[..], |title| &self.rows[title + 1..])
+    }
+
+    /// The row the cursor is on: the active prompt, if there is one.
+    fn active_row(&self) -> Option<&str> {
+        self.terminal_rows().last().map(|row| row.text.as_str())
+    }
+
+    /// Whether Terminal waits at a shell prompt.
+    fn at_shell_prompt(&self) -> bool {
+        self.active_row().is_some_and(is_shell_prompt)
+    }
+
+    /// Names of the screens and prompts seen, for errors. Recognized text is
+    /// never quoted: it can hold a computer name, and once credentials are
+    /// typed it could hold more.
+    fn known_phrases(&self) -> Vec<&'static str> {
+        const KNOWN: [&str; 7] = [
+            "options",
+            "utilities",
+            "english",
+            "bash-",
+            "y/n]",
+            "authorized user",
+            "password for user",
+        ];
+        KNOWN
+            .into_iter()
+            .filter(|phrase| self.contains(phrase))
+            .collect()
+    }
 }
 
-/// What Terminal's `csrutil` is asking or saying, taken from the latest prompt
-/// on the screen.
+fn is_shell_prompt(row: &str) -> bool {
+    let row = row.trim_end();
+    row.contains("bash-") || row.ends_with('#') || row.ends_with('$')
+}
+
+/// What `csrutil` is asking or saying.
 #[derive(Debug, PartialEq, Eq)]
 enum Prompt {
     Confirm,
@@ -115,7 +261,7 @@ enum Prompt {
     /// A password prompt, with the user it names when it names one.
     Password(Option<String>),
     Done,
-    Rejected(String),
+    Rejected(&'static str),
 }
 
 const DONE: [&str; 3] = [
@@ -132,36 +278,37 @@ const REJECTED: [&str; 6] = [
     "failed to modify",
 ];
 
-fn classify(text: &str) -> Option<Prompt> {
-    if DONE.iter().any(|done| text.contains(done)) {
+/// Reads the Terminal: results anywhere in it, but a question only when it is
+/// on the last row. A shell prompt on the last row means nothing is pending,
+/// whatever scrolled by above it.
+fn classify(screen: &Screen) -> Option<Prompt> {
+    let rows = screen.terminal_rows();
+    let anywhere = |phrase: &str| rows.iter().any(|row| row.text.contains(phrase));
+    if DONE.iter().any(|phrase| anywhere(phrase)) {
         return Some(Prompt::Done);
     }
-    if let Some(reason) = REJECTED.iter().find(|reason| text.contains(**reason)) {
-        return Some(Prompt::Rejected((*reason).to_string()));
+    if let Some(reason) = REJECTED.iter().find(|phrase| anywhere(phrase)) {
+        return Some(Prompt::Rejected(reason));
     }
-    // The latest prompt wins: earlier ones stay on screen.
-    let latest = [
-        ("y/n]", Prompt::Confirm),
-        ("authorized user", Prompt::Username),
-        ("password", Prompt::Password(password_user(text))),
-    ]
-    .into_iter()
-    .filter_map(|(marker, prompt)| text.rfind(marker).map(|at| (at, prompt)))
-    .max_by_key(|(at, _)| *at);
-    latest.map(|(_, prompt)| prompt)
+    let last = screen.active_row()?;
+    if is_shell_prompt(last) {
+        return None;
+    }
+    if last.contains("authorized user") {
+        Some(Prompt::Username)
+    } else if last.contains("password") {
+        Some(Prompt::Password(password_user(last)))
+    } else if last.contains("y/n]") {
+        Some(Prompt::Confirm)
+    } else {
+        None
+    }
 }
 
-/// Whether a user is the placeholder macOS uses while no account exists.
-fn is_setup_user(name: &str) -> bool {
-    name.starts_with('_') || name.contains("mbsetupuser")
-}
-
-/// The user in "enter password for user <name>:". Recognition may break the
-/// line between "user" and the name.
-fn password_user(text: &str) -> Option<String> {
+/// The user in "enter password for user <name>:".
+fn password_user(row: &str) -> Option<String> {
     const LEAD: &str = "password for user";
-    let flat = text.replace('\n', " ");
-    let rest = flat[flat.rfind(LEAD)? + LEAD.len()..].trim_start();
+    let rest = row[row.rfind(LEAD)? + LEAD.len()..].trim_start();
     let name: String = rest
         .chars()
         .take_while(|c| !c.is_whitespace() && *c != ':')
@@ -227,12 +374,14 @@ impl Guest for LiveGuest<'_> {
 enum Failure {
     Retry(String),
     Fatal(String),
+    Cancelled,
 }
 
 impl Failure {
     fn fatal(self) -> Self {
         match self {
             Self::Retry(message) | Self::Fatal(message) => Self::Fatal(message),
+            Self::Cancelled => Self::Cancelled,
         }
     }
 }
@@ -240,23 +389,42 @@ impl Failure {
 enum Check<T> {
     Found(T),
     Press(u16),
+    /// Press Down this many times, then Return.
+    Choose(usize),
     Rejected(String),
     Waiting,
 }
 
 struct Driver<'a, G: Guest> {
     guest: &'a mut G,
+    cancelled: &'a dyn Fn() -> bool,
     keyboard: Keyboard,
     unreadable: usize,
-    last: String,
+    seen: Vec<&'static str>,
 }
 
 impl<G: Guest> Driver<'_, G> {
-    fn blind(&self) -> bool {
-        self.unreadable >= UNREADABLE_AFTER
+    fn check(&self) -> Result<(), Failure> {
+        if (self.cancelled)() {
+            Err(Failure::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pause(&mut self, duration: Duration) -> Result<(), Failure> {
+        let mut left = duration;
+        while !left.is_zero() {
+            self.check()?;
+            let slice = left.min(CANCEL_SLICE);
+            self.guest.pause(slice);
+            left -= slice;
+        }
+        self.check()
     }
 
     fn send(&mut self, events: Vec<KeyEvent>) -> Result<(), Failure> {
+        self.check()?;
         self.guest.keys(events).map_err(|message| {
             Failure::Fatal(format!("Silo lost the computer's setup window. {message}"))
         })
@@ -271,7 +439,7 @@ impl<G: Guest> Driver<'_, G> {
         for c in text.chars() {
             let events = self.keyboard.character(c).map_err(Failure::Fatal)?;
             self.send(events)?;
-            self.guest.pause(KEY_GAP);
+            self.pause(KEY_GAP)?;
         }
         Ok(())
     }
@@ -288,64 +456,75 @@ impl<G: Guest> Driver<'_, G> {
             (PointerKind::Down, 100),
             (PointerKind::Up, 0),
         ] {
+            self.check()?;
             self.guest.pointer(kind, x, y).map_err(|message| {
-                Failure::Fatal(format!("Silo lost the setup window. {message}"))
+                Failure::Fatal(format!("Silo lost the computer's setup window. {message}"))
             })?;
-            self.guest.pause(Duration::from_millis(gap));
+            self.pause(Duration::from_millis(gap))?;
         }
         Ok(())
     }
 
-    /// One reading of the screen; `None` when the screen cannot be read.
-    fn look(&mut self) -> Option<Screen> {
+    /// One reading of the screen. A screen that stays unreadable ends the setup.
+    fn look(&mut self) -> Result<Option<Screen>, Failure> {
         match self.guest.screen() {
             Ok(lines) => {
                 self.unreadable = 0;
                 let screen = Screen::new(lines);
-                self.last = screen.text.replace('\n', " | ");
-                Some(screen)
+                self.seen = screen.known_phrases();
+                Ok(Some(screen))
             }
             Err(_) => {
                 self.unreadable += 1;
-                None
+                if self.unreadable >= UNREADABLE_AFTER {
+                    return Err(Failure::Fatal(
+                        "Silo cannot read the computer's screen, so it stopped setting it up."
+                            .into(),
+                    ));
+                }
+                Ok(None)
             }
         }
     }
 
-    fn quote(&self) -> String {
-        if self.last.is_empty() {
-            return "The screen could not be read.".into();
+    /// What the last screen showed, as names of known screens only.
+    fn describe(&self) -> String {
+        if self.seen.is_empty() {
+            "Nothing recognizable was on screen.".into()
+        } else {
+            format!("The screen showed: {}.", self.seen.join(", "))
         }
-        let shown: String = self.last.chars().take(QUOTE).collect();
-        format!("It showed: {shown}")
     }
 
-    /// Polls the screen until `check` finds what it waits for. `None` means the
-    /// screen is unreadable and `blind` was waited out instead.
+    /// Polls the screen until `check` finds what it waits for.
     fn wait_for<T>(
         &mut self,
         what: &str,
         timeout: Duration,
-        blind: Duration,
         mut check: impl FnMut(&Screen) -> Check<T>,
-    ) -> Result<Option<T>, Failure> {
+    ) -> Result<T, Failure> {
         let deadline = self.guest.elapsed() + timeout;
         loop {
-            if self.blind() {
-                self.guest.pause(blind);
-                return Ok(None);
-            }
-            if let Some(screen) = self.look() {
+            self.check()?;
+            if let Some(screen) = self.look()? {
                 match check(&screen) {
-                    Check::Found(found) => return Ok(Some(found)),
+                    Check::Found(found) => return Ok(found),
                     Check::Press(code) => {
                         self.press(code)?;
-                        self.guest.pause(Duration::from_secs(4));
+                        self.pause(Duration::from_secs(4))?;
+                    }
+                    Check::Choose(downs) => {
+                        for _ in 0..downs {
+                            self.press(input::DOWN)?;
+                            self.pause(Duration::from_millis(300))?;
+                        }
+                        self.press(input::RETURN)?;
+                        self.pause(Duration::from_secs(4))?;
                     }
                     Check::Rejected(reason) => {
                         return Err(Failure::Fatal(format!(
-                            "Recovery refused the account: {reason}. {}",
-                            self.quote()
+                            "Recovery refused the account ({reason}). {}",
+                            self.describe()
                         )))
                     }
                     Check::Waiting => {}
@@ -354,70 +533,69 @@ impl<G: Guest> Driver<'_, G> {
             if self.guest.elapsed() >= deadline {
                 return Err(Failure::Retry(format!(
                     "Recovery did not show {what}. {}",
-                    self.quote()
+                    self.describe()
                 )));
             }
-            self.guest.pause(POLL);
+            self.pause(POLL)?;
         }
     }
 }
 
 /// Plays the whole sequence on a guest that has just been started in Recovery,
 /// and returns once the halt command is sent.
-fn run<G: Guest>(guest: &mut G, user: &str, password: &str) -> Result<(), Failure> {
+fn run<G: Guest>(
+    guest: &mut G,
+    user: &str,
+    password: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), Failure> {
     let mut driver = Driver {
         guest,
+        cancelled,
         keyboard: Keyboard::default(),
         unreadable: 0,
-        last: String::new(),
+        seen: Vec::new(),
     };
     pick_options(&mut driver)?;
     open_terminal(&mut driver)?;
     driver.type_line("csrutil disable")?;
     answer_prompts(&mut driver, user, password).map_err(Failure::fatal)?;
-    driver.guest.pause(Duration::from_secs(2));
+    driver.pause(Duration::from_secs(2))?;
     driver.type_line("halt").map_err(Failure::fatal)
 }
 
 /// Gets from the startup picker to Recovery's main window.
 fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
-    driver.wait_for(
-        "its startup options",
-        PICKER_WAIT,
-        Duration::from_secs(30),
-        |screen| {
-            if screen.contains("options") {
-                Check::Found(())
-            } else {
-                Check::Waiting
-            }
-        },
-    )?;
+    driver.wait_for("its startup options", PICKER_WAIT, |screen| {
+        if screen.contains("options") {
+            Check::Found(())
+        } else {
+            Check::Waiting
+        }
+    })?;
     // Skip "Macintosh HD" to reach "Options".
     for _ in 0..2 {
         driver.press(input::RIGHT)?;
-        driver.guest.pause(Duration::from_secs(1));
+        driver.pause(Duration::from_secs(1))?;
     }
     driver.press(input::RETURN)?;
-    driver.wait_for(
-        "its main window",
-        RECOVERY_WAIT,
-        Duration::from_secs(45),
-        |screen| {
-            if screen.contains("utilities") {
-                Check::Found(())
-            } else if screen.contains("language") {
-                Check::Press(input::RETURN)
-            } else {
-                Check::Waiting
-            }
-        },
-    )?;
-    Ok(())
+    driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
+        if screen.contains("utilities") {
+            Check::Found(())
+        } else if screen.is_language_list() {
+            screen
+                .line_equal("english")
+                .map_or(Check::Press(input::RETURN), |english| {
+                    Check::Choose(screen.list_items_above(english))
+                })
+        } else {
+            Check::Waiting
+        }
+    })
 }
 
 /// Opens Terminal with its shortcut, or from the Utilities menu when the
-/// shortcut does nothing.
+/// shortcut does nothing, and waits for its shell prompt.
 fn open_terminal<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     let shortcut = driver.keyboard.chord(
         &[Modifier::Shift, Modifier::Command],
@@ -426,66 +604,52 @@ fn open_terminal<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     );
     driver.send(shortcut)?;
     let shown = |screen: &Screen| {
-        if screen.contains("bash") {
+        if screen.at_shell_prompt() {
             Check::Found(())
         } else {
             Check::Waiting
         }
     };
-    match driver.wait_for(
-        "Terminal",
-        Duration::from_secs(8),
-        Duration::from_secs(8),
-        shown,
-    ) {
-        Ok(_) => return Ok(()),
+    match driver.wait_for("Terminal", SHORTCUT_WAIT, shown) {
+        Ok(()) => return Ok(()),
         Err(Failure::Retry(_)) => {}
         Err(other) => return Err(other),
     }
     let menu = driver
-        .look()
+        .look()?
         .and_then(|screen| screen.line_starting("utilities").cloned())
         .ok_or_else(|| {
             Failure::Retry(format!(
                 "Recovery has no Utilities menu. {}",
-                driver.quote()
+                driver.describe()
             ))
         })?;
     driver.click(&menu)?;
-    driver.guest.pause(Duration::from_secs(1));
+    driver.pause(Duration::from_secs(1))?;
     let item = driver
-        .look()
+        .look()?
         .and_then(|screen| screen.line_starting("terminal").cloned())
         .ok_or_else(|| {
             Failure::Retry(format!(
                 "The Utilities menu has no Terminal. {}",
-                driver.quote()
+                driver.describe()
             ))
         })?;
     driver.click(&item)?;
-    driver.wait_for("Terminal", TERMINAL_WAIT, Duration::from_secs(8), shown)?;
-    Ok(())
+    driver.wait_for("Terminal", TERMINAL_WAIT, shown)
 }
 
-/// Answers `csrutil`'s questions until it reports the result. macOS 26 asks for
-/// a user name before the password; earlier versions name the user in the
-/// password prompt.
+/// Answers `csrutil`'s questions until it reports the result. macOS 26 may ask
+/// for a user name before the password. The password is typed only at a
+/// password prompt that is the last row of the Terminal and names the
+/// computer's account (compared without regard to case, since recognition
+/// cannot be trusted with it), or follows the user name Silo typed.
 fn answer_prompts<G: Guest>(
     driver: &mut Driver<'_, G>,
     user: &str,
     password: &str,
 ) -> Result<(), Failure> {
     let (mut confirmed, mut named, mut authenticated) = (false, false, false);
-    if driver.blind() {
-        driver.guest.pause(Duration::from_secs(5));
-        driver.type_line("y")?;
-        driver.guest.pause(Duration::from_secs(5));
-        driver.type_line(user)?;
-        driver.guest.pause(Duration::from_secs(5));
-        driver.type_line(password)?;
-        driver.guest.pause(Duration::from_secs(20));
-        return Ok(());
-    }
     loop {
         let wait = if authenticated {
             RESULT_WAIT
@@ -493,42 +657,44 @@ fn answer_prompts<G: Guest>(
             PROMPT_WAIT
         };
         let prompt =
-            driver.wait_for("a csrutil prompt", wait, Duration::from_secs(5), |screen| {
-                match classify(&screen.text) {
-                    Some(Prompt::Done) => Check::Found(Prompt::Done),
-                    Some(Prompt::Rejected(reason)) => Check::Rejected(reason),
-                    Some(Prompt::Confirm) if !confirmed => Check::Found(Prompt::Confirm),
-                    Some(Prompt::Username) if !named => Check::Found(Prompt::Username),
-                    Some(Prompt::Password(who)) if !authenticated => {
-                        Check::Found(Prompt::Password(who))
-                    }
-                    _ => Check::Waiting,
+            driver.wait_for("a csrutil prompt", wait, |screen| match classify(screen) {
+                Some(Prompt::Done) => Check::Found(Prompt::Done),
+                Some(Prompt::Rejected(reason)) => Check::Rejected(reason.into()),
+                Some(Prompt::Confirm) if !confirmed => Check::Found(Prompt::Confirm),
+                Some(Prompt::Username) if !named => Check::Found(Prompt::Username),
+                Some(Prompt::Password(who)) if !authenticated => {
+                    Check::Found(Prompt::Password(who))
                 }
+                _ => Check::Waiting,
             })?;
         match prompt {
-            Some(Prompt::Done) => return Ok(()),
-            Some(Prompt::Confirm) => {
+            Prompt::Done => return Ok(()),
+            Prompt::Confirm => {
                 confirmed = true;
                 driver.type_line("y")?;
             }
-            Some(Prompt::Username) => {
+            Prompt::Username => {
                 named = true;
                 driver.type_line(user)?;
             }
-            Some(Prompt::Password(who)) => {
-                if !named && who.as_deref().is_some_and(is_setup_user) {
-                    return Err(Failure::Fatal(format!(
-                        "Recovery asked for the password of {}, not of {user}, so it does not know the account. {}",
-                        who.unwrap_or_default(),
-                        driver.quote()
-                    )));
+            Prompt::Password(who) => {
+                let expected = user.to_lowercase();
+                let right_account = match &who {
+                    Some(who) => *who == expected,
+                    None => named,
+                };
+                if !right_account {
+                    return Err(Failure::Fatal(
+                        "Recovery asked for the password of an account other than the computer's, so it does not know the account."
+                            .into(),
+                    ));
                 }
                 authenticated = true;
                 driver.type_line(password)?;
             }
-            Some(Prompt::Rejected(_)) | None => return Ok(()),
+            Prompt::Rejected(_) => unreachable!("a rejection ends the wait with an error"),
         }
-        driver.guest.pause(Duration::from_secs(2));
+        driver.pause(Duration::from_secs(2))?;
     }
 }
 
@@ -546,30 +712,72 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_latest_prompt_wins() {
-        let confirm = "turning off system integrity protection requires modifying system security.\nallow booting unsigned operating systems and any kernel extensions for os \"macintosh hd\"? [y/n]:";
-        assert_eq!(classify(confirm), Some(Prompt::Confirm));
-        let user = format!("{confirm} y\nenter a username of an authorized user:");
-        assert_eq!(classify(&user), Some(Prompt::Username));
-        let password = format!("{user} silo\npassword:");
-        assert_eq!(classify(&password), Some(Prompt::Password(None)));
+    fn screen(rows: &[&str]) -> Screen {
+        Screen::new(
+            rows.iter()
+                .enumerate()
+                .map(|(index, text)| line(text, 0.1, 0.9 - index as f64 * 0.05))
+                .collect(),
+        )
     }
 
+    const CONFIRM: &str = "Allow booting unsigned operating systems and any kernel extensions for OS \"Macintosh HD\"? [y/n]:";
+
     #[test]
-    fn a_password_prompt_names_its_user() {
-        let text = "[y/n]: y\nenter password for user _mbsetupuser:";
+    fn the_last_row_decides_the_prompt() {
         assert_eq!(
-            classify(text),
-            Some(Prompt::Password(Some("_mbsetupuser".into())))
+            classify(&screen(&["-bash-3.2# csrutil disable", CONFIRM])),
+            Some(Prompt::Confirm)
+        );
+        assert_eq!(
+            classify(&screen(&[
+                "[y/n]: y",
+                "Enter a username of an authorized user:"
+            ])),
+            Some(Prompt::Username)
+        );
+        assert_eq!(
+            classify(&screen(&["authorized user: silo", "Password:"])),
+            Some(Prompt::Password(None))
+        );
+        assert_eq!(
+            classify(&screen(&["[y/n]: y", "Enter password for user silo:"])),
+            Some(Prompt::Password(Some("silo".into())))
         );
     }
 
     #[test]
-    fn a_user_name_on_the_next_line_is_still_read() {
-        let text = "[y/n]: y\nenter password for user\n_mbsetupuser:";
+    fn a_stale_prompt_above_a_shell_prompt_is_not_pending() {
+        let stale = screen(&[
+            CONFIRM,
+            "[y/n]: y",
+            "Enter password for user silo:",
+            "^C",
+            "-bash-3.2#",
+        ]);
+        assert_eq!(classify(&stale), None);
+        assert!(stale.at_shell_prompt());
+    }
+
+    #[test]
+    fn a_command_being_typed_is_not_a_prompt() {
         assert_eq!(
-            classify(text),
+            classify(&screen(&[
+                "Enter password for user silo:",
+                "-bash-3.2# csrutil disable"
+            ])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_prompt_split_across_recognized_lines_is_one_row() {
+        let split = Screen::new(vec![
+            line("Enter password for user", 0.1, 0.5),
+            line("_mbsetupuser:", 0.4, 0.5),
+        ]);
+        assert_eq!(
+            classify(&split),
             Some(Prompt::Password(Some("_mbsetupuser".into())))
         );
     }
@@ -577,14 +785,33 @@ mod tests {
     #[test]
     fn results_override_prompts() {
         assert_eq!(
-            classify("[y/n]: y\npassword:\nsystem integrity protection is off."),
+            classify(&screen(&[
+                "Password:",
+                "System Integrity Protection is off."
+            ])),
             Some(Prompt::Done)
         );
         assert!(matches!(
-            classify("password for user silo:\ncsrutil: failed to set credential: authentication failure."),
+            classify(&screen(&[
+                "password for user silo:",
+                "csrutil: failed to set credential: authentication failure.",
+                "-bash-3.2#"
+            ])),
             Some(Prompt::Rejected(_))
         ));
-        assert_eq!(classify("-bash-3.2#"), None);
+        assert_eq!(classify(&screen(&["-bash-3.2#"])), None);
+    }
+
+    #[test]
+    fn only_rows_below_the_terminal_title_count() {
+        let terminal = screen(&[
+            "Recovery  File  Utilities",
+            "Enter password for user silo:",
+            "Terminal — -bash — 120×30",
+            "-bash-3.2#",
+        ]);
+        assert_eq!(classify(&terminal), None);
+        assert_eq!(terminal.terminal_rows().len(), 1);
     }
 
     #[test]
@@ -595,6 +822,7 @@ mod tests {
         ]);
         assert_eq!(screen.line_starting("utilities").unwrap().x, 0.3);
         assert!(screen.line_starting("terminal").is_none());
+        assert_eq!(screen.rows.len(), 1);
     }
 
     /// A scripted Recovery: it reacts to the keys and clicks it receives and to
@@ -610,6 +838,10 @@ mod tests {
         readable: bool,
         password_ok: bool,
         menu_open: bool,
+        prompt_user: &'static str,
+        cancel_confirm: bool,
+        language_list: bool,
+        downs: usize,
         keys: Vec<String>,
     }
 
@@ -624,6 +856,8 @@ mod tests {
         Password,
         Result,
         Rejected,
+        Stale,
+        Language,
         Halted,
     }
 
@@ -640,6 +874,10 @@ mod tests {
                 readable: true,
                 password_ok: true,
                 menu_open: false,
+                prompt_user: "silo",
+                cancel_confirm: false,
+                language_list: false,
+                downs: 0,
                 keys: Vec::new(),
             }
         }
@@ -655,6 +893,7 @@ mod tests {
             self.keys.push(format!("line:{typed}"));
             match (self.phase, typed.as_str()) {
                 (Phase::Terminal, "csrutil disable") => self.enter(Phase::Confirm),
+                (Phase::Confirm, "y") if self.cancel_confirm => self.enter(Phase::Stale),
                 (Phase::Confirm, "y") => self.enter(if self.username_prompt {
                     Phase::Username
                 } else {
@@ -674,6 +913,21 @@ mod tests {
             if !self.readable {
                 return Err("no capture".into());
             }
+            if self.phase == Phase::Language {
+                let heading = TextLine {
+                    height: 0.05,
+                    ..line("Langue", 0.45, 0.95)
+                };
+                let mut lines = vec![heading];
+                for (index, text) in ["Français", "English (UK)", "English", "Español"]
+                    .iter()
+                    .enumerate()
+                {
+                    lines.push(line(text, 0.45, 0.8 - index as f64 * 0.05));
+                }
+                return Ok(lines);
+            }
+            let prompt = format!("Enter password for user {}:", self.prompt_user);
             let rows: Vec<&str> = match self.phase {
                 Phase::Picker if self.now >= self.entered + Duration::from_secs(12) => {
                     vec!["Macintosh HD", "Options", "Shut Down"]
@@ -691,20 +945,18 @@ mod tests {
                     }
                 }
                 Phase::Terminal => vec!["Terminal", "-bash-3.2#"],
-                Phase::Confirm => vec![
-                    "-bash-3.2# csrutil disable",
-                    "Allow booting unsigned operating systems? [y/n]:",
-                ],
+                Phase::Confirm => vec!["-bash-3.2# csrutil disable", CONFIRM],
                 Phase::Username => vec!["[y/n]: y", "Enter a username of an authorized user:"],
                 Phase::Password if self.username_prompt => {
                     vec!["authorized user: silo", "Password:"]
                 }
-                Phase::Password => vec!["[y/n]: y", "Enter password for user silo:"],
+                Phase::Password => vec!["[y/n]: y", &prompt],
                 Phase::Result => vec!["System Integrity Protection is off."],
                 Phase::Rejected => vec![
                     "csrutil: failed to set credential: Authentication failure.",
                     "-bash-3.2#",
                 ],
+                Phase::Stale => vec!["[y/n]: y", &prompt, "^C", "-bash-3.2#"],
                 _ => vec![],
             };
             Ok(rows
@@ -720,12 +972,21 @@ mod tests {
                     match (self.phase, event.code) {
                         (Phase::Picker, input::RIGHT) => self.picked += 1,
                         (Phase::Picker, input::RETURN) => {
-                            let phase = if self.picked == 2 {
+                            let phase = match (self.picked == 2, self.language_list) {
+                                (false, _) => Phase::Halted,
+                                (true, true) => Phase::Language,
+                                (true, false) => Phase::Booting,
+                            };
+                            self.enter(phase);
+                        }
+                        (Phase::Language, input::DOWN) => self.downs += 1,
+                        (Phase::Language, input::RETURN) => {
+                            // Without English chosen, Recovery would come up localized.
+                            self.enter(if self.downs == 2 {
                                 Phase::Booting
                             } else {
                                 Phase::Halted
-                            };
-                            self.enter(phase);
+                            });
                         }
                         (Phase::Main, input::KEY_T) if self.shortcut_works => {
                             self.keys.push("shortcut".into());
@@ -776,10 +1037,14 @@ mod tests {
             .collect()
     }
 
+    fn never() -> bool {
+        false
+    }
+
     #[test]
     fn the_modern_flow_asks_for_a_user_then_a_password() {
         let mut guest = Recovery::new();
-        run(&mut guest, "silo", "secret").unwrap();
+        run(&mut guest, "silo", "secret", &never).unwrap();
         assert_eq!(guest.phase, Phase::Halted);
         assert_eq!(
             lines_typed(&guest),
@@ -792,7 +1057,7 @@ mod tests {
     fn the_older_flow_asks_for_the_password_directly() {
         let mut guest = Recovery::new();
         guest.username_prompt = false;
-        run(&mut guest, "silo", "secret").unwrap();
+        run(&mut guest, "silo", "secret", &never).unwrap();
         assert_eq!(guest.phase, Phase::Halted);
         assert_eq!(
             lines_typed(&guest),
@@ -804,32 +1069,86 @@ mod tests {
     fn terminal_is_opened_from_the_menu_when_the_shortcut_does_nothing() {
         let mut guest = Recovery::new();
         guest.shortcut_works = false;
-        run(&mut guest, "silo", "secret").unwrap();
+        run(&mut guest, "silo", "secret", &never).unwrap();
         assert!(guest.keys.contains(&"menu".to_string()));
         assert_eq!(guest.phase, Phase::Halted);
+    }
+
+    #[test]
+    fn the_language_list_is_answered_with_english_by_keyboard() {
+        let mut guest = Recovery::new();
+        guest.language_list = true;
+        run(&mut guest, "silo", "secret", &never).unwrap();
+        assert_eq!(guest.phase, Phase::Halted);
+        assert!(lines_typed(&guest).contains(&"secret".to_string()));
+    }
+
+    #[test]
+    fn the_language_list_is_recognized_by_native_names() {
+        assert!(screen(&["Langue", "Français", "English", "Español"]).is_language_list());
+        let list = screen(&["Language", "Français", "English (UK)", "English", "Español"]);
+        let english = list.line_equal("english").unwrap();
+        // Heading, Français and English (UK) share the list's center; the heading
+        // is excluded only when it is taller, which `screen` does not model.
+        assert_eq!(list.list_items_above(english), 3);
+        assert!(!screen(&["Macintosh HD", "Options"]).is_language_list());
+        assert!(!screen(&["English (UK)", "English"]).is_language_list());
     }
 
     #[test]
     fn a_rejected_password_fails_without_retrying() {
         let mut guest = Recovery::new();
         guest.password_ok = false;
-        let error = run(&mut guest, "silo", "secret").unwrap_err();
+        let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
         match error {
             Failure::Fatal(message) => {
                 assert!(message.contains("authentication failure"), "{message}");
                 assert!(!message.contains("secret"));
             }
-            Failure::Retry(message) => panic!("retryable: {message}"),
+            other => panic!("{other:?}"),
         }
         assert_ne!(guest.phase, Phase::Halted);
     }
 
     #[test]
-    fn recovery_that_never_appears_is_a_retryable_failure() {
+    fn a_password_prompt_for_another_account_gets_no_password() {
+        for name in ["_mbsetupuser", "bob"] {
+            let mut guest = Recovery::new();
+            guest.username_prompt = false;
+            guest.prompt_user = name;
+            let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
+            assert!(matches!(error, Failure::Fatal(_)), "{name}");
+            assert!(
+                !lines_typed(&guest).contains(&"secret".to_string()),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_account_name_is_matched_without_regard_to_case() {
+        let mut guest = Recovery::new();
+        guest.username_prompt = false;
+        guest.prompt_user = "Silo";
+        run(&mut guest, "silo", "secret", &never).unwrap();
+    }
+
+    #[test]
+    fn a_stale_prompt_never_receives_the_password() {
+        let mut guest = Recovery::new();
+        guest.username_prompt = false;
+        guest.cancel_confirm = true;
+        let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
+        assert!(matches!(error, Failure::Fatal(_)));
+        assert!(!lines_typed(&guest).contains(&"secret".to_string()));
+    }
+
+    #[test]
+    fn recovery_that_never_appears_is_a_retryable_failure_that_quotes_no_text() {
         struct Dead(Recovery);
         impl Guest for Dead {
             fn screen(&mut self) -> Result<Vec<TextLine>, String> {
-                Ok(vec![line("Apple logo", 0.5, 0.5)])
+                Ok(vec![line("Setting up My Options Mac", 0.5, 0.5)])
             }
             fn keys(&mut self, events: Vec<KeyEvent>) -> Result<(), String> {
                 self.0.keys(events)
@@ -845,17 +1164,56 @@ mod tests {
             }
         }
         let mut guest = Dead(Recovery::new());
-        let error = run(&mut guest, "silo", "secret").unwrap_err();
-        assert!(matches!(error, Failure::Retry(message) if message.contains("apple logo")));
+        let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
+        match error {
+            Failure::Retry(message) => {
+                assert!(message.contains("options"), "{message}");
+                assert!(!message.contains("my options mac"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
         assert!(guest.0.now >= PICKER_WAIT);
     }
 
     #[test]
-    fn an_unreadable_screen_falls_back_to_timed_waits() {
+    fn an_unreadable_screen_stops_the_setup_without_typing_anything() {
         let mut guest = Recovery::new();
         guest.readable = false;
-        run(&mut guest, "silo", "secret").unwrap();
-        assert_eq!(guest.phase, Phase::Halted);
+        let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
+        assert!(matches!(error, Failure::Fatal(message) if message.contains("cannot read")));
+        assert!(guest.keys.is_empty());
+    }
+
+    #[test]
+    fn a_screen_that_goes_dark_midway_types_no_credentials() {
+        struct Fails(Recovery, bool);
+        impl Guest for Fails {
+            fn screen(&mut self) -> Result<Vec<TextLine>, String> {
+                if self.0.phase == Phase::Confirm {
+                    self.1 = true;
+                }
+                if self.1 {
+                    Err("gone".into())
+                } else {
+                    self.0.screen()
+                }
+            }
+            fn keys(&mut self, events: Vec<KeyEvent>) -> Result<(), String> {
+                self.0.keys(events)
+            }
+            fn pointer(&mut self, kind: PointerKind, x: f64, y: f64) -> Result<(), String> {
+                self.0.pointer(kind, x, y)
+            }
+            fn pause(&mut self, duration: Duration) {
+                self.0.pause(duration);
+            }
+            fn elapsed(&self) -> Duration {
+                self.0.elapsed()
+            }
+        }
+        let mut guest = Fails(Recovery::new(), false);
+        assert!(run(&mut guest, "silo", "secret", &never).is_err());
+        assert_eq!(lines_typed(&guest.0), ["csrutil disable"]);
     }
 
     #[test]
@@ -877,8 +1235,24 @@ mod tests {
             }
         }
         assert!(matches!(
-            run(&mut Closed, "silo", "secret"),
+            run(&mut Closed, "silo", "secret", &never),
             Err(Failure::Fatal(_))
         ));
+    }
+
+    #[test]
+    fn cancelling_stops_at_once_and_types_no_credentials() {
+        for cancel_at in [0usize, 5, 40, 120] {
+            let mut guest = Recovery::new();
+            let polls = std::cell::Cell::new(0usize);
+            let cancelled = || {
+                polls.set(polls.get() + 1);
+                polls.get() > cancel_at
+            };
+            let result = run(&mut guest, "silo", "secret", &cancelled);
+            assert!(matches!(result, Err(Failure::Cancelled)), "{cancel_at}");
+            assert!(!lines_typed(&guest).contains(&"secret".to_string()));
+            assert_ne!(guest.phase, Phase::Halted, "{cancel_at}");
+        }
     }
 }

@@ -91,6 +91,12 @@ pub(super) fn read_screen(_app: &AppHandle, _id: &str) -> Result<Vec<TextLine>, 
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn lock_input(_app: &AppHandle, _id: &str, _subtitle: &str) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn unlock_input(_app: &AppHandle, _id: &str) {}
+
 pub(super) fn wait_until_stopped(
     _app: &AppHandle,
     _id: &str,
