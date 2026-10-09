@@ -387,7 +387,6 @@ impl Screen {
             "disk utility",
         ];
         LABELS.iter().any(|label| self.contains(label))
-            || self.line_equal("continue").is_some()
             || (self.line_equal("edit").is_some() && self.line_equal("window").is_some())
     }
 
@@ -795,7 +794,11 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     let mut chosen = false;
     let mut crowded = 0;
     let window = driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
-        if screen.is_english_main_window() {
+        if screen.contains("options") {
+            // The startup picker is still up, whatever else it shows.
+            crowded = 0;
+            Check::Waiting
+        } else if screen.is_english_main_window() {
             Check::Found(MainWindow::English)
         } else if screen.is_language_list() {
             crowded = 0;
@@ -808,7 +811,7 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
                 .map_or(Check::Press(input::RETURN), |english| {
                     Check::Choose(screen.list_items_above(english))
                 })
-        } else if !screen.contains("options") && screen.rows.len() >= LOCALIZED_ROWS {
+        } else if screen.rows.len() >= LOCALIZED_ROWS {
             // Recovery's window and menu bar, in a language Silo has no words for.
             crowded += 1;
             if crowded >= LOCALIZED_POLLS {
@@ -1384,6 +1387,7 @@ mod tests {
             "Disk Utility",
             "Continue",
         ]);
+        rows.retain(|row| *row != "Continue");
         assert!(screen(&rows).is_english_main_window());
         assert!(screen(&["Reinstall macOS Tahoe"]).is_english_main_window());
         assert!(screen(&["Edit", "Window"]).is_english_main_window());
@@ -1394,6 +1398,41 @@ mod tests {
             "Utilitaire de disque"
         ])
         .is_english_main_window());
+    }
+
+    #[test]
+    fn a_picker_that_lingers_after_return_is_not_the_main_window() {
+        assert!(!screen(&["Macintosh HD", "Options", "Continue"]).is_english_main_window());
+        struct Lingering(Recovery);
+        impl Guest for Lingering {
+            fn screen(&mut self) -> Result<Vec<TextLine>, String> {
+                if self.0.phase == Phase::Booting {
+                    return Ok(vec![
+                        line("Macintosh HD", 0.2, 0.5),
+                        line("Options", 0.4, 0.5),
+                        line("Continue", 0.4, 0.4),
+                        line("Disk Utility", 0.4, 0.3),
+                    ]);
+                }
+                self.0.screen()
+            }
+            fn keys(&mut self, events: Vec<KeyEvent>) -> Result<(), String> {
+                self.0.keys(events)
+            }
+            fn pointer(&mut self, kind: PointerKind, x: f64, y: f64) -> Result<(), String> {
+                self.0.pointer(kind, x, y)
+            }
+            fn pause(&mut self, duration: Duration) {
+                self.0.pause(duration);
+            }
+            fn elapsed(&self) -> Duration {
+                self.0.elapsed()
+            }
+        }
+        let mut guest = Lingering(Recovery::new());
+        run(&mut guest, "silo", "secret", &never).unwrap();
+        assert!(!guest.0.keys.contains(&"shortcut".to_string()) || guest.0.phase == Phase::Halted);
+        assert_eq!(guest.0.phase, Phase::Halted);
     }
 
     #[test]
