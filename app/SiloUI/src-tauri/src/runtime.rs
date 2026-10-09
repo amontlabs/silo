@@ -4285,6 +4285,12 @@ pub async fn retry_computer_configuration(
                 Some(request) => request,
                 None => read_metadata(&paths.metadata).map_err(|e| e.to_string())?,
             };
+        // A resumed creation must not produce a name a macOS computer took since.
+        let committed = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
+        let _reservation = crate::computer_names::reserve(
+            &new_names(&committed.computers, &request.computers),
+            &|| crate::macos_computers::names(&app),
+        )?;
         apply_configuration_with_progress(&app, &paths, request, &request_id, retry_computer)
     })
     .await
@@ -4346,10 +4352,11 @@ pub async fn change_computer_configuration(
         let mut request = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
         let before = request.computers.clone();
         change.apply(&mut request.computers)?;
-        names_clash(
-            &new_names(&before, &request.computers),
-            &crate::macos_computers::names(&app),
-        )?;
+        // Held until the change is committed, so a macOS creation sees the name.
+        let _reservation =
+            crate::computer_names::reserve(&new_names(&before, &request.computers), &|| {
+                crate::macos_computers::names(&app)
+            })?;
         apply_configuration_with_progress(&app, &paths, request, &request_id, retry_computer)
     })
     .await
@@ -6152,20 +6159,33 @@ fn validate_request(request: &ComputerConfigurationRequest) -> Result<(), Runtim
     Ok(())
 }
 
-/// The lowercased names of the Linux computers on this device. An unreadable
-/// inventory yields none; the Linux path validates it itself.
+/// The lowercased names of the Linux computers on this device, including those an
+/// interrupted creation will add when it resumes. An unreadable inventory yields none;
+/// the Linux path validates it itself.
 pub(crate) fn computer_names(app: &AppHandle) -> Vec<String> {
-    runtime_paths(app)
+    let Ok(paths) = runtime_paths(app) else {
+        return Vec::new();
+    };
+    let committed = read_metadata(&paths.metadata)
+        .map(|request| request.computers)
+        .unwrap_or_default();
+    let pending = configuration_recovery::pending_request(&paths)
         .ok()
-        .and_then(|paths| read_metadata(&paths.metadata).ok())
-        .map(|request| {
-            request
-                .computers
-                .iter()
-                .map(|computer| computer.name().to_ascii_lowercase())
-                .collect()
-        })
-        .unwrap_or_default()
+        .flatten()
+        .map(|request| request.computers);
+    names_of(&committed, pending.as_deref())
+}
+
+/// The lowercased names of committed computers and of those a pending request adds.
+fn names_of(
+    committed: &[ComputerConfiguration],
+    pending: Option<&[ComputerConfiguration]>,
+) -> Vec<String> {
+    committed
+        .iter()
+        .chain(pending.into_iter().flatten())
+        .map(|computer| computer.name().to_ascii_lowercase())
+        .collect()
 }
 
 /// The names a change adds: computers new to the inventory, or renamed.
@@ -6179,15 +6199,6 @@ fn new_names(before: &[ComputerConfiguration], after: &[ComputerConfiguration]) 
         })
         .map(|computer| computer.name().to_ascii_lowercase())
         .collect()
-}
-
-/// Refuses a new name that a computer of another kind already uses.
-fn names_clash(new: &[String], taken: &[String]) -> Result<(), String> {
-    if new.iter().any(|name| taken.contains(name)) {
-        Err(crate::macos_computers::NAME_TAKEN.into())
-    } else {
-        Ok(())
-    }
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<(), RuntimeError> {
@@ -13393,14 +13404,37 @@ mod cross_kind_name_tests {
 
     #[test]
     fn a_new_linux_name_used_by_a_macos_computer_is_refused() {
-        let macos = vec!["mac-one".to_string()];
-        assert_eq!(names_clash(&["api".into()], &macos), Ok(()));
+        let macos = || vec!["mac-one".to_string()];
+        assert!(crate::computer_names::reserve(&["rt-api".into()], &macos).is_ok());
         assert_eq!(
-            names_clash(&["mac-one".into()], &macos),
-            Err("Computer names must be unique.".into())
+            crate::computer_names::reserve(&["mac-one".into()], &macos).unwrap_err(),
+            "Computer names must be unique."
         );
         // An existing computer that keeps its name is not a new name.
         let existing = vec![computer("1", "mac-one")];
         assert!(new_names(&existing, &existing).is_empty());
+    }
+
+    #[test]
+    fn names_of_pending_creations_count_as_used() {
+        let committed = vec![computer("1", "Web")];
+        let pending = vec![computer("1", "web"), computer("2", "Fresh")];
+        assert_eq!(names_of(&committed, None), ["web"]);
+        assert_eq!(
+            names_of(&committed, Some(&pending)),
+            ["web", "web", "fresh"]
+        );
+    }
+
+    #[test]
+    fn replaying_a_journal_reserves_only_its_new_names() {
+        let previous = vec![computer("1", "web")];
+        let request = vec![computer("1", "web"), computer("2", "rp-fresh")];
+        let macos = || vec!["rp-fresh".to_string()];
+        let added = new_names(&previous, &request);
+        assert_eq!(added, ["rp-fresh"]);
+        assert!(crate::computer_names::reserve(&added, &macos).is_err());
+        let mac_only_web = || vec!["web".to_string()];
+        assert!(crate::computer_names::reserve(&added, &mac_only_web).is_ok());
     }
 }

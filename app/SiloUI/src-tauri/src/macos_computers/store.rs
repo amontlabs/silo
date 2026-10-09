@@ -13,7 +13,6 @@ const MIN_MEMORY_GIB: u64 = 4;
 const HOST_MEMORY_RESERVE_GIB: u64 = 4;
 const MIN_DISK_GIB: u64 = 32;
 const MAX_DISK_GIB: u64 = 1024;
-pub(crate) const NAME_TAKEN: &str = "Computer names must be unique.";
 pub(super) const INTERRUPTED_INSTALL: &str =
     "Installation was interrupted. Delete this computer and create it again.";
 
@@ -258,15 +257,6 @@ pub(super) fn names(app_data: &Path) -> Vec<String> {
         .filter_map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .filter_map(|record| record.get("name")?.as_str().map(str::to_ascii_lowercase))
         .collect()
-}
-
-/// Refuses a name that a computer of another kind already uses.
-pub(super) fn ensure_unique_across_kinds(name: &str, taken: &[String]) -> Result<(), String> {
-    if taken.iter().any(|other| other.eq_ignore_ascii_case(name)) {
-        Err(NAME_TAKEN.into())
-    } else {
-        Ok(())
-    }
 }
 
 pub(super) fn restore_images(app_data: &Path) -> PathBuf {
@@ -606,17 +596,6 @@ mod tests {
         let mut names = names(app_data.path());
         names.sort();
         assert_eq!(names, ["mac-one", "other-one"]);
-    }
-
-    #[test]
-    fn a_name_used_by_another_kind_is_refused_whatever_its_case() {
-        let taken = vec!["web".to_string()];
-        assert_eq!(ensure_unique_across_kinds("api", &taken), Ok(()));
-        assert_eq!(
-            ensure_unique_across_kinds("web", &taken),
-            Err("Computer names must be unique.".into())
-        );
-        assert!(ensure_unique_across_kinds("WEB", &taken).is_err());
     }
 
     #[test]

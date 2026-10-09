@@ -1736,6 +1736,7 @@ fn fork_in_lanes(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    macos_names: &dyn Fn() -> Vec<String>,
 ) -> Result<(), RuntimeError> {
     use super::operation_gate::OperationKind;
     let computer_name = computer_configuration(paths, computer_id)?
@@ -1757,7 +1758,18 @@ fn fork_in_lanes(
         .device("Forking checkpoint")?;
     guard.expect_within(Duration::from_secs(60));
     shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
+    // Held until the fork is in the inventory, so a macOS creation sees the name.
+    let _reservation = reserve_fork_name(new_name, macos_names)?;
     fork_commit(runner, paths, assignments, &fork, new_name)
+}
+
+/// Reserves a fork's name against the names of macOS computers.
+fn reserve_fork_name(
+    new_name: &str,
+    macos_names: &dyn Fn() -> Vec<String>,
+) -> Result<crate::computer_names::Reservation, RuntimeError> {
+    crate::computer_names::reserve(&[new_name.to_string()], macos_names)
+        .map_err(RuntimeError::Invalid)
 }
 
 #[tauri::command]
@@ -1779,6 +1791,7 @@ pub async fn fork_checkpoint(
             &computer_id,
             checkpoint_id.as_deref(),
             &new_name,
+            &|| crate::macos_computers::names(&worker_app),
         )
         .and_then(|_| application_state_response(&worker_app, &paths));
         let _ = worker_app.emit("silo://application-state-changed", ());
@@ -5697,7 +5710,17 @@ mod tests {
             lanes: Mutex::new(Vec::new()),
         };
         let assignments = FakeAssignments::new(&[]);
-        fork_in_lanes(gate, &runner, &paths, &assignments, ID, None, "branch").unwrap();
+        fork_in_lanes(
+            gate,
+            &runner,
+            &paths,
+            &assignments,
+            ID,
+            None,
+            "branch",
+            &Vec::new,
+        )
+        .unwrap();
         let lanes = runner.lanes.lock().unwrap();
         let create = lanes
             .iter()

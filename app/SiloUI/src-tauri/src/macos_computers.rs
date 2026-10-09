@@ -25,8 +25,6 @@ mod recovery;
 mod restore_image;
 mod store;
 
-pub(crate) use store::NAME_TAKEN;
-
 use crate::runtime;
 use serde::Serialize;
 use std::{
@@ -527,7 +525,9 @@ fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, Stri
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
-    store::ensure_unique_across_kinds(&request.name, &runtime::computer_names(app))?;
+    // Held until the computer is registered and saved, so a Linux creation sees it.
+    let reservation =
+        crate::computer_names::reserve(&[request.name.clone()], &|| runtime::computer_names(app))?;
     let (record, cancel, row) = {
         let _admitted = admission()?;
         let mut registry = registry();
@@ -541,6 +541,7 @@ fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, Stri
         registry.entries.push(entry);
         (record, cancel, row)
     };
+    drop(reservation);
     emit(app);
     let app = app.clone();
     std::thread::spawn(move || create_workflow(&app, &data, record, &cancel));

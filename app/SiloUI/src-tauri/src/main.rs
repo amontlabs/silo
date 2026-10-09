@@ -9,6 +9,7 @@ mod chatgpt_app;
 mod clipboard;
 #[cfg(test)]
 mod command_permissions_tests;
+mod computer_names;
 mod computer_use;
 mod creation_inputs;
 mod dependencies;

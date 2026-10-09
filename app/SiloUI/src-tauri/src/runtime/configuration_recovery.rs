@@ -607,12 +607,17 @@ pub(crate) fn recover(app: &AppHandle) -> Result<(), String> {
 
 fn recover_inner(app: &AppHandle) -> Result<(), String> {
     let paths = runtime_paths(app)?;
-    if load(&paths).map_err(|e| e.to_string())?.is_none() {
+    let Some(journal) = load(&paths).map_err(|e| e.to_string())? else {
         return Ok(());
-    }
+    };
     let _guard = OPERATIONS
         .device("Recovering computer configuration")
         .map_err(|_| "Computer configuration lock is unavailable.")?;
+    // Replaying must not add a name a macOS computer took since the interruption.
+    let _reservation = crate::computer_names::reserve(
+        &super::new_names(&journal.previous.computers, &journal.request.computers),
+        &|| crate::macos_computers::names(app),
+    )?;
     let request_id = uuid::Uuid::new_v4().to_string();
     let activity = Mutex::new(ActivityJournal::start(&paths, &request_id)?);
     let progress = |step: &str, name: &str, fraction: u8| {
