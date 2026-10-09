@@ -39,6 +39,7 @@ import type {
   ComputerDetailTab,
 } from "@/features/application/model/application-source"
 import { ComputerConfigurationList } from "@/features/computers/components/computer-configuration-list"
+import { MacosComputersSection } from "@/features/macos-computers/components/macos-computers-section"
 import type { DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
 import { ComputerAction, type ComputerIconState } from "@/features/computers/components/computer-list"
 
@@ -640,6 +641,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               <div role="alert" className="text-sm text-destructive"><ErrorDetails message={configurationOperation.error.message} diagnostic={configurationFailureDiagnostic(configurationOperation)} fallbackSummary="Computer changes failed." /></div>
               <Button variant="outline" size="sm" className="mt-2" disabled={readOnly} onClick={() => actions.dismissComputerConfigurationError()}>Dismiss configuration error</Button>
             </div>}
+            <div className="flex h-full min-h-0 flex-col gap-4">
+            <div className="min-h-0 flex-1">
             <ComputerConfigurationList
               newComputerRequest={readOnly ? undefined : newComputerRequest}
               onNewComputerRequestHandled={onNewComputerRequestHandled}
@@ -744,6 +747,9 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                 }
               }}
             />
+            </div>
+            <MacosComputersSection capacity={deviceCapacityFrom(source.deviceCapacity)} />
+            </div>
           </>
         )}
       </div>

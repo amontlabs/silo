@@ -29,6 +29,8 @@ import { operationQueueFromSearch } from "./operation-queue"
 import { RuntimeMigrationBoundary } from "@/desktop/runtime-migration-boundary"
 import { createFixtureMigrationBackend, fixtureBackupForMode, preUpgradeBackupFixtureModeFromSearch } from "./pre-upgrade-backup"
 import { createFixtureEditorInclude, editorIncludeFixtureModeFromSearch } from "./editor-include"
+import { MacosComputersContext } from "@/features/macos-computers/model/macos-computers"
+import { createFixtureMacosComputersStore } from "./macos-computers"
 import { createComputerUseBridge } from "@/desktop/computer-use-bridge"
 import { ComputerUseProvider } from "@/desktop/computer-use-provider"
 import { createFixturePreparationBackend, preparationFixtureFromSearch } from "./preparation"
@@ -75,6 +77,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
   const chatGptMode = chatGptFixtureFromSearch(window.location.search)
   const chatGptRemoteMode = chatGptFixtureFromSearch(window.location.search, "chatgpt-remote")
   const computerUseBridge = useMemo(() => computerUseMode || chatGptMode || chatGptRemoteMode ? createComputerUseBridge(createFixtureComputerUseBackend(computerUseMode ?? "ready", chatGptMode ?? "ready", chatGptRemoteMode ?? chatGptMode ?? "ready")) : null, [computerUseMode, chatGptMode, chatGptRemoteMode])
+  const macosComputersStore = useMemo(() => createFixtureMacosComputersStore(), [])
   const preparationMode = preparationFixtureFromSearch(window.location.search)
   const preparationStore = useMemo(() => preparationMode ? createPreparationStore(createFixturePreparationBackend(preparationMode)) : null, [preparationMode])
   const queuedSource = operationQueue ? { ...baseSource, operationQueue } : baseSource
@@ -161,5 +164,6 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
     </>
   )
   const withPreparation = preparationStore ? <PreparationProvider store={preparationStore}>{content}</PreparationProvider> : content
-  return computerUseBridge ? <ComputerUseProvider bridge={computerUseBridge}>{withPreparation}</ComputerUseProvider> : withPreparation
+  const withMacos = <MacosComputersContext.Provider value={macosComputersStore}>{withPreparation}</MacosComputersContext.Provider>
+  return computerUseBridge ? <ComputerUseProvider bridge={computerUseBridge}>{withMacos}</ComputerUseProvider> : withMacos
 }
