@@ -43,8 +43,8 @@ START_MODELINE = ['88.75', '1440', '1488', '1520', '1600', '900', '903', '909', 
 XRANDR_READY_SECONDS = 10
 XRANDR_TIMEOUT_SECONDS = 10
 # Receipt revisions the service still runs; only the newest is current.
-STREAMER_RECIPE_VERSIONS = (1, 2, 3)
-STREAMER_CURRENT_RECIPE = 3
+STREAMER_RECIPE_VERSIONS = (1, 2, 3, 4)
+STREAMER_CURRENT_RECIPE = 4
 SELKIES_MAX_ATTEMPTS = 3
 # A stream that stays up this long starts a fresh retry budget, so unrelated
 # crashes hours apart never add up to a failed display.
@@ -605,7 +605,8 @@ def launch_selkies_streamer(account, environment):
             '--enable-https=false', f'--basic-auth-user={USER}',
             f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
             '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
-            '--enable-resize=true', '--use-css-scaling=true|locked',
+            '--enable-resize=true', '--use-css-scaling=false|locked',
+            '--video-streaming-mode=false',
             '--enable-clipboard=true', '--enable-binary-clipboard=true',
             '--clipboard-seamless=false', '--file-transfers=none',
             '--audio-enabled=true', '--audio-bitrate=64000',
