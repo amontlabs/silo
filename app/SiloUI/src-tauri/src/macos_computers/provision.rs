@@ -5,6 +5,7 @@
 //!
 //! The computer's state stays `setting-up` throughout; each step names itself in
 //! the detail. Machines started here have no display.
+use super::setup_log::SetupLog;
 use super::{
     app_data, engine, guest_access, guest_clipboard, guest_computer_use, layout_and_record,
     offline_setup, personalize, recovery, set_detail,
@@ -51,8 +52,15 @@ pub(super) fn run(
         id: record.id.clone(),
         cancel,
         reservation: std::cell::Cell::new(reservation),
+        log: SetupLog::open(app, &record.id),
     };
+    provision.log("setup started");
     let result = provision.steps(record);
+    match &result {
+        Ok(()) => provision.log("setup finished"),
+        Err(Stop::Cancelled) => provision.log("setup cancelled"),
+        Err(Stop::Failed(message)) => provision.log(&format!("setup failed: {message}")),
+    }
     if result.is_err() {
         // Nothing may report the setup as over while the machine can still run.
         provision.ensure_stopped();
@@ -67,11 +75,24 @@ struct Provision<'a> {
     cancel: &'a AtomicU8,
     /// Space set aside for a copy's writes, held by the creation that made it.
     reservation: std::cell::Cell<Option<templates::SpaceReservation>>,
+    log: Option<SetupLog>,
 }
 
 impl Provision<'_> {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst) != RUN
+    }
+
+    fn log(&self, message: &str) {
+        if let Some(log) = &self.log {
+            log.line(message);
+        }
+    }
+
+    fn log_command(&self, what: &str, output: &guest_access::CommandOutput) {
+        if let Some(log) = &self.log {
+            log.command(what, output.status, &output.stdout, &output.stderr);
+        }
     }
 
     fn check(&self) -> Result<(), Stop> {
@@ -85,6 +106,7 @@ impl Provision<'_> {
     /// Names the current step, unless the setup is already ending.
     fn say(&self, step: &str) -> Result<(), Stop> {
         self.check()?;
+        self.log(&format!("step: {step}"));
         set_detail(self.app, &self.id, step);
         Ok(())
     }
@@ -96,6 +118,7 @@ impl Provision<'_> {
         finished: impl FnOnce(&mut SetupProgress),
     ) -> Result<(), Stop> {
         finished(&mut record.setup);
+        self.log(&format!("step finished: {:?}", record.setup));
         store::save(self.layout, record)?;
         let saved = record.clone();
         super::update(self.app, &self.id, |entry| entry.record = saved);
@@ -238,16 +261,13 @@ impl Provision<'_> {
                 &template_login,
                 record,
                 &personalize::command(&script),
-                Some(&personalize::input(&own.password)),
+                Some(&personalize::input(
+                    &own.password,
+                    &guest_access::account(&template_login)?.password,
+                )),
                 PERSONALIZE_COMMAND,
             )?;
-            if output.status != 0 {
-                eprintln!(
-                    "macOS computer personalization failed with status {}: {}",
-                    output.status,
-                    output.stderr.trim()
-                );
-            }
+            self.log_command("personalization script", &output);
             let outcome =
                 personalize::outcome(output.status, &output.stdout).map_err(Stop::Failed)?;
             unallocated = outcome.unallocated;
@@ -272,7 +292,7 @@ impl Provision<'_> {
         if grow {
             let disk = personalize::reconcile_disk(requested, template_gib, unallocated);
             if disk.short {
-                eprintln!("macOS computer personalization: the disk could not be expanded.");
+                self.log("personalization: the disk could not be expanded");
                 shortfall = Some(format!(
                     "Silo could not expand the disk to {requested} GiB, so the computer has {} GiB. It is otherwise ready to start.",
                     disk.gib
@@ -347,7 +367,7 @@ impl Provision<'_> {
     /// credential a new guest has, then checks that the key and `sudo -n` work.
     fn finalize(&self, account: &guest_access::GuestAccount) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
-        finalize_guest(&layout, &record, account).map_err(Stop::Failed)
+        finalize_guest(&layout, &record, account, self.log.as_ref()).map_err(Stop::Failed)
     }
 
     /// Stores English and a US keyboard layout in the running guest's NVRAM, which
@@ -369,12 +389,8 @@ impl Provision<'_> {
                 Stop::Failed(message)
             }
         })?;
+        self.log_command("nvram prev-lang:kbd", &output);
         if output.status != 0 {
-            eprintln!(
-                "macOS computer setup: nvram failed with status {}: {}",
-                output.status,
-                output.stderr.trim()
-            );
             return Err(Stop::Failed(
                 "Silo could not set the language Recovery uses.".into(),
             ));
@@ -399,6 +415,7 @@ impl Provision<'_> {
             None,
             GUEST_COMMAND,
         )?;
+        self.log_command("csrutil status", &output);
         if sip_disabled(&output.stdout) {
             Ok(())
         } else {
@@ -565,6 +582,7 @@ fn finalize_guest(
     layout: &Layout,
     record: &Record,
     account: &guest_access::GuestAccount,
+    log: Option<&SetupLog>,
 ) -> Result<(), String> {
     let public_key = guest_access::public_key(account)?;
     let script = base64_encode(offline_setup::finalization_script(&public_key).as_bytes());
@@ -579,21 +597,26 @@ fn finalize_guest(
         GUEST_COMMAND,
     )?;
     if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-        eprintln!(
-            "macOS computer setup: the account script failed with status {}.\nstdout: {}\nstderr: {}",
-            output.status,
-            output.stdout.trim(),
-            output.stderr.trim()
-        );
+        if let Some(log) = log {
+            log.command(
+                "account script",
+                output.status,
+                &output.stdout,
+                &output.stderr,
+            );
+        }
         return Err(finalization_failure(output.status));
     }
     let output = guest_access::run(layout, record, "/usr/bin/sudo -n true", None, GUEST_COMMAND)?;
     if output.status != 0 {
-        eprintln!(
-            "macOS computer setup: key login or sudo -n failed with status {}: {}",
-            output.status,
-            output.stderr.trim()
-        );
+        if let Some(log) = log {
+            log.command(
+                "key login with sudo -n",
+                output.status,
+                &output.stdout,
+                &output.stderr,
+            );
+        }
         return Err(
             "Silo could not log in to the computer with its key and run administrator commands."
                 .into(),
@@ -734,7 +757,7 @@ mod tests {
         )
         .unwrap();
         println!("password login works at {address}");
-        finalize_guest(&layout, &record, &account).unwrap();
+        finalize_guest(&layout, &record, &account, None).unwrap();
         println!("finalized; key login and sudo -n work");
     }
 }

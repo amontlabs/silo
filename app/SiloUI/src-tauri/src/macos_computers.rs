@@ -25,6 +25,7 @@ mod personalize;
 mod provision;
 mod recovery;
 mod restore_image;
+mod setup_log;
 mod store;
 mod templates;
 
@@ -930,7 +931,9 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
     };
     let made = templates::make(&data, record, layout, version, &protected_templates);
     if let Err(message) = made {
-        eprintln!("macOS computer template could not be saved: {message}");
+        if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
+            log.line(&format!("the template could not be saved: {message}"));
+        }
     }
     refresh_template(app);
 }
@@ -949,6 +952,12 @@ fn perform(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
         Action::Delete => delete(app, id),
         Action::Setup => begin_setup(app, id),
     }
+}
+
+/// The name and retained-log folder of the macOS computer `id`, for the Logs page.
+pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, std::path::PathBuf)> {
+    let (record, _) = computer(id).ok()?;
+    Some((record.name, setup_log::directory(app, id)?))
 }
 
 fn computer(id: &str) -> Result<(Record, State), String> {

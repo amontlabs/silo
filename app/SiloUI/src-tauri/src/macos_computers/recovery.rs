@@ -15,10 +15,11 @@
 use super::engine;
 use super::guest_access::CANCELLED;
 use super::input::{self, KeyEvent, Keyboard, Modifier, PointerKind, TextLine};
+use super::setup_log::SetupLog;
 use super::store::Layout;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const ATTEMPTS: usize = 2;
 const POLL: Duration = Duration::from_millis(1500);
@@ -66,6 +67,11 @@ pub(super) fn disable_sip(
             return Err(CANCELLED.into());
         }
         engine::clear_last_screen(id);
+        if let Some(log) = SetupLog::open(app, id) {
+            log.line(&format!(
+                "turning off System Integrity Protection: Recovery attempt {attempt}"
+            ));
+        }
         engine::start_in_recovery(app, &record, &layout)?;
         let outcome = prepare_window(app, id, &title).and_then(|()| {
             let _lock = InputLock { app, id };
@@ -73,7 +79,12 @@ pub(super) fn disable_sip(
             run(&mut guest, &account.user, &account.password, cancelled)
         });
         match outcome {
-            Ok(()) => return finish(app, id, cancelled),
+            Ok(()) => {
+                if let Some(log) = SetupLog::open(app, id) {
+                    log.line("System Integrity Protection: csrutil disable sent, waiting for halt");
+                }
+                return finish(app, id, cancelled);
+            }
             Err(error) => {
                 if !matches!(error, Failure::Cancelled) {
                     record_failure(app, id, &account.password, &error);
@@ -109,22 +120,18 @@ fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
     // that point recognition cannot be trusted to hide a secret, so the image
     // and the recognized text stay out of the log.
     let before_credentials = matches!(error, Failure::Retry(_) | Failure::WrongLanguage(_));
-    let saved = app.path().app_log_dir().ok().and_then(|logs| {
-        save_evidence(
-            &logs.join("macos-computers").join(id),
-            id,
-            password,
-            before_credentials,
-        )
-    });
+    let Some(log) = SetupLog::open(app, id) else {
+        return;
+    };
+    let saved = save_evidence(log.dir(), id, password, before_credentials);
     match saved {
-        Some(path) => eprintln!(
-            "macOS computer setup: turning off System Integrity Protection failed ({message}) Last screen: {}",
+        Some(path) => log.line(&format!(
+            "turning off System Integrity Protection failed ({message}) Last screen: {}",
             path.display()
-        ),
-        None => eprintln!(
-            "macOS computer setup: turning off System Integrity Protection failed ({message}) No screen was kept."
-        ),
+        )),
+        None => log.line(&format!(
+            "turning off System Integrity Protection failed ({message}) No screen was kept."
+        )),
     }
 }
 

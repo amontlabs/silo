@@ -33,13 +33,14 @@ pub(super) fn script(public_key: &str, computer_name: &str, grow: bool) -> Strin
         "set -e
 IFS= read -r SILO_PASSWORD
 IFS= read -r SILO_KCPASSWORD
-if [ -z \"$SILO_PASSWORD\" ] || [ -z \"$SILO_KCPASSWORD\" ]; then exit {MISSING_SECRETS}; fi
-printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
+IFS= read -r SILO_OLD_PASSWORD
+if [ -z \"$SILO_PASSWORD\" ] || [ -z \"$SILO_KCPASSWORD\" ] || [ -z \"$SILO_OLD_PASSWORD\" ]; then exit {MISSING_SECRETS}; fi
+printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_OLD_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
 printf '%s' \"$SILO_KCPASSWORD\" | /usr/bin/base64 -D > /etc/kcpassword.new
 /usr/sbin/chown root:wheel /etc/kcpassword.new
 /bin/chmod 600 /etc/kcpassword.new
 /bin/mv -f /etc/kcpassword.new /etc/kcpassword
-unset SILO_PASSWORD SILO_KCPASSWORD
+unset SILO_PASSWORD SILO_KCPASSWORD SILO_OLD_PASSWORD
 /usr/sbin/scutil --set ComputerName {name}
 /usr/sbin/scutil --set LocalHostName {name}
 /usr/sbin/scutil --set HostName {name}
@@ -142,9 +143,13 @@ pub(super) fn unallocated(stdout: &str) -> Option<u64> {
 }
 
 /// The standard input of the personalization command.
-pub(super) fn input(password: &str) -> Vec<u8> {
+///
+/// `dscl` changes the password of an account that holds a secure token only when it is
+/// given the old password too: it asks for it after the new one, so the old one (the
+/// template's) is the third line.
+pub(super) fn input(password: &str, old_password: &str) -> Vec<u8> {
     let kcpassword = base64_encode(&offline_setup::kcpassword(password));
-    format!("{password}\n{kcpassword}\n").into_bytes()
+    format!("{password}\n{kcpassword}\n{old_password}\n").into_bytes()
 }
 
 /// The command that runs `script` as root with the key of the account. The script is
@@ -224,9 +229,10 @@ mod tests {
 
     #[test]
     fn the_secrets_travel_on_standard_input() {
-        let input = String::from_utf8(input(PASSWORD)).unwrap();
+        let input = String::from_utf8(input(PASSWORD, "Old-template-password")).unwrap();
         let lines: Vec<_> = input.lines().collect();
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[2], "Old-template-password");
         assert_eq!(lines[0], PASSWORD);
         let kcpassword = base64::engine::general_purpose::STANDARD
             .decode(lines[1])

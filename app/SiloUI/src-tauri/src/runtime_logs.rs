@@ -607,6 +607,11 @@ pub(crate) fn query(app: &AppHandle, request: Query) -> Result<Page, BridgeError
         );
         return remote_page(outcome);
     }
+    // A macOS computer keeps its setup log beside Silo's own logs, not in the runtime.
+    if let Some((name, directory)) = crate::macos_computers::log_target(app, &request.computer_id) {
+        return read(&directory, request, &name, &device_id, &device_name)
+            .map_err(BridgeError::from);
+    }
     let paths = runtime_paths(app)?;
     query_local(&paths, request, &device_id, &device_name).map_err(BridgeError::from)
 }
@@ -1233,6 +1238,22 @@ mod tests {
         );
     }
     use super::*;
+    #[test]
+    fn a_macos_setup_log_is_read_as_the_runtime_source() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join("runtime.log"),
+            "2026-10-10T12:00:00.500000Z step: Preparing Recovery\n2026-10-10T12:00:01Z personalization script: status 1; stdout: ; stderr: boom\n",
+        )
+        .unwrap();
+        let mut query = request();
+        query.source = Some("runtime".into());
+        query.query = Some("boom".into());
+        let page = read(directory.path(), query, "mac", "pc", "Desktop").unwrap();
+        assert_eq!(page.total_matches, 1);
+        assert!(page.entries[0].line.contains("status 1"));
+        assert!(!page.timestamp_estimated);
+    }
     #[test]
     fn boot_failure_is_searchable_with_its_timestamp_context_and_pagination() {
         let directory = tempfile::tempdir().unwrap();
