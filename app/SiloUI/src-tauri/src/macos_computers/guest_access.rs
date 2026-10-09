@@ -12,6 +12,10 @@ use std::{
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -25,6 +29,8 @@ const PASSWORD_LENGTH: usize = 24;
 const CONNECT_TIMEOUT: u64 = 10;
 const SSH_PROBE: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_secs(3);
+/// What `run_capped` reports when the command printed more than its allowance.
+pub(crate) const OUTPUT_TOO_LARGE: &str = "The command in the computer printed too much.";
 pub(super) const CANCELLED: &str = "Setup was cancelled.";
 
 pub(crate) struct CommandOutput {
@@ -372,7 +378,8 @@ fn wait(
         }
         if let Ok(address) = guest_address(&record.mac_address) {
             let args = ssh_args(layout, record, &account, address, "true", auth);
-            if exec(SSH, &args, None, SSH_PROBE, &envs).is_ok_and(|output| output.status == 0) {
+            if exec(SSH, &args, None, SSH_PROBE, &envs, None).is_ok_and(|output| output.status == 0)
+            {
                 return Ok(address);
             }
         }
@@ -391,7 +398,28 @@ pub(crate) fn run(
     stdin: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<CommandOutput, String> {
-    run_as(layout, record, command, stdin, timeout, Auth::Key)
+    run_as(layout, record, command, stdin, timeout, Auth::Key, None)
+}
+
+/// Like `run`, but fails with `OUTPUT_TOO_LARGE` and stops the command once it has printed more
+/// than `max_stdout` bytes, so the host never buffers more than that.
+pub(crate) fn run_capped(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    max_stdout: Option<usize>,
+) -> Result<CommandOutput, String> {
+    run_as(
+        layout,
+        record,
+        command,
+        stdin,
+        timeout,
+        Auth::Key,
+        max_stdout,
+    )
 }
 
 /// Like `run`, logging in with the password.
@@ -402,7 +430,15 @@ pub(super) fn run_with_password(
     stdin: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<CommandOutput, String> {
-    run_as(layout, record, command, stdin, timeout, Auth::Password)
+    run_as(
+        layout,
+        record,
+        command,
+        stdin,
+        timeout,
+        Auth::Password,
+        None,
+    )
 }
 
 fn run_as(
@@ -412,6 +448,7 @@ fn run_as(
     stdin: Option<&[u8]>,
     timeout: Duration,
     auth: Auth,
+    max_stdout: Option<usize>,
 ) -> Result<CommandOutput, String> {
     let account = account(layout)?;
     let address = guest_address(&record.mac_address)?;
@@ -421,6 +458,7 @@ fn run_as(
         stdin,
         timeout,
         &environment(layout, auth)?,
+        max_stdout,
     )
 }
 
@@ -442,6 +480,7 @@ pub(crate) fn copy(
         None,
         timeout,
         &[],
+        None,
     )?;
     if output.status == 0 {
         Ok(())
@@ -460,6 +499,7 @@ fn exec(
     stdin: Option<&[u8]>,
     timeout: Duration,
     envs: &[(String, String)],
+    max_stdout: Option<usize>,
 ) -> Result<CommandOutput, String> {
     let mut child = Command::new(program)
         .args(args)
@@ -481,10 +521,16 @@ fn exec(
             }
         })
     });
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let stdout = drain(child.stdout.take(), max_stdout, exceeded.clone());
+    let stderr = drain(child.stderr.take(), None, Arc::new(AtomicBool::new(false)));
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if exceeded.load(Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(OUTPUT_TOO_LARGE.into());
+        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
@@ -506,11 +552,28 @@ fn exec(
     })
 }
 
-fn drain<R: Read + Send + 'static>(stream: Option<R>) -> thread::JoinHandle<String> {
+/// Reads `stream` to its end. Past `limit` bytes it stops reading, sets `exceeded` and returns
+/// what it has.
+fn drain<R: Read + Send + 'static>(
+    stream: Option<R>,
+    limit: Option<usize>,
+    exceeded: Arc<AtomicBool>,
+) -> thread::JoinHandle<String> {
     thread::spawn(move || {
         let mut text = Vec::new();
-        if let Some(mut stream) = stream {
-            let _ = stream.read_to_end(&mut text);
+        if let Some(stream) = stream {
+            match limit {
+                None => {
+                    let mut stream = stream;
+                    let _ = stream.read_to_end(&mut text);
+                }
+                Some(limit) => {
+                    let _ = stream.take(limit as u64 + 1).read_to_end(&mut text);
+                    if text.len() > limit {
+                        exceeded.store(true, Ordering::SeqCst);
+                    }
+                }
+            }
         }
         String::from_utf8_lossy(&text).into_owned()
     })
@@ -668,6 +731,7 @@ mod tests {
             None,
             Duration::from_secs(5),
             &[],
+            None,
         )
         .unwrap();
         assert_eq!(output.stdout, account_files.password);
@@ -728,6 +792,7 @@ mod tests {
             Some(b"in"),
             Duration::from_secs(5),
             &[("SILO_TEST".to_string(), "env".to_string())],
+            None,
         )
         .unwrap();
         assert_eq!(output.status, 3);
@@ -738,9 +803,38 @@ mod tests {
             &args("sleep 5"),
             None,
             Duration::from_millis(200),
-            &[]
+            &[],
+            None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn output_beyond_the_allowance_stops_the_command() {
+        let args = |script: &str| vec!["-c".to_string(), script.to_string()];
+        let within = exec(
+            "/bin/sh",
+            &args("printf 12345"),
+            None,
+            Duration::from_secs(5),
+            &[],
+            Some(5),
+        )
+        .unwrap();
+        assert_eq!(within.stdout, "12345");
+        let started = Instant::now();
+        let error = exec(
+            "/bin/sh",
+            &args("printf 123456; sleep 30"),
+            None,
+            Duration::from_secs(20),
+            &[],
+            Some(5),
+        )
+        .err()
+        .unwrap();
+        assert_eq!(error, OUTPUT_TOO_LARGE);
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
