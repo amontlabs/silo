@@ -603,34 +603,24 @@ def run_lifecycle():
                     return True
                 WebDriverWait(browser, 240).until(completed)
 
+            def open_computers_overview():
+                click(browser, wait, By.ID, "application-nav-computers")
+                wait.until(lambda _: browser.find_element(By.ID, "application-panel-computers").is_displayed())
+
             def archive_round_trip():
                 use_ipc = os.environ.get("SILO_LINUX_ARCHIVE_IPC") == "1"
 
-                phase("exporting a v4 archive through production backup IPC" if use_ipc else "exporting a v4 archive through the production Backup UI")
-                click(browser, wait, By.ID, "application-nav-backup")
-                wait.until(lambda _: browser.find_element(By.ID, "application-panel-backup").is_displayed())
+                phase("exporting a v4 archive through production export IPC" if use_ipc else "exporting a v4 archive through the computer's Export… action")
+                open_computers_overview()
                 old_archives = set(archive_destination.glob("*.silo-backup"))
-                click(browser, wait, By.XPATH, "//button[normalize-space()='Create backup…']")
-                labels = browser.find_elements(By.XPATH, "//h3[normalize-space()='Create backup']/ancestor::li[1]//label[button[@role='checkbox']]")
-                assert labels, "The production Backup page did not list any selectable computers"
-                assert sum(label.text.strip().startswith(name) for label in labels) == 1, [label.text for label in labels]
-                for label in labels:
-                    checkbox = label.find_element(By.CSS_SELECTOR, "button[role='checkbox']")
-                    selected = label.text.strip().startswith(name)
-                    if (checkbox.get_attribute("aria-checked") == "true") != selected:
-                        checkbox.click()
-                wait.until(lambda _: sum(label.find_element(By.CSS_SELECTOR, "button[role='checkbox']").get_attribute("aria-checked") == "true" for label in labels) == 1)
                 if use_ipc:
-                    backup_state = invoke_native("read_backup_state", {})
-                    assert backup_state["destination"] == str(archive_destination), backup_state
                     invoke_native("start_backup", {"destination": str(archive_destination), "computers": [name]})
                 else:
-                    click(browser, wait, By.XPATH, "//button[normalize-space()='Change…']")
-                    choose_native_path(archive_destination, "Choose a backup destination")
-                    wait.until(lambda _: browser.find_element(By.CSS_SELECTOR, "input[aria-label='Destination']").get_attribute("value") == str(archive_destination))
-                    click(browser, wait, By.XPATH, "//button[normalize-space()='Review backup']")
-                    click(browser, wait, By.XPATH, "//button[normalize-space()='Start backup']")
-                WebDriverWait(browser, 240).until(lambda _: "Backup completed successfully" in body_text(browser))
+                    click(browser, wait, By.CSS_SELECTOR, f"button[aria-label='More actions for {name}']")
+                    click(browser, wait, By.CSS_SELECTOR, f"[role='menuitem'][aria-label='Export {name}']")
+                    choose_native_path(archive_destination, "Choose where to export")
+                    WebDriverWait(browser, 240).until(lambda _: "Exported" in body_text(browser))
+                wait_backup_result("backup", old_archives)
                 archives = sorted(set(archive_destination.glob("*.silo-backup")) - old_archives)
                 assert archives, f"No v4 archive was written to {archive_destination}"
                 with archives[0].open("rb") as package:
@@ -641,25 +631,27 @@ def run_lifecycle():
                     manifest = json.loads(package.read(manifest_size))
                     assert manifest["schemaVersion"] == 4, manifest
                     assert [item["name"] for item in manifest["computers"]] == [name], manifest
-                report.append(("Production backup command" if use_ipc else "Production Backup UI") + " exported a v4 archive containing only the migrated source")
+                report.append(("Production export command" if use_ipc else "Production Export… action") + " exported a v4 archive containing only the migrated source")
 
-                phase("importing the archive through production backup IPC" if use_ipc else "importing the archive through the production Backup UI")
-                click(browser, wait, By.ID, "application-nav-computers")
-                wait.until(lambda _: browser.find_element(By.ID, "application-panel-computers").is_displayed())
-                click(browser, wait, By.ID, "application-nav-backup")
+                phase("importing the archive through production import IPC" if use_ipc else "importing the archive through Import computer…")
+                open_computers_overview()
                 if use_ipc:
                     inspected = invoke_native("inspect_backup_archive", {"archivePath": str(archives[0])})
                     assert inspected["valid"] and inspected["archive"]["computers"] == [name], inspected
                     invoke_native("start_restore", {"archivePath": str(archives[0]), "newName": archive_name, "sourceName": name})
                 else:
-                    click(browser, wait, By.XPATH, "//button[normalize-space()='Choose backup…']")
-                    choose_native_path(archives[0], "Choose a Silo backup")
-                    wait.until(lambda _: "Backup validated" in body_text(browser))
-                    name_input = browser.find_element(By.XPATH, "//label[contains(., 'New computer name')]/input")
+                    click(browser, wait, By.XPATH, "//section[@id='application-panel-computers']//button[normalize-space()='Add']")
+                    click(browser, wait, By.XPATH, "//*[@role='menuitem'][normalize-space()='Import computer…']")
+                    choose_native_path(archives[0], "Choose a Silo export to import")
+                    name_xpath = "//label[normalize-space()='New computer name']/following-sibling::input"
+                    wait.until(lambda _: browser.find_element(By.XPATH, name_xpath).is_displayed())
+                    name_input = browser.find_element(By.XPATH, name_xpath)
                     name_input.clear()
                     name_input.send_keys(archive_name)
-                    click(browser, wait, By.XPATH, "//button[normalize-space()='Restore new computer']")
-                WebDriverWait(browser, 240).until(lambda _: "Computer restored successfully" in body_text(browser))
+                    wait.until(lambda _: browser.find_element(By.XPATH, name_xpath).get_attribute("value") == archive_name)
+                    click(browser, wait, By.XPATH, "//form[.//label[normalize-space()='New computer name']]//button[@type='submit' and normalize-space()='Import']")
+                    WebDriverWait(browser, 240).until(lambda _: f"Imported {archive_name}" in body_text(browser))
+                wait_backup_result("restore")
                 click(browser, wait, By.ID, "application-nav-computers")
                 wait.until(lambda _: has_button(browser, f"Start {name}") and has_button(browser, f"Start {archive_name}"))
                 click(browser, wait, By.CSS_SELECTOR, f"button[aria-label='Start {archive_name}']")
@@ -727,8 +719,8 @@ def run_lifecycle():
                     manifest_size = int.from_bytes(package.read(8), "big")
                     assert 0 < manifest_size <= 1024 * 1024
                     assert [item["name"] for item in json.loads(package.read(manifest_size))["computers"]] == [name]
-                phase("importing the preserved verified v4 archive through production backup IPC")
-                click(browser, wait, By.ID, "application-nav-backup")
+                phase("importing the preserved verified v4 archive through production import IPC")
+                open_computers_overview()
                 inspected = invoke_native("inspect_backup_archive", {"archivePath": str(archive)})
                 assert inspected["valid"] and inspected["archive"]["computers"] == [name], inspected
                 invoke_native("start_restore", {"archivePath": str(archive), "newName": archive_name, "sourceName": name})
