@@ -422,6 +422,9 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                       existingNames={macosComputers.map(({ name }) => name)}
                       otherNames={localLinuxNames}
                       capacity={getDeviceCapacity?.("")}
+                      template={macosState?.template}
+                      minDiskGiB={macosState?.minDiskGiB}
+                      onRemoveTemplate={macos ? () => macos.store.deleteTemplate() : undefined}
                       osField={osField}
                       onCancel={() => { setMacosForm(null); setEditor(null) }}
                       onCreate={request => void createMacos(editor.draft.id, request)}

@@ -8,6 +8,7 @@ export const nativeMacosComputersBackend: MacosComputersBackend = {
   action: (id, action) => invoke("macos_computer_action", { id, action }),
   openDisplay: id => invoke("open_macos_display", { id }),
   clipboard: (id, direction) => invoke("macos_computer_clipboard", { id, direction }),
+  deleteTemplate: () => invoke("delete_macos_template"),
   listen: handler => listen("silo://macos-computers-changed", event => handler(event.payload)),
 }
 

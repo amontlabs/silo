@@ -2,6 +2,7 @@ import { createMacosComputersStore, type MacosComputer, type MacosComputersBacke
 
 export const macosComputerFixtures: readonly MacosComputer[] = [
   { id: "mac-download", name: "sequoia-test", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: null, state: "downloading", progress: 0.42, detail: null, displayOpen: false, installed: false, setupComplete: true },
+  { id: "mac-copy", name: "fast-one", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "copying", progress: null, detail: null, displayOpen: false, installed: false, setupComplete: false },
   { id: "mac-install", name: "release-check", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "installing", progress: 0.63, detail: null, displayOpen: false, installed: false, setupComplete: true },
   { id: "mac-setup", name: "agent-box", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "setting-up", progress: null, detail: "Creating the account", displayOpen: false, installed: true, setupComplete: false },
   { id: "mac-stopped", name: "xcode-build", cpus: 6, memoryGiB: 16, diskGiB: 128, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, installed: true, setupComplete: true },
@@ -11,7 +12,7 @@ export const macosComputerFixtures: readonly MacosComputer[] = [
 
 /** Keeps the computers in memory; start, stop and delete change them at once and create adds a downloading row. */
 export function createFixtureMacosComputersBackend(initial: readonly MacosComputer[] = macosComputerFixtures): MacosComputersBackend {
-  let state: MacosComputersState = { supported: true, unsupportedReason: null, computers: [...initial] }
+  let state: MacosComputersState = { supported: true, unsupportedReason: null, computers: [...initial], template: { macosVersion: "26.6.2", build: "25G83", current: true }, minDiskGiB: 64 }
   const handlers = new Set<(state: unknown) => void>()
   const change = (computers: MacosComputer[]) => {
     state = { ...state, computers }
@@ -35,6 +36,10 @@ export function createFixtureMacosComputersBackend(initial: readonly MacosComput
       else update(id, { state: action === "start" ? "running" : "stopped", displayOpen: false, installed: true, setupComplete: true })
     },
     openDisplay: async id => update(id, { displayOpen: true }),
+    deleteTemplate: async () => {
+      state = { ...state, template: null, minDiskGiB: 32 }
+      handlers.forEach(handler => handler(state))
+    },
     clipboard: async (_id, direction) => direction === "paste-into"
       ? { action: "paste", status: "pasted", content: "text", message: null }
       : { action: "copy", status: "copied", content: "text", message: null },

@@ -4,7 +4,7 @@ import { z } from "zod"
 import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
 
-export const macosComputerStates = ["preparing", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
+export const macosComputerStates = ["preparing", "copying", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
 export type MacosComputerState = (typeof macosComputerStates)[number]
 
 export const macosComputerSchema = z.object({
@@ -23,10 +23,22 @@ export const macosComputerSchema = z.object({
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 
+/** The set-up computer that new macOS computers are copied from. */
+export const macosTemplateSchema = z.object({
+  macosVersion: z.string(),
+  build: z.string(),
+  /** Made by this version of the setup; an older one is kept but not copied from. */
+  current: z.boolean(),
+})
+export type MacosTemplate = z.infer<typeof macosTemplateSchema>
+
 export const macosComputersStateSchema = z.object({
   supported: z.boolean(),
   unsupportedReason: z.string().nullable(),
   computers: z.array(macosComputerSchema),
+  template: macosTemplateSchema.nullable(),
+  /** A copy keeps its template's disk size, so a new computer cannot have less. */
+  minDiskGiB: z.number().int().positive(),
 })
 export type MacosComputersState = z.infer<typeof macosComputersStateSchema>
 
@@ -54,6 +66,8 @@ export interface MacosComputersBackend {
   openDisplay(id: string): Promise<void>
   /** Transfers the clipboard once and resolves to the outcome. */
   clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
+  /** Removes the template; computers made from it are not affected. */
+  deleteTemplate(): Promise<void>
   /** Subscribes to state changes; resolves to an unsubscribe function. */
   listen(handler: (state: unknown) => void): Promise<() => void>
 }
@@ -75,6 +89,7 @@ export interface MacosComputersStore {
   action(id: string, action: MacosComputerAction): Promise<void>
   openDisplay(id: string): Promise<void>
   clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
+  deleteTemplate(): Promise<void>
 }
 
 const initialSnapshot: MacosComputersSnapshot = { state: null, error: null, warning: null }
@@ -192,6 +207,7 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
     action: (id, action) => readAfter(backend.action(id, action)),
     openDisplay: id => backend.openDisplay(id),
     clipboard: (id, direction) => backend.clipboard(id, direction),
+    deleteTemplate: () => readAfter(backend.deleteTemplate()),
   }
 }
 
@@ -210,6 +226,8 @@ export function useMacosComputers(enabled = true): { store: MacosComputersStore;
 export const macosNamePattern = /^[a-z][a-z0-9-]{0,31}$/
 
 export interface MacosLimits {
+  /** The disk of the template new computers are copied from, when it is larger than the general minimum. */
+  minDiskGiB: number
   maxCPUs: number
   maxMemoryGiB: number
   /** Names of this device's computers of other kinds; macOS names stay unique across kinds. */
@@ -231,11 +249,12 @@ export function validateMacosRequest(request: MacosComputerRequest, existingName
   const within = (value: number, min: number, max: number) => Number.isSafeInteger(value) && value >= min && value <= max
   if (!within(request.cpus, macosLimits.minCPUs, maxCPUs)) errors.cpus = `Use ${macosLimits.minCPUs} to ${maxCPUs} CPUs.`
   if (!within(request.memoryGiB, macosLimits.minMemoryGiB, maxMemoryGiB)) errors.memoryGiB = `Use ${macosLimits.minMemoryGiB} to ${maxMemoryGiB} GiB of memory.`
-  if (!within(request.diskGiB, macosLimits.minDiskGiB, macosLimits.maxDiskGiB)) errors.diskGiB = `Use ${macosLimits.minDiskGiB} to ${macosLimits.maxDiskGiB} GiB of disk.`
+  const minDiskGiB = Math.max(limits.minDiskGiB ?? macosLimits.minDiskGiB, macosLimits.minDiskGiB)
+  if (!within(request.diskGiB, minDiskGiB, macosLimits.maxDiskGiB)) errors.diskGiB = `Use ${minDiskGiB} to ${macosLimits.maxDiskGiB} GiB of disk${minDiskGiB > macosLimits.minDiskGiB ? `, as new computers are copied from a template of ${minDiskGiB} GiB` : ""}.`
   return errors
 }
 
-export const isMacosCreating = (computer: MacosComputer) => computer.state === "preparing" || computer.state === "downloading" || computer.state === "installing"
+export const isMacosCreating = (computer: MacosComputer) => computer.state === "preparing" || computer.state === "copying" || computer.state === "downloading" || computer.state === "installing"
 
 export const isMacosSettingUp = (computer: MacosComputer) => computer.state === "setting-up"
 
@@ -246,6 +265,7 @@ export function macosStateLabel(computer: MacosComputer): string {
   const percent = computer.progress == null ? "" : ` ${Math.round(computer.progress * 100)}%`
   switch (computer.state) {
     case "preparing": return "Preparing"
+    case "copying": return "Copying macOS"
     case "downloading": return `Downloading macOS${percent}`
     case "installing": return `Installing macOS${percent}`
     case "setting-up": return "Setting up macOS"

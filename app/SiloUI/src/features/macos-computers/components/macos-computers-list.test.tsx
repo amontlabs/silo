@@ -61,6 +61,8 @@ it("renders every state with its label, resources and progress", async () => {
   await loaded()
   expect(row("sequoia-test")).toHaveTextContent("Downloading macOS 42%")
   expect(within(row("sequoia-test")).getByRole("progressbar", { name: "sequoia-test progress" })).toHaveAttribute("aria-valuenow", "42")
+  expect(row("fast-one")).toHaveTextContent("Copying macOS")
+  expect(within(row("fast-one")).getByRole("button", { name: "Cancel creating fast-one" })).toBeVisible()
   expect(row("release-check")).toHaveTextContent("Installing macOS 63%")
   expect(row("agent-box")).toHaveTextContent("Setting up macOS")
   expect(row("agent-box")).toHaveTextContent("Creating the account")
@@ -282,6 +284,53 @@ it("creates a macOS computer from the editor with the defaults and notice", asyn
   expect(within(row("daily")).getByText("macOS")).toBeVisible()
 })
 
+it("tells the user new computers are copied from a template and lets them remove it", async () => {
+  const base = backendFor([])
+  let template: { macosVersion: string; build: string; current: boolean } | null = { macosVersion: "26.6.2", build: "25G83", current: true }
+  const read = vi.fn(async () => ({ supported: true, unsupportedReason: null, computers: [], template, minDiskGiB: template ? 64 : 32 }))
+  const removable = { ...base, read, deleteTemplate: vi.fn(async () => { template = null }) }
+  const user = userEvent.setup()
+  renderSection(removable)
+  const form = await openNewMacosForm(user)
+  expect(within(form).getByTestId("macos-template-notice")).toHaveTextContent("New macOS computers are copied from a set-up template (macOS 26.6.2); the first takes about 15 minutes, later ones about a minute.")
+  // A copy keeps the template's disk size, so a smaller disk is refused.
+  await user.clear(within(form).getByLabelText("Disk (GiB)"))
+  await user.type(within(form).getByLabelText("Disk (GiB)"), "48")
+  expect(within(form).getByText("Use 64 to 1024 GiB of disk, as new computers are copied from a template of 64 GiB.")).toBeVisible()
+  await user.click(within(form).getByRole("button", { name: "Remove template" }))
+  expect(within(document.querySelector<HTMLElement>("[data-slot=popover-content]")!).getByText(/Computers already created are not affected/)).toBeVisible()
+  await user.click(popoverButton("Remove template"))
+  await waitFor(() => expect(removable.deleteTemplate).toHaveBeenCalledOnce())
+})
+
+it("reports a template that could not be removed and keeps it", async () => {
+  const backend = { ...backendFor([]), deleteTemplate: vi.fn().mockRejectedValue("A computer is being copied from the template. Wait for it to finish.") }
+  const user = userEvent.setup()
+  renderSection(backend)
+  const form = await openNewMacosForm(user)
+  await user.click(within(form).getByRole("button", { name: "Remove template" }))
+  await user.click(popoverButton("Remove template"))
+  await waitFor(() => expect(showActionFailure).toHaveBeenCalledWith("Could not remove the template", "A computer is being copied from the template. Wait for it to finish.", undefined, { native: false }))
+  expect(within(form).getByTestId("macos-template-notice")).toBeVisible()
+})
+
+it("says an older template is no longer used, and shows nothing without one", async () => {
+  const user = userEvent.setup()
+  const base = backendFor([])
+  renderSection({ ...base, read: async () => ({ supported: true, unsupportedReason: null, computers: [], template: { macosVersion: "26.5", build: "25F1", current: false }, minDiskGiB: 32 }) })
+  const form = await openNewMacosForm(user)
+  expect(within(form).getByTestId("macos-template-notice")).toHaveTextContent("A template from an earlier setup (macOS 26.5) is kept but no longer used.")
+})
+
+it("shows no template notice before the first computer has been set up", async () => {
+  const user = userEvent.setup()
+  const base = backendFor([])
+  renderSection({ ...base, read: async () => ({ supported: true, unsupportedReason: null, computers: [], template: null, minDiskGiB: 32 }) })
+  const form = await openNewMacosForm(user)
+  expect(within(form).queryByTestId("macos-template-notice")).not.toBeInTheDocument()
+  expect(within(form).queryByRole("button", { name: "Remove template" })).not.toBeInTheDocument()
+})
+
 it("keeps the form open and reports a failed creation", async () => {
   const backend = { ...backendFor([]), create: vi.fn().mockRejectedValue("Not enough free disk space.") }
   const user = userEvent.setup()
@@ -338,7 +387,7 @@ it("validates the macOS fields against the device and existing names", async () 
   await user.type(within(form).getByLabelText("Memory (GiB)"), "16")
   await user.clear(within(form).getByLabelText("Disk (GiB)"))
   await user.type(within(form).getByLabelText("Disk (GiB)"), "2000")
-  expect(within(form).getByText("Use 32 to 1024 GiB of disk.")).toBeVisible()
+  expect(within(form).getByText("Use 64 to 1024 GiB of disk, as new computers are copied from a template of 64 GiB.")).toBeVisible()
   await user.clear(within(form).getByLabelText("Disk (GiB)"))
   await user.type(within(form).getByLabelText("Disk (GiB)"), "100")
   await user.click(create)
@@ -346,7 +395,7 @@ it("validates the macOS fields against the device and existing names", async () 
 })
 
 it("hides macOS entirely where it is not supported", async () => {
-  const state: MacosComputersState = { supported: false, unsupportedReason: "macOS computers need a Mac with Apple silicon.", computers: [] }
+  const state: MacosComputersState = { supported: false, unsupportedReason: "macOS computers need a Mac with Apple silicon.", computers: [], template: null, minDiskGiB: 32 }
   const backend = { ...backendFor([]), read: vi.fn(async () => state) }
   const user = userEvent.setup()
   renderSection(backend)
@@ -373,18 +422,19 @@ it("re-renders when the backend reports a change", async () => {
   renderSection({ ...base, listen: async handler => { emit = handler; return () => {} } })
   expect(await screen.findByText(/Downloading macOS 42%/)).toBeVisible()
   const [first, ...rest] = macosComputerFixtures
-  act(() => emit({ supported: true, unsupportedReason: null, computers: [{ ...first, state: "installing", progress: 0.1 }, ...rest] }))
+  act(() => emit({ supported: true, unsupportedReason: null, computers: [{ ...first, state: "installing", progress: 0.1 }, ...rest], template: null, minDiskGiB: 32 }))
   expect(await screen.findByText(/Installing macOS 10%/)).toBeVisible()
   expect(screen.queryByText(/Downloading macOS 42%/)).not.toBeInTheDocument()
 })
 
 it("invokes the native commands with the contract's payloads", async () => {
   const handlers = {
-    read_macos_computers: () => ({ supported: true, unsupportedReason: null, computers: [] }),
+    read_macos_computers: () => ({ supported: true, unsupportedReason: null, computers: [], template: null, minDiskGiB: 32 }),
     create_macos_computer: () => macosComputerFixtures[0],
     macos_computer_action: () => undefined,
     open_macos_display: () => undefined,
     macos_computer_clipboard: () => ({ action: "copy", status: "copied", content: "text", message: null }),
+    delete_macos_template: () => undefined,
   }
   const invoke = nativeBridgeMock(handlers)
   mockIPC((command, payload) => invoke(command, payload as Record<string, unknown>), { shouldMockEvents: true })
@@ -393,18 +443,20 @@ it("invokes the native commands with the contract's payloads", async () => {
   await nativeMacosComputersBackend.action("a", "force-stop")
   await nativeMacosComputersBackend.openDisplay("a")
   await nativeMacosComputersBackend.clipboard("a", "copy-from")
+  await nativeMacosComputersBackend.deleteTemplate()
   expect(invoke.mock.calls).toEqual([
     ["read_macos_computers", {}],
     ["create_macos_computer", { request: { name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 } }],
     ["macos_computer_action", { id: "a", action: "force-stop" }],
     ["open_macos_display", { id: "a" }],
     ["macos_computer_clipboard", { id: "a", direction: "copy-from" }],
+    ["delete_macos_template", {}],
   ])
 })
 
 it("shows a read failure with Retry, and recovers", async () => {
   const user = userEvent.setup()
-  const backend = { ...backendFor(macosComputerFixtures), read: vi.fn().mockRejectedValueOnce("The display service did not answer.").mockResolvedValue({ supported: true, unsupportedReason: null, computers: [] }) }
+  const backend = { ...backendFor(macosComputerFixtures), read: vi.fn().mockRejectedValueOnce("The display service did not answer.").mockResolvedValue({ supported: true, unsupportedReason: null, computers: [], template: null, minDiskGiB: 32 }) }
   renderSection(backend)
   expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the macOS computers. The display service did not answer.")
   await user.click(screen.getByRole("button", { name: "Retry" }))
@@ -422,7 +474,7 @@ it("warns about a malformed update and keeps the computers", async () => {
 })
 
 it("shows Retry when the first read is unreadable", async () => {
-  const backend = { ...backendFor([]), read: vi.fn().mockResolvedValueOnce({ nonsense: true }).mockResolvedValue({ supported: true, unsupportedReason: null, computers: [] }) }
+  const backend = { ...backendFor([]), read: vi.fn().mockResolvedValueOnce({ nonsense: true }).mockResolvedValue({ supported: true, unsupportedReason: null, computers: [], template: null, minDiskGiB: 32 }) }
   const user = userEvent.setup()
   renderSection(backend)
   expect(await screen.findByRole("alert")).toHaveTextContent("unreadable")

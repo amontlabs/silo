@@ -22,6 +22,7 @@ import {
 
 const tones: Record<MacosComputer["state"], ComputerRowTone> = {
   preparing: "starting",
+  copying: "starting",
   downloading: "starting",
   installing: "starting",
   "setting-up": "starting",
@@ -105,7 +106,7 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
           align="end"
           tone="destructive"
           title={`Cancel creating ${computer.name}?`}
-          description="The download and installation stop and the computer is removed."
+          description={computer.state === "copying" ? "The copy stops and the computer is removed." : "The download and installation stop and the computer is removed."}
           confirmLabel="Cancel creation"
           cancelLabel="Keep creating"
           onConfirm={() => run("delete")}

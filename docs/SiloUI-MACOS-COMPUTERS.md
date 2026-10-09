@@ -25,6 +25,14 @@ stop and delete. Most other Linux computer features do not apply yet; see
   shown as Setting up macOS with the current step. A failed setup offers Retry
   setup, which resumes at the first unfinished step, and Start, so the screen
   can be inspected.
+  Once a computer has finished setup, and before anyone starts it, Silo keeps a
+  [template](#templates) of it. Later computers are copied from the template
+  instead: Preparing, Copying macOS (the files are cloned, seconds), then Setting
+  up with the detail "Personalizing the computer" (about a minute), so the second
+  computer takes about a minute instead of about fifteen. A copy keeps its
+  template's disk size, so the form's smallest disk is the template's; a larger
+  disk is grown, and the guest's APFS container is expanded to fill it. Without a
+  network, a current template is used even when a newer macOS exists.
 - **Start and stop.** Start boots the computer. Stop shuts macOS down over SSH
   once setup has created the account. Before that it presses the virtual power
   button, which makes macOS ask for confirmation in the computer's screen; the
@@ -40,7 +48,9 @@ stop and delete. Most other Linux computer features do not apply yet; see
   The guest display follows the window size (`automaticallyReconfiguresDisplay`). Closing the window keeps the computer
   running; stopping the computer closes it.
 - **Delete.** Delete removes a stopped or failed computer and its disk. During
-  creation the same action cancels it.
+  creation (including the copy and its personalization) the same action cancels
+  it. Delete never removes the template; the macOS form's Remove template does,
+  unless a copy is being made from it.
 - **Quit.** Quit asks running macOS computers to shut down, then turns off any
   that have not stopped by the deadline, as it stops local Linux computers.
   A creation in progress is cancelled and shows as failed on the next launch.
@@ -55,11 +65,108 @@ All paths are inside the channel's application data directory
 | `macos-computers/<id>/computer.json` | Name, resources, MAC address, installed macOS version |
 | `macos-computers/<id>/disk.img` | Sparse raw disk; uses only what macOS has written |
 | `macos-computers/<id>/auxiliary-storage.img`, `hardware-model.bin`, `machine-identifier.bin` | The framework's per-computer platform identity |
+| `macos-templates/<build>-<setup version>/` | The template: `disk.img`, `auxiliary-storage.img` and `hardware-model.bin` as APFS clones of the source computer, `template.json` (macOS version and build, setup version, disk size, creation time, source computer), and `template-access/` (mode 0700), the source computer's password and SSH key |
 | `macos-restore-images/<file>.ipsw` | The last downloaded restore image, kept so the next computer does not download it again; a `.partial` file resumes an interrupted download |
 
 macOS computers are not entries in the MicroSandbox registry
 (`computers.json`), so the Linux lifecycle, health, backup and Connections code
 never sees them.
+
+## Templates
+
+The first computer that finishes setup is the expensive one: a 20 GB download, an
+install, three boots and a Recovery session. Silo keeps its result as a
+template, and every later computer starts from a copy of it.
+
+**Making one.** At the end of setup, with the computer stopped and before the
+user could start it, Silo clones `disk.img`, `auxiliary-storage.img` and
+`hardware-model.bin` with `clonefile` (copy-on-write: the template costs only
+what the computer later changes) into `macos-templates/<build>-<setup version>/`,
+writes `template.json`, and copies the computer's guest-access secrets to
+`template-access/`. The folder is built under a partial name and renamed, so an
+interrupted run leaves nothing a copy could use. Only the newest template is
+kept: making one removes older ones, except any a copy is being made from. A
+computer qualifies only if it came from an installation (not from a template),
+finished all four setup steps, and was never started by the user afterwards
+(`pristine` in `computer.json`, cleared by Start). Computers created before
+templates existed never qualify.
+
+**Setup version.** A hash of everything setup installs: the pinned ChatGPT app
+and LCU locks, the guest script, the offline account setup and the initial
+computer use approval mode. A template with a different setup version is never
+copied, so changing a pin or the script makes the next computer install from
+scratch and produce a new template.
+
+**Copying.** `create_macos_computer` asks the framework for the newest supported
+macOS as before. A template of that build with the current setup version is
+copied; if the lookup fails (offline) the newest current template is copied;
+otherwise the computer is installed. Silo checks free space (the copy writes a
+few GB; it keeps 5 GB free for the Mac), clones the three files into the new
+computer's folder, writes a new machine identifier (`VZMacMachineIdentifier`) and
+uses the MAC address the computer was created with. The template's secrets are
+not copied into the computer's folder. If the data folder's volume cannot clone
+files (not APFS), the computer is installed instead.
+
+The auxiliary storage carries over because it holds the NVRAM, and System
+Integrity Protection's setting lives in NVRAM: a copy boots with it disabled, as
+the template did. LCU, the ChatGPT app and the TCC rows are on the disk.
+
+**Personalizing.** The copy still has the template's password, SSH key and host
+keys, so an agent in one computer could log in to every other computer made from
+the same template. Setup therefore ends with a step the template never needed.
+Silo boots the copy without a display and logs in as `silo` with the template's
+key from `template-access/`, then runs one script as root (`personalize.rs`):
+
+- sets the account password to the copy's own, with `dscl . -passwd` reading it
+  from standard input, and rewrites `/etc/kcpassword` for it (the same encoder as
+  the offline setup); both arrive on the SSH command's standard input, never in
+  an argument, the script or the environment;
+- replaces `/etc/ssh/ssh_host_*` (`ssh-keygen -A`) and sets `ComputerName`,
+  `LocalHostName` and `HostName` from the computer's name;
+- removes the contents of `~/Library/Keychains`. The login keychain is locked
+  with the old password, and macOS asks to unlock it at the next automatic login
+  when the password changes. Deleting it in the copy, rather than leaving it out of
+  the template, keeps the template an exact image of a finished computer, and
+  macOS creates a fresh keychain, unlocked with the new password, at the next
+  login;
+- when the disk is larger than the template's, expands the APFS container with
+  `diskutil apfs resizeContainer` (after `repairDisk`) on the container's
+  physical store, found with `diskutil info`. If the container does not reach the
+  requested size the computer keeps working with the template's space and its
+  recorded disk size says so;
+- replaces `authorized_keys` with the copy's own public key, as its last change, so
+  a run cut short can start again with the template's key. A run that already got
+  that far is recognised by the copy's own key answering.
+
+Silo then shuts the copy down with its own key, forgets the known hosts (the host
+keys changed), boots it again and checks `csrutil status`, that LCU's receipt is
+present, and that macOS logged in as `silo` on its own with the new password. The
+state is `setting-up` until then; Retry setup resumes an interrupted
+personalization, and Quit and Delete end it like any setup. While a computer
+waits for its personalization, its template cannot be removed.
+
+**Status.** Implemented and unit-tested. Not yet run against a live guest: that a
+copy boots with the new machine identifier and keeps SIP disabled, that `dscl`
+reads the password from standard input over SSH, that the fresh login keychain
+raises no dialog, and that the container expands (macOS keeps its Recovery
+partition after the container on a framework-installed disk, which may stop it).
+
+**Prior art.**
+
+| Product | Mechanism | Verdict |
+| --- | --- | --- |
+| Cua `cua-vmm` (MIT, [commit ba4c636](https://github.com/trycua/cua/blob/ba4c6369660ab4a9c4d3d8af942bc53ad376615f/libs/cua/crates/cua-vmm/src/lume/mod.rs)) | A base VM per image, `clonefile` per create, free-space check before the clone, a guard that deletes an interrupted clone, bookkeeping of owned VMs, resources applied before the first boot | Structure reused: base, space check, clone, resources |
+| Lume (MIT, `LumeController.clone`) | Clones the VM folder with `clonefile`, then a new MAC address and a new `VZMacMachineIdentifier`; grows a disk, never shrinks it | Reused: what a copy changes, grow-only disks. Lume also rewrites the GPT to grow a macOS disk; Silo expands the container in the guest instead |
+| Tart (FSL, read for insight only) | `tart clone` is a clonefile of the VM folder with a new MAC address; `tart set --disk-size` only grows | Same model; no code used |
+| Cua Spaces (FSL-1.1-MIT) | Hosted spaces built on cua-vmm | Not used: license |
+| VMPal | Clones a VM and keeps a Base OS; Tools helper in the guest | Not reusable; proprietary |
+
+**Why Silo cannot ship a pre-installed image.** Apple's macOS license lets a
+Mac's owner run up to two macOS virtual machines on that Mac; it does not allow
+redistributing macOS, and the restore image is downloaded from Apple for each
+Mac. A downloadable pre-installed image would be a redistribution of macOS, so
+Silo installs on the user's own Mac and shares copy-on-write blocks only between
+that Mac's own computers.
 
 ## Provisioning for computer use
 
@@ -182,12 +289,12 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Remote computers (Connections) | None. The view must live in the process that runs the computer, so a computer on another device would need a streamed or VNC path, and Apple's license excludes service-style use |
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
-| Shared copies of one installation | None. Each computer installs its own macOS (about 21 GB); APFS clones of a set-up template would share blocks |
+| Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: checkpoints from clones, a template per macOS build kept side by side, and shrinking a template's disk |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
 | Export, import and backup | None |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
 | Shared folders | None. The framework offers a VirtioFS share |
-| Editing resources after creation | None. CPUs and memory are fixed at creation; disk size cannot change |
+| Editing resources after creation | None. CPUs and memory are fixed at creation; disk size cannot change. A new computer's disk is at least its template's |
 | Status panel, tray, notifications, start with Silo | None |
 | Linux devices and Intel Macs | Not possible: the framework runs macOS guests only on Apple Silicon |
 

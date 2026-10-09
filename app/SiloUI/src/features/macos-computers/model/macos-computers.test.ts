@@ -13,18 +13,21 @@ import {
 } from "./macos-computers"
 
 const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, installed: true, setupComplete: true }
-const state = { supported: true, unsupportedReason: null, computers: [computer] }
+const state = { supported: true, unsupportedReason: null, computers: [computer], template: { macosVersion: "26.6.2", build: "25G83", current: true }, minDiskGiB: 64 }
 
 describe("macOS computers payload", () => {
   it("parses the native state", () => {
     expect(parseMacosComputersState(state)).toEqual(state)
-    expect(parseMacosComputersState({ supported: false, unsupportedReason: "Requires Apple silicon.", computers: [] }).supported).toBe(false)
+    expect(parseMacosComputersState({ supported: false, unsupportedReason: "Requires Apple silicon.", computers: [], template: null, minDiskGiB: 32 }).supported).toBe(false)
   })
 
   it("rejects unknown states and out-of-range progress", () => {
     expect(() => parseMacosComputersState({ ...state, computers: [{ ...computer, state: "paused" }] })).toThrow()
     expect(() => parseMacosComputersState({ ...state, computers: [{ ...computer, progress: 1.5 }] })).toThrow()
     expect(() => parseMacosComputersState({ supported: true, computers: [] })).toThrow()
+    const { template: _template, ...withoutTemplate } = state
+    expect(() => parseMacosComputersState(withoutTemplate)).toThrow()
+    expect(() => parseMacosComputersState({ ...state, minDiskGiB: 0 })).toThrow()
     const { setupComplete: _omitted, ...withoutSetup } = computer
     expect(() => parseMacosComputersState({ ...state, computers: [withoutSetup] })).toThrow()
     const { installed: _installed, ...withoutInstalled } = computer
@@ -85,6 +88,9 @@ describe("validateMacosRequest", () => {
     expect(validateMacosRequest({ ...valid, memoryGiB: 3 }, []).memoryGiB).toBeDefined()
     expect(validateMacosRequest({ ...valid, memoryGiB: 33 }, [], { maxMemoryGiB: 32 }).memoryGiB).toBeDefined()
     expect(validateMacosRequest({ ...valid, diskGiB: 31 }, []).diskGiB).toBeDefined()
+    expect(validateMacosRequest({ ...valid, diskGiB: 63 }, [], { minDiskGiB: 64 }).diskGiB).toContain("template of 64 GiB")
+    expect(validateMacosRequest({ ...valid, diskGiB: 64 }, [], { minDiskGiB: 64 }).diskGiB).toBeUndefined()
+    expect(validateMacosRequest({ ...valid, diskGiB: 32 }, [], { minDiskGiB: 16 }).diskGiB).toBeUndefined()
     expect(validateMacosRequest({ ...valid, diskGiB: 1025 }, []).diskGiB).toBeDefined()
     expect(validateMacosRequest({ ...valid, diskGiB: Number.NaN }, []).diskGiB).toBeDefined()
   })
@@ -99,6 +105,7 @@ describe("createMacosComputersStore", () => {
       create: vi.fn(async () => ({ ...computer, id: "b", name: "new", state: "preparing" })),
       action: vi.fn(async () => {}),
       openDisplay: vi.fn(async () => {}),
+      deleteTemplate: vi.fn(async () => {}),
       clipboard: vi.fn(async () => ({ action: "paste" as const, status: "pasted" as const })),
       listen: vi.fn(async next => { handler = next; return unlisten }),
     }
