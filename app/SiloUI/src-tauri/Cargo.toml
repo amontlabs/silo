@@ -48,6 +48,10 @@ objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSettings", "UNUserNotificationCenter", "block2"] }
 block2 = "0.6"
 
+# Apple Virtualization.framework bindings for macOS computers (Zlib OR Apache-2.0 OR MIT).
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+objc2-virtualization = "0.3.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3.6"
 # logind delay inhibitor for graceful shutdown (F-20). Already in the graph through ksni.

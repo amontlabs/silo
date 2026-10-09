@@ -104,17 +104,21 @@ pub(crate) fn stop_local_computers(
                 // cannot restore listeners while local computer shutdown is in progress.
                 crate::ssh_access::close_all();
                 crate::desktop_viewer::close_all();
+                // macOS computers live in this process. Quit runs on a worker thread, so the
+                // main thread stays free for the framework's callbacks while they stop.
+                let macos = crate::macos_computers::stop_all(app, deadline);
                 // With the storage migration unfinished no runtime is in use, so no computer of this
                 // Silo can be running and Quit has nothing to stop.
                 let Some(paths) = runtime_paths_if_in_use(app)? else {
-                    return Ok(());
+                    return macos;
                 };
                 // The quit overlay follows the queue and shows which computer is stopping (D-29).
                 let progress = |name: &str, index: usize, total: usize| {
                     guard.relabel(&format!("Stopping {name} ({index} of {total})"));
                 };
                 stop_local_computers_with(&ProcessRunner, &paths, &progress)
-                    .map_err(|error| safe_activity_error(&error))
+                    .map_err(|error| safe_activity_error(&error))?;
+                macos
             })
         },
     );

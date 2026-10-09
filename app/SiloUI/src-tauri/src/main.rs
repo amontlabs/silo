@@ -36,6 +36,7 @@ mod host_push_operations;
 mod host_push_transport;
 mod log_export;
 mod log_retention;
+mod macos_computers;
 mod network;
 mod notifications;
 mod owned_tunnel;
@@ -136,6 +137,10 @@ fn main() {
             desktop_viewer_media::desktop_viewer_set_audio,
             desktop_viewer_media::desktop_viewer_reset_screen,
             desktop_viewer::desktop_viewer_clipboard,
+            macos_computers::read_macos_computers,
+            macos_computers::create_macos_computer,
+            macos_computers::macos_computer_action,
+            macos_computers::open_macos_display,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,
