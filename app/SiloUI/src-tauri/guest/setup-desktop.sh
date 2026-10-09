@@ -14,6 +14,7 @@ esac
 helper=${SILO_DESKTOP_SERVICE_SOURCE:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/desktop-service.py}
 streamer_lock=${SILO_DESKTOP_STREAMER_LOCK_SOURCE:-$(dirname -- "$helper")/desktop-streamer-lock.json}
 selkies_web_client_patch=${SILO_SELKIES_WEB_CLIENT_PATCH_SOURCE:-$(dirname -- "$helper")/patch-selkies-web-client.py}
+selkies_display_patch=${SILO_SELKIES_DISPLAY_PATCH_SOURCE:-$(dirname -- "$helper")/patch-selkies-display-scaling.py}
 desktop_packages_file=${SILO_DESKTOP_PACKAGES_SOURCE:-$(dirname -- "$helper")/desktop-packages.txt}
 accessibility_source=${SILO_ACCESSIBILITY_HELPER_SOURCE:-$(dirname -- "$helper")/silo-accessibility.py}
 [ -f "$helper" ] || { echo 'Desktop lifecycle helper is missing' >&2; exit 1; }
@@ -30,7 +31,7 @@ import json, re, sys
 # SILO_STREAMER_LOCK_V1
 lock = json.load(open(sys.argv[1], encoding='utf-8'))
 if (set(lock) != {'schemaVersion', 'recipeVersion', 'version', 'resolution', 'assets'} or
-        lock['schemaVersion'] != 1 or lock['recipeVersion'] != 3 or
+        lock['schemaVersion'] != 1 or lock['recipeVersion'] != 4 or
         lock['version'] != '2.0.0' or lock['resolution'] != {'width': 1440, 'height': 900} or
         set(lock['assets']) != {'amd64', 'arm64'}):
     raise SystemExit('Invalid bundled desktop streamer lock')
@@ -135,6 +136,8 @@ install_streamer() {
     [ -x /usr/bin/selkies ] || { echo 'Pinned desktop streamer did not install /usr/bin/selkies' >&2; exit 1; }
     [ -f "$selkies_web_client_patch" ] || { echo 'Selkies web client patch helper is missing' >&2; exit 1; }
     python3 "$selkies_web_client_patch" "$arch"
+    [ -f "$selkies_display_patch" ] || { echo 'Selkies display scaling patch helper is missing' >&2; exit 1; }
+    python3 "$selkies_display_patch" "$arch"
     ensure_connection_credentials "$connection_policy"
     write_streamer_receipt
     rm -f "$package"
@@ -220,8 +223,9 @@ PY
     [ -x /usr/local/libexec/silo-accessibility ] || { echo 'The guest image is missing the accessibility helper'; return 0; }
     [ -f /etc/xdg/autostart/silo-accessibility.desktop ] || { echo 'The guest image is missing the accessibility autostart entry'; return 0; }
     [ -f /etc/dconf/profile/user ] && [ -f /etc/dconf/db/local ] && grep -qx 'toolkit-accessibility=true' /etc/dconf/db/local.d/00-silo-accessibility 2>/dev/null || { echo 'The guest image is missing the accessibility settings'; return 0; }
-    # The patcher needs exactly the pinned web client; it is idempotent.
+    # The patchers need exactly the pinned web client and display module; they are idempotent.
     [ -f "$selkies_web_client_patch" ] && python3 "$selkies_web_client_patch" "$arch" >/dev/null 2>&1 || { echo 'The Selkies web client is missing or damaged'; return 0; }
+    [ -f "$selkies_display_patch" ] && python3 "$selkies_display_patch" "$arch" >/dev/null 2>&1 || { echo 'The Selkies display module is missing or damaged'; return 0; }
     echo ok
 }
 # Restore the accessibility and default-application settings of the v4 guest image
@@ -248,6 +252,8 @@ restore_image_defaults() {
 provision_image_desktop() {
     [ -f "$selkies_web_client_patch" ] || { echo 'Selkies web client patch helper is missing' >&2; exit 1; }
     python3 "$selkies_web_client_patch" "$arch"
+    [ -f "$selkies_display_patch" ] || { echo 'Selkies display scaling patch helper is missing' >&2; exit 1; }
+    python3 "$selkies_display_patch" "$arch"
     ensure_connection_credentials create
     write_streamer_receipt
     if [ ! -d "$desktop_home/.vnc" ]; then
@@ -275,6 +281,14 @@ if [ -f /var/lib/silo-desktop/installed.json ]; then
     # repair it through the full install below, which keeps the connection
     # credentials. Healthy, legacy and Kasm installs are only refreshed.
     if [ "$v4_guest" = 0 ] || [ "$image_problem" = ok ] || [ ! -f /var/lib/silo-desktop/streamer.json ]; then
+        # The helper launches Selkies with the device-pixel flags, which need the patched
+        # display module; a receipt from an earlier recipe still has the unpatched one.
+        if [ -f /var/lib/silo-desktop/streamer.json ]; then
+            [ -f "$selkies_web_client_patch" ] || { echo 'Selkies web client patch helper is missing' >&2; exit 1; }
+            python3 "$selkies_web_client_patch" "$arch"
+            [ -f "$selkies_display_patch" ] || { echo 'Selkies display scaling patch helper is missing' >&2; exit 1; }
+            python3 "$selkies_display_patch" "$arch"
+        fi
         install -m 0755 "$helper" /usr/local/bin/silo-desktop
         configure_session
         ensure_theme

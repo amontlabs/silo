@@ -18,6 +18,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 
 STATE = Path('/var/lib/silo-desktop')
 RUN = Path('/run/silo-desktop')
@@ -43,8 +44,8 @@ START_MODELINE = ['88.75', '1440', '1488', '1520', '1600', '900', '903', '909', 
 XRANDR_READY_SECONDS = 10
 XRANDR_TIMEOUT_SECONDS = 10
 # Receipt revisions the service still runs; only the newest is current.
-STREAMER_RECIPE_VERSIONS = (1, 2, 3)
-STREAMER_CURRENT_RECIPE = 3
+STREAMER_RECIPE_VERSIONS = (1, 2, 3, 4)
+STREAMER_CURRENT_RECIPE = 4
 SELKIES_MAX_ATTEMPTS = 3
 # A stream that stays up this long starts a fresh retry budget, so unrelated
 # crashes hours apart never add up to a failed display.
@@ -605,7 +606,8 @@ def launch_selkies_streamer(account, environment):
             '--enable-https=false', f'--basic-auth-user={USER}',
             f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
             '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
-            '--enable-resize=true', '--use-css-scaling=true|locked',
+            '--enable-resize=true', '--use-css-scaling=false|locked',
+            '--video-streaming-mode=false', '--framerate=60,8-60',
             '--enable-clipboard=true', '--enable-binary-clipboard=true',
             '--clipboard-seamless=false', '--file-transfers=none',
             '--audio-enabled=true', '--audio-bitrate=64000',
@@ -887,6 +889,103 @@ def log_line(text):
         pass
 
 
+XFCONF_DIRECTORY = ('.config', 'xfce4', 'xfconf', 'xfce-perchannel-xml')
+STOCK_WM_THEMES = ('Default', 'Default-hdpi', 'Default-xhdpi')
+
+
+def open_directory_chain(home, names):
+    """Open `home` and then each name below it without following symbolic links."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open(home, flags)
+    try:
+        for name in names:
+            child = os.open(name, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def xfconf_property(channel, path):
+    node = channel
+    for name in path:
+        node = next((child for child in node.findall('property')
+                     if child.get('name') == name), None)
+        if node is None:
+            return None
+    return node
+
+
+def reset_xfconf_file(directory_fd, name, uid, changes):
+    """Set existing properties of one persisted xfconf channel file.
+
+    `changes` maps a property path to (type, value, only_if), where only_if says
+    whether the current value may be replaced. Absent files and properties stay
+    absent; the file keeps its owner and mode."""
+    try:
+        # O_NONBLOCK: a FIFO in place of the file must not block before the check below.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return False
+    with os.fdopen(fd, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != uid:
+            raise RuntimeError(f'{name} is not a regular file owned by the desktop account')
+        tree = ElementTree.parse(source)
+    changed = False
+    for path, (kind, value, replaceable) in changes.items():
+        node = xfconf_property(tree.getroot(), path)
+        if (node is not None and node.get('type') == kind and node.get('value') != value
+                and replaceable(node.get('value', ''))):
+            node.set('value', value)
+            changed = True
+    if not changed:
+        return False
+    temporary = f'.{name}.{secrets.token_hex(8)}'
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600,
+                 dir_fd=directory_fd)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            tree.write(output, encoding='UTF-8', xml_declaration=True)
+            output.write(b'\n')
+            output.flush()
+            os.fchmod(output.fileno(), stat.S_IMODE(info.st_mode))
+            os.fchown(output.fileno(), info.st_uid, info.st_gid)
+            os.fsync(output.fileno())
+        os.replace(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+    return True
+
+
+def reset_desktop_density(account, home=None):
+    """Return the persisted Xfce density to 96 DPI, scale 1 and the stock window theme.
+
+    A viewer leaves its density in the account's xfconf files and Selkies re-applies
+    it when it starts, so a fresh desktop session clears it before Xfce reads them."""
+    home = HOME if home is None else home
+    try:
+        directory_fd = open_directory_chain(home, XFCONF_DIRECTORY)
+    except FileNotFoundError:
+        return
+    try:
+        is_integer = lambda value: re.fullmatch(r'-?\d+', value) is not None
+        reset_xfconf_file(directory_fd, 'xsettings.xml', account.pw_uid, {
+            ('Xft', 'DPI'): ('int', '96', is_integer),
+            ('Gdk', 'WindowScalingFactor'): ('int', '1', is_integer),
+            ('Gtk', 'CursorThemeSize'): ('int', '32', is_integer)})
+        reset_xfconf_file(directory_fd, 'xfwm4.xml', account.pw_uid, {
+            ('general', 'theme'): ('string', 'Default', lambda value: value in STOCK_WM_THEMES)})
+    finally:
+        os.close(directory_fd)
+
+
 def start_session_processes(commands, environment, account, state, children, stopping,
                             after_launch=None):
     """Launch the session processes in order, retrying a failed launch with backoff.
@@ -975,6 +1074,10 @@ def supervise_selkies():
                                XDG_RUNTIME_DIR=str(RUN / 'user'), XDG_CURRENT_DESKTOP='XFCE',
                                PULSE_RUNTIME_PATH=str(RUN / 'user/pulse'),
                                PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}')
+            try:
+                reset_desktop_density(account)
+            except Exception as error:
+                log_line(f'Could not reset the persisted desktop density: {error}')
             commands = [
                 ('xvfb', ['Xvfb', ':1', '-screen', '0', XVFB_SCREEN, '+extension', 'RANDR',
                           '-noreset', '-nolisten', 'tcp', '-auth', str(RUN / 'user/Xauthority')]),

@@ -143,6 +143,20 @@ static VIEWERS: OnceLock<Mutex<HashMap<String, Viewer>>> = OnceLock::new();
 fn viewers() -> &'static Mutex<HashMap<String, Viewer>> {
     VIEWERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
+/// Labels of the viewer windows with a live connection.
+#[cfg(debug_assertions)]
+pub(crate) fn viewer_labels() -> Vec<String> {
+    viewers()
+        .lock()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|(_, viewer)| viewer.proxy.is_some())
+                .map(|(label, _)| label.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 pub(crate) fn require_computer(window: &Window, computer: &str) -> Result<(), String> {
     if window.label() == "main" {
         return Ok(());

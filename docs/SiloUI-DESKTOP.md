@@ -47,7 +47,7 @@ as the previous boot's (boots are nearly deterministic) made PulseAudio exit wit
 computer use reported "The Linux desktop was not running". Reproduced on the first
 restart of a built-in computer; intermittent on restart and on import.
 
-## Selkies settings, screen size and recipe 3
+## Selkies settings, screen size and recipe 4
 
 `launch_selkies_streamer` in `guest/desktop-service.py` starts Selkies 2.0.0 with
 these settings. Syntax is from `src/selkies/settings.py` at tag 2.0.0: a bool is on
@@ -63,7 +63,9 @@ suffix stops the client changing it. `enable_clipboard` is a string
 | `--microphone-enabled` | `false\|locked` | The server answers microphone data with `MICROPHONE_DISABLED` (`websockets_mode.py`). |
 | `--ui-sidebar-show-audio-settings` | `false` | The guest sidebar shows no audio section. |
 | `--enable-resize` | `true` | The screen follows the viewer window. |
-| `--use-css-scaling` | `true\|locked` | The client sends the window size in logical pixels and stretches the canvas, so a Retina window does not multiply the pixels the guest encodes. |
+| `--use-css-scaling` | `false\|locked` | The client sends the window size in device pixels and its DPI (a 1192x736 point window on a Retina display requests 2384x1472 at 192 DPI), so the guest renders at the display's full resolution. The display-scaling patch below turns that DPI into a correctly scaled Xfce. |
+| `--video-streaming-mode` | `false` | Selkies' "Turbo" mode is off: frames are encoded only when the screen changes, instead of continuously. An idle desktop at 2x costs about 4% of a core rather than 60%, with no added latency. |
+| `--framerate` | `60,8-60` | 60 fps by default and at most; the frame-size cap below assumes it. 120 fps lowered no latency in measurements. |
 | `--mode`, `--enable-dual-mode` | `websockets`, `false\|locked` | The client cannot switch to WebRTC. |
 
 **Screen size.** Xvfb 21.1 caps RandR at the size it was started with, so it starts
@@ -85,9 +87,47 @@ expect. The streamer receipt's `resolution` (and the lock's) is the start size,
 not the current size; a desktop resized by a viewer is healthy, and the
 receipt check never compares against the live screen.
 
-**Recipe 3.** `recipeVersion` in `desktop-streamer-lock.json` is 3. The service
-accepts receipts 1, 2 and 3. An older receipt is a runnable desktop with an
-optional update: the helper reports `updateAvailable` and leaves `updateRequired`
+**Display scaling patch.** Selkies' Xfce path only sets `xsettings /Xft/DPI` and
+`/Gtk/CursorThemeSize` from the client DPI, which at 192 DPI gives sharp but
+mixed-scale UI (tiny panel and desktop icons, overlapping clock).
+`guest/patch-selkies-display-scaling.py` patches the installed
+`selkies/display_utils.py` and `selkies/websockets_mode.py` (found under `/opt/selkies/lib/python*/site-packages`) the
+way the web client patcher patches its asset: it accepts only the pinned 2.0.0 file
+(SHA-256 `b00e3f43...ab84` and `1d86b009...cebc`, the same on amd64 and arm64), rewrites it atomically
+keeping mode and owner, is idempotent, and exits non-zero with a message on any
+other file. `_run_xfconf` then treats a density that is a whole multiple of 96 from
+2x up as an integer `/Gdk/WindowScalingFactor` with `/Xft/DPI` at 96 and
+`/Gtk/CursorThemeSize` sized from the full density (`round(dpi / 96 * 32)`, 64 at 192 DPI),
+because GTK passes it to Xcursor without the window scale and Selkies divides the captured
+cursor by the viewer density (any other density stays on the font DPI alone, as before).
+A lowered scale is written before the DPI and a raised one after it, so the session
+never renders at the product of the old and new factors. If `xfwm4 /general/theme`
+is `Default`, `Default-hdpi` or `Default-xhdpi` it becomes `Default-xhdpi` at scale 2
+or more and `Default` otherwise (best effort; other themes are left alone).
+`desktop_dpi()`, which `restore_dpi` uses at startup, returns the stored font DPI
+times the stored scale, so a restart re-applies the same 2x state instead of
+collapsing to 1x. A streamer-only restart keeps that density; a fresh desktop session does
+not: before Xvfb and Xfce start, `silo-desktop` resets the `silo` account's persisted
+`xsettings.xml` (`Xft/DPI` 96, `Gdk/WindowScalingFactor` 1, `Gtk/CursorThemeSize` 32) and an
+`xfwm4.xml` stock theme to `Default`, so an agent with no viewer gets the 1440x900 screen at
+1x. Only existing integer and stock-theme properties are edited (no symlinks followed,
+owner and mode kept, atomic replace). This mirrors Selkies' MATE path and is a candidate upstream fix.
+
+The same patch caps the screen so a 60 fps stream stays within H.264 level 5.2 (2,073,600
+macroblocks per second, so at most 34560 macroblocks of 16x16 per frame, about 8.8 Mpx, for
+example 3840x2160); beyond it x264 signals a higher level and the macOS WebKit decoder refuses
+the stream (verified live: 4080x2412 and 3960x2338 both failed). `fit_frame_size` in
+`display_utils.py` scales a larger requested size down at the same aspect ratio (each side
+rounded down to even), for both viewer resizes (`parse_resize_dims`) and the initial size in
+`websockets_mode.py`. `--framerate=60,8-60` keeps clients from raising the rate past the cap's
+assumption. In a very large window (a fullscreen Retina viewer asking for about 4080x2508) the
+viewer detects the smaller
+realized resolution and shows a slightly scaled picture fitted to the window.
+
+**Recipe 4.** `recipeVersion` in `desktop-streamer-lock.json` is 4. The service
+accepts receipts 1, 2, 3 and 4. An older receipt is a runnable desktop with an
+optional update (a rerun of `setup-desktop.sh install` on such a computer first applies
+both Selkies patches, so the new flags never meet unpatched Selkies): the helper reports `updateAvailable` and leaves `updateRequired`
 false. `updateRequired` is only for a receipt the service cannot run (invalid or
 unknown revision), where Start is replaced by "Update desktop".
 
@@ -101,7 +141,7 @@ command and compares its `recipeVersion` with the bundled lock's, but only when 
 helper itself reports the `selkies` backend, because that means the installed helper
 validated the receipt and can run it. For such a helper, a receipt from 1 up to (not
 including) the bundled revision sets `updateAvailable` and clears `updateRequired`
-(an older helper called a runnable recipe 1 or 2 required), and a current receipt
+(an older helper called a runnable recipe 1, 2 or 3 required), and a current receipt
 clears `updateAvailable`. A helper that reports no backend has rejected the receipt
 (invalid fields, unsafe permissions, a missing Selkies executable, or a revision it
 does not know, which includes a helper from before the bundled recipe seeing a
@@ -119,12 +159,15 @@ showing "Update desktop" alone, and a viewer that predates it ignores
 as the primary action and shows "Update desktop" beside it with a note about
 clipboard, sound control and window-sized screen (a Kasm desktop gets the same
 secondary button). Choosing it runs `setup-desktop.sh update-streamer`. This is the
-recipe 1 to 2 path: it reinstalls the pinned Selkies package, keeps the viewer
-credentials, rewrites the receipt as recipe 3 and installs the new service. It
+recipe 1, 2 or 3 to 4 path: it reinstalls the pinned Selkies package, applies the
+web client and display scaling patches, keeps the viewer credentials, rewrites the
+receipt as recipe 4 and installs the new service (with the device-pixel and
+damage-gated flags above). It
 does not rebuild the computer, touch files or restart a running desktop (it
 refuses to run while the session is up). It needs network access for the pinned
 package download, even on a v4 image that already contains it. New computers get
-recipe 3 from the install or preinstalled-image path. Packages are unchanged, so
+recipe 4 from the install or preinstalled-image path, where the guest image check
+also requires that both patches apply. Packages are unchanged, so
 no guest image bump is needed; `xrandr` (`x11-xserver-utils`) is not listed in
 `desktop-packages.txt`; it is expected through `xfce4-session`'s dependencies and
 must be confirmed on a live v4 computer.
@@ -783,15 +826,21 @@ bound to the window's own computer through `require_computer`, rejected from
   readable from viewer windows. Computers on a recipe 2 guest keep Selkies'
   default of audio on; sound is detected and controlled the same way there, and
   the viewer's `getUserMedia` lock still keeps the microphone out of reach.
-- `desktop_viewer_reset_screen` sends `r,1440x900,primary`; it appears as
-  **Reset to 1440×900** in the desktop actions menu, except for desktops that
-  report `updateRequired` or `updateAvailable`, whose Selkies runs with resizing
-  off and ignores it.
+- `desktop_viewer_reset_screen` calls the page bridge's `resetScreen`, which sends
+  `r,1440x900,primary` and `s,96` (96 DPI, so a recipe 4 desktop returns to scale 1
+  for computer-use agents) and, in the same page task and only when both frames
+  went out, arms a one-shot `resize` listener that posts Selkies'
+  `resetResolutionToWindow` message, so the next window resize brings back the
+  window's size and density. It appears as **Reset to 1440×900** in the desktop
+  actions menu, except for desktops that report `updateRequired` or
+  `updateAvailable`. Verified live on a recipe 4 computer: reset gives 1440x900,
+  scale 1 and the stock xfwm4 theme; the next window resize returns to the
+  window's device pixels at scale 2.
 
 Resizing needs no Silo code: the guest child webview's bounds follow the shell's
 screen area (a `ResizeObserver` plus the window `resize` event), the Selkies
 client sees its own window change and, 500 ms after the last change, asks the
-server for that size in CSS pixels. The shell window's minimum is 672x480, which
+server for that size in device pixels (recipe 4; CSS pixels on older recipes). The shell window's minimum is 672x480, which
 leaves the guest at least 656x424 logical pixels after the toolbar and frame.
 Closing the viewer keeps the size, so an agent working without a viewer sees no
 change. The reset is explicit and one-off: the next resize of the window makes

@@ -127,6 +127,10 @@
     {
       "path": "patches/microsandbox-reordered-image-metadata-0.7.6.patch",
       "sha256": "5cd4d570c38ce0f50582c19107aa382cda89ba73533346ff556d9a47186ec37d"
+    },
+    {
+      "path": "patches/microsandbox-metrics-sampler-blocking-0.7.6.patch",
+      "sha256": "791cfc43eef69cdd425887eba5471e0ff90789e671664d54335e5022d185f681"
     }
   ]
 }

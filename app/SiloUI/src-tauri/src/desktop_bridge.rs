@@ -49,6 +49,9 @@ pub(crate) enum Op {
     Capabilities,
     /// The page's acknowledgement that it sent (or could not send) frames.
     Sent,
+    /// A stream benchmark report; development builds only.
+    #[cfg(debug_assertions)]
+    Diagnostics,
 }
 impl Op {
     fn parse(name: &str) -> Option<Self> {
@@ -56,6 +59,8 @@ impl Op {
             "clipboard" => Some(Self::Clipboard),
             "capabilities" => Some(Self::Capabilities),
             "sent" => Some(Self::Sent),
+            #[cfg(debug_assertions)]
+            "diagnostics" => Some(Self::Diagnostics),
             _ => None,
         }
     }
@@ -64,6 +69,8 @@ impl Op {
             Self::Clipboard => "clipboard",
             Self::Capabilities => "capabilities",
             Self::Sent => "sent",
+            #[cfg(debug_assertions)]
+            Self::Diagnostics => "diagnostics",
         }
     }
     /// Largest request body Rust accepts for this operation.
@@ -72,6 +79,8 @@ impl Op {
             Self::Clipboard => 24 * 1024 * 1024,
             Self::Capabilities => 4 * 1024,
             Self::Sent => 0,
+            #[cfg(debug_assertions)]
+            Self::Diagnostics => 4 * 1024 * 1024,
         }
     }
     /// Acknowledgements for several sends and answers to several capability
@@ -579,7 +588,7 @@ impl Bridge<'_> {
         self.send_acknowledged("sendFrames", frames)
     }
 
-    /// Runs the page's `method` (`sendFrames` or `sendShortcut`) and waits for
+    /// Runs the page's `method` (`sendFrames`, `sendShortcut` or `resetScreen`) and waits for
     /// its acknowledgement, which says whether the socket took every frame.
     fn send_acknowledged(&self, method: &str, frames: &[String]) -> Result<(), String> {
         let expectation = self.inbox.expect(Op::Sent, SEND_WAIT + REPLY_GRACE);
@@ -703,13 +712,21 @@ impl Bridge<'_> {
         self.invoke("setAudioActive", json!([active]))
     }
 
-    /// Asks the server for a screen size (`r,WxH,primary`). Selkies wants even
-    /// dimensions of at most 4080.
+    /// Asks the server for a screen size (`r,WxH,primary`) at 96 DPI (`s,96`)
+    /// through the page's `resetScreen`, which in the same task lets the next
+    /// window resize take the client back to the window's size and density.
+    /// Selkies wants even dimensions of at most 4080.
     pub(crate) fn reset_resolution(&self, width: u32, height: u32) -> Result<(), String> {
         if !(16..=MAX_SCREEN_EDGE).contains(&width) || !(16..=MAX_SCREEN_EDGE).contains(&height) {
             return Err("Invalid screen size.".into());
         }
-        self.send_frames(&[format!("r,{}x{},primary", width & !1, height & !1)])
+        self.send_acknowledged(
+            "resetScreen",
+            &[
+                format!("r,{}x{},primary", width & !1, height & !1),
+                "s,96".to_string(),
+            ],
+        )
     }
 
     /// Selkies `resetResolutionToWindow` page message.
@@ -737,11 +754,14 @@ pub(crate) mod test_page {
         )
     }
 
-    /// Answers a `sendFrames` or `sendShortcut` script the way the page does, with `outcome`.
+    /// Answers a `sendFrames`, `sendShortcut` or `resetScreen` script the way the page does, with `outcome`.
     /// Returns whether the script was a send.
     pub(crate) fn acknowledge_send(inbox: &Inbox, script: &str, outcome: &str) -> bool {
         let (method, args) = invocation(script);
-        if method != "sendFrames" && method != "sendShortcut" {
+        if !matches!(
+            method.as_str(),
+            "sendFrames" | "sendShortcut" | "resetScreen"
+        ) {
             return false;
         }
         let nonce = args[1].as_str().expect("a nonce");
@@ -1119,7 +1139,9 @@ mod tests {
         bridge.reset_resolution(1441, 901).unwrap();
         bridge.set_audio_active(true).unwrap();
         let scripts = page.scripts.borrow();
-        assert!(scripts[0].contains("\"r,1440x900,primary\""));
+        let (method, args) = invocation(&scripts[0]);
+        assert_eq!(method, "resetScreen");
+        assert_eq!(args[0], json!(["r,1440x900,primary", "s,96"]));
         assert!(scripts[1].ends_with("invoke(\"setAudioActive\",[true]);"));
     }
 
