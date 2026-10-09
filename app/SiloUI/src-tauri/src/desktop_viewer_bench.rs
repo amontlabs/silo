@@ -33,7 +33,8 @@ pub(crate) fn start(app: &AppHandle) {
         let _ = fs::remove_file(&request);
         let config: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
         // A `bench.js` beside the request replaces the built-in script while iterating on it.
-        let script = fs::read_to_string(directory.join("bench.js")).unwrap_or_else(|_| SCRIPT.into());
+        let script =
+            fs::read_to_string(directory.join("bench.js")).unwrap_or_else(|_| SCRIPT.into());
         let result = run(&app, &config, &script).unwrap_or_else(|error| json!({ "error": error }));
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -45,7 +46,12 @@ pub(crate) fn start(app: &AppHandle) {
 
 fn write(directory: &Path, name: &str, value: &Value) {
     let partial = directory.join(format!(".{name}.partial"));
-    if fs::write(&partial, serde_json::to_vec_pretty(value).unwrap_or_default()).is_ok() {
+    if fs::write(
+        &partial,
+        serde_json::to_vec_pretty(value).unwrap_or_default(),
+    )
+    .is_ok()
+    {
         let _ = fs::rename(partial, directory.join(name));
     }
 }
@@ -71,9 +77,11 @@ fn run(app: &AppHandle, config: &Value, script: &str) -> Result<Value, String> {
     let started = Instant::now();
     let reply = crate::desktop_viewer::with_bridge(app, &label, |bridge| {
         let expectation = bridge.inbox.expect(Op::Diagnostics, budget);
-        bridge
-            .page
-            .eval(&format!("({script})({},{});", json!(expectation.nonce), config))?;
+        bridge.page.eval(&format!(
+            "({script})({},{});",
+            json!(expectation.nonce),
+            config
+        ))?;
         expectation.wait(budget)
     })?;
     let wall = started.elapsed().as_secs_f64();
