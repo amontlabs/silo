@@ -15,7 +15,7 @@
 #   1. check that System Integrity Protection is off;
 #   2. install /Applications/ChatGPT.app from the staged zip when the pinned version is not
 #      there: SHA-256, code signature (`codesign --verify --deep --strict`), bundle identifier
-#      and team are checked before the quarantine attribute is cleared and the app is moved in;
+#      and team are checked, then the app is moved in and its quarantine attribute cleared;
 #   3. install LCU's runtime against that app (`scripts/install.sh --runtime-only --yes`);
 #   4. grant Accessibility and Screen Recording to the app and its Computer Use helper in the
 #      system TCC database, and pre-write the Screen Recording reminder ledger;
@@ -61,9 +61,9 @@ say() { log "$*"; print -r -- "$*"; }
 logged() {
   log "\$ $*"
   "$@" >>"$LOG" 2>&1
-  local status=$?
-  log "exit $status"
-  return $status
+  local result=$?
+  log "exit $result"
+  return $result
 }
 
 pinned() { plutil -extract "$1" raw -o - "$PINNED" 2>/dev/null; }
@@ -120,13 +120,13 @@ install_app() {
   rm -rf "$WORK/app" && mkdir -p "$WORK/app" || fail "could not prepare the ChatGPT app folder"
   logged ditto -x -k "$zip" "$WORK/app" || fail "could not unpack the ChatGPT app"
   app_ok "$WORK/app/ChatGPT.app" || fail "the ChatGPT app is not the official signed app"
-  xattr -dr com.apple.quarantine "$WORK/app/ChatGPT.app" >>"$LOG" 2>&1
   # LCU and the Computer Use helper run from /Applications, owned by root.
   if [[ -e $APP ]]; then
     logged ${=SUDO} rm -rf "$APP" || fail "could not remove the previous ChatGPT app"
   fi
   logged ${=SUDO} mv "$WORK/app/ChatGPT.app" "$APP" || fail "could not move the ChatGPT app into Applications"
   logged ${=SUDO} chown -R root:wheel "$APP" || fail "could not hand the ChatGPT app to root"
+  ${=SUDO} xattr -dr com.apple.quarantine "$APP" >>"$LOG" 2>&1
   app_ok "$APP" || fail "the installed ChatGPT app did not verify"
   rm -rf "$WORK/app" "$zip"
 }
@@ -152,7 +152,10 @@ install_lcu() {
   logged tar -xzf "$archive" -C "$WORK/lcu" || fail "could not unpack LCU"
   local release=$WORK/lcu/${$(pinned lcuArchive)%.tar.gz}
   [[ -x $release/scripts/install.sh ]] || fail "the LCU archive has no installer"
-  (cd "$release" && logged ./scripts/install.sh --runtime-only --yes) || fail "the LCU installer failed"
+  # The installer verifies the app's signature under a time limit; the first verification after
+  # the app was installed can be slower than that, and the second finds the files cached.
+  (cd "$release" && { logged ./scripts/install.sh --runtime-only --yes || logged ./scripts/install.sh --runtime-only --yes; }) ||
+    fail "the LCU installer failed"
   lcu_current || fail "LCU did not install the pinned version"
   rm -rf "$WORK/lcu" "$archive"
 }
@@ -200,7 +203,8 @@ granted() { # service client
 }
 
 grant_clients() {
-  local helper=$APP/$HELPER_REL clients=("$APP" "$helper") code client service
+  local helper=$APP/$HELPER_REL code client service
+  local clients=("$APP" "$helper")
   for code in $clients; do
     client=$(app_info "$code" CFBundleIdentifier)
     [[ -n $client ]] || fail "could not read the identifier of ${code:t}"
