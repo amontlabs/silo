@@ -90,9 +90,9 @@ receipt check never compares against the live screen.
 `/Gtk/CursorThemeSize` from the client DPI, which at 192 DPI gives sharp but
 mixed-scale UI (tiny panel and desktop icons, overlapping clock).
 `guest/patch-selkies-display-scaling.py` patches the installed
-`selkies/display_utils.py` (found under `/opt/selkies/lib/python*/site-packages`) the
+`selkies/display_utils.py` and `selkies/websockets_mode.py` (found under `/opt/selkies/lib/python*/site-packages`) the
 way the web client patcher patches its asset: it accepts only the pinned 2.0.0 file
-(SHA-256 `b00e3f43...ab84`, the same on amd64 and arm64), rewrites it atomically
+(SHA-256 `b00e3f43...ab84` and `1d86b009...cebc`, the same on amd64 and arm64), rewrites it atomically
 keeping mode and owner, is idempotent, and exits non-zero with a message on any
 other file. `_run_xfconf` then treats a density that is a whole multiple of 96 from
 2x up as an integer `/Gdk/WindowScalingFactor` with `/Xft/DPI` at 96 and
@@ -111,6 +111,14 @@ not: before Xvfb and Xfce start, `silo-desktop` resets the `silo` account's pers
 `xfwm4.xml` stock theme to `Default`, so an agent with no viewer gets the 1440x900 screen at
 1x. Only existing integer and stock-theme properties are edited (no symlinks followed,
 owner and mode kept, atomic replace). This mirrors Selkies' MATE path and is a candidate upstream fix.
+
+The same patch caps the screen at H.264 level 5.2's maximum frame size (36864 macroblocks of
+16x16, about 9.4 Mpx), the largest the browsers' H.264 decoders accept; above it the macOS
+WebKit decoder refuses the stream. `fit_frame_size` in `display_utils.py` scales a larger
+requested size down at the same aspect ratio (each side rounded down to even), for both viewer
+resizes (`parse_resize_dims`) and the initial size in `websockets_mode.py`. In a very large
+window (a fullscreen Retina viewer asking for about 4080x2508) the viewer detects the smaller
+realized resolution and shows a slightly scaled picture fitted to the window.
 
 **Recipe 4.** `recipeVersion` in `desktop-streamer-lock.json` is 4. The service
 accepts receipts 1, 2, 3 and 4. An older receipt is a runnable desktop with an
