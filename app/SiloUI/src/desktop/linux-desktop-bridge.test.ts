@@ -58,12 +58,13 @@ describe("host bridge page helper", () => {
   })
 
   it("sends only well-formed Selkies frames through the socket", () => {
-    expect(call("sendFrames", ["cw,aGk=", "kd,65507", "ku,65507", "r,1440x900,primary", "REQUEST_CLIPBOARD"])).toBe(true)
-    expect(socket.sent).toEqual(["cw,aGk=", "kd,65507", "ku,65507", "r,1440x900,primary", "REQUEST_CLIPBOARD"])
+    expect(call("sendFrames", ["cw,aGk=", "kd,65507", "ku,65507", "r,1440x900,primary", "s,96", "REQUEST_CLIPBOARD"])).toBe(true)
+    expect(socket.sent).toEqual(["cw,aGk=", "kd,65507", "ku,65507", "r,1440x900,primary", "s,96", "REQUEST_CLIPBOARD"])
     socket.sent.length = 0
     expect(call("sendFrames", ["cmd,rm -rf /"])).toBe(false)
     expect(call("sendFrames", ["kd,65507", "js,c,1"])).toBe(false)
     expect(call("sendFrames", ["START_AUDIO"])).toBe(false)
+    for (const frame of ["s,192", "s,", "s,96,1", "s,096", " s,96", "s,96\n"]) expect(call("sendFrames", [frame]), frame).toBe(false)
     expect(call("sendFrames", "cw,aGk=")).toBe(false)
     expect(socket.sent).toEqual([])
   })
@@ -178,6 +179,28 @@ describe("host bridge page helper", () => {
       { type: "resetResolutionToWindow" },
       { type: "pipelineControl", pipeline: "audio", enabled: false },
     ])
+  })
+
+  it("hands the next window resize back to Selkies once, and a newer arming replaces the older", async () => {
+    const messages: unknown[] = []
+    const listener = (event: MessageEvent) => messages.push(event.data)
+    window.addEventListener("message", listener)
+    const settle = () => new Promise(resolve => setTimeout(resolve, 30))
+    expect(call("followWindowOnResize")).toBe(true)
+    await settle()
+    expect(messages).toEqual([])
+    window.dispatchEvent(new Event("resize"))
+    window.dispatchEvent(new Event("resize"))
+    await settle()
+    expect(messages).toEqual([{ type: "resetResolutionToWindow" }])
+
+    messages.length = 0
+    call("followWindowOnResize")
+    call("followWindowOnResize")
+    window.dispatchEvent(new Event("resize"))
+    await settle()
+    window.removeEventListener("message", listener)
+    expect(messages).toEqual([{ type: "resetResolutionToWindow" }])
   })
 
   it("re-applies the wanted mute and volume when the audio pipeline reports in", async () => {

@@ -329,6 +329,8 @@ fn serve_inner(
     // On macOS, accepted sockets inherit the listener's O_NONBLOCK setting.
     // This handler uses timed blocking reads, so clear that flag explicitly.
     client.set_nonblocking(false)?;
+    // Small input frames and frame tails must not wait for Nagle's algorithm.
+    let _ = client.set_nodelay(true);
     client.set_read_timeout(Some(Duration::from_secs(3)))?;
     client.set_write_timeout(Some(Duration::from_secs(3)))?;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1065,6 +1067,7 @@ mod tests {
                         let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFL) };
                         assert_ne!(flags, -1);
                         assert_eq!(flags & libc::O_NONBLOCK, 0);
+                        assert!(stream.nodelay().unwrap());
                         progress_tx.send(consumed).unwrap();
                     } else if consumed == fragment.len() {
                         progress_tx.send(consumed).unwrap();

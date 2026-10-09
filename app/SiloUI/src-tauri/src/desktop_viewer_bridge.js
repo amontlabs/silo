@@ -76,6 +76,8 @@
 
   const nativeFetch = window.fetch.bind(window)
   const nativePost = window.postMessage.bind(window)
+  const listen = window.addEventListener.bind(window)
+  const unlisten = window.removeEventListener.bind(window)
   const encoder = new TextEncoder()
   const ROUTE = "/__silo/v1/"
   // Mirrors the Rust per-operation cap; larger payloads are dropped here.
@@ -83,9 +85,9 @@
   const TEXT_MIME = "text/plain"
   // Frames Rust may send (Selkies input_handler.py `_dispatch_message`): `cw`,
   // `cws`, `cwd`, `cwe` write text; `cb`, `cbs`, `cbd`, `cbe` write binary; `kd` and
-  // `ku` are key events; `r,WxH` resizes; `REQUEST_CLIPBOARD` asks the server to
+  // `ku` are key events; `r,WxH` resizes; `s,96` restores the default DPI; `REQUEST_CLIPBOARD` asks the server to
   // push its current selection.
-  const ALLOWED_FRAME = /^(?:cw,[A-Za-z0-9+/=]*|cws,[^,]+,\d+|cwd,[^,]+,[A-Za-z0-9+/=]*|cwe,[^,]+|cb,[^,]+,[A-Za-z0-9+/=]*|cbs,[^,]+,[^,]+,\d+|cbd,[^,]+,[A-Za-z0-9+/=]*|cbe,[^,]+|kd,\d+|ku,\d+|r,\d+x\d+,primary|REQUEST_CLIPBOARD|cr)$/
+  const ALLOWED_FRAME = /^(?:cw,[A-Za-z0-9+/=]*|cws,[^,]+,\d+|cwd,[^,]+,[A-Za-z0-9+/=]*|cwe,[^,]+|cb,[^,]+,[A-Za-z0-9+/=]*|cbs,[^,]+,[^,]+,\d+|cbd,[^,]+,[A-Za-z0-9+/=]*|cbe,[^,]+|kd,\d+|ku,\d+|r,\d+x\d+,primary|s,96|REQUEST_CLIPBOARD|cr)$/
 
   // The last clipboard payload the guest announced, kept as base64 so nothing
   // is decoded or sent anywhere until Rust asks for it. An announcement above
@@ -398,6 +400,7 @@
   window.addEventListener("message", event => {
     if (event.origin === location.origin && event.data && event.data.type === "pipelineStatusUpdate") applyAudio()
   })
+  let followResize = null
   const methods = {
     sendFrames,
     sendShortcut,
@@ -412,6 +415,17 @@
       if (active === true) for (const delay of [500, 1500, 3000]) setTimeout(applyAudio, delay)
     },
     resetResolutionToWindow: () => nativePost({ type: "resetResolutionToWindow" }, location.origin),
+    // One-shot: the next resize of this page hands the size and density back
+    // to the window. A newer call replaces a pending one.
+    followWindowOnResize: () => {
+      if (followResize) unlisten("resize", followResize)
+      followResize = () => {
+        unlisten("resize", followResize)
+        followResize = null
+        nativePost({ type: "resetResolutionToWindow" }, location.origin)
+      }
+      listen("resize", followResize)
+    },
   }
   const bridge = freeze({
     invoke(method, args) {
