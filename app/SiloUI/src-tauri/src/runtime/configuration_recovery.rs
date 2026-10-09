@@ -607,17 +607,21 @@ pub(crate) fn recover(app: &AppHandle) -> Result<(), String> {
 
 fn recover_inner(app: &AppHandle) -> Result<(), String> {
     let paths = runtime_paths(app)?;
-    let Some(journal) = load(&paths).map_err(|e| e.to_string())? else {
+    if load(&paths).map_err(|e| e.to_string())?.is_none() {
         return Ok(());
-    };
+    }
     let _guard = OPERATIONS
         .device("Recovering computer configuration")
         .map_err(|_| "Computer configuration lock is unavailable.")?;
-    // Replaying must not add a name a macOS computer took since the interruption.
-    let _reservation = crate::computer_names::reserve(
-        &super::new_names(&journal.previous.computers, &journal.request.computers),
-        &|| crate::macos_computers::names(app),
-    )?;
+    // Waiting for the gate let other work replace or finish the journal, so the copy to
+    // reserve from is read now. Replaying must not add a name a macOS computer took
+    // since the interruption.
+    let journal = load(&paths).map_err(|e| e.to_string())?;
+    let Some(_reservation) =
+        reserve_replay(journal.as_ref(), &|| crate::macos_computers::names(app))?
+    else {
+        return Ok(());
+    };
     let request_id = uuid::Uuid::new_v4().to_string();
     let activity = Mutex::new(ActivityJournal::start(&paths, &request_id)?);
     let progress = |step: &str, name: &str, fraction: u8| {
@@ -643,9 +647,62 @@ fn recover_inner(app: &AppHandle) -> Result<(), String> {
     result.map_err(|e| e.to_string())
 }
 
+/// Reserves the names replaying `journal` would add. `None` when no journal is pending.
+fn reserve_replay(
+    journal: Option<&Journal>,
+    macos_names: &dyn Fn() -> Vec<String>,
+) -> Result<Option<crate::computer_names::Reservation>, String> {
+    let Some(journal) = journal else {
+        return Ok(None);
+    };
+    crate::computer_names::reserve(
+        &super::new_names(&journal.previous.computers, &journal.request.computers),
+        macos_names,
+    )
+    .map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn computer(id: &str, name: &str) -> ComputerConfiguration {
+        ComputerConfiguration {
+            id: id.into(),
+            name: name.into(),
+            cpus: 2,
+            max_cpus: 4,
+            memory_gib: 4,
+            max_memory_gib: 8,
+            workspace_storage_gib: 10,
+            runtime_storage_gib: 10,
+            desktop: None,
+        }
+    }
+
+    fn journal(previous: &[ComputerConfiguration], request: &[ComputerConfiguration]) -> Journal {
+        let request_of = |computers: &[ComputerConfiguration]| ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: computers.to_vec(),
+        };
+        Journal {
+            version: 1,
+            previous: request_of(previous),
+            request: request_of(request),
+        }
+    }
+
+    #[test]
+    fn replay_reserves_from_the_journal_read_after_the_gate() {
+        let macos = || vec!["rr-foo".to_string()];
+        // The journal read before the gate added rr-foo; a change since then replaced it.
+        let stale = journal(&[], &[computer("1", "rr-foo")]);
+        let fresh = journal(&[], &[computer("2", "rr-bar")]);
+        assert!(reserve_replay(Some(&stale), &macos).is_err());
+        assert!(reserve_replay(Some(&fresh), &macos).unwrap().is_some());
+        // A journal that finished meanwhile leaves nothing to replay or reserve.
+        assert!(reserve_replay(None, &macos).unwrap().is_none());
+    }
 
     #[test]
     fn a_migrated_configuration_operation_loads() {
