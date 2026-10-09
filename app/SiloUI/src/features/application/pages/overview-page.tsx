@@ -39,7 +39,6 @@ import type {
   ComputerDetailTab,
 } from "@/features/application/model/application-source"
 import { ComputerConfigurationList } from "@/features/computers/components/computer-configuration-list"
-import { MacosComputersSection } from "@/features/macos-computers/components/macos-computers-section"
 import type { DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
 import { ComputerAction, type ComputerIconState } from "@/features/computers/components/computer-list"
 
@@ -661,6 +660,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               isComputerRunning={isComputerRunning}
               getConfigurationBusyReason={configurationBusyReason}
               editorDraftKey="computer-list"
+              includeMacosComputers
               // New computers fit this device; remote devices do not report capacity yet.
               getDeviceCapacity={(deviceId) => deviceId ? undefined : deviceCapacityFrom(source.deviceCapacity)}
               onConfigurationsChange={changeConfigurations}
@@ -748,7 +748,6 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               }}
             />
             </div>
-            <MacosComputersSection capacity={deviceCapacityFrom(source.deviceCapacity)} />
             </div>
           </>
         )}

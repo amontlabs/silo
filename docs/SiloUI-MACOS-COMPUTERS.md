@@ -11,10 +11,11 @@ Linux computer features do not apply yet; see [not covered yet](#not-covered-yet
 
 ## Behaviour
 
-- **Availability.** The overview page shows a macOS computers section on Apple
-  Silicon Macs only. On Linux devices and Intel Macs the commands report the
-  feature as unsupported and the section is hidden.
-- **Create.** New macOS computer asks for a name, CPUs, memory and disk size.
+- **Availability.** macOS computers appear in the overview's Computers list,
+  with a macOS badge, on Apple Silicon Macs only. On Linux devices and Intel
+  Macs the commands report the feature as unsupported and macOS is hidden.
+- **Create.** New computer has an Operating system select; choosing macOS asks
+  for a name, CPUs, memory and disk size.
   Silo asks the framework for the newest macOS this Mac can run, downloads that
   restore image from Apple (about 20 GB), and installs it. Progress shows as
   Preparing, Downloading and Installing. The creation form states Apple's
