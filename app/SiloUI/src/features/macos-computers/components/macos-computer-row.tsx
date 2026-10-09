@@ -85,7 +85,7 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
       detail={detail}
       detailClassName="overflow-visible"
       actions={<>
-        {computer.state === "stopped" && <ComputerAction label={`Start ${computer.name}`} disabled={pending} onClick={() => void run("start")}><Play /></ComputerAction>}
+        {(computer.state === "stopped" || (computer.state === "failed" && computer.installed)) && <ComputerAction label={`Start ${computer.name}`} disabled={pending} onClick={() => void run("start")}><Play /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending} onClick={() => void run("stop")}><Square /></ComputerAction>}
         {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending} onClick={() => void run("setup")}>Retry setup</Button>}

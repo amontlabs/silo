@@ -187,6 +187,26 @@ it("retries the setup of an idle computer that is not set up", async () => {
   expect(screen.queryByRole("button", { name: "Retry setup of unfinished" })).not.toBeInTheDocument()
 })
 
+it("lets an installed computer whose setup failed start so its screen can be inspected", async () => {
+  const unfinished: MacosComputer = { ...macosComputerFixtures[0], id: "mac-unfinished", name: "unfinished", state: "failed", detail: "Setup stopped.", installed: true, setupComplete: false }
+  const backend = backendFor([unfinished])
+  const user = userEvent.setup()
+  renderSection(backend)
+  await loaded()
+  const names = () => within(row("unfinished")).getAllByRole("button").map(button => button.getAttribute("aria-label") ?? button.textContent)
+  expect(names()).toEqual(["Start unfinished", "Retry setup of unfinished", "More actions for unfinished"])
+  await user.click(screen.getByRole("button", { name: "Start unfinished" }))
+  expect(backend.action).toHaveBeenCalledWith("mac-unfinished", "start")
+  expect(await screen.findByRole("button", { name: "Show screen of unfinished" })).toBeVisible()
+  expect(screen.getByRole("button", { name: "Stop unfinished" })).toBeVisible()
+})
+
+it("does not offer Start for a failed computer whose installation never finished", async () => {
+  renderSection(backendFor(macosComputerFixtures))
+  await loaded()
+  expect(screen.queryByRole("button", { name: "Start broken" })).not.toBeInTheDocument()
+})
+
 it("reports an action failure", async () => {
   const backend = { ...backendFor(macosComputerFixtures), action: vi.fn().mockRejectedValue("Not enough free disk space.") }
   const user = userEvent.setup()
