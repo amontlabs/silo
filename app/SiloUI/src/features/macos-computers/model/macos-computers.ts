@@ -211,6 +211,8 @@ export const macosNamePattern = /^[a-z][a-z0-9-]{0,31}$/
 export interface MacosLimits {
   maxCPUs: number
   maxMemoryGiB: number
+  /** Names of this device's computers of other kinds; macOS names stay unique across kinds. */
+  otherNames: readonly string[]
 }
 
 export const macosDefaults = { cpus: 4, memoryGiB: 8, diskGiB: 64 } as const
@@ -224,6 +226,7 @@ export function validateMacosRequest(request: MacosComputerRequest, existingName
   const errors: MacosRequestErrors = {}
   if (!macosNamePattern.test(request.name)) errors.name = "Use 1 to 32 lowercase letters, digits or hyphens, starting with a letter."
   else if (existingNames.includes(request.name)) errors.name = "A macOS computer with this name exists."
+  else if (limits.otherNames?.some(name => name.toLowerCase() === request.name)) errors.name = "Computer names must be unique."
   const within = (value: number, min: number, max: number) => Number.isSafeInteger(value) && value >= min && value <= max
   if (!within(request.cpus, macosLimits.minCPUs, maxCPUs)) errors.cpus = `Use ${macosLimits.minCPUs} to ${maxCPUs} CPUs.`
   if (!within(request.memoryGiB, macosLimits.minMemoryGiB, maxMemoryGiB)) errors.memoryGiB = `Use ${macosLimits.minMemoryGiB} to ${maxMemoryGiB} GiB of memory.`

@@ -102,7 +102,9 @@ function TextField({ label, value, error, firstField = false, inputRef, ...props
   )
 }
 
-export function ComputerEditor({ saving, blockedReason, editorHeader, editor, focusRequest, configurations, baselineComputer, conflict = false, review, onCancel, onSave, onDraftChange, onReview, onDiscard, created, running, capacity, deviceName, deviceId }: {
+export function ComputerEditor({ saving, blockedReason, editorHeader, editor, focusRequest, configurations, baselineComputer, conflict = false, review, onCancel, onSave, onDraftChange, onReview, onDiscard, created, running, capacity, deviceName, deviceId, reservedNames }: {
+  /** Names of this device's computers of another kind (macOS), which a new computer cannot reuse. */
+  reservedNames?: readonly string[]
   saving?: boolean
   /** Why Save is unavailable right now (another change locks editing); the draft is kept. */
   blockedReason?: string
@@ -229,6 +231,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     const nextErrors = validateComputer({ ...draft, id: nativeId(draft.id) }, configurations.map(configuration => ({ ...configuration, id: nativeId(configuration.id) })), editor.originalID ? nativeId(editor.originalID) : undefined)
     // Resource fields get readable range messages instead of the contract schema's.
     for (const field of resourceFields) delete nextErrors[field]
+    if (!editor.originalID && reservedNames?.some(name => name.toLowerCase() === draft.name.toLowerCase())) nextErrors.name = "Computer names must be unique."
     Object.assign(nextErrors, validateComputerResources(draft, capacity, deviceName))
     const capacityError = computerCapacityError(configurations.length, editor.originalID)
     if (capacityError) nextErrors.form = capacityError

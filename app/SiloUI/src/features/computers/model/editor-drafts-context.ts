@@ -22,6 +22,20 @@ export interface StoredComputerEditor {
   editorReview?: ComputerReview | null
   /** A save that must stay locked and settle even if its editor surface unmounts. */
   pendingSave?: Promise<void>
+  macosForm?: MacosEditorState
+}
+
+/** The macOS side of a new-computer editor: the chosen operating system and the macOS fields. */
+export interface MacosEditorState {
+  /** The id of the editor draft this belongs to. */
+  editorId: string
+  os: "linux" | "macos"
+  name: string
+  cpus: string
+  memoryGiB: string
+  diskGiB: string
+  /** A macOS creation started from this editor has not finished. */
+  creating: boolean
 }
 
 export const ComputerEditorDraftsContext = createContext<Map<string, StoredComputerEditor> | null>(null)

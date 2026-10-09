@@ -1,15 +1,14 @@
-import { useId, useRef, useState, type ReactNode } from "react"
+import { useId, type ReactNode } from "react"
 import { Monitor } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
-import { showActionFailure } from "@/lib/operation-toast"
+import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import {
   macosDefaults,
   validateMacosRequest,
   type MacosComputerRequest,
-  type MacosComputersStore,
 } from "../model/macos-computers"
 
 export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, Silo sets the computer up for computer use, which takes a few minutes."
@@ -18,44 +17,47 @@ function parseNumber(text: string) {
   return /^\d+$/.test(text.trim()) ? Number(text.trim()) : Number.NaN
 }
 
-/** The fields of a new macOS computer, shown in place of the Linux editor when macOS is chosen as its operating system. */
-export function MacosComputerForm({ store, existingNames, capacity, osField, onCancel, onCreated }: {
-  store: MacosComputersStore
+export type MacosFormFields = Pick<MacosEditorState, "name" | "cpus" | "memoryGiB" | "diskGiB">
+
+export function defaultMacosFields(capacity?: DeviceCapacity): MacosFormFields {
+  return {
+    name: "",
+    cpus: String(Math.min(macosDefaults.cpus, capacity?.logicalCPUs ?? macosDefaults.cpus)),
+    memoryGiB: String(Math.min(macosDefaults.memoryGiB, capacity?.memoryGiB ?? macosDefaults.memoryGiB)),
+    diskGiB: String(macosDefaults.diskGiB),
+  }
+}
+
+export function macosRequestFrom(fields: MacosFormFields): MacosComputerRequest {
+  return { name: fields.name, cpus: parseNumber(fields.cpus), memoryGiB: parseNumber(fields.memoryGiB), diskGiB: parseNumber(fields.diskGiB) }
+}
+
+/** The fields of a new macOS computer, shown in place of the Linux editor when macOS is chosen as its operating system. The host owns the values so they survive navigation. */
+export function MacosComputerForm({ fields, onChange, creating, existingNames, otherNames, capacity, osField, onCancel, onCreate }: {
+  fields: MacosFormFields
+  onChange: (changes: Partial<MacosFormFields>) => void
+  /** A creation is in flight: every field stays locked. */
+  creating: boolean
   existingNames: readonly string[]
+  /** This device's Linux computers, whose names a macOS computer cannot reuse. */
+  otherNames: readonly string[]
   capacity?: DeviceCapacity
   osField: ReactNode
   onCancel: () => void
-  onCreated: () => void
+  onCreate: (request: MacosComputerRequest) => void
 }) {
-  const [name, setName] = useState("")
-  const [cpus, setCpus] = useState(String(Math.min(macosDefaults.cpus, capacity?.logicalCPUs ?? macosDefaults.cpus)))
-  const [memory, setMemory] = useState(String(Math.min(macosDefaults.memoryGiB, capacity?.memoryGiB ?? macosDefaults.memoryGiB)))
-  const [disk, setDisk] = useState(String(macosDefaults.diskGiB))
-  const [saving, setSaving] = useState(false)
   const noticeId = useId()
-  const request: MacosComputerRequest = { name, cpus: parseNumber(cpus), memoryGiB: parseNumber(memory), diskGiB: parseNumber(disk) }
-  const errors = validateMacosRequest(request, existingNames, { maxCPUs: capacity?.logicalCPUs, maxMemoryGiB: capacity?.memoryGiB })
+  const request = macosRequestFrom(fields)
+  const errors = validateMacosRequest(request, existingNames, { maxCPUs: capacity?.logicalCPUs, maxMemoryGiB: capacity?.memoryGiB, otherNames })
   const invalid = Object.keys(errors).length > 0
-  const nameInput = useRef<HTMLInputElement>(null)
 
-  async function create() {
-    setSaving(true)
-    try {
-      await store.create(request)
-      onCreated()
-    } catch (error) {
-      showActionFailure(`Could not create ${request.name}`, error, undefined, { native: false })
-      setSaving(false)
-    }
-  }
-
-  function field(label: string, key: keyof MacosComputerRequest, value: string, onChange: (value: string) => void, numeric: boolean) {
+  function field(label: string, key: keyof MacosFormFields, numeric: boolean) {
     // An untouched name is incomplete, not wrong.
-    const error = key === "name" && name === "" ? undefined : errors[key]
+    const error = key === "name" && fields.name === "" ? undefined : errors[key]
     const errorId = `${noticeId}-${key}`
     return <label className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
       {label}
-      <Input technical ref={key === "name" ? nameInput : undefined} aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} type={numeric ? "number" : "text"} inputMode={numeric ? "numeric" : undefined} maxLength={key === "name" ? 32 : undefined} autoComplete="off" value={value} onChange={event => onChange(event.target.value)} />
+      <Input technical aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} type={numeric ? "number" : "text"} inputMode={numeric ? "numeric" : undefined} maxLength={key === "name" ? 32 : undefined} autoComplete="off" value={fields[key]} onChange={event => onChange({ [key]: event.target.value })} />
       {error && <span id={errorId} className="text-destructive">{error}</span>}
     </label>
   }
@@ -66,18 +68,18 @@ export function MacosComputerForm({ store, existingNames, capacity, osField, onC
       <span className="min-w-0 flex-1 text-xs font-semibold">Computer details</span>
     </div>
     {osField}
-    <fieldset disabled={saving} className="m-0 grid min-w-0 gap-3 border-0 p-0">
-      {field("Computer name", "name", name, setName, false)}
+    <fieldset disabled={creating} className="m-0 grid min-w-0 gap-3 border-0 p-0">
+      {field("Computer name", "name", false)}
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-        {field("CPUs", "cpus", cpus, setCpus, true)}
-        {field("Memory (GiB)", "memoryGiB", memory, setMemory, true)}
-        {field("Disk (GiB)", "diskGiB", disk, setDisk, true)}
+        {field("CPUs", "cpus", true)}
+        {field("Memory (GiB)", "memoryGiB", true)}
+        {field("Disk (GiB)", "diskGiB", true)}
       </div>
       <p className="text-[11px] text-muted-foreground">{macosLicenseNotice}</p>
     </fieldset>
     <div className="flex justify-end gap-2">
-      <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>Cancel</Button>
-      <Button type="button" size="sm" disabled={saving || invalid} onClick={() => void create()}>{saving ? "Creating…" : "Create"}</Button>
+      <Button type="button" variant="outline" size="sm" disabled={creating} onClick={onCancel}>Cancel</Button>
+      <Button type="button" size="sm" disabled={creating || invalid} onClick={() => onCreate(request)}>{creating ? "Creating…" : "Create"}</Button>
     </div>
   </div>
 }
