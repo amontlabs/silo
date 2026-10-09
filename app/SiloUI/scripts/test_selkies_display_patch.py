@@ -13,41 +13,81 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH_PATH = ROOT / 'src-tauri/guest/patch-selkies-display-scaling.py'
-UPSTREAM = Path('/Users/polarzero/code/projects/selkies/src/selkies/display_utils.py')
+UPSTREAM_DIR = Path('/Users/polarzero/code/projects/selkies/src/selkies')
+UPSTREAM = UPSTREAM_DIR / 'display_utils.py'
+UPSTREAM_WEBSOCKETS = UPSTREAM_DIR / 'websockets_mode.py'
 SPEC = importlib.util.spec_from_file_location('selkies_display_patch', PATCH_PATH)
 PATCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PATCH)
 
-# The minimal pinned fragments the patch rewrites, taken from upstream 2.0.0.
+# The minimal pinned fragments each module's patch rewrites, taken from upstream 2.0.0.
 SYNTHETIC = b'\n'.join(old for old, _ in PATCH.REPLACEMENTS)
+SYNTHETIC_WEBSOCKETS = b'\n'.join(old for old, _ in PATCH.WEBSOCKETS_REPLACEMENTS)
+
+
+def digest(value):
+    return hashlib.sha256(value).hexdigest()
 
 
 class SelkiesDisplayPatchTests(unittest.TestCase):
-    def test_patch_file_is_idempotent_and_rejects_changed_hash_without_write(self):
-        original = SYNTHETIC
-        patched = PATCH.transform_source(original)
-        digest = lambda value: hashlib.sha256(value).hexdigest()
-        PATCH.SOURCE_SHA256['test'] = digest(original)
-        PATCH.PATCHED_SHA256['test'] = digest(patched)
-        try:
+    def synthetic_modules(self):
+        return {
+            'display_utils.py': {
+                'source': digest(SYNTHETIC),
+                'patched': digest(PATCH.transform_source(SYNTHETIC)),
+                'replacements': PATCH.REPLACEMENTS,
+                'earlier': {},
+            },
+            'websockets_mode.py': {
+                'source': digest(SYNTHETIC_WEBSOCKETS),
+                'patched': digest(PATCH.transform_source(
+                    SYNTHETIC_WEBSOCKETS, PATCH.WEBSOCKETS_REPLACEMENTS)),
+                'replacements': PATCH.WEBSOCKETS_REPLACEMENTS,
+                'earlier': {},
+            },
+        }
+
+    def test_patch_package_is_idempotent(self):
+        modules = self.synthetic_modules()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'display_utils.py').write_bytes(SYNTHETIC)
+            (root / 'websockets_mode.py').write_bytes(SYNTHETIC_WEBSOCKETS)
+            (root / 'display_utils.py').chmod(0o640)
+            self.assertEqual(PATCH.patch_package(root, 'amd64', modules), 'patched')
+            for name, spec in modules.items():
+                self.assertEqual(digest((root / name).read_bytes()), spec['patched'])
+            self.assertEqual((root / 'display_utils.py').stat().st_mode & 0o777, 0o640)
+            self.assertEqual(PATCH.patch_package(root, 'amd64', modules), 'already patched')
+            self.assertEqual(set(os.listdir(root)), {'display_utils.py', 'websockets_mode.py'})
+
+    def test_each_module_refuses_a_changed_hash_and_nothing_is_written(self):
+        modules = self.synthetic_modules()
+        for changed in modules:
             with tempfile.TemporaryDirectory() as directory:
-                path = Path(directory) / 'display_utils.py'
-                path.write_bytes(original)
-                path.chmod(0o640)
-                self.assertEqual(PATCH.patch_file(path, 'test'), 'patched')
-                self.assertEqual(path.read_bytes(), patched)
-                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
-                self.assertEqual(PATCH.patch_file(path, 'test'), 'already patched')
-                changed = path.with_name('changed.py')
-                changed.write_bytes(original + b'# changed\n')
-                before = changed.read_bytes()
-                with self.assertRaisesRegex(ValueError, 'source hash'):
-                    PATCH.patch_file(changed, 'test')
-                self.assertEqual(changed.read_bytes(), before)
-                self.assertEqual(set(os.listdir(directory)), {'display_utils.py', 'changed.py'})
-        finally:
-            PATCH.SOURCE_SHA256.pop('test', None)
-            PATCH.PATCHED_SHA256.pop('test', None)
+                root = Path(directory)
+                (root / 'display_utils.py').write_bytes(SYNTHETIC)
+                (root / 'websockets_mode.py').write_bytes(SYNTHETIC_WEBSOCKETS)
+                (root / changed).write_bytes((root / changed).read_bytes() + b'# changed\n')
+                before = {n: (root / n).read_bytes() for n in modules}
+                with self.assertRaisesRegex(ValueError, f'{changed} source hash'):
+                    PATCH.patch_package(root, 'amd64', modules)
+                self.assertEqual({n: (root / n).read_bytes() for n in modules}, before)
+                self.assertEqual(set(os.listdir(root)), set(modules))
+
+    def test_earlier_patch_result_gets_only_the_remaining_fragments(self):
+        modules = self.synthetic_modules()
+        earlier = SYNTHETIC
+        for old, new in PATCH.SCALING_REPLACEMENTS:
+            earlier = earlier.replace(old, new, 1)
+        modules['display_utils.py']['earlier'] = {digest(earlier): PATCH.FIT_REPLACEMENTS}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'display_utils.py').write_bytes(earlier)
+            (root / 'websockets_mode.py').write_bytes(SYNTHETIC_WEBSOCKETS)
+            self.assertEqual(PATCH.patch_package(root, 'arm64', modules), 'patched')
+            self.assertEqual(digest((root / 'display_utils.py').read_bytes()),
+                             modules['display_utils.py']['patched'])
 
     def test_transform_requires_every_exact_fragment(self):
         with self.assertRaisesRegex(ValueError, 'expected source fragments'):
@@ -57,7 +97,7 @@ class SelkiesDisplayPatchTests(unittest.TestCase):
 
     def test_unsupported_architecture_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'architecture'):
-            PATCH.patch_file(PATCH_PATH, 'riscv')
+            PATCH.patch_package(PATCH_PATH.parent, 'riscv')
 
     def test_transform_result_replaces_the_fragments(self):
         patched = PATCH.transform_source(SYNTHETIC)
@@ -73,10 +113,61 @@ class PinnedUpstreamTests(unittest.TestCase):
         self.source = UPSTREAM.read_bytes()
 
     def test_pinned_source_patches_to_the_recorded_hash(self):
-        self.assertEqual(hashlib.sha256(self.source).hexdigest(), PATCH.SOURCE_SHA256['amd64'])
+        spec = PATCH.MODULES['display_utils.py']
+        self.assertEqual(digest(self.source), spec['source'])
         patched = PATCH.transform_source(self.source)
-        self.assertEqual(hashlib.sha256(patched).hexdigest(), PATCH.PATCHED_SHA256['amd64'])
+        self.assertEqual(digest(patched), spec['patched'])
         compile(patched, 'display_utils.py', 'exec')
+        earlier = self.source
+        for old, new in PATCH.SCALING_REPLACEMENTS:
+            earlier = earlier.replace(old, new, 1)
+        (earlier_digest, remaining), = spec['earlier'].items()
+        self.assertEqual(digest(earlier), earlier_digest)
+        self.assertEqual(digest(PATCH.transform_source(earlier, remaining)), spec['patched'])
+
+    def test_websockets_mode_patches_to_the_recorded_hash_and_fits_the_initial_size(self):
+        spec = PATCH.MODULES['websockets_mode.py']
+        source = UPSTREAM_WEBSOCKETS.read_bytes()
+        self.assertEqual(digest(source), spec['source'])
+        patched = PATCH.transform_source(source, spec['replacements'])
+        self.assertEqual(digest(patched), spec['patched'])
+        compile(patched, 'websockets_mode.py', 'exec')
+        text = patched.decode()
+        self.assertEqual(text.count('    fit_frame_size,\n'), 1)
+        clamp = text.index('target_h = max(1, min(target_h, 4320))')
+        fit = text.index('target_w, target_h = fit_frame_size(target_w, target_h)')
+        rounding = text.index('if target_w % 2 != 0: target_w -= 1')
+        self.assertLess(clamp, fit)
+        self.assertLess(fit, rounding)
+
+    def fit_namespace(self):
+        text = PATCH.transform_source(self.source).decode()
+        first = text.index('MAX_FRAME_MACROBLOCKS = ')
+        namespace = {'Optional': __import__('typing').Optional, 'Tuple': tuple}
+        exec(text[first:text.index('def cursor_size_for_dpi')], namespace)
+        return namespace
+
+    def test_fit_frame_size_keeps_fitting_sizes_and_scales_large_ones(self):
+        namespace = self.fit_namespace()
+        fit, limit = namespace['fit_frame_size'], namespace['MAX_FRAME_MACROBLOCKS']
+        self.assertEqual(limit, 36864)
+        self.assertEqual(fit(1440, 900), (1440, 900))
+        self.assertEqual(fit(3840, 2400), (3840, 2400))
+        for w, h in ((4080, 2508), (4080, 4080), (7680, 4320), (4080, 1000), (4318, 4318)):
+            fw, fh = fit(w, h)
+            self.assertEqual((fw % 2, fh % 2), (0, 0))
+            self.assertLessEqual(-(-fw // 16) * -(-fh // 16), limit)
+            self.assertLess(abs(fw / fh - w / h) / (w / h), 0.01)
+        self.assertLess(fit(4080, 2508)[0], 4080)
+
+    def test_parse_resize_dims_fits_the_frame_size(self):
+        parse = self.fit_namespace()['parse_resize_dims']
+        self.assertEqual(parse('1440x900'), (1440, 900))
+        self.assertEqual(parse('8000x5000')[0] % 2, 0)
+        width, height = parse('4080x2508')
+        self.assertLessEqual(-(-width // 16) * -(-height // 16), 36864)
+        self.assertIsNone(parse('0x600'))
+        self.assertIsNone(parse('bad'))
 
     def patched_module(self):
         """The patched _run_xfconf and desktop_dpi, extracted without importing Selkies."""

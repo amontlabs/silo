@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply Silo's source-hash-guarded Selkies 2.0.0 XFCE display scaling fix."""
+"""Apply Silo's source-hash-guarded Selkies 2.0.0 display scaling and frame size fixes."""
 import hashlib
 import os
 from pathlib import Path
@@ -7,15 +7,6 @@ import stat
 import sys
 import tempfile
 
-
-SOURCE_SHA256 = {
-    'amd64': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
-    'arm64': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
-}
-PATCHED_SHA256 = {
-    'amd64': '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9',
-    'arm64': '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9',
-}
 
 # XFCE has no fractional scaling, so a client density that is a whole multiple
 # of 96 (at least 2x) is applied as a window scaling factor with the font DPI
@@ -161,41 +152,139 @@ READ_NEW = b'''        if found and found[-1] > 0:
                 density *= scales[-1] if scales and scales[-1] > 0 else 1
             return density
 '''
-REPLACEMENTS = (
+SCALING_REPLACEMENTS = (
     (DOCSTRING_OLD, DOCSTRING_NEW), (SETTINGS_OLD, SETTINGS_NEW),
     (REGEX_OLD, REGEX_NEW), (DOC_OLD, DOC_NEW), (READ_OLD, READ_NEW),
 )
 
+# A screen above H.264 level 5.2's maximum frame size makes the browsers'
+# decoders refuse the stream, so every size a client can request is fitted.
+FIT_HELPER_OLD = b'''def parse_resize_dims(res_str: str) -> Optional[Tuple[int, int]]:
+'''
+FIT_HELPER_NEW = b'''# H.264 level 5.2's maximum frame size in 16x16 macroblocks, the largest the browsers' H.264 decoders accept.
+MAX_FRAME_MACROBLOCKS = 36864
 
-def transform_source(source):
-    if any(source.count(old) != 1 for old, _ in REPLACEMENTS):
-        raise ValueError('Pinned Selkies display module does not match the expected source fragments')
+
+def fit_frame_size(w: int, h: int) -> Tuple[int, int]:
+    """Scale ``w`` x ``h`` down, keeping the aspect ratio, until it fits the
+    maximum H.264 frame size; each side is rounded down to even.
+
+    Returns:
+        ``(w, h)`` unchanged when it already fits.
+    """
+    def macroblocks(width: int, height: int) -> int:
+        return -(-width // 16) * -(-height // 16)
+
+    if macroblocks(w, h) <= MAX_FRAME_MACROBLOCKS:
+        return w, h
+    scale = (MAX_FRAME_MACROBLOCKS * 256 / (w * h)) ** 0.5
+    while True:
+        fitted_w, fitted_h = max(2, int(w * scale)) & ~1, max(2, int(h * scale)) & ~1
+        if macroblocks(fitted_w, fitted_h) <= MAX_FRAME_MACROBLOCKS:
+            return fitted_w, fitted_h
+        scale *= 0.99
+
+
+def parse_resize_dims(res_str: str) -> Optional[Tuple[int, int]]:
+'''
+FIT_PARSE_OLD = b'''    w, h = min(w, 7680) & ~1, min(h, 4320) & ~1
+    if w <= 0 or h <= 0:
+        return None
+    return w, h
+'''
+FIT_PARSE_NEW = b'''    w, h = min(w, 7680) & ~1, min(h, 4320) & ~1
+    if w <= 0 or h <= 0:
+        return None
+    return fit_frame_size(w, h)
+'''
+FIT_REPLACEMENTS = (
+    (FIT_HELPER_OLD, FIT_HELPER_NEW), (FIT_PARSE_OLD, FIT_PARSE_NEW),
+)
+# Kept for tests that exercise the whole display_utils rewrite.
+REPLACEMENTS = SCALING_REPLACEMENTS + FIT_REPLACEMENTS
+
+IMPORT_OLD = b'''    parse_resize_dims,
+    cursor_size_for_dpi,
+'''
+IMPORT_NEW = b'''    parse_resize_dims,
+    fit_frame_size,
+    cursor_size_for_dpi,
+'''
+INITIAL_OLD = b'''                    target_h = old_display_height if old_display_height > 0 else 768
+                if target_w % 2 != 0: target_w -= 1
+'''
+INITIAL_NEW = b'''                    target_h = old_display_height if old_display_height > 0 else 768
+                target_w, target_h = fit_frame_size(target_w, target_h)
+                if target_w % 2 != 0: target_w -= 1
+'''
+WEBSOCKETS_REPLACEMENTS = ((IMPORT_OLD, IMPORT_NEW), (INITIAL_OLD, INITIAL_NEW))
+
+# Each patched module with its pinned 2.0.0 source hash, the hash after the
+# patch, and the fragments rewritten. `earlier` maps the result of a previous
+# version of this patch to the fragments still to apply on top of it.
+MODULES = {
+    'display_utils.py': {
+        'source': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
+        'patched': '5e31a80db3511e2a16830c8dcd5bbe3ccc5003fec227e1bbb64716f3c9d1ce84',
+        'replacements': REPLACEMENTS,
+        'earlier': {
+            '3a53dbbfa9609f90924e665d05ea6315ce2e0fd0df651cfe986fb90ec4dd34d9': FIT_REPLACEMENTS,
+        },
+    },
+    'websockets_mode.py': {
+        'source': '1d86b0092fc9f24ccec1e862bf94309021b9136344916ac7836565e1a4c4cebc',
+        'patched': '5de8017e68901b42090b1e5252d7774f5164bc7cf1c60139583775af7cef4319',
+        'replacements': WEBSOCKETS_REPLACEMENTS,
+        'earlier': {},
+    },
+}
+SUPPORTED_ARCHITECTURES = ('amd64', 'arm64')
+
+
+def transform_source(source, replacements=REPLACEMENTS):
+    if any(source.count(old) != 1 for old, _ in replacements):
+        raise ValueError('Pinned Selkies module does not match the expected source fragments')
     updated = source
-    for old, new in REPLACEMENTS:
+    for old, new in replacements:
         updated = updated.replace(old, new, 1)
-    if any(updated.count(new) != 1 for _, new in REPLACEMENTS):
-        raise ValueError('Selkies display scaling patch did not produce the expected result')
+    if any(updated.count(new) != 1 for _, new in replacements):
+        raise ValueError('Selkies patch did not produce the expected result')
     return updated
 
 
-def patch_file(path, architecture):
-    if architecture not in SOURCE_SHA256:
-        raise ValueError('Unsupported Selkies package architecture')
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_module(path, name):
     path = Path(path)
     if not path.is_file() or path.is_symlink():
-        raise ValueError('Selkies display module is missing or not a regular file')
-    source = path.read_bytes()
-    digest = hashlib.sha256(source).hexdigest()
-    if digest == PATCHED_SHA256[architecture]:
-        return 'already patched'
-    if digest != SOURCE_SHA256[architecture]:
-        raise ValueError('Selkies display module source hash is not the pinned 2.0.0 module')
-    updated = transform_source(source)
-    if hashlib.sha256(updated).hexdigest() != PATCHED_SHA256[architecture]:
-        raise ValueError('Selkies display scaling patch result hash mismatch')
+        raise ValueError(f'Selkies module {name} is missing or not a regular file')
+    return path.read_bytes()
 
+
+def plan_file(path, name, spec):
+    """The patched bytes for one module, or None when it is already patched."""
+    source = read_module(path, name)
+    digest = sha256(source)
+    if digest == spec['patched']:
+        return None
+    if digest == spec['source']:
+        replacements = spec['replacements']
+    elif digest in spec['earlier']:
+        replacements = spec['earlier'][digest]
+    else:
+        raise ValueError(f'Selkies module {name} source hash is not the pinned 2.0.0 module')
+    updated = transform_source(source, replacements)
+    if sha256(updated) != spec['patched']:
+        raise ValueError(f'Selkies patch result hash mismatch for {name}')
+    return updated
+
+
+def write_atomically(path, updated):
+    path = Path(path)
     original = path.stat()
-    fd, temporary = tempfile.mkstemp(prefix='.selkies-display-', dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix='.selkies-patch-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as output:
             output.write(updated)
@@ -214,20 +303,32 @@ def patch_file(path, architecture):
             os.unlink(temporary)
         except FileNotFoundError:
             pass
-    return 'patched'
 
 
-def find_module():
+def patch_package(directory, architecture, modules=None):
+    """Patch every module in ``directory``; nothing is written unless all match."""
+    modules = MODULES if modules is None else modules
+    if architecture not in SUPPORTED_ARCHITECTURES:
+        raise ValueError('Unsupported Selkies package architecture')
+    directory = Path(directory)
+    plans = {name: plan_file(directory / name, name, spec) for name, spec in modules.items()}
+    for name, updated in plans.items():
+        if updated is not None:
+            write_atomically(directory / name, updated)
+    return 'already patched' if all(u is None for u in plans.values()) else 'patched'
+
+
+def find_package():
     modules = list(Path('/opt/selkies/lib').glob('python*/site-packages/selkies/display_utils.py'))
     if len(modules) != 1:
         raise ValueError('Expected exactly one installed Selkies 2.0.0 display module')
-    return modules[0]
+    return modules[0].parent
 
 
 def main(argv):
     if len(argv) != 1:
         raise ValueError('Usage: patch-selkies-display-scaling.py amd64|arm64')
-    print(f"Selkies 2.0.0 {argv[0]} display scaling {patch_file(find_module(), argv[0])}")
+    print(f"Selkies 2.0.0 {argv[0]} display scaling {patch_package(find_package(), argv[0])}")
 
 
 if __name__ == '__main__':
