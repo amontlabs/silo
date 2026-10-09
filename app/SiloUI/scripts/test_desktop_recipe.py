@@ -498,6 +498,29 @@ class PreinstalledImageDesktop(DesktopRecipe):
         self.assertIn('guest image package xvfb is missing', stderr)
         self.assertEqual((self.state / 'connection.json').read_text(), connection)
 
+    def test_rerun_on_an_older_recipe_receipt_patches_selkies_before_the_new_helper(self):
+        (self.state / 'installed.json').write_text('{"version":"1"}')
+        (self.state / 'streamer.json').write_text(json.dumps({'recipeVersion': 3}))
+        calls = self.run_recipe()
+        patchers = [['python3', [str(self.fixture / name), 'arm64']] for name in (
+            'patch-selkies-web-client.py', 'patch-selkies-display-scaling.py')]
+        for patcher in patchers:
+            self.assertIn(patcher, calls)
+        self.assertEqual((self.root / 'usr/local/bin/silo-desktop').read_text(),
+                         (self.fixture / 'desktop-service.py').read_text())
+        self.assertFalse(any(name in ('apt-get', 'curl') for name, _ in calls))
+
+    def test_rerun_with_a_failing_display_patch_keeps_the_previous_helper(self):
+        (self.state / 'installed.json').write_text('{"version":"1"}')
+        (self.state / 'streamer.json').write_text(json.dumps({'recipeVersion': 3}))
+        helper = self.root / 'usr/local/bin/silo-desktop'
+        helper.parent.mkdir(parents=True)
+        helper.write_text('previous helper\n')
+        result = subprocess.run(['/bin/sh', str(self.recipe), 'install'], env=dict(self.env, SELKIES_PATCH_FAIL='1'),
+                                text=True, capture_output=True, timeout=120)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(helper.read_text(), 'previous helper\n')
+
     def test_legacy_install_without_streamer_receipt_is_only_refreshed(self):
         (self.state / 'installed.json').write_text('{"version":"1"}')
         calls = self.run_recipe(env={'V4_MISSING_PACKAGE': 'xvfb'})

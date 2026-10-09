@@ -138,7 +138,13 @@ class PinnedUpstreamTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(self.settings(commands), [
             ('/Xft/DPI', '96'), ('/Gdk/WindowScalingFactor', '2'),
-            ('/Gtk/CursorThemeSize', '32'), ('/general/theme', 'Default-xhdpi')])
+            ('/Gtk/CursorThemeSize', '64'), ('/general/theme', 'Default-xhdpi')])
+
+    def test_cursor_size_follows_the_full_density(self):
+        for dpi, cursor in ((192, '64'), (288, '96')):
+            store = {}
+            self.assertTrue(self.run_xfconf(dpi, store)[0])
+            self.assertEqual(store[('xsettings', '/Gtk/CursorThemeSize')], cursor)
 
     def test_other_densities_ride_on_the_font_dpi(self):
         for dpi, cursor in ((96, '32'), (144, '48'), (200, '67')):

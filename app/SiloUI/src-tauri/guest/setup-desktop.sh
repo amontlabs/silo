@@ -281,6 +281,14 @@ if [ -f /var/lib/silo-desktop/installed.json ]; then
     # repair it through the full install below, which keeps the connection
     # credentials. Healthy, legacy and Kasm installs are only refreshed.
     if [ "$v4_guest" = 0 ] || [ "$image_problem" = ok ] || [ ! -f /var/lib/silo-desktop/streamer.json ]; then
+        # The helper launches Selkies with the device-pixel flags, which need the patched
+        # display module; a receipt from an earlier recipe still has the unpatched one.
+        if [ -f /var/lib/silo-desktop/streamer.json ]; then
+            [ -f "$selkies_web_client_patch" ] || { echo 'Selkies web client patch helper is missing' >&2; exit 1; }
+            python3 "$selkies_web_client_patch" "$arch"
+            [ -f "$selkies_display_patch" ] || { echo 'Selkies display scaling patch helper is missing' >&2; exit 1; }
+            python3 "$selkies_display_patch" "$arch"
+        fi
         install -m 0755 "$helper" /usr/local/bin/silo-desktop
         configure_session
         ensure_theme
