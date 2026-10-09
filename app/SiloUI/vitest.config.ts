@@ -12,6 +12,14 @@ const nodeTests = [
   "src/features/onboarding/model/**/*.test.ts",
   "src/features/preferences/model/**/*.test.ts",
   "src/features/preferences/{settings-store,system-integrations-store}.test.ts",
+  "src/desktop/{editor-include,linux-desktop-state,native-contracts,production-source-validation,transfer-result-notice}.test.ts",
+  "src/features/application/components/application-commands.test.ts",
+  "src/features/computers/model/*.test.ts",
+  "src/features/status-bar/computer-menu-items.test.ts",
+  "src/fixtures/{application-scenarios,directory-loader,log-pages}.test.ts",
+  "src/fixtures/{application-scenarios,scenarios}.test.tsx",
+  "src/lib/{relative-time,visible-text}.test.ts",
+  "src/test/native-bridge-mock.test.ts",
   "src/test/{git-runtime,microsandbox-runtime,native-permissions,transition-styles}.test.ts",
 ]
 

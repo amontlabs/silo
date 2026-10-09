@@ -181,3 +181,19 @@ failed the existing editor-focus assertion (14 passed). These durations are not
 a valid speed comparison. Restore the original query rather than retaining an
 unverified optimization. Both verbose logs and JSON reports remain in
 `test-speed/machines-{before,after}.{log,json}` under the ignored evidence root.
+
+## Further Node-project suites (2026-10-09)
+
+Moved 18 more browser-free suites (the Node project grew from 40 to 58 files) by checking every remaining `*.test.ts` and `*.test.tsx` suite in the DOM project: first for DOM globals, testing-library, and timers in the file, then by running the candidates in the Node project. Eight candidates failed there because they read `window`, `document`, `localStorage` or the setup stubs (`identity-resume`, `network-mutations`, `production-directory`, `production-file-transfers`, `production-source-cleanup`, `workspace-storage`, `bundled-help`, `console-error-guard`) and stay in jsdom. The moved suites passed without `src/test/setup.ts`, none of their modules branch on `window`/`document`, and the Node run printed no `console.error` output that the DOM setup's guard would otherwise have rejected. Moved: `desktop/{editor-include,linux-desktop-state,native-contracts,production-source-validation,transfer-result-notice}`, `features/application/components/application-commands`, the three `features/computers/model` suites, `features/status-bar/computer-menu-items`, `fixtures/{application-scenarios (.ts and .tsx),directory-loader,log-pages,scenarios}`, `lib/{relative-time,visible-text}` and `test/native-bridge-mock`.
+
+Same command as above (`npx vitest run --maxWorkers=2 --reporter=default --reporter=json`), 257 files and 2,636 tests passing every time. Host: Apple M4 Max, shared with other agents (load average 7 to 12), so wall times are noisy.
+
+| Run | Vitest wall time | Aggregate environment setup |
+| --- | ---: | ---: |
+| Before | 123.59 s | 50.63 s |
+| After, run 1 | 135.49 s | 47.25 s |
+| After, run 2 | 114.46 s | 43.17 s |
+
+The moved suites are tiny, so the saving is the removed jsdom environment setup (about 3 to 7 s of aggregate time, not wall time) and is within the run-to-run noise. The slowest files are DOM-bound (`application-shell-navigation` 8.1 s, `application-lifecycle` 6.8 s, `linux-desktop-bridge` 6.1 s, `onboarding-configurations` 5.1 s, `onboarding-github` 4.2 s). No per-file change was made.
+
+Suggestion, not applied: `src/desktop/linux-desktop-bridge.test.ts` spends about 5 s in real waits (20 to 600 ms) that match grace periods of the script evaluated with `window.eval`; fake timers would need the script to use the faked clock, which was not verified. Evidence is under `app/SiloUI/src-tauri/target/verification/frontend-perf-2026-10-09/`.
