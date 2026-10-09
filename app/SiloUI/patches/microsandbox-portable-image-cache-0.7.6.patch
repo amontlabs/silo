@@ -1,5 +1,5 @@
 diff --git a/crates/image/Cargo.toml b/crates/image/Cargo.toml
-index f644705..591334b 100644
+index f6447054..591334b4 100644
 --- a/crates/image/Cargo.toml
 +++ b/crates/image/Cargo.toml
 @@ -30,6 +30,7 @@ serde = { workspace = true, features = ["rc"] }
@@ -16,7 +16,7 @@ index f644705..591334b 100644
  rcgen.workspace = true
 -tempfile.workspace = true
 diff --git a/crates/image/lib/cache/store.rs b/crates/image/lib/cache/store.rs
-index 3ebe277..179ed1e 100644
+index 3ebe2772..179ed1ee 100644
 --- a/crates/image/lib/cache/store.rs
 +++ b/crates/image/lib/cache/store.rs
 @@ -307,6 +307,84 @@ impl GlobalCache {
@@ -105,7 +105,7 @@ index 3ebe277..179ed1e 100644
  
      /// Path to the manifest-keyed flat rootfs reference.
 diff --git a/sdk/rust/lib/backend/local/snapshot/archive.rs b/sdk/rust/lib/backend/local/snapshot/archive.rs
-index dcaf951..fabe123 100644
+index dcaf9518..0711e73a 100644
 --- a/sdk/rust/lib/backend/local/snapshot/archive.rs
 +++ b/sdk/rust/lib/backend/local/snapshot/archive.rs
 @@ -3732,7 +3732,7 @@ async fn install_staged_cache(
@@ -117,19 +117,16 @@ index dcaf951..fabe123 100644
      let metadata = staged_cache
          .read_image_metadata_async(&image_ref)
          .await?
-@@ -3752,17 +3752,79 @@ async fn install_staged_cache(
+@@ -3752,12 +3752,44 @@ async fn install_staged_cache(
          manifest.root_disk.clone(),
      )?;
      ensure_only_expected_cache_files(cache_stage, &expected_files)?;
 -    ensure_cache_targets_compatible(&expected_files, cache_stage, cache_dir).await?;
--
 +    let staged_vmdk = staged_cache.vmdk_path(&pinned_digest);
 +    let needs_vmdk = expected_files.contains(&staged_vmdk);
-     let metadata_path = staged_cache.image_metadata_path(&image_ref);
--    for source in expected_files.iter().filter(|path| **path != metadata_path) {
 +    let immutable_files = expected_files
 +        .into_iter()
-+        .filter(|path| path != &staged_vmdk && path != &metadata_path)
++        .filter(|path| path != &staged_vmdk)
 +        .collect::<HashSet<_>>();
 +    let layer_diff_ids = if needs_vmdk {
 +        metadata
@@ -148,14 +145,15 @@ index dcaf951..fabe123 100644
 +        Vec::new()
 +    };
 +    ensure_cache_targets_compatible(&immutable_files, cache_stage, cache_dir).await?;
-+    let metadata_target = cache_install_target(&metadata_path, cache_stage, cache_dir)?;
-+    let metadata_installed =
-+        image_metadata_target_matches(&metadata_path, &metadata_target).await?;
-+
-+    for source in &immutable_files {
+ 
+     let metadata_path = staged_cache.image_metadata_path(&image_ref);
+-    for source in expected_files.iter().filter(|path| **path != metadata_path) {
++    for source in immutable_files
++        .iter()
++        .filter(|path| **path != metadata_path)
++    {
          install_cache_file(source, cache_stage, cache_dir).await?;
      }
--    install_cache_file(&metadata_path, cache_stage, cache_dir).await?;
 +    if needs_vmdk {
 +        tokio::task::spawn_blocking(move || {
 +            real_cache.rebind_vmdk(&pinned_digest, &layer_diff_ids)
@@ -163,46 +161,11 @@ index dcaf951..fabe123 100644
 +        .await
 +        .map_err(|error| MicrosandboxError::Custom(format!("VMDK rebinding task: {error}")))??;
 +    }
-+    if !metadata_installed {
-+        install_cache_file(&metadata_path, cache_stage, cache_dir).await?;
-+    }
+     install_cache_file(&metadata_path, cache_stage, cache_dir).await?;
  
      Ok(())
- }
- 
-+/// Image metadata is re-serialized from a label `HashMap`, so two caches holding the same image
-+/// can store it with different key order. Compare the parsed documents instead of their bytes.
-+/// Returns whether a matching target is already installed.
-+async fn image_metadata_target_matches(source: &Path, target: &Path) -> MicrosandboxResult<bool> {
-+    let Ok(metadata) = tokio::fs::symlink_metadata(target).await else {
-+        return Ok(false);
-+    };
-+    if !metadata.file_type().is_file() {
-+        return Err(MicrosandboxError::Custom(format!(
-+            "cache target is not a regular file: {}",
-+            target.display()
-+        )));
-+    }
-+    let parse = |bytes: &[u8]| {
-+        serde_json::from_slice::<microsandbox_image::CachedImageMetadata>(bytes).ok()?;
-+        serde_json::from_slice::<serde_json::Value>(bytes).ok()
-+    };
-+    let staged = parse(&tokio::fs::read(source).await?);
-+    let existing = parse(&tokio::fs::read(target).await?);
-+    if staged.is_none() || staged != existing {
-+        return Err(MicrosandboxError::Custom(format!(
-+            "cache target already exists with different content: {}",
-+            target.display()
-+        )));
-+    }
-+    Ok(true)
-+}
-+
- fn validate_cached_metadata(
-     manifest: &microsandbox_image::snapshot::Manifest,
-     metadata: &microsandbox_image::CachedImageMetadata,
 diff --git a/sdk/rust/tests/snapshot_artifact.rs b/sdk/rust/tests/snapshot_artifact.rs
-index 067db7a..74d0e2d 100644
+index 067db7a4..892300f8 100644
 --- a/sdk/rust/tests/snapshot_artifact.rs
 +++ b/sdk/rust/tests/snapshot_artifact.rs
 @@ -7,6 +7,8 @@
@@ -377,149 +340,3 @@ index 067db7a..74d0e2d 100644
  #[tokio::test]
  async fn load_rejects_symlink_entries_without_writing_outside_dest() {
      let tmp = TempDir::new().unwrap();
-@@ -2464,6 +2606,145 @@ async fn failed_load_with_conflicting_cache_target_does_not_install_cache_entrie
-     );
- }
- 
-+#[tokio::test]
-+async fn load_accepts_existing_image_metadata_with_different_serialization() {
-+    let tmp = TempDir::new().unwrap();
-+    let export_home = tmp.path().join("export-home");
-+    let export_backend = isolated_backend(&export_home).await;
-+    let export_cache = microsandbox_image::GlobalCache::new(&export_home.join("cache")).unwrap();
-+    let seeded = seed_image_cache(&export_cache).await;
-+    let (dir, _) = make_artifact_with_image(
-+        tmp.path(),
-+        "src-cache-reserialized",
-+        b"upper",
-+        seeded.image_ref.to_string(),
-+        seeded.manifest_digest.clone(),
-+    );
-+    let archive = tmp.path().join("cache-reserialized.tar");
-+
-+    microsandbox::with_backend(
-+        export_backend,
-+        Box::pin(async {
-+            save_snapshot(
-+                dir.to_string_lossy().as_ref(),
-+                &archive,
-+                microsandbox::snapshot::SaveOpts {
-+                    with_image: true,
-+                    plain_tar: true,
-+                    ..Default::default()
-+                },
-+            )
-+            .await
-+            .unwrap();
-+        }),
-+    )
-+    .await;
-+
-+    // Image metadata holds a label HashMap, so another cache of the same image can store the
-+    // same document with different bytes.
-+    let import_home = tmp.path().join("import-home");
-+    let import_backend = isolated_backend(&import_home).await;
-+    let import_cache = microsandbox_image::GlobalCache::new(&import_home.join("cache")).unwrap();
-+    let document: serde_json::Value = serde_json::from_slice(
-+        &std::fs::read(export_cache.image_metadata_path(&seeded.image_ref)).unwrap(),
-+    )
-+    .unwrap();
-+    let existing_metadata = import_cache.image_metadata_path(&seeded.image_ref);
-+    let existing_bytes = serde_json::to_vec_pretty(&document).unwrap();
-+    std::fs::write(&existing_metadata, &existing_bytes).unwrap();
-+    let dest = tmp.path().join("cache-reserialized-dest");
-+
-+    microsandbox::with_backend(
-+        import_backend,
-+        Box::pin(async {
-+            Snapshot::load(&archive, Some(&dest)).await.unwrap();
-+        }),
-+    )
-+    .await;
-+
-+    assert_eq!(std::fs::read(&existing_metadata).unwrap(), existing_bytes);
-+    assert!(import_cache.layer_erofs_path(&seeded.diff_id).exists());
-+    assert!(
-+        import_cache
-+            .fsmeta_erofs_path(&seeded.image_digest)
-+            .exists()
-+    );
-+    assert!(import_cache.vmdk_path(&seeded.image_digest).exists());
-+}
-+
-+#[tokio::test]
-+async fn load_rejects_existing_image_metadata_for_a_different_image() {
-+    let tmp = TempDir::new().unwrap();
-+    let export_home = tmp.path().join("export-home");
-+    let export_backend = isolated_backend(&export_home).await;
-+    let export_cache = microsandbox_image::GlobalCache::new(&export_home.join("cache")).unwrap();
-+    let seeded = seed_image_cache(&export_cache).await;
-+    let (dir, _) = make_artifact_with_image(
-+        tmp.path(),
-+        "src-cache-other-image",
-+        b"upper",
-+        seeded.image_ref.to_string(),
-+        seeded.manifest_digest.clone(),
-+    );
-+    let archive = tmp.path().join("cache-other-image.tar");
-+
-+    microsandbox::with_backend(
-+        export_backend,
-+        Box::pin(async {
-+            save_snapshot(
-+                dir.to_string_lossy().as_ref(),
-+                &archive,
-+                microsandbox::snapshot::SaveOpts {
-+                    with_image: true,
-+                    plain_tar: true,
-+                    ..Default::default()
-+                },
-+            )
-+            .await
-+            .unwrap();
-+        }),
-+    )
-+    .await;
-+
-+    let import_home = tmp.path().join("import-home");
-+    let import_backend = isolated_backend(&import_home).await;
-+    let import_cache = microsandbox_image::GlobalCache::new(&import_home.join("cache")).unwrap();
-+    let mut metadata = read_cached_metadata(&export_cache, &seeded.image_ref);
-+    metadata.layers[0].size_bytes = Some(11);
-+    import_cache
-+        .write_image_metadata_async(&seeded.image_ref, &metadata)
-+        .await
-+        .unwrap();
-+    let existing_metadata = import_cache.image_metadata_path(&seeded.image_ref);
-+    let existing_bytes = std::fs::read(&existing_metadata).unwrap();
-+    let dest = tmp.path().join("cache-other-image-dest");
-+
-+    microsandbox::with_backend(
-+        import_backend,
-+        Box::pin(async {
-+            let err = Snapshot::load(&archive, Some(&dest))
-+                .await
-+                .expect_err("expected different image metadata to fail import");
-+            assert!(
-+                err.to_string()
-+                    .contains("cache target already exists with different content"),
-+                "unexpected error: {err}"
-+            );
-+        }),
-+    )
-+    .await;
-+
-+    assert_eq!(std::fs::read(&existing_metadata).unwrap(), existing_bytes);
-+    assert!(!import_cache.layer_erofs_path(&seeded.diff_id).exists());
-+}
-+
-+fn read_cached_metadata(
-+    cache: &microsandbox_image::GlobalCache,
-+    image_ref: &microsandbox_image::Reference,
-+) -> microsandbox_image::CachedImageMetadata {
-+    serde_json::from_slice(&std::fs::read(cache.image_metadata_path(image_ref)).unwrap()).unwrap()
-+}
-+
- #[tokio::test]
- async fn manifest_digest_is_stable_across_processes() {
-     // Canonicalization is stable for one immutable descriptor. Independent

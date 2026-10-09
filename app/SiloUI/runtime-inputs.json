@@ -86,7 +86,7 @@
     },
     {
       "path": "patches/microsandbox-portable-image-cache-0.7.6.patch",
-      "sha256": "f627298c02524ea7bc5b7aeddc3020cdfaf0a4cd8afa87b56cae5b371ae478c9"
+      "sha256": "4dcff8f9ea6f25d8c541a1625d7ac8796622c53f7692ce77e8a8442b32e50b9f"
     },
     {
       "path": "patches/microsandbox-live-public-ports-0.7.6.patch",
@@ -123,6 +123,10 @@
     {
       "path": "patches/microsandbox-relay-closed-local-arena-0.7.6.patch",
       "sha256": "efbed4c5ea7b0e79e3745445b5dd54d5dc30590e530aad3a61840735f960ef10"
+    },
+    {
+      "path": "patches/microsandbox-reordered-image-metadata-0.7.6.patch",
+      "sha256": "5cd4d570c38ce0f50582c19107aa382cda89ba73533346ff556d9a47186ec37d"
     }
   ]
 }
