@@ -24,8 +24,8 @@ const POLL: Duration = Duration::from_millis(1500);
 const KEY_GAP: Duration = Duration::from_millis(30);
 /// The longest a pause runs before the cancellation flag is looked at again.
 const CANCEL_SLICE: Duration = Duration::from_millis(250);
-const PICKER_WAIT: Duration = Duration::from_secs(120);
-const RECOVERY_WAIT: Duration = Duration::from_secs(150);
+const PICKER_WAIT: Duration = Duration::from_secs(240);
+const RECOVERY_WAIT: Duration = Duration::from_secs(240);
 const SHORTCUT_WAIT: Duration = Duration::from_secs(8);
 const TERMINAL_WAIT: Duration = Duration::from_secs(15);
 const PROMPT_WAIT: Duration = Duration::from_secs(45);
@@ -169,6 +169,38 @@ impl Screen {
         self.rows.iter().any(|row| row.text.contains(needle))
     }
 
+    /// The first line whose text is exactly `text`, ignoring case.
+    fn line_equal(&self, text: &str) -> Option<&TextLine> {
+        self.lines
+            .iter()
+            .find(|line| line.text.trim().to_lowercase() == text)
+    }
+
+    /// The language list Recovery shows first on a computer with no language
+    /// set: language names in their own languages. The list does not depend on
+    /// the language it is shown in.
+    fn is_language_list(&self) -> bool {
+        self.line_equal("english").is_some()
+            && ["español", "français", "deutsch"]
+                .into_iter()
+                .any(|name| self.line_equal(name).is_some())
+    }
+
+    /// How many list items sit above `item`: lines centered on it and as tall
+    /// as it, which leaves out the larger heading. The first item is the one
+    /// selected when the list appears.
+    fn list_items_above(&self, item: &TextLine) -> usize {
+        let center = item.x + item.width / 2.0;
+        self.lines
+            .iter()
+            .filter(|line| {
+                line.y > item.y
+                    && (line.x + line.width / 2.0 - center).abs() < 0.1
+                    && (line.height - item.height).abs() < 0.2 * item.height
+            })
+            .count()
+    }
+
     /// The first line that starts with `prefix`.
     fn line_starting(&self, prefix: &str) -> Option<&TextLine> {
         self.lines
@@ -203,7 +235,7 @@ impl Screen {
         const KNOWN: [&str; 7] = [
             "options",
             "utilities",
-            "language",
+            "english",
             "bash-",
             "y/n]",
             "authorized user",
@@ -357,6 +389,8 @@ impl Failure {
 enum Check<T> {
     Found(T),
     Press(u16),
+    /// Press Down this many times, then Return.
+    Choose(usize),
     Rejected(String),
     Waiting,
 }
@@ -479,6 +513,14 @@ impl<G: Guest> Driver<'_, G> {
                         self.press(code)?;
                         self.pause(Duration::from_secs(4))?;
                     }
+                    Check::Choose(downs) => {
+                        for _ in 0..downs {
+                            self.press(input::DOWN)?;
+                            self.pause(Duration::from_millis(300))?;
+                        }
+                        self.press(input::RETURN)?;
+                        self.pause(Duration::from_secs(4))?;
+                    }
                     Check::Rejected(reason) => {
                         return Err(Failure::Fatal(format!(
                             "Recovery refused the account ({reason}). {}",
@@ -540,8 +582,12 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
         if screen.contains("utilities") {
             Check::Found(())
-        } else if screen.contains("language") {
-            Check::Press(input::RETURN)
+        } else if screen.is_language_list() {
+            screen
+                .line_equal("english")
+                .map_or(Check::Press(input::RETURN), |english| {
+                    Check::Choose(screen.list_items_above(english))
+                })
         } else {
             Check::Waiting
         }
@@ -794,6 +840,8 @@ mod tests {
         menu_open: bool,
         prompt_user: &'static str,
         cancel_confirm: bool,
+        language_list: bool,
+        downs: usize,
         keys: Vec<String>,
     }
 
@@ -809,6 +857,7 @@ mod tests {
         Result,
         Rejected,
         Stale,
+        Language,
         Halted,
     }
 
@@ -827,6 +876,8 @@ mod tests {
                 menu_open: false,
                 prompt_user: "silo",
                 cancel_confirm: false,
+                language_list: false,
+                downs: 0,
                 keys: Vec::new(),
             }
         }
@@ -861,6 +912,20 @@ mod tests {
         fn screen(&mut self) -> Result<Vec<TextLine>, String> {
             if !self.readable {
                 return Err("no capture".into());
+            }
+            if self.phase == Phase::Language {
+                let heading = TextLine {
+                    height: 0.05,
+                    ..line("Langue", 0.45, 0.95)
+                };
+                let mut lines = vec![heading];
+                for (index, text) in ["Français", "English (UK)", "English", "Español"]
+                    .iter()
+                    .enumerate()
+                {
+                    lines.push(line(text, 0.45, 0.8 - index as f64 * 0.05));
+                }
+                return Ok(lines);
             }
             let prompt = format!("Enter password for user {}:", self.prompt_user);
             let rows: Vec<&str> = match self.phase {
@@ -907,12 +972,21 @@ mod tests {
                     match (self.phase, event.code) {
                         (Phase::Picker, input::RIGHT) => self.picked += 1,
                         (Phase::Picker, input::RETURN) => {
-                            let phase = if self.picked == 2 {
+                            let phase = match (self.picked == 2, self.language_list) {
+                                (false, _) => Phase::Halted,
+                                (true, true) => Phase::Language,
+                                (true, false) => Phase::Booting,
+                            };
+                            self.enter(phase);
+                        }
+                        (Phase::Language, input::DOWN) => self.downs += 1,
+                        (Phase::Language, input::RETURN) => {
+                            // Without English chosen, Recovery would come up localized.
+                            self.enter(if self.downs == 2 {
                                 Phase::Booting
                             } else {
                                 Phase::Halted
-                            };
-                            self.enter(phase);
+                            });
                         }
                         (Phase::Main, input::KEY_T) if self.shortcut_works => {
                             self.keys.push("shortcut".into());
@@ -998,6 +1072,27 @@ mod tests {
         run(&mut guest, "silo", "secret", &never).unwrap();
         assert!(guest.keys.contains(&"menu".to_string()));
         assert_eq!(guest.phase, Phase::Halted);
+    }
+
+    #[test]
+    fn the_language_list_is_answered_with_english_by_keyboard() {
+        let mut guest = Recovery::new();
+        guest.language_list = true;
+        run(&mut guest, "silo", "secret", &never).unwrap();
+        assert_eq!(guest.phase, Phase::Halted);
+        assert!(lines_typed(&guest).contains(&"secret".to_string()));
+    }
+
+    #[test]
+    fn the_language_list_is_recognized_by_native_names() {
+        assert!(screen(&["Langue", "Français", "English", "Español"]).is_language_list());
+        let list = screen(&["Language", "Français", "English (UK)", "English", "Español"]);
+        let english = list.line_equal("english").unwrap();
+        // Heading, Français and English (UK) share the list's center; the heading
+        // is excluded only when it is taller, which `screen` does not model.
+        assert_eq!(list.list_items_above(english), 3);
+        assert!(!screen(&["Macintosh HD", "Options"]).is_language_list());
+        assert!(!screen(&["English (UK)", "English"]).is_language_list());
     }
 
     #[test]

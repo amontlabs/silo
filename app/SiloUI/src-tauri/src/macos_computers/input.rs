@@ -11,6 +11,7 @@
 
 pub(super) const RETURN: u16 = 36;
 pub(super) const RIGHT: u16 = 124;
+pub(super) const DOWN: u16 = 125;
 
 /// `T`'s US position, for the Terminal shortcut.
 pub(super) const KEY_T: u16 = 17;
