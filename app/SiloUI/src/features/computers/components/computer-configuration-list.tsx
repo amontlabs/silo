@@ -97,7 +97,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
   const {
     deviceId, setDeviceId,
     committing,
-    interactionDisabled,
+    interactionDisabled: hookInteractionDisabled,
     saveBlockedReason,
     editor, setEditor,
     editorBaseline, editorConflict, editorReview, editorResetToken,
@@ -130,16 +130,20 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     return () => { mountedRef.current = false }
   }, [editor])
   // A restored editor observes the creation its predecessor started and settles with it.
-  const [restoredCreate] = useState(() => editorDraftKey ? drafts?.get(editorDraftKey)?.pendingMacosCreate : undefined)
-  const settleRestoredCreate = useEffectEvent((succeeded: boolean) => {
+  const [restoredCreate] = useState(() => {
+    const entry = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
+    return entry?.pendingMacosCreate ? { promise: entry.pendingMacosCreate, editorId: entry.macosForm?.editorId } : undefined
+  })
+  const settleRestoredCreate = useEffectEvent((succeeded: boolean, editorId: string | undefined) => {
     const form = macosFormRef.current
-    if (!form || editorRef.current?.draft.id !== form.editorId) return
+    // Only the editor that started the creation reacts to it; a newer editor keeps its draft.
+    if (!form || form.editorId !== editorId || editorRef.current?.draft.id !== editorId) return
     if (succeeded) { setMacosForm(null); setEditor(null) } else setMacosForm({ ...form, creating: false })
   })
   useEffect(() => {
     if (!restoredCreate) return
     let current = true
-    void restoredCreate.then(() => { if (current) settleRestoredCreate(true) }, () => { if (current) settleRestoredCreate(false) })
+    void restoredCreate.promise.then(() => { if (current) settleRestoredCreate(true, restoredCreate.editorId) }, () => { if (current) settleRestoredCreate(false, restoredCreate.editorId) })
     return () => { current = false }
   }, [restoredCreate])
   function persistMacosForm(next: MacosEditorState | null) {
@@ -153,6 +157,8 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
   }
   const macosForm = storedMacosForm && storedMacosForm.editorId === editor?.draft.id ? storedMacosForm : null
   const newOs: ComputerOs = macosForm?.os ?? "linux"
+  // Like a pending Linux save, a pending macOS creation locks adding and editing until it settles.
+  const interactionDisabled = hookInteractionDisabled || Boolean(storedMacosForm?.creating)
   // Focus follows the operating system choice into the fields that replace the old ones.
   useEffect(() => {
     if (!focusOsSelect.current) return

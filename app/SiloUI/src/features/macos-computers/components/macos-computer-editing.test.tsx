@@ -79,8 +79,19 @@ it("keeps a pending macOS creation locked across navigation and closes when it f
   expect(within(restored).getByLabelText("Computer name")).toBeDisabled()
   expect(screen.getByRole("combobox", { name: "Operating system" })).toBeDisabled()
   expect(backend.create).toHaveBeenCalledTimes(1)
+  // Adding is locked while the creation is pending, so no second editor can take over its draft.
+  expect(screen.getByRole("button", { name: "Add" })).toBeDisabled()
   finish({ ...macosComputerFixtures[0], id: "mac-slow", name: "slow" })
   await waitFor(() => expect(screen.queryByTestId("macos-computer-form")).not.toBeInTheDocument())
+  expect(screen.getByRole("button", { name: "Add" })).toBeEnabled()
+  // A new editor starts fresh: Linux, not locked, nothing carried over from the finished creation.
+  await user.click(screen.getByRole("button", { name: "Add" }))
+  await user.click(await screen.findByRole("menuitem", { name: "New computer" }))
+  expect(await screen.findByRole("combobox", { name: "Operating system" })).toHaveValue("linux")
+  await user.selectOptions(screen.getByRole("combobox", { name: "Operating system" }), "macOS")
+  const next = await screen.findByTestId("macos-computer-form")
+  expect(within(next).getByLabelText("Computer name")).toHaveValue("")
+  expect(within(next).getByLabelText("Computer name")).toBeEnabled()
 })
 
 it("moves focus to the operating system select when it swaps the fields", async () => {

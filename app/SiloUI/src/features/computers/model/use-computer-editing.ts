@@ -93,7 +93,12 @@ export function useComputerEditing({
   const [editorReview, setEditorReview] = useState<ComputerReview | null>(stored?.editorReview ?? null)
   useEffect(() => {
     if (!draftKey || !drafts) return
-    if (editor) drafts.set(draftKey, { editor, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: drafts.get(draftKey)?.pendingSave, macosForm: drafts.get(draftKey)?.macosForm, pendingMacosCreate: drafts.get(draftKey)?.pendingMacosCreate })
+    if (editor) {
+      const previous = drafts.get(draftKey)
+      // The macOS state belongs to the editor it was made in; a different editor starts without it.
+      const macos = previous?.editor.draft.id === editor.draft.id ? previous : undefined
+      drafts.set(draftKey, { editor, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: previous?.pendingSave, macosForm: macos?.macosForm, pendingMacosCreate: macos?.pendingMacosCreate })
+    }
     else drafts.delete(draftKey)
   }, [drafts, draftKey, editor, editorBaseline, editorConflict, editorReview, deviceId])
   const [editorResetToken, setEditorResetToken] = useState(0)
