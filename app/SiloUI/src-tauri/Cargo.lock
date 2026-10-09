@@ -3300,6 +3300,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-virtualization"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8edb98625ad1f7dea2e82ab54d5bdf3f477e6645b550f4a7cced1818be9ff59d"
+dependencies = [
+ "bitflags 2.13.1",
+ "block2",
+ "dispatch2",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-web-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4639,6 +4654,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-service-management",
  "objc2-user-notifications",
+ "objc2-virtualization",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

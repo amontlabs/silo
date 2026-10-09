@@ -91,9 +91,10 @@ int main(int argc, char **argv) {
             'com.apple.security.cs.disable-library-validation': True,
         }, constraint=constraint)
 
-    def seal(self):
+    def seal(self, virtualization=True):
         self.sign(self.app, entitlements={
             'com.apple.security.hypervisor': True,
+            **({'com.apple.security.virtualization': True} if virtualization else {}),
             'com.apple.security.automation.apple-events': True,
         })
 
@@ -170,6 +171,10 @@ int main(int argc, char **argv) {
     def test_git_library_exception_rejected(self):
         self.sign(self.binaries / 'git', entitlements={'com.apple.security.cs.disable-library-validation': True})
         self.seal()
+        self.verify(False)
+
+    def test_app_without_the_virtualization_entitlement_rejected(self):
+        self.seal(virtualization=False)
         self.verify(False)
 
     def test_non_hardened_helper_rejected(self):
