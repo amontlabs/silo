@@ -27,8 +27,9 @@ single-path decision below, as its tradeoffs section requires.
 - **Remote computers, Linux hosts and the interim** keep the Selkies viewer
   described below. Improve it now: render at the window's device pixels instead
   of CSS scaling, and prefer low-latency hardware-decoded video.
-- **macOS guests**, if added, use Virtualization.framework and its
-  `VZVirtualMachineView`; libkrun cannot run macOS.
+- **macOS guests** use Virtualization.framework and its
+  `VZVirtualMachineView`; libkrun cannot run macOS. See
+  [macOS computers](SiloUI-MACOS-COMPUTERS.md).
 - **Gates:** working checkpoints with the display devices attached, a
   maintained upstream route, and measured latency, CPU and memory against the
   streamed path.
