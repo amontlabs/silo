@@ -100,17 +100,37 @@ it to 4%, sent nothing while idle and did not change the input-to-picture time.
 
 ## Results
 
-Before = Silo `main` at `f328998e`. After = the merged changes. Same computer,
-window and method.
+Before = Silo `main` at `f328998e` (run `before-1`). After = the merged changes:
+`after-1` and `after-2` on the same computer brought to recipe 4 with **Update
+desktop**, and `after-fresh` on a computer created afterwards (`e2e-hidpi`, same
+size). Same window and method; transport runs are `transport.py --echoes 3000`.
 
-| | Before | After |
-| --- | --- | --- |
-| Stream resolution | 1192x736, stretched 2x | 2384x1472, 1:1 device pixels |
-| Keypress to picture, median | 14 ms | _pending_ |
-| Keypress to picture, 90th percentile | 405 ms | _pending_ |
-| Keypress to picture, max | 519 ms | _pending_ |
-| SSH forward round trips over 50 ms (3000 idle) | 14 | _pending_ |
-| Selkies CPU, idle desktop | 19% of a core (1x) | _pending_ |
+| | Before | After (updated computer) | After (new computer) |
+| --- | --- | --- | --- |
+| Stream resolution | 1192x736, stretched 2x | 2384x1472, 1:1 device pixels | 2384x1472 |
+| Keypress to picture, median | 14 ms | 24 / 21 ms | 20 ms |
+| Keypress to picture, 90th percentile | 405 ms | 35 / 35 ms | 28 ms |
+| Keypress to picture, max | 519 ms | 48 / 69 ms | 36 ms |
+| Selkies round trip during the scroll | 22 ms | 1.7 ms | 1.8 ms |
+| SSH forward round trips over 50 ms (3000 idle) | 14 (515-590 ms) | 0 (max 45 ms) | not run |
+| SSH forward round trip next to a bulk download, max | 503-525 ms | 15.6 ms | not run |
+| Selkies CPU, idle ordinary desktop at 2x | 60% of a core (Turbo on, run `hidpi-raw`) | 3.6% | 3.1% |
+
+The median rose by about 7 ms because every frame now has four times the pixels
+(encode about 4 ms instead of 1 ms, decode about 3 ms instead of 1 ms); the
+stalls that made the desktop feel slow are gone. Screenshots: `before-desktop.jpg`
+and `after-desktop.jpg` in the evidence directory.
+
+### Frame-size limit found while verifying
+
+A fullscreen Retina viewer requested about 4080x2508 device pixels. x264 then
+signals an H.264 level above 5.2 and the WebKit decoder refuses the stream
+("This session streams H.264 video, which this browser cannot decode"). Level 5.2
+allows 2,073,600 macroblocks per second, so at 60 fps a frame may have at most
+34560 macroblocks (3840x2160 fits; 4080x2412 and 3960x2338 failed live). The
+display patch now fits every realized screen to that, and the streamer caps the
+frame rate at 60. A large window then gets a slightly scaled picture (for
+example 3832x2264 shown in a 4112x2580-pixel area), and it decodes.
 
 ## Remaining gaps
 

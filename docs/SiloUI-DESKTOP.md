@@ -826,15 +826,21 @@ bound to the window's own computer through `require_computer`, rejected from
   readable from viewer windows. Computers on a recipe 2 guest keep Selkies'
   default of audio on; sound is detected and controlled the same way there, and
   the viewer's `getUserMedia` lock still keeps the microphone out of reach.
-- `desktop_viewer_reset_screen` sends `r,1440x900,primary`; it appears as
-  **Reset to 1440×900** in the desktop actions menu, except for desktops that
-  report `updateRequired` or `updateAvailable`, whose Selkies runs with resizing
-  off and ignores it.
+- `desktop_viewer_reset_screen` calls the page bridge's `resetScreen`, which sends
+  `r,1440x900,primary` and `s,96` (96 DPI, so a recipe 4 desktop returns to scale 1
+  for computer-use agents) and, in the same page task and only when both frames
+  went out, arms a one-shot `resize` listener that posts Selkies'
+  `resetResolutionToWindow` message, so the next window resize brings back the
+  window's size and density. It appears as **Reset to 1440×900** in the desktop
+  actions menu, except for desktops that report `updateRequired` or
+  `updateAvailable`. Verified live on a recipe 4 computer: reset gives 1440x900,
+  scale 1 and the stock xfwm4 theme; the next window resize returns to the
+  window's device pixels at scale 2.
 
 Resizing needs no Silo code: the guest child webview's bounds follow the shell's
 screen area (a `ResizeObserver` plus the window `resize` event), the Selkies
 client sees its own window change and, 500 ms after the last change, asks the
-server for that size in CSS pixels. The shell window's minimum is 672x480, which
+server for that size in device pixels (recipe 4; CSS pixels on older recipes). The shell window's minimum is 672x480, which
 leaves the guest at least 656x424 logical pixels after the toolbar and frame.
 Closing the viewer keeps the size, so an agent working without a viewer sees no
 change. The reset is explicit and one-off: the next resize of the window makes

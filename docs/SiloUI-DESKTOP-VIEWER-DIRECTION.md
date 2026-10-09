@@ -26,7 +26,10 @@ single-path decision below, as its tradeoffs section requires.
   that path.
 - **Remote computers, Linux hosts and the interim** keep the Selkies viewer
   described below. Improve it now: render at the window's device pixels instead
-  of CSS scaling, and prefer low-latency hardware-decoded video.
+  of CSS scaling, and prefer low-latency hardware-decoded video. Done 2026-10-09
+  (streamer recipe 4, the MicroSandbox relay-stall fix and measurements in
+  [desktop stream tuning](research/desktop-stream-tuning-2026-10-09.md)):
+  keypress-to-picture p90 went from 405 ms to 35 ms at twice the resolution.
 - **macOS guests**, if added, use Virtualization.framework and its
   `VZVirtualMachineView`; libkrun cannot run macOS.
 - **Gates:** working checkpoints with the display devices attached, a
@@ -158,7 +161,7 @@ do not promise zero CPU or zero timing impact on a running task.
 | --- | --- |
 | Open and watch | Attach to the existing session. No unsolicited guest input, clipboard writes, keymap/DPI changes, app launches or display reconfiguration |
 | Desktop stopped | Show that state. Starting the desktop is a separate explicit operation, never a side effect of opening a viewer |
-| Resize, zoom or fullscreen the viewer | Selkies follows the viewer window (debounced) while the viewer is open, including when it enters or leaves fullscreen, so the guest resolution changes with them. Closing the viewer keeps the size; the viewer's actions menu resets to 1440x900 on up-to-date desktops (recipe 2 desktops run with resizing off and do not offer it) |
+| Resize, zoom or fullscreen the viewer | Selkies follows the viewer window (debounced) while the viewer is open, including when it enters or leaves fullscreen, so the guest resolution changes with them. On recipe 4 the guest also follows the window's density (Xfce at 2x on a Retina display). Closing the viewer keeps the size and density; the viewer's actions menu resets to 1440x900 at 96 DPI on up-to-date desktops, and a fresh desktop session always starts at 1440x900 and 96 DPI (desktops with an available update do not offer the reset) |
 | Change guest resolution | Explicit controller operation in Display settings; persist it with the session |
 | Close every viewer | Keep the desktop, apps and agent running; stop unused capture/encoding when safe |
 | Viewer crash, reload or network loss | Reattach to the same session; reject stale/replayed input and re-read geometry |
