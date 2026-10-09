@@ -925,7 +925,8 @@ def reset_xfconf_file(directory_fd, name, uid, changes):
     whether the current value may be replaced. Absent files and properties stay
     absent; the file keeps its owner and mode."""
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        # O_NONBLOCK: a FIFO in place of the file must not block before the check below.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
     except FileNotFoundError:
         return False
     with os.fdopen(fd, 'rb') as source:

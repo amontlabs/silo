@@ -1301,6 +1301,11 @@ class DesktopDensityReset(unittest.TestCase):
         with self.assertRaises(OSError):
             service.reset_desktop_density(self.account, link)
 
+    def test_a_pipe_in_place_of_a_channel_file_is_refused_without_blocking(self):
+        os.mkfifo(self.channels / 'xsettings.xml')
+        with self.assertRaisesRegex(RuntimeError, 'not a regular file'):
+            service.reset_desktop_density(self.account, self.home)
+
     def test_file_owned_by_another_account_is_refused(self):
         (self.channels / 'xsettings.xml').write_text(self.XSETTINGS)
         with self.assertRaisesRegex(RuntimeError, 'owned by the desktop account'):
