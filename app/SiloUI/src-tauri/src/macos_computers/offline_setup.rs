@@ -268,7 +268,18 @@ fn tool_plist(program: &str, args: &[&str]) -> Result<Dictionary, String> {
 
 // MARK: Patching
 
+/// What `run` returns when the guest was stopped before macOS wrote its launchd
+/// state. Remote Login is switched on in that state, and a guest patched without it
+/// boots with sshd off, so nothing is written until a longer first boot has made it.
+pub(super) const FIRST_BOOT_INCOMPLETE: &str = "macOS had not finished its first start.";
+
+/// Where launchd keeps which services are disabled; written during the first boot.
+const LAUNCHD_DISABLED: &str = "private/var/db/com.apple.xpc.launchd/disabled.plist";
+
 fn patch(root: &Path, account: &GuestAccount, release: Option<&Release<'_>>) -> Result<(), String> {
+    if !root.join(LAUNCHD_DISABLED).exists() {
+        return Err(FIRST_BOOT_INCOMPLETE.into());
+    }
     let users = root.join("private/var/db/dslocal/nodes/Default/users");
     for dir in [users.parent().unwrap_or(&users), &users] {
         make_executable(dir)?;
@@ -1131,6 +1142,10 @@ mod tests {
 
     fn volume() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
+        // macOS writes its launchd state during the first boot.
+        let launchd = root.path().join(LAUNCHD_DISABLED);
+        fs::create_dir_all(launchd.parent().unwrap()).unwrap();
+        write_plist(&Dictionary::new(), &launchd, 0o644, false, Format::Xml).unwrap();
         let nodes = root.path().join("private/var/db/dslocal/nodes/Default");
         fs::create_dir_all(nodes.join("users")).unwrap();
         fs::create_dir_all(nodes.join("groups")).unwrap();
@@ -1226,6 +1241,23 @@ mod tests {
             power["AC Power"].as_dictionary().unwrap()["System Sleep Timer"].as_signed_integer(),
             Some(0)
         );
+    }
+
+    #[test]
+    fn a_guest_stopped_before_its_first_boot_wrote_launchd_state_is_left_untouched() {
+        let root = volume();
+        fs::remove_file(root.path().join(LAUNCHD_DISABLED)).unwrap();
+        let error = patch(root.path(), &account(), None).unwrap_err();
+        assert_eq!(error, FIRST_BOOT_INCOMPLETE);
+        // Nothing was written, so the same disk can be patched after a longer first boot.
+        assert!(!root.path().join("private/var/db/.AppleSetupDone").exists());
+        assert!(!root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist")
+            .exists());
+        let launchd = root.path().join(LAUNCHD_DISABLED);
+        write_plist(&Dictionary::new(), &launchd, 0o644, false, Format::Xml).unwrap();
+        patch(root.path(), &account(), None).unwrap();
     }
 
     #[test]

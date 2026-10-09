@@ -19,8 +19,11 @@ use tauri::AppHandle;
 
 /// How long the first boot may take to give the guest an address.
 const FIRST_BOOT_ADDRESS: Duration = Duration::from_secs(120);
-/// Lume lets the first boot settle this long once the guest has an address.
-const FIRST_BOOT_SETTLE: Duration = Duration::from_secs(10);
+/// A guest gets its address within seconds of starting, long before launchd has written
+/// the state the offline edit builds on. The first boot runs this long after the address
+/// appears, and twice as long again each time the edit finds that state missing.
+const FIRST_BOOT_SETTLE: Duration = Duration::from_secs(50);
+const FIRST_BOOT_ATTEMPTS: u32 = 3;
 const SSH_WAIT: Duration = Duration::from_secs(300);
 const GUEST_COMMAND: Duration = Duration::from_secs(120);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(120);
@@ -130,16 +133,30 @@ impl Provision<'_> {
     /// first-boot state, the offline edit, and a second boot to finish what only
     /// the running guest can.
     fn create_account(&self, record: &mut Record) -> Result<(), Stop> {
-        self.say("Starting macOS for the first time")?;
-        self.first_boot()?;
-        self.say("Creating the account")?;
         let account = guest_access::account(self.layout)?;
         let image = record.restore_image.clone();
-        let release = image.as_ref().map(|image| offline_setup::Release {
-            version: &image.version,
-            build: &image.build,
-        });
-        offline_setup::run(&self.layout.disk(), &account, release)?;
+        let mut settle = FIRST_BOOT_SETTLE;
+        for attempt in 1..=FIRST_BOOT_ATTEMPTS {
+            self.say("Starting macOS for the first time")?;
+            self.first_boot(settle)?;
+            self.say("Creating the account")?;
+            let release = image.as_ref().map(|image| offline_setup::Release {
+                version: &image.version,
+                build: &image.build,
+            });
+            match offline_setup::run(&self.layout.disk(), &account, release) {
+                Err(message)
+                    if message == offline_setup::FIRST_BOOT_INCOMPLETE
+                        && attempt < FIRST_BOOT_ATTEMPTS =>
+                {
+                    settle *= 2;
+                }
+                result => {
+                    result?;
+                    break;
+                }
+            }
+        }
         self.say("Starting macOS")?;
         self.boot(Login::Password)?;
         self.say("Finishing the account")?;
@@ -196,8 +213,9 @@ impl Provision<'_> {
         Ok(())
     }
 
-    /// Lets macOS write its first-boot state, then stops it hard, as Lume does.
-    fn first_boot(&self) -> Result<(), Stop> {
+    /// Lets macOS write its first-boot state for `settle` after the guest has an address,
+    /// then stops it hard, as Lume does.
+    fn first_boot(&self, settle: Duration) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         offline_setup::ensure_detached(&layout.disk())?;
@@ -212,7 +230,7 @@ impl Provision<'_> {
             }
             std::thread::sleep(MACHINE_POLL);
         }
-        let settled = Instant::now() + FIRST_BOOT_SETTLE;
+        let settled = Instant::now() + settle;
         while Instant::now() < settled {
             self.check()?;
             std::thread::sleep(MACHINE_POLL);
@@ -405,15 +423,23 @@ mod tests {
     fn live_offline() {
         let (layout, _) = live_layout();
         let account = guest_access::account(&layout).unwrap();
-        offline_setup::run(
+        let result = offline_setup::run(
             &layout.disk(),
             &account,
             Some(offline_setup::Release {
                 version: "26.6.2",
                 build: "25G83",
             }),
-        )
-        .unwrap();
+        );
+        println!("offline setup: {result:?}");
+        if std::env::var("SILO_LIVE_EXPECT_INCOMPLETE").is_ok() {
+            assert_eq!(
+                result,
+                Err(offline_setup::FIRST_BOOT_INCOMPLETE.to_string())
+            );
+        } else {
+            result.unwrap();
+        }
     }
 
     /// Finishes the account of a clone that is booted and reachable. Run by hand.
