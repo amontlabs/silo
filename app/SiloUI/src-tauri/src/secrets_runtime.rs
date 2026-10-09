@@ -981,7 +981,10 @@ fn live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates() {
             MUTATION_TIMEOUT,
         )
         .map(|output| output.stdout)
-        .map_err(|_| "guest verification failed".into())
+        .map_err(|error| {
+            let command: String = script.chars().take(60).collect();
+            format!("guest verification failed ({command}): {error:?}")
+        })
     };
     let connection_update = |desired: Option<&Material>,
                              before: &str,
