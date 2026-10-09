@@ -21,6 +21,7 @@ import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById
 import type { MenuAction, MenuPopovers } from "@/components/actions-menu"
 import { ConfirmBody } from "@/components/confirm-popover"
 import type { BackupController, VerifiedExport } from "../model/backup-source"
+import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { computerNamesOnDevice, type ComputerCheckpoint } from "../model/checkpoint-source"
 
 import { configurationFailureDiagnostic } from "../model/configuration-failure"
@@ -313,6 +314,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   const exportComputer = !readOnly && backup && onExportComputer ? onExportComputer : undefined
   const importComputer = !readOnly && backup && onImportComputer ? onImportComputer : undefined
   const visibleComputers = displayComputers(source)
+  const macosNames = useMacosComputers()?.snapshot.state?.computers.map(({ name }) => name) ?? []
   // Resolved lazily when a "Fork created" toast's Open button is clicked, so it finds the
   // newly forked computer once the backend snapshot includes it rather than at toast time.
   const computersRef = useRef(visibleComputers)
@@ -327,7 +329,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   /** The Fork popover body for a computer's ⋯ menu (row or detail page); state lives with that menu. */
   function forkPopovers(computer: ApplicationComputer | undefined): MenuPopovers | undefined {
     if (!computer || !actions.forkCheckpoint) return undefined
-    return { fork: close => <ForkBody computerName={computer.configuration.name} disabled={forkDisabled(computer)} takenNames={computerNamesOnDevice(visibleComputers, computer.device?.id)} onFork={name => forkCurrentState(computer, name)} onClose={close} /> }
+    return { fork: close => <ForkBody computerName={computer.configuration.name} disabled={forkDisabled(computer)} takenNames={computerNamesOnDevice(visibleComputers, computer.device?.id, macosNames)} onFork={name => forkCurrentState(computer, name)} onClose={close} /> }
   }
   const configurationOperation = source.computerConfigurationOperation
   const configurationLocked = readOnly || configurationOperation !== null

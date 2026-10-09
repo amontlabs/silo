@@ -17,7 +17,7 @@ import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/compu
 import { computerEditMenu } from "@/features/computers/model/computer-edit-menu"
 import { OperatingSystemField, type ComputerOs } from "@/features/computers/components/os-badge"
 import { showActionFailure } from "@/lib/operation-toast"
-import { useComputerEditorDrafts, type MacosEditorState } from "@/features/computers/model/editor-drafts-context"
+import { useComputerEditorDrafts, type MacosEditorState, type StoredComputerEditor } from "@/features/computers/model/editor-drafts-context"
 import { defaultMacosFields, type MacosComputerRequest } from "@/features/macos-computers/model/macos-computers"
 import { MacosComputerForm } from "@/features/macos-computers/components/macos-computer-form"
 import { MacosComputerRow } from "@/features/macos-computers/components/macos-computer-row"
@@ -115,9 +115,9 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
   // are kept with its stored draft so navigating away and back restores them.
   const drafts = useComputerEditorDrafts()
   const [storedMacosForm, setStoredMacosForm] = useState<MacosEditorState | null>(() => {
-    const stored = editorDraftKey ? drafts?.get(editorDraftKey)?.macosForm : undefined
-    // A creation started before leaving is not tracked by this instance; it is no longer pending here.
-    return stored ? { ...stored, creating: false } : null
+    const entry = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
+    // A creation started before leaving is still pending when its promise is kept.
+    return entry?.macosForm ? { ...entry.macosForm, creating: Boolean(entry.pendingMacosCreate) } : null
   })
   const macosFormRef = useRef(storedMacosForm)
   const editorRef = useRef(editor)
@@ -129,6 +129,19 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     mountedRef.current = true
     return () => { mountedRef.current = false }
   }, [editor])
+  // A restored editor observes the creation its predecessor started and settles with it.
+  const [restoredCreate] = useState(() => editorDraftKey ? drafts?.get(editorDraftKey)?.pendingMacosCreate : undefined)
+  const settleRestoredCreate = useEffectEvent((succeeded: boolean) => {
+    const form = macosFormRef.current
+    if (!form || editorRef.current?.draft.id !== form.editorId) return
+    if (succeeded) { setMacosForm(null); setEditor(null) } else setMacosForm({ ...form, creating: false })
+  })
+  useEffect(() => {
+    if (!restoredCreate) return
+    let current = true
+    void restoredCreate.then(() => { if (current) settleRestoredCreate(true) }, () => { if (current) settleRestoredCreate(false) })
+    return () => { current = false }
+  }, [restoredCreate])
   function persistMacosForm(next: MacosEditorState | null) {
     macosFormRef.current = next
     const cached = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
@@ -307,14 +320,24 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     const current = macosFormRef.current
     if (!macos || !current || current.editorId !== editorId) return
     setMacosForm({ ...current, creating: true })
+    const pending = macos.store.create(request)
+    const cached = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
+    if (editorDraftKey && cached) drafts?.set(editorDraftKey, { ...cached, pendingMacosCreate: pending })
+    const settleEntry = (patch: Partial<StoredComputerEditor>) => {
+      const entry = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
+      if (editorDraftKey && entry?.pendingMacosCreate === pending) drafts?.set(editorDraftKey, { ...entry, pendingMacosCreate: undefined, ...patch })
+    }
     const stillHere = () => mountedRef.current && editorRef.current?.draft.id === editorId && macosFormRef.current?.editorId === editorId && macosFormRef.current.os === "macos"
     try {
-      await macos.store.create(request)
+      await pending
     } catch (error) {
       showActionFailure(`Could not create ${request.name}`, error, undefined, { native: false })
+      const entry = editorDraftKey ? drafts?.get(editorDraftKey) : undefined
+      settleEntry({ macosForm: entry?.macosForm?.editorId === editorId ? { ...entry.macosForm, creating: false } : entry?.macosForm })
       if (stillHere() && macosFormRef.current) setMacosForm({ ...macosFormRef.current, creating: false })
       return
     }
+    settleEntry({})
     // Only the editor that started the creation closes; one that moved on is left as it is.
     if (stillHere()) {
       setMacosForm(null)

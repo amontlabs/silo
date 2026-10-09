@@ -23,6 +23,8 @@ export interface StoredComputerEditor {
   /** A save that must stay locked and settle even if its editor surface unmounts. */
   pendingSave?: Promise<void>
   macosForm?: MacosEditorState
+  /** A macOS creation started from this editor; a restored editor observes it instead of starting another. */
+  pendingMacosCreate?: Promise<void>
 }
 
 /** The macOS side of a new-computer editor: the chosen operating system and the macOS fields. */

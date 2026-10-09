@@ -63,6 +63,26 @@ it("locks the form and the operating system select while a macOS creation is pen
   await waitFor(() => expect(screen.queryByTestId("macos-computer-form")).not.toBeInTheDocument())
 })
 
+it("keeps a pending macOS creation locked across navigation and closes when it finishes", async () => {
+  let finish: (value: MacosComputer) => void = () => {}
+  const backend = { ...createFixtureMacosComputersBackend([]), create: vi.fn(() => new Promise<MacosComputer>(resolve => { finish = resolve })) }
+  const user = userEvent.setup()
+  render(<App backend={backend} />)
+  const form = await openMacosForm(user)
+  await user.type(within(form).getByLabelText("Computer name"), "slow")
+  await user.click(within(form).getByRole("button", { name: "Create" }))
+  expect(await within(form).findByRole("button", { name: "Creating…" })).toBeDisabled()
+  await user.click(screen.getByRole("button", { name: "Switch page" }))
+  await user.click(screen.getByRole("button", { name: "Switch page" }))
+  const restored = await screen.findByTestId("macos-computer-form")
+  expect(within(restored).getByRole("button", { name: "Creating…" })).toBeDisabled()
+  expect(within(restored).getByLabelText("Computer name")).toBeDisabled()
+  expect(screen.getByRole("combobox", { name: "Operating system" })).toBeDisabled()
+  expect(backend.create).toHaveBeenCalledTimes(1)
+  finish({ ...macosComputerFixtures[0], id: "mac-slow", name: "slow" })
+  await waitFor(() => expect(screen.queryByTestId("macos-computer-form")).not.toBeInTheDocument())
+})
+
 it("moves focus to the operating system select when it swaps the fields", async () => {
   const user = userEvent.setup()
   render(<App backend={createFixtureMacosComputersBackend([])} />)

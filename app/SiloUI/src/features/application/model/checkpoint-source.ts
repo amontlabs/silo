@@ -33,8 +33,10 @@ export interface PendingCheckpointRestore {
 }
 
 /** Computer names already used on one device (`undefined` for this device), so a fork name conflict shows inline. */
-export function computerNamesOnDevice(computers: readonly ApplicationComputer[], deviceId: string | undefined): string[] {
-  return computers.filter(computer => (computer.device?.id ?? "") === (deviceId ?? "")).map(computer => computer.configuration.name)
+export function computerNamesOnDevice(computers: readonly ApplicationComputer[], deviceId: string | undefined, localMacosNames: readonly string[] = []): string[] {
+  const names = computers.filter(computer => (computer.device?.id ?? "") === (deviceId ?? "")).map(computer => computer.configuration.name)
+  // macOS computers exist only on this device.
+  return deviceId ? names : [...names, ...localMacosNames]
 }
 
 /** Storage and Delete availability per checkpoint (`read_checkpoint_usage`). */

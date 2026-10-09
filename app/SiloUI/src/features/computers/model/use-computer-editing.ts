@@ -93,7 +93,7 @@ export function useComputerEditing({
   const [editorReview, setEditorReview] = useState<ComputerReview | null>(stored?.editorReview ?? null)
   useEffect(() => {
     if (!draftKey || !drafts) return
-    if (editor) drafts.set(draftKey, { editor, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: drafts.get(draftKey)?.pendingSave, macosForm: drafts.get(draftKey)?.macosForm })
+    if (editor) drafts.set(draftKey, { editor, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: drafts.get(draftKey)?.pendingSave, macosForm: drafts.get(draftKey)?.macosForm, pendingMacosCreate: drafts.get(draftKey)?.pendingMacosCreate })
     else drafts.delete(draftKey)
   }, [drafts, draftKey, editor, editorBaseline, editorConflict, editorReview, deviceId])
   const [editorResetToken, setEditorResetToken] = useState(0)
