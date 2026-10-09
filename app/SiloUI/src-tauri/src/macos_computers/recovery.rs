@@ -87,18 +87,25 @@ fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
     let (Failure::Retry(message) | Failure::Fatal(message)) = error else {
         return;
     };
-    let saved = app
-        .path()
-        .app_log_dir()
-        .ok()
-        .and_then(|logs| save_evidence(&logs.join("macos-computers").join(id), id, password));
+    // Only a retryable failure happened before any credential was typed. After
+    // that point recognition cannot be trusted to hide a secret, so the image
+    // and the recognized text stay out of the log.
+    let before_credentials = matches!(error, Failure::Retry(_));
+    let saved = app.path().app_log_dir().ok().and_then(|logs| {
+        save_evidence(
+            &logs.join("macos-computers").join(id),
+            id,
+            password,
+            before_credentials,
+        )
+    });
     match saved {
         Some(path) => eprintln!(
             "macOS computer setup: turning off System Integrity Protection failed ({message}) Last screen: {}",
             path.display()
         ),
         None => eprintln!(
-            "macOS computer setup: turning off System Integrity Protection failed ({message}) No screen was captured."
+            "macOS computer setup: turning off System Integrity Protection failed ({message}) No screen was kept."
         ),
     }
 }
@@ -106,21 +113,89 @@ fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
 /// How many failed attempts' files stay in a computer's evidence folder.
 const EVIDENCE_KEPT: usize = 6;
 
-/// Writes the recognized text of the last screen, and its image unless it shows
-/// the password, into `dir`. Returns the file to look at.
-fn save_evidence(dir: &Path, id: &str, password: &str) -> Option<PathBuf> {
-    std::fs::create_dir_all(dir).ok()?;
+/// Saves the last screen into `dir`: its image and recognized text before any
+/// credential was typed, otherwise only the names of the known screens.
+/// Returns the file to look at.
+fn save_evidence(dir: &Path, id: &str, password: &str, full: bool) -> Option<PathBuf> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let png = dir.join(format!("sip-failure-{stamp:012}.png"));
-    let text = dir.join(format!("sip-failure-{stamp:012}.txt"));
-    let (lines, saved) =
-        engine::save_last_screen(id, &png, |lines| !redacted_rows(lines, password).1)?;
-    let (rows, _) = redacted_rows(&lines, password);
-    std::fs::write(&text, rows).ok()?;
+    let (lines, _) = engine::save_last_screen(id, None)?;
+    let (text, image) = if full {
+        let (rows, shown) = redacted_rows(&lines, password);
+        (rows, !shown)
+    } else {
+        let screen = Screen::new(lines);
+        (screen.known_phrases().join("\n"), false)
+    };
+    let kept = write_evidence(dir, stamp, &text, |path| {
+        image && engine::save_last_screen(id, Some(path)).is_some_and(|(_, saved)| saved)
+    })?;
     prune_evidence(dir, EVIDENCE_KEPT);
-    Some(if saved { png } else { text })
+    Some(kept)
+}
+
+/// Creates `path` readable by the owner only, failing if it exists.
+fn create_private(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+/// Writes one failed attempt's files into `dir` as a pair that appears whole or
+/// not at all: both are written under temporary names, then renamed. `image`
+/// writes the image to the path it is given and says whether it did. Returns
+/// the image's path, or the text's when there is no image.
+fn write_evidence(
+    dir: &Path,
+    stamp: u64,
+    text: &str,
+    image: impl FnOnce(&Path) -> bool,
+) -> Option<PathBuf> {
+    use std::io::Write;
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .ok()?;
+    let temp_text = dir.join(format!(".sip-failure-{stamp:012}.txt"));
+    let temp_image = dir.join(format!(".sip-failure-{stamp:012}.png"));
+    let text_path = dir.join(format!("sip-failure-{stamp:012}.txt"));
+    let image_path = dir.join(format!("sip-failure-{stamp:012}.png"));
+    let discard = |paths: &[&Path]| {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
+    };
+    if create_private(&temp_text)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .is_err()
+    {
+        discard(&[&temp_text]);
+        return None;
+    }
+    let has_image = create_private(&temp_image).is_ok() && image(&temp_image);
+    if !has_image {
+        discard(&[&temp_image]);
+        if std::fs::rename(&temp_text, &text_path).is_err() {
+            discard(&[&temp_text]);
+            return None;
+        }
+        return Some(text_path);
+    }
+    if std::fs::rename(&temp_image, &image_path).is_err() {
+        discard(&[&temp_image, &temp_text]);
+        return None;
+    }
+    if std::fs::rename(&temp_text, &text_path).is_err() {
+        discard(&[&temp_text, &image_path]);
+        return None;
+    }
+    Some(image_path)
 }
 
 /// The recognized rows of a screen, top to bottom and in lower case, with every
@@ -1216,6 +1291,48 @@ mod tests {
         assert!(!shown);
         assert!(text.contains("my secret"));
         assert!(!redacted_rows(&lines, "").1);
+    }
+
+    #[test]
+    fn evidence_is_private_and_written_as_a_whole_pair() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("logs");
+        let kept = write_evidence(&folder, 7, "recovery", |path| {
+            std::fs::write(path, b"png").is_ok()
+        })
+        .unwrap();
+        assert_eq!(kept, folder.join("sip-failure-000000000007.png"));
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&folder), 0o700);
+        assert_eq!(mode(&kept), 0o600);
+        assert_eq!(mode(&kept.with_extension("txt")), 0o600);
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn evidence_without_an_image_is_only_the_text_and_leaves_no_partials() {
+        let dir = tempfile::tempdir().unwrap();
+        let kept = write_evidence(dir.path(), 8, "recovery", |_| false).unwrap();
+        assert_eq!(kept, dir.path().join("sip-failure-000000000008.txt"));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_failed_write_cleans_up_its_partial_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory in the text's place makes the final rename fail.
+        std::fs::create_dir(dir.path().join("sip-failure-000000000009.txt")).unwrap();
+        let kept = write_evidence(dir.path(), 9, "recovery", |path| {
+            std::fs::write(path, b"png").is_ok()
+        });
+        assert!(kept.is_none());
+        let names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["sip-failure-000000000009.txt"]);
     }
 
     #[test]

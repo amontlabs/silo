@@ -99,8 +99,7 @@ pub(super) fn clear_last_screen(_id: &str) {}
 
 pub(super) fn save_last_screen(
     _id: &str,
-    _png: &std::path::Path,
-    _keep_image: impl FnOnce(&[TextLine]) -> bool,
+    _png: Option<&std::path::Path>,
 ) -> Option<(Vec<TextLine>, bool)> {
     None
 }

@@ -1196,17 +1196,12 @@ pub(super) fn clear_last_screen(id: &str) {
     }
 }
 
-/// The last recognized text of the computer's screen, and whether the image
-/// was written to `png`. The image is written only when `keep_image` agrees to
-/// the text (a screen that shows a secret is never saved).
-pub(super) fn save_last_screen(
-    id: &str,
-    png: &Path,
-    keep_image: impl FnOnce(&[TextLine]) -> bool,
-) -> Option<(Vec<TextLine>, bool)> {
+/// The last recognized text of the computer's screen, and whether its image
+/// was written to `png` when one is given.
+pub(super) fn save_last_screen(id: &str, png: Option<&Path>) -> Option<(Vec<TextLine>, bool)> {
     let last = LAST_SCREENS.lock().ok()?;
     let (image, lines) = last.get(id)?;
-    let saved = keep_image(lines) && image.write_png(png).is_ok();
+    let saved = png.is_some_and(|png| image.write_png(png).is_ok());
     Some((lines.clone(), saved))
 }
 
