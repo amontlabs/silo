@@ -32,6 +32,10 @@ use tauri::AppHandle;
 const TEXT_TIMEOUT: Duration = Duration::from_secs(10);
 const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a transfer's outcome stays in the screen window's subtitle.
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 const FEEDBACK_SHOWN: Duration = Duration::from_secs(5);
 
 /// Reads the general pasteboard's PNG (converting TIFF when that is all there is) or its
@@ -282,6 +286,10 @@ pub(super) fn feedback(report: &Report, name: &str) -> String {
 
 /// Starts a transfer from the screen window's toolbar and shows its outcome in
 /// that window's subtitle.
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(super) fn spawn_from_display(app: &AppHandle, id: &str, direction: Direction) {
     let (app, id) = (app.clone(), id.to_string());
     tauri::async_runtime::spawn_blocking(move || {
@@ -328,6 +336,10 @@ impl Generations {
     }
 }
 
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 fn generations() -> &'static Generations {
     static GENERATIONS: OnceLock<Generations> = OnceLock::new();
     GENERATIONS.get_or_init(Generations::default)

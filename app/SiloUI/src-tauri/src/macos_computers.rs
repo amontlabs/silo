@@ -12,7 +12,6 @@ mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod guest_access;
 mod guest_clipboard;
 mod guest_computer_use;
@@ -47,6 +46,8 @@ const STOP_IGNORED_AFTER: Duration = Duration::from_secs(20);
 const GRACEFUL_QUIT: Duration = Duration::from_secs(60);
 /// Quit waits less for a guest's SSH shutdown than a user-initiated Stop does.
 const QUIT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
+/// Less than this is not worth an SSH attempt.
+const MIN_QUIT_SHUTDOWN: Duration = Duration::from_secs(2);
 const FORCED_QUIT: Duration = Duration::from_secs(8);
 
 /// Why a creation workflow was asked to end.
@@ -802,7 +803,10 @@ fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
 /// confirm the shutdown.
 const CONFIRM_IN_SCREEN: &str =
     "macOS is asking to confirm in the computer's screen. Confirm there, or use Force stop.";
-const SSH_SHUTDOWN: &str = "sudo -n /sbin/shutdown -h now";
+/// The marker is printed before the shutdown starts, so that it proves the command ran on the
+/// guest and not just that `ssh` ended with its connection-failure status.
+const SHUTDOWN_MARKER: &str = "SILO_SHUTDOWN";
+const SSH_SHUTDOWN: &str = "echo SILO_SHUTDOWN; sudo -n /sbin/shutdown -h now";
 const SSH_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How a graceful stop is first attempted.
@@ -822,10 +826,26 @@ fn stop_plan(setup_complete: bool) -> StopPlan {
     }
 }
 
-/// Whether the shutdown command was accepted. `ssh` exits with 255 when the guest closes the
-/// connection as it goes down.
+/// Whether the shutdown command ran and was accepted. `ssh` exits with 255 when the guest closes
+/// the connection as it goes down, but also when it could not connect or authenticate, so only
+/// the marker the command prints first shows that it ran.
 fn shutdown_accepted(result: &Result<guest_access::CommandOutput, String>) -> bool {
-    matches!(result, Ok(output) if output.status == 0 || output.status == 255)
+    matches!(
+        result,
+        Ok(output) if (output.status == 0 || output.status == 255)
+            && output.stdout.contains(SHUTDOWN_MARKER)
+    )
+}
+
+/// How long Quit may spend on SSH shutdowns: `QUIT_SHUTDOWN_TIMEOUT` at most, and never so
+/// long that less than `FORCED_QUIT` of the time left is kept for the forced stop. `None` when
+/// too little time is left to try at all.
+fn quit_shutdown_timeout(remaining: Option<Duration>) -> Option<Duration> {
+    let budget = remaining.map_or(QUIT_SHUTDOWN_TIMEOUT, |remaining| {
+        remaining.saturating_sub(FORCED_QUIT)
+    });
+    let timeout = budget.min(QUIT_SHUTDOWN_TIMEOUT);
+    (timeout >= MIN_QUIT_SHUTDOWN).then_some(timeout)
 }
 
 /// Shuts the guest down over SSH; false when it could not be done.
@@ -1166,13 +1186,18 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     {
         std::thread::sleep(Duration::from_millis(250));
     }
-    // Over SSH each guest shuts itself down without a prompt; the rest are asked through the framework.
+    // Over SSH each guest shuts itself down without a prompt; the rest are asked through the
+    // framework, as is every guest when too little time is left for SSH.
+    let ssh_timeout = quit_shutdown_timeout(
+        deadline.map(|deadline| deadline.saturating_duration_since(Instant::now())),
+    );
     std::thread::scope(|scope| {
         for id in &machines {
-            scope.spawn(move || {
-                if let Ok((record, _)) = computer(id) {
-                    let _ = request_graceful_stop(app, &record, QUIT_SHUTDOWN_TIMEOUT);
-                } else {
+            scope.spawn(move || match (ssh_timeout, computer(id)) {
+                (Some(timeout), Ok((record, _))) => {
+                    let _ = request_graceful_stop(app, &record, timeout);
+                }
+                _ => {
                     let _ = engine::request_stop(app, id);
                 }
             });
@@ -1226,17 +1251,37 @@ mod tests {
 
     #[test]
     fn a_shutdown_counts_when_the_command_ran_or_the_guest_hung_up() {
-        let output = |status| {
+        let output = |status, stdout: &str| {
             Ok(guest_access::CommandOutput {
                 status,
-                stdout: String::new(),
+                stdout: stdout.into(),
                 stderr: String::new(),
             })
         };
-        assert!(shutdown_accepted(&output(0)));
-        assert!(shutdown_accepted(&output(255)));
-        assert!(!shutdown_accepted(&output(1)));
+        assert!(shutdown_accepted(&output(0, "SILO_SHUTDOWN\n")));
+        assert!(shutdown_accepted(&output(255, "SILO_SHUTDOWN\n")));
+        assert!(!shutdown_accepted(&output(255, "")));
+        assert!(!shutdown_accepted(&output(0, "")));
+        assert!(!shutdown_accepted(&output(1, "SILO_SHUTDOWN\n")));
+        assert!(SSH_SHUTDOWN.starts_with("echo SILO_SHUTDOWN;"));
         assert!(!shutdown_accepted(&Err("took too long".into())));
+    }
+
+    #[test]
+    fn quit_keeps_time_for_the_forced_stop() {
+        let secs = Duration::from_secs;
+        assert_eq!(quit_shutdown_timeout(None), Some(QUIT_SHUTDOWN_TIMEOUT));
+        assert_eq!(
+            quit_shutdown_timeout(Some(secs(600))),
+            Some(QUIT_SHUTDOWN_TIMEOUT)
+        );
+        assert_eq!(
+            quit_shutdown_timeout(Some(FORCED_QUIT + secs(5))),
+            Some(secs(5))
+        );
+        assert_eq!(quit_shutdown_timeout(Some(FORCED_QUIT + secs(1))), None);
+        assert_eq!(quit_shutdown_timeout(Some(secs(3))), None);
+        assert_eq!(quit_shutdown_timeout(Some(Duration::ZERO)), None);
     }
 
     #[test]
