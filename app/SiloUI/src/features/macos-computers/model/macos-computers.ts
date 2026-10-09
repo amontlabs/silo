@@ -105,6 +105,8 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   }
 
   async function read(mine: number) {
+    // A read for an ended subscription must not displace the current one's.
+    if (mine !== generation) return
     const startedAfter = eventCount
     const sequence = ++readCount
     // Only the newest read, with no event since it started, reflects the latest state.

@@ -185,6 +185,26 @@ describe("createMacosComputersStore", () => {
     stop()
   })
 
+  it("ignores a registration that finishes after its subscription ended", async () => {
+    const { value } = backend()
+    const registrations: Array<(unlisten: () => void) => void> = []
+    value.listen = vi.fn(() => new Promise<() => void>(resolve => { registrations.push(resolve) }))
+    let finish: (value: unknown) => void = () => {}
+    value.read = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const store = createMacosComputersStore(value)
+    store.subscribe(() => {})()
+    const stop = store.subscribe(() => {})
+    registrations[1](() => {})
+    await vi.waitFor(() => expect(value.read).toHaveBeenCalledTimes(1))
+    registrations[0](() => {})
+    await Promise.resolve()
+    await Promise.resolve()
+    finish(state)
+    await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
+    expect(value.read).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
   it("applies only the newest of overlapping reads", async () => {
     const { value } = backend()
     const finishers: Array<(value: unknown) => void> = []
