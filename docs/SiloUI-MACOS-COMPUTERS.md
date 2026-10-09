@@ -135,10 +135,13 @@ key from `template-access/`, then runs one script as root (`personalize.rs`):
   login;
 - when the disk is larger than the template's, expands the APFS container with
   `diskutil apfs resizeContainer` (after `repairDisk`) on the container's
-  physical store, found with `diskutil info`. It counts only if the command
-  succeeded and the container grew by about the extra size. Otherwise the
-  computer keeps the template's space, its recorded disk size says so, and the
-  computer ends as Failed with that message but is complete and can be started;
+  physical store, found with `diskutil info`. Every attempt, including a resumed
+  one, measures the bytes no partition covers and expands only while a GiB or more is
+  unused; the record's disk size is set from that measurement. If the container does
+  not fill the disk, the computer keeps the space it got, its recorded disk size says
+  so, and it ends as Failed with that message but is complete and can be started. A
+  requested disk smaller than the template that is selected when the copy starts
+  fails with "This macOS template needs at least N GiB" instead of being enlarged;
 - replaces `authorized_keys` with the copy's own public key, as its last change, so
   a run cut short can start again with the template's key. A run that already got
   that far is recognised by the copy's own key answering.

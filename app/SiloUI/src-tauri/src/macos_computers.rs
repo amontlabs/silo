@@ -723,7 +723,7 @@ fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, canc
 fn setup_workflow(app: &AppHandle, data: &std::path::Path, mut record: Record, cancel: &AtomicU8) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let result = run_setup(app, &layout, &mut record, cancel);
+    let result = run_setup(app, &layout, &mut record, cancel, None);
     end_workflow(app, &id, &layout, result);
 }
 
@@ -778,7 +778,7 @@ fn run_creation(
     }
     if let Some(lease) = templates::lease_matching(data, build, &version) {
         // Held until this creation ends: the copy writes during its personalization.
-        let _space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
+        let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
         if copy_template(app, layout, &mut record, &lease, cancel)? {
             // Persist while the computer is still in its creation state.
             if !registry().creation_continues(&id) {
@@ -791,7 +791,8 @@ fn run_creation(
             emit(app);
             // The computer now names its template, which keeps it from being removed.
             drop(lease);
-            return run_setup(app, layout, &mut record, cancel);
+            // The reservation stays with the computer until its personalization is done.
+            return run_setup(app, layout, &mut record, cancel, Some(space));
         }
     }
     let latest = latest?;
@@ -850,7 +851,7 @@ fn run_creation(
         return Err(Stop::Cancelled);
     }
     emit(app);
-    run_setup(app, layout, &mut record, cancel)
+    run_setup(app, layout, &mut record, cancel, None)
 }
 
 /// Copies a template's files into the new computer and records what the copy still lacks.
@@ -868,13 +869,13 @@ fn copy_template(
         return Err(Stop::Cancelled);
     }
     let template = &lease.template;
+    // The form may have been checked against another template.
+    templates::check_disk(record.disk_gib, template)?;
     let before = record.clone();
     record.restore_image = Some(store::RestoreImageInfo {
         version: template.meta.macos_version.clone(),
         build: template.meta.build.clone(),
     });
-    // A copy keeps its template's disk; a larger one is grown and expanded in the guest.
-    record.disk_gib = record.disk_gib.max(template.meta.disk_gib);
     record.pristine = false;
     record.template = Some(template.name.clone());
     record.setup_version = Some(template.meta.setup_version.clone());
@@ -909,8 +910,9 @@ fn run_setup(
     layout: &Layout,
     record: &mut Record,
     cancel: &AtomicU8,
+    reservation: Option<templates::SpaceReservation>,
 ) -> Result<(), Stop> {
-    provision::run(app, layout, record, cancel)?;
+    provision::run(app, layout, record, cancel, reservation)?;
     if cancel.load(Ordering::SeqCst) == RUN && templates::eligible(record) {
         save_template(app, layout, record);
     }
@@ -923,13 +925,10 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
         return;
     };
     set_detail(app, &record.id, "Saving a template");
-    let made = templates::make(
-        &data,
-        record,
-        layout,
-        &templates::setup_version(),
-        &protected_templates,
-    );
+    let Some(version) = record.setup_version.as_deref() else {
+        return;
+    };
+    let made = templates::make(&data, record, layout, version, &protected_templates);
     if let Err(message) = made {
         eprintln!("macOS computer template could not be saved: {message}");
     }

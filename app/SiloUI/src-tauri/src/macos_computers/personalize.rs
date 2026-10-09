@@ -16,20 +16,19 @@ use super::{
 };
 
 const GIB: u64 = 1 << 30;
-pub(super) const RESIZED: &str = "SILO_DISK_RESIZE=ok";
-pub(super) const NOT_RESIZED: &str = "SILO_DISK_RESIZE=failed";
+const UNALLOCATED: &str = "SILO_UNALLOCATED=";
 pub(super) const DONE: &str = "SILO_PERSONALIZED";
 const MISSING_SECRETS: i32 = 64;
 
-/// The commands run as root. `grow_by_gib` is how much larger than the template's the disk
-/// was made, which the APFS container should grow by. The secrets are only ever read into
+/// The commands run as root. `grow` adds the expansion of the APFS container into a disk
+/// that was made larger than the template's. The secrets are only ever read into
 /// shell variables and written through the shell's builtin `printf`, so no external process
 /// receives them as an argument.
-pub(super) fn script(public_key: &str, computer_name: &str, grow_by_gib: Option<u64>) -> String {
+pub(super) fn script(public_key: &str, computer_name: &str, grow: bool) -> String {
     let name = shell_quote(computer_name);
     let authorized_key = shell_quote(public_key.trim());
     let home = format!("/Users/{USER}");
-    let grow = grow_by_gib.map_or_else(String::new, |gib| grow_disk(gib * GIB / 10 * 9));
+    let grow = if grow { grow_script() } else { String::new() };
     format!(
         "set -e
 IFS= read -r SILO_PASSWORD
@@ -59,25 +58,79 @@ printf '%s\\n' {authorized_key} > {home}/.ssh/authorized_keys.new
     )
 }
 
-/// Expands the APFS container into the larger disk. It counts as done only when the resize
-/// command succeeded and the container grew by at least `minimum_growth` bytes. A failure
-/// is reported, not fatal here: the computer works with the template's space.
-fn grow_disk(minimum_growth: u64) -> String {
-    format!(
-        "store=$(/usr/sbin/diskutil info -plist / | /usr/bin/plutil -extract APFSPhysicalStores.0.APFSPhysicalStore raw -o - - 2>/dev/null || true)
-whole=$(printf '%s' \"$store\" | /usr/bin/sed 's/s[0-9]*$//')
-resized=no
-if [ -n \"$store\" ] && [ -n \"$whole\" ]; then
-before=$(/usr/sbin/diskutil info -plist \"$store\" | /usr/bin/plutil -extract TotalSize raw -o - - 2>/dev/null || /bin/echo 0)
-/bin/echo y | /usr/sbin/diskutil repairDisk \"$whole\" >/dev/null 2>&1 || true
-if /usr/sbin/diskutil apfs resizeContainer \"$store\" 0 >/dev/null 2>&1; then
-after=$(/usr/sbin/diskutil info -plist \"$store\" | /usr/bin/plutil -extract TotalSize raw -o - - 2>/dev/null || /bin/echo 0)
-if [ \"$((after - before))\" -ge {minimum_growth} ] 2>/dev/null; then resized=yes; fi
+/// Measures how much of the disk no partition covers, expands the APFS container when that is
+/// a gibibyte or more, and measures again. It prints `SILO_UNALLOCATED=<bytes>` (or
+/// `unknown`), so it can run on every attempt: it expands only what is still unexpanded, and
+/// the result is a measurement of the guest, not of this attempt.
+pub(super) fn grow_script() -> String {
+    r#"set +e
+store=$(/usr/sbin/diskutil info -plist / | /usr/bin/plutil -extract APFSPhysicalStores.0.APFSPhysicalStore raw -o - - 2>/dev/null)
+whole=$(printf '%s' "$store" | /usr/bin/sed 's/s[0-9]*$//')
+unallocated_bytes() {
+list=$(/usr/sbin/diskutil list -plist "$whole" 2>/dev/null) || return 1
+total=$(printf '%s' "$list" | /usr/bin/plutil -extract AllDisksAndPartitions.0.Size raw -o - - 2>/dev/null) || return 1
+sum=0
+n=0
+while size=$(printf '%s' "$list" | /usr/bin/plutil -extract "AllDisksAndPartitions.0.Partitions.$n.Size" raw -o - - 2>/dev/null); do
+sum=$((sum + size))
+n=$((n + 1))
+done
+/bin/echo $((total - sum))
+}
+gap=
+if [ -n "$store" ] && [ -n "$whole" ]; then
+gap=$(unallocated_bytes)
+if [ -n "$gap" ] && [ "$gap" -ge GIB_BYTES ]; then
+/bin/echo y | /usr/sbin/diskutil repairDisk "$whole" >/dev/null 2>&1
+/usr/sbin/diskutil apfs resizeContainer "$store" 0 >/dev/null 2>&1
+gap=$(unallocated_bytes)
 fi
 fi
-if [ \"$resized\" = yes ]; then /bin/echo {RESIZED}; else /bin/echo {NOT_RESIZED}; fi
-"
-    )
+if [ -n "$gap" ]; then /bin/echo SILO_UNALLOCATED=$gap; else /bin/echo SILO_UNALLOCATED=unknown; fi
+set -e
+"#
+    .replace("GIB_BYTES", &GIB.to_string())
+}
+
+/// The disk size a computer really has once the guest has been measured.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Disk {
+    pub gib: u64,
+    /// The container does not fill the disk that was asked for.
+    pub short: bool,
+}
+
+/// What `requested_gib` of disk came to, given the bytes no partition covers. A disk smaller
+/// than the template's does not exist, and an unmeasurable one counts as not expanded.
+pub(super) fn reconcile_disk(
+    requested_gib: u64,
+    template_gib: u64,
+    unallocated: Option<u64>,
+) -> Disk {
+    match unallocated {
+        Some(bytes) if bytes < GIB => Disk {
+            gib: requested_gib,
+            short: false,
+        },
+        Some(bytes) => Disk {
+            gib: requested_gib
+                .saturating_sub(bytes.div_ceil(GIB))
+                .clamp(template_gib, requested_gib.max(template_gib)),
+            short: true,
+        },
+        None => Disk {
+            gib: template_gib,
+            short: true,
+        },
+    }
+}
+
+/// The measurement a script printed.
+pub(super) fn unallocated(stdout: &str) -> Option<u64> {
+    stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(UNALLOCATED))
+        .and_then(|value| value.parse().ok())
 }
 
 /// The standard input of the personalization command.
@@ -94,10 +147,10 @@ pub(super) fn command(script: &str) -> String {
     format!("/usr/bin/sudo -n /bin/sh -c \"$(/bin/echo {script} | /usr/bin/base64 -D)\"")
 }
 
-/// Whether the script ran to its end, and how the disk expansion went.
+/// Whether the script ran to its end, and what it measured of the disk.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Outcome {
-    pub disk_resized: Option<bool>,
+    pub unallocated: Option<u64>,
 }
 
 pub(super) fn outcome(status: i32, stdout: &str) -> Result<Outcome, String> {
@@ -107,15 +160,8 @@ pub(super) fn outcome(status: i32, stdout: &str) -> Result<Outcome, String> {
     if status != 0 || !stdout.lines().any(|line| line.trim() == DONE) {
         return Err("Silo could not personalize the computer.".into());
     }
-    let has = |marker: &str| stdout.lines().any(|line| line.trim() == marker);
     Ok(Outcome {
-        disk_resized: if has(RESIZED) {
-            Some(true)
-        } else if has(NOT_RESIZED) {
-            Some(false)
-        } else {
-            None
-        },
+        unallocated: unallocated(stdout),
     })
 }
 
@@ -148,7 +194,7 @@ mod tests {
 
     #[test]
     fn the_password_is_never_in_the_script_or_the_command() {
-        let script = script(KEY, "mac-one", Some(128));
+        let script = script(KEY, "mac-one", true);
         let command = command(&script);
         for text in [&script, &command, &decoded(&command)] {
             assert!(!text.contains(PASSWORD));
@@ -184,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_command_survives_the_shell_round_trip() {
-        let script = script("ssh-ed25519 AAAA 'quoted' comment", "mac-one", None);
+        let script = script("ssh-ed25519 AAAA 'quoted' comment", "mac-one", false);
         let command = command(&script);
         assert_eq!(decoded(&command), script);
         assert!(command.starts_with("/usr/bin/sudo -n /bin/sh -c \"$("));
@@ -193,7 +239,7 @@ mod tests {
 
     #[test]
     fn the_copy_gets_its_own_identity() {
-        let script = script(KEY, "mac-one", None);
+        let script = script(KEY, "mac-one", false);
         for expected in [
             "/etc/kcpassword",
             "scutil --set ComputerName 'mac-one'",
@@ -212,7 +258,7 @@ mod tests {
 
     #[test]
     fn the_template_key_is_replaced_last_so_a_failed_run_can_be_repeated() {
-        let script = script(KEY, "mac-one", Some(64));
+        let script = script(KEY, "mac-one", true);
         let at = |needle: &str| script.find(needle).unwrap();
         let replaced = at("mv -f /Users/silo/.ssh/authorized_keys.new");
         for earlier in [
@@ -231,22 +277,73 @@ mod tests {
 
     #[test]
     fn the_container_is_grown_only_for_a_larger_disk() {
-        assert!(!script(KEY, "mac-one", None).contains("resizeContainer"));
-        let grown = script(KEY, "mac-one", Some(128));
+        assert!(!script(KEY, "mac-one", false).contains("resizeContainer"));
+        let grown = script(KEY, "mac-one", true);
         assert!(grown.contains("diskutil apfs resizeContainer \"$store\" 0"));
-        assert!(grown.contains(&format!("-ge {}", 128 * GIB / 10 * 9)));
-        // The command's own status decides, and growth is measured against the container before.
-        assert!(grown.contains("if /usr/sbin/diskutil apfs resizeContainer"));
-        assert!(grown.contains("before=$(") && grown.contains("after - before"));
+        assert!(grown.contains(&format!("-ge {GIB} ]")));
+    }
+
+    #[test]
+    fn growth_is_measured_on_every_attempt_and_only_done_while_space_is_unused() {
+        let grow = grow_script();
+        // The expansion is behind a measurement, which is taken again afterwards.
+        let first = grow.find("gap=$(unallocated_bytes)").unwrap();
+        let resize = grow.find("resizeContainer").unwrap();
+        let second = grow.rfind("gap=$(unallocated_bytes)").unwrap();
+        assert!(first < resize && resize < second);
+        assert!(grow.contains("SILO_UNALLOCATED=$gap"));
+        assert!(grow.contains("SILO_UNALLOCATED=unknown"));
+        assert!(!grow.contains("GIB_BYTES"));
+    }
+
+    #[test]
+    fn the_disk_is_reconciled_with_what_the_guest_measured() {
+        let disk = |unallocated| reconcile_disk(128, 64, unallocated);
+        let full = Disk {
+            gib: 128,
+            short: false,
+        };
+        assert_eq!(disk(Some(0)), full);
+        assert_eq!(disk(Some(GIB - 1)), full);
+        // 60 GiB unused: the container still has about the template's space.
+        assert_eq!(
+            disk(Some(60 * GIB)),
+            Disk {
+                gib: 68,
+                short: true
+            }
+        );
+        assert_eq!(
+            disk(Some(64 * GIB)),
+            Disk {
+                gib: 64,
+                short: true
+            }
+        );
+        assert_eq!(
+            disk(Some(100 * GIB)),
+            Disk {
+                gib: 64,
+                short: true
+            }
+        );
+        assert_eq!(
+            disk(None),
+            Disk {
+                gib: 64,
+                short: true
+            }
+        );
     }
 
     #[test]
     fn the_outcome_reads_the_markers() {
-        let ok = format!("{RESIZED}\n{DONE}\n");
-        assert_eq!(outcome(0, &ok).unwrap().disk_resized, Some(true));
-        let short = format!("{NOT_RESIZED}\n{DONE}\n");
-        assert_eq!(outcome(0, &short).unwrap().disk_resized, Some(false));
-        assert_eq!(outcome(0, &format!("{DONE}\n")).unwrap().disk_resized, None);
+        let ok = format!("SILO_UNALLOCATED=4096\n{DONE}\n");
+        assert_eq!(outcome(0, &ok).unwrap().unallocated, Some(4096));
+        let unknown = format!("SILO_UNALLOCATED=unknown\n{DONE}\n");
+        assert_eq!(outcome(0, &unknown).unwrap().unallocated, None);
+        assert_eq!(outcome(0, &format!("{DONE}\n")).unwrap().unallocated, None);
+        assert_eq!(unallocated("noise\nSILO_UNALLOCATED=7\n"), Some(7));
         assert!(outcome(1, &ok).is_err());
         assert!(outcome(0, "").is_err());
         assert!(outcome(MISSING_SECRETS, "")

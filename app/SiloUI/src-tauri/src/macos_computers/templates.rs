@@ -182,10 +182,10 @@ pub(super) fn choose<'a>(
 
 // MARK: Leases
 
-/// Folder names of templates that copies are being made from, with their counts.
-static LEASES: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+/// Folders of templates that copies are being made from, with their counts.
+static LEASES: Mutex<Option<HashMap<PathBuf, usize>>> = Mutex::new(None);
 
-fn leases() -> std::sync::MutexGuard<'static, Option<HashMap<String, usize>>> {
+fn leases() -> std::sync::MutexGuard<'static, Option<HashMap<PathBuf, usize>>> {
     LEASES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -197,8 +197,8 @@ pub(super) struct Lease {
 }
 
 impl Lease {
-    fn take(leases: &mut HashMap<String, usize>, template: Template) -> Self {
-        *leases.entry(template.name.clone()).or_default() += 1;
+    fn take(leases: &mut HashMap<PathBuf, usize>, template: Template) -> Self {
+        *leases.entry(template.dir.clone()).or_default() += 1;
         Self { template }
     }
 }
@@ -207,10 +207,10 @@ impl Drop for Lease {
     fn drop(&mut self) {
         let mut guard = leases();
         if let Some(leases) = guard.as_mut() {
-            if let Some(count) = leases.get_mut(&self.template.name) {
+            if let Some(count) = leases.get_mut(&self.template.dir) {
                 *count -= 1;
                 if *count == 0 {
-                    leases.remove(&self.template.name);
+                    leases.remove(&self.template.dir);
                 }
             }
         }
@@ -255,22 +255,27 @@ fn remove_dir(path: &Path) -> Result<(), String> {
     }
 }
 
-/// Removes every template except `keep` that no copy is made from. `protected` names the
+type Leases = std::sync::MutexGuard<'static, Option<HashMap<PathBuf, usize>>>;
+
+/// Removes every template but the newest that no copy is made from. `protected` names the
 /// templates computers still depend on; it is read while the leases are locked, so a copy
-/// that starts to depend on a template cannot slip between the two checks.
-fn prune(
+/// that starts to depend on a template cannot slip between the two checks. The newest is
+/// chosen here, under the same lock a publication takes, so one published meanwhile is
+/// never mistaken for an old one.
+fn prune_locked(
+    guard: &Leases,
     app_data: &Path,
-    keep: Option<&str>,
     protected: &dyn Fn() -> Vec<String>,
 ) -> Result<(), String> {
-    let guard = leases();
     let held = guard.as_ref();
     let protected = protected();
+    let templates = list(app_data);
+    let newest = templates.first().map(|template| template.name.clone());
     let mut result = Ok(());
-    for template in list(app_data) {
-        let used = held.is_some_and(|held| held.contains_key(&template.name))
+    for template in templates {
+        let used = held.is_some_and(|held| held.contains_key(&template.dir))
             || protected.contains(&template.name);
-        if Some(template.name.as_str()) != keep && !used {
+        if Some(&template.name) != newest.as_ref() && !used {
             if let Err(message) = remove_dir(&template.dir) {
                 result = Err(message);
             }
@@ -279,14 +284,13 @@ fn prune(
     result
 }
 
-/// Removes every template but the newest that no copy is made from and no unfinished copy
-/// depends on. Run when a copy ends, so a template a copy held is not kept for good.
+/// Removes every template but the newest that nothing needs. Run when a copy ends, so a
+/// template a copy held is not kept for good.
 pub(super) fn prune_stale(
     app_data: &Path,
     protected: &dyn Fn() -> Vec<String>,
 ) -> Result<(), String> {
-    let newest = list(app_data).first().map(|template| template.name.clone());
-    prune(app_data, newest.as_deref(), protected)
+    prune_locked(&leases(), app_data, protected)
 }
 
 /// Removes every template, unless a copy is being made from one or an unfinished copy
@@ -300,7 +304,7 @@ pub(super) fn remove_all(
     if templates.iter().any(|template| {
         guard
             .as_ref()
-            .is_some_and(|held| held.contains_key(&template.name))
+            .is_some_and(|held| held.contains_key(&template.dir))
     }) {
         return Err("A computer is being copied from the template. Wait for it to finish.".into());
     }
@@ -382,11 +386,13 @@ pub(super) fn make(
         let _ = remove_dir(&partial);
         return Err(message);
     }
+    // Publishing and pruning happen under one lock, so a prune never runs between them.
+    let guard = leases();
     if let Err(error) = fs::rename(&partial, &target) {
         let _ = remove_dir(&partial);
         return Err(store::io_error("save the template", &error));
     }
-    prune(app_data, Some(&name), protected)?;
+    prune_locked(&guard, app_data, protected)?;
     Ok(Some(name))
 }
 
@@ -445,6 +451,17 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 // MARK: Copying
+
+/// A copy cannot be smaller than its template; the disk is only ever grown.
+pub(super) fn check_disk(requested_gib: u64, template: &Template) -> Result<(), String> {
+    if requested_gib < template.meta.disk_gib {
+        return Err(format!(
+            "This macOS template needs at least {} GiB of disk. Create the computer again with a larger disk.",
+            template.meta.disk_gib
+        ));
+    }
+    Ok(())
+}
 
 /// Copies a template's files into the new computer's folder. The disk is the template's
 /// size or, when `disk_gib` is larger, grown to it; the guest uses the extra space once
@@ -897,6 +914,25 @@ mod tests {
         // Writing to the copy leaves the template alone.
         fs::write(copy.disk(), b"changed").unwrap();
         assert_eq!(fs::read(lease.template.disk()).unwrap(), vec![7u8; 4096]);
+    }
+
+    #[test]
+    fn a_disk_smaller_than_the_selected_template_is_refused_not_enlarged() {
+        let template = template("25G83", "abcd", "2026-10-01T00:00:00Z");
+        assert!(check_disk(64, &template).is_ok());
+        assert!(check_disk(128, &template).is_ok());
+        let error = check_disk(63, &template).unwrap_err();
+        assert!(error.contains("needs at least 64 GiB"), "{error}");
+    }
+
+    #[test]
+    fn a_template_published_while_pruning_is_not_pruned() {
+        let (computer, layout, data) = record(64);
+        make(data.path(), &computer, &layout, "one", &none).unwrap();
+        make(data.path(), &computer, &layout, "two", &none).unwrap();
+        prune_stale(data.path(), &none).unwrap();
+        let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["25G83-two"]);
     }
 
     #[test]

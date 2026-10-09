@@ -41,12 +41,14 @@ pub(super) fn run(
     layout: &Layout,
     record: &mut Record,
     cancel: &AtomicU8,
+    reservation: Option<templates::SpaceReservation>,
 ) -> Result<(), Stop> {
     let provision = Provision {
         app,
         layout,
         id: record.id.clone(),
         cancel,
+        reservation: std::cell::Cell::new(reservation),
     };
     let result = provision.steps(record);
     if result.is_err() {
@@ -61,6 +63,8 @@ struct Provision<'a> {
     layout: &'a Layout,
     id: String,
     cancel: &'a AtomicU8,
+    /// Space set aside for a copy's writes, held by the creation that made it.
+    reservation: std::cell::Cell<Option<templates::SpaceReservation>>,
 }
 
 impl Provision<'_> {
@@ -186,6 +190,11 @@ impl Provision<'_> {
             .template
             .clone()
             .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
+        // A resumed personalization writes as much as a first one, so it needs the space too.
+        let _space = match self.reservation.take() {
+            Some(held) => held,
+            None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
+        };
         let lease = templates::lease_named(&data, &name)?;
         let access = lease.template.access_dir();
         if !access.join("id_ed25519").exists() {
@@ -195,14 +204,14 @@ impl Provision<'_> {
         let template_login = self.layout.clone().with_access(access);
         self.say("Personalizing the computer")?;
         let mut shortfall = None;
+        let requested = record.disk_gib;
+        let template_gib = lease.template.meta.disk_gib;
+        let grow = requested > template_gib;
+        let mut unallocated = None;
         // The guest's host keys are about to change.
         guest_access::reset_host_keys(self.layout)?;
         self.start_machine()?;
         if self.wait_for_login(&template_login, record)? == LoginKey::Template {
-            let grow = record
-                .disk_gib
-                .checked_sub(lease.template.meta.disk_gib)
-                .filter(|by| *by > 0);
             let script = personalize::script(&guest_access::public_key(&own)?, &record.name, grow);
             let output = guest_access::run(
                 &template_login,
@@ -220,21 +229,37 @@ impl Provision<'_> {
             }
             let outcome =
                 personalize::outcome(output.status, &output.stdout).map_err(Stop::Failed)?;
-            if outcome.disk_resized == Some(false) {
-                eprintln!("macOS computer personalization: the disk could not be expanded.");
-                shortfall = Some(format!(
-                    "Silo could not expand the disk to {} GiB, so the computer has {} GiB. It is otherwise ready to start.",
-                    record.disk_gib, lease.template.meta.disk_gib
-                ));
-                record.disk_gib = lease.template.meta.disk_gib;
-                self.persist(record)?;
-            }
+            unallocated = outcome.unallocated;
             // The script replaced the host keys, and every new connection presents them.
             guest_access::reset_host_keys(self.layout)?;
             if !guest_access::probe(self.layout, record) {
                 return Err(Stop::Failed(
                     "Silo could not log in to the computer with its own key.".into(),
                 ));
+            }
+        } else if grow {
+            // The script ran in an earlier attempt, whose measurement was lost.
+            let output = guest_access::run(
+                self.layout,
+                record,
+                &personalize::command(&personalize::grow_script()),
+                None,
+                PERSONALIZE_COMMAND,
+            )?;
+            unallocated = personalize::unallocated(&output.stdout);
+        }
+        if grow {
+            let disk = personalize::reconcile_disk(requested, template_gib, unallocated);
+            if disk.short {
+                eprintln!("macOS computer personalization: the disk could not be expanded.");
+                shortfall = Some(format!(
+                    "Silo could not expand the disk to {requested} GiB, so the computer has {} GiB. It is otherwise ready to start.",
+                    disk.gib
+                ));
+            }
+            if disk.gib != record.disk_gib {
+                record.disk_gib = disk.gib;
+                self.persist(record)?;
             }
         }
         self.shut_down()?;
