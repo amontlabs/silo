@@ -104,10 +104,11 @@ safe_members() {
   done
 }
 
-# Fails when a symbolic link under $1 points outside $1.
+# Fails when a symbolic link under $1 does not resolve to a path inside $1; a dangling link fails.
 links_stay_inside() {
   local root=${1:A} link target
   find "$root" -type l -print0 | while IFS= read -r -d '' link; do
+    [[ -e $link ]] || return 1
     target=${link:A}
     [[ $target == $root || $target == $root/* ]] || return 1
   done
@@ -140,7 +141,7 @@ install_app() {
   zipinfo -1 "$zip" 2>>"$LOG" | safe_members || fail "the ChatGPT app archive has unsafe paths"
   logged ditto -x -k "$zip" "$WORK/app" || fail "could not unpack the ChatGPT app"
   [[ $(ls -A "$WORK/app") == ChatGPT.app ]] || fail "the ChatGPT app archive holds more than the app"
-  links_stay_inside "$WORK/app" || fail "the ChatGPT app archive has links that leave the app"
+  links_stay_inside "$WORK/app/ChatGPT.app" || fail "the ChatGPT app archive has links that leave the app"
   app_ok "$WORK/app/ChatGPT.app" || fail "the ChatGPT app is not the official signed app"
   # LCU and the Computer Use helper run from /Applications, owned by root.
   if [[ -e $APP ]]; then

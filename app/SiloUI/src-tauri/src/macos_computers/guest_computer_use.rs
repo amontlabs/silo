@@ -628,6 +628,12 @@ mod tests {
             assert!(check(&root));
             std::os::unix::fs::symlink("/etc", root.join("sub/outside")).unwrap();
             assert!(!check(&root));
+            std::fs::remove_file(root.join("sub/outside")).unwrap();
+            std::os::unix::fs::symlink("/nonexistent-target", root.join("sub/dangling")).unwrap();
+            assert!(!check(&root));
+            std::fs::remove_file(root.join("sub/dangling")).unwrap();
+            std::os::unix::fs::symlink("../..", root.join("sub/parent")).unwrap();
+            assert!(!check(&root.join("sub")));
         }
 
         #[test]
