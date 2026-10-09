@@ -16,6 +16,7 @@ use std::{
     fs,
     io::Write,
     os::unix::fs::PermissionsExt,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -46,17 +47,23 @@ pub(super) fn run(
     public_key: &str,
     release: Option<Release<'_>>,
 ) -> Result<(), String> {
-    let attached = Attached::attach(disk)?;
-    let mount = attached.mount_data_volume()?;
-    patch(&mount, account, public_key, release.as_ref())
+    let mut attached = Attached::attach(disk)?;
+    let patched = attached
+        .mount_data_volume()
+        .and_then(|mount| patch(&mount, account, public_key, release.as_ref()));
+    // The guest must never boot while the host still holds its disk.
+    let closed = attached.close();
+    patched.and(closed)
 }
 
 // MARK: Disk
 
-/// A disk image attached to the host without mounting its volumes. Dropping it
-/// unmounts whatever was mounted and detaches the image.
+/// A disk image attached to the host without mounting its volumes. `close`
+/// unmounts whatever was mounted and detaches the image, reporting a failure;
+/// dropping it does the same without reporting.
 struct Attached {
     whole_disk: String,
+    closed: bool,
 }
 
 impl Attached {
@@ -66,7 +73,10 @@ impl Attached {
             &["attach", "-readwrite", "-nomount", &disk.to_string_lossy()],
         )?;
         match parse_whole_disk(&output) {
-            Some(whole_disk) => Ok(Self { whole_disk }),
+            Some(whole_disk) => Ok(Self {
+                whole_disk,
+                closed: false,
+            }),
             None => {
                 // The image is attached but its device is unknown: detach by image.
                 detach_by_image(disk);
@@ -95,17 +105,34 @@ impl Attached {
     }
 }
 
-impl Drop for Attached {
-    fn drop(&mut self) {
+impl Attached {
+    /// Unmounts every volume and detaches the image. Fails if the image is still attached.
+    fn close(&mut self) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
         let device = format!("/dev/{}", self.whole_disk);
-        let _ = tool("/usr/sbin/diskutil", &["unmountDisk", "force", &device]);
+        if tool("/usr/sbin/diskutil", &["unmountDisk", &device]).is_err() {
+            let _ = tool("/usr/sbin/diskutil", &["unmountDisk", "force", &device]);
+        }
         for _ in 0..3 {
             if tool("/usr/bin/hdiutil", &["detach", &device]).is_ok() {
-                return;
+                self.closed = true;
+                return Ok(());
             }
             thread::sleep(Duration::from_millis(500));
         }
-        let _ = tool("/usr/bin/hdiutil", &["detach", "-force", &device]);
+        tool("/usr/bin/hdiutil", &["detach", "-force", &device])
+            .map(|_| self.closed = true)
+            .map_err(|error| {
+                format!("Silo could not release the computer's disk from this Mac. {error}")
+            })
+    }
+}
+
+impl Drop for Attached {
+    fn drop(&mut self) {
+        let _ = self.close();
     }
 }
 
@@ -132,11 +159,21 @@ fn detach_by_image(disk: &Path) {
             .flatten()
             .filter_map(Value::as_dictionary)
             .filter_map(|entity| entity.get("dev-entry").and_then(Value::as_string))
-            .find(|device| !device.trim_start_matches("/dev/").contains('s'));
+            .find(|device| is_whole_disk(device));
         if let Some(device) = whole {
             let _ = tool("/usr/bin/hdiutil", &["detach", "-force", device]);
         }
     }
+}
+
+/// Whether `device` (`/dev/disk4`) names a whole disk rather than a partition (`disk4s2`).
+fn is_whole_disk(device: &str) -> bool {
+    device
+        .trim_start_matches("/dev/")
+        .strip_prefix("disk")
+        .is_some_and(|number| {
+            !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }
 
 /// The whole-disk node (`disk4`) from `hdiutil attach` output: the line whose
@@ -604,7 +641,8 @@ fn allow_sudo(root: &Path) -> Result<(), String> {
 /// The commands run as root in the guest once it is up. Lume's finalization,
 /// plus the ownership the host cannot set while it edits the volume offline and
 /// the installation of the sudoers entry.
-pub(super) fn finalization_script() -> String {
+pub(super) fn finalization_script(public_key: &str) -> String {
+    let authorized_key = super::guest_access::shell_quote(public_key.trim());
     let sudoers_entry = sudoers();
     let sudoers_entry = sudoers_entry.trim_end();
     format!(
@@ -623,6 +661,8 @@ pub(super) fn finalization_script() -> String {
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTrueToneSetup -bool true
 /usr/sbin/chown root:wheel /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
 /bin/chmod 600 /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
+/bin/mkdir -p /Users/{USER}/.ssh
+/usr/bin/printf '%s\\n' {authorized_key} > /Users/{USER}/.ssh/authorized_keys
 /usr/sbin/chown -R {UID}:{GID} /Users/{USER}
 /bin/chmod 700 /Users/{USER}/.ssh
 /bin/chmod 600 /Users/{USER}/.ssh/authorized_keys
@@ -703,16 +743,16 @@ fn write_file(path: &Path, bytes: &[u8], mode: u32, preserve_existing: bool) -> 
     if exists {
         set_mode(path, mode | 0o200)?;
     }
-    if preserve_existing && exists {
-        fs::OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)
-            .and_then(|mut file| file.write_all(bytes))
-    } else {
-        fs::write(path, bytes)
+    let mut options = fs::OpenOptions::new();
+    options.write(true).truncate(true);
+    if !(preserve_existing && exists) {
+        // A new file is created with its final mode, never readable by others first.
+        options.create(true).mode(mode);
     }
-    .map_err(|error| fs_error(action, &error))?;
+    options
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+        .map_err(|error| fs_error(action, &error))?;
     set_mode(path, mode)
 }
 
@@ -724,7 +764,10 @@ fn create_dir(path: &Path, mode: u32) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         create_dir(parent, 0o755)?;
     }
-    fs::create_dir(path).map_err(|error| fs_error("set up the computer's account", &error))?;
+    fs::DirBuilder::new()
+        .mode(mode)
+        .create(path)
+        .map_err(|error| fs_error("set up the computer's account", &error))?;
     set_mode(path, mode)
 }
 
@@ -897,7 +940,7 @@ mod tests {
 
     #[test]
     fn finalization_installs_sudoers_ownership_and_prebooted_recovery_metadata() {
-        let script = finalization_script();
+        let script = finalization_script("ssh-ed25519 AAAA test");
         assert!(script.starts_with("set -e\n"));
         assert!(script.contains("autoLoginUser -string silo"));
         assert!(script.contains("diskutil apfs updatePreboot /"));
@@ -905,6 +948,8 @@ mod tests {
         assert!(script.contains("visudo -cf /etc/sudoers.d/silo.new"));
         assert!(script.contains("chmod 440 /etc/sudoers.d/silo.new"));
         assert!(script.contains("chown -R 501:20 /Users/silo"));
+        assert!(script
+            .contains("printf '%s\\n' 'ssh-ed25519 AAAA test' > /Users/silo/.ssh/authorized_keys"));
         assert!(script.contains("MARKER_OWNER=%u:%g"));
         assert!(!script.contains("lume"));
     }
@@ -928,6 +973,44 @@ mod tests {
             .into_dictionary()
             .unwrap();
         assert_eq!(data_volume_device(&list).as_deref(), Some("disk8s2"));
+    }
+
+    #[test]
+    fn whole_disks_are_told_from_partitions() {
+        for device in ["/dev/disk7", "disk10", "/dev/disk0"] {
+            assert!(is_whole_disk(device), "{device}");
+        }
+        for device in [
+            "/dev/disk7s2",
+            "disk10s1",
+            "/dev/disk",
+            "/dev/rdisk7",
+            "disk7x",
+        ] {
+            assert!(!is_whole_disk(device), "{device}");
+        }
+    }
+
+    #[test]
+    fn secret_files_are_created_private() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, mode) in [("kcpassword", 0o600), ("sudoers", 0o440), ("plain", 0o644)] {
+            let path = dir.path().join(name);
+            write_file(&path, b"secret", mode, false).unwrap();
+            assert_eq!(mode_of(&path), Some(mode), "{name}");
+            // Rewriting in place keeps the mode.
+            write_file(&path, b"other", mode, true).unwrap();
+            assert_eq!(mode_of(&path), Some(mode), "{name}");
+            assert_eq!(fs::read(&path).unwrap(), b"other");
+        }
+        // The file exists with its final mode as soon as it is created, whatever the umask allows.
+        let mut options = fs::OpenOptions::new();
+        let path = dir.path().join("direct");
+        options.write(true).create_new(true).mode(0o600);
+        options.open(&path).unwrap();
+        assert_eq!(mode_of(&path), Some(0o600));
+        create_dir(&dir.path().join("a/b"), 0o700).unwrap();
+        assert_eq!(mode_of(&dir.path().join("a/b")), Some(0o700));
     }
 
     #[test]

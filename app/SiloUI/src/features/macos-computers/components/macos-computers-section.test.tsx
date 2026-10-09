@@ -63,6 +63,7 @@ it("offers the actions that fit each state", async () => {
   expect(names(row("agent-box"))).toEqual(["Cancel setting up agent-box"])
   expect(names(row("xcode-build"))).toEqual(["Start xcode-build", "More actions for xcode-build"])
   expect(names(row("daily"))).toEqual(["Show screen of daily", "Stop daily", "More actions for daily"])
+  // Never installed, so there is nothing to set up again.
   expect(names(row("broken"))).toEqual(["More actions for broken"])
 })
 
@@ -156,7 +157,7 @@ it("confirms before cancelling a setup", async () => {
 })
 
 it("retries the setup of an idle computer that is not set up", async () => {
-  const unfinished: MacosComputer = { ...macosComputerFixtures[0], id: "mac-unfinished", name: "unfinished", state: "failed", detail: "Turning off System Integrity Protection is not implemented yet.", setupComplete: false }
+  const unfinished: MacosComputer = { ...macosComputerFixtures[0], id: "mac-unfinished", name: "unfinished", state: "failed", detail: "Turning off System Integrity Protection is not implemented yet.", installed: true, setupComplete: false }
   const backend = backendFor([unfinished])
   const user = userEvent.setup()
   renderSection(backend)

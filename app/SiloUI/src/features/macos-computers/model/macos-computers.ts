@@ -17,6 +17,7 @@ export const macosComputerSchema = z.object({
   progress: z.number().min(0).max(1).nullable(),
   detail: z.string().nullable(),
   displayOpen: z.boolean(),
+  installed: z.boolean(),
   setupComplete: z.boolean(),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
@@ -234,7 +235,7 @@ export const isMacosCreating = (computer: MacosComputer) => computer.state === "
 export const isMacosSettingUp = (computer: MacosComputer) => computer.state === "setting-up"
 
 /** An installed computer that stopped before its setup finished can run the remaining steps again. */
-export const canRetryMacosSetup = (computer: MacosComputer) => !computer.setupComplete && (computer.state === "stopped" || computer.state === "failed")
+export const canRetryMacosSetup = (computer: MacosComputer) => computer.installed && !computer.setupComplete && (computer.state === "stopped" || computer.state === "failed")
 
 export function macosStateLabel(computer: MacosComputer): string {
   const percent = computer.progress == null ? "" : ` ${Math.round(computer.progress * 100)}%`

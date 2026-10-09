@@ -63,6 +63,7 @@ pub(crate) struct MacosComputer {
     progress: Option<f64>,
     detail: Option<String>,
     display_open: bool,
+    installed: bool,
     setup_complete: bool,
 }
 
@@ -114,6 +115,7 @@ impl Entry {
             progress: self.progress,
             detail: self.detail.clone(),
             display_open: self.display_open,
+            installed: self.record.installed,
             setup_complete: self.record.setup.complete(),
         }
     }
@@ -552,7 +554,7 @@ fn end_workflow(
     cancel: &AtomicU8,
     result: Result<(), Stop>,
 ) {
-    match result {
+    match classify(result, cancel.load(Ordering::SeqCst)) {
         Ok(()) => {}
         Err(Stop::Failed(message)) => set_state(app, id, State::Failed, Some(message)),
         Err(Stop::Cancelled) => {
@@ -968,6 +970,19 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
 
 // MARK: Quit
 
+/// Asks a creation or setup to end and keep the computer, unless a Delete already asked it to end and remove it.
+fn request_abort(cancel: &AtomicU8) {
+    let _ = cancel.compare_exchange(RUN, ABORT_AND_KEEP, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+/// A step that failed after a Delete was accepted ended because of the Delete.
+fn classify(result: Result<(), Stop>, flag: u8) -> Result<(), Stop> {
+    match result {
+        Err(Stop::Failed(_)) if flag == CANCEL_AND_REMOVE => Err(Stop::Cancelled),
+        other => other,
+    }
+}
+
 fn is_busy(state: State) -> bool {
     !matches!(state, State::Stopped | State::Failed)
 }
@@ -997,7 +1012,7 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
             state,
             State::Preparing | State::Downloading | State::Installing | State::SettingUp
         ) {
-            cancel.store(ABORT_AND_KEEP, Ordering::SeqCst);
+            request_abort(cancel);
         }
     }
     // A start in flight cannot be asked to stop; let it settle first.
@@ -1028,26 +1043,21 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
         all_stopped(ids)
     };
     let everything: Vec<&String> = busy.iter().map(|(id, _, _)| id).collect();
-    if wait_until(limit(GRACEFUL_QUIT), &machines) {
-        // Installations and setups were aborted; give them a moment to release their machine.
-        if wait_until(limit(FORCED_QUIT), &everything) {
-            return Ok(());
-        }
-        // A setup stuck in a guest command still holds its machine.
-        for id in &everything {
-            if state_of(id) == Some(State::SettingUp) {
-                let _ = engine::force_stop(app, id);
-            }
-        }
-        wait_until(limit(FORCED_QUIT), &everything);
+    // Installations and setups were aborted; they release their machine (and, for a
+    // setup, the disk image) before they stop being busy.
+    if wait_until(limit(GRACEFUL_QUIT), &machines) && wait_until(limit(FORCED_QUIT), &everything) {
         return Ok(());
     }
-    for id in &machines {
-        if state_of(id).is_some_and(is_busy) {
+    // A machine that ignored the request, or a setup stuck in a guest command, still holds its machine.
+    for id in &everything {
+        if state_of(id).is_some_and(|state| state != State::Stopped && state != State::Failed)
+            && engine::machine_states(app)
+                .is_ok_and(|states| states.iter().any(|(held, _)| held == *id))
+        {
             let _ = engine::force_stop(app, id);
         }
     }
-    if wait_until(limit(FORCED_QUIT), &machines) {
+    if wait_until(limit(FORCED_QUIT), &everything) {
         Ok(())
     } else {
         Err("A macOS computer did not stop in time.".into())
@@ -1079,6 +1089,7 @@ mod tests {
         assert_eq!(json["displayOpen"], false);
         assert_eq!(json["progress"], 0.25);
         assert_eq!(json["setupComplete"], false);
+        assert_eq!(json["installed"], false);
         assert!(json.get("detail").is_some());
         let mut done = entry;
         done.state = State::SettingUp;
@@ -1174,6 +1185,31 @@ mod tests {
             .store(ABORT_AND_KEEP, Ordering::SeqCst);
         let mut registry = registry;
         assert!(registry.creation_continues(&id));
+    }
+
+    #[test]
+    fn quit_keeps_a_stronger_removal_request() {
+        let cancel = AtomicU8::new(RUN);
+        request_abort(&cancel);
+        assert_eq!(cancel.load(Ordering::SeqCst), ABORT_AND_KEEP);
+        let cancel = AtomicU8::new(CANCEL_AND_REMOVE);
+        request_abort(&cancel);
+        assert_eq!(cancel.load(Ordering::SeqCst), CANCEL_AND_REMOVE);
+    }
+
+    #[test]
+    fn a_failure_after_an_accepted_delete_counts_as_the_delete() {
+        let failed = || Err(Stop::Failed("boom".into()));
+        assert!(matches!(
+            classify(failed(), CANCEL_AND_REMOVE),
+            Err(Stop::Cancelled)
+        ));
+        assert!(matches!(classify(failed(), RUN), Err(Stop::Failed(_))));
+        assert!(matches!(
+            classify(failed(), ABORT_AND_KEEP),
+            Err(Stop::Failed(_))
+        ));
+        assert!(classify(Ok(()), CANCEL_AND_REMOVE).is_ok());
     }
 
     #[test]
