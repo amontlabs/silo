@@ -79,11 +79,46 @@ State `setting-up` covers these steps; its detail names the current step.
    `csrutil disable` sequence into its `VZVirtualMachineView`, then boots
    normally and confirms `csrutil status` over SSH. The key sequence follows
    cirruslabs' MIT image templates.
-4. **Computer use.** Over SSH Silo installs the pinned ChatGPT app and LCU
-   darwin build, runs `lcu setup --agent all --allow-missing`, and writes
-   Accessibility and Screen Recording grants for `com.openai.sky.CUAService`
-   and `com.openai.codex` into the system TCC database, which SIP no longer
-   protects.
+4. **Computer use.** Silo downloads two pinned archives once per device
+   (`guest/macos/chatgpt-app-lock.json`: the official ChatGPT macOS app from
+   OpenAI's Sparkle feed; `guest/macos/lcu-lock.json`: LCU's darwin build),
+   checks their size and SHA-256, copies them with `silo-computer-use.zsh` into
+   the running computer and runs `apply --approval ask|auto` over SSH, the mode
+   coming from the `computerUseAutoApproval` setting as for Linux computers.
+   The script (zsh, as the guest has no Python):
+   - requires `csrutil status` to say disabled;
+   - installs `/Applications/ChatGPT.app` unless the pinned version is already
+     there: SHA-256, `codesign --verify --deep --strict`, bundle identifier
+     `com.openai.codex` and team `2DC432GLL2` are checked before the app is moved
+     in, owned by root, and its quarantine attribute is cleared;
+   - runs LCU's installer (`scripts/install.sh --runtime-only --yes`) as `silo`;
+   - writes Accessibility and Screen Recording rows for `com.openai.codex` and
+     `com.openai.sky.CUAService` (the Computer Use helper inside the app) into
+     the system TCC database. The `access` table's columns are read at run time
+     and only existing ones are written; the csreq blob comes from
+     `codesign -d -r-` and `csreq -b`. It reads every row back, pre-writes the
+     Screen Recording reminder ledger of `replayd` (macOS 15 and later) and
+     restarts both `tccd` daemons;
+   - runs `lcu setup --agent all --allow-missing --session direct --yes
+     --approval <mode>` and installs a LaunchAgent that runs
+     `lcu setup --reconcile` at each login, so agents installed later register.
+   Per-app approvals ("Allow Computer Use to use X?") stay with LCU and are never
+   seeded. The script keeps a log (`~/Library/Logs/silo-computer-use.log`) and a
+   receipt (`~/Library/Application Support/Silo/computer-use-receipt.json`) in the
+   guest, and is idempotent: a rerun with the same pins and mode changes nothing.
+   Pins: ChatGPT 26.930.61225 (CUA runtime 0.0.27, the runtime LCU's tested macOS
+   pair uses; LCU lists its pairing with 26.928.20755, which the feed no longer
+   serves) and LCU 0.10.1. The home folder `/Users/silo` is within the helper's
+   13-byte limit.
+   The approach follows prior art rather than inventing one:
+   [trycua/cua `seed-tcc.sh`](https://github.com/trycua/cua/blob/main/libs/images/macos/files/seed-tcc.sh)
+   and [actions/runner-images `configure-tccdb-macos.sh`](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)
+   (both MIT) for the system-database rows, csreq derivation and the `replayd`
+   ledger, and [electron's `screencapture-nag-remover.sh`](https://github.com/electron/electron/blob/main/script/actions/screencapture-nag-remover.sh)
+   (MIT) for the ledger formats. `tccutil.py` (GPL-2.0) and MDM's PPPC profiles
+   were not used: the first cannot be bundled under Silo's license, and Apple
+   only accepts a PPPC profile for Accessibility and Screen Recording from an
+   enrolled MDM server, which a guest does not have.
 5. **Clipboard.** Nothing is installed in the guest and nothing syncs on its
    own. Two explicit actions, "Paste into computer" and "Copy from computer",
    move text (1 MiB limit) and PNG images (16 MiB) over SSH as the logged-in
@@ -124,7 +159,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | --- | --- |
 | Checkpoints | None. Framework save/restore state (macOS 14+) is tied to this Mac and needs a paused computer and a configuration that passes `validateSaveRestoreSupportWithError`; disk clones (APFS `clonefile`) are the likely checkpoint route. Not designed yet |
 | Remote computers (Connections) | None. The view must live in the process that runs the computer, so a computer on another device would need a streamed or VNC path, and Apple's license excludes service-style use |
-| Agent computer use | None. LCU, the agent harnesses and their installation are Linux-only in Silo today |
+| Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
 | Unattended setup | None. The user completes Setup Assistant by hand; no account, SSH or automatic login is configured |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
 | Export, import and backup | None |
