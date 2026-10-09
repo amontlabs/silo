@@ -38,7 +38,7 @@ describe("macOS computer presentation", () => {
   })
 
   it("describes resources and creation", () => {
-    expect(macosResources(computer)).toBe("4 CPUs · 8 GB memory · 64 GB disk")
+    expect(macosResources(computer)).toBe("4 CPUs · 8 GiB memory · 64 GiB disk")
     expect(isMacosCreating({ ...computer, state: "installing" })).toBe(true)
     expect(isMacosCreating(computer)).toBe(false)
   })
@@ -103,7 +103,7 @@ describe("createMacosComputersStore", () => {
     await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
     emit({ nonsense: true })
     expect(store.getSnapshot().state).toEqual(state)
-    expect(store.getSnapshot().error).toBeTruthy()
+    expect(store.getSnapshot().warning).toBeTruthy()
     stop()
   })
 
@@ -114,6 +114,74 @@ describe("createMacosComputersStore", () => {
     await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
     await store.create({ name: "new", cpus: 4, memoryGiB: 8, diskGiB: 64 })
     expect(store.getSnapshot().state?.computers.map(({ name }) => name)).toEqual(["daily", "new"])
+    stop()
+  })
+
+  it("registers the listener before the first read", async () => {
+    const order: string[] = []
+    const { value } = backend()
+    value.listen = vi.fn(async () => { order.push("listen"); return () => {} })
+    value.read = vi.fn(async () => { order.push("read"); return state })
+    const stop = createMacosComputersStore(value).subscribe(() => {})
+    await vi.waitFor(() => expect(order).toEqual(["listen", "read"]))
+    stop()
+  })
+
+  it("discards a read that finishes after a newer event", async () => {
+    const { value, emit } = backend()
+    let finish: (value: unknown) => void = () => {}
+    value.read = vi.fn(() => new Promise(resolve => { finish = resolve }))
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(value.read).toHaveBeenCalled())
+    emit({ ...state, computers: [{ ...computer, state: "running" }] })
+    finish(state)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.getSnapshot().state?.computers[0].state).toBe("running")
+    stop()
+  })
+
+  it("applies a read that finishes before any event", async () => {
+    const { value, emit } = backend()
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().state).toEqual(state))
+    emit({ ...state, computers: [] })
+    expect(store.getSnapshot().state?.computers).toEqual([])
+    stop()
+  })
+
+  it("retries a failed listener registration, warns meanwhile and reads after actions", async () => {
+    vi.useFakeTimers()
+    const { value } = backend()
+    const listen = vi.fn()
+      .mockRejectedValueOnce(new Error("no events"))
+      .mockImplementation(async () => () => {})
+    value.listen = listen
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.advanceTimersByTimeAsync(0)
+    expect(store.getSnapshot().warning).toMatch(/unavailable/)
+    expect(store.getSnapshot().state).toEqual(state)
+    await store.action("a", "start")
+    await vi.advanceTimersByTimeAsync(0)
+    expect(value.read).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(listen).toHaveBeenCalledTimes(2)
+    expect(store.getSnapshot().warning).toBeNull()
+    stop()
+    vi.useRealTimers()
+  })
+
+  it("keeps a failed first read as an error and refreshes on request", async () => {
+    const { value } = backend()
+    value.read = vi.fn().mockRejectedValueOnce("Virtualization is unavailable.").mockResolvedValue(state)
+    const store = createMacosComputersStore(value)
+    const stop = store.subscribe(() => {})
+    await vi.waitFor(() => expect(store.getSnapshot().error).toBe("Virtualization is unavailable."))
+    await store.refresh()
+    expect(store.getSnapshot()).toMatchObject({ state, error: null })
     stop()
   })
 })

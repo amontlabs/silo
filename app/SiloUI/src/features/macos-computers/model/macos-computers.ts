@@ -50,52 +50,100 @@ export interface MacosComputersBackend {
 
 export interface MacosComputersSnapshot {
   state: MacosComputersState | null
-  /** The state could not be read or an update was malformed. Cleared by the next valid state. */
+  /** The state could not be read. Cleared by the next valid state. */
   error: string | null
+  /** Updates are late or incomplete (a malformed event, or no change events); the state shown may be behind. */
+  warning: string | null
 }
 
 export interface MacosComputersStore {
   subscribe(listener: () => void): () => void
   getSnapshot(): MacosComputersSnapshot
+  /** Reads the state again. */
+  refresh(): Promise<void>
   create(request: MacosComputerRequest): Promise<void>
   action(id: string, action: MacosComputerAction): Promise<void>
   openDisplay(id: string): Promise<void>
 }
 
-const initialSnapshot: MacosComputersSnapshot = { state: null, error: null }
+const initialSnapshot: MacosComputersSnapshot = { state: null, error: null, warning: null }
 
 function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "The state of macOS computers could not be read."
 }
 
-/** Reads the state when the first listener subscribes and follows its change events until the last one leaves. */
+const listenRetryMs = (attempt: number) => Math.min(30_000, 1_000 * 2 ** attempt)
+
+/**
+ * Registers for change events, then reads the state when the first listener subscribes, and follows
+ * the events until the last one leaves. A read that finishes after a newer event is discarded. While
+ * the event listener cannot be registered it is retried with backoff and every action and creation
+ * reads the state again.
+ */
 export function createMacosComputersStore(backend: MacosComputersBackend): MacosComputersStore {
   let snapshot = initialSnapshot
   const listeners = new Set<() => void>()
   let stop: (() => void) | undefined
+  let retry: ReturnType<typeof setTimeout> | undefined
   let generation = 0
+  let eventCount = 0
+  let listening = false
 
   function publish(next: MacosComputersSnapshot) {
     snapshot = next
     listeners.forEach(listener => listener())
   }
 
-  function accept(value: unknown) {
+  function accept(value: unknown, fromEvent: boolean) {
     const parsed = macosComputersStateSchema.safeParse(value)
-    if (parsed.success) publish({ state: parsed.data, error: null })
-    else publish({ ...snapshot, error: "The state of macOS computers was unreadable." })
+    if (parsed.success) publish({ state: parsed.data, error: null, warning: fromEvent || listening ? null : snapshot.warning })
+    else publish({ ...snapshot, warning: "An update to the macOS computers was unreadable. Refreshing…" })
+  }
+
+  async function read(mine: number) {
+    const startedAfter = eventCount
+    try {
+      const value = await backend.read()
+      if (mine === generation && eventCount === startedAfter) accept(value, false)
+    } catch (error) {
+      if (mine === generation && eventCount === startedAfter) publish({ ...snapshot, error: failureMessage(error) })
+    }
+  }
+
+  async function register(mine: number, attempt: number): Promise<void> {
+    try {
+      const unlisten = await backend.listen(payload => {
+        if (mine !== generation) return
+        eventCount++
+        accept(payload, true)
+        // A malformed event leaves the state behind; read it again.
+        if (!macosComputersStateSchema.safeParse(payload).success) void read(mine)
+      })
+      if (mine !== generation) { unlisten(); return }
+      stop = unlisten
+      listening = true
+      if (snapshot.warning) publish({ ...snapshot, warning: null })
+    } catch {
+      if (mine !== generation) return
+      listening = false
+      publish({ ...snapshot, warning: "Live updates of macOS computers are unavailable. Retrying…" })
+      retry = setTimeout(() => { void register(mine, attempt + 1).then(() => { if (listening) void read(mine) }) }, listenRetryMs(attempt))
+    }
   }
 
   function start() {
     const mine = ++generation
-    void backend.listen(payload => { if (mine === generation) accept(payload) }).then(
-      unlisten => { if (mine === generation) stop = unlisten; else unlisten() },
-      () => {},
-    )
-    void backend.read().then(
-      value => { if (mine === generation) accept(value) },
-      error => { if (mine === generation) publish({ ...snapshot, error: failureMessage(error) }) },
-    )
+    listening = false
+    void register(mine, 0).then(() => read(mine))
+  }
+
+  async function refresh() {
+    await read(generation)
+  }
+
+  // Without change events, an operation's effect is only visible by reading again.
+  async function readAfter<T>(operation: Promise<T>): Promise<T> {
+    try { return await operation } finally { if (!listening && listeners.size > 0) void refresh() }
   }
 
   return {
@@ -106,19 +154,22 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
         listeners.delete(listener)
         if (listeners.size === 0) {
           generation++
+          clearTimeout(retry)
           stop?.()
           stop = undefined
+          listening = false
         }
       }
     },
     getSnapshot: () => snapshot,
+    refresh,
     async create(request) {
-      const created = macosComputerSchema.parse(await backend.create(request))
+      const created = macosComputerSchema.parse(await readAfter(backend.create(request)))
       // The change event normally arrives first; the returned row covers a missed one.
       const current = snapshot.state
-      if (current && !current.computers.some(({ id }) => id === created.id)) publish({ state: { ...current, computers: [...current.computers, created] }, error: null })
+      if (current && !current.computers.some(({ id }) => id === created.id)) publish({ ...snapshot, state: { ...current, computers: [...current.computers, created] } })
     },
-    action: (id, action) => backend.action(id, action),
+    action: (id, action) => readAfter(backend.action(id, action)),
     openDisplay: id => backend.openDisplay(id),
   }
 }
@@ -154,8 +205,8 @@ export function validateMacosRequest(request: MacosComputerRequest, existingName
   else if (existingNames.includes(request.name)) errors.name = "A macOS computer with this name exists."
   const within = (value: number, min: number, max: number) => Number.isSafeInteger(value) && value >= min && value <= max
   if (!within(request.cpus, macosLimits.minCPUs, maxCPUs)) errors.cpus = `Use ${macosLimits.minCPUs} to ${maxCPUs} CPUs.`
-  if (!within(request.memoryGiB, macosLimits.minMemoryGiB, maxMemoryGiB)) errors.memoryGiB = `Use ${macosLimits.minMemoryGiB} to ${maxMemoryGiB} GB of memory.`
-  if (!within(request.diskGiB, macosLimits.minDiskGiB, macosLimits.maxDiskGiB)) errors.diskGiB = `Use ${macosLimits.minDiskGiB} to ${macosLimits.maxDiskGiB} GB of disk.`
+  if (!within(request.memoryGiB, macosLimits.minMemoryGiB, maxMemoryGiB)) errors.memoryGiB = `Use ${macosLimits.minMemoryGiB} to ${maxMemoryGiB} GiB of memory.`
+  if (!within(request.diskGiB, macosLimits.minDiskGiB, macosLimits.maxDiskGiB)) errors.diskGiB = `Use ${macosLimits.minDiskGiB} to ${macosLimits.maxDiskGiB} GiB of disk.`
   return errors
 }
 
@@ -176,5 +227,5 @@ export function macosStateLabel(computer: MacosComputer): string {
 }
 
 export function macosResources(computer: MacosComputer): string {
-  return `${computer.cpus} CPUs · ${computer.memoryGiB} GB memory · ${computer.diskGiB} GB disk`
+  return `${computer.cpus} CPUs · ${computer.memoryGiB} GiB memory · ${computer.diskGiB} GiB disk`
 }
