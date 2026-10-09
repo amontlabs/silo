@@ -26,7 +26,7 @@ pub(crate) fn generation() -> u64 {
 }
 pub(crate) fn cancel() {
     QUITTING.store(false, Ordering::SeqCst);
-    crate::macos_computers::reopen();
+    crate::macos_computers::reopen_after_quit();
     if let Ok(mut deadline) = MAINTENANCE_DEADLINE.lock() {
         *deadline = None;
     }
