@@ -54,6 +54,44 @@ macOS computers are not entries in the MicroSandbox registry
 (`computers.json`), so the Linux lifecycle, health, backup and Connections code
 never sees them.
 
+## Provisioning for computer use
+
+Agents use macOS computers through LCU's macOS build, as they use Linux
+computers through its Linux build. Nobody clicks Setup Assistant, a Recovery
+prompt or an "Allow" dialog: Silo provisions the guest after installation.
+State `setting-up` covers these steps; its detail names the current step.
+
+1. **Account, automatic login and SSH, offline.** With the computer stopped,
+   Silo attaches `disk.img` with `hdiutil`, mounts the guest's Data volume and
+   writes the account `silo` (home `/Users/silo`, short enough for LCU's
+   13-byte limit), its random password, `.AppleSetupDone`, the Setup Assistant
+   keys, automatic login (`/etc/kcpassword`), Remote Login, and no sleep or
+   screen lock. This ports the offline setup of
+   [Lume](https://github.com/trycua/cua/tree/main/libs/lume) (MIT) rather than
+   bundling its binary; see the [engine research](research/macos-guest-engine-2026-10-09.md#provisioning).
+2. **First boot.** Silo finds the guest's address in `/var/db/dhcpd_leases` by
+   its MAC address, installs a per-computer SSH key over the password login,
+   and finishes what must run inside the guest (`diskutil apfs updatePreboot /`
+   so Recovery knows the account).
+3. **System Integrity Protection.** Silo boots the computer into macOS Recovery
+   (`startUpFromMacOSRecovery`) in a visible "Setting up" window and types the
+   `csrutil disable` sequence into its `VZVirtualMachineView`, then boots
+   normally and confirms `csrutil status` over SSH. The key sequence follows
+   cirruslabs' MIT image templates.
+4. **Computer use.** Over SSH Silo installs the pinned ChatGPT app and LCU
+   darwin build, runs `lcu setup --agent all --allow-missing`, and writes
+   Accessibility and Screen Recording grants for `com.openai.sky.CUAService`
+   and `com.openai.codex` into the system TCC database, which SIP no longer
+   protects.
+5. **Clipboard.** On macOS 15 or later on both sides, a SPICE agent port
+   (`VZSpiceAgentPortAttachment`) and a guest clipboard agent share the
+   clipboard. On macOS 14 the port is omitted and the screen window says
+   clipboard sharing needs macOS 15.
+
+Per-computer secrets live in `macos-computers/<id>/guest-access/` (mode 0700):
+the account password and the SSH key. Anyone who can read that directory can
+also read the computer's disk, so the Keychain would add no protection.
+
 ## Development and signing
 
 Virtualization.framework requires the `com.apple.security.virtualization`

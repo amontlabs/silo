@@ -66,9 +66,14 @@ virtualization, display and input are Apple's.
 - **Process and thread.** The VM, its installer and its view belong to the main
   queue of the Silo process. Quitting Silo stops its macOS computers, matching
   local Linux computers. A crash of Silo stops them abruptly.
-- **Save and restore state** (macOS 14+) exists but is tied to this device, needs
-  the paused VM and a configuration that passes
-  `validateSaveRestoreSupportWithError`. Not used yet.
+- **Save and restore state** (macOS 14+) is tied to this device and needs a
+  paused VM. A probe on this macOS 26.5 Mac built Silo's configuration from the
+  26.6.2 restore image and asked `validateSaveRestoreSupport`: it passed with
+  every device Silo uses (Mac graphics, virtio block, NAT, Mac keyboard and
+  trackpad, USB pointer, virtio sound to host output, entropy) and with a SPICE
+  agent console port added. Tart disables audio, entropy and USB input for its
+  suspendable VMs; on this host that is not needed. A real save still has to
+  confirm it.
 - **Networking.** NAT needs no extra entitlement; bridged networking needs the
   restricted `com.apple.vm.networking` entitlement.
 
@@ -99,3 +104,33 @@ For Silo this means:
   of this slice (see [macOS computers](../SiloUI-MACOS-COMPUTERS.md#not-covered-yet)).
 
 This is a reading of the license for product design, not legal advice.
+
+## Provisioning
+
+Computer use needs a provisioned guest: an account with automatic login, SSH,
+and SIP disabled so that LCU's Accessibility and Screen Recording grants can be
+written into the TCC database. Two existing approaches were read at pinned
+sources (Lume `ba4c636`, cirruslabs/macos-image-templates `2ff087f`, MIT):
+
+- **Lume's unattended setup** edits the installed disk offline: an account
+  record with a PBKDF2 password hash, `.AppleSetupDone`, Setup Assistant keys,
+  automatic login and Remote Login, then one boot to finish over SSH. No
+  keystrokes. Its presets cover macOS 26 (verified upstream) and 15.
+- **Lume's `sip` command** boots Recovery and drives it over the private
+  `_VZVNCServer` with the Python `vncdotool` package, Vision OCR and a click
+  at a fixed screen position. **cirruslabs' templates** drive Setup Assistant
+  and Recovery with timed keystrokes through Tart's Packer plugin.
+
+Silo ports Lume's offline setup to Rust instead of bundling the `lume` binary.
+Bundling would add a second process that runs the same VM (counting against the
+two-guest limit), telemetry that must be switched off, and Lume's bundle layout;
+the setup itself is a few hundred lines of file edits. Lume's SIP path is not
+reusable as shipped (Python dependency, private API), so Silo drives Recovery
+itself: it owns the VM and its view, so keystrokes go to the
+`VZVirtualMachineView`, following the cirruslabs key sequence. Both depend on
+undocumented guest formats and screens that may change with each macOS
+release; they are qualified per guest version and checked with `csrutil status`
+and a first LCU call.
+
+Pre-provisioned images are not an option: Apple's license does not allow
+redistributing macOS.
