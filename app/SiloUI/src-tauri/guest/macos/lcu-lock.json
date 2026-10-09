@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": "0.10.1",
+  "source": "https://github.com/amontlabs/lcu/releases/tag/v0.10.1",
+  "assets": {
+    "arm64": {
+      "url": "https://github.com/amontlabs/lcu/releases/download/v0.10.1/lcu-0.10.1-darwin-arm64.tar.gz",
+      "sha256": "84be4c61751c59f504347df9297ba323edb951f22bc5984b5f31610b4a19bab4",
+      "bytes": 5861932
+    }
+  }
+}

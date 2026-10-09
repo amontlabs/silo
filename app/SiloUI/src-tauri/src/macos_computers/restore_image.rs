@@ -160,9 +160,36 @@ pub(super) fn download(
     progress: &mut dyn FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, DownloadError> {
     let name = file_name(url)?;
-    let target = dir.join(&name);
+    let (target, fresh) = fetch(url, dir, &name, cancelled, progress)?;
+    if fresh {
+        prune_other_images(dir, &name);
+    }
+    Ok(target)
+}
+
+/// Downloads `url` into `dir` as `name` with the same resuming and retries as
+/// `download`, leaving every other file in `dir` alone.
+pub(super) fn download_as(
+    url: &str,
+    dir: &Path,
+    name: &str,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<PathBuf, DownloadError> {
+    fetch(url, dir, name, cancelled, progress).map(|(target, _)| target)
+}
+
+/// The finished file and whether this call downloaded it.
+fn fetch(
+    url: &str,
+    dir: &Path,
+    name: &str,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(u64, Option<u64>),
+) -> Result<(PathBuf, bool), DownloadError> {
+    let target = dir.join(name);
     if target.is_file() {
-        return Ok(target);
+        return Ok((target, false));
     }
     fs::create_dir_all(dir)
         .map_err(|error| super::store::io_error("prepare the download", &error))?;
@@ -180,8 +207,7 @@ pub(super) fn download(
             Ok(()) => {
                 fs::rename(&partial, &target)
                     .map_err(|error| super::store::io_error("finish the download", &error))?;
-                prune_other_images(dir, &name);
-                return Ok(target);
+                return Ok((target, true));
             }
             Err(Attempt::Cancelled) => return Err(DownloadError::Cancelled),
             Err(Attempt::Fatal(message)) => return Err(DownloadError::Failed(message)),
