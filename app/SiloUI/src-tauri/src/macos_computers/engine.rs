@@ -1075,7 +1075,7 @@ pub(super) fn attach_display(
                         constraint.setActive(true);
                     }
                 } else {
-                    view.setFrame(content.bounds());
+                    view.setFrame(content.convertRect_fromView(native.contentLayoutRect(), None));
                     view.setAutoresizingMask(
                         NSAutoresizingMaskOptions::ViewWidthSizable
                             | NSAutoresizingMaskOptions::ViewHeightSizable,
