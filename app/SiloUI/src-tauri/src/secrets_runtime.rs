@@ -1155,7 +1155,8 @@ finally: c.close()
             "allowed HTTPS received a placeholder"
         );
         guest("curl -fsS --max-time 20 https://example.com >/dev/null")?;
-        guest("if curl -fsS --max-time 20 -H \"X-Silo-Test: $API_TEST_TOKEN\" https://example.com >/dev/null 2>&1; then exit 1; fi")?;
+        // Placeholders travel unchanged to other hosts instead of closing the connection.
+        guest("curl -fsS --max-time 20 -H \"X-Silo-Test: $API_TEST_TOKEN\" https://example.com >/dev/null")?;
         connection_update(None,"synthetic-first",Some("synthetic-first"))?;
         material[0].1 = "synthetic-rotated".into();
         connection_update(Some(&material),"synthetic-first",Some("synthetic-rotated"))?;
@@ -1165,7 +1166,9 @@ finally: c.close()
         material[0].2 = vec!["other.example.com".into()];
         assert!(apply(&paths, name, &material, false)?.is_empty());
         assert_eq!(guest("cat /proc/sys/kernel/random/boot_id")?, boot);
-        guest("if curl -fsS --max-time 20 -H \"X-Silo-Test: $API_TEST_TOKEN\" https://httpbingo.org/headers >/dev/null 2>&1; then exit 1; fi")?;
+        let unassigned = guest("curl -fsS --max-time 20 -H \"X-Silo-Test: $API_TEST_TOKEN\" https://httpbingo.org/headers?probe=$(date +%s)")?;
+        assert!(unassigned.contains("$MSB_API_TEST_TOKEN"), "a host no longer allowed did not receive the placeholder");
+        assert!(!unassigned.contains("synthetic-"), "a host no longer allowed received the secret value");
         material.push((
             "SECOND_TOKEN".into(),
             "synthetic-second".into(),
