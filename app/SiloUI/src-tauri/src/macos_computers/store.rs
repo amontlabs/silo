@@ -22,6 +22,8 @@ pub(super) enum State {
     Preparing,
     Downloading,
     Installing,
+    #[serde(rename = "setting-up")]
+    SettingUp,
     Stopped,
     Starting,
     Running,
@@ -36,12 +38,30 @@ pub(crate) enum Action {
     Stop,
     ForceStop,
     Delete,
+    /// Runs the provisioning steps that have not finished.
+    Setup,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct RestoreImageInfo {
     pub version: String,
     pub build: String,
+}
+
+/// Which provisioning steps have finished. Persisted so a retry resumes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(super) struct SetupProgress {
+    pub account: bool,
+    pub sip: bool,
+    pub computer_use: bool,
+    pub clipboard: bool,
+}
+
+impl SetupProgress {
+    pub(super) fn complete(self) -> bool {
+        self.account && self.sip && self.computer_use && self.clipboard
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,6 +79,8 @@ pub(super) struct Record {
     pub mac_address: String,
     pub restore_image: Option<RestoreImageInfo>,
     pub installed: bool,
+    #[serde(default)]
+    pub setup: SetupProgress,
 }
 
 impl Record {
@@ -141,6 +163,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         mac_address,
         restore_image: None,
         installed: false,
+        setup: SetupProgress::default(),
     }
 }
 
@@ -162,7 +185,9 @@ pub(super) enum DeleteMode {
 
 pub(super) fn delete_mode(state: State) -> Result<DeleteMode, String> {
     match state {
-        State::Preparing | State::Downloading | State::Installing => Ok(DeleteMode::Cancel),
+        State::Preparing | State::Downloading | State::Installing | State::SettingUp => {
+            Ok(DeleteMode::Cancel)
+        }
         State::Stopped | State::Failed => Ok(DeleteMode::Remove),
         State::Starting | State::Running | State::Stopping => {
             Err("Stop the computer first.".into())
@@ -178,6 +203,27 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
         State::Stopped | State::Failed => Ok(()),
         State::Running | State::Starting => Err("This computer is already running.".into()),
         State::Stopping => Err("This computer is still stopping.".into()),
+        State::Preparing | State::Downloading | State::Installing => {
+            Err("macOS is still being installed on this computer.".into())
+        }
+        State::SettingUp => Err("This computer is still being set up.".into()),
+    }
+}
+
+/// Whether provisioning can be run (again): an installed, idle computer with steps left.
+pub(super) fn setup_allowed(state: State, record: &Record) -> Result<(), String> {
+    if !record.installed {
+        return Err(INTERRUPTED_INSTALL.into());
+    }
+    if record.setup.complete() {
+        return Err("This computer is already set up.".into());
+    }
+    match state {
+        State::Stopped | State::Failed => Ok(()),
+        State::SettingUp => Err("This computer is already being set up.".into()),
+        State::Running | State::Starting | State::Stopping => {
+            Err("Stop the computer before setting it up.".into())
+        }
         State::Preparing | State::Downloading | State::Installing => {
             Err("macOS is still being installed on this computer.".into())
         }
@@ -421,7 +467,7 @@ mod tests {
     #[test]
     fn delete_rules_follow_the_state() {
         use State::*;
-        for state in [Preparing, Downloading, Installing] {
+        for state in [Preparing, Downloading, Installing, SettingUp] {
             assert_eq!(delete_mode(state), Ok(DeleteMode::Cancel));
         }
         for state in [Stopped, Failed] {
@@ -441,6 +487,63 @@ mod tests {
         assert!(start_allowed(State::Failed, &computer).is_ok());
         assert!(start_allowed(State::Running, &computer).is_err());
         assert!(start_allowed(State::Installing, &computer).is_err());
+    }
+
+    #[test]
+    fn setup_runs_on_an_idle_installed_computer_with_steps_left() {
+        let mut computer = record(&request());
+        assert!(setup_allowed(State::Stopped, &computer).is_err());
+        computer.installed = true;
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
+        assert!(setup_allowed(State::Failed, &computer).is_ok());
+        for state in [State::SettingUp, State::Running, State::Installing] {
+            assert!(setup_allowed(state, &computer).is_err());
+        }
+        computer.setup.account = true;
+        computer.setup.sip = true;
+        computer.setup.computer_use = true;
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
+        computer.setup.clipboard = true;
+        assert!(setup_allowed(State::Stopped, &computer).is_err());
+        assert!(start_allowed(State::SettingUp, &computer).is_err());
+    }
+
+    #[test]
+    fn setup_progress_persists_and_old_records_default_to_none_done() {
+        let app_data = tempfile::tempdir().unwrap();
+        let mut original = record(&request());
+        original.installed = true;
+        original.setup.account = true;
+        original.setup.sip = true;
+        let layout = Layout::new(app_data.path(), &original.id);
+        save(&layout, &original).unwrap();
+        let loaded = load_all(app_data.path());
+        assert_eq!(loaded, vec![original.clone()]);
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+        assert_eq!(
+            json["setup"],
+            serde_json::json!({"account": true, "sip": true, "computerUse": false, "clipboard": false})
+        );
+
+        let mut old = json;
+        old.as_object_mut().unwrap().remove("setup");
+        fs::write(layout.record(), serde_json::to_vec(&old).unwrap()).unwrap();
+        let loaded = load_all(app_data.path());
+        assert_eq!(loaded[0].setup, SetupProgress::default());
+        assert!(!loaded[0].setup.complete());
+    }
+
+    #[test]
+    fn states_serialize_to_the_contract_strings() {
+        assert_eq!(
+            serde_json::to_value(State::SettingUp).unwrap(),
+            serde_json::json!("setting-up")
+        );
+        assert_eq!(
+            serde_json::to_value(State::Stopped).unwrap(),
+            serde_json::json!("stopped")
+        );
     }
 
     #[test]
@@ -472,6 +575,7 @@ mod tests {
             ("stop", Action::Stop),
             ("force-stop", Action::ForceStop),
             ("delete", Action::Delete),
+            ("setup", Action::Setup),
         ] {
             let parsed: Action = serde_json::from_value(serde_json::json!(text)).unwrap();
             assert_eq!(parsed, action);

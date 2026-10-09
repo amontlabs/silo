@@ -29,6 +29,10 @@ libc = "0.2"
 microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-image" }
 microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-utils" }
 sha2 = "0.10"
+# PBKDF2-HMAC-SHA512 for the macOS guest account (the RustCrypto pbkdf2 crate is not in the lock file; both are already locked through other dependencies).
+hmac = "0.12"
+# Reads and writes the guest's property lists. Already locked through Tauri.
+plist = "1"
 flate2 = "1"
 tar = "0.4"
 # Already locked through microsandbox-image; used to pre-scan imported snapshot archives.
