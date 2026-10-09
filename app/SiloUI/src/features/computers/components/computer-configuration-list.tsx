@@ -15,6 +15,10 @@ import { computerSummary } from "@/features/computers/model/computer-summary"
 import { deleteComputerDescription, deleteComputerTitle } from "@/features/computers/model/delete-computer-copy"
 import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
 import { computerEditMenu } from "@/features/computers/model/computer-edit-menu"
+import { OperatingSystemField, type ComputerOs } from "@/features/computers/components/os-badge"
+import { MacosComputerForm } from "@/features/macos-computers/components/macos-computer-form"
+import { MacosComputerRow } from "@/features/macos-computers/components/macos-computer-row"
+import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { restoreFocus } from "@/lib/focus"
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
@@ -82,9 +86,11 @@ interface ComputerConfigurationListProps {
   getConfigurationBusyReason?: (configuration: SetupComputerConfiguration) => string | undefined
   /** Keeps an open editor across navigation within a `ComputerEditorDraftsProvider`. */
   editorDraftKey?: string
+  /** Lists this device's macOS computers with the others and offers macOS when creating one. */
+  includeMacosComputers?: boolean
 }
 
-export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey }: ComputerConfigurationListProps) {
+export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
   const {
     deviceId, setDeviceId,
     committing,
@@ -98,6 +104,13 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     startEdit, startAdd, startDuplicate, save, remove, reviewConflict, deleteWithNotice,
   } = useComputerEditing({ configurations, getDeviceId, onCommitComputer, onDeleteComputer, onConfigurationsChange, validateOperation, isComputerRunning, onEditorDraftChange, initialEditorDraft, interactionDisabled: interactionDisabledProp, getDeviceCapacity, getConfigurationBusyReason, draftKey: editorDraftKey })
 
+  // macOS computers share this list; their store is separate and absent where macOS is unsupported.
+  const macos = useMacosComputers(includeMacosComputers)
+  const macosState = macos?.snapshot.state?.supported ? macos.snapshot.state : null
+  const macosComputers = macosState?.computers ?? []
+  // The choice belongs to the editor it was made in, so a new editor starts as Linux.
+  const [osChoice, setOsChoice] = useState<{ editorId: string; os: ComputerOs } | null>(null)
+  const newOs = osChoice && osChoice.editorId === editor?.draft.id ? osChoice.os : "linux"
   const [addOpen, setAddOpen] = useState(false)
   const addSelected = useRef<"editor" | "external" | null>(null)
   const [draggedID, setDraggedID] = useState<string | null>(null)
@@ -253,7 +266,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     reorder(id, targetIndex)
   }
 
-  const computerCount = configurations.length
+  const computerCount = configurations.length + macosComputers.length
   const remoteCount = configurations.filter(configuration => getDeviceId?.(configuration)).length
 
   return (
@@ -283,6 +296,11 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
           </DropdownMenu.Root>)}
         />
 
+        {macos?.snapshot.error && <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/30 p-2 text-xs text-destructive">
+          <span className="min-w-0">Could not read the macOS computers. {macos.snapshot.error}</span>
+          <Button type="button" variant="outline" size="xs" onClick={() => void macos.store.refresh()}>Retry</Button>
+        </div>}
+        {macosState && macos?.snapshot.warning && <p role="status" className="mb-2 text-[11px] text-amber-700 dark:text-amber-400">{macos.snapshot.warning}</p>}
         <ComputerList label="Configured computers" className="max-h-full min-h-0" data-testid="computer-configuration-list">
             {displayConfigurations.map((configuration) => {
               const isEditing = editor?.draft.id === configuration.id
@@ -293,6 +311,10 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
               const presentation = getRowPresentation?.(configuration)
               const rowInteractionsDisabled = interactionDisabled || Boolean(presentation?.suppressInteractions)
               const reorderDisabled = rowInteractionsDisabled || Boolean(editor)
+              // Only a computer being created chooses its operating system; saved ones keep theirs.
+              const creating = Boolean(isEditing && editor && !editor.originalID)
+              const newMacosForm = creating && Boolean(macosState) && newOs === "macos"
+              const osField = creating ? <OperatingSystemField value={newMacosForm ? "macos" : "linux"} macosSupported={Boolean(macosState)} disabled={committing} onChange={os => setOsChoice({ editorId: configuration.id, os })} /> : undefined
               const deviceName = devices?.find(device => device.id === getDeviceId?.(configuration))?.name
               const deletionName = deviceName ? `${configuration.name} on ${deviceName}` : configuration.name
               return (
@@ -305,11 +327,22 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => drop(event, configuration, Boolean(presentation?.suppressInteractions))}
                 >
-                  {isEditing && editor ? (
-                    <ComputerEditor key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
+                  {isEditing && editor && newMacosForm ? (
+                    <MacosComputerForm
+                      key={editor.draft.id}
+                      store={macos!.store}
+                      existingNames={macosComputers.map(({ name }) => name)}
+                      capacity={getDeviceCapacity?.("")}
+                      osField={osField}
+                      onCancel={() => setEditor(null)}
+                      onCreated={() => setEditor(null)}
+                    />
+                  ) : isEditing && editor ? (
+                    <ComputerEditor key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={<>{osField}{devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}</>} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
                   ) : (
                     <ComputerListRow
                       name={configuration.name}
+                      os="linux"
                       onOpen={onOpenComputer && presentation?.openable !== false ? () => onOpenComputer(configuration) : undefined}
                       remote={Boolean(getDeviceId?.(configuration))}
                       kindBadge={presentation?.kindBadge}
@@ -387,6 +420,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                 </ComputerListItem>
               )
             })}
+            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} />)}
         </ComputerList>
         {footer && <div className="mt-3 shrink-0">{footer}</div>}
         <p id={reorderHelpId} className="sr-only">Use the Up and Down arrow keys to reorder.</p>

@@ -1,33 +1,24 @@
-import { useId, useState } from "react"
-import { Monitor, Play, Plus, Square } from "lucide-react"
+import { useState } from "react"
+import { Monitor, Play, Square } from "lucide-react"
 
 import { ActionsMenu, type MenuAction } from "@/components/actions-menu"
-import { ConfirmBody, ConfirmPopover, FormPopover } from "@/components/confirm-popover"
-import { ListHeader, listHeadingClassName } from "@/components/list-header"
+import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-import { ComputerAction, ComputerList, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
-import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
+import { ComputerAction, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
 import { clipboardFeedback } from "@/desktop/viewer-clipboard-feedback"
 import { showActionFailure, showQuickConfirmation } from "@/lib/operation-toast"
 import {
   canRetryMacosSetup,
   isMacosCreating,
   isMacosSettingUp,
-  macosDefaults,
   macosResources,
   macosStateLabel,
-  useMacosComputers,
-  validateMacosRequest,
   type MacosComputer,
   type MacosClipboardDirection,
   type MacosComputerAction,
-  type MacosComputerRequest,
   type MacosComputersStore,
 } from "../model/macos-computers"
-
-export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, Silo sets the computer up for computer use, which takes a few minutes."
 
 const tones: Record<MacosComputer["state"], ComputerRowTone> = {
   preparing: "starting",
@@ -43,56 +34,8 @@ const tones: Record<MacosComputer["state"], ComputerRowTone> = {
 
 const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete", setup: "set up" }
 
-function parseNumber(text: string) {
-  return /^\d+$/.test(text.trim()) ? Number(text.trim()) : Number.NaN
-}
-
-function NewMacosComputer({ store, existingNames, capacity }: { store: MacosComputersStore; existingNames: readonly string[]; capacity?: DeviceCapacity }) {
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState("")
-  const [cpus, setCpus] = useState(String(Math.min(macosDefaults.cpus, capacity?.logicalCPUs ?? macosDefaults.cpus)))
-  const [memory, setMemory] = useState(String(Math.min(macosDefaults.memoryGiB, capacity?.memoryGiB ?? macosDefaults.memoryGiB)))
-  const [disk, setDisk] = useState(String(macosDefaults.diskGiB))
-  const noticeId = useId()
-  const request: MacosComputerRequest = { name, cpus: parseNumber(cpus), memoryGiB: parseNumber(memory), diskGiB: parseNumber(disk) }
-  const errors = validateMacosRequest(request, existingNames, { maxCPUs: capacity?.logicalCPUs, maxMemoryGiB: capacity?.memoryGiB })
-  const invalid = Object.keys(errors).length > 0
-
-  function field(label: string, key: keyof MacosComputerRequest, value: string, onChange: (value: string) => void, numeric: boolean) {
-    // An untouched name is incomplete, not wrong.
-    const error = key === "name" && name === "" ? undefined : errors[key]
-    const errorId = `${noticeId}-${key}`
-    return <label className="grid gap-1 text-[11px] font-medium text-muted-foreground">
-      {label}
-      <Input technical aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} type={numeric ? "number" : "text"} inputMode={numeric ? "numeric" : undefined} value={value} onChange={event => onChange(event.target.value)} />
-      {error && <span id={errorId} className="text-destructive">{error}</span>}
-    </label>
-  }
-
-  return <FormPopover
-    open={open}
-    onOpenChange={next => { setOpen(next); if (next) setName("") }}
-    align="end"
-    title="New macOS computer"
-    confirmLabel="Create"
-    canSubmit={!invalid}
-    anchor={<Button type="button" variant="outline" size="xs" onClick={() => setOpen(true)}><Plus aria-hidden="true" data-icon="inline-start" /> New macOS computer</Button>}
-    fields={<div className="grid gap-2">
-      {field("Name", "name", name, setName, false)}
-      <div className="grid grid-cols-3 gap-2">
-        {field("CPUs", "cpus", cpus, setCpus, true)}
-        {field("Memory (GiB)", "memoryGiB", memory, setMemory, true)}
-        {field("Disk (GiB)", "diskGiB", disk, setDisk, true)}
-      </div>
-      <p className="text-[11px] text-muted-foreground">{macosLicenseNotice}</p>
-    </div>}
-    onSubmit={async () => {
-      try { await store.create(request) } catch (error) { showActionFailure(`Could not create ${request.name}`, error, undefined, { native: false }) }
-    }}
-  />
-}
-
-function MacosComputerRow({ computer, store }: { computer: MacosComputer; store: MacosComputersStore }) {
+/** A macOS computer in the computers list. It has no detail page, terminal, editor or reorder handle. */
+export function MacosComputerRow({ computer, store }: { computer: MacosComputer; store: MacosComputersStore }) {
   const [pending, setPending] = useState(false)
 
   async function run(action: MacosComputerAction) {
@@ -135,6 +78,8 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
   return <ComputerListItem data-macos-computer-id={computer.id} aria-busy={creating || settingUp || pending || undefined}>
     <ComputerListRow
       name={computer.name}
+      os="macos"
+      leading={<span aria-hidden="true" className="size-7 shrink-0" />}
       tone={tones[computer.state]}
       iconState={computer.state === "failed" ? "error" : "normal"}
       detail={detail}
@@ -181,30 +126,3 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
   </ComputerListItem>
 }
 
-/** The macOS computers of this device. Renders nothing where this build has none or the Mac cannot run them. */
-export function MacosComputersSection({ capacity }: { capacity?: DeviceCapacity }) {
-  const macos = useMacosComputers()
-  const headingId = useId()
-  if (!macos) return null
-  const { store, snapshot: { state, error, warning } } = macos
-  const problem = error && <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/30 p-2 text-xs text-destructive">
-    <span className="min-w-0">Could not read the macOS computers. {error}</span>
-    <Button type="button" variant="outline" size="xs" onClick={() => void store.refresh()}>Retry</Button>
-  </div>
-  // Without a successful read, whether this Mac supports macOS computers is unknown.
-  if (!state) return problem ? <div className="shrink-0" data-testid="macos-computers">{problem}</div> : null
-  if (!state.supported) return null
-  const count = state.computers.length
-  return <div role="group" aria-labelledby={headingId} className="shrink-0" data-testid="macos-computers">
-    <ListHeader
-      heading={<h3 id={headingId} className={listHeadingClassName}>macOS computers</h3>}
-      subtitle={`${count} ${count === 1 ? "computer" : "computers"} on this device`}
-      actions={<NewMacosComputer store={store} existingNames={state.computers.map(({ name }) => name)} capacity={capacity} />}
-    />
-    {problem}
-    {warning && <p role="status" className="mb-2 text-[11px] text-amber-700 dark:text-amber-400">{warning}</p>}
-    {count > 0 && <ComputerList label="macOS computers" className="max-h-80">
-      {state.computers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={store} />)}
-    </ComputerList>}
-  </div>
-}

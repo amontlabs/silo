@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { OsBadge, type ComputerOs } from "./os-badge"
 
 export type ComputerIconState = "normal" | "warning" | "error"
 export type ComputerRowTone = "running" | "starting" | "stopped" | "warning" | "error"
@@ -54,6 +55,7 @@ function ComputerIcon({ state, remote }: { state: ComputerIconState; remote: boo
 export function ComputerListRow({
   name,
   remote = false,
+  os,
   badge,
   kindBadge,
   iconState = "normal",
@@ -69,6 +71,8 @@ export function ComputerListRow({
 }: {
   name: string
   remote?: boolean
+  /** Shows the operating system badge after the name. */
+  os?: ComputerOs
   badge?: ReactNode
   kindBadge?: ReactNode
   iconState?: ComputerIconState
@@ -102,6 +106,7 @@ export function ComputerListRow({
           {onOpen
             ? <button type="button" aria-label={`Open ${name}`} title={name} onClick={onOpen} className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">{name}</button>
             : <span className="truncate" title={name}>{name}</span>}
+          {os && <OsBadge os={os} />}
           {kindBadge}
           {badge}
         </>

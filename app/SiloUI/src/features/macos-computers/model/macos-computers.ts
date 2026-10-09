@@ -199,8 +199,9 @@ export const MacosComputersContext = createContext<MacosComputersStore | null>(n
 const noopSubscribe = () => () => {}
 
 /** The macOS computers of this device, or null when this build has none. */
-export function useMacosComputers(): { store: MacosComputersStore; snapshot: MacosComputersSnapshot } | null {
-  const store = useContext(MacosComputersContext)
+export function useMacosComputers(enabled = true): { store: MacosComputersStore; snapshot: MacosComputersSnapshot } | null {
+  const context = useContext(MacosComputersContext)
+  const store = enabled ? context : null
   const snapshot = useSyncExternalStore(store ? store.subscribe : noopSubscribe, store ? store.getSnapshot : () => initialSnapshot)
   return store ? { store, snapshot } : null
 }
