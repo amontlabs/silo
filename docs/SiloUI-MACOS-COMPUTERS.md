@@ -83,24 +83,23 @@ State `setting-up` covers these steps; its detail names the current step.
    Accessibility and Screen Recording grants for `com.openai.sky.CUAService`
    and `com.openai.codex` into the system TCC database, which SIP no longer
    protects.
-5. **Clipboard.** On macOS 15 or later on both sides, a SPICE agent port
-   (`VZSpiceAgentPortAttachment`) and a guest clipboard agent share the
-   clipboard. On macOS 14 the port is omitted and the computer's row says
-   clipboard sharing needs macOS 15. macOS guests ship no SPICE agent. Silo
-   installs the vdagent of [tart-guest-agent](https://github.com/openai/tart-guest-agent)
-   (v0.10.0, the newest release built for macOS 15; later releases need macOS 26),
-   pinned with its SHA-256 in `src-tauri/guest/macos/clipboard-agent-lock.json`.
-   The host downloads and verifies the archive, copies it to
-   `/usr/local/libexec/silo/` and installs `/Library/LaunchAgents/org.silo.clipboard-agent.plist`
-   (`--run-vdagent` only, session type Aqua), so it starts in the `silo`
-   session at automatic login. The release is licensed FSL-1.1-Apache-2.0
-   (copyright Cirrus Labs, now OpenAI): any purpose except a competing
-   commercial product, converting to Apache 2.0 two years after release. Silo
-   downloads the upstream archive for the user's computer and does not
-   redistribute it. The v0.10.0 binary is only ad hoc signed; later releases
-   are Developer ID signed and notarized. UTM's guest tools (spice-vdagent)
-   are the alternative: they ship only inside UTM.app and need an interactive
-   approval prompt. Untested on a running guest.
+5. **Clipboard.** Nothing is installed in the guest and nothing syncs on its
+   own. Two explicit actions, "Paste into computer" and "Copy from computer",
+   move text (1 MiB limit) and PNG images (16 MiB) over SSH as the logged-in
+   `silo` user, with the same orchestration, limits and messages as the Linux
+   desktop viewer ([clipboard behaviour](SiloUI-DESKTOP.md#clipboard-behaviour)).
+   Text goes through `pbcopy` and `pbpaste`, images through `osascript`
+   (`«class PNGf»`); payloads travel on standard input and base64 output, never
+   in the command line. The commands follow Lume's `ClipboardWatcher.swift`
+   (MIT, [commit ba4c636](https://github.com/trycua/cua/blob/ba4c6369660ab4a9c4d3d8af942bc53ad376615f/libs/lume/src/Clipboard/ClipboardWatcher.swift)).
+   The actions are in the computer row's menu and in the screen window's
+   toolbar; the toolbar shows the outcome in the window's subtitle. They need a
+   running computer whose setup is complete (SSH and the automatic login
+   session) and work on any supported guest, macOS 14 and later. "Paste into
+   computer" sets the computer's clipboard; the user then pastes with
+   Command+V in the guest. There are no keyboard shortcuts in the screen
+   window: the guest owns Command+C, Command+V and their Shift variants
+   (Paste and Match Style), so a shortcut that Silo took would break them.
 
 Per-computer secrets live in `macos-computers/<id>/guest-access/` (mode 0700):
 the account password and the SSH key. Anyone who can read that directory can
@@ -128,7 +127,18 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Unattended setup | None. The user completes Setup Assistant by hand; no account, SSH or automatic login is configured |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
 | Export, import and backup | None |
-| Clipboard and shared folders | None. The framework offers a VirtioFS share and, for macOS 15 guests, a SPICE clipboard agent |
+| Clipboard | Explicit text and image transfer (step 5); no continuous sync |
+| Shared folders | None. The framework offers a VirtioFS share |
 | Editing resources after creation | None. CPUs and memory are fixed at creation; disk size cannot change |
 | Status panel, tray, notifications, start with Silo | None |
 | Linux devices and Intel Macs | Not possible: the framework runs macOS guests only on Apple Silicon |
+
+## Prior art for the clipboard
+
+| Product | Mechanism | Verdict |
+| --- | --- | --- |
+| VMPal | Its own proprietary Tools helper in the guest | Not reusable |
+| Cua Spaces | `cua-spacesd` guest daemon over gRPC, FSL-1.1-MIT | Not used |
+| Lume | SSH transfer with `pbcopy`, `pbpaste` and `osascript`, MIT | Chosen: nothing to install, works on macOS 14 |
+| tart-guest-agent | SPICE vdagent in the guest, FSL-1.1-Apache-2.0 | Rejected: the same license family as the excluded Tart |
+| UTM guest tools | spice-vdagent, needs macOS 15 and an interactive approval | Not used |

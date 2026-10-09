@@ -34,7 +34,7 @@ function row(name: string) {
 
 function backendFor(computers: readonly MacosComputer[]) {
   const base = createFixtureMacosComputersBackend(computers)
-  return { ...base, create: vi.fn(base.create), action: vi.fn(base.action), openDisplay: vi.fn(base.openDisplay) }
+  return { ...base, create: vi.fn(base.create), action: vi.fn(base.action), openDisplay: vi.fn(base.openDisplay), clipboard: vi.fn(base.clipboard) }
 }
 
 it("renders every state with its label, resources and progress", async () => {
@@ -49,17 +49,6 @@ it("renders every state with its label, resources and progress", async () => {
   expect(row("daily")).toHaveTextContent("Running")
   expect(row("broken")).toHaveTextContent("Failed")
   expect(within(row("broken")).getByRole("alert")).toHaveTextContent("The macOS download did not finish.")
-})
-
-it("notes that clipboard sharing needs macOS 15 only where it is unavailable", async () => {
-  const older: MacosComputer = { ...macosComputerFixtures[3]!, id: "mac-older", name: "older", osVersion: "14.7 (23H124)", clipboard: "needs-macos-15" }
-  renderSection(backendFor([...macosComputerFixtures, older]))
-  await screen.findByRole("heading", { name: "macOS computers" })
-  const note = "Clipboard sharing needs macOS 15 or later on this Mac and the computer."
-  expect(row("older")).toHaveTextContent(note)
-  expect(row("daily")).not.toHaveTextContent(note)
-  expect(row("sequoia-test")).not.toHaveTextContent(note)
-  expect(row("broken")).not.toHaveTextContent(note)
 })
 
 it("offers the actions that fit each state", async () => {
@@ -93,6 +82,37 @@ it("force stops from the menu", async () => {
   await user.click(await screen.findByRole("button", { name: "More actions for daily" }))
   await user.click(screen.getByRole("menuitem", { name: "Force stop daily" }))
   expect(backend.action).toHaveBeenCalledWith("mac-running", "force-stop")
+})
+
+it("pastes into and copies from a running computer from the menu", async () => {
+  const backend = backendFor(macosComputerFixtures)
+  const user = userEvent.setup()
+  renderSection(backend)
+  await user.click(await screen.findByRole("button", { name: "More actions for daily" }))
+  await user.click(screen.getByRole("menuitem", { name: "Paste into daily" }))
+  expect(backend.clipboard).toHaveBeenCalledWith("mac-running", "paste-into")
+  await user.click(screen.getByRole("button", { name: "More actions for daily" }))
+  await user.click(screen.getByRole("menuitem", { name: "Copy from daily" }))
+  expect(backend.clipboard).toHaveBeenCalledWith("mac-running", "copy-from")
+  expect(showActionFailure).not.toHaveBeenCalled()
+})
+
+it("reports a clipboard transfer that did not happen", async () => {
+  const backend = backendFor(macosComputerFixtures)
+  backend.clipboard.mockResolvedValue({ action: "copy", status: "computer-empty", content: null, message: null })
+  const user = userEvent.setup()
+  renderSection(backend)
+  await user.click(await screen.findByRole("button", { name: "More actions for daily" }))
+  await user.click(screen.getByRole("menuitem", { name: "Copy from daily" }))
+  await waitFor(() => expect(showActionFailure).toHaveBeenCalledWith("Could not copy from daily", "Nothing to copy from daily", undefined, { native: false }))
+})
+
+it("offers the clipboard actions only while a computer runs", async () => {
+  renderSection(backendFor(macosComputerFixtures))
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole("button", { name: "More actions for xcode-build" }))
+  expect(screen.queryByRole("menuitem", { name: "Paste into xcode-build" })).toBeNull()
+  expect(screen.queryByRole("menuitem", { name: "Copy from xcode-build" })).toBeNull()
 })
 
 it("confirms before deleting a stopped computer", async () => {
@@ -215,6 +235,7 @@ it("invokes the native commands with the contract's payloads", async () => {
     create_macos_computer: () => macosComputerFixtures[0],
     macos_computer_action: () => undefined,
     open_macos_display: () => undefined,
+    macos_computer_clipboard: () => ({ action: "copy", status: "copied", content: "text", message: null }),
   }
   const invoke = nativeBridgeMock(handlers)
   mockIPC((command, payload) => invoke(command, payload as Record<string, unknown>), { shouldMockEvents: true })
@@ -222,11 +243,13 @@ it("invokes the native commands with the contract's payloads", async () => {
   await nativeMacosComputersBackend.create({ name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 })
   await nativeMacosComputersBackend.action("a", "force-stop")
   await nativeMacosComputersBackend.openDisplay("a")
+  await nativeMacosComputersBackend.clipboard("a", "copy-from")
   expect(invoke.mock.calls).toEqual([
     ["read_macos_computers", {}],
     ["create_macos_computer", { request: { name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 } }],
     ["macos_computer_action", { id: "a", action: "force-stop" }],
     ["open_macos_display", { id: "a" }],
+    ["macos_computer_clipboard", { id: "a", direction: "copy-from" }],
   ])
 })
 

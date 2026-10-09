@@ -11,7 +11,7 @@ import {
   type MacosComputersBackend,
 } from "./macos-computers"
 
-const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, clipboard: "available" }
+const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false }
 const state = { supported: true, unsupportedReason: null, computers: [computer] }
 
 describe("macOS computers payload", () => {
@@ -80,6 +80,7 @@ describe("createMacosComputersStore", () => {
       create: vi.fn(async () => ({ ...computer, id: "b", name: "new", state: "preparing" })),
       action: vi.fn(async () => {}),
       openDisplay: vi.fn(async () => {}),
+      clipboard: vi.fn(async () => ({ action: "paste" as const, status: "pasted" as const })),
       listen: vi.fn(async next => { handler = next; return unlisten }),
     }
     return { value, unlisten, emit: (payload: unknown) => handler?.(payload) }

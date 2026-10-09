@@ -25,6 +25,7 @@ fn macos_computer_commands_belong_to_the_main_window_only() {
         "create_macos_computer",
         "macos_computer_action",
         "open_macos_display",
+        "macos_computer_clipboard",
     ] {
         let permission = format!("allow-{}", command.replace('_', "-"));
         assert_eq!(

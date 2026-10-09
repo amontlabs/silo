@@ -56,7 +56,6 @@ pub(crate) struct MacosComputer {
     progress: Option<f64>,
     detail: Option<String>,
     display_open: bool,
-    clipboard: guest_clipboard::Clipboard,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -107,7 +106,6 @@ impl Entry {
             progress: self.progress,
             detail: self.detail.clone(),
             display_open: self.display_open,
-            clipboard: guest_clipboard::status_for(&self.record),
         }
     }
 }
@@ -443,6 +441,20 @@ pub(crate) async fn open_macos_display(
     main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
+}
+
+/// Pastes this Mac's clipboard into a running computer, or copies the computer's
+/// clipboard to this Mac. Only the main window can start it.
+#[tauri::command]
+pub(crate) async fn macos_computer_clipboard(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    direction: guest_clipboard::Direction,
+) -> Result<crate::viewer_clipboard::Report, String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || guest_clipboard::run(&app, &id, direction)).await
 }
 
 // MARK: Create
@@ -970,7 +982,6 @@ mod tests {
         assert_eq!(json["diskGiB"], 64);
         assert_eq!(json["osVersion"], serde_json::Value::Null);
         assert_eq!(json["displayOpen"], false);
-        assert_eq!(json["clipboard"], "needs-macos-15");
         assert_eq!(json["progress"], 0.25);
         assert!(json.get("detail").is_some());
         let state = serde_json::to_value(MacosComputersState {

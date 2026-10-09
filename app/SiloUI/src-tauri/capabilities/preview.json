@@ -141,6 +141,7 @@
     "allow-create-macos-computer",
     "allow-macos-computer-action",
     "allow-open-macos-display",
+    "allow-macos-computer-clipboard",
     "allow-set-computer-use-approval",
     "allow-chatgpt-app-status",
     "allow-chatgpt-app-retry",

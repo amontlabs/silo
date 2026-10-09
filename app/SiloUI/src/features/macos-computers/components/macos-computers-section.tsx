@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { ComputerAction, ComputerList, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
-import { showActionFailure } from "@/lib/operation-toast"
+import { clipboardFeedback } from "@/desktop/viewer-clipboard-feedback"
+import { showActionFailure, showQuickConfirmation } from "@/lib/operation-toast"
 import {
   isMacosCreating,
   macosDefaults,
@@ -18,6 +19,7 @@ import {
   useMacosComputers,
   validateMacosRequest,
   type MacosComputer,
+  type MacosClipboardDirection,
   type MacosComputerAction,
   type MacosComputerRequest,
   type MacosComputersStore,
@@ -99,17 +101,29 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
     try { await store.openDisplay(computer.id) } catch (error) { showActionFailure(`Could not show the screen of ${computer.name}`, error, undefined, { native: false }) }
   }
 
+  async function transferClipboard(direction: MacosClipboardDirection) {
+    const verb = direction === "paste-into" ? "paste into" : "copy from"
+    try {
+      const feedback = clipboardFeedback(await store.clipboard(computer.id, direction), computer.name)
+      if (feedback.error) showActionFailure(`Could not ${verb} ${computer.name}`, feedback.text, undefined, { native: false })
+      else showQuickConfirmation(feedback.text)
+    } catch (error) { showActionFailure(`Could not ${verb} ${computer.name}`, error, undefined, { native: false }) }
+  }
+
   const creating = isMacosCreating(computer)
   const settled = computer.state === "stopped" || computer.state === "failed"
   const label = macosStateLabel(computer)
   const items: MenuAction[] = []
+  if (computer.state === "running") items.push(
+    { label: "Paste into computer", accessibleLabel: `Paste into ${computer.name}`, onSelect: () => void transferClipboard("paste-into") },
+    { label: "Copy from computer", accessibleLabel: `Copy from ${computer.name}`, onSelect: () => void transferClipboard("copy-from") },
+  )
   if (computer.state === "running" || computer.state === "stopping") items.push({ label: "Force stop", accessibleLabel: `Force stop ${computer.name}`, disabled: pending, onSelect: () => void run("force-stop") })
   if (settled) items.push({ label: "Delete", accessibleLabel: `Delete ${computer.name}`, destructive: true, popover: "delete" })
 
   const detail = <span className="grid gap-1">
     <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
     {computer.state === "failed" && computer.detail && <span role="alert" className="whitespace-normal">{computer.detail}</span>}
-    {!creating && computer.state !== "failed" && computer.clipboard === "needs-macos-15" && <span className="whitespace-normal">Clipboard sharing needs macOS 15 or later on this Mac and the computer.</span>}
     {creating && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
   </span>
 

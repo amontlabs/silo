@@ -40,6 +40,7 @@ fn main() {
             "create_macos_computer",
             "macos_computer_action",
             "open_macos_display",
+            "macos_computer_clipboard",
             "set_app_menu_state",
             "show_app_menu",
             "get_update_state",

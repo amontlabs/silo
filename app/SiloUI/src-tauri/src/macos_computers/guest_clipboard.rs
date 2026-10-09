@@ -1,185 +1,160 @@
-//! Clipboard sharing between this Mac and a macOS computer: `engine` attaches
-//! the SPICE agent port; this module installs the guest side, a pinned SPICE
-//! vdagent that runs as a launchd agent in the `silo` user's session.
-use super::store::{self, Layout, Record};
-use super::{app_data, restore_image};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::Duration,
+//! Explicit clipboard transfers between this Mac and a macOS computer.
+//!
+//! "Paste into computer" and "Copy from computer" reuse the orchestration, size
+//! limits and messages of the desktop viewer (`viewer_clipboard`); only the
+//! computer's side differs. It runs over SSH as the logged-in `silo` user: text
+//! moves through `pbcopy` and `pbpaste`, PNG images through `osascript`
+//! (`«class PNGf»`), and payloads travel on standard input and base64 output,
+//! never in the command line. Nothing syncs on its own.
+//!
+//! The transfer commands follow Lume's `ClipboardWatcher.swift`
+//! (https://github.com/trycua/cua/blob/ba4c6369660ab4a9c4d3d8af942bc53ad376615f/libs/lume/src/Clipboard/ClipboardWatcher.swift,
+//! MIT License, Copyright (c) trycua).
+use super::store::{Layout, State};
+use super::{app_data, computer, engine};
+use crate::{
+    desktop_bridge::{ClipboardSupport, GuestClipboard, MAX_IMAGE_BYTES},
+    viewer_clipboard::{self, Action, ActiveGuard, Guest, Report, Status},
 };
+use base64::Engine as _;
+use serde::Deserialize;
+use std::time::Duration;
 use tauri::AppHandle;
 
-/// Clipboard sharing needs this macOS major version on the Mac and in the guest.
-pub(super) const MINIMUM_MACOS: u64 = 15;
-const LOCK: &str = include_str!("../../guest/macos/clipboard-agent-lock.json");
-const LABEL: &str = "org.silo.clipboard-agent";
-const GUEST_DIR: &str = "/usr/local/libexec/silo";
-const GUEST_ARCHIVE: &str = "/tmp/silo-clipboard-agent.tar.gz";
-const GUEST_PLIST: &str = "/tmp/silo-clipboard-agent.plist";
-const COPY_TIMEOUT: Duration = Duration::from_secs(120);
-const RUN_TIMEOUT: Duration = Duration::from_secs(60);
+const TEXT_TIMEOUT: Duration = Duration::from_secs(10);
+const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a transfer's outcome stays in the screen window's subtitle.
+const FEEDBACK_SHOWN: Duration = Duration::from_secs(5);
 
-/// Whether a computer's clipboard is shared with this Mac.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum Clipboard {
-    Available,
-    #[serde(rename = "needs-macos-15")]
-    NeedsMacos15,
+const WRITE_TEXT: &str = "LANG=en_US.UTF-8 /usr/bin/pbcopy";
+
+const WRITE_IMAGE: &str = r#"f=$(/usr/bin/mktemp /tmp/silo-clipboard.XXXXXX) || exit 1
+trap '/bin/rm -f "$f"' EXIT
+/bin/cat > "$f" || exit 1
+/usr/bin/osascript -e "set the clipboard to (read (POSIX file \"$f\") as «class PNGf»)""#;
+
+const READ: &str = r#"f=$(/usr/bin/mktemp /tmp/silo-clipboard.XXXXXX) || exit 1
+trap '/bin/rm -f "$f"' EXIT
+if /usr/bin/osascript \
+  -e 'set imageData to the clipboard as «class PNGf»' \
+  -e "set fileRef to open for access POSIX file \"$f\" with write permission" \
+  -e 'set eof fileRef to 0' \
+  -e 'write imageData to fileRef' \
+  -e 'close access fileRef' >/dev/null 2>&1; then
+  printf 'IMAGE\n'
+  /usr/bin/base64 < "$f"
+else
+  printf 'TEXT\n'
+  LANG=en_US.UTF-8 /usr/bin/pbpaste | /usr/bin/base64
+fi"#;
+
+/// Which way a transfer goes, as the frontend names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub(crate) enum Direction {
+    #[serde(rename = "paste-into")]
+    PasteInto,
+    #[serde(rename = "copy-from")]
+    CopyFrom,
 }
 
-/// The pinned guest agent release.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Lock {
-    schema_version: u32,
-    name: String,
-    version: String,
-    url: String,
-    sha256: String,
-    minimum_macos: u64,
-    arguments: Vec<String>,
-}
-
-fn parse_lock(text: &str) -> Result<Lock, String> {
-    let lock: Lock = serde_json::from_str(text)
-        .map_err(|error| format!("The clipboard agent pin is invalid: {error}"))?;
-    let digest_ok = lock.sha256.len() == 64
-        && lock
-            .sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-    if lock.schema_version != 1
-        || lock.name.is_empty()
-        || lock.version.is_empty()
-        || !lock.url.starts_with("https://")
-        || !digest_ok
-        || lock.arguments.is_empty()
-    {
-        return Err("The clipboard agent pin is invalid.".into());
-    }
-    Ok(lock)
-}
-
-/// The major component of a macOS version such as `15.4.1`.
-fn major(version: &str) -> Option<u64> {
-    version.split('.').next()?.trim().parse().ok()
-}
-
-/// Clipboard availability for a Mac running `host_major` and a computer whose
-/// macOS version, when known, is `guest_version`.
-pub(super) fn status(host_major: u64, guest_version: Option<&str>) -> Clipboard {
-    let guest = guest_version.and_then(major).unwrap_or(0);
-    if host_major >= MINIMUM_MACOS && guest >= MINIMUM_MACOS {
-        Clipboard::Available
-    } else {
-        Clipboard::NeedsMacos15
+impl Direction {
+    fn action(self) -> Action {
+        match self {
+            Self::PasteInto => Action::Paste,
+            Self::CopyFrom => Action::Copy,
+        }
     }
 }
 
-pub(super) fn status_for(record: &Record) -> Clipboard {
-    status(
-        super::engine::host_macos_major(),
-        record
-            .restore_image
-            .as_ref()
-            .map(|image| image.version.as_str()),
-    )
+/// `script` as a single argument of `/bin/sh -c`, whatever the login shell is.
+fn sh_command(script: &str) -> String {
+    format!("/bin/sh -c '{}'", script.replace('\'', r"'\''"))
 }
 
-fn launch_agent_plist(lock: &Lock) -> String {
-    let arguments: String = std::iter::once(format!("{GUEST_DIR}/{}", lock.name))
-        .chain(lock.arguments.iter().cloned())
-        .map(|argument| format!("        <string>{argument}</string>\n"))
-        .collect();
-    format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
-         <plist version=\"1.0\">\n\
-         <dict>\n\
-         \x20   <key>Label</key>\n\
-         \x20   <string>{LABEL}</string>\n\
-         \x20   <key>ProgramArguments</key>\n\
-         \x20   <array>\n{arguments}    </array>\n\
-         \x20   <key>RunAtLoad</key>\n\
-         \x20   <true/>\n\
-         \x20   <key>KeepAlive</key>\n\
-         \x20   <true/>\n\
-         \x20   <key>LimitLoadToSessionType</key>\n\
-         \x20   <string>Aqua</string>\n\
-         </dict>\n\
-         </plist>\n"
-    )
-}
-
-/// Installs the archive and launch agent as root, then starts the agent in the
-/// `silo` user's session when that session exists; otherwise the next login does.
-fn install_script(lock: &Lock) -> String {
-    format!(
-        "set -eu\n\
-         [ \"$(shasum -a 256 {GUEST_ARCHIVE} | cut -d' ' -f1)\" = \"{sha}\" ]\n\
-         mkdir -p {GUEST_DIR}\n\
-         tar -xzf {GUEST_ARCHIVE} -C {GUEST_DIR} {name} LICENSE\n\
-         chown root:wheel {GUEST_DIR}/{name} {GUEST_DIR}/LICENSE\n\
-         chmod 755 {GUEST_DIR}/{name}\n\
-         install -m 644 -o root -g wheel {GUEST_PLIST} /Library/LaunchAgents/{LABEL}.plist\n\
-         rm -f {GUEST_ARCHIVE} {GUEST_PLIST}\n\
-         uid=$(id -u silo)\n\
-         launchctl bootout gui/$uid/{LABEL} 2>/dev/null || true\n\
-         launchctl bootstrap gui/$uid /Library/LaunchAgents/{LABEL}.plist 2>/dev/null || true\n",
-        sha = lock.sha256,
-        name = lock.name,
-    )
-}
-
-/// What `install_on` needs from a running guest.
-trait Guest {
-    fn copy(&self, local: &Path, remote: &str) -> Result<(), String>;
-    /// Runs `script` as root and fails when it exits non-zero.
-    fn root_script(&self, script: &str) -> Result<(), String>;
-}
-
-/// The guest reached over SSH as account `silo` with passwordless sudo.
-struct Ssh<'a> {
-    layout: &'a Layout,
-    record: &'a Record,
-}
-
-impl Guest for Ssh<'_> {
-    fn copy(&self, local: &Path, remote: &str) -> Result<(), String> {
-        access::copy(self.layout, self.record, local, remote, COPY_TIMEOUT)
+/// Splits the output of `READ` into the computer's clipboard.
+fn parse_read(output: &str) -> Result<GuestClipboard, String> {
+    let (kind, encoded) = output
+        .split_once('\n')
+        .ok_or("The computer's clipboard could not be read.")?;
+    let encoded: String = encoded.split_whitespace().collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| "The computer's clipboard could not be read.".to_string())?;
+    if bytes.is_empty() {
+        return Ok(GuestClipboard::Empty);
     }
+    match kind.trim() {
+        "IMAGE" if bytes.len() > MAX_IMAGE_BYTES => Ok(GuestClipboard::TooLarge),
+        "IMAGE" => Ok(GuestClipboard::Image {
+            mime: "image/png".into(),
+            bytes,
+        }),
+        "TEXT" => String::from_utf8(bytes)
+            .map(GuestClipboard::Text)
+            .map_err(|_| "The computer's clipboard is not text.".to_string()),
+        _ => Err("The computer's clipboard could not be read.".into()),
+    }
+}
 
-    fn root_script(&self, script: &str) -> Result<(), String> {
-        let output = access::run(
-            self.layout,
-            self.record,
-            "sudo -n /bin/sh -s",
-            Some(script.as_bytes()),
-            RUN_TIMEOUT,
-        )?;
+/// The running computer reached over SSH.
+struct MacGuest {
+    layout: Layout,
+    record: super::store::Record,
+}
+
+impl MacGuest {
+    fn run(
+        &self,
+        command: &str,
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        let output = access::run(&self.layout, &self.record, command, stdin, timeout)?;
         if output.status == 0 {
-            Ok(())
+            Ok(output.stdout)
         } else {
             Err(format!(
-                "Installing the clipboard agent failed: {}",
+                "The computer's clipboard failed: {}",
                 output.stderr.trim()
             ))
         }
     }
 }
 
+impl Guest for MacGuest {
+    fn clipboard_support(&self, _writing: bool) -> Result<ClipboardSupport, String> {
+        Ok(ClipboardSupport::Supported)
+    }
+
+    fn send_text(&self, text: &str) -> Result<(), String> {
+        self.run(&sh_command(WRITE_TEXT), Some(text.as_bytes()), TEXT_TIMEOUT)
+            .map(drop)
+    }
+
+    fn send_image(&self, _mime: &str, bytes: &[u8]) -> Result<(), String> {
+        self.run(&sh_command(WRITE_IMAGE), Some(bytes), IMAGE_TIMEOUT)
+            .map(drop)
+    }
+
+    /// The computer's clipboard is set; the user pastes where they want it.
+    fn press_paste(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn request_clipboard(&self, _timeout: Duration) -> Result<GuestClipboard, String> {
+        parse_read(&self.run(&sh_command(READ), None, IMAGE_TIMEOUT)?)
+    }
+}
+
 /// Stand-in for `guest_access`, which another slice provides. Replace this
 /// module with `use super::guest_access as access;` once that exists.
 mod access {
-    use super::{Layout, Record};
-    use std::{path::Path, time::Duration};
+    use super::super::store::{Layout, Record};
+    use std::time::Duration;
 
     pub(super) struct CommandOutput {
         pub status: i32,
+        pub stdout: String,
         pub stderr: String,
     }
 
@@ -192,155 +167,197 @@ mod access {
     ) -> Result<CommandOutput, String> {
         Err("Silo cannot reach the computer yet.".into())
     }
-
-    pub(super) fn copy(
-        _layout: &Layout,
-        _record: &Record,
-        _local: &Path,
-        _remote: &str,
-        _timeout: Duration,
-    ) -> Result<(), String> {
-        Err("Silo cannot reach the computer yet.".into())
-    }
 }
 
-/// Returns the pinned archive from the cache, downloading it when missing, and
-/// checks its digest.
-fn cached_archive(app_data: &Path, lock: &Lock) -> Result<PathBuf, String> {
-    let dir = app_data
-        .join("macos-guest-agents")
-        .join(format!("{}-{}", lock.name, lock.version));
-    for _ in 0..2 {
-        let path = restore_image::download(&lock.url, &dir, &|| false, &mut |_, _| {}).map_err(
-            |error| match error {
-                restore_image::DownloadError::Cancelled => "The download was cancelled.".into(),
-                restore_image::DownloadError::Failed(message) => message,
-            },
-        )?;
-        let bytes = fs::read(&path).map_err(|error| store::io_error("read the agent", &error))?;
-        if format!("{:x}", Sha256::digest(&bytes)) == lock.sha256 {
-            return Ok(path);
-        }
-        let _ = fs::remove_file(&path);
-    }
-    Err("The downloaded clipboard agent does not match its pinned digest.".into())
-}
-
-fn install_on(
-    guest: &dyn Guest,
-    lock: &Lock,
-    archive: &Path,
-    scratch: &Path,
-) -> Result<(), String> {
-    let plist = scratch.join("agent.plist");
-    fs::write(&plist, launch_agent_plist(lock))
-        .map_err(|error| store::io_error("prepare the launch agent", &error))?;
-    guest.copy(archive, GUEST_ARCHIVE)?;
-    guest.copy(&plist, GUEST_PLIST)?;
-    guest.root_script(&install_script(lock))
-}
-
-/// Installs the clipboard agent in the running computer `id`. Does nothing when
-/// this Mac or the computer has macOS older than 15.
-#[allow(dead_code)]
-pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
-    let data = app_data(app)?;
-    let record = store::load_all(&data)
-        .into_iter()
-        .find(|record| record.id == id)
-        .ok_or("This computer no longer exists.")?;
-    if status_for(&record) == Clipboard::NeedsMacos15 {
-        return Ok(());
-    }
-    let lock = parse_lock(LOCK)?;
-    let layout = Layout::new(&data, id);
-    let archive = cached_archive(&data, &lock)?;
-    let scratch = tempfile::tempdir().map_err(|error| store::io_error("prepare", &error))?;
-    let guest = Ssh {
-        layout: &layout,
-        record: &record,
+/// Runs one transfer in the running computer `id`. Blocks, so call it from a worker thread.
+pub(super) fn run(app: &AppHandle, id: &str, direction: Direction) -> Result<Report, String> {
+    let action = direction.action();
+    let Some(_guard) = ActiveGuard::acquire(&format!("macos-computer-{id}")) else {
+        return Ok(Report::new(action, Status::Busy, None));
     };
-    install_on(&guest, &lock, &archive, scratch.path())
+    let (record, state) = computer(id)?;
+    if state != State::Running {
+        return Err("Start the computer to use its clipboard.".into());
+    }
+    let guest = MacGuest {
+        layout: Layout::new(&app_data(app)?, id),
+        record,
+    };
+    let device = crate::clipboard::system();
+    Ok(match action {
+        Action::Paste => viewer_clipboard::paste(&guest, device),
+        Action::Copy => viewer_clipboard::copy(&guest, device),
+    })
+}
+
+/// The words for a transfer's outcome, as the desktop viewer's toolbar shows them.
+pub(super) fn feedback(report: &Report, name: &str) -> String {
+    use crate::viewer_clipboard::Content;
+    let image = report.content == Some(Content::Image);
+    let noun = if image { "image" } else { "text" };
+    let verb = if report.action == Action::Paste {
+        "paste"
+    } else {
+        "copy"
+    };
+    match report.status {
+        Status::Pasted => format!("Pasted {}into {name}", if image { "image " } else { "" }),
+        Status::Copied => format!("Copied {}from {name}", if image { "image " } else { "" }),
+        Status::DeviceEmpty => "This device's clipboard has no text or image".into(),
+        Status::ComputerEmpty => format!("Nothing to copy from {name}"),
+        Status::TooLarge if report.content.is_some() => {
+            format!("That {noun} is too large to {verb}")
+        }
+        Status::TooLarge => format!("{name}'s clipboard is too large to copy"),
+        Status::NotConnected => "The computer is not connected".into(),
+        Status::Unsupported => "This computer does not support clipboard transfer".into(),
+        Status::Busy => "A clipboard transfer is already running".into(),
+        Status::Failed => report
+            .message
+            .clone()
+            .unwrap_or_else(|| "The clipboard transfer failed".into()),
+    }
+}
+
+/// Starts a transfer from the screen window's toolbar and shows its outcome in
+/// that window's subtitle.
+pub(super) fn spawn_from_display(app: &AppHandle, id: &str, direction: Direction) {
+    let (app, id) = (app.clone(), id.to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = computer(&id)
+            .map(|(record, _)| record.name)
+            .unwrap_or_default();
+        let text = match run(&app, &id, direction) {
+            Ok(report) => feedback(&report, &name),
+            Err(message) => message,
+        };
+        engine::set_display_subtitle(&app, &id, &text);
+        std::thread::sleep(FEEDBACK_SHOWN);
+        engine::set_display_subtitle(&app, &id, "");
+    });
+}
+
+/// Nothing needs installing in the computer: its clipboard is reached with the
+/// tools macOS ships. Kept so provisioning can call it as a step.
+pub(super) fn install(_app: &AppHandle, _id: &str) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use crate::viewer_clipboard::Content;
 
-    #[test]
-    fn the_pinned_lock_is_valid() {
-        let lock = parse_lock(LOCK).unwrap();
-        assert_eq!(lock.minimum_macos, MINIMUM_MACOS);
-        assert!(lock.url.contains(&format!("v{}", lock.version)));
+    fn encoded(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
     #[test]
-    fn locks_without_a_digest_or_https_are_rejected() {
-        assert!(parse_lock(&LOCK.replace("303a50d4", "XXXXXXXX")).is_err());
-        assert!(parse_lock(&LOCK.replace("https://", "http://")).is_err());
-        assert!(parse_lock("{}").is_err());
+    fn directions_parse_from_the_frontend_names() {
+        let parse = |name: &str| serde_json::from_value::<Direction>(name.into());
+        assert_eq!(parse("paste-into").unwrap(), Direction::PasteInto);
+        assert_eq!(parse("copy-from").unwrap(), Direction::CopyFrom);
+        assert!(parse("paste").is_err());
+        assert_eq!(Direction::PasteInto.action(), Action::Paste);
+        assert_eq!(Direction::CopyFrom.action(), Action::Copy);
     }
 
     #[test]
-    fn versions_gate_the_clipboard() {
-        assert_eq!(status(15, Some("15.4.1")), Clipboard::Available);
-        assert_eq!(status(26, Some("26.0")), Clipboard::Available);
-        assert_eq!(status(14, Some("15.4")), Clipboard::NeedsMacos15);
-        assert_eq!(status(15, Some("14.7")), Clipboard::NeedsMacos15);
-        assert_eq!(status(15, None), Clipboard::NeedsMacos15);
-        assert_eq!(status(15, Some("garbage")), Clipboard::NeedsMacos15);
-        assert_eq!(status(0, Some("15.0")), Clipboard::NeedsMacos15);
-        assert_eq!(major("26.0.1"), Some(26));
+    fn scripts_become_one_quoted_shell_argument() {
+        let command = sh_command("trap '/bin/rm -f \"$f\"' EXIT");
+        assert_eq!(command, r#"/bin/sh -c 'trap '\''/bin/rm -f "$f"'\'' EXIT'"#);
+        assert!(sh_command(WRITE_TEXT).starts_with("/bin/sh -c 'LANG=en_US.UTF-8 /usr/bin/pbcopy"));
     }
 
     #[test]
-    fn the_clipboard_state_serializes_to_the_frontend_values() {
+    fn payloads_never_appear_in_the_commands() {
+        for script in [WRITE_TEXT, WRITE_IMAGE, READ] {
+            assert!(!script.contains("base64 -D"));
+        }
+        assert!(WRITE_IMAGE.contains("«class PNGf»"));
+        assert!(READ.contains("pbpaste"));
+    }
+
+    #[test]
+    fn text_output_parses_to_text() {
+        let output = format!("TEXT\n{}\n", encoded("héllo\nworld".as_bytes()));
         assert_eq!(
-            serde_json::to_value(Clipboard::Available).unwrap(),
-            "available"
+            parse_read(&output).unwrap(),
+            GuestClipboard::Text("héllo\nworld".into())
+        );
+    }
+
+    #[test]
+    fn image_output_parses_to_a_png() {
+        let output = format!("IMAGE\n{}\n", encoded(b"\x89PNG"));
+        assert_eq!(
+            parse_read(&output).unwrap(),
+            GuestClipboard::Image {
+                mime: "image/png".into(),
+                bytes: b"\x89PNG".to_vec()
+            }
+        );
+    }
+
+    #[test]
+    fn wrapped_base64_parses() {
+        let all = encoded(&[7u8; 200]);
+        let (first, rest) = all.split_at(76);
+        let output = format!("IMAGE\n{first}\n{rest}\n");
+        let GuestClipboard::Image { bytes, .. } = parse_read(&output).unwrap() else {
+            panic!("expected an image");
+        };
+        assert_eq!(bytes, vec![7u8; 200]);
+    }
+
+    #[test]
+    fn empty_and_oversized_clipboards_are_reported() {
+        assert_eq!(parse_read("TEXT\n").unwrap(), GuestClipboard::Empty);
+        let huge = format!("IMAGE\n{}\n", encoded(&vec![0u8; MAX_IMAGE_BYTES + 1]));
+        assert_eq!(parse_read(&huge).unwrap(), GuestClipboard::TooLarge);
+    }
+
+    #[test]
+    fn malformed_output_is_an_error() {
+        assert!(parse_read("no newline").is_err());
+        assert!(parse_read("TEXT\n!!!").is_err());
+        assert!(parse_read(&format!("OTHER\n{}", encoded(b"x"))).is_err());
+        assert!(parse_read(&format!("TEXT\n{}", encoded(&[0xff, 0xfe]))).is_err());
+    }
+
+    #[test]
+    fn feedback_names_the_computer_and_content() {
+        let report = |action, status, content| Report::new(action, status, content);
+        assert_eq!(
+            feedback(
+                &report(Action::Paste, Status::Pasted, Some(Content::Image)),
+                "mac"
+            ),
+            "Pasted image into mac"
         );
         assert_eq!(
-            serde_json::to_value(Clipboard::NeedsMacos15).unwrap(),
-            "needs-macos-15"
+            feedback(
+                &report(Action::Copy, Status::Copied, Some(Content::Text)),
+                "mac"
+            ),
+            "Copied from mac"
+        );
+        assert_eq!(
+            feedback(
+                &report(Action::Copy, Status::TooLarge, Some(Content::Image)),
+                "mac"
+            ),
+            "That image is too large to copy"
+        );
+        assert_eq!(
+            feedback(&Report::failed(Action::Copy, "boom"), "mac"),
+            "boom"
         );
     }
 
     #[test]
-    fn the_launch_agent_runs_only_the_vdagent_in_the_gui_session() {
-        let plist = launch_agent_plist(&parse_lock(LOCK).unwrap());
-        assert!(plist.contains("<string>/usr/local/libexec/silo/tart-guest-agent</string>"));
-        assert!(plist.contains("<string>--run-vdagent</string>"));
-        assert!(plist.contains("<string>Aqua</string>"));
-        assert!(!plist.contains("--run-agent"));
-    }
-
-    struct Recorder(RefCell<Vec<String>>);
-
-    impl Guest for Recorder {
-        fn copy(&self, _local: &Path, remote: &str) -> Result<(), String> {
-            self.0.borrow_mut().push(format!("copy {remote}"));
-            Ok(())
-        }
-
-        fn root_script(&self, script: &str) -> Result<(), String> {
-            self.0.borrow_mut().push(format!("script {}", script.len()));
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn installation_copies_the_archive_and_plist_before_the_script() {
-        let lock = parse_lock(LOCK).unwrap();
-        let guest = Recorder(RefCell::new(vec![]));
-        let scratch = tempfile::tempdir().unwrap();
-        install_on(&guest, &lock, Path::new("/nonexistent"), scratch.path()).unwrap();
-        let steps = guest.0.borrow();
-        assert_eq!(steps[0], format!("copy {GUEST_ARCHIVE}"));
-        assert_eq!(steps[1], format!("copy {GUEST_PLIST}"));
-        assert!(steps[2].starts_with("script "));
-        let script = install_script(&lock);
-        assert!(script.contains(&lock.sha256));
-        assert!(script.contains("bootstrap gui/$uid"));
+    fn installing_needs_nothing() {
+        // Compiles against the provisioning step's signature.
+        let _: fn(&AppHandle, &str) -> Result<(), String> = install;
     }
 }
