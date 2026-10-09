@@ -99,7 +99,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
         {state && state.state !== "uninstalled" && state.state !== "starting" && <Button disabled={busy} size="sm" onClick={() => onAction(primaryAction)}>{actionLabel}</Button>}
         {updateAvailable && !updateRequired && <>
           <Button disabled={busy} size="sm" variant="ghost" onClick={() => onAction("update-streamer")}>Update desktop</Button>
-          {state?.backend === "selkies" && <p className="text-xs text-muted-foreground">Updating adds clipboard sharing, sound control and a screen that follows the window. It needs a network connection. You can start the desktop without updating.</p>}
+          {state?.backend === "selkies" && <p className="text-xs text-muted-foreground">Updating adds a sharp display at your screen's full resolution, clipboard sharing, sound control and a screen that follows the window. It needs a network connection. You can start the desktop without updating.</p>}
         </>}
         {state?.state === "uninstalled" && !computerUse && <p className="text-xs text-muted-foreground">Choose Add Linux desktop in the computer’s actions menu.</p>}
       </div>
