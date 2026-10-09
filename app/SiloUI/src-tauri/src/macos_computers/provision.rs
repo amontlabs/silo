@@ -355,13 +355,20 @@ impl Provision<'_> {
     /// that runs the computer otherwise, and Silo reads its screen in English.
     fn set_recovery_language(&self) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
-        let output = guest_access::run(
+        let output = guest_access::run_cancellable(
             &layout,
             &record,
             RECOVERY_LANGUAGE_COMMAND,
-            None,
             GUEST_COMMAND,
-        )?;
+            &|| self.cancelled(),
+        )
+        .map_err(|message| {
+            if self.cancelled() {
+                Stop::Cancelled
+            } else {
+                Stop::Failed(message)
+            }
+        })?;
         if output.status != 0 {
             eprintln!(
                 "macOS computer setup: nvram failed with status {}: {}",

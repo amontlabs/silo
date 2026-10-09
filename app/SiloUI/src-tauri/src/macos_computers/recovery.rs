@@ -375,6 +375,22 @@ impl Screen {
                 .any(|name| self.line_equal(name).is_some())
     }
 
+    /// Whether any English label of Recovery's main window or its menu bar is on
+    /// screen: the Utilities menu, or one of the window's options. A window
+    /// whose menu word was misread still shows the others.
+    fn is_english_main_window(&self) -> bool {
+        const LABELS: [&str; 5] = [
+            "utilities",
+            "restore from time machine",
+            "reinstall macos",
+            "get help online",
+            "disk utility",
+        ];
+        LABELS.iter().any(|label| self.contains(label))
+            || self.line_equal("continue").is_some()
+            || (self.line_equal("edit").is_some() && self.line_equal("window").is_some())
+    }
+
     /// How many list items sit above `item`: lines centered on it and as tall
     /// as it, which leaves out the larger heading. The first item is the one
     /// selected when the list appears.
@@ -779,7 +795,7 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     let mut chosen = false;
     let mut crowded = 0;
     let window = driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
-        if screen.contains("utilities") {
+        if screen.is_english_main_window() {
             Check::Found(MainWindow::English)
         } else if screen.is_language_list() {
             crowded = 0;
@@ -1357,6 +1373,27 @@ mod tests {
         assert!(matches!(error, Failure::WrongLanguage(_)), "{error:?}");
         assert!(guest.keys.is_empty() || !lines_typed(&guest).contains(&"secret".to_string()));
         assert!(!lines_typed(&guest).contains(&"csrutil disable".to_string()));
+    }
+
+    #[test]
+    fn an_english_window_with_a_misread_menu_word_is_not_another_language() {
+        let mut rows = vec!["Recovery", "File", "Edit", "Utiities", "Window"];
+        rows.extend([
+            "Restore from Time Machine",
+            "Reinstall macOS Tahoe",
+            "Disk Utility",
+            "Continue",
+        ]);
+        assert!(screen(&rows).is_english_main_window());
+        assert!(screen(&["Reinstall macOS Tahoe"]).is_english_main_window());
+        assert!(screen(&["Edit", "Window"]).is_english_main_window());
+        assert!(!screen(&[
+            "Récupération",
+            "Fichier",
+            "Continuer",
+            "Utilitaire de disque"
+        ])
+        .is_english_main_window());
     }
 
     #[test]
