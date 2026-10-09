@@ -79,8 +79,10 @@ impl Attached {
             }),
             None => {
                 // The image is attached but its device is unknown: detach by image.
-                detach_by_image(disk);
-                Err("Silo could not read the computer's disk.".into())
+                match ensure_detached(disk) {
+                    Ok(()) => Err("Silo could not read the computer's disk.".into()),
+                    Err(message) => Err(message),
+                }
             }
         }
     }
@@ -136,12 +138,41 @@ impl Drop for Attached {
     }
 }
 
-fn detach_by_image(disk: &Path) {
-    let Ok(info) = tool_plist("/usr/bin/hdiutil", &["info", "-plist"]) else {
-        return;
-    };
+/// Detaches every attachment of `disk` on this Mac and fails if one remains.
+/// The host's own list of attached images is the record, so this also finds an
+/// attachment an earlier run or launch left behind.
+pub(super) fn ensure_detached(disk: &Path) -> Result<(), String> {
+    detach_matching(
+        disk,
+        &|| tool_plist("/usr/bin/hdiutil", &["info", "-plist"]),
+        &|device| tool("/usr/bin/hdiutil", &["detach", "-force", device]).map(|_| ()),
+    )
+}
+
+fn detach_matching(
+    disk: &Path,
+    info: &dyn Fn() -> Result<Dictionary, String>,
+    detach: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let devices = attached_devices(&info()?, disk);
+    if devices.is_empty() {
+        return Ok(());
+    }
+    for device in &devices {
+        let _ = detach(device);
+    }
+    if attached_devices(&info()?, disk).is_empty() {
+        Ok(())
+    } else {
+        Err("The computer's disk is still attached to this Mac. Eject it in Disk Utility, then try again.".into())
+    }
+}
+
+/// The whole-disk devices that `hdiutil info` lists for the image at `disk`.
+fn attached_devices(info: &Dictionary, disk: &Path) -> Vec<String> {
     let target = fs::canonicalize(disk).unwrap_or_else(|_| disk.to_path_buf());
     let images = info.get("images").and_then(Value::as_array);
+    let mut devices = Vec::new();
     for image in images
         .into_iter()
         .flatten()
@@ -154,16 +185,17 @@ fn detach_by_image(disk: &Path) {
             continue;
         }
         let entities = image.get("system-entities").and_then(Value::as_array);
-        let whole = entities
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_dictionary)
-            .filter_map(|entity| entity.get("dev-entry").and_then(Value::as_string))
-            .find(|device| is_whole_disk(device));
-        if let Some(device) = whole {
-            let _ = tool("/usr/bin/hdiutil", &["detach", "-force", device]);
-        }
+        devices.extend(
+            entities
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_dictionary)
+                .filter_map(|entity| entity.get("dev-entry").and_then(Value::as_string))
+                .filter(|device| is_whole_disk(device))
+                .map(String::from),
+        );
     }
+    devices
 }
 
 /// Whether `device` (`/dev/disk4`) names a whole disk rather than a partition (`disk4s2`).
@@ -973,6 +1005,77 @@ mod tests {
             .into_dictionary()
             .unwrap();
         assert_eq!(data_volume_device(&list).as_deref(), Some("disk8s2"));
+    }
+
+    fn info(images: &[(&str, &[&str])]) -> Dictionary {
+        let images = images
+            .iter()
+            .map(|(path, devices)| {
+                let entities = devices
+                    .iter()
+                    .map(|device| {
+                        let mut entity = Dictionary::new();
+                        entity.insert("dev-entry".into(), Value::String((*device).into()));
+                        Value::Dictionary(entity)
+                    })
+                    .collect();
+                let mut image = Dictionary::new();
+                image.insert("image-path".into(), Value::String((*path).into()));
+                image.insert("system-entities".into(), Value::Array(entities));
+                Value::Dictionary(image)
+            })
+            .collect();
+        let mut info = Dictionary::new();
+        info.insert("images".into(), Value::Array(images));
+        info
+    }
+
+    #[test]
+    fn only_the_whole_disks_of_the_named_image_are_found() {
+        let list = info(&[
+            ("/other.dmg", &["/dev/disk3", "/dev/disk3s1"]),
+            (
+                "/vm/disk.img",
+                &["/dev/disk7", "/dev/disk7s1", "/dev/disk8"],
+            ),
+        ]);
+        assert_eq!(
+            attached_devices(&list, Path::new("/vm/disk.img")),
+            ["/dev/disk7", "/dev/disk8"]
+        );
+        assert!(attached_devices(&list, Path::new("/vm/none.img")).is_empty());
+    }
+
+    #[test]
+    fn an_attachment_that_cannot_be_detached_is_reported() {
+        use std::cell::{Cell, RefCell};
+        let attached = RefCell::new(info(&[("/vm/disk.img", &["/dev/disk7"])]));
+        let detached = Cell::new(Vec::new());
+        // A detach that works leaves nothing attached.
+        let result = detach_matching(
+            Path::new("/vm/disk.img"),
+            &|| Ok(attached.borrow().clone()),
+            &|device| {
+                let mut seen = detached.take();
+                seen.push(device.to_string());
+                detached.set(seen);
+                *attached.borrow_mut() = info(&[]);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(detached.take(), ["/dev/disk7"]);
+        // A detach that fails leaves it attached, and that is an error.
+        let stuck = info(&[("/vm/disk.img", &["/dev/disk7"])]);
+        let result = detach_matching(Path::new("/vm/disk.img"), &|| Ok(stuck.clone()), &|_| {
+            Err("busy".into())
+        });
+        assert!(result.unwrap_err().contains("still attached"));
+        // Nothing attached needs no detach at all.
+        let result = detach_matching(Path::new("/vm/disk.img"), &|| Ok(info(&[])), &|_| {
+            panic!("nothing to detach")
+        });
+        assert_eq!(result, Ok(()));
     }
 
     #[test]

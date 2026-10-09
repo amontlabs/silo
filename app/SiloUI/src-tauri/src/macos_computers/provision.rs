@@ -204,6 +204,7 @@ impl Provision<'_> {
     fn boot(&self, login: Login) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
+        offline_setup::ensure_detached(&layout.disk())?;
         engine::start(self.app, &record, &layout)?;
         let cancelled = || self.cancelled();
         match login {
@@ -226,6 +227,7 @@ impl Provision<'_> {
     fn first_boot(&self) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
+        offline_setup::ensure_detached(&layout.disk())?;
         engine::start(self.app, &record, &layout)?;
         let deadline = Instant::now() + FIRST_BOOT_ADDRESS;
         while guest_access::guest_address(&record.mac_address).is_err() {

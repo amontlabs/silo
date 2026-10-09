@@ -121,6 +121,12 @@ impl Entry {
     }
 }
 
+/// What `Registry::finish_workflow` decided for the computer's files.
+enum Finish {
+    Remove,
+    Kept,
+}
+
 struct Registry {
     loaded: bool,
     entries: Vec<Entry>,
@@ -168,6 +174,30 @@ impl Registry {
                 }
             }
         }
+    }
+
+    /// Publishes how a creation or setup ended. A Delete accepted before this lock was
+    /// taken wins over every outcome, success included.
+    fn finish_workflow(&mut self, id: &str, result: Result<(), Stop>) -> Finish {
+        let Some(entry) = self.entry(id) else {
+            return Finish::Kept;
+        };
+        let flag = entry.cancel.load(Ordering::SeqCst);
+        if flag == CANCEL_AND_REMOVE {
+            return Finish::Remove;
+        }
+        let (state, detail) = match classify(result, flag) {
+            Ok(()) => (State::Stopped, None),
+            Err(Stop::Failed(message)) => (State::Failed, Some(message)),
+            // Quit ended the work; what finished is kept and the rest can be retried.
+            Err(Stop::Cancelled) if entry.record.installed => (State::Stopped, None),
+            Err(Stop::Cancelled) => (State::Failed, Some(store::INTERRUPTED_INSTALL.into())),
+        };
+        entry.state = state;
+        entry.detail = detail;
+        entry.progress = None;
+        entry.since = Instant::now();
+        Finish::Kept
     }
 
     /// Marks a force stop as under way. Returns the state to restore if it cannot be issued.
@@ -536,7 +566,7 @@ fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, canc
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
     let result = run_creation(app, data, record, &layout, cancel);
-    end_workflow(app, &id, &layout, cancel, result);
+    end_workflow(app, &id, &layout, result);
 }
 
 /// Provisions an installed computer again, resuming at the first unfinished step.
@@ -544,37 +574,27 @@ fn setup_workflow(app: &AppHandle, data: &std::path::Path, mut record: Record, c
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
     let result = run_setup(app, &layout, &mut record, cancel);
-    end_workflow(app, &id, &layout, cancel, result);
+    end_workflow(app, &id, &layout, result);
 }
 
-fn end_workflow(
-    app: &AppHandle,
-    id: &str,
-    layout: &Layout,
-    cancel: &AtomicU8,
-    result: Result<(), Stop>,
-) {
-    match classify(result, cancel.load(Ordering::SeqCst)) {
-        Ok(()) => {}
-        Err(Stop::Failed(message)) => set_state(app, id, State::Failed, Some(message)),
-        Err(Stop::Cancelled) => {
-            if cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE {
-                let removal = store::remove(layout);
-                registry().finish_cancelled(id, removal);
-                emit(app);
-            } else if computer(id).is_ok_and(|(record, _)| record.installed) {
-                // Quit ended the work; what finished is kept and the rest can be retried.
-                set_state(app, id, State::Stopped, None);
-            } else {
-                set_state(
-                    app,
-                    id,
-                    State::Failed,
-                    Some(store::INTERRUPTED_INSTALL.into()),
-                );
-            }
+fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), Stop>) {
+    // The outcome is decided under the lock a Delete takes, so a Delete accepted
+    // before it is never lost.
+    let finish = registry().finish_workflow(id, result);
+    match finish {
+        Finish::Remove => {
+            let removal = remove_computer(layout);
+            registry().finish_cancelled(id, removal);
         }
+        Finish::Kept => {}
     }
+    emit(app);
+}
+
+/// Deletes a computer's files, after making sure this Mac no longer holds its disk image.
+fn remove_computer(layout: &Layout) -> Result<(), String> {
+    offline_setup::ensure_detached(&layout.disk())?;
+    store::remove(layout)
 }
 
 fn run_creation(
@@ -661,13 +681,7 @@ fn run_setup(
     record: &mut Record,
     cancel: &AtomicU8,
 ) -> Result<(), Stop> {
-    let id = record.id.clone();
-    provision::run(app, layout, record, cancel)?;
-    if cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE {
-        return Err(Stop::Cancelled);
-    }
-    set_state(app, &id, State::Stopped, None);
-    Ok(())
+    provision::run(app, layout, record, cancel)
 }
 
 /// Two computers created together would otherwise write the same partial image.
@@ -718,7 +732,10 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     };
     emit(app);
     watch(app);
-    match engine::start(app, &record, &Layout::new(&data, id)) {
+    let layout = Layout::new(&data, id);
+    let started = offline_setup::ensure_detached(&layout.disk())
+        .and_then(|()| engine::start(app, &record, &layout));
+    match started {
         Ok(()) => {
             update(app, id, |entry| {
                 if entry.state == State::Starting {
@@ -824,7 +841,7 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     if removed {
         close_display(app, id);
         // The entry stays until the files are gone, so a failed removal can be retried.
-        match store::remove(&Layout::new(&data, id)) {
+        match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
             Err(message) => {
                 update(app, id, |entry| {
@@ -991,6 +1008,32 @@ fn is_busy(state: State) -> bool {
 /// stop. Runs on a worker thread; the main thread must stay free to run the
 /// framework's callbacks.
 pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
+    let stopped = stop_busy(app, deadline);
+    // A host-attached disk image outlives Silo; none may be left behind.
+    let detached = release_disks(app);
+    stopped.and(detached)
+}
+
+/// Detaches the disk image of every macOS computer from this Mac.
+fn release_disks(app: &AppHandle) -> Result<(), String> {
+    let Ok(data) = app_data(app) else {
+        return Ok(());
+    };
+    let ids: Vec<String> = registry()
+        .entries
+        .iter()
+        .map(|entry| entry.record.id.clone())
+        .collect();
+    let mut result = Ok(());
+    for id in ids {
+        if let Err(message) = offline_setup::ensure_detached(&Layout::new(&data, &id).disk()) {
+            result = Err(message);
+        }
+    }
+    result
+}
+
+fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     // From here on nothing new is admitted; anything admitted before is in the snapshot.
     closed().quit = true;
     let busy: Vec<(String, State, Arc<AtomicU8>)> = registry()
@@ -1185,6 +1228,65 @@ mod tests {
             .store(ABORT_AND_KEEP, Ordering::SeqCst);
         let mut registry = registry;
         assert!(registry.creation_continues(&id));
+    }
+
+    fn finish(
+        state: State,
+        flag: u8,
+        installed: bool,
+        result: Result<(), Stop>,
+    ) -> (Finish, Registry) {
+        let (mut registry, id) = registry_with(state);
+        registry.entries[0].cancel.store(flag, Ordering::SeqCst);
+        registry.entries[0].record.installed = installed;
+        let finish = registry.finish_workflow(&id, result);
+        (finish, registry)
+    }
+
+    #[test]
+    fn a_delete_accepted_before_the_outcome_is_published_wins() {
+        // Success, failure and a Quit-style abort all give way to a Delete.
+        for result in [
+            Ok(()),
+            Err(Stop::Failed("boom".into())),
+            Err(Stop::Cancelled),
+        ] {
+            let (outcome, registry) = finish(State::SettingUp, CANCEL_AND_REMOVE, true, result);
+            assert!(matches!(outcome, Finish::Remove));
+            // The computer stays busy until its files are gone.
+            assert_eq!(registry.entries[0].state, State::SettingUp);
+        }
+    }
+
+    #[test]
+    fn outcomes_without_a_delete_are_published() {
+        let (outcome, registry) = finish(State::SettingUp, RUN, true, Ok(()));
+        assert!(matches!(outcome, Finish::Kept));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+
+        let (_, registry) = finish(
+            State::SettingUp,
+            RUN,
+            true,
+            Err(Stop::Failed("boom".into())),
+        );
+        assert_eq!(registry.entries[0].state, State::Failed);
+        assert_eq!(registry.entries[0].detail.as_deref(), Some("boom"));
+
+        let (_, registry) = finish(State::SettingUp, ABORT_AND_KEEP, true, Err(Stop::Cancelled));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+
+        let (_, registry) = finish(
+            State::Installing,
+            ABORT_AND_KEEP,
+            false,
+            Err(Stop::Cancelled),
+        );
+        assert_eq!(registry.entries[0].state, State::Failed);
+        assert_eq!(
+            registry.entries[0].detail.as_deref(),
+            Some(store::INTERRUPTED_INSTALL)
+        );
     }
 
     #[test]
