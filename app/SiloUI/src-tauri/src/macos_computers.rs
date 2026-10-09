@@ -114,6 +114,82 @@ struct Registry {
     entries: Vec<Entry>,
 }
 
+impl Registry {
+    fn entry(&mut self, id: &str) -> Option<&mut Entry> {
+        self.entries.iter_mut().find(|entry| entry.record.id == id)
+    }
+
+    /// Whether the creation of `id` may go on: it exists and no Delete cancelled it.
+    fn creation_continues(&mut self, id: &str) -> bool {
+        self.entry(id)
+            .is_some_and(|entry| entry.cancel.load(Ordering::SeqCst) != CANCEL_AND_REMOVE)
+    }
+
+    /// Makes a finished installation visible, unless a Delete cancelled it meanwhile.
+    fn publish_installed(&mut self, id: &str, record: &Record) -> bool {
+        if !self.creation_continues(id) {
+            return false;
+        }
+        let Some(entry) = self.entry(id) else {
+            return false;
+        };
+        entry.record = record.clone();
+        entry.state = State::Stopped;
+        entry.detail = None;
+        entry.progress = None;
+        entry.since = Instant::now();
+        true
+    }
+
+    /// Ends a cancelled creation: the computer disappears once its files are gone;
+    /// if they cannot be removed it stays, failed, so Delete can be retried.
+    fn finish_cancelled(&mut self, id: &str, removal: Result<(), String>) {
+        match removal {
+            Ok(()) => self.entries.retain(|entry| entry.record.id != id),
+            Err(message) => {
+                if let Some(entry) = self.entry(id) {
+                    entry.cancel.store(RUN, Ordering::SeqCst);
+                    entry.state = State::Failed;
+                    entry.detail = Some(message);
+                    entry.progress = None;
+                    entry.since = Instant::now();
+                }
+            }
+        }
+    }
+
+    /// Marks a force stop as under way. Returns the state to restore if it cannot be issued.
+    fn begin_force_stop(&mut self, id: &str) -> Option<State> {
+        let entry = self.entry(id)?;
+        let before = entry.state;
+        if entry.state == State::Running {
+            entry.state = State::Stopping;
+            entry.since = Instant::now();
+        }
+        Some(before)
+    }
+
+    fn undo_force_stop(&mut self, id: &str, before: State) {
+        if let Some(entry) = self.entry(id) {
+            if entry.state == State::Stopping && before == State::Running {
+                entry.state = before;
+                entry.since = Instant::now();
+            }
+        }
+    }
+
+    /// A force stop failed while the machine is still alive.
+    fn force_stop_failed(&mut self, id: &str, message: String) {
+        if let Some(entry) = self.entry(id) {
+            if matches!(entry.state, State::Stopping | State::Running) {
+                entry.state = State::Running;
+                entry.detail = Some(message);
+                entry.since = Instant::now();
+            }
+        }
+    }
+}
+
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     loaded: false,
     entries: Vec::new(),
@@ -141,9 +217,17 @@ pub(crate) fn reopen() {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
 }
 
-/// Whether any macOS computer is running, starting, stopping or installing.
-pub(crate) fn any_busy() -> bool {
-    registry().entries.iter().any(|entry| is_busy(entry.state))
+/// Closes admission for an update unless a macOS computer is busy. Starts and
+/// creations check the same flag under the same lock, so none can slip in after.
+pub(crate) fn close_for_update() -> Result<(), String> {
+    let mut closed = CLOSED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if registry().entries.iter().any(|entry| is_busy(entry.state)) {
+        return Err("Stop your macOS computers before installing the update.".into());
+    }
+    *closed = true;
+    Ok(())
 }
 
 fn registry() -> std::sync::MutexGuard<'static, Registry> {
@@ -389,10 +473,8 @@ fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, canc
         Err(Stop::Failed(message)) => set_state(app, &id, State::Failed, Some(message)),
         Err(Stop::Cancelled) => {
             if cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE {
-                registry().entries.retain(|entry| entry.record.id != id);
-                if let Err(error) = store::remove(&layout) {
-                    eprintln!("macOS computer cleanup failed: {error}");
-                }
+                let removal = store::remove(&layout);
+                registry().finish_cancelled(&id, removal);
                 emit(app);
             } else {
                 set_state(
@@ -470,34 +552,16 @@ fn run_creation(
     )?;
     drop(in_use);
     record.installed = true;
-    // A Delete accepted while the installer finished wins: the check and the change
-    // to `stopped` share one lock, and Delete reads the state under it.
-    let finished = {
-        let mut registry = registry();
-        match registry
-            .entries
-            .iter_mut()
-            .find(|entry| entry.record.id == id)
-        {
-            Some(entry) if entry.cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE => false,
-            Some(entry) => {
-                entry.record = record.clone();
-                entry.state = State::Stopped;
-                entry.detail = None;
-                entry.progress = None;
-                entry.since = Instant::now();
-                true
-            }
-            None => false,
-        }
-    };
-    if !finished {
+    // Persist while the computer is still in its creation state, where nothing else
+    // can start or delete it; a Delete accepted meanwhile only sets the cancel flag.
+    if !registry().creation_continues(&id) {
+        return Err(Stop::Cancelled);
+    }
+    store::save(layout, &record)?;
+    if !registry().publish_installed(&id, &record) {
         return Err(Stop::Cancelled);
     }
     emit(app);
-    if let Err(message) = store::save(layout, &record) {
-        set_state(app, &id, State::Failed, Some(message));
-    }
     Ok(())
 }
 
@@ -585,13 +649,15 @@ fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
     if !matches!(state, State::Running | State::Starting | State::Stopping) {
         return Err("This computer isn't running.".into());
     }
-    engine::force_stop(app, id)?;
-    update(app, id, |entry| {
-        if entry.state == State::Running {
-            entry.state = State::Stopping;
-            entry.since = Instant::now();
+    let before = registry().begin_force_stop(id);
+    emit(app);
+    if let Err(message) = engine::force_stop(app, id) {
+        if let Some(before) = before {
+            registry().undo_force_stop(id, before);
+            emit(app);
         }
-    });
+        return Err(message);
+    }
     Ok(())
 }
 
@@ -642,13 +708,8 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
 
 /// A force stop failed while the machine is still alive: keep it tracked as running.
 fn force_stop_failed(app: &AppHandle, id: &str, message: String) {
-    update(app, id, |entry| {
-        if entry.state == State::Stopping {
-            entry.state = State::Running;
-            entry.detail = Some(message);
-            entry.since = Instant::now();
-        }
-    });
+    registry().force_stop_failed(id, message);
+    emit(app);
 }
 
 /// The machine ended on its own or at Silo's request.
@@ -887,6 +948,78 @@ mod tests {
         .unwrap();
         assert_eq!(state["unsupportedReason"], "no");
         assert!(state["computers"].as_array().unwrap().is_empty());
+    }
+
+    fn registry_with(state: State) -> (Registry, String) {
+        let record = store::new_record(
+            &CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        let id = record.id.clone();
+        let registry = Registry {
+            loaded: true,
+            entries: vec![Entry::new(record, state, None)],
+        };
+        (registry, id)
+    }
+
+    #[test]
+    fn a_finished_installation_is_published_unless_cancelled() {
+        let (mut registry, id) = registry_with(State::Installing);
+        let mut record = registry.entries[0].record.clone();
+        record.installed = true;
+        assert!(registry.creation_continues(&id));
+        assert!(registry.publish_installed(&id, &record));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert!(registry.entries[0].record.installed);
+
+        let (mut registry, id) = registry_with(State::Installing);
+        registry.entries[0]
+            .cancel
+            .store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+        assert!(!registry.creation_continues(&id));
+        assert!(!registry.publish_installed(&id, &record));
+        assert_eq!(registry.entries[0].state, State::Installing);
+    }
+
+    #[test]
+    fn a_cancelled_creation_stays_failed_when_its_files_cannot_be_removed() {
+        let (mut registry, id) = registry_with(State::Installing);
+        registry.entries[0]
+            .cancel
+            .store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+        registry.finish_cancelled(&id, Err("permission denied".into()));
+        let entry = &registry.entries[0];
+        assert_eq!(entry.state, State::Failed);
+        assert_eq!(entry.detail.as_deref(), Some("permission denied"));
+        assert_eq!(store::delete_mode(entry.state), Ok(DeleteMode::Remove));
+        registry.finish_cancelled(&id, Ok(()));
+        assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn a_force_stop_failure_is_kept_whenever_it_arrives() {
+        // Marked stopping before the framework call: the failure returns it to running.
+        let (mut registry, id) = registry_with(State::Running);
+        assert_eq!(registry.begin_force_stop(&id), Some(State::Running));
+        registry.force_stop_failed(&id, "busy".into());
+        assert_eq!(registry.entries[0].state, State::Running);
+        assert_eq!(registry.entries[0].detail.as_deref(), Some("busy"));
+        // A failure that races ahead of the marking is not lost either.
+        let (mut registry, id) = registry_with(State::Running);
+        registry.force_stop_failed(&id, "busy".into());
+        assert_eq!(registry.entries[0].detail.as_deref(), Some("busy"));
+        // A call the framework refuses restores the state.
+        let (mut registry, id) = registry_with(State::Running);
+        let before = registry.begin_force_stop(&id).unwrap();
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        registry.undo_force_stop(&id, before);
+        assert_eq!(registry.entries[0].state, State::Running);
     }
 
     #[test]

@@ -802,13 +802,12 @@ pub(crate) async fn install_update(
         }
         // Reservation uses the same atomic gate as backup/restore admission.
         let admission = (|| {
+            // Linux computers are stopped and restored from the update journal after the
+            // restart. macOS computers live in this process and cannot be restored, so
+            // the update refuses while one is busy and admits no new one until it ends.
+            crate::macos_computers::close_for_update()?;
             let admission = ADMISSION.try_write().map_err(|_| "Wait for active operations to finish before updating.")?;
             let backup = crate::backup_controller::update_guard(&worker)?;
-            // Linux computers are stopped and restored from the update journal after the
-            // restart. macOS computers live in this process and cannot be restored.
-            if crate::macos_computers::any_busy() {
-                return Err("Stop your macOS computers before installing the update.".to_string());
-            }
             let github = crate::github::update_guard()?;
             let secrets = crate::secrets::update_guard()?;
             // The installer waits its turn for device-wide work before stopping computers.
@@ -820,7 +819,7 @@ pub(crate) async fn install_update(
         })();
         let (_admission, _backup, _github, _secrets, _runtime) = match admission {
             Ok(guards) => guards,
-            Err(error) => { let _ = modify(&worker, |s| s.bytes = Some(bytes)); return Err(error.into()); }
+            Err(error) => { crate::macos_computers::reopen(); let _ = modify(&worker, |s| s.bytes = Some(bytes)); return Err(error.into()); }
         };
         let mut transfers = None;
         let result = installation_preflight(&bytes)
@@ -834,6 +833,7 @@ pub(crate) async fn install_update(
             })
             .and_then(|_| update.install(&bytes).map_err(|e| e.to_string()));
         if let Err(error) = result {
+            crate::macos_computers::reopen();
             let restore = crate::runtime::update_recovery::restore_locked(&worker);
             drop(transfers);
             let _ = modify(&worker, |s| s.bytes = Some(bytes));
