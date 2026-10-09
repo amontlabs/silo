@@ -61,9 +61,15 @@ output and input were not confirmed as part of that work.
 
 ## Constraints that still apply
 
-- **Checkpoints.** The msb-omarchy findings report that the graphics and sound
-  devices cannot quiesce, so a VM with them fails the checkpoint gate. Silo
-  needs this solved before shipping a native display.
+- **Checkpoints.** MicroSandbox refuses a checkpoint when any attached virtio
+  device does not support quiesce (`admit_resources` in
+  `crates/runtime/lib/checkpoint/coordinator.rs`, main `21b0d57`). In
+  MicroSandbox's libkrun (branch `krun`, `b35c7e1`, 2026-10-08) the GPU, sound
+  and input devices do not implement `supports_quiesce`, so they inherit the
+  default `false`. msb-omarchy reproduced the refusal on 0.7.2
+  ([finding D8](https://github.com/ya-luotao/msb-omarchy/blob/main/docs/findings.md)).
+  Pause and resume work with these devices attached. Silo needs quiesce support
+  for them before shipping a native display.
 - **Remote computers.** Shared-memory delivery does not cross a network; remote
   computers keep streaming.
 - **macOS guests.** libkrun cannot run macOS. macOS guests need
