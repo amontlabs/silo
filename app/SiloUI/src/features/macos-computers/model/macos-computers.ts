@@ -1,7 +1,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import { z } from "zod"
 
-export const macosComputerStates = ["preparing", "downloading", "installing", "stopped", "starting", "running", "stopping", "failed"] as const
+export const macosComputerStates = ["preparing", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
 export type MacosComputerState = (typeof macosComputerStates)[number]
 
 export const macosComputerSchema = z.object({
@@ -15,6 +15,7 @@ export const macosComputerSchema = z.object({
   progress: z.number().min(0).max(1).nullable(),
   detail: z.string().nullable(),
   displayOpen: z.boolean(),
+  setupComplete: z.boolean(),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 
@@ -36,7 +37,7 @@ export interface MacosComputerRequest {
   diskGiB: number
 }
 
-export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete"
+export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "setup"
 
 /** What the section needs from its host: the native commands in production, fixtures in the browser preview. */
 export interface MacosComputersBackend {
@@ -221,12 +222,18 @@ export function validateMacosRequest(request: MacosComputerRequest, existingName
 
 export const isMacosCreating = (computer: MacosComputer) => computer.state === "preparing" || computer.state === "downloading" || computer.state === "installing"
 
+export const isMacosSettingUp = (computer: MacosComputer) => computer.state === "setting-up"
+
+/** An installed computer that stopped before its setup finished can run the remaining steps again. */
+export const canRetryMacosSetup = (computer: MacosComputer) => !computer.setupComplete && (computer.state === "stopped" || computer.state === "failed")
+
 export function macosStateLabel(computer: MacosComputer): string {
   const percent = computer.progress == null ? "" : ` ${Math.round(computer.progress * 100)}%`
   switch (computer.state) {
     case "preparing": return "Preparing"
     case "downloading": return `Downloading macOS${percent}`
     case "installing": return `Installing macOS${percent}`
+    case "setting-up": return "Setting up macOS"
     case "stopped": return "Stopped"
     case "starting": return "Starting"
     case "running": return "Running"

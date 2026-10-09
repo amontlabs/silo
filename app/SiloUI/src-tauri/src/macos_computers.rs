@@ -3,16 +3,24 @@
 //! Linux computers MicroSandbox runs.
 //!
 //! This module owns the state the UI sees and the workflows around it (creating,
-//! starting, stopping, deleting, Quit). `store` and `restore_image` are plain Rust;
-//! `engine` holds every Virtualization.framework call.
+//! setting up, starting, stopping, deleting, Quit). `store` and `restore_image` are
+//! plain Rust; `engine` holds every Virtualization.framework call. `provision`
+//! prepares an installed computer for computer use, with `offline_setup`,
+//! `guest_access`, `recovery`, `guest_computer_use` and `guest_clipboard` behind it.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod guest_access;
+mod guest_clipboard;
+mod guest_computer_use;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod guest_screen;
 mod input;
+mod offline_setup;
+mod provision;
 mod recovery;
 mod restore_image;
 mod store;
@@ -59,6 +67,7 @@ pub(crate) struct MacosComputer {
     progress: Option<f64>,
     detail: Option<String>,
     display_open: bool,
+    setup_complete: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -109,6 +118,7 @@ impl Entry {
             progress: self.progress,
             detail: self.detail.clone(),
             display_open: self.display_open,
+            setup_complete: self.record.setup.complete(),
         }
     }
 }
@@ -129,8 +139,8 @@ impl Registry {
             .is_some_and(|entry| entry.cancel.load(Ordering::SeqCst) != CANCEL_AND_REMOVE)
     }
 
-    /// Makes a finished installation visible, unless a Delete cancelled it meanwhile.
-    fn publish_installed(&mut self, id: &str, record: &Record) -> bool {
+    /// Makes a finished installation visible in state `next`, unless a Delete cancelled it meanwhile.
+    fn publish_installed(&mut self, id: &str, record: &Record, next: State) -> bool {
         if !self.creation_continues(id) {
             return false;
         }
@@ -138,7 +148,7 @@ impl Registry {
             return false;
         };
         entry.record = record.clone();
-        entry.state = State::Stopped;
+        entry.state = next;
         entry.detail = None;
         entry.progress = None;
         entry.since = Instant::now();
@@ -329,6 +339,16 @@ fn update<R>(app: &AppHandle, id: &str, change: impl FnOnce(&mut Entry) -> R) ->
     result
 }
 
+fn set_detail(app: &AppHandle, id: &str, detail: &str) {
+    update(app, id, |entry| entry.detail = Some(detail.to_string()));
+}
+
+/// The files and latest record of a computer.
+fn layout_and_record(app: &AppHandle, id: &str) -> Result<(Layout, Record), String> {
+    let (record, _) = computer(id)?;
+    Ok((Layout::new(&app_data(app)?, id), record))
+}
+
 fn set_state(app: &AppHandle, id: &str, state: State, detail: Option<String>) {
     update(app, id, |entry| {
         entry.state = state;
@@ -429,7 +449,7 @@ pub(crate) async fn macos_computer_action(
     action: Action,
 ) -> Result<(), String> {
     main_window_only(&window)?;
-    if action == Action::Start {
+    if matches!(action, Action::Start | Action::Setup) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
     blocking(move || perform(&app, &id, action)).await
@@ -503,18 +523,40 @@ impl From<engine::InstallError> for Stop {
 fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, cancel: &AtomicU8) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    match run_creation(app, data, record, &layout, cancel) {
+    let result = run_creation(app, data, record, &layout, cancel);
+    end_workflow(app, &id, &layout, cancel, result);
+}
+
+/// Provisions an installed computer again, resuming at the first unfinished step.
+fn setup_workflow(app: &AppHandle, data: &std::path::Path, mut record: Record, cancel: &AtomicU8) {
+    let id = record.id.clone();
+    let layout = Layout::new(data, &id);
+    let result = run_setup(app, &layout, &mut record, cancel);
+    end_workflow(app, &id, &layout, cancel, result);
+}
+
+fn end_workflow(
+    app: &AppHandle,
+    id: &str,
+    layout: &Layout,
+    cancel: &AtomicU8,
+    result: Result<(), Stop>,
+) {
+    match result {
         Ok(()) => {}
-        Err(Stop::Failed(message)) => set_state(app, &id, State::Failed, Some(message)),
+        Err(Stop::Failed(message)) => set_state(app, id, State::Failed, Some(message)),
         Err(Stop::Cancelled) => {
             if cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE {
-                let removal = store::remove(&layout);
-                registry().finish_cancelled(&id, removal);
+                let removal = store::remove(layout);
+                registry().finish_cancelled(id, removal);
                 emit(app);
+            } else if computer(id).is_ok_and(|(record, _)| record.installed) {
+                // Quit ended the work; what finished is kept and the rest can be retried.
+                set_state(app, id, State::Stopped, None);
             } else {
                 set_state(
                     app,
-                    &id,
+                    id,
                     State::Failed,
                     Some(store::INTERRUPTED_INSTALL.into()),
                 );
@@ -593,10 +635,26 @@ fn run_creation(
         return Err(Stop::Cancelled);
     }
     store::save(layout, &record)?;
-    if !registry().publish_installed(&id, &record) {
+    if !registry().publish_installed(&id, &record, State::SettingUp) {
         return Err(Stop::Cancelled);
     }
     emit(app);
+    run_setup(app, layout, &mut record, cancel)
+}
+
+/// Runs the provisioning steps, then leaves the computer stopped.
+fn run_setup(
+    app: &AppHandle,
+    layout: &Layout,
+    record: &mut Record,
+    cancel: &AtomicU8,
+) -> Result<(), Stop> {
+    let id = record.id.clone();
+    provision::run(app, layout, record, cancel)?;
+    if cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE {
+        return Err(Stop::Cancelled);
+    }
+    set_state(app, &id, State::Stopped, None);
     Ok(())
 }
 
@@ -612,6 +670,7 @@ fn perform(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
         Action::Stop => stop(app, id),
         Action::ForceStop => force_stop(app, id),
         Action::Delete => delete(app, id),
+        Action::Setup => begin_setup(app, id),
     }
 }
 
@@ -662,6 +721,34 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             Err(message)
         }
     }
+}
+
+fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
+    require_supported()?;
+    let data = app_data(app)?;
+    let (record, cancel) = {
+        let _admitted = admission()?;
+        let mut registry = registry();
+        let entry = registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.record.id == id)
+            .ok_or("This computer no longer exists.")?;
+        if entry.deleting {
+            return Err("This computer is being deleted.".into());
+        }
+        store::setup_allowed(entry.state, &entry.record)?;
+        entry.cancel.store(RUN, Ordering::SeqCst);
+        entry.state = State::SettingUp;
+        entry.detail = None;
+        entry.progress = None;
+        entry.since = Instant::now();
+        (entry.record.clone(), entry.cancel.clone())
+    };
+    emit(app);
+    let app = app.clone();
+    std::thread::spawn(move || setup_workflow(&app, &data, record, &cancel));
+    Ok(())
 }
 
 fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
@@ -904,7 +991,7 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
     for (_, state, cancel) in &busy {
         if matches!(
             state,
-            State::Preparing | State::Downloading | State::Installing
+            State::Preparing | State::Downloading | State::Installing | State::SettingUp
         ) {
             cancel.store(ABORT_AND_KEEP, Ordering::SeqCst);
         }
@@ -938,7 +1025,16 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
     };
     let everything: Vec<&String> = busy.iter().map(|(id, _, _)| id).collect();
     if wait_until(limit(GRACEFUL_QUIT), &machines) {
-        // Installations were aborted; give them a moment to release their machine.
+        // Installations and setups were aborted; give them a moment to release their machine.
+        if wait_until(limit(FORCED_QUIT), &everything) {
+            return Ok(());
+        }
+        // A setup stuck in a guest command still holds its machine.
+        for id in &everything {
+            if state_of(id) == Some(State::SettingUp) {
+                let _ = engine::force_stop(app, id);
+            }
+        }
         wait_until(limit(FORCED_QUIT), &everything);
         return Ok(());
     }
@@ -978,7 +1074,21 @@ mod tests {
         assert_eq!(json["osVersion"], serde_json::Value::Null);
         assert_eq!(json["displayOpen"], false);
         assert_eq!(json["progress"], 0.25);
+        assert_eq!(json["setupComplete"], false);
         assert!(json.get("detail").is_some());
+        let mut done = entry;
+        done.state = State::SettingUp;
+        done.detail = Some("Creating the account".into());
+        done.record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+        };
+        let json = serde_json::to_value(done.row()).unwrap();
+        assert_eq!(json["state"], "setting-up");
+        assert_eq!(json["detail"], "Creating the account");
+        assert_eq!(json["setupComplete"], true);
         let state = serde_json::to_value(MacosComputersState {
             supported: false,
             unsupported_reason: Some("no".into()),
@@ -1013,8 +1123,8 @@ mod tests {
         let mut record = registry.entries[0].record.clone();
         record.installed = true;
         assert!(registry.creation_continues(&id));
-        assert!(registry.publish_installed(&id, &record));
-        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert!(registry.publish_installed(&id, &record, State::SettingUp));
+        assert_eq!(registry.entries[0].state, State::SettingUp);
         assert!(registry.entries[0].record.installed);
 
         let (mut registry, id) = registry_with(State::Installing);
@@ -1022,7 +1132,7 @@ mod tests {
             .cancel
             .store(CANCEL_AND_REMOVE, Ordering::SeqCst);
         assert!(!registry.creation_continues(&id));
-        assert!(!registry.publish_installed(&id, &record));
+        assert!(!registry.publish_installed(&id, &record, State::SettingUp));
         assert_eq!(registry.entries[0].state, State::Installing);
     }
 
@@ -1039,6 +1149,27 @@ mod tests {
         assert_eq!(store::delete_mode(entry.state), Ok(DeleteMode::Remove));
         registry.finish_cancelled(&id, Ok(()));
         assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn a_setup_in_progress_is_cancelled_like_an_installation() {
+        let (mut registry, id) = registry_with(State::SettingUp);
+        assert!(registry.creation_continues(&id));
+        registry.entries[0]
+            .cancel
+            .store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+        assert!(!registry.creation_continues(&id));
+        assert_eq!(store::delete_mode(State::SettingUp), Ok(DeleteMode::Cancel));
+        registry.finish_cancelled(&id, Ok(()));
+        assert!(registry.entries.is_empty());
+
+        // Quit keeps the computer; its flag differs from a Delete's.
+        let (registry, id) = registry_with(State::SettingUp);
+        registry.entries[0]
+            .cancel
+            .store(ABORT_AND_KEEP, Ordering::SeqCst);
+        let mut registry = registry;
+        assert!(registry.creation_continues(&id));
     }
 
     #[test]
@@ -1097,6 +1228,7 @@ mod tests {
             State::Preparing,
             State::Downloading,
             State::Installing,
+            State::SettingUp,
             State::Starting,
             State::Running,
             State::Stopping,

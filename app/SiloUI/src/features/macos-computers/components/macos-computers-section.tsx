@@ -11,7 +11,9 @@ import { ComputerAction, ComputerList, ComputerListItem, ComputerListRow, type C
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
 import { showActionFailure } from "@/lib/operation-toast"
 import {
+  canRetryMacosSetup,
   isMacosCreating,
+  isMacosSettingUp,
   macosDefaults,
   macosResources,
   macosStateLabel,
@@ -23,12 +25,13 @@ import {
   type MacosComputersStore,
 } from "../model/macos-computers"
 
-export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, finish macOS Setup Assistant in the computer's screen."
+export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, Silo sets the computer up for computer use, which takes a few minutes."
 
 const tones: Record<MacosComputer["state"], ComputerRowTone> = {
   preparing: "starting",
   downloading: "starting",
   installing: "starting",
+  "setting-up": "starting",
   stopped: "stopped",
   starting: "starting",
   running: "running",
@@ -36,7 +39,7 @@ const tones: Record<MacosComputer["state"], ComputerRowTone> = {
   failed: "error",
 }
 
-const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete" }
+const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete", setup: "set up" }
 
 function parseNumber(text: string) {
   return /^\d+$/.test(text.trim()) ? Number(text.trim()) : Number.NaN
@@ -100,6 +103,7 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
   }
 
   const creating = isMacosCreating(computer)
+  const settingUp = isMacosSettingUp(computer)
   const settled = computer.state === "stopped" || computer.state === "failed"
   const label = macosStateLabel(computer)
   const items: MenuAction[] = []
@@ -108,11 +112,11 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
 
   const detail = <span className="grid gap-1">
     <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
-    {computer.state === "failed" && computer.detail && <span role="alert" className="whitespace-normal">{computer.detail}</span>}
-    {creating && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
+    {(computer.state === "failed" || settingUp) && computer.detail && <span role={settingUp ? undefined : "alert"} className="whitespace-normal">{computer.detail}</span>}
+    {(creating || settingUp) && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
   </span>
 
-  return <ComputerListItem data-macos-computer-id={computer.id} aria-busy={creating || pending || undefined}>
+  return <ComputerListItem data-macos-computer-id={computer.id} aria-busy={creating || settingUp || pending || undefined}>
     <ComputerListRow
       name={computer.name}
       tone={tones[computer.state]}
@@ -123,6 +127,18 @@ function MacosComputerRow({ computer, store }: { computer: MacosComputer; store:
         {computer.state === "stopped" && <ComputerAction label={`Start ${computer.name}`} disabled={pending} onClick={() => void run("start")}><Play /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending} onClick={() => void run("stop")}><Square /></ComputerAction>}
+        {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending} onClick={() => void run("setup")}>Retry setup</Button>}
+        {settingUp && <ConfirmPopover
+          align="end"
+          tone="destructive"
+          title={`Cancel setting up ${computer.name}?`}
+          description="The setup stops and the computer is removed."
+          confirmLabel="Cancel setup"
+          cancelLabel="Keep setting up"
+          onConfirm={() => run("delete")}
+        >
+          <Button type="button" variant="ghost" size="xs" aria-label={`Cancel setting up ${computer.name}`} disabled={pending}>Cancel</Button>
+        </ConfirmPopover>}
         {creating && <ConfirmPopover
           align="end"
           tone="destructive"

@@ -43,6 +43,9 @@ it("renders every state with its label, resources and progress", async () => {
   expect(row("sequoia-test")).toHaveTextContent("Downloading macOS 42%")
   expect(within(row("sequoia-test")).getByRole("progressbar", { name: "sequoia-test progress" })).toHaveAttribute("aria-valuenow", "42")
   expect(row("release-check")).toHaveTextContent("Installing macOS 63%")
+  expect(row("agent-box")).toHaveTextContent("Setting up macOS")
+  expect(row("agent-box")).toHaveTextContent("Creating the account")
+  expect(within(row("agent-box")).getByRole("progressbar", { name: "agent-box progress" })).toBeVisible()
   expect(row("xcode-build")).toHaveTextContent("Stopped")
   expect(row("xcode-build")).toHaveTextContent("macOS 26.6.2 (25G83)")
   expect(row("xcode-build")).toHaveTextContent("6 CPUs · 16 GiB memory · 128 GiB disk")
@@ -57,6 +60,7 @@ it("offers the actions that fit each state", async () => {
   const names = (item: HTMLElement) => within(item).getAllByRole("button").map(button => button.getAttribute("aria-label") ?? button.textContent)
   expect(names(row("sequoia-test"))).toEqual(["Cancel creating sequoia-test"])
   expect(names(row("release-check"))).toEqual(["Cancel creating release-check"])
+  expect(names(row("agent-box"))).toEqual(["Cancel setting up agent-box"])
   expect(names(row("xcode-build"))).toEqual(["Start xcode-build", "More actions for xcode-build"])
   expect(names(row("daily"))).toEqual(["Show screen of daily", "Stop daily", "More actions for daily"])
   expect(names(row("broken"))).toEqual(["More actions for broken"])
@@ -108,6 +112,28 @@ it("confirms before cancelling a creation, and keeping it does nothing", async (
   await user.click(screen.getByRole("button", { name: "Cancel creating sequoia-test" }))
   await user.click(popoverButton("Cancel creation"))
   await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-download", "delete"))
+})
+
+it("confirms before cancelling a setup", async () => {
+  const backend = backendFor(macosComputerFixtures)
+  const user = userEvent.setup()
+  renderSection(backend)
+  await user.click(await screen.findByRole("button", { name: "Cancel setting up agent-box" }))
+  expect(await screen.findByText("Cancel setting up agent-box?")).toBeVisible()
+  await user.click(popoverButton("Cancel setup"))
+  await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-setup", "delete"))
+})
+
+it("retries the setup of an idle computer that is not set up", async () => {
+  const unfinished: MacosComputer = { ...macosComputerFixtures[0], id: "mac-unfinished", name: "unfinished", state: "failed", detail: "Turning off System Integrity Protection is not implemented yet.", setupComplete: false }
+  const backend = backendFor([unfinished])
+  const user = userEvent.setup()
+  renderSection(backend)
+  expect(await screen.findByRole("alert")).toHaveTextContent("not implemented yet")
+  await user.click(screen.getByRole("button", { name: "Retry setup of unfinished" }))
+  expect(backend.action).toHaveBeenCalledWith("mac-unfinished", "setup")
+  await waitFor(() => expect(row("unfinished")).toHaveTextContent("Setting up macOS"))
+  expect(screen.queryByRole("button", { name: "Retry setup of unfinished" })).not.toBeInTheDocument()
 })
 
 it("reports an action failure", async () => {

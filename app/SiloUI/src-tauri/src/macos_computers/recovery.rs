@@ -14,10 +14,6 @@ use super::store::Layout;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
-/// The account that authorizes the change: it exists, has a password and is an
-/// administrator before the computer first starts in Recovery.
-const ACCOUNT: &str = "silo";
-
 const ATTEMPTS: usize = 2;
 const POLL: Duration = Duration::from_millis(1500);
 const KEY_GAP: Duration = Duration::from_millis(30);
@@ -34,14 +30,11 @@ const UNREADABLE_AFTER: usize = 5;
 const QUOTE: usize = 300;
 
 /// Turns off System Integrity Protection on the stopped computer `id` and
-/// leaves it stopped. The account `silo` must exist, with its password stored
-/// for the computer.
-// The provisioning pipeline calls this.
-#[allow(dead_code)]
+/// leaves it stopped. The computer's account must exist with the stored password.
 pub(super) fn disable_sip(app: &AppHandle, id: &str) -> Result<(), String> {
     let (record, _) = super::computer(id)?;
     let layout = Layout::new(&super::app_data(app)?, id);
-    let password = account_password(&layout)?;
+    let account = super::guest_access::account(&layout)?;
     let title = format!("Setting up {}", record.name);
     let mut failure = String::new();
     for attempt in 1..=ATTEMPTS {
@@ -51,7 +44,7 @@ pub(super) fn disable_sip(app: &AppHandle, id: &str) -> Result<(), String> {
             .map_err(Failure::Fatal)
             .and_then(|()| {
                 let mut guest = LiveGuest::new(app, id);
-                run(&mut guest, ACCOUNT, &password)
+                run(&mut guest, &account.user, &account.password)
             });
         match outcome {
             Ok(()) => return finish(app, id),
@@ -65,18 +58,6 @@ pub(super) fn disable_sip(app: &AppHandle, id: &str) -> Result<(), String> {
         }
     }
     Err(failure)
-}
-
-/// Stand-in for `guest_access::account`: reads the stored password of `silo`.
-fn account_password(layout: &Layout) -> Result<String, String> {
-    let path = layout.dir.join("guest-access").join("password");
-    let password = std::fs::read_to_string(&path)
-        .map_err(|_| "Silo has no password stored for this computer's account.".to_string())?;
-    let password = password.trim().to_string();
-    if password.is_empty() {
-        return Err("Silo has no password stored for this computer's account.".into());
-    }
-    Ok(password)
 }
 
 /// Waits for the halted guest to stop, forcing it if it does not.
