@@ -41,16 +41,26 @@ const LOCKED_SUBTITLE: &str = "Silo is setting up this computer. Please don't ty
 /// leaves it stopped. The computer's account must exist with the stored
 /// password. `cancelled` is polled between steps; once it is true the computer
 /// is force-stopped and the error is `guest_access::CANCELLED`.
+///
+/// Recovery runs in the language and keyboard layout stored in the computer's
+/// NVRAM. `set_language` boots the computer normally and stores English with a
+/// US layout; it runs first unless `language_ready`, and again when Recovery
+/// still came up in another language.
 pub(super) fn disable_sip(
     app: &AppHandle,
     id: &str,
     cancelled: &dyn Fn() -> bool,
+    language_ready: bool,
+    set_language: &dyn Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let (record, _) = super::computer(id)?;
     let layout = Layout::new(&super::app_data(app)?, id);
     let account = super::guest_access::account(&layout)?;
     let title = format!("Setting up {}", record.name);
     let mut failure = String::new();
+    if !language_ready {
+        set_language()?;
+    }
     for attempt in 1..=ATTEMPTS {
         if cancelled() {
             return Err(CANCELLED.into());
@@ -71,8 +81,14 @@ pub(super) fn disable_sip(
                 stop(app, id);
                 match error {
                     Failure::Cancelled => return Err(CANCELLED.into()),
+                    Failure::WrongLanguage(message) if attempt < ATTEMPTS => {
+                        set_language()?;
+                        failure = message;
+                    }
                     Failure::Retry(message) if attempt < ATTEMPTS => failure = message,
-                    Failure::Retry(message) | Failure::Fatal(message) => return Err(message),
+                    Failure::Retry(message)
+                    | Failure::WrongLanguage(message)
+                    | Failure::Fatal(message) => return Err(message),
                 }
             }
         }
@@ -84,13 +100,15 @@ pub(super) fn disable_sip(
 /// the log. The folder is Silo's log folder for the computer; the UI gets the
 /// error message only.
 fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
-    let (Failure::Retry(message) | Failure::Fatal(message)) = error else {
+    let (Failure::Retry(message) | Failure::WrongLanguage(message) | Failure::Fatal(message)) =
+        error
+    else {
         return;
     };
     // Only a retryable failure happened before any credential was typed. After
     // that point recognition cannot be trusted to hide a secret, so the image
     // and the recognized text stay out of the log.
-    let before_credentials = matches!(error, Failure::Retry(_));
+    let before_credentials = matches!(error, Failure::Retry(_) | Failure::WrongLanguage(_));
     let saved = app.path().app_log_dir().ok().and_then(|logs| {
         save_evidence(
             &logs.join("macos-computers").join(id),
@@ -156,7 +174,7 @@ fn write_evidence(
     image: impl FnOnce(&Path) -> bool,
 ) -> Option<PathBuf> {
     use std::io::Write;
-    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -178,7 +196,10 @@ fn write_evidence(
         discard(&[&temp_text]);
         return None;
     }
-    let has_image = create_private(&temp_image).is_ok() && image(&temp_image);
+    // The image writer may replace the file, so the mode is set again afterwards.
+    let has_image = create_private(&temp_image).is_ok()
+        && image(&temp_image)
+        && std::fs::set_permissions(&temp_image, std::fs::Permissions::from_mode(0o600)).is_ok();
     if !has_image {
         discard(&[&temp_image]);
         if std::fs::rename(&temp_text, &text_path).is_err() {
@@ -541,6 +562,9 @@ impl Guest for LiveGuest<'_> {
 #[derive(Debug)]
 enum Failure {
     Retry(String),
+    /// Recovery's main window is in a language other than English; setting the
+    /// language and starting over fixes it.
+    WrongLanguage(String),
     Fatal(String),
     Cancelled,
 }
@@ -548,7 +572,9 @@ enum Failure {
 impl Failure {
     fn fatal(self) -> Self {
         match self {
-            Self::Retry(message) | Self::Fatal(message) => Self::Fatal(message),
+            Self::Retry(message) | Self::WrongLanguage(message) | Self::Fatal(message) => {
+                Self::Fatal(message)
+            }
             Self::Cancelled => Self::Cancelled,
         }
     }
@@ -751,21 +777,52 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     // Return on a slow start, and choosing again would count from English and
     // pick another language, which turns Recovery into one Silo cannot read.
     let mut chosen = false;
-    driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
+    let mut crowded = 0;
+    let window = driver.wait_for("its main window", RECOVERY_WAIT, |screen| {
         if screen.contains("utilities") {
-            Check::Found(())
-        } else if screen.is_language_list() && !chosen {
+            Check::Found(MainWindow::English)
+        } else if screen.is_language_list() {
+            crowded = 0;
+            if chosen {
+                return Check::Waiting;
+            }
             chosen = true;
             screen
                 .line_equal("english")
                 .map_or(Check::Press(input::RETURN), |english| {
                     Check::Choose(screen.list_items_above(english))
                 })
+        } else if !screen.contains("options") && screen.rows.len() >= LOCALIZED_ROWS {
+            // Recovery's window and menu bar, in a language Silo has no words for.
+            crowded += 1;
+            if crowded >= LOCALIZED_POLLS {
+                Check::Found(MainWindow::Localized)
+            } else {
+                Check::Waiting
+            }
         } else {
+            crowded = 0;
             Check::Waiting
         }
-    })
+    })?;
+    match window {
+        MainWindow::English => Ok(()),
+        MainWindow::Localized => Err(Failure::WrongLanguage(
+            "Recovery came up in a language other than English.".into(),
+        )),
+    }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum MainWindow {
+    English,
+    Localized,
+}
+
+/// Rows of text that make a screen Recovery's main window when no known word
+/// is on it, and how many reads in a row must agree.
+const LOCALIZED_ROWS: usize = 6;
+const LOCALIZED_POLLS: usize = 3;
 
 /// Opens Terminal with its shortcut, or from the Utilities menu when the
 /// shortcut does nothing, and waits for its shell prompt.
@@ -1014,6 +1071,8 @@ mod tests {
         prompt_user: &'static str,
         cancel_confirm: bool,
         language_list: bool,
+        /// Recovery's main window is in French.
+        french: bool,
         /// How long the language list stays after the language is chosen.
         language_lag: Duration,
         chosen_at: Option<Duration>,
@@ -1053,6 +1112,7 @@ mod tests {
                 prompt_user: "silo",
                 cancel_confirm: false,
                 language_list: false,
+                french: false,
                 language_lag: Duration::ZERO,
                 chosen_at: None,
                 downs: 0,
@@ -1110,6 +1170,18 @@ mod tests {
                 Phase::Picker if self.now >= self.entered + Duration::from_secs(12) => {
                     vec!["Macintosh HD", "Options", "Shut Down"]
                 }
+                Phase::Main if self.french => vec![
+                    "Récupération",
+                    "Fichier",
+                    "Édition",
+                    "Utilitaires",
+                    "Fenêtre",
+                    "Restaurer à partir de Time Machine",
+                    "Réinstaller macOS Tahoe",
+                    "Navigateur Web",
+                    "Utilitaire de disque",
+                    "Continuer",
+                ],
                 Phase::Main => {
                     if self.menu_open {
                         vec![
@@ -1278,6 +1350,24 @@ mod tests {
     }
 
     #[test]
+    fn a_main_window_in_another_language_asks_for_the_language_to_be_set() {
+        let mut guest = Recovery::new();
+        guest.french = true;
+        let error = run(&mut guest, "silo", "secret", &never).unwrap_err();
+        assert!(matches!(error, Failure::WrongLanguage(_)), "{error:?}");
+        assert!(guest.keys.is_empty() || !lines_typed(&guest).contains(&"secret".to_string()));
+        assert!(!lines_typed(&guest).contains(&"csrutil disable".to_string()));
+    }
+
+    #[test]
+    fn a_language_failure_is_final_once_credentials_could_have_been_typed() {
+        assert!(matches!(
+            Failure::WrongLanguage("x".into()).fatal(),
+            Failure::Fatal(_)
+        ));
+    }
+
+    #[test]
     fn evidence_hides_rows_with_the_password_and_the_image_that_shows_it() {
         let lines = vec![
             line("Recovery", 0.1, 0.9),
@@ -1298,8 +1388,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("logs");
+        // Like the image writer, replace the file the writer was given.
         let kept = write_evidence(&folder, 7, "recovery", |path| {
-            std::fs::write(path, b"png").is_ok()
+            std::fs::remove_file(path).is_ok() && std::fs::write(path, b"png").is_ok()
         })
         .unwrap();
         assert_eq!(kept, folder.join("sip-failure-000000000007.png"));

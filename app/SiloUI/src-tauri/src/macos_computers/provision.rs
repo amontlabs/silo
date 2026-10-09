@@ -25,6 +25,8 @@ const FIRST_BOOT_ADDRESS: Duration = Duration::from_secs(120);
 const FIRST_BOOT_SETTLE: Duration = Duration::from_secs(50);
 const FIRST_BOOT_ATTEMPTS: u32 = 3;
 const SSH_WAIT: Duration = Duration::from_secs(300);
+/// NVRAM's `prev-lang:kbd` is the language and keyboard layout Recovery starts with.
+const RECOVERY_LANGUAGE_COMMAND: &str = "/usr/bin/sudo -n /usr/sbin/nvram prev-lang:kbd=en-US:0";
 const GUEST_COMMAND: Duration = Duration::from_secs(120);
 /// Personalization may expand the disk, which takes the guest a while.
 const PERSONALIZE_COMMAND: Duration = Duration::from_secs(600);
@@ -104,12 +106,28 @@ impl Provision<'_> {
         if record.setup.needs_personalizing {
             self.personalize(record)?;
         }
+        // The account step leaves the language Recovery uses set.
+        let mut language_ready = false;
         if !record.setup.account {
             self.create_account(record)?;
+            language_ready = true;
         }
         if !record.setup.sip {
             self.say("Turning off System Integrity Protection")?;
-            recovery::disable_sip(self.app, &self.id, &|| self.cancelled()).map_err(|message| {
+            let set_language = || {
+                self.prepare_recovery_language().map_err(|stop| match stop {
+                    Stop::Cancelled => guest_access::CANCELLED.to_string(),
+                    Stop::Failed(message) => message,
+                })
+            };
+            recovery::disable_sip(
+                self.app,
+                &self.id,
+                &|| self.cancelled(),
+                language_ready,
+                &set_language,
+            )
+            .map_err(|message| {
                 if self.cancelled() {
                     Stop::Cancelled
                 } else {
@@ -176,6 +194,7 @@ impl Provision<'_> {
         self.boot(Login::Password)?;
         self.say("Finishing the account")?;
         self.finalize(&account)?;
+        self.set_recovery_language()?;
         self.shut_down()?;
         self.mark(record, |setup| setup.account = true)
     }
@@ -329,6 +348,39 @@ impl Provision<'_> {
     fn finalize(&self, account: &guest_access::GuestAccount) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         finalize_guest(&layout, &record, account).map_err(Stop::Failed)
+    }
+
+    /// Stores English and a US keyboard layout in the running guest's NVRAM, which
+    /// is where Recovery reads its language: it follows the language of the Mac
+    /// that runs the computer otherwise, and Silo reads its screen in English.
+    fn set_recovery_language(&self) -> Result<(), Stop> {
+        let (layout, record) = layout_and_record(self.app, &self.id)?;
+        let output = guest_access::run(
+            &layout,
+            &record,
+            RECOVERY_LANGUAGE_COMMAND,
+            None,
+            GUEST_COMMAND,
+        )?;
+        if output.status != 0 {
+            eprintln!(
+                "macOS computer setup: nvram failed with status {}: {}",
+                output.status,
+                output.stderr.trim()
+            );
+            return Err(Stop::Failed(
+                "Silo could not set the language Recovery uses.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Starts the computer, sets the language Recovery uses and shuts it down.
+    fn prepare_recovery_language(&self) -> Result<(), Stop> {
+        self.say("Preparing Recovery")?;
+        self.boot(Login::Key)?;
+        self.set_recovery_language()?;
+        self.shut_down()
     }
 
     fn verify_sip_disabled(&self) -> Result<(), Stop> {

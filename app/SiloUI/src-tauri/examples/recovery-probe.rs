@@ -145,7 +145,7 @@ fn build(dir: &Path, mtm: MainThreadMarker) -> Result<(), String> {
             }
         });
         let options = VZMacOSVirtualMachineStartOptions::new();
-        options.setStartUpFromMacOSRecovery(true);
+        options.setStartUpFromMacOSRecovery(std::env::var_os("PROBE_NORMAL").is_none());
         vm.startWithOptions_completionHandler(&options, &handler);
         STATE.with(|s| *s.borrow_mut() = Some((window, view, vm)));
     }
