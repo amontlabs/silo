@@ -804,6 +804,11 @@ pub(crate) async fn install_update(
         let admission = (|| {
             let admission = ADMISSION.try_write().map_err(|_| "Wait for active operations to finish before updating.")?;
             let backup = crate::backup_controller::update_guard(&worker)?;
+            // Linux computers are stopped and restored from the update journal after the
+            // restart. macOS computers live in this process and cannot be restored.
+            if crate::macos_computers::any_busy() {
+                return Err("Stop your macOS computers before installing the update.".to_string());
+            }
             let github = crate::github::update_guard()?;
             let secrets = crate::secrets::update_guard()?;
             // The installer waits its turn for device-wide work before stopping computers.

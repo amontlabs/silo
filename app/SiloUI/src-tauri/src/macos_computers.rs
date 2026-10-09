@@ -72,6 +72,8 @@ struct Entry {
     detail: Option<String>,
     cancel: Arc<AtomicU8>,
     display_open: bool,
+    /// Its files are being removed; nothing else may use the computer.
+    deleting: bool,
     since: Instant,
     progress_emitted: Option<Instant>,
 }
@@ -85,6 +87,7 @@ impl Entry {
             detail,
             cancel: Arc::new(AtomicU8::new(RUN)),
             display_open: false,
+            deleting: false,
             since: Instant::now(),
             progress_emitted: None,
         }
@@ -115,6 +118,33 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     loaded: false,
     entries: Vec::new(),
 });
+
+/// Whether Quit has begun. Creating and starting check it under the same lock that
+/// `stop_all` sets it under, so nothing starts after Quit has taken its snapshot.
+static CLOSED: Mutex<bool> = Mutex::new(false);
+
+fn admission() -> Result<std::sync::MutexGuard<'static, bool>, String> {
+    let closed = CLOSED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if *closed {
+        Err("Silo is quitting and stopping its computers. Wait for shutdown to finish.".into())
+    } else {
+        Ok(closed)
+    }
+}
+
+/// Admits macOS computers again after a Quit was cancelled.
+pub(crate) fn reopen() {
+    *CLOSED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+}
+
+/// Whether any macOS computer is running, starting, stopping or installing.
+pub(crate) fn any_busy() -> bool {
+    registry().entries.iter().any(|entry| is_busy(entry.state))
+}
 
 fn registry() -> std::sync::MutexGuard<'static, Registry> {
     REGISTRY
@@ -304,6 +334,7 @@ fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, Stri
     ensure_loaded(app)?;
     let data = app_data(app)?;
     let (record, cancel, row) = {
+        let _admitted = admission()?;
         let mut registry = registry();
         let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
         store::validate_request(&request, engine::host_limits(), &existing)?;
@@ -407,8 +438,16 @@ fn run_creation(
     let in_use = restore_image::InUse::new(&image);
     set_state(app, &id, State::Downloading, None);
     update(app, &id, |entry| entry.progress = Some(0.0));
-    let download_turn = DOWNLOAD_TURN.lock();
-    let download_turn = download_turn.unwrap_or_else(|poisoned| poisoned.into_inner());
+    let download_turn = loop {
+        match DOWNLOAD_TURN.try_lock() {
+            Ok(turn) => break turn,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                check()?;
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    };
     let image = restore_image::download(&latest.url, &images, &cancelled, &mut |done, total| {
         if let Some(total) = total.filter(|total| *total > 0) {
             set_progress(app, &id, done as f64 / total as f64);
@@ -431,9 +470,34 @@ fn run_creation(
     )?;
     drop(in_use);
     record.installed = true;
-    store::save(layout, &record)?;
-    update(app, &id, |entry| entry.record = record.clone());
-    set_state(app, &id, State::Stopped, None);
+    // A Delete accepted while the installer finished wins: the check and the change
+    // to `stopped` share one lock, and Delete reads the state under it.
+    let finished = {
+        let mut registry = registry();
+        match registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.record.id == id)
+        {
+            Some(entry) if entry.cancel.load(Ordering::SeqCst) == CANCEL_AND_REMOVE => false,
+            Some(entry) => {
+                entry.record = record.clone();
+                entry.state = State::Stopped;
+                entry.detail = None;
+                entry.progress = None;
+                entry.since = Instant::now();
+                true
+            }
+            None => false,
+        }
+    };
+    if !finished {
+        return Err(Stop::Cancelled);
+    }
+    emit(app);
+    if let Err(message) = store::save(layout, &record) {
+        set_state(app, &id, State::Failed, Some(message));
+    }
     Ok(())
 }
 
@@ -466,12 +530,16 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     let data = app_data(app)?;
     // The state check and the change to `starting` happen under one lock.
     let record = {
+        let _admitted = admission()?;
         let mut registry = registry();
         let entry = registry
             .entries
             .iter_mut()
             .find(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        if entry.deleting {
+            return Err("This computer is being deleted.".into());
+        }
         store::start_allowed(entry.state, &entry.record)?;
         entry.state = State::Starting;
         entry.detail = None;
@@ -544,17 +612,43 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
                 false
             }
             DeleteMode::Remove => {
-                registry.entries.remove(index);
+                let entry = &mut registry.entries[index];
+                if entry.deleting {
+                    return Err("This computer is already being deleted.".into());
+                }
+                entry.deleting = true;
                 true
             }
         }
     };
     if removed {
         close_display(app, id);
-        store::remove(&Layout::new(&data, id))?;
+        // The entry stays until the files are gone, so a failed removal can be retried.
+        match store::remove(&Layout::new(&data, id)) {
+            Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
+            Err(message) => {
+                update(app, id, |entry| {
+                    entry.deleting = false;
+                    entry.state = State::Failed;
+                    entry.detail = Some(message.clone());
+                });
+                return Err(message);
+            }
+        }
     }
     emit(app);
     Ok(())
+}
+
+/// A force stop failed while the machine is still alive: keep it tracked as running.
+fn force_stop_failed(app: &AppHandle, id: &str, message: String) {
+    update(app, id, |entry| {
+        if entry.state == State::Stopping {
+            entry.state = State::Running;
+            entry.detail = Some(message);
+            entry.since = Instant::now();
+        }
+    });
 }
 
 /// The machine ended on its own or at Silo's request.
@@ -689,6 +783,10 @@ fn is_busy(state: State) -> bool {
 /// stop. Runs on a worker thread; the main thread must stay free to run the
 /// framework's callbacks.
 pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
+    // From here on nothing new is admitted; anything admitted before is in the snapshot.
+    *CLOSED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
     let busy: Vec<(String, State, Arc<AtomicU8>)> = registry()
         .entries
         .iter()
@@ -710,6 +808,16 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
         ) {
             cancel.store(ABORT_AND_KEEP, Ordering::SeqCst);
         }
+    }
+    // A start in flight cannot be asked to stop; let it settle first.
+    let settle = Instant::now() + Duration::from_secs(30);
+    while machines
+        .iter()
+        .any(|id| state_of(id) == Some(State::Starting))
+        && Instant::now() < settle
+        && deadline.is_none_or(|deadline| Instant::now() < deadline)
+    {
+        std::thread::sleep(Duration::from_millis(250));
     }
     for id in &machines {
         let _ = engine::request_stop(app, id);
@@ -779,6 +887,15 @@ mod tests {
         .unwrap();
         assert_eq!(state["unsupportedReason"], "no");
         assert!(state["computers"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn nothing_is_admitted_between_quit_and_its_cancellation() {
+        assert!(admission().is_ok());
+        *CLOSED.lock().unwrap() = true;
+        assert!(admission().unwrap_err().contains("quitting"));
+        reopen();
+        assert!(admission().is_ok());
     }
 
     #[test]

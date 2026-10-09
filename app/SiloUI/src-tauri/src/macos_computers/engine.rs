@@ -22,14 +22,13 @@ use std::{
     collections::HashMap,
     ffi::{c_char, c_void},
     path::Path,
-    sync::{mpsc, OnceLock},
+    sync::{mpsc, Arc, Mutex, OnceLock},
     time::Duration,
 };
 use tauri::AppHandle;
 
 const MAIN_THREAD_WAIT: Duration = Duration::from_secs(10);
 const FETCH_WAIT: Duration = Duration::from_secs(60);
-const START_WAIT: Duration = Duration::from_secs(180);
 const CANCEL_WAIT: Duration = Duration::from_secs(30);
 const VIRTUALIZATION_ENTITLEMENT: &str = "com.apple.security.virtualization";
 const LIMIT_EXCEEDED: &str =
@@ -113,16 +112,45 @@ pub(super) fn on_main<T: Send + 'static>(
     if MainThreadMarker::new().is_some() {
         return Err("macOS computers cannot wait on the main thread.".into());
     }
+    // `Pending` work that its caller has given up on must never run; work already
+    // running is waited for, so its effects are always reported.
+    let phase = Arc::new(Mutex::new(Phase::Pending));
     let (send, receive) = mpsc::channel();
+    let worker_phase = phase.clone();
     app.run_on_main_thread(move || {
+        {
+            let mut phase = worker_phase.lock().unwrap_or_else(|p| p.into_inner());
+            if *phase == Phase::Abandoned {
+                return;
+            }
+            *phase = Phase::Running;
+        }
         if let Some(mtm) = MainThreadMarker::new() {
             let _ = send.send(work(mtm));
         }
     })
     .map_err(|_| "Silo could not reach its main thread.".to_string())?;
-    receive
-        .recv_timeout(MAIN_THREAD_WAIT)
-        .map_err(|_| "Silo's main thread did not respond.".to_string())
+    match receive.recv_timeout(MAIN_THREAD_WAIT) {
+        Ok(result) => Ok(result),
+        Err(_) => {
+            let mut phase = phase.lock().unwrap_or_else(|p| p.into_inner());
+            if *phase == Phase::Pending {
+                *phase = Phase::Abandoned;
+                return Err("Silo's main thread did not respond.".to_string());
+            }
+            drop(phase);
+            receive
+                .recv()
+                .map_err(|_| "Silo's main thread did not respond.".to_string())
+        }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum Phase {
+    Pending,
+    Running,
+    Abandoned,
 }
 
 // MARK: Host support
@@ -694,9 +722,11 @@ pub(super) fn start(app: &AppHandle, record: &Record, layout: &Layout) -> Result
         unsafe { vm.startWithCompletionHandler(&handler) };
         Ok(())
     })??;
+    // The framework always answers a start. Giving up earlier would leave a machine
+    // that may still come up without anything tracking it as started.
     receive
-        .recv_timeout(START_WAIT)
-        .map_err(|_| "The computer did not start in time.".to_string())?
+        .recv()
+        .map_err(|_| "The computer did not start.".to_string())?
 }
 
 pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {
@@ -733,11 +763,23 @@ pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
             if !vm.canStop() {
                 return Err("This computer can't be force stopped right now.".to_string());
             }
-            let finished = id.clone();
+            let (finished, machine) = (id.clone(), vm.clone());
             vm.stopWithCompletionHandler(&RcBlock::new(move |error: *mut NSError| {
                 // A stop the host requested ends without a delegate callback.
-                let detail = error.as_ref().map(|error| describe(error));
-                super::machine_stopped(&handle, &finished, detail);
+                match error.as_ref() {
+                    None => super::machine_stopped(&handle, &finished, None),
+                    Some(error) => {
+                        let message = describe(error);
+                        let state = machine.state();
+                        if state == VZVirtualMachineState::Stopped
+                            || state == VZVirtualMachineState::Error
+                        {
+                            super::machine_stopped(&handle, &finished, Some(message));
+                        } else {
+                            super::force_stop_failed(&handle, &finished, message);
+                        }
+                    }
+                }
             }));
         }
         Ok(())
