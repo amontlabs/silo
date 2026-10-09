@@ -49,6 +49,9 @@ pub(crate) enum Op {
     Capabilities,
     /// The page's acknowledgement that it sent (or could not send) frames.
     Sent,
+    /// A stream benchmark report; development builds only.
+    #[cfg(debug_assertions)]
+    Diagnostics,
 }
 impl Op {
     fn parse(name: &str) -> Option<Self> {
@@ -56,6 +59,8 @@ impl Op {
             "clipboard" => Some(Self::Clipboard),
             "capabilities" => Some(Self::Capabilities),
             "sent" => Some(Self::Sent),
+            #[cfg(debug_assertions)]
+            "diagnostics" => Some(Self::Diagnostics),
             _ => None,
         }
     }
@@ -64,6 +69,8 @@ impl Op {
             Self::Clipboard => "clipboard",
             Self::Capabilities => "capabilities",
             Self::Sent => "sent",
+            #[cfg(debug_assertions)]
+            Self::Diagnostics => "diagnostics",
         }
     }
     /// Largest request body Rust accepts for this operation.
@@ -72,6 +79,8 @@ impl Op {
             Self::Clipboard => 24 * 1024 * 1024,
             Self::Capabilities => 4 * 1024,
             Self::Sent => 0,
+            #[cfg(debug_assertions)]
+            Self::Diagnostics => 4 * 1024 * 1024,
         }
     }
     /// Acknowledgements for several sends and answers to several capability

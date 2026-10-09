@@ -16,6 +16,8 @@ mod desktop;
 mod desktop_bridge;
 mod desktop_proxy;
 mod desktop_viewer;
+#[cfg(debug_assertions)]
+mod desktop_viewer_bench;
 mod desktop_viewer_media;
 mod device_identity;
 mod editor;
@@ -284,6 +286,8 @@ fn main() {
                 backup_controller::install(app.handle())?;
                 runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
+                #[cfg(debug_assertions)]
+                desktop_viewer_bench::start(app.handle());
                 tray::install(app.handle())?;
                 app_menu::install(app.handle())?;
                 let window = app
