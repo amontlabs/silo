@@ -46,24 +46,44 @@ pub(crate) struct GuestAccount {
     pub key: PathBuf,
 }
 
+/// The computer's own folder for its secrets and known hosts.
 fn directory(layout: &Layout) -> PathBuf {
     layout.dir.join("guest-access")
 }
 
+/// Where the password and key are read from: the computer's own folder unless the layout
+/// names another.
+pub(super) fn credentials_dir(layout: &Layout) -> PathBuf {
+    layout.access.clone().unwrap_or_else(|| directory(layout))
+}
+
+/// Always the computer's own: a guest's host keys are the computer's, whoever's key logs in.
 fn known_hosts(layout: &Layout) -> PathBuf {
     directory(layout).join("known_hosts")
 }
 
+/// Drops the host keys seen so far, for a guest whose keys are about to change.
+pub(super) fn reset_host_keys(layout: &Layout) -> Result<(), String> {
+    match fs::remove_file(known_hosts(layout)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(store::io_error("reset the computer's host keys", &error)),
+    }
+}
+
 /// The account of this computer; its password and key are created the first time.
 pub(crate) fn account(layout: &Layout) -> Result<GuestAccount, String> {
-    let dir = directory(layout);
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|error| store::io_error("create the computer's access folder", &error))?;
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
-        .map_err(|error| store::io_error("protect the computer's access folder", &error))?;
+    // The known hosts live in the computer's own folder even when the secrets do not.
+    for dir in [directory(layout), credentials_dir(layout)] {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|error| store::io_error("create the computer's access folder", &error))?;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
+            .map_err(|error| store::io_error("protect the computer's access folder", &error))?;
+    }
+    let dir = credentials_dir(layout);
 
     let password = dir.join("password");
     let password = match fs::read_to_string(&password) {
@@ -234,7 +254,7 @@ enum Auth {
 }
 
 fn askpass(layout: &Layout) -> PathBuf {
-    directory(layout).join("askpass")
+    credentials_dir(layout).join("askpass")
 }
 
 /// Writes the helper `ssh` runs to ask for the password. It prints the password
@@ -243,7 +263,7 @@ fn ensure_askpass(layout: &Layout) -> Result<PathBuf, String> {
     let path = askpass(layout);
     let script = format!(
         "#!/bin/sh\nexec /bin/cat {}\n",
-        shell_quote(&directory(layout).join("password").to_string_lossy())
+        shell_quote(&credentials_dir(layout).join("password").to_string_lossy())
     );
     if fs::read_to_string(&path).is_ok_and(|current| current == script) {
         return Ok(path);
@@ -361,6 +381,21 @@ pub(super) fn wait_for_password_ssh(
     cancel: &dyn Fn() -> bool,
 ) -> Result<Ipv4Addr, String> {
     wait(layout, record, timeout, cancel, Auth::Password)
+}
+
+/// Whether the guest answers one key login right now.
+pub(super) fn probe(layout: &Layout, record: &Record) -> bool {
+    let Ok(account) = account(layout) else {
+        return false;
+    };
+    let (Ok(address), Ok(envs)) = (
+        guest_address(&record.mac_address),
+        environment(layout, Auth::Key),
+    ) else {
+        return false;
+    };
+    let args = ssh_args(layout, record, &account, address, "true", Auth::Key);
+    exec(SSH, &args, None, SSH_PROBE, &envs, None).is_ok_and(|output| output.status == 0)
 }
 
 fn wait(

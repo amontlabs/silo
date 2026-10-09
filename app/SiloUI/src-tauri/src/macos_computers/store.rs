@@ -11,7 +11,7 @@ const MIN_CPUS: u64 = 2;
 const MIN_MEMORY_GIB: u64 = 4;
 /// Memory kept for the host: the guest may not take it all.
 const HOST_MEMORY_RESERVE_GIB: u64 = 4;
-const MIN_DISK_GIB: u64 = 32;
+pub(super) const MIN_DISK_GIB: u64 = 32;
 const MAX_DISK_GIB: u64 = 1024;
 pub(super) const INTERRUPTED_INSTALL: &str =
     "Installation was interrupted. Delete this computer and create it again.";
@@ -20,6 +20,8 @@ pub(super) const INTERRUPTED_INSTALL: &str =
 #[serde(rename_all = "lowercase")]
 pub(super) enum State {
     Preparing,
+    /// A new computer is being copied from a template.
+    Copying,
     Downloading,
     Installing,
     #[serde(rename = "setting-up")]
@@ -56,11 +58,13 @@ pub(super) struct SetupProgress {
     pub sip: bool,
     pub computer_use: bool,
     pub clipboard: bool,
+    /// A copy of a template still has the template's password, keys and identity.
+    pub needs_personalizing: bool,
 }
 
 impl SetupProgress {
     pub(super) fn complete(self) -> bool {
-        self.account && self.sip && self.computer_use && self.clipboard
+        self.account && self.sip && self.computer_use && self.clipboard && !self.needs_personalizing
     }
 }
 
@@ -81,6 +85,13 @@ pub(super) struct Record {
     pub installed: bool,
     #[serde(default)]
     pub setup: SetupProgress,
+    /// Installed here and not started by the user since its setup: the only kind of
+    /// computer a template may be made from.
+    #[serde(default)]
+    pub pristine: bool,
+    /// The folder name of the template this computer was copied from.
+    #[serde(default)]
+    pub template: Option<String>,
 }
 
 impl Record {
@@ -121,6 +132,7 @@ pub(super) fn validate_request(
     request: &CreateRequest,
     host: HostLimits,
     existing: &[Record],
+    min_disk_gib: u64,
 ) -> Result<(), String> {
     crate::runtime::validate_name(&request.name).map_err(|error| error.to_string())?;
     if existing.iter().any(|record| record.name == request.name) {
@@ -141,10 +153,13 @@ pub(super) fn validate_request(
             "Memory must be between {MIN_MEMORY_GIB} and {max_memory} GiB on this Mac."
         ));
     }
-    if !(MIN_DISK_GIB..=MAX_DISK_GIB).contains(&request.disk_gib) {
-        return Err(format!(
-            "Disk size must be between {MIN_DISK_GIB} and {MAX_DISK_GIB} GiB."
-        ));
+    let min_disk = min_disk_gib.max(MIN_DISK_GIB);
+    if !(min_disk..=MAX_DISK_GIB).contains(&request.disk_gib) {
+        return Err(if min_disk > MIN_DISK_GIB {
+            format!("Disk size must be between {min_disk} and {MAX_DISK_GIB} GiB, as new computers are copied from a template of {min_disk} GiB.")
+        } else {
+            format!("Disk size must be between {MIN_DISK_GIB} and {MAX_DISK_GIB} GiB.")
+        });
     }
     Ok(())
 }
@@ -164,6 +179,8 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         restore_image: None,
         installed: false,
         setup: SetupProgress::default(),
+        pristine: true,
+        template: None,
     }
 }
 
@@ -185,9 +202,11 @@ pub(super) enum DeleteMode {
 
 pub(super) fn delete_mode(state: State) -> Result<DeleteMode, String> {
     match state {
-        State::Preparing | State::Downloading | State::Installing | State::SettingUp => {
-            Ok(DeleteMode::Cancel)
-        }
+        State::Preparing
+        | State::Copying
+        | State::Downloading
+        | State::Installing
+        | State::SettingUp => Ok(DeleteMode::Cancel),
         State::Stopped | State::Failed => Ok(DeleteMode::Remove),
         State::Starting | State::Running | State::Stopping => {
             Err("Stop the computer first.".into())
@@ -203,7 +222,7 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
         State::Stopped | State::Failed => Ok(()),
         State::Running | State::Starting => Err("This computer is already running.".into()),
         State::Stopping => Err("This computer is still stopping.".into()),
-        State::Preparing | State::Downloading | State::Installing => {
+        State::Preparing | State::Copying | State::Downloading | State::Installing => {
             Err("macOS is still being installed on this computer.".into())
         }
         State::SettingUp => Err("This computer is still being set up.".into()),
@@ -224,7 +243,7 @@ pub(super) fn setup_allowed(state: State, record: &Record) -> Result<(), String>
         State::Running | State::Starting | State::Stopping => {
             Err("Stop the computer before setting it up.".into())
         }
-        State::Preparing | State::Downloading | State::Installing => {
+        State::Preparing | State::Copying | State::Downloading | State::Installing => {
             Err("macOS is still being installed on this computer.".into())
         }
     }
@@ -267,13 +286,22 @@ pub(super) fn restore_images(app_data: &Path) -> PathBuf {
 #[derive(Clone, Debug)]
 pub(super) struct Layout {
     pub dir: PathBuf,
+    /// Where the guest-access secrets are read from instead of `guest-access/`: the
+    /// first login to a copy of a template uses the template's.
+    pub access: Option<PathBuf>,
 }
 
 impl Layout {
     pub(super) fn new(app_data: &Path, id: &str) -> Self {
         Self {
             dir: root(app_data).join(id),
+            access: None,
         }
+    }
+
+    pub(super) fn with_access(mut self, access: PathBuf) -> Self {
+        self.access = Some(access);
+        self
     }
 
     pub(super) fn record(&self) -> PathBuf {
@@ -379,7 +407,7 @@ mod tests {
 
     #[test]
     fn accepts_the_default_request() {
-        assert_eq!(validate_request(&request(), HOST, &[]), Ok(()));
+        assert_eq!(validate_request(&request(), HOST, &[], 0), Ok(()));
     }
 
     #[test]
@@ -389,14 +417,14 @@ mod tests {
                 name: name.into(),
                 ..request()
             };
-            assert!(validate_request(&request, HOST, &[]).is_err(), "{name}");
+            assert!(validate_request(&request, HOST, &[], 0).is_err(), "{name}");
         }
     }
 
     #[test]
     fn rejects_duplicate_names() {
         let existing = [record(&request())];
-        let error = validate_request(&request(), HOST, &existing).unwrap_err();
+        let error = validate_request(&request(), HOST, &existing, 0).unwrap_err();
         assert!(error.contains("already exists"), "{error}");
     }
 
@@ -417,7 +445,7 @@ mod tests {
                 ..request()
             };
             assert!(
-                validate_request(&request, HOST, &[]).is_err(),
+                validate_request(&request, HOST, &[], 0).is_err(),
                 "{cpus} {memory_gib} {disk_gib}"
             );
         }
@@ -427,7 +455,75 @@ mod tests {
             disk_gib: 1024,
             ..request()
         };
-        assert_eq!(validate_request(&edge, HOST, &[]), Ok(()));
+        assert_eq!(validate_request(&edge, HOST, &[], 0), Ok(()));
+    }
+
+    #[test]
+    fn a_template_sets_the_smallest_disk() {
+        let at = |disk_gib, min| {
+            validate_request(
+                &CreateRequest {
+                    disk_gib,
+                    ..request()
+                },
+                HOST,
+                &[],
+                min,
+            )
+        };
+        assert_eq!(at(32, 0), Ok(()));
+        assert_eq!(at(64, 64), Ok(()));
+        assert_eq!(at(65, 64), Ok(()));
+        let error = at(63, 64).unwrap_err();
+        assert!(error.contains("between 64 and 1024"), "{error}");
+        assert!(error.contains("template"), "{error}");
+        // A template smaller than the general minimum changes nothing.
+        assert!(at(31, 16).unwrap_err().contains("between 32 and 1024"));
+        assert_eq!(at(1024, 1024), Ok(()));
+    }
+
+    #[test]
+    fn a_copy_is_complete_only_once_it_is_personalized() {
+        let mut setup = SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: true,
+        };
+        assert!(!setup.complete());
+        setup.needs_personalizing = false;
+        assert!(setup.complete());
+    }
+
+    #[test]
+    fn records_from_before_templates_load_as_finished_and_not_pristine() {
+        let app_data = tempfile::tempdir().unwrap();
+        let mut original = record(&request());
+        original.installed = true;
+        original.setup = SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        let layout = Layout::new(app_data.path(), &original.id);
+        save(&layout, &original).unwrap();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.remove("pristine");
+        object.remove("template");
+        object["setup"]
+            .as_object_mut()
+            .unwrap()
+            .remove("needsPersonalizing");
+        fs::write(layout.record(), serde_json::to_vec(&json).unwrap()).unwrap();
+        let loaded = &load_all(app_data.path())[0];
+        assert!(loaded.setup.complete());
+        assert!(!loaded.pristine);
+        assert_eq!(loaded.template, None);
     }
 
     #[test]
@@ -440,7 +536,7 @@ mod tests {
             memory_gib: 4,
             ..request()
         };
-        assert_eq!(validate_request(&request, host, &[]), Ok(()));
+        assert_eq!(validate_request(&request, host, &[], 0), Ok(()));
     }
 
     #[test]
@@ -492,7 +588,7 @@ mod tests {
     #[test]
     fn delete_rules_follow_the_state() {
         use State::*;
-        for state in [Preparing, Downloading, Installing, SettingUp] {
+        for state in [Preparing, Copying, Downloading, Installing, SettingUp] {
             assert_eq!(delete_mode(state), Ok(DeleteMode::Cancel));
         }
         for state in [Stopped, Failed] {
@@ -548,7 +644,7 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "computerUse": false, "clipboard": false})
+            serde_json::json!({"account": true, "sip": true, "computerUse": false, "clipboard": false, "needsPersonalizing": false})
         );
 
         let mut old = json;

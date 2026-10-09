@@ -1,0 +1,878 @@
+//! Templates: a set-up macOS computer kept stopped as the source of later computers.
+//!
+//! A template is a folder in `macos-templates/` named `<build>-<setup version>`
+//! holding APFS clones of a finished computer's disk, auxiliary storage and
+//! hardware model, a `template.json`, and `template-access/`, the guest-access
+//! secrets of the computer it came from (the first login to a copy needs them).
+//! The structure follows `cua-vmm` (trycua/cua, MIT, commit ba4c636): a base image
+//! that is cloned with `clonefile`, a free-space check before the clone, and
+//! bookkeeping of what is in use. Lume's clone (`LumeController.clone`, MIT) is the
+//! model for what a copy changes: a new MAC address and a new machine identifier;
+//! the disk is grown, never shrunk, as Lume and Tart do.
+//!
+//! Nothing here touches Virtualization.framework, so it runs on every platform.
+use super::{
+    guest_access, guest_computer_use, offline_setup,
+    store::{self, Layout, Record},
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Write,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
+
+const SCHEMA_VERSION: u32 = 1;
+const META: &str = "template.json";
+const ACCESS: &str = "template-access";
+/// The secrets of the source computer that a first login to a copy needs.
+const ACCESS_FILES: [&str; 3] = ["password", "id_ed25519", "id_ed25519.pub"];
+const PARTIAL: &str = ".partial-";
+const GIB: u64 = 1 << 30;
+/// What a copy writes before it is first started: the personalization and two boots.
+pub(super) const COPY_ESTIMATE: u64 = 4 * GIB;
+/// Free space a copy leaves to the Mac.
+const FREE_RESERVE: u64 = 5 * GIB;
+
+/// Bump to invalidate every template when the setup changes in a way no hashed input shows.
+const SETUP_REVISION: u32 = 1;
+
+pub(super) fn root(app_data: &Path) -> PathBuf {
+    app_data.join("macos-templates")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Meta {
+    pub schema_version: u32,
+    pub macos_version: String,
+    pub build: String,
+    pub setup_version: String,
+    #[serde(rename = "diskGiB")]
+    pub disk_gib: u64,
+    pub created_at: String,
+    pub source_computer_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Template {
+    /// The folder name.
+    pub name: String,
+    pub dir: PathBuf,
+    pub meta: Meta,
+}
+
+impl Template {
+    pub(super) fn disk(&self) -> PathBuf {
+        self.dir.join("disk.img")
+    }
+
+    pub(super) fn auxiliary_storage(&self) -> PathBuf {
+        self.dir.join("auxiliary-storage.img")
+    }
+
+    pub(super) fn hardware_model(&self) -> PathBuf {
+        self.dir.join("hardware-model.bin")
+    }
+
+    /// The source computer's guest-access secrets.
+    pub(super) fn access_dir(&self) -> PathBuf {
+        self.dir.join(ACCESS)
+    }
+}
+
+// MARK: Setup version
+
+/// A hash of everything setup installs: the pinned ChatGPT app and LCU, the guest
+/// script, the account setup and the initial approval mode. A template made under a
+/// different setup version is never copied.
+pub(super) fn setup_version() -> String {
+    let approval = crate::computer_use::initial_approval();
+    hash_inputs(guest_computer_use::setup_inputs().into_iter().chain([
+        offline_setup::setup_inputs().as_str(),
+        approval.as_str(),
+        &SETUP_REVISION.to_string(),
+    ]))
+}
+
+fn hash_inputs<'a>(inputs: impl IntoIterator<Item = &'a str>) -> String {
+    let mut hash = Sha256::new();
+    for input in inputs {
+        // Length-prefixed, so that moving text between two inputs changes the hash.
+        hash.update((input.len() as u64).to_le_bytes());
+        hash.update(input.as_bytes());
+    }
+    hash.finalize()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The folder name of the template for `build` under `setup_version`.
+pub(super) fn dir_name(build: &str, setup_version: &str) -> Result<String, String> {
+    let safe = |text: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+    };
+    if safe(build) && safe(setup_version) {
+        Ok(format!("{build}-{setup_version}"))
+    } else {
+        Err("The macOS build has an unexpected name.".into())
+    }
+}
+
+// MARK: Reading
+
+/// Every complete template, newest first. Unfinished and unreadable folders are skipped.
+pub(super) fn list(app_data: &Path) -> Vec<Template> {
+    let Ok(entries) = fs::read_dir(root(app_data)) else {
+        return Vec::new();
+    };
+    let mut templates: Vec<Template> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            if name.contains(PARTIAL) {
+                return None;
+            }
+            let meta: Meta =
+                serde_json::from_slice(&fs::read(entry.path().join(META)).ok()?).ok()?;
+            (meta.schema_version == SCHEMA_VERSION).then(|| Template {
+                name,
+                dir: entry.path(),
+                meta,
+            })
+        })
+        .collect();
+    templates.sort_by(|a, b| created(b).cmp(&created(a)).then(a.name.cmp(&b.name)));
+    templates
+}
+
+fn created(template: &Template) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(
+        &template.meta.created_at,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .ok()
+}
+
+/// The template a new computer is copied from. `latest_build` is the build the framework
+/// offers; with `None` (the lookup failed, as when offline) the newest template of the
+/// current setup version is used.
+pub(super) fn choose<'a>(
+    templates: &'a [Template],
+    latest_build: Option<&str>,
+    setup_version: &str,
+) -> Option<&'a Template> {
+    templates.iter().find(|template| {
+        template.meta.setup_version == setup_version
+            && latest_build.is_none_or(|build| template.meta.build == build)
+    })
+}
+
+// MARK: Leases
+
+/// Folder names of templates that copies are being made from, with their counts.
+static LEASES: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+fn leases() -> std::sync::MutexGuard<'static, Option<HashMap<String, usize>>> {
+    LEASES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A hold on a template: it cannot be pruned or removed while one exists.
+pub(super) struct Lease {
+    pub template: Template,
+}
+
+impl Lease {
+    fn take(leases: &mut HashMap<String, usize>, template: Template) -> Self {
+        *leases.entry(template.name.clone()).or_default() += 1;
+        Self { template }
+    }
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        let mut guard = leases();
+        if let Some(leases) = guard.as_mut() {
+            if let Some(count) = leases.get_mut(&self.template.name) {
+                *count -= 1;
+                if *count == 0 {
+                    leases.remove(&self.template.name);
+                }
+            }
+        }
+    }
+}
+
+/// Holds the template a new computer is copied from, if there is one.
+pub(super) fn lease_matching(
+    app_data: &Path,
+    latest_build: Option<&str>,
+    setup_version: &str,
+) -> Option<Lease> {
+    let mut guard = leases();
+    let templates = list(app_data);
+    let chosen = choose(&templates, latest_build, setup_version)?.clone();
+    Some(Lease::take(guard.get_or_insert_with(HashMap::new), chosen))
+}
+
+/// Holds the named template again, for a copy whose personalization is resumed.
+pub(super) fn lease_named(app_data: &Path, name: &str) -> Result<Lease, String> {
+    let mut guard = leases();
+    let template = list(app_data)
+        .into_iter()
+        .find(|template| template.name == name)
+        .ok_or(TEMPLATE_GONE)?;
+    Ok(Lease::take(
+        guard.get_or_insert_with(HashMap::new),
+        template,
+    ))
+}
+
+pub(super) const TEMPLATE_GONE: &str =
+    "The template this computer was copied from is gone. Delete this computer and create it again.";
+
+// MARK: Removing
+
+fn remove_dir(path: &Path) -> Result<(), String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(store::io_error("remove the template", &error)),
+    }
+}
+
+/// Removes every template except `keep` that no copy is made from. `protected` names the
+/// templates computers still depend on; it is read while the leases are locked, so a copy
+/// that starts to depend on a template cannot slip between the two checks.
+fn prune(
+    app_data: &Path,
+    keep: Option<&str>,
+    protected: &dyn Fn() -> Vec<String>,
+) -> Result<(), String> {
+    let guard = leases();
+    let held = guard.as_ref();
+    let protected = protected();
+    let mut result = Ok(());
+    for template in list(app_data) {
+        let used = held.is_some_and(|held| held.contains_key(&template.name))
+            || protected.contains(&template.name);
+        if Some(template.name.as_str()) != keep && !used {
+            if let Err(message) = remove_dir(&template.dir) {
+                result = Err(message);
+            }
+        }
+    }
+    result
+}
+
+/// Removes every template, unless a copy is being made from one or an unfinished copy
+/// depends on one.
+pub(super) fn remove_all(
+    app_data: &Path,
+    protected: &dyn Fn() -> Vec<String>,
+) -> Result<(), String> {
+    let guard = leases();
+    let templates = list(app_data);
+    if templates.iter().any(|template| {
+        guard
+            .as_ref()
+            .is_some_and(|held| held.contains_key(&template.name))
+    }) {
+        return Err("A computer is being copied from the template. Wait for it to finish.".into());
+    }
+    let protected = protected();
+    if templates
+        .iter()
+        .any(|template| protected.contains(&template.name))
+    {
+        return Err(
+            "A computer is still being set up from the template. Finish or delete it first.".into(),
+        );
+    }
+    for template in templates {
+        remove_dir(&template.dir)?;
+    }
+    // Folders an interrupted run left half-made.
+    remove_partials(app_data)
+}
+
+fn remove_partials(app_data: &Path) -> Result<(), String> {
+    let Ok(entries) = fs::read_dir(root(app_data)) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().contains(PARTIAL) {
+            remove_dir(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+// MARK: Making
+
+/// Whether `record` may become a template: it finished its setup, was never started by the
+/// user afterwards, and is not itself a copy of a template.
+pub(super) fn eligible(record: &Record) -> bool {
+    record.installed
+        && record.setup.complete()
+        && record.pristine
+        && record.template.is_none()
+        && record.restore_image.is_some()
+}
+
+/// Serializes template creation: one folder name is made at a time.
+static MAKING: Mutex<()> = Mutex::new(());
+
+/// Makes the template of a finished, stopped computer, then removes older ones. Does nothing
+/// when a template for this build and setup version exists. Returns the folder name made.
+pub(super) fn make(
+    app_data: &Path,
+    record: &Record,
+    layout: &Layout,
+    setup_version: &str,
+    protected: &dyn Fn() -> Vec<String>,
+) -> Result<Option<String>, String> {
+    if !eligible(record) {
+        return Ok(None);
+    }
+    let image = record.restore_image.as_ref().ok_or("No macOS version.")?;
+    let name = dir_name(&image.build, setup_version)?;
+    let _making = MAKING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let templates = root(app_data);
+    let target = templates.join(&name);
+    remove_partials(app_data)?;
+    if target.join(META).exists() {
+        return Ok(None);
+    }
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&templates)
+        .map_err(|error| store::io_error("create the template folder", &error))?;
+    let partial = templates.join(format!("{name}{PARTIAL}{}", uuid::Uuid::new_v4()));
+    let built = build(&partial, record, layout, setup_version, image);
+    if let Err(message) = built {
+        let _ = remove_dir(&partial);
+        return Err(message);
+    }
+    if let Err(error) = fs::rename(&partial, &target) {
+        let _ = remove_dir(&partial);
+        return Err(store::io_error("save the template", &error));
+    }
+    prune(app_data, Some(&name), protected)?;
+    Ok(Some(name))
+}
+
+fn build(
+    partial: &Path,
+    record: &Record,
+    layout: &Layout,
+    setup_version: &str,
+    image: &store::RestoreImageInfo,
+) -> Result<(), String> {
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(partial)
+        .map_err(|error| store::io_error("create the template", &error))?;
+    for (from, to) in [
+        (layout.disk(), "disk.img"),
+        (layout.auxiliary_storage(), "auxiliary-storage.img"),
+        (layout.hardware_model(), "hardware-model.bin"),
+    ] {
+        clone_file(&from, &partial.join(to)).map_err(CopyError::message)?;
+    }
+    let access = partial.join(ACCESS);
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&access)
+        .map_err(|error| store::io_error("create the template", &error))?;
+    let source = guest_access::credentials_dir(layout);
+    for file in ACCESS_FILES {
+        let bytes = fs::read(source.join(file))
+            .map_err(|error| store::io_error("copy the computer's access", &error))?;
+        write_private(&access.join(file), &bytes)?;
+    }
+    let meta = Meta {
+        schema_version: SCHEMA_VERSION,
+        macos_version: image.version.clone(),
+        build: image.build.clone(),
+        setup_version: setup_version.to_string(),
+        disk_gib: record.disk_gib,
+        created_at: time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
+        source_computer_id: record.id.clone(),
+    };
+    let json = serde_json::to_vec_pretty(&meta).map_err(|error| error.to_string())?;
+    write_private(&partial.join(META), &json)
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+        .map_err(|error| store::io_error("save the template", &error))
+}
+
+// MARK: Copying
+
+/// Copies a template's files into the new computer's folder. The disk is the template's
+/// size or, when `disk_gib` is larger, grown to it; the guest uses the extra space once
+/// personalization has expanded its APFS container. The template's secrets are not copied.
+pub(super) fn clone_into(
+    template: &Template,
+    layout: &Layout,
+    machine_identifier: &[u8],
+    disk_gib: u64,
+) -> Result<(), CopyError> {
+    let copied = (|| {
+        fs::create_dir_all(&layout.dir)
+            .map_err(|error| CopyError::Failed(store::io_error("create the computer", &error)))?;
+        for (from, to) in [
+            (template.disk(), layout.disk()),
+            (template.auxiliary_storage(), layout.auxiliary_storage()),
+            (template.hardware_model(), layout.hardware_model()),
+        ] {
+            clone_file(&from, &to)?;
+        }
+        fs::write(layout.machine_identifier(), machine_identifier).map_err(|error| {
+            CopyError::Failed(store::io_error("save the computer's identity", &error))
+        })?;
+        if disk_gib > template.meta.disk_gib {
+            fs::OpenOptions::new()
+                .write(true)
+                .open(layout.disk())
+                .and_then(|file| file.set_len(disk_gib * GIB))
+                .map_err(|error| CopyError::Failed(store::io_error("grow the disk", &error)))?;
+        }
+        Ok(())
+    })();
+    if copied.is_err() {
+        for file in [
+            layout.disk(),
+            layout.auxiliary_storage(),
+            layout.hardware_model(),
+            layout.machine_identifier(),
+        ] {
+            let _ = fs::remove_file(file);
+        }
+    }
+    copied
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum CopyError {
+    /// The volume cannot clone files (it is not APFS).
+    Unsupported,
+    Failed(String),
+}
+
+impl CopyError {
+    pub(super) fn message(self) -> String {
+        match self {
+            Self::Unsupported => "Silo's data folder is on a volume that cannot copy files instantly (it needs APFS).".into(),
+            Self::Failed(message) => message,
+        }
+    }
+}
+
+/// Copy-on-write copy of one file. On macOS this is `clonefile`, which shares the blocks
+/// and costs no space until one side changes; elsewhere (the tests, on Linux) it is a
+/// plain copy.
+#[cfg(target_os = "macos")]
+fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
+    use std::os::unix::ffi::OsStrExt;
+    let cstring = |path: &Path| {
+        std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| CopyError::Failed("A file name contains a null byte.".into()))
+    };
+    let (from, to) = (cstring(from)?, cstring(to)?);
+    // SAFETY: Both arguments are NUL-terminated paths that outlive the call.
+    if unsafe { libc::clonefile(from.as_ptr(), to.as_ptr(), 0) } == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ENOTSUP) => Err(CopyError::Unsupported),
+        _ => Err(CopyError::Failed(store::io_error(
+            "copy the computer's files",
+            &error,
+        ))),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
+    fs::copy(from, to)
+        .map(|_| ())
+        .map_err(|error| CopyError::Failed(store::io_error("copy the computer's files", &error)))
+}
+
+// MARK: Space
+
+/// Bytes available to this process on the volume holding `path`.
+fn available_space(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut probe = path;
+    while !probe.exists() {
+        probe = probe.parent()?;
+    }
+    let path = std::ffi::CString::new(probe.as_os_str().as_bytes()).ok()?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is NUL-terminated and `stats` is a valid out-pointer.
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: statvfs succeeded and initialised the structure.
+    let stats = unsafe { stats.assume_init() };
+    Some(u64::from(stats.f_bavail) * u64::from(stats.f_frsize))
+}
+
+fn enough_space(available: Option<u64>, needed: u64) -> Result<(), String> {
+    match available {
+        Some(available) if available < needed.saturating_add(FREE_RESERVE) => Err(format!(
+            "This Mac is low on disk space: about {} GB are free and a new computer needs {} GB more than the {} GB Silo leaves free.",
+            available / 1_000_000_000,
+            needed.div_ceil(1_000_000_000),
+            FREE_RESERVE / 1_000_000_000
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Fails when the volume holding `app_data` has less than `needed` bytes free beyond the
+/// reserve Silo leaves to the Mac. An unknown amount is not checked.
+pub(super) fn ensure_space(app_data: &Path, needed: u64) -> Result<(), String> {
+    enough_space(available_space(app_data), needed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::macos_computers::store::{CreateRequest, RestoreImageInfo, SetupProgress};
+
+    fn record(disk_gib: u64) -> (Record, Layout, tempfile::TempDir) {
+        let data = tempfile::tempdir().unwrap();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        record.installed = true;
+        record.restore_image = Some(RestoreImageInfo {
+            version: "26.6.2".into(),
+            build: "25G83".into(),
+        });
+        record.setup = SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        let layout = Layout::new(data.path(), &record.id);
+        fs::create_dir_all(&layout.dir).unwrap();
+        fs::write(layout.disk(), vec![7u8; 4096]).unwrap();
+        fs::write(layout.auxiliary_storage(), b"aux").unwrap();
+        fs::write(layout.hardware_model(), b"model").unwrap();
+        fs::write(layout.machine_identifier(), b"source-identifier").unwrap();
+        let access = guest_access::credentials_dir(&layout);
+        fs::create_dir_all(&access).unwrap();
+        for file in ACCESS_FILES {
+            fs::write(access.join(file), format!("secret {file}")).unwrap();
+        }
+        fs::write(access.join("known_hosts"), b"host").unwrap();
+        (record, layout, data)
+    }
+
+    fn none() -> Vec<String> {
+        Vec::new()
+    }
+
+    fn meta(build: &str, setup: &str, created: &str) -> Meta {
+        Meta {
+            schema_version: SCHEMA_VERSION,
+            macos_version: "26.6.2".into(),
+            build: build.into(),
+            setup_version: setup.into(),
+            disk_gib: 64,
+            created_at: created.into(),
+            source_computer_id: "source".into(),
+        }
+    }
+
+    fn template(build: &str, setup: &str, created: &str) -> Template {
+        let name = dir_name(build, setup).unwrap();
+        Template {
+            dir: PathBuf::from(&name),
+            name,
+            meta: meta(build, setup, created),
+        }
+    }
+
+    #[test]
+    fn a_template_is_chosen_by_build_and_setup_version() {
+        let templates = [
+            template("25G83", "old", "2026-10-02"),
+            template("25G83", "new", "2026-10-01"),
+            template("25H1", "new", "2026-10-03"),
+        ];
+        let pick = |build, setup| choose(&templates, build, setup).map(|t| t.name.as_str());
+        assert_eq!(pick(Some("25G83"), "new"), Some("25G83-new"));
+        assert_eq!(pick(Some("25G83"), "old"), Some("25G83-old"));
+        assert_eq!(pick(Some("25H1"), "new"), Some("25H1-new"));
+        // A newer macOS than any template, or a changed setup, means a fresh install.
+        assert_eq!(pick(Some("25J9"), "new"), None);
+        assert_eq!(pick(Some("25G83"), "other"), None);
+    }
+
+    #[test]
+    fn offline_the_newest_template_of_the_current_setup_is_used() {
+        let templates = [
+            template("25G83", "old", "2026-10-04"),
+            template("25H1", "new", "2026-10-03"),
+            template("25G83", "new", "2026-10-01"),
+        ];
+        assert_eq!(
+            choose(&templates, None, "new").map(|t| t.name.as_str()),
+            Some("25H1-new")
+        );
+        assert_eq!(choose(&templates, None, "other"), None);
+        assert_eq!(choose(&[], None, "new"), None);
+    }
+
+    #[test]
+    fn the_setup_version_changes_with_any_input() {
+        let base = hash_inputs(["a", "b"]);
+        assert_eq!(base, hash_inputs(["a", "b"]));
+        assert_ne!(base, hash_inputs(["a", "c"]));
+        assert_ne!(base, hash_inputs(["ab", ""]));
+        assert_ne!(base, hash_inputs(["a"]));
+        assert_eq!(base.len(), 16);
+        assert_eq!(setup_version().len(), 16);
+    }
+
+    #[test]
+    fn folder_names_stay_inside_the_templates_folder() {
+        assert_eq!(dir_name("25G83", "0123abcd").unwrap(), "25G83-0123abcd");
+        for bad in ["", "../x", "a/b", "a b"] {
+            assert!(dir_name(bad, "x").is_err(), "{bad}");
+            assert!(dir_name("x", bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_a_pristine_finished_install_may_become_a_template() {
+        let (mut computer, _, _data) = record(64);
+        assert!(eligible(&computer));
+        computer.pristine = false;
+        assert!(!eligible(&computer));
+        computer.pristine = true;
+        computer.setup.clipboard = false;
+        assert!(!eligible(&computer));
+        computer.setup.clipboard = true;
+        computer.template = Some("25G83-x".into());
+        assert!(!eligible(&computer));
+        computer.template = None;
+        computer.setup.needs_personalizing = true;
+        assert!(!eligible(&computer));
+    }
+
+    #[test]
+    fn making_a_template_lays_out_the_files_and_the_source_secrets() {
+        let (computer, layout, data) = record(64);
+        let name = make(data.path(), &computer, &layout, "abcd", &none)
+            .unwrap()
+            .unwrap();
+        assert_eq!(name, "25G83-abcd");
+        let listed = list(data.path());
+        assert_eq!(listed.len(), 1);
+        let made = &listed[0];
+        assert_eq!(made.meta.disk_gib, 64);
+        assert_eq!(made.meta.source_computer_id, computer.id);
+        assert_eq!(made.meta.macos_version, "26.6.2");
+        assert_eq!(fs::read(made.disk()).unwrap(), vec![7u8; 4096]);
+        assert_eq!(fs::read(made.auxiliary_storage()).unwrap(), b"aux");
+        assert_eq!(fs::read(made.hardware_model()).unwrap(), b"model");
+        // The identity belongs to the source alone.
+        assert!(!made.dir.join("machine-identifier.bin").exists());
+        let access = made.access_dir();
+        assert_eq!(
+            fs::metadata(&access).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        for file in ACCESS_FILES {
+            assert_eq!(
+                fs::read_to_string(access.join(file)).unwrap(),
+                format!("secret {file}")
+            );
+            assert_eq!(
+                fs::metadata(access.join(file))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        assert!(!access.join("known_hosts").exists());
+        // Making it again changes nothing.
+        assert_eq!(
+            make(data.path(), &computer, &layout, "abcd", &none).unwrap(),
+            None
+        );
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(made.dir.join(META)).unwrap()).unwrap();
+        assert_eq!(json["diskGiB"], 64);
+        assert_eq!(json["setupVersion"], "abcd");
+    }
+
+    #[test]
+    fn a_computer_that_is_not_pristine_makes_no_template() {
+        let (mut computer, layout, data) = record(64);
+        computer.pristine = false;
+        assert_eq!(
+            make(data.path(), &computer, &layout, "abcd", &none).unwrap(),
+            None
+        );
+        assert!(list(data.path()).is_empty());
+    }
+
+    #[test]
+    fn a_new_template_replaces_older_ones_unless_they_are_in_use() {
+        let (computer, layout, data) = record(64);
+        make(data.path(), &computer, &layout, "one", &none).unwrap();
+        let held = lease_named(data.path(), "25G83-one").unwrap();
+        make(data.path(), &computer, &layout, "two", &none).unwrap();
+        let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["25G83-two", "25G83-one"], "a leased template stays");
+        drop(held);
+        // A template an unfinished copy depends on also stays.
+        let protect = || vec!["25G83-one".to_string()];
+        make(data.path(), &computer, &layout, "three", &protect).unwrap();
+        let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["25G83-three", "25G83-one"]);
+        make(data.path(), &computer, &layout, "four", &none).unwrap();
+        let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["25G83-four"]);
+    }
+
+    #[test]
+    fn unfinished_templates_are_not_listed_and_are_cleaned_up() {
+        let (computer, layout, data) = record(64);
+        let stale = root(data.path()).join(format!("25G83-x{PARTIAL}1"));
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(
+            stale.join(META),
+            serde_json::to_vec(&meta("25G83", "x", "t")).unwrap(),
+        )
+        .unwrap();
+        assert!(list(data.path()).is_empty());
+        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
+        assert!(!stale.exists());
+        assert_eq!(list(data.path()).len(), 1);
+    }
+
+    #[test]
+    fn removing_refuses_while_a_copy_depends_on_the_template() {
+        let (computer, layout, data) = record(64);
+        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
+        let lease = lease_matching(data.path(), Some("25G83"), "abcd").unwrap();
+        assert!(remove_all(data.path(), &none)
+            .unwrap_err()
+            .contains("being copied"));
+        drop(lease);
+        let protect = || vec!["25G83-abcd".to_string()];
+        assert!(remove_all(data.path(), &protect)
+            .unwrap_err()
+            .contains("still being set up"));
+        assert_eq!(list(data.path()).len(), 1);
+        remove_all(data.path(), &none).unwrap();
+        assert!(list(data.path()).is_empty());
+        // Nothing to remove is fine.
+        remove_all(data.path(), &none).unwrap();
+    }
+
+    #[test]
+    fn a_copy_has_the_template_files_a_new_identity_and_none_of_its_secrets() {
+        let (computer, layout, data) = record(64);
+        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
+        let lease = lease_matching(data.path(), Some("25G83"), "abcd").unwrap();
+        let copy = Layout::new(data.path(), "copy-id");
+        clone_into(&lease.template, &copy, b"new-identifier", 64).unwrap();
+        assert_eq!(fs::read(copy.disk()).unwrap(), vec![7u8; 4096]);
+        assert_eq!(fs::read(copy.auxiliary_storage()).unwrap(), b"aux");
+        assert_eq!(fs::read(copy.hardware_model()).unwrap(), b"model");
+        assert_eq!(
+            fs::read(copy.machine_identifier()).unwrap(),
+            b"new-identifier"
+        );
+        assert_ne!(
+            fs::read(copy.machine_identifier()).unwrap(),
+            fs::read(layout.machine_identifier()).unwrap()
+        );
+        let mut files: Vec<_> = fs::read_dir(&copy.dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().into_string().unwrap())
+            .collect();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                "auxiliary-storage.img",
+                "disk.img",
+                "hardware-model.bin",
+                "machine-identifier.bin"
+            ]
+        );
+        // Writing to the copy leaves the template alone.
+        fs::write(copy.disk(), b"changed").unwrap();
+        assert_eq!(fs::read(lease.template.disk()).unwrap(), vec![7u8; 4096]);
+    }
+
+    #[test]
+    fn a_larger_disk_is_grown_and_a_template_sized_disk_is_not() {
+        let (computer, layout, data) = record(64);
+        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
+        let lease = lease_matching(data.path(), None, "abcd").unwrap();
+        let same = Layout::new(data.path(), "same");
+        clone_into(&lease.template, &same, b"id", 64).unwrap();
+        assert_eq!(fs::metadata(same.disk()).unwrap().len(), 4096);
+        let larger = Layout::new(data.path(), "larger");
+        clone_into(&lease.template, &larger, b"id", 128).unwrap();
+        assert_eq!(fs::metadata(larger.disk()).unwrap().len(), 128 * GIB);
+        assert_eq!(fs::metadata(lease.template.disk()).unwrap().len(), 4096);
+    }
+
+    #[test]
+    fn a_copy_needs_free_space_beyond_the_reserve() {
+        assert!(enough_space(None, COPY_ESTIMATE).is_ok());
+        assert!(enough_space(Some(COPY_ESTIMATE + FREE_RESERVE), COPY_ESTIMATE).is_ok());
+        let error =
+            enough_space(Some(COPY_ESTIMATE + FREE_RESERVE - 1), COPY_ESTIMATE).unwrap_err();
+        assert!(error.contains("low on disk space"), "{error}");
+        assert!(
+            ensure_space(Path::new("/"), 0).is_ok() || available_space(Path::new("/")).is_some()
+        );
+    }
+}

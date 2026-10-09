@@ -6,10 +6,10 @@
 //! The computer's state stays `setting-up` throughout; each step names itself in
 //! the detail. Machines started here have no display.
 use super::{
-    engine, guest_access, guest_clipboard, guest_computer_use, layout_and_record, offline_setup,
-    recovery, set_detail,
+    app_data, engine, guest_access, guest_clipboard, guest_computer_use, layout_and_record,
+    offline_setup, personalize, recovery, set_detail,
     store::{self, Layout, Record, SetupProgress},
-    Stop, RUN,
+    templates, Stop, RUN,
 };
 use std::{
     sync::atomic::{AtomicU8, Ordering},
@@ -26,6 +26,11 @@ const FIRST_BOOT_SETTLE: Duration = Duration::from_secs(50);
 const FIRST_BOOT_ATTEMPTS: u32 = 3;
 const SSH_WAIT: Duration = Duration::from_secs(300);
 const GUEST_COMMAND: Duration = Duration::from_secs(120);
+/// Personalization may expand the disk, which takes the guest a while.
+const PERSONALIZE_COMMAND: Duration = Duration::from_secs(600);
+/// How long an automatic login may take after a boot.
+const LOGIN_WAIT: Duration = Duration::from_secs(180);
+const SSH_POLL: Duration = Duration::from_secs(3);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(120);
 const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
 const MACHINE_POLL: Duration = Duration::from_millis(500);
@@ -92,6 +97,9 @@ impl Provision<'_> {
     }
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
+        if record.setup.needs_personalizing {
+            self.personalize(record)?;
+        }
         if !record.setup.account {
             self.create_account(record)?;
         }
@@ -165,6 +173,122 @@ impl Provision<'_> {
         self.mark(record, |setup| setup.account = true)
     }
 
+    /// Gives a copy of a template its own password, key, host keys, keychain and name,
+    /// then restarts it to check that it came up as its own computer. A run that ends
+    /// early is repeated whole: the template's key stays valid until the last command of
+    /// the script, and a copy that already has its own key skips the script.
+    fn personalize(&self, record: &mut Record) -> Result<(), Stop> {
+        let data = app_data(self.app)?;
+        let name = record
+            .template
+            .clone()
+            .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
+        let lease = templates::lease_named(&data, &name)?;
+        let access = lease.template.access_dir();
+        if !access.join("id_ed25519").exists() {
+            return Err(Stop::Failed(templates::TEMPLATE_GONE.into()));
+        }
+        let own = guest_access::account(self.layout)?;
+        let template_login = self.layout.clone().with_access(access);
+        self.say("Personalizing the computer")?;
+        // The guest's host keys are about to change.
+        guest_access::reset_host_keys(self.layout)?;
+        self.start_machine()?;
+        if self.wait_for_login(&template_login, record)? == LoginKey::Template {
+            let grow = (record.disk_gib > lease.template.meta.disk_gib).then_some(record.disk_gib);
+            let script = personalize::script(&guest_access::public_key(&own)?, &record.name, grow);
+            let output = guest_access::run(
+                &template_login,
+                record,
+                &personalize::command(&script),
+                Some(&personalize::input(&own.password)),
+                PERSONALIZE_COMMAND,
+            )?;
+            if output.status != 0 {
+                eprintln!(
+                    "macOS computer personalization failed with status {}: {}",
+                    output.status,
+                    output.stderr.trim()
+                );
+            }
+            let outcome =
+                personalize::outcome(output.status, &output.stdout).map_err(Stop::Failed)?;
+            if outcome.disk_resized == Some(false) {
+                eprintln!("macOS computer personalization: the disk could not be expanded.");
+                record.disk_gib = lease.template.meta.disk_gib;
+                self.persist(record)?;
+            }
+            if !guest_access::probe(self.layout, record) {
+                return Err(Stop::Failed(
+                    "Silo could not log in to the computer with its own key.".into(),
+                ));
+            }
+        }
+        self.shut_down()?;
+        guest_access::reset_host_keys(self.layout)?;
+        self.say("Checking the computer")?;
+        self.boot(Login::Key)?;
+        self.verify_sip_disabled()?;
+        self.verify_personalized()?;
+        self.shut_down()?;
+        self.mark(record, |setup| setup.needs_personalizing = false)
+    }
+
+    /// Waits until the guest answers a login with the template's key or its own.
+    fn wait_for_login(&self, template_login: &Layout, record: &Record) -> Result<LoginKey, Stop> {
+        let deadline = Instant::now() + SSH_WAIT;
+        loop {
+            self.check()?;
+            if guest_access::probe(self.layout, record) {
+                return Ok(LoginKey::Own);
+            }
+            if guest_access::probe(template_login, record) {
+                return Ok(LoginKey::Template);
+            }
+            if Instant::now() >= deadline {
+                return Err(Stop::Failed(
+                    "The computer did not accept SSH logins in time.".into(),
+                ));
+            }
+            std::thread::sleep(SSH_POLL);
+        }
+    }
+
+    /// Checks a restarted copy: LCU's receipt came along, and macOS logged in on its own
+    /// with the new password.
+    fn verify_personalized(&self) -> Result<(), Stop> {
+        let (layout, record) = layout_and_record(self.app, &self.id)?;
+        let deadline = Instant::now() + LOGIN_WAIT;
+        loop {
+            self.check()?;
+            let output =
+                guest_access::run(&layout, &record, GUEST_STATE_COMMAND, None, GUEST_COMMAND)?;
+            let state = guest_state(&output.stdout);
+            if !state.receipt {
+                return Err(Stop::Failed(
+                    "The copy of the template has no computer use installed.".into(),
+                ));
+            }
+            if state.console_user.as_deref() == Some(guest_access::USER) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Stop::Failed(
+                    "The computer did not log in on its own after it was personalized.".into(),
+                ));
+            }
+            std::thread::sleep(SSH_POLL);
+        }
+    }
+
+    /// Saves `record` and shows it.
+    fn persist(&self, record: &Record) -> Result<(), Stop> {
+        store::save(self.layout, record)?;
+        let saved = record.clone();
+        super::update(self.app, &self.id, |entry| entry.record = saved);
+        Ok(())
+    }
+
     /// Runs the root script with the account's password, which is the only
     /// credential a new guest has, then checks that the key and `sudo -n` work.
     fn finalize(&self, account: &guest_access::GuestAccount) -> Result<(), Stop> {
@@ -190,12 +314,19 @@ impl Provision<'_> {
         }
     }
 
-    /// Boots the computer without a display and waits for SSH.
-    fn boot(&self, login: Login) -> Result<(), Stop> {
+    /// Starts the machine without a display.
+    fn start_machine(&self) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         offline_setup::ensure_detached(&layout.disk())?;
         engine::start(self.app, &record, &layout)?;
+        Ok(())
+    }
+
+    /// Boots the computer without a display and waits for SSH.
+    fn boot(&self, login: Login) -> Result<(), Stop> {
+        self.start_machine()?;
+        let (layout, record) = layout_and_record(self.app, &self.id)?;
         let cancelled = || self.cancelled();
         match login {
             Login::Key => guest_access::wait_for_ssh(&layout, &record, SSH_WAIT, &cancelled),
@@ -298,6 +429,34 @@ impl Provision<'_> {
     }
 }
 
+/// Which key a copy of a template answers to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoginKey {
+    /// The template's: the personalization has not run.
+    Template,
+    /// Its own: the personalization ran.
+    Own,
+}
+
+/// Prints whether LCU's receipt exists, who owns the console and whether `sudo -n` works.
+const GUEST_STATE_COMMAND: &str = "/bin/test -f \"$HOME/Library/Application Support/Silo/computer-use-receipt.json\" && /bin/echo SILO_RECEIPT; /usr/bin/stat -f 'SILO_CONSOLE=%Su' /dev/console; /usr/bin/sudo -n true && /bin/echo SILO_SUDO";
+
+#[derive(Debug, PartialEq, Eq)]
+struct GuestState {
+    receipt: bool,
+    console_user: Option<String>,
+}
+
+fn guest_state(stdout: &str) -> GuestState {
+    GuestState {
+        receipt: stdout.lines().any(|line| line.trim() == "SILO_RECEIPT"),
+        console_user: stdout
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("SILO_CONSOLE="))
+            .map(str::to_string),
+    }
+}
+
 /// How the first connection to a boot proves who it is.
 #[derive(Clone, Copy)]
 enum Login {
@@ -394,6 +553,31 @@ mod tests {
     }
 
     #[test]
+    fn the_guest_state_is_read_from_the_marker_lines() {
+        assert_eq!(
+            guest_state("SILO_RECEIPT\nSILO_CONSOLE=silo\nSILO_SUDO\n"),
+            GuestState {
+                receipt: true,
+                console_user: Some("silo".into())
+            }
+        );
+        assert_eq!(
+            guest_state("SILO_CONSOLE=root\n"),
+            GuestState {
+                receipt: false,
+                console_user: Some("root".into())
+            }
+        );
+        assert_eq!(
+            guest_state(""),
+            GuestState {
+                receipt: false,
+                console_user: None
+            }
+        );
+    }
+
+    #[test]
     fn csrutil_output_decides_whether_protection_is_off() {
         assert!(sip_disabled(
             "System Integrity Protection status: disabled.\n"
@@ -414,7 +598,7 @@ mod tests {
         let mac = std::fs::read_to_string(dir.join("mac-address.txt")).unwrap();
         let mut record = store::new_record(&request, mac.trim().into());
         record.id = "live".into();
-        (Layout { dir }, record)
+        (Layout { dir, access: None }, record)
     }
 
     /// Patches the disk of a clone. Run by hand: `SILO_LIVE_DIR=<clone> cargo test live_offline -- --ignored`.

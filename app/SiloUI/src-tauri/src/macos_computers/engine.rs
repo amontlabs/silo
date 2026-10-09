@@ -269,6 +269,13 @@ pub(super) fn random_mac() -> String {
     }
 }
 
+/// The data of a new machine identifier, which tells the framework (and the guest) apart from
+/// every other computer.
+pub(super) fn new_machine_identifier() -> Vec<u8> {
+    // SAFETY: A class method without arguments; the representation is plain data.
+    unsafe { VZMacMachineIdentifier::new().dataRepresentation().to_vec() }
+}
+
 // MARK: Restore images
 
 pub(super) struct LatestImage {

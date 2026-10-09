@@ -145,6 +145,7 @@ fn main() {
             macos_computers::macos_computer_action,
             macos_computers::open_macos_display,
             macos_computers::macos_computer_clipboard,
+            macos_computers::delete_macos_template,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,

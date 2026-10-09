@@ -178,6 +178,11 @@ impl Pins {
     }
 }
 
+/// The pinned archives and the script, which decide what a computer holds after setup.
+pub(super) fn setup_inputs() -> [&'static str; 3] {
+    [APP_LOCK, LCU_LOCK, SCRIPT]
+}
+
 /// Installs computer use in the running computer `id`.
 pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
     let pins = Pins::bundled()?;

@@ -41,6 +41,7 @@ fn main() {
             "macos_computer_action",
             "open_macos_display",
             "macos_computer_clipboard",
+            "delete_macos_template",
             "set_app_menu_state",
             "show_app_menu",
             "get_update_state",

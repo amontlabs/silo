@@ -3,10 +3,12 @@
 //! Linux computers MicroSandbox runs.
 //!
 //! This module owns the state the UI sees and the workflows around it (creating,
-//! setting up, starting, stopping, deleting, Quit). `store` and `restore_image` are
-//! plain Rust; `engine` holds every Virtualization.framework call. `provision`
-//! prepares an installed computer for computer use, with `offline_setup`,
+//! setting up, starting, stopping, deleting, Quit). `store`, `restore_image` and
+//! `templates` are plain Rust; `engine` holds every Virtualization.framework call.
+//! `provision` prepares an installed computer for computer use, with `offline_setup`,
 //! `guest_access`, `recovery`, `guest_computer_use` and `guest_clipboard` behind it.
+//! A finished computer becomes a template (`templates`); later computers are copied
+//! from it and made their own by `personalize`.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -19,10 +21,12 @@ mod guest_computer_use;
 mod guest_screen;
 mod input;
 mod offline_setup;
+mod personalize;
 mod provision;
 mod recovery;
 mod restore_image;
 mod store;
+mod templates;
 
 use crate::runtime;
 use serde::Serialize;
@@ -74,12 +78,26 @@ pub(crate) struct MacosComputer {
     setup_complete: bool,
 }
 
+/// The template new computers are copied from.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TemplateSummary {
+    macos_version: String,
+    build: String,
+    /// Made by this version of the setup, so new computers are copied from it.
+    current: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MacosComputersState {
     supported: bool,
     unsupported_reason: Option<String>,
     computers: Vec<MacosComputer>,
+    template: Option<TemplateSummary>,
+    /// The smallest disk a new computer may have: a copy keeps its template's size.
+    #[serde(rename = "minDiskGiB")]
+    min_disk_gib: u64,
 }
 
 struct Entry {
@@ -137,6 +155,8 @@ enum Finish {
 struct Registry {
     loaded: bool,
     entries: Vec<Entry>,
+    template: Option<TemplateSummary>,
+    min_disk_gib: u64,
 }
 
 impl Registry {
@@ -243,6 +263,8 @@ impl Registry {
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     loaded: false,
     entries: Vec::new(),
+    template: None,
+    min_disk_gib: store::MIN_DISK_GIB,
 });
 
 /// Why new computers are refused. Quit and an update each own one flag, so neither
@@ -337,9 +359,45 @@ fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
                 Entry::new(record, state, detail)
             })
             .collect();
+        let data = app_data(app)?;
+        registry.refresh_template(&data);
     }
     registry.loaded = true;
     Ok(())
+}
+
+impl Registry {
+    /// Reads the templates on disk: the newest is the one shown, the newest of the current
+    /// setup version sets the smallest disk.
+    fn refresh_template(&mut self, data: &std::path::Path) {
+        let version = templates::setup_version();
+        let all = templates::list(data);
+        self.min_disk_gib = templates::choose(&all, None, &version)
+            .map_or(store::MIN_DISK_GIB, |template| {
+                template.meta.disk_gib.max(store::MIN_DISK_GIB)
+            });
+        self.template = all.first().map(|template| TemplateSummary {
+            macos_version: template.meta.macos_version.clone(),
+            build: template.meta.build.clone(),
+            current: template.meta.setup_version == version,
+        });
+    }
+}
+
+/// The templates that computers still being personalized depend on.
+fn protected_templates() -> Vec<String> {
+    registry()
+        .entries
+        .iter()
+        .filter(|entry| entry.record.setup.needs_personalizing)
+        .filter_map(|entry| entry.record.template.clone())
+        .collect()
+}
+
+fn refresh_template(app: &AppHandle) {
+    if let Ok(data) = app_data(app) {
+        registry().refresh_template(&data);
+    }
 }
 
 fn snapshot() -> MacosComputersState {
@@ -348,10 +406,13 @@ fn snapshot() -> MacosComputersState {
     } else {
         Some(NOT_SUPPORTED.to_string())
     };
+    let registry = registry();
     MacosComputersState {
         supported: reason.is_none(),
         unsupported_reason: reason,
-        computers: registry().entries.iter().map(Entry::row).collect(),
+        computers: registry.entries.iter().map(Entry::row).collect(),
+        template: registry.template.clone(),
+        min_disk_gib: registry.min_disk_gib,
     }
 }
 
@@ -461,7 +522,24 @@ pub(crate) async fn read_macos_computers(
     main_window_only(&window)?;
     blocking(move || {
         ensure_loaded(&app)?;
+        refresh_template(&app);
         Ok(snapshot())
+    })
+    .await
+}
+
+/// Removes the template new computers are copied from. Computers made from it keep working.
+#[tauri::command]
+pub(crate) async fn delete_macos_template(app: AppHandle, window: Window) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || {
+        require_supported()?;
+        ensure_loaded(&app)?;
+        templates::remove_all(&app_data(&app)?, &protected_templates)?;
+        refresh_template(&app);
+        emit(&app);
+        Ok(())
     })
     .await
 }
@@ -536,7 +614,10 @@ fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, Stri
         let _admitted = admission()?;
         let mut registry = registry();
         let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
-        store::validate_request(&request, engine::host_limits(), &existing)?;
+        let min_disk =
+            templates::choose(&templates::list(&data), None, &templates::setup_version())
+                .map_or(0, |template| template.meta.disk_gib);
+        store::validate_request(&request, engine::host_limits(), &existing, min_disk)?;
         let record = store::new_record(&request, engine::random_mac());
         // A crash after this point leaves a visible computer that reports the interruption.
         store::save(&Layout::new(&data, &record.id), &record)?;
@@ -634,8 +715,30 @@ fn run_creation(
     };
 
     set_state(app, &id, State::Preparing, None);
-    let latest = engine::fetch_latest()?;
+    let latest = engine::fetch_latest();
     check()?;
+    // A template of the newest macOS (or, without a network, of any build) replaces the
+    // download and the installation.
+    let version = templates::setup_version();
+    let build = latest.as_ref().ok().map(|latest| latest.build.as_str());
+    if let Some(lease) = templates::lease_matching(data, build, &version) {
+        if copy_template(app, data, layout, &mut record, &lease, cancel)? {
+            // Persist while the computer is still in its creation state.
+            if !registry().creation_continues(&id) {
+                return Err(Stop::Cancelled);
+            }
+            store::save(layout, &record)?;
+            if !registry().publish_installed(&id, &record, State::SettingUp) {
+                return Err(Stop::Cancelled);
+            }
+            emit(app);
+            // The computer now names its template, which keeps it from being removed.
+            drop(lease);
+            return run_setup(app, layout, &mut record, cancel);
+        }
+    }
+    let latest = latest?;
+    set_state(app, &id, State::Preparing, None);
     record.restore_image = Some(store::RestoreImageInfo {
         version: latest.version.clone(),
         build: latest.build.clone(),
@@ -693,14 +796,88 @@ fn run_creation(
     run_setup(app, layout, &mut record, cancel)
 }
 
-/// Runs the provisioning steps, then leaves the computer stopped.
+/// Copies a template's files into the new computer and records what the copy still lacks.
+/// Returns false when the volume cannot clone files, so the computer is installed instead.
+fn copy_template(
+    app: &AppHandle,
+    data: &std::path::Path,
+    layout: &Layout,
+    record: &mut Record,
+    lease: &templates::Lease,
+    cancel: &AtomicU8,
+) -> Result<bool, Stop> {
+    let id = record.id.clone();
+    set_state(app, &id, State::Copying, None);
+    templates::ensure_space(data, templates::COPY_ESTIMATE)?;
+    if cancel.load(Ordering::SeqCst) != RUN {
+        return Err(Stop::Cancelled);
+    }
+    let template = &lease.template;
+    let before = record.clone();
+    record.restore_image = Some(store::RestoreImageInfo {
+        version: template.meta.macos_version.clone(),
+        build: template.meta.build.clone(),
+    });
+    // A copy keeps its template's disk; a larger one is grown and expanded in the guest.
+    record.disk_gib = record.disk_gib.max(template.meta.disk_gib);
+    record.pristine = false;
+    record.template = Some(template.name.clone());
+    match templates::clone_into(
+        template,
+        layout,
+        &engine::new_machine_identifier(),
+        record.disk_gib,
+    ) {
+        Ok(()) => {}
+        Err(templates::CopyError::Unsupported) => {
+            *record = before;
+            return Ok(false);
+        }
+        Err(error) => return Err(Stop::Failed(error.message())),
+    }
+    record.installed = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        computer_use: true,
+        clipboard: true,
+        needs_personalizing: true,
+    };
+    Ok(true)
+}
+
+/// Runs the provisioning steps, then leaves the computer stopped. A computer that was just
+/// installed and set up, and never started by the user, becomes the template.
 fn run_setup(
     app: &AppHandle,
     layout: &Layout,
     record: &mut Record,
     cancel: &AtomicU8,
 ) -> Result<(), Stop> {
-    provision::run(app, layout, record, cancel)
+    provision::run(app, layout, record, cancel)?;
+    if cancel.load(Ordering::SeqCst) == RUN && templates::eligible(record) {
+        save_template(app, layout, record);
+    }
+    Ok(())
+}
+
+/// Makes the template of `record`. A failure only costs the speed of later computers.
+fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
+    let Ok(data) = app_data(app) else {
+        return;
+    };
+    set_detail(app, &record.id, "Saving a template");
+    let made = templates::make(
+        &data,
+        record,
+        layout,
+        &templates::setup_version(),
+        &protected_templates,
+    );
+    if let Err(message) = made {
+        eprintln!("macOS computer template could not be saved: {message}");
+    }
+    refresh_template(app);
 }
 
 /// Two computers created together would otherwise write the same partial image.
@@ -744,6 +921,13 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             return Err("This computer is being deleted.".into());
         }
         store::start_allowed(entry.state, &entry.record)?;
+        // A computer the user starts is no longer the clean result of its setup.
+        if entry.record.pristine {
+            let mut started = entry.record.clone();
+            started.pristine = false;
+            store::save(&Layout::new(&data, id), &started)?;
+            entry.record = started;
+        }
         entry.state = State::Starting;
         entry.detail = None;
         entry.since = Instant::now();
@@ -1117,6 +1301,18 @@ fn classify(result: Result<(), Stop>, flag: u8) -> Result<(), Stop> {
     }
 }
 
+/// States of a creation or setup, which Quit ends and Delete cancels.
+fn is_creating(state: State) -> bool {
+    matches!(
+        state,
+        State::Preparing
+            | State::Copying
+            | State::Downloading
+            | State::Installing
+            | State::SettingUp
+    )
+}
+
 fn is_busy(state: State) -> bool {
     !matches!(state, State::Stopped | State::Failed)
 }
@@ -1178,10 +1374,7 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
         .map(|(id, _, _)| id)
         .collect();
     for (_, state, cancel) in &busy {
-        if matches!(
-            state,
-            State::Preparing | State::Downloading | State::Installing | State::SettingUp
-        ) {
+        if is_creating(*state) {
             request_abort(cancel);
         }
     }
@@ -1347,6 +1540,7 @@ mod tests {
             sip: true,
             computer_use: true,
             clipboard: true,
+            needs_personalizing: false,
         };
         let json = serde_json::to_value(done.row()).unwrap();
         assert_eq!(json["state"], "setting-up");
@@ -1356,9 +1550,20 @@ mod tests {
             supported: false,
             unsupported_reason: Some("no".into()),
             computers: vec![],
+            template: Some(TemplateSummary {
+                macos_version: "26.6.2".into(),
+                build: "25G83".into(),
+                current: true,
+            }),
+            min_disk_gib: 64,
         })
         .unwrap();
         assert_eq!(state["unsupportedReason"], "no");
+        assert_eq!(
+            state["template"],
+            serde_json::json!({"macosVersion": "26.6.2", "build": "25G83", "current": true})
+        );
+        assert_eq!(state["minDiskGiB"], 64);
         assert!(state["computers"].as_array().unwrap().is_empty());
     }
 
@@ -1376,6 +1581,8 @@ mod tests {
         let registry = Registry {
             loaded: true,
             entries: vec![Entry::new(record, state, None)],
+            template: None,
+            min_disk_gib: store::MIN_DISK_GIB,
         };
         (registry, id)
     }
@@ -1495,6 +1702,46 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_in_progress_is_cancelled_and_aborted_like_an_installation() {
+        assert!(is_creating(State::Copying));
+        assert!(is_busy(State::Copying));
+        assert!(!is_creating(State::Running));
+        assert_eq!(store::delete_mode(State::Copying), Ok(DeleteMode::Cancel));
+        let (mut registry, id) = registry_with(State::Copying);
+        assert!(registry.creation_continues(&id));
+        registry.entries[0]
+            .cancel
+            .store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+        assert!(!registry.creation_continues(&id));
+        registry.finish_cancelled(&id, Ok(()));
+        assert!(registry.entries.is_empty());
+        // Quit before the files were copied leaves a failed computer to delete; after
+        // them, one whose personalization can be retried.
+        let (_, registry) = finish(State::Copying, ABORT_AND_KEEP, false, Err(Stop::Cancelled));
+        assert_eq!(registry.entries[0].state, State::Failed);
+        let (_, registry) = finish(State::SettingUp, ABORT_AND_KEEP, true, Err(Stop::Cancelled));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+    }
+
+    #[test]
+    fn a_copy_that_still_needs_personalizing_is_not_set_up() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let record = &mut registry.entries[0].record;
+        record.installed = true;
+        record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: true,
+        };
+        record.template = Some("25G83-abcd".into());
+        assert!(!registry.entries[0].row().setup_complete);
+        assert!(store::setup_allowed(State::Stopped, &registry.entries[0].record).is_ok());
+        assert!(registry.entries[0].row().installed);
+    }
+
+    #[test]
     fn quit_leaves_the_disks_of_active_workers_to_their_workers() {
         let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         assert_eq!(
@@ -1583,6 +1830,7 @@ mod tests {
         assert!(!is_busy(State::Failed));
         for state in [
             State::Preparing,
+            State::Copying,
             State::Downloading,
             State::Installing,
             State::SettingUp,

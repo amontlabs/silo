@@ -25,8 +25,8 @@ use std::{
 
 /// The exit status of the finalization script when the Preboot volume could not be updated.
 pub(super) const PREBOOT_FAILED: i32 = 70;
-const UID: &str = "501";
-const GID: &str = "20";
+pub(super) const UID: &str = "501";
+pub(super) const GID: &str = "20";
 const PBKDF2_ITERATIONS: u32 = 50_000;
 const ENTROPY_BYTES: usize = 128;
 const SALT_BYTES: usize = 32;
@@ -435,7 +435,7 @@ fn pbkdf2_sha512(password: &[u8], salt: &[u8], iterations: u32, length: usize) -
 /// padded to a multiple of 12 bytes before it is XORed with the key. Padding after
 /// the XOR leaves raw NULs that loginwindow decodes into key material, and the
 /// login keychain then cannot be unlocked.
-fn kcpassword(password: &str) -> Vec<u8> {
+pub(super) fn kcpassword(password: &str) -> Vec<u8> {
     let mut bytes = password.as_bytes().to_vec();
     bytes.resize(bytes.len() + 12 - bytes.len() % 12, 0);
     bytes
@@ -651,6 +651,18 @@ fn configure_power_and_lock(root: &Path) -> Result<(), String> {
         write_plist(&per_host, &path, 0o644, path.exists(), Format::Binary)?;
     }
     Ok(())
+}
+
+/// Bump when the account setup changes in a way its text does not show.
+const SETUP_REVISION: u32 = 1;
+
+/// What the account setup consists of, for the version of a template.
+pub(super) fn setup_inputs() -> String {
+    format!(
+        "{SETUP_REVISION}\n{}\n{}",
+        finalization_script(""),
+        sudoers()
+    )
 }
 
 /// The sudoers entry that lets the account run root commands with `sudo -n`. It is

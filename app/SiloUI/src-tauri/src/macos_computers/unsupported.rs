@@ -42,6 +42,10 @@ pub(super) fn random_mac() -> String {
     String::new()
 }
 
+pub(super) fn new_machine_identifier() -> Vec<u8> {
+    Vec::new()
+}
+
 pub(super) fn fetch_latest() -> Result<LatestImage, String> {
     Err(UNSUPPORTED.into())
 }
