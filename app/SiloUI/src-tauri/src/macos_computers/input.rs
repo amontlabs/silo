@@ -251,6 +251,52 @@ impl TextLine {
     }
 }
 
+/// `NSEventType` raw values of the keyboard events.
+const KEYBOARD_EVENTS: [usize; 3] = [10, 11, 12];
+
+/// `NSEventType` raw values of every event that moves, presses or gestures with
+/// a pointing device: mouse (left, right, other) down, up, moved, dragged,
+/// entered, exited and cancelled; scroll wheel; tablet point and proximity;
+/// rotate, begin and end gesture, gesture, magnify, swipe, smart magnify, quick
+/// look; pressure; direct touch; cursor updates and mode changes.
+const POINTER_EVENTS: [usize; 28] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 18, 19, 20, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 37, 40,
+    17, 38,
+];
+
+pub(super) fn is_keyboard_event(kind: usize) -> bool {
+    KEYBOARD_EVENTS.contains(&kind)
+}
+
+pub(super) fn is_pointer_event(kind: usize) -> bool {
+    POINTER_EVENTS.contains(&kind)
+}
+
+/// Something installed per computer, such as an event monitor. Replacing or
+/// removing one computer's entry never touches another's.
+pub(super) struct Monitors<T> {
+    by_computer: std::collections::HashMap<String, T>,
+}
+
+impl<T> Default for Monitors<T> {
+    fn default() -> Self {
+        Self {
+            by_computer: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl<T> Monitors<T> {
+    /// Stores the entry and returns the one it replaces for the same computer.
+    pub(super) fn insert(&mut self, id: &str, entry: T) -> Option<T> {
+        self.by_computer.insert(id.to_string(), entry)
+    }
+
+    pub(super) fn remove(&mut self, id: &str) -> Option<T> {
+        self.by_computer.remove(id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PointerKind {
     Move,
@@ -402,6 +448,39 @@ mod tests {
     #[test]
     fn an_untypeable_character_is_refused() {
         assert!(Keyboard::default().character('ü').is_err());
+    }
+
+    #[test]
+    fn keyboard_and_pointer_events_are_told_apart_by_type() {
+        for kind in [10, 11, 12] {
+            assert!(is_keyboard_event(kind) && !is_pointer_event(kind), "{kind}");
+        }
+        // Mouse down/up/moved/dragged/entered/exited for every button, scroll,
+        // tablet, gestures, pressure, direct touch and a cancelled mouse.
+        for kind in [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 18, 19, 20, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34,
+            37, 40,
+        ] {
+            assert!(is_pointer_event(kind) && !is_keyboard_event(kind), "{kind}");
+        }
+        // Events that are neither: app-kit, system and application defined, periodic.
+        for kind in [0, 13, 14, 15, 16] {
+            assert!(
+                !is_pointer_event(kind) && !is_keyboard_event(kind),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn monitors_are_kept_per_computer() {
+        let mut monitors = Monitors::default();
+        assert_eq!(monitors.insert("a", 1), None);
+        assert_eq!(monitors.insert("b", 2), None);
+        assert_eq!(monitors.insert("a", 3), Some(1));
+        assert_eq!(monitors.remove("a"), Some(3));
+        assert_eq!(monitors.remove("a"), None);
+        assert_eq!(monitors.remove("b"), Some(2));
     }
 
     #[test]

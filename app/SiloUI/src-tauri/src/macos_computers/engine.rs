@@ -7,7 +7,7 @@
 //! closure's result. The closure itself never waits for a framework callback;
 //! callbacks send their result over a channel that the worker reads.
 use super::guest_screen;
-use super::input::{KeyEvent, PointerKind, TextLine};
+use super::input::{self, KeyEvent, Monitors, PointerKind, TextLine};
 use super::store::{self, HostLimits, Layout, Record};
 use block2::RcBlock;
 use objc2::Message as _;
@@ -18,8 +18,8 @@ use objc2::{
     sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSEvent, NSEventMask, NSEventType, NSResponder, NSToolbar,
-    NSToolbarDelegate, NSToolbarDisplayMode, NSToolbarItem, NSView, NSWindow,
+    NSAutoresizingMaskOptions, NSEvent, NSEventMask, NSResponder, NSToolbar, NSToolbarDelegate,
+    NSToolbarDisplayMode, NSToolbarItem, NSView, NSWindow,
 };
 use objc2_foundation::{
     NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSString, NSURL,
@@ -1112,8 +1112,9 @@ pub(super) fn read_screen(app: &AppHandle, id: &str) -> Result<Vec<TextLine>, St
 }
 
 thread_local! {
-    /// Main thread only: the monitor that drops the user's own input.
-    static INPUT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    /// Main thread only: the monitor that drops the user's own input, per computer.
+    static INPUT_MONITORS: RefCell<Monitors<Retained<AnyObject>>> =
+        RefCell::new(Monitors::default());
 }
 
 /// Makes the display window ignore the user's keyboard and the pointer over the
@@ -1121,7 +1122,7 @@ thread_local! {
 /// delivers with `window.sendEvent` do not pass through event monitors, so they
 /// still arrive.
 pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<(), String> {
-    let subtitle = subtitle.to_string();
+    let (subtitle, key) = (subtitle.to_string(), id.to_string());
     with_display_window(app, id, move |window, view| {
         window.setSubtitle(&NSString::from_str(&subtitle));
         let number = window.windowNumber();
@@ -1132,14 +1133,9 @@ pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<()
             if event_ref.windowNumber() != number {
                 return event.as_ptr();
             }
-            let kind = event_ref.r#type();
-            let keyboard = kind == NSEventType::KeyDown
-                || kind == NSEventType::KeyUp
-                || kind == NSEventType::FlagsChanged;
-            let pointer = (NSEventType::LeftMouseDown.0..=NSEventType::MouseMoved.0)
-                .contains(&kind.0)
-                || kind == NSEventType::ScrollWheel;
-            let over_screen = pointer && {
+            let kind = event_ref.r#type().0;
+            let keyboard = input::is_keyboard_event(kind);
+            let over_screen = input::is_pointer_event(kind) && {
                 let screen = view.convertRect_toView(view.bounds(), None);
                 let at = event_ref.locationInWindow();
                 at.x >= screen.origin.x
@@ -1160,9 +1156,10 @@ pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<()
                 &handler,
             )
         };
-        INPUT_MONITOR.with(|slot| {
-            if let Some(previous) = slot.borrow_mut().replace(monitor.ok_or("No monitor.")?) {
-                // SAFETY: The monitor came from the call above.
+        let monitor = monitor.ok_or("Silo could not lock the computer's window.")?;
+        INPUT_MONITORS.with(|monitors| {
+            if let Some(previous) = monitors.borrow_mut().insert(&key, monitor) {
+                // SAFETY: The monitor came from an earlier call of this function.
                 unsafe { NSEvent::removeMonitor(&previous) };
             }
             Ok(())
@@ -1174,8 +1171,8 @@ pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<()
 pub(super) fn unlock_input(app: &AppHandle, id: &str) {
     let id = id.to_string();
     let _ = on_main(app, move |_| {
-        INPUT_MONITOR.with(|slot| {
-            if let Some(monitor) = slot.borrow_mut().take() {
+        INPUT_MONITORS.with(|monitors| {
+            if let Some(monitor) = monitors.borrow_mut().remove(&id) {
                 // SAFETY: The monitor came from `lock_input`.
                 unsafe { NSEvent::removeMonitor(&monitor) };
             }
