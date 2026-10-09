@@ -91,7 +91,11 @@ impl Template {
 /// script, the account setup and the initial approval mode. A template made under a
 /// different setup version is never copied.
 pub(super) fn setup_version() -> String {
-    let approval = crate::computer_use::initial_approval();
+    setup_version_for(crate::computer_use::initial_approval())
+}
+
+/// The setup version of a computer set up with `approval`.
+pub(super) fn setup_version_for(approval: crate::computer_use::Approval) -> String {
     hash_inputs(guest_computer_use::setup_inputs().into_iter().chain([
         offline_setup::setup_inputs().as_str(),
         approval.as_str(),
@@ -275,6 +279,16 @@ fn prune(
     result
 }
 
+/// Removes every template but the newest that no copy is made from and no unfinished copy
+/// depends on. Run when a copy ends, so a template a copy held is not kept for good.
+pub(super) fn prune_stale(
+    app_data: &Path,
+    protected: &dyn Fn() -> Vec<String>,
+) -> Result<(), String> {
+    let newest = list(app_data).first().map(|template| template.name.clone());
+    prune(app_data, newest.as_deref(), protected)
+}
+
 /// Removes every template, unless a copy is being made from one or an unfinished copy
 /// depends on one.
 pub(super) fn remove_all(
@@ -324,6 +338,7 @@ fn remove_partials(app_data: &Path) -> Result<(), String> {
 /// user afterwards, and is not itself a copy of a template.
 pub(super) fn eligible(record: &Record) -> bool {
     record.installed
+        && record.setup_version.is_some()
         && record.setup.complete()
         && record.pristine
         && record.template.is_none()
@@ -555,10 +570,40 @@ fn enough_space(available: Option<u64>, needed: u64) -> Result<(), String> {
     }
 }
 
-/// Fails when the volume holding `app_data` has less than `needed` bytes free beyond the
-/// reserve Silo leaves to the Mac. An unknown amount is not checked.
-pub(super) fn ensure_space(app_data: &Path, needed: u64) -> Result<(), String> {
-    enough_space(available_space(app_data), needed)
+/// Bytes that copies in progress are still expected to write.
+static PENDING: Mutex<u64> = Mutex::new(0);
+
+/// Space set aside for one copy until it is dropped.
+pub(super) struct SpaceReservation(u64);
+
+impl Drop for SpaceReservation {
+    fn drop(&mut self) {
+        let mut pending = PENDING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *pending = pending.saturating_sub(self.0);
+    }
+}
+
+/// Sets `needed` bytes aside on the volume holding `app_data`, failing when that leaves
+/// less than the reserve Silo keeps for the Mac once the copies already under way have
+/// written theirs too. An unknown amount of free space is not checked.
+pub(super) fn reserve_space(app_data: &Path, needed: u64) -> Result<SpaceReservation, String> {
+    reserve_in(app_data, needed, available_space)
+}
+
+fn reserve_in(
+    app_data: &Path,
+    needed: u64,
+    available: impl FnOnce(&Path) -> Option<u64>,
+) -> Result<SpaceReservation, String> {
+    let mut pending = PENDING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let free = available(app_data).map(|free| free.saturating_sub(*pending));
+    enough_space(free, needed)?;
+    *pending += needed;
+    Ok(SpaceReservation(needed))
 }
 
 #[cfg(test)]
@@ -578,6 +623,7 @@ mod tests {
             "02:00:00:00:00:01".into(),
         );
         record.installed = true;
+        record.setup_version = Some("abcd".into());
         record.restore_image = Some(RestoreImageInfo {
             version: "26.6.2".into(),
             build: "25G83".into(),
@@ -687,6 +733,9 @@ mod tests {
         computer.pristine = false;
         assert!(!eligible(&computer));
         computer.pristine = true;
+        computer.setup_version = None;
+        assert!(!eligible(&computer));
+        computer.setup_version = Some("abcd".into());
         computer.setup.clipboard = false;
         assert!(!eligible(&computer));
         computer.setup.clipboard = true;
@@ -871,8 +920,19 @@ mod tests {
         let error =
             enough_space(Some(COPY_ESTIMATE + FREE_RESERVE - 1), COPY_ESTIMATE).unwrap_err();
         assert!(error.contains("low on disk space"), "{error}");
-        assert!(
-            ensure_space(Path::new("/"), 0).is_ok() || available_space(Path::new("/")).is_some()
-        );
+    }
+
+    #[test]
+    fn copies_in_progress_count_against_the_free_space() {
+        let root = Path::new("/");
+        let free = Some(2 * COPY_ESTIMATE + FREE_RESERVE + 1);
+        let first = reserve_in(root, COPY_ESTIMATE, |_| free).unwrap();
+        let second = reserve_in(root, COPY_ESTIMATE, |_| free).unwrap();
+        let error = reserve_in(root, COPY_ESTIMATE, |_| free).err().unwrap();
+        assert!(error.contains("low on disk space"), "{error}");
+        drop(first);
+        let third = reserve_in(root, COPY_ESTIMATE, |_| free).unwrap();
+        drop((second, third));
+        assert_eq!(*PENDING.lock().unwrap(), 0);
     }
 }

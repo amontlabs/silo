@@ -184,9 +184,12 @@ pub(super) fn setup_inputs() -> [&'static str; 3] {
 }
 
 /// Installs computer use in the running computer `id`.
-pub(super) fn install(app: &AppHandle, id: &str) -> Result<(), String> {
+pub(super) fn install(
+    app: &AppHandle,
+    id: &str,
+    approval: computer_use::Approval,
+) -> Result<(), String> {
     let pins = Pins::bundled()?;
-    let approval = computer_use::initial_approval();
     let cache = app_data(app)?.join(CACHE_DIR);
     let app_zip = cached(app, id, &cache, "ChatGPT", pins.app_asset())?;
     let lcu_archive = cached(app, id, &cache, "LCU", pins.lcu_asset())?;

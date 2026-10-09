@@ -126,7 +126,10 @@ impl Provision<'_> {
         }
         if !record.setup.computer_use {
             self.say("Installing computer use")?;
-            guest_computer_use::install(self.app, &self.id)?;
+            // The mode installed is the one the template's version names.
+            let approval = crate::computer_use::initial_approval();
+            guest_computer_use::install(self.app, &self.id, approval)?;
+            record.setup_version = Some(templates::setup_version_for(approval));
             self.mark(record, |setup| setup.computer_use = true)?;
         }
         if !record.setup.clipboard {
@@ -191,11 +194,15 @@ impl Provision<'_> {
         let own = guest_access::account(self.layout)?;
         let template_login = self.layout.clone().with_access(access);
         self.say("Personalizing the computer")?;
+        let mut shortfall = None;
         // The guest's host keys are about to change.
         guest_access::reset_host_keys(self.layout)?;
         self.start_machine()?;
         if self.wait_for_login(&template_login, record)? == LoginKey::Template {
-            let grow = (record.disk_gib > lease.template.meta.disk_gib).then_some(record.disk_gib);
+            let grow = record
+                .disk_gib
+                .checked_sub(lease.template.meta.disk_gib)
+                .filter(|by| *by > 0);
             let script = personalize::script(&guest_access::public_key(&own)?, &record.name, grow);
             let output = guest_access::run(
                 &template_login,
@@ -215,9 +222,15 @@ impl Provision<'_> {
                 personalize::outcome(output.status, &output.stdout).map_err(Stop::Failed)?;
             if outcome.disk_resized == Some(false) {
                 eprintln!("macOS computer personalization: the disk could not be expanded.");
+                shortfall = Some(format!(
+                    "Silo could not expand the disk to {} GiB, so the computer has {} GiB. It is otherwise ready to start.",
+                    record.disk_gib, lease.template.meta.disk_gib
+                ));
                 record.disk_gib = lease.template.meta.disk_gib;
                 self.persist(record)?;
             }
+            // The script replaced the host keys, and every new connection presents them.
+            guest_access::reset_host_keys(self.layout)?;
             if !guest_access::probe(self.layout, record) {
                 return Err(Stop::Failed(
                     "Silo could not log in to the computer with its own key.".into(),
@@ -231,7 +244,9 @@ impl Provision<'_> {
         self.verify_sip_disabled()?;
         self.verify_personalized()?;
         self.shut_down()?;
-        self.mark(record, |setup| setup.needs_personalizing = false)
+        self.mark(record, |setup| setup.needs_personalizing = false)?;
+        // The computer is usable and complete; the message stays as its failure detail.
+        shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
     }
 
     /// Waits until the guest answers a login with the template's key or its own.

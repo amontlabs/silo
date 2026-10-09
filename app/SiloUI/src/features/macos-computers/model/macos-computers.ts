@@ -20,6 +20,8 @@ export const macosComputerSchema = z.object({
   displayOpen: z.boolean(),
   installed: z.boolean(),
   setupComplete: z.boolean(),
+  /** A copy of a template that still has the template's credentials: it can only be set up again or deleted. */
+  needsPersonalizing: z.boolean().optional(),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 

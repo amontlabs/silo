@@ -13,6 +13,8 @@ const MIN_MEMORY_GIB: u64 = 4;
 const HOST_MEMORY_RESERVE_GIB: u64 = 4;
 pub(super) const MIN_DISK_GIB: u64 = 32;
 const MAX_DISK_GIB: u64 = 1024;
+pub(super) const NEEDS_PERSONALIZING: &str =
+    "This computer is not ready yet. Use Retry setup to finish it, or delete it.";
 pub(super) const INTERRUPTED_INSTALL: &str =
     "Installation was interrupted. Delete this computer and create it again.";
 
@@ -92,6 +94,10 @@ pub(super) struct Record {
     /// The folder name of the template this computer was copied from.
     #[serde(default)]
     pub template: Option<String>,
+    /// The setup version of what the computer actually has installed, fixed when its
+    /// computer use step finished (copies take their template's).
+    #[serde(default)]
+    pub setup_version: Option<String>,
 }
 
 impl Record {
@@ -181,6 +187,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         setup: SetupProgress::default(),
         pristine: true,
         template: None,
+        setup_version: None,
     }
 }
 
@@ -217,6 +224,10 @@ pub(super) fn delete_mode(state: State) -> Result<DeleteMode, String> {
 pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String> {
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
+    }
+    // Until then it still has its template's password and keys.
+    if record.setup.needs_personalizing {
+        return Err(NEEDS_PERSONALIZING.into());
     }
     match state {
         State::Stopped | State::Failed => Ok(()),
@@ -608,6 +619,13 @@ mod tests {
         assert!(start_allowed(State::Failed, &computer).is_ok());
         assert!(start_allowed(State::Running, &computer).is_err());
         assert!(start_allowed(State::Installing, &computer).is_err());
+        computer.setup.needs_personalizing = true;
+        assert_eq!(
+            start_allowed(State::Stopped, &computer),
+            Err(NEEDS_PERSONALIZING.into())
+        );
+        assert!(start_allowed(State::Failed, &computer).is_err());
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
     }
 
     #[test]

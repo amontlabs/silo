@@ -319,7 +319,7 @@ it("says an older template is no longer used, and shows nothing without one", as
   const base = backendFor([])
   renderSection({ ...base, read: async () => ({ supported: true, unsupportedReason: null, computers: [], template: { macosVersion: "26.5", build: "25F1", current: false }, minDiskGiB: 32 }) })
   const form = await openNewMacosForm(user)
-  expect(within(form).getByTestId("macos-template-notice")).toHaveTextContent("A template from an earlier setup (macOS 26.5) is kept but no longer used.")
+  expect(within(form).getByTestId("macos-template-notice")).toHaveTextContent("A template from an earlier setup or macOS version (macOS 26.5) is kept but not used.")
 })
 
 it("shows no template notice before the first computer has been set up", async () => {
@@ -329,6 +329,15 @@ it("shows no template notice before the first computer has been set up", async (
   const form = await openNewMacosForm(user)
   expect(within(form).queryByTestId("macos-template-notice")).not.toBeInTheDocument()
   expect(within(form).queryByRole("button", { name: "Remove template" })).not.toBeInTheDocument()
+})
+
+it("offers only Retry setup and Delete for a copy that is not personalized yet", async () => {
+  const copy: MacosComputer = { ...macosComputerFixtures.find(({ id }) => id === "mac-stopped")!, id: "mac-unfinished", name: "half-done", setupComplete: false, needsPersonalizing: true }
+  renderSection(backendFor([copy]))
+  await loaded()
+  expect(within(row("half-done")).queryByRole("button", { name: "Start half-done" })).not.toBeInTheDocument()
+  expect(within(row("half-done")).getByRole("button", { name: "Retry setup of half-done" })).toBeVisible()
+  expect(within(row("half-done")).getByRole("button", { name: "More actions for half-done" })).toBeVisible()
 })
 
 it("keeps the form open and reports a failed creation", async () => {

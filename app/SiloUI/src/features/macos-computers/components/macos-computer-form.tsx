@@ -68,7 +68,7 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
       {template && <div className="grid justify-items-start gap-1 text-[11px] text-muted-foreground" data-testid="macos-template-notice">
         <p>{template.current
           ? `New macOS computers are copied from a set-up template (macOS ${template.macosVersion}); the first takes about 15 minutes, later ones about a minute.`
-          : `A template from an earlier setup (macOS ${template.macosVersion}) is kept but no longer used.`}</p>
+          : `A template from an earlier setup or macOS version (macOS ${template.macosVersion}) is kept but not used.`}</p>
         {onRemoveTemplate && <ConfirmPopover
           align="start"
           tone="destructive"

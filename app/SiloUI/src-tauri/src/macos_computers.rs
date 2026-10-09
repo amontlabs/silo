@@ -76,6 +76,8 @@ pub(crate) struct MacosComputer {
     display_open: bool,
     installed: bool,
     setup_complete: bool,
+    /// A copy of a template that still has the template's credentials; it cannot be started.
+    needs_personalizing: bool,
 }
 
 /// The template new computers are copied from.
@@ -142,6 +144,7 @@ impl Entry {
             display_open: self.display_open,
             installed: self.record.installed,
             setup_complete: self.record.setup.complete(),
+            needs_personalizing: self.record.setup.needs_personalizing,
         }
     }
 }
@@ -157,6 +160,8 @@ struct Registry {
     entries: Vec<Entry>,
     template: Option<TemplateSummary>,
     min_disk_gib: u64,
+    /// The newest macOS build the framework offered the last time it was asked.
+    latest_build: Option<String>,
 }
 
 impl Registry {
@@ -265,6 +270,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     entries: Vec::new(),
     template: None,
     min_disk_gib: store::MIN_DISK_GIB,
+    latest_build: None,
 });
 
 /// Why new computers are refused. Quit and an update each own one flag, so neither
@@ -367,19 +373,24 @@ fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
 }
 
 impl Registry {
-    /// Reads the templates on disk: the newest is the one shown, the newest of the current
-    /// setup version sets the smallest disk.
+    /// Reads the templates on disk: the newest is the one shown. Only the template a new
+    /// computer would be copied from (the current setup version, and the newest build when
+    /// that is known) counts as current and sets the smallest disk.
     fn refresh_template(&mut self, data: &std::path::Path) {
         let version = templates::setup_version();
         let all = templates::list(data);
-        self.min_disk_gib = templates::choose(&all, None, &version)
+        let used = templates::choose(&all, self.latest_build.as_deref(), &version)
+            .map(|template| template.name.clone());
+        self.min_disk_gib = used
+            .as_ref()
+            .and_then(|name| all.iter().find(|template| &template.name == name))
             .map_or(store::MIN_DISK_GIB, |template| {
                 template.meta.disk_gib.max(store::MIN_DISK_GIB)
             });
         self.template = all.first().map(|template| TemplateSummary {
             macos_version: template.meta.macos_version.clone(),
             build: template.meta.build.clone(),
-            current: template.meta.setup_version == version,
+            current: used.as_ref() == Some(&template.name),
         });
     }
 }
@@ -398,6 +409,45 @@ fn refresh_template(app: &AppHandle) {
     if let Ok(data) = app_data(app) {
         registry().refresh_template(&data);
     }
+}
+
+/// Removes the templates that nothing needs any more.
+fn prune_templates(app: &AppHandle) {
+    if let Ok(data) = app_data(app) {
+        if let Err(message) = templates::prune_stale(&data, &protected_templates) {
+            eprintln!("macOS templates could not be pruned: {message}");
+        }
+    }
+    refresh_template(app);
+}
+
+/// Asks the framework for the newest macOS in the background, at most every few minutes, so
+/// the form knows which template a new computer would use.
+fn refresh_latest_build(app: &AppHandle) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    const EVERY: Duration = Duration::from_secs(600);
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return;
+    }
+    {
+        let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last.is_some_and(|at| at.elapsed() < EVERY) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Ok(latest) = engine::fetch_latest() {
+            note_latest_build(&app, &latest.build);
+        }
+    });
+}
+
+fn note_latest_build(app: &AppHandle, build: &str) {
+    registry().latest_build = Some(build.to_string());
+    refresh_template(app);
+    emit(app);
 }
 
 fn snapshot() -> MacosComputersState {
@@ -523,6 +573,7 @@ pub(crate) async fn read_macos_computers(
     blocking(move || {
         ensure_loaded(&app)?;
         refresh_template(&app);
+        refresh_latest_build(&app);
         Ok(snapshot())
     })
     .await
@@ -614,9 +665,8 @@ fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, Stri
         let _admitted = admission()?;
         let mut registry = registry();
         let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
-        let min_disk =
-            templates::choose(&templates::list(&data), None, &templates::setup_version())
-                .map_or(0, |template| template.meta.disk_gib);
+        registry.refresh_template(&data);
+        let min_disk = registry.min_disk_gib;
         store::validate_request(&request, engine::host_limits(), &existing, min_disk)?;
         let record = store::new_record(&request, engine::random_mac());
         // A crash after this point leaves a visible computer that reports the interruption.
@@ -688,6 +738,8 @@ fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), S
         }
         Finish::Kept => {}
     }
+    // A copy that ended no longer holds its template.
+    prune_templates(app);
     emit(app);
 }
 
@@ -721,8 +773,13 @@ fn run_creation(
     // download and the installation.
     let version = templates::setup_version();
     let build = latest.as_ref().ok().map(|latest| latest.build.as_str());
+    if let Some(build) = build {
+        note_latest_build(app, build);
+    }
     if let Some(lease) = templates::lease_matching(data, build, &version) {
-        if copy_template(app, data, layout, &mut record, &lease, cancel)? {
+        // Held until this creation ends: the copy writes during its personalization.
+        let _space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
+        if copy_template(app, layout, &mut record, &lease, cancel)? {
             // Persist while the computer is still in its creation state.
             if !registry().creation_continues(&id) {
                 return Err(Stop::Cancelled);
@@ -800,7 +857,6 @@ fn run_creation(
 /// Returns false when the volume cannot clone files, so the computer is installed instead.
 fn copy_template(
     app: &AppHandle,
-    data: &std::path::Path,
     layout: &Layout,
     record: &mut Record,
     lease: &templates::Lease,
@@ -808,7 +864,6 @@ fn copy_template(
 ) -> Result<bool, Stop> {
     let id = record.id.clone();
     set_state(app, &id, State::Copying, None);
-    templates::ensure_space(data, templates::COPY_ESTIMATE)?;
     if cancel.load(Ordering::SeqCst) != RUN {
         return Err(Stop::Cancelled);
     }
@@ -822,6 +877,7 @@ fn copy_template(
     record.disk_gib = record.disk_gib.max(template.meta.disk_gib);
     record.pristine = false;
     record.template = Some(template.name.clone());
+    record.setup_version = Some(template.meta.setup_version.clone());
     match templates::clone_into(
         template,
         layout,
@@ -1148,6 +1204,7 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
             }
         }
     }
+    prune_templates(app);
     emit(app);
     Ok(())
 }
@@ -1531,6 +1588,7 @@ mod tests {
         assert_eq!(json["progress"], 0.25);
         assert_eq!(json["setupComplete"], false);
         assert_eq!(json["installed"], false);
+        assert_eq!(json["needsPersonalizing"], false);
         assert!(json.get("detail").is_some());
         let mut done = entry;
         done.state = State::SettingUp;
@@ -1583,6 +1641,7 @@ mod tests {
             entries: vec![Entry::new(record, state, None)],
             template: None,
             min_disk_gib: store::MIN_DISK_GIB,
+            latest_build: None,
         };
         (registry, id)
     }
@@ -1721,6 +1780,43 @@ mod tests {
         assert_eq!(registry.entries[0].state, State::Failed);
         let (_, registry) = finish(State::SettingUp, ABORT_AND_KEEP, true, Err(Stop::Cancelled));
         assert_eq!(registry.entries[0].state, State::Stopped);
+    }
+
+    #[test]
+    fn only_a_template_that_would_be_copied_sets_the_smallest_disk() {
+        let data = tempfile::tempdir().unwrap();
+        let dir =
+            templates::root(data.path()).join(format!("25G83-{}", templates::setup_version()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let meta = templates::Meta {
+            schema_version: 1,
+            macos_version: "26.6.2".into(),
+            build: "25G83".into(),
+            setup_version: templates::setup_version(),
+            disk_gib: 128,
+            created_at: "2026-10-09T10:00:00Z".into(),
+            source_computer_id: "source".into(),
+        };
+        std::fs::write(
+            dir.join("template.json"),
+            serde_json::to_vec(&meta).unwrap(),
+        )
+        .unwrap();
+        let (mut registry, _) = registry_with(State::Stopped);
+        // The newest macOS is not known yet: the template counts, as it does offline.
+        registry.refresh_template(data.path());
+        assert_eq!(registry.min_disk_gib, 128);
+        assert!(registry.template.as_ref().unwrap().current);
+        registry.latest_build = Some("25G83".into());
+        registry.refresh_template(data.path());
+        assert_eq!(registry.min_disk_gib, 128);
+        // A newer macOS is installed from scratch, so the old template's size does not matter.
+        registry.latest_build = Some("25H1".into());
+        registry.refresh_template(data.path());
+        assert_eq!(registry.min_disk_gib, store::MIN_DISK_GIB);
+        let shown = registry.template.as_ref().unwrap();
+        assert_eq!(shown.build, "25G83");
+        assert!(!shown.current);
     }
 
     #[test]

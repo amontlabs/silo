@@ -16,29 +16,27 @@ use super::{
 };
 
 const GIB: u64 = 1 << 30;
-/// The container store may fall short of the disk by the partitions around it.
-const PARTITION_ALLOWANCE: u64 = 8 * GIB;
 pub(super) const RESIZED: &str = "SILO_DISK_RESIZE=ok";
 pub(super) const NOT_RESIZED: &str = "SILO_DISK_RESIZE=failed";
 pub(super) const DONE: &str = "SILO_PERSONALIZED";
 const MISSING_SECRETS: i32 = 64;
 
-/// The commands run as root. `grow_to_gib` is the disk size the APFS container should
-/// fill when the disk was made larger than the template's.
-pub(super) fn script(public_key: &str, computer_name: &str, grow_to_gib: Option<u64>) -> String {
+/// The commands run as root. `grow_by_gib` is how much larger than the template's the disk
+/// was made, which the APFS container should grow by. The secrets are only ever read into
+/// shell variables and written through the shell's builtin `printf`, so no external process
+/// receives them as an argument.
+pub(super) fn script(public_key: &str, computer_name: &str, grow_by_gib: Option<u64>) -> String {
     let name = shell_quote(computer_name);
     let authorized_key = shell_quote(public_key.trim());
     let home = format!("/Users/{USER}");
-    let grow = grow_to_gib.map_or_else(String::new, |gib| {
-        grow_disk(gib * GIB - PARTITION_ALLOWANCE)
-    });
+    let grow = grow_by_gib.map_or_else(String::new, |gib| grow_disk(gib * GIB / 10 * 9));
     format!(
         "set -e
 IFS= read -r SILO_PASSWORD
 IFS= read -r SILO_KCPASSWORD
 if [ -z \"$SILO_PASSWORD\" ] || [ -z \"$SILO_KCPASSWORD\" ]; then exit {MISSING_SECRETS}; fi
-/usr/bin/printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
-/usr/bin/printf '%s' \"$SILO_KCPASSWORD\" | /usr/bin/base64 -D > /etc/kcpassword.new
+printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
+printf '%s' \"$SILO_KCPASSWORD\" | /usr/bin/base64 -D > /etc/kcpassword.new
 /usr/sbin/chown root:wheel /etc/kcpassword.new
 /bin/chmod 600 /etc/kcpassword.new
 /bin/mv -f /etc/kcpassword.new /etc/kcpassword
@@ -50,7 +48,7 @@ unset SILO_PASSWORD SILO_KCPASSWORD
 /usr/bin/ssh-keygen -A
 /usr/bin/find {home}/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {{}} + 2>/dev/null || true
 {grow}/bin/mkdir -p {home}/.ssh
-/usr/bin/printf '%s\\n' {authorized_key} > {home}/.ssh/authorized_keys.new
+printf '%s\\n' {authorized_key} > {home}/.ssh/authorized_keys.new
 /usr/sbin/chown {UID}:{GID} {home}/.ssh {home}/.ssh/authorized_keys.new
 /bin/chmod 700 {home}/.ssh
 /bin/chmod 600 {home}/.ssh/authorized_keys.new
@@ -61,18 +59,21 @@ unset SILO_PASSWORD SILO_KCPASSWORD
     )
 }
 
-/// Expands the APFS container to fill the disk. A failure is reported, not fatal: the
-/// computer works with the template's space.
-fn grow_disk(minimum_store_bytes: u64) -> String {
+/// Expands the APFS container into the larger disk. It counts as done only when the resize
+/// command succeeded and the container grew by at least `minimum_growth` bytes. A failure
+/// is reported, not fatal here: the computer works with the template's space.
+fn grow_disk(minimum_growth: u64) -> String {
     format!(
         "store=$(/usr/sbin/diskutil info -plist / | /usr/bin/plutil -extract APFSPhysicalStores.0.APFSPhysicalStore raw -o - - 2>/dev/null || true)
-whole=$(/usr/bin/printf '%s' \"$store\" | /usr/bin/sed 's/s[0-9]*$//')
+whole=$(printf '%s' \"$store\" | /usr/bin/sed 's/s[0-9]*$//')
 resized=no
 if [ -n \"$store\" ] && [ -n \"$whole\" ]; then
+before=$(/usr/sbin/diskutil info -plist \"$store\" | /usr/bin/plutil -extract TotalSize raw -o - - 2>/dev/null || /bin/echo 0)
 /bin/echo y | /usr/sbin/diskutil repairDisk \"$whole\" >/dev/null 2>&1 || true
-/usr/sbin/diskutil apfs resizeContainer \"$store\" 0 >/dev/null 2>&1 || true
-size=$(/usr/sbin/diskutil info -plist \"$store\" | /usr/bin/plutil -extract TotalSize raw -o - - 2>/dev/null || /bin/echo 0)
-if [ \"$size\" -ge {minimum_store_bytes} ] 2>/dev/null; then resized=yes; fi
+if /usr/sbin/diskutil apfs resizeContainer \"$store\" 0 >/dev/null 2>&1; then
+after=$(/usr/sbin/diskutil info -plist \"$store\" | /usr/bin/plutil -extract TotalSize raw -o - - 2>/dev/null || /bin/echo 0)
+if [ \"$((after - before))\" -ge {minimum_growth} ] 2>/dev/null; then resized=yes; fi
+fi
 fi
 if [ \"$resized\" = yes ]; then /bin/echo {RESIZED}; else /bin/echo {NOT_RESIZED}; fi
 "
@@ -157,6 +158,14 @@ mod tests {
         assert!(script.contains("| /usr/bin/dscl . -passwd /Users/silo\n"));
         assert!(!script.contains("-passwd /Users/silo \""));
         assert!(!script.contains("sysadminctl"));
+        // Only builtins touch the secrets: no external program names them in its arguments.
+        for line in script.lines().filter(|line| line.contains("$SILO_")) {
+            assert!(
+                !line.contains("/usr/bin/printf") && !line.contains("/bin/echo"),
+                "{line}"
+            );
+        }
+        assert!(script.contains("| /usr/bin/base64 -D > /etc/kcpassword.new"));
     }
 
     #[test]
@@ -203,7 +212,7 @@ mod tests {
 
     #[test]
     fn the_template_key_is_replaced_last_so_a_failed_run_can_be_repeated() {
-        let script = script(KEY, "mac-one", Some(128));
+        let script = script(KEY, "mac-one", Some(64));
         let at = |needle: &str| script.find(needle).unwrap();
         let replaced = at("mv -f /Users/silo/.ssh/authorized_keys.new");
         for earlier in [
@@ -225,7 +234,10 @@ mod tests {
         assert!(!script(KEY, "mac-one", None).contains("resizeContainer"));
         let grown = script(KEY, "mac-one", Some(128));
         assert!(grown.contains("diskutil apfs resizeContainer \"$store\" 0"));
-        assert!(grown.contains(&format!("-ge {}", 128 * GIB - PARTITION_ALLOWANCE)));
+        assert!(grown.contains(&format!("-ge {}", 128 * GIB / 10 * 9)));
+        // The command's own status decides, and growth is measured against the container before.
+        assert!(grown.contains("if /usr/sbin/diskutil apfs resizeContainer"));
+        assert!(grown.contains("before=$(") && grown.contains("after - before"));
     }
 
     #[test]

@@ -30,7 +30,9 @@ stop and delete. Most other Linux computer features do not apply yet; see
   instead: Preparing, Copying macOS (the files are cloned, seconds), then Setting
   up with the detail "Personalizing the computer" (about a minute), so the second
   computer takes about a minute instead of about fifteen. A copy keeps its
-  template's disk size, so the form's smallest disk is the template's; a larger
+  template's disk size, so the form's smallest disk is the template's, but only
+  while that template is the one a new computer would use (current setup version,
+  and the newest macOS when Silo knows it); a larger
   disk is grown, and the guest's APFS container is expanded to fill it. Without a
   network, a current template is used even when a newer macOS exists.
 - **Start and stop.** Start boots the computer. Stop shuts macOS down over SSH
@@ -93,7 +95,9 @@ templates existed never qualify.
 
 **Setup version.** A hash of everything setup installs: the pinned ChatGPT app
 and LCU locks, the guest script, the offline account setup and the initial
-computer use approval mode. A template with a different setup version is never
+computer use approval mode. The computer's record keeps the version of what it
+actually has installed (the approval mode used when its computer use step ran), and a
+template is made under that, not under the setting at the time of the copy. A template with a different setup version is never
 copied, so changing a pin or the script makes the next computer install from
 scratch and produce a new template.
 
@@ -131,9 +135,10 @@ key from `template-access/`, then runs one script as root (`personalize.rs`):
   login;
 - when the disk is larger than the template's, expands the APFS container with
   `diskutil apfs resizeContainer` (after `repairDisk`) on the container's
-  physical store, found with `diskutil info`. If the container does not reach the
-  requested size the computer keeps working with the template's space and its
-  recorded disk size says so;
+  physical store, found with `diskutil info`. It counts only if the command
+  succeeded and the container grew by about the extra size. Otherwise the
+  computer keeps the template's space, its recorded disk size says so, and the
+  computer ends as Failed with that message but is complete and can be started;
 - replaces `authorized_keys` with the copy's own public key, as its last change, so
   a run cut short can start again with the template's key. A run that already got
   that far is recognised by the copy's own key answering.
@@ -143,7 +148,12 @@ keys changed), boots it again and checks `csrutil status`, that LCU's receipt is
 present, and that macOS logged in as `silo` on its own with the new password. The
 state is `setting-up` until then; Retry setup resumes an interrupted
 personalization, and Quit and Delete end it like any setup. While a computer
-waits for its personalization, its template cannot be removed.
+waits for its personalization, its template cannot be removed, and the computer
+cannot be started (Retry setup or Delete only), because it still has the
+template's password and keys. Secrets are only read by shell builtins in the guest
+script. Copies in progress reserve their estimated writes, so two at once cannot
+both pass the free-space check; a template a copy held is removed when that copy
+ends, if a newer one exists.
 
 **Status.** Implemented and unit-tested. Not yet run against a live guest: that a
 copy boots with the new machine identifier and keeps SIP disabled, that `dscl`
