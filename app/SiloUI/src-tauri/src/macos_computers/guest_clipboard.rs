@@ -2,24 +2,31 @@
 //!
 //! "Paste into computer" and "Copy from computer" reuse the orchestration, size
 //! limits and messages of the desktop viewer (`viewer_clipboard`); only the
-//! computer's side differs. It runs over SSH as the logged-in `silo` user: text
-//! moves through `pbcopy` and `pbpaste`, PNG images through `osascript`
-//! (`«class PNGf»`), and payloads travel on standard input and base64 output,
-//! never in the command line. Nothing syncs on its own.
+//! computer's side differs. It runs over SSH as the logged-in `silo` user. A
+//! JavaScript for Automation script reads and writes the general pasteboard as
+//! explicit plain text (`public.utf8-plain-text`) or PNG (`public.png`), never
+//! through `pbcopy` and `pbpaste`, which sniff RTF and EPS content. Payloads
+//! travel on standard input and base64 output, never in the command line, and
+//! sizes are checked in the computer before anything is printed. Nothing syncs
+//! on its own.
 //!
-//! The transfer commands follow Lume's `ClipboardWatcher.swift`
+//! The approach follows Lume's `ClipboardWatcher.swift`
 //! (https://github.com/trycua/cua/blob/ba4c6369660ab4a9c4d3d8af942bc53ad376615f/libs/lume/src/Clipboard/ClipboardWatcher.swift,
 //! MIT License, Copyright (c) trycua).
 use super::guest_access as access;
 use super::store::{Layout, State};
 use super::{app_data, computer, engine};
 use crate::{
-    desktop_bridge::{ClipboardSupport, GuestClipboard, MAX_IMAGE_BYTES},
+    desktop_bridge::{ClipboardSupport, GuestClipboard, MAX_IMAGE_BYTES, MAX_TEXT_BYTES},
     viewer_clipboard::{self, Action, ActiveGuard, Guest, Report, Status},
 };
 use base64::Engine as _;
 use serde::Deserialize;
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 use tauri::AppHandle;
 
 const TEXT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -27,27 +34,71 @@ const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a transfer's outcome stays in the screen window's subtitle.
 const FEEDBACK_SHOWN: Duration = Duration::from_secs(5);
 
-const WRITE_TEXT: &str = "LANG=en_US.UTF-8 /usr/bin/pbcopy";
+/// Reads the general pasteboard's PNG (converting TIFF when that is all there is) or its
+/// plain text, and prints a kind line followed by base64. The sizes are checked here, so
+/// an oversized clipboard prints `TOO_LARGE` instead of its payload.
+fn read_script() -> String {
+    format!(
+        r#"ObjC.import("AppKit");
+const pb = $.NSPasteboard.generalPasteboard;
+function encode(kind, data) {{ return kind + "\n" + ObjC.unwrap(data.base64EncodedStringWithOptions(0)); }}
+let png = pb.dataForType("public.png");
+if (!png || png.length === 0) {{
+  const tiff = pb.dataForType("public.tiff");
+  if (tiff && tiff.length > 0) {{
+    const rep = $.NSBitmapImageRep.imageRepWithData(tiff);
+    png = rep ? rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $.NSDictionary.dictionary) : null;
+  }}
+}}
+let result;
+if (png && png.length > 0) {{
+  result = png.length > {MAX_IMAGE_BYTES} ? "TOO_LARGE\n" : encode("IMAGE", png);
+}} else {{
+  const text = pb.stringForType("public.utf8-plain-text");
+  if (!text) {{
+    result = "EMPTY\n";
+  }} else {{
+    const data = text.dataUsingEncoding($.NSUTF8StringEncoding);
+    result = data.length > {MAX_TEXT_BYTES} ? "TOO_LARGE\n" : encode("TEXT", data);
+  }}
+}}
+result;"#
+    )
+}
 
-const WRITE_IMAGE: &str = r#"f=$(/usr/bin/mktemp /tmp/silo-clipboard.XXXXXX) || exit 1
-trap '/bin/rm -f "$f"' EXIT
-/bin/cat > "$f" || exit 1
-/usr/bin/osascript -e "set the clipboard to (read (POSIX file \"$f\") as «class PNGf»)""#;
+/// Replaces the general pasteboard's contents with standard input, as explicit plain text
+/// (`public.utf8-plain-text`) or PNG (`public.png`). Nothing is sniffed or converted.
+fn write_script(image: bool) -> String {
+    let store = if image {
+        r#"pb.setDataForType(data, "public.png")"#
+    } else {
+        r#"(function () {
+  const text = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding);
+  return text ? pb.setStringForType(text, "public.utf8-plain-text") : false;
+})()"#
+    };
+    format!(
+        r#"ObjC.import("AppKit");
+const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+const pb = $.NSPasteboard.generalPasteboard;
+pb.clearContents;
+if (!{store}) {{ throw new Error("The pasteboard refused the content."); }}
+"ok";"#
+    )
+}
 
-const READ: &str = r#"f=$(/usr/bin/mktemp /tmp/silo-clipboard.XXXXXX) || exit 1
-trap '/bin/rm -f "$f"' EXIT
-if /usr/bin/osascript \
-  -e 'set imageData to the clipboard as «class PNGf»' \
-  -e "set fileRef to open for access POSIX file \"$f\" with write permission" \
-  -e 'set eof fileRef to 0' \
-  -e 'write imageData to fileRef' \
-  -e 'close access fileRef' >/dev/null 2>&1; then
-  printf 'IMAGE\n'
-  /usr/bin/base64 < "$f"
-else
-  printf 'TEXT\n'
-  LANG=en_US.UTF-8 /usr/bin/pbpaste | /usr/bin/base64
-fi"#;
+/// The command that runs a JavaScript for Automation script, whatever the login shell is.
+fn osascript(script: &str) -> String {
+    sh_command(&format!(
+        "/usr/bin/osascript -l JavaScript -e {}",
+        access::shell_quote(script)
+    ))
+}
+
+/// The most a read may print: a maximum-size image as base64, plus its kind line.
+const MAX_READ_OUTPUT: usize = MAX_IMAGE_BYTES.div_ceil(3) * 4 + 64;
+/// Writes print only a short acknowledgement.
+const WRITE_OUTPUT: usize = 4096;
 
 /// Which way a transfer goes, as the frontend names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -77,6 +128,11 @@ fn parse_read(output: &str) -> Result<GuestClipboard, String> {
     let (kind, encoded) = output
         .split_once('\n')
         .ok_or("The computer's clipboard could not be read.")?;
+    match kind.trim() {
+        "TOO_LARGE" => return Ok(GuestClipboard::TooLarge),
+        "EMPTY" => return Ok(GuestClipboard::Empty),
+        _ => {}
+    }
     let encoded: String = encoded.split_whitespace().collect();
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
@@ -109,8 +165,16 @@ impl MacGuest {
         command: &str,
         stdin: Option<&[u8]>,
         timeout: Duration,
+        max_stdout: Option<usize>,
     ) -> Result<String, String> {
-        let output = access::run(&self.layout, &self.record, command, stdin, timeout)?;
+        let output = access::run_capped(
+            &self.layout,
+            &self.record,
+            command,
+            stdin,
+            timeout,
+            max_stdout,
+        )?;
         if output.status == 0 {
             Ok(output.stdout)
         } else {
@@ -128,13 +192,23 @@ impl Guest for MacGuest {
     }
 
     fn send_text(&self, text: &str) -> Result<(), String> {
-        self.run(&sh_command(WRITE_TEXT), Some(text.as_bytes()), TEXT_TIMEOUT)
-            .map(drop)
+        self.run(
+            &osascript(&write_script(false)),
+            Some(text.as_bytes()),
+            TEXT_TIMEOUT,
+            Some(WRITE_OUTPUT),
+        )
+        .map(drop)
     }
 
     fn send_image(&self, _mime: &str, bytes: &[u8]) -> Result<(), String> {
-        self.run(&sh_command(WRITE_IMAGE), Some(bytes), IMAGE_TIMEOUT)
-            .map(drop)
+        self.run(
+            &osascript(&write_script(true)),
+            Some(bytes),
+            IMAGE_TIMEOUT,
+            Some(WRITE_OUTPUT),
+        )
+        .map(drop)
     }
 
     /// The computer's clipboard is set; the user pastes where they want it.
@@ -143,7 +217,16 @@ impl Guest for MacGuest {
     }
 
     fn request_clipboard(&self, _timeout: Duration) -> Result<GuestClipboard, String> {
-        parse_read(&self.run(&sh_command(READ), None, IMAGE_TIMEOUT)?)
+        match self.run(
+            &osascript(&read_script()),
+            None,
+            IMAGE_TIMEOUT,
+            Some(MAX_READ_OUTPUT),
+        ) {
+            Ok(output) => parse_read(&output),
+            Err(message) if message == access::OUTPUT_TOO_LARGE => Ok(GuestClipboard::TooLarge),
+            Err(message) => Err(message),
+        }
     }
 }
 
@@ -209,10 +292,45 @@ pub(super) fn spawn_from_display(app: &AppHandle, id: &str, direction: Direction
             Ok(report) => feedback(&report, &name),
             Err(message) => message,
         };
+        let generation = generations().show(&id);
         engine::set_display_subtitle(&app, &id, &text);
         std::thread::sleep(FEEDBACK_SHOWN);
-        engine::set_display_subtitle(&app, &id, "");
+        if generations().clear(&id, generation) {
+            engine::set_display_subtitle(&app, &id, "");
+        }
     });
+}
+
+/// The newest outcome shown in each screen window's subtitle, so that an older outcome's
+/// timer never clears a newer one.
+#[derive(Default)]
+struct Generations(Mutex<HashMap<String, u64>>);
+
+impl Generations {
+    /// Records a new outcome for `id` and returns its generation.
+    fn show(&self, id: &str) -> u64 {
+        let mut shown = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let next = shown.get(id).map_or(1, |generation| generation + 1);
+        shown.insert(id.to_string(), next);
+        next
+    }
+
+    /// Whether `generation` is still the newest for `id`, so its timer may clear the subtitle.
+    fn clear(&self, id: &str, generation: u64) -> bool {
+        let shown = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        shown.get(id) == Some(&generation)
+    }
+}
+
+fn generations() -> &'static Generations {
+    static GENERATIONS: OnceLock<Generations> = OnceLock::new();
+    GENERATIONS.get_or_init(Generations::default)
 }
 
 /// Nothing needs installing in the computer: its clipboard is reached with the
@@ -244,16 +362,55 @@ mod tests {
     fn scripts_become_one_quoted_shell_argument() {
         let command = sh_command("trap '/bin/rm -f \"$f\"' EXIT");
         assert_eq!(command, r#"/bin/sh -c 'trap '\''/bin/rm -f "$f"'\'' EXIT'"#);
-        assert!(sh_command(WRITE_TEXT).starts_with("/bin/sh -c 'LANG=en_US.UTF-8 /usr/bin/pbcopy"));
+        let command = osascript("a'b");
+        assert!(command.starts_with("/bin/sh -c '/usr/bin/osascript -l JavaScript -e "));
+        assert!(!command.contains("a'b"));
+    }
+
+    #[test]
+    fn the_pasteboard_is_never_reached_through_sniffing_tools() {
+        for script in [read_script(), write_script(false), write_script(true)] {
+            assert!(!script.contains("pbcopy") && !script.contains("pbpaste"));
+        }
+        assert!(write_script(false).contains("setStringForType(text, \"public.utf8-plain-text\")"));
+        assert!(write_script(true).contains("setDataForType(data, \"public.png\")"));
+        let read = read_script();
+        assert!(read.contains("stringForType(\"public.utf8-plain-text\")"));
+        assert!(read.contains("dataForType(\"public.png\")"));
     }
 
     #[test]
     fn payloads_never_appear_in_the_commands() {
-        for script in [WRITE_TEXT, WRITE_IMAGE, READ] {
-            assert!(!script.contains("base64 -D"));
-        }
-        assert!(WRITE_IMAGE.contains("«class PNGf»"));
-        assert!(READ.contains("pbpaste"));
+        let command = osascript(&write_script(false));
+        assert!(command.contains("fileHandleWithStandardInput"));
+        assert!(!command.contains("base64"));
+    }
+
+    #[test]
+    fn the_guest_checks_sizes_before_printing() {
+        let read = read_script();
+        assert!(read.contains(&format!("png.length > {MAX_IMAGE_BYTES}")));
+        assert!(read.contains(&format!("data.length > {MAX_TEXT_BYTES}")));
+        assert!(read.contains("TOO_LARGE"));
+        assert!(MAX_READ_OUTPUT >= MAX_IMAGE_BYTES / 3 * 4);
+        assert!(MAX_READ_OUTPUT < MAX_IMAGE_BYTES * 2);
+    }
+
+    #[test]
+    fn the_guests_size_and_empty_markers_parse() {
+        assert_eq!(parse_read("TOO_LARGE\n").unwrap(), GuestClipboard::TooLarge);
+        assert_eq!(parse_read("EMPTY\n").unwrap(), GuestClipboard::Empty);
+    }
+
+    #[test]
+    fn only_the_newest_outcome_may_clear_the_subtitle() {
+        let generations = Generations::default();
+        let older = generations.show("a");
+        let newer = generations.show("a");
+        let other = generations.show("b");
+        assert!(!generations.clear("a", older));
+        assert!(generations.clear("a", newer));
+        assert!(generations.clear("b", other));
     }
 
     #[test]
