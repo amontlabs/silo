@@ -468,13 +468,7 @@ fn home(root: &Path) -> PathBuf {
 
 fn create_home(root: &Path) -> Result<(), String> {
     let home = home(root);
-    for relative in [
-        "Library/Preferences",
-        "Library/Preferences/ByHost",
-        "Desktop",
-        "Documents",
-        "Downloads",
-    ] {
+    for relative in ["Library/Preferences", "Library/Preferences/ByHost"] {
         create_dir(&home.join(relative), 0o755)?;
     }
     set_mode(&home, 0o755)?;
@@ -674,13 +668,16 @@ pub(super) fn finalization_script(public_key: &str) -> String {
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeSiriSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTouchIDSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTrueToneSetup -bool true
-/usr/sbin/chown root:wheel /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
-/bin/chmod 600 /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
+/usr/sbin/chown root:wheel /etc/kcpassword
+/bin/chmod 600 /etc/kcpassword
+/usr/sbin/chown root:wheel /var/db/dslocal/nodes/Default/users/{USER}.plist || true
 /usr/sbin/chown root:wheel /Library/Preferences/com.apple.loginwindow.plist /Library/Preferences/com.apple.SetupAssistant.plist /Library/Preferences/.GlobalPreferences.plist /Library/Preferences/com.apple.PowerManagement.plist || true
 /usr/sbin/chown root:wheel /var/db/com.apple.xpc.launchd/disabled.plist /var/db/com.apple.xpc.launchd/disabled.migrated || true
 /bin/mkdir -p /Users/{USER}/.ssh
 /usr/bin/printf '%s\\n' {authorized_key} > /Users/{USER}/.ssh/authorized_keys
-/usr/sbin/chown -R {UID}:{GID} /Users/{USER}
+/usr/sbin/chown {UID}:{GID} /Users/{USER}
+/usr/sbin/chown {UID}:{GID} /Users/{USER}/.CFUserTextEncoding /Users/{USER}/Library /Users/{USER}/Library/Preferences /Users/{USER}/Library/Preferences/ByHost /Users/{USER}/Library/Preferences/*.plist || true
+/usr/sbin/chown -R {UID}:{GID} /Users/{USER}/.ssh
 /bin/chmod 700 /Users/{USER}/.ssh
 /bin/chmod 600 /Users/{USER}/.ssh/authorized_keys
 /usr/bin/printf '%s\\n' '{sudoers_entry}' > /etc/sudoers.d/{USER}.new
@@ -964,7 +961,8 @@ mod tests {
         assert!(script.contains("launchctl enable system/com.openssh.sshd"));
         assert!(script.contains("visudo -cf /etc/sudoers.d/silo.new"));
         assert!(script.contains("chmod 440 /etc/sudoers.d/silo.new"));
-        assert!(script.contains("chown -R 501:20 /Users/silo"));
+        assert!(script.contains("chown 501:20 /Users/silo\n"));
+        assert!(!script.contains("chown -R 501:20 /Users/silo\n"));
         assert!(script
             .contains("printf '%s\\n' 'ssh-ed25519 AAAA test' > /Users/silo/.ssh/authorized_keys"));
         assert!(script.contains("MARKER_OWNER=%u:%g"));
