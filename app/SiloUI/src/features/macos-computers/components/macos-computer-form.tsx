@@ -4,33 +4,14 @@ import { Monitor } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { DeviceCapacity } from "@/features/computers/model/computer-limits"
-import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import {
-  macosDefaults,
+  macosRequestFrom,
   validateMacosRequest,
   type MacosComputerRequest,
+  type MacosFormFields,
 } from "../model/macos-computers"
 
 export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, Silo sets the computer up for computer use, which takes a few minutes."
-
-function parseNumber(text: string) {
-  return /^\d+$/.test(text.trim()) ? Number(text.trim()) : Number.NaN
-}
-
-export type MacosFormFields = Pick<MacosEditorState, "name" | "cpus" | "memoryGiB" | "diskGiB">
-
-export function defaultMacosFields(capacity?: DeviceCapacity): MacosFormFields {
-  return {
-    name: "",
-    cpus: String(Math.min(macosDefaults.cpus, capacity?.logicalCPUs ?? macosDefaults.cpus)),
-    memoryGiB: String(Math.min(macosDefaults.memoryGiB, capacity?.memoryGiB ?? macosDefaults.memoryGiB)),
-    diskGiB: String(macosDefaults.diskGiB),
-  }
-}
-
-export function macosRequestFrom(fields: MacosFormFields): MacosComputerRequest {
-  return { name: fields.name, cpus: parseNumber(fields.cpus), memoryGiB: parseNumber(fields.memoryGiB), diskGiB: parseNumber(fields.diskGiB) }
-}
 
 /** The fields of a new macOS computer, shown in place of the Linux editor when macOS is chosen as its operating system. The host owns the values so they survive navigation. */
 export function MacosComputerForm({ fields, onChange, creating, existingNames, otherNames, capacity, osField, onCancel, onCreate }: {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 import { z } from "zod"
 
+import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
 
 export const macosComputerStates = ["preparing", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
@@ -258,4 +259,24 @@ export function macosStateLabel(computer: MacosComputer): string {
 
 export function macosResources(computer: MacosComputer): string {
   return `${computer.cpus} CPUs · ${computer.memoryGiB} GiB memory · ${computer.diskGiB} GiB disk`
+}
+
+function parseWholeNumber(text: string) {
+  return /^\d+$/.test(text.trim()) ? Number(text.trim()) : Number.NaN
+}
+
+export type MacosFormFields = Pick<MacosEditorState, "name" | "cpus" | "memoryGiB" | "diskGiB">
+
+/** The starting values of the macOS fields, within what the device offers. */
+export function defaultMacosFields(capacity?: { logicalCPUs: number; memoryGiB: number }): MacosFormFields {
+  return {
+    name: "",
+    cpus: String(Math.min(macosDefaults.cpus, capacity?.logicalCPUs ?? macosDefaults.cpus)),
+    memoryGiB: String(Math.min(macosDefaults.memoryGiB, capacity?.memoryGiB ?? macosDefaults.memoryGiB)),
+    diskGiB: String(macosDefaults.diskGiB),
+  }
+}
+
+export function macosRequestFrom(fields: MacosFormFields): MacosComputerRequest {
+  return { name: fields.name, cpus: parseWholeNumber(fields.cpus), memoryGiB: parseWholeNumber(fields.memoryGiB), diskGiB: parseWholeNumber(fields.diskGiB) }
 }
