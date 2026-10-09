@@ -25,6 +25,8 @@ mod recovery;
 mod restore_image;
 mod store;
 
+pub(crate) use store::NAME_TAKEN;
+
 use crate::runtime;
 use serde::Serialize;
 use std::{
@@ -514,10 +516,18 @@ pub(crate) async fn macos_computer_clipboard(
 
 // MARK: Create
 
+/// The lowercased names of the macOS computers on this device, loaded or not.
+pub(crate) fn names(app: &AppHandle) -> Vec<String> {
+    app_data(app)
+        .map(|data| store::names(&data))
+        .unwrap_or_default()
+}
+
 fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
+    store::ensure_unique_across_kinds(&request.name, &runtime::computer_names(app))?;
     let (record, cancel, row) = {
         let _admitted = admission()?;
         let mut registry = registry();

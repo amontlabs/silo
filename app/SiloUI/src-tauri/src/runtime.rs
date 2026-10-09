@@ -4344,7 +4344,12 @@ pub async fn change_computer_configuration(
         // Read fresh, then apply the specific change so a queued edit lands on the
         // latest inventory instead of overwriting concurrent work.
         let mut request = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
+        let before = request.computers.clone();
         change.apply(&mut request.computers)?;
+        names_clash(
+            &new_names(&before, &request.computers),
+            &crate::macos_computers::names(&app),
+        )?;
         apply_configuration_with_progress(&app, &paths, request, &request_id, retry_computer)
     })
     .await
@@ -6145,6 +6150,44 @@ fn validate_request(request: &ComputerConfigurationRequest) -> Result<(), Runtim
         }
     }
     Ok(())
+}
+
+/// The lowercased names of the Linux computers on this device. An unreadable
+/// inventory yields none; the Linux path validates it itself.
+pub(crate) fn computer_names(app: &AppHandle) -> Vec<String> {
+    runtime_paths(app)
+        .ok()
+        .and_then(|paths| read_metadata(&paths.metadata).ok())
+        .map(|request| {
+            request
+                .computers
+                .iter()
+                .map(|computer| computer.name().to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The names a change adds: computers new to the inventory, or renamed.
+fn new_names(before: &[ComputerConfiguration], after: &[ComputerConfiguration]) -> Vec<String> {
+    after
+        .iter()
+        .filter(|computer| {
+            !before
+                .iter()
+                .any(|old| old.id() == computer.id() && old.name() == computer.name())
+        })
+        .map(|computer| computer.name().to_ascii_lowercase())
+        .collect()
+}
+
+/// Refuses a new name that a computer of another kind already uses.
+fn names_clash(new: &[String], taken: &[String]) -> Result<(), String> {
+    if new.iter().any(|name| taken.contains(name)) {
+        Err(crate::macos_computers::NAME_TAKEN.into())
+    } else {
+        Ok(())
+    }
 }
 
 pub(crate) fn validate_name(name: &str) -> Result<(), RuntimeError> {
@@ -13315,5 +13358,49 @@ mod change_configuration_tests {
         let error = batch.apply(&mut computers).unwrap_err();
         assert!(error.contains("Nested"), "{error}");
         assert_eq!(computers, vec![computer("a", "dev", 2)]);
+    }
+}
+
+#[cfg(test)]
+mod cross_kind_name_tests {
+    use super::*;
+
+    fn computer(id: &str, name: &str) -> ComputerConfiguration {
+        ComputerConfiguration {
+            id: id.into(),
+            name: name.into(),
+            cpus: 2,
+            max_cpus: 4,
+            memory_gib: 4,
+            max_memory_gib: 8,
+            workspace_storage_gib: 10,
+            runtime_storage_gib: 10,
+            desktop: None,
+        }
+    }
+
+    #[test]
+    fn only_added_or_renamed_computers_have_new_names() {
+        let before = vec![computer("1", "web"), computer("2", "db")];
+        let after = vec![
+            computer("1", "web"),
+            computer("2", "data"),
+            computer("3", "api"),
+        ];
+        assert_eq!(new_names(&before, &after), ["data", "api"]);
+        assert!(new_names(&before, &before).is_empty());
+    }
+
+    #[test]
+    fn a_new_linux_name_used_by_a_macos_computer_is_refused() {
+        let macos = vec!["mac-one".to_string()];
+        assert_eq!(names_clash(&["api".into()], &macos), Ok(()));
+        assert_eq!(
+            names_clash(&["mac-one".into()], &macos),
+            Err("Computer names must be unique.".into())
+        );
+        // An existing computer that keeps its name is not a new name.
+        let existing = vec![computer("1", "mac-one")];
+        assert!(new_names(&existing, &existing).is_empty());
     }
 }
