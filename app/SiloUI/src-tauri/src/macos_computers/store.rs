@@ -234,6 +234,20 @@ pub(super) fn root(app_data: &Path) -> PathBuf {
     app_data.join("macos-computers")
 }
 
+/// The id of every computer folder on disk, readable or not.
+pub(super) fn computer_ids(app_data: &Path) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root(app_data)) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    ids.sort();
+    ids
+}
+
 pub(super) fn restore_images(app_data: &Path) -> PathBuf {
     app_data.join("macos-restore-images")
 }
@@ -544,6 +558,19 @@ mod tests {
             serde_json::to_value(State::Stopped).unwrap(),
             serde_json::json!("stopped")
         );
+    }
+
+    #[test]
+    fn every_computer_folder_is_listed_even_when_its_record_is_unreadable() {
+        let app_data = tempfile::tempdir().unwrap();
+        let good = record(&request());
+        save(&Layout::new(app_data.path(), &good.id), &good).unwrap();
+        fs::create_dir_all(root(app_data.path()).join("broken")).unwrap();
+        fs::write(root(app_data.path()).join("stray-file"), b"").unwrap();
+        let mut expected = vec![good.id.clone(), "broken".to_string()];
+        expected.sort();
+        assert_eq!(computer_ids(app_data.path()), expected);
+        assert!(computer_ids(&app_data.path().join("missing")).is_empty());
     }
 
     #[test]
