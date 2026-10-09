@@ -10,6 +10,7 @@ use super::guest_screen;
 use super::input::{KeyEvent, PointerKind, TextLine};
 use super::store::{self, HostLimits, Layout, Record};
 use block2::RcBlock;
+use objc2::Message as _;
 use objc2::{
     define_class, msg_send,
     rc::Retained,
@@ -17,8 +18,8 @@ use objc2::{
     sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSResponder, NSToolbar, NSToolbarDelegate, NSToolbarDisplayMode,
-    NSToolbarItem, NSView, NSWindow,
+    NSAutoresizingMaskOptions, NSEvent, NSEventMask, NSEventType, NSResponder, NSToolbar,
+    NSToolbarDelegate, NSToolbarDisplayMode, NSToolbarItem, NSView, NSWindow,
 };
 use objc2_foundation::{
     NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSString, NSURL,
@@ -29,6 +30,7 @@ use std::{
     collections::HashMap,
     ffi::{c_char, c_void},
     path::Path,
+    ptr::NonNull,
     sync::{mpsc, Arc, Mutex, OnceLock},
     time::Duration,
 };
@@ -1083,7 +1085,7 @@ pub(super) fn send_keys(app: &AppHandle, id: &str, events: Vec<KeyEvent>) -> Res
 }
 
 /// Moves, presses or releases the pointer at a position given as fractions of
-/// the display window, measured from its bottom left.
+/// the machine's screen, measured from its bottom left.
 pub(super) fn send_pointer(
     app: &AppHandle,
     id: &str,
@@ -1091,35 +1093,120 @@ pub(super) fn send_pointer(
     x: f64,
     y: f64,
 ) -> Result<(), String> {
-    with_display_window(app, id, move |window, _| {
-        guest_screen::deliver_pointer(window, kind, x, y)
+    with_display_window(app, id, move |window, view| {
+        guest_screen::deliver_pointer(window, view, kind, x, y)
     })
 }
 
-/// The text on the machine's screen, as shown in its display window.
+/// The text on the machine's screen (the display view, not the window's title
+/// bar).
 pub(super) fn read_screen(app: &AppHandle, id: &str) -> Result<Vec<TextLine>, String> {
-    let number = with_display_window(app, id, |window, _| Ok(window.windowNumber()))?;
-    let image = guest_screen::capture(number)?;
+    let (number, geometry) = with_display_window(app, id, |window, view| {
+        Ok((
+            window.windowNumber(),
+            guest_screen::ViewGeometry::of(window, view),
+        ))
+    })?;
+    let image = guest_screen::capture(number, geometry)?;
     guest_screen::recognize(&image)
 }
 
-/// Whether the machine has stopped (or is gone) within `timeout`.
+thread_local! {
+    /// Main thread only: the monitor that drops the user's own input.
+    static INPUT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+}
+
+/// Makes the display window ignore the user's keyboard and the pointer over the
+/// machine's screen, and shows `subtitle` in its title bar. Events Silo
+/// delivers with `window.sendEvent` do not pass through event monitors, so they
+/// still arrive.
+pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<(), String> {
+    let subtitle = subtitle.to_string();
+    with_display_window(app, id, move |window, view| {
+        window.setSubtitle(&NSString::from_str(&subtitle));
+        let number = window.windowNumber();
+        let view = view.retain();
+        let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+            // SAFETY: AppKit passes a valid event.
+            let event_ref = unsafe { event.as_ref() };
+            if event_ref.windowNumber() != number {
+                return event.as_ptr();
+            }
+            let kind = event_ref.r#type();
+            let keyboard = kind == NSEventType::KeyDown
+                || kind == NSEventType::KeyUp
+                || kind == NSEventType::FlagsChanged;
+            let pointer = (NSEventType::LeftMouseDown.0..=NSEventType::MouseMoved.0)
+                .contains(&kind.0)
+                || kind == NSEventType::ScrollWheel;
+            let over_screen = pointer && {
+                let screen = view.convertRect_toView(view.bounds(), None);
+                let at = event_ref.locationInWindow();
+                at.x >= screen.origin.x
+                    && at.x <= screen.origin.x + screen.size.width
+                    && at.y >= screen.origin.y
+                    && at.y <= screen.origin.y + screen.size.height
+            };
+            if keyboard || over_screen {
+                std::ptr::null_mut()
+            } else {
+                event.as_ptr()
+            }
+        });
+        // SAFETY: The block returns the event it was given or null.
+        let monitor = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+                NSEventMask::from_bits_retain(u64::MAX),
+                &handler,
+            )
+        };
+        INPUT_MONITOR.with(|slot| {
+            if let Some(previous) = slot.borrow_mut().replace(monitor.ok_or("No monitor.")?) {
+                // SAFETY: The monitor came from the call above.
+                unsafe { NSEvent::removeMonitor(&previous) };
+            }
+            Ok(())
+        })
+    })
+}
+
+/// Gives the user's input back to the display window.
+pub(super) fn unlock_input(app: &AppHandle, id: &str) {
+    let id = id.to_string();
+    let _ = on_main(app, move |_| {
+        INPUT_MONITOR.with(|slot| {
+            if let Some(monitor) = slot.borrow_mut().take() {
+                // SAFETY: The monitor came from `lock_input`.
+                unsafe { NSEvent::removeMonitor(&monitor) };
+            }
+        });
+        SLOTS.with(|slots| {
+            if let Some(window) = slots
+                .borrow()
+                .get(&id)
+                .and_then(|slot| slot.view.as_ref())
+                .and_then(|view| view.window())
+            {
+                window.setSubtitle(&NSString::from_str(""));
+            }
+        });
+    });
+}
+
+/// Whether the machine has stopped and been released within `timeout`. A machine
+/// that is stopping, stopped but not yet released, or running does not count.
 pub(super) fn wait_until_stopped(app: &AppHandle, id: &str, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        let stopped = machine_states(app).is_ok_and(|states| {
-            states
-                .iter()
-                .find(|(machine, _)| machine == id)
-                .is_none_or(|(_, state)| *state != MachineState::Running)
-        });
-        if stopped {
+        let released = machine_states(app)
+            .is_ok_and(|states| !states.iter().any(|(machine, _)| machine == id));
+        if released {
             return true;
         }
         if std::time::Instant::now() >= deadline {
             return false;
         }
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(250));
     }
 }
 

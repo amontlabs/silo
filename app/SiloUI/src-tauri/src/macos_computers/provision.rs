@@ -94,7 +94,13 @@ impl Provision<'_> {
         }
         if !record.setup.sip {
             self.say("Turning off System Integrity Protection")?;
-            recovery::disable_sip(self.app, &self.id)?;
+            recovery::disable_sip(self.app, &self.id, &|| self.cancelled()).map_err(|message| {
+                if self.cancelled() {
+                    Stop::Cancelled
+                } else {
+                    Stop::Failed(message)
+                }
+            })?;
             self.check()?;
         }
         if record.setup.sip && record.setup.computer_use && record.setup.clipboard {
