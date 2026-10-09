@@ -13,6 +13,31 @@ The human is responsible for conflicts. Do not add input leases, takeover
 handshakes, arbitration, agent pausing or cancellation. The detailed delivery
 sequence is in the [implementation plan](SiloUI-DETACHED-DESKTOP-IMPLEMENTATION-PLAN.md).
 
+## Revision 2026-10-09: native local display
+
+The owner judged the streamed local desktop below the bar set by native VM apps
+such as VMPal: visible input latency and soft text. This revisits the
+single-path decision below, as its tradeoffs section requires.
+
+- **Local computers on macOS** move to a native display when MicroSandbox
+  supports it: the guest's virtio-gpu scanout drawn in a native view in Silo's
+  window, virtio-input for keyboard and mouse, host audio and resize. GPU
+  acceleration (Venus) follows. No encoder, network transport or webview in
+  that path.
+- **Remote computers, Linux hosts and the interim** keep the Selkies viewer
+  described below. Improve it now: render at the window's device pixels instead
+  of CSS scaling, and prefer low-latency hardware-decoded video.
+- **macOS guests**, if added, use Virtualization.framework and its
+  `VZVirtualMachineView`; libkrun cannot run macOS.
+- **Gates:** working checkpoints with the display devices attached, a
+  maintained upstream route, and measured latency, CPU and memory against the
+  streamed path.
+
+Evidence, upstream status and the patch map are in
+[native local display research](research/desktop-native-display-2026-10-09.md).
+Upstream discussion: [microsandbox#1805](https://github.com/superradcompany/microsandbox/issues/1805).
+The sections below remain the contract for the streamed path.
+
 ## Decision
 
 **Use the same streamed desktop viewer on every device, for local and remote

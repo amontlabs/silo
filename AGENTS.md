@@ -90,6 +90,16 @@ See `docs/SiloUI-BUILD-CHANNELS.md`.
 - Keep generated evidence under an ignored directory such as `app/SiloUI/src-tauri/target/verification/`. Keep private system logs in a temporary local path and do not publish credentials, computer data, or unredacted logs. Preserve the exact failing output before rerunning.
 - Report commands, results, the exact inspected bundle, and whether data was fixture or live. A frontend test proves UI behavior against its supplied data; a build proves compilation and packaging. Neither proves live computer health, two-device management, installed-app behavior, or release readiness.
 
+## Delegated work
+
+For larger tasks, work in your own git worktree, split the work into
+independent slices and run them in parallel:
+
+- Sonnet subagents implement.
+- Haiku subagents take small, tightly bounded slices.
+- Codex `gpt-6.1-sol` at high reasoning reviews each change, focused on that
+  change. Fix and re-review until it answers LGTM.
+
 ## SiloUI release notes
 
 For each user-visible SiloUI feature, fix, or behavior change, include a Markdown
