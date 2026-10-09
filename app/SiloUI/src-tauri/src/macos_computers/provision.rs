@@ -128,13 +128,12 @@ impl Provision<'_> {
         self.first_boot()?;
         self.say("Creating the account")?;
         let account = guest_access::account(self.layout)?;
-        let key = guest_access::public_key(&account)?;
         let image = record.restore_image.clone();
         let release = image.as_ref().map(|image| offline_setup::Release {
             version: &image.version,
             build: &image.build,
         });
-        offline_setup::run(&self.layout.disk(), &account, &key, release)?;
+        offline_setup::run(&self.layout.disk(), &account, release)?;
         self.say("Starting macOS")?;
         self.boot(Login::Password)?;
         self.say("Finishing the account")?;
@@ -147,39 +146,7 @@ impl Provision<'_> {
     /// credential a new guest has, then checks that the key and `sudo -n` work.
     fn finalize(&self, account: &guest_access::GuestAccount) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
-        let public_key = guest_access::public_key(account)?;
-        let script = base64_encode(offline_setup::finalization_script(&public_key).as_bytes());
-        let command = format!(
-            "/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'"
-        );
-        let password = format!("{}\n", account.password);
-        let output = guest_access::run_with_password(
-            &layout,
-            &record,
-            &command,
-            Some(password.as_bytes()),
-            GUEST_COMMAND,
-        )?;
-        if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-            return Err(Stop::Failed(format!(
-                "Silo could not finish setting up the account in the computer: {}",
-                output.stderr.trim()
-            )));
-        }
-        let output = guest_access::run(
-            &layout,
-            &record,
-            "/usr/bin/sudo -n true",
-            None,
-            GUEST_COMMAND,
-        )?;
-        if output.status != 0 {
-            return Err(Stop::Failed(
-                "Silo cannot log in to the computer with its key and run administrator commands."
-                    .into(),
-            ));
-        }
-        Ok(())
+        finalize_guest(&layout, &record, account).map_err(Stop::Failed)
     }
 
     fn verify_sip_disabled(&self) -> Result<(), Stop> {
@@ -316,6 +283,41 @@ enum Login {
     Password,
 }
 
+/// Finishes the account inside a booted guest that only accepts the password.
+fn finalize_guest(
+    layout: &Layout,
+    record: &Record,
+    account: &guest_access::GuestAccount,
+) -> Result<(), String> {
+    let public_key = guest_access::public_key(account)?;
+    let script = base64_encode(offline_setup::finalization_script(&public_key).as_bytes());
+    let command =
+        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
+    let password = format!("{}\n", account.password);
+    let output = guest_access::run_with_password(
+        layout,
+        record,
+        &command,
+        Some(password.as_bytes()),
+        GUEST_COMMAND,
+    )?;
+    if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
+        return Err(format!(
+            "Silo could not finish setting up the account in the computer: {} {}",
+            output.stdout.trim(),
+            output.stderr.trim()
+        ));
+    }
+    let output = guest_access::run(layout, record, "/usr/bin/sudo -n true", None, GUEST_COMMAND)?;
+    if output.status != 0 {
+        return Err(format!(
+            "Silo cannot log in to the computer with its key and run administrator commands: {}",
+            output.stderr.trim()
+        ));
+    }
+    Ok(())
+}
+
 fn sip_disabled(csrutil_status: &str) -> bool {
     csrutil_status.to_ascii_lowercase().contains("disabled")
 }
@@ -349,5 +351,54 @@ mod tests {
         assert!(!sip_disabled(
             "System Integrity Protection status: enabled.\n"
         ));
+    }
+
+    fn live_layout() -> (Layout, Record) {
+        let dir = std::path::PathBuf::from(std::env::var("SILO_LIVE_DIR").expect("SILO_LIVE_DIR"));
+        let request = store::CreateRequest {
+            name: "live".into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+        };
+        let mac = std::fs::read_to_string(dir.join("mac-address.txt")).unwrap();
+        let mut record = store::new_record(&request, mac.trim().into());
+        record.id = "live".into();
+        (Layout { dir }, record)
+    }
+
+    /// Patches the disk of a clone. Run by hand: `SILO_LIVE_DIR=<clone> cargo test live_offline -- --ignored`.
+    #[test]
+    #[ignore = "needs a clone of an installed computer"]
+    fn live_offline() {
+        let (layout, _) = live_layout();
+        let account = guest_access::account(&layout).unwrap();
+        offline_setup::run(
+            &layout.disk(),
+            &account,
+            Some(offline_setup::Release {
+                version: "26.6.2",
+                build: "25G83",
+            }),
+        )
+        .unwrap();
+    }
+
+    /// Finishes the account of a clone that is booted and reachable. Run by hand.
+    #[test]
+    #[ignore = "needs a running clone"]
+    fn live_finalize() {
+        let (layout, record) = live_layout();
+        let account = guest_access::account(&layout).unwrap();
+        let address = guest_access::wait_for_password_ssh(
+            &layout,
+            &record,
+            Duration::from_secs(300),
+            &|| false,
+        )
+        .unwrap();
+        println!("password login works at {address}");
+        finalize_guest(&layout, &record, &account).unwrap();
+        println!("finalized; key login and sudo -n work");
     }
 }

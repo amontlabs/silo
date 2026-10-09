@@ -25,6 +25,8 @@ mod recovery;
 mod restore_image;
 mod store;
 
+pub(crate) use store::NAME_TAKEN;
+
 use crate::runtime;
 use serde::Serialize;
 use std::{
@@ -514,10 +516,18 @@ pub(crate) async fn macos_computer_clipboard(
 
 // MARK: Create
 
+/// The lowercased names of the macOS computers on this device, loaded or not.
+pub(crate) fn names(app: &AppHandle) -> Vec<String> {
+    app_data(app)
+        .map(|data| store::names(&data))
+        .unwrap_or_default()
+}
+
 fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
+    store::ensure_unique_across_kinds(&request.name, &runtime::computer_names(app))?;
     let (record, cancel, row) = {
         let _admitted = admission()?;
         let mut registry = registry();
@@ -1024,23 +1034,33 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
     stopped.and(detached)
 }
 
-/// Detaches the disk image of every macOS computer from this Mac.
+/// Detaches the disk image of every macOS computer on disk from this Mac, except
+/// those a creation or setup still owns: their worker detaches its own image, and a
+/// forced detach under it would corrupt the patch. Those report through `stop_busy`.
 fn release_disks(app: &AppHandle) -> Result<(), String> {
+    // Computers a previous launch left behind count even if nothing loaded them yet.
+    let _ = ensure_loaded(app);
     let Ok(data) = app_data(app) else {
         return Ok(());
     };
-    let ids: Vec<String> = registry()
+    let owned: Vec<String> = registry()
         .entries
         .iter()
+        .filter(|entry| is_busy(entry.state))
         .map(|entry| entry.record.id.clone())
         .collect();
     let mut result = Ok(());
-    for id in ids {
+    for id in disks_to_release(store::computer_ids(&data), &owned) {
         if let Err(message) = offline_setup::ensure_detached(&Layout::new(&data, &id).disk()) {
             result = Err(message);
         }
     }
     result
+}
+
+/// The computers whose disk Quit may detach: all of them but the ones a worker owns.
+fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
+    ids.into_iter().filter(|id| !owned.contains(id)).collect()
 }
 
 fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
@@ -1297,6 +1317,16 @@ mod tests {
             registry.entries[0].detail.as_deref(),
             Some(store::INTERRUPTED_INSTALL)
         );
+    }
+
+    #[test]
+    fn quit_leaves_the_disks_of_active_workers_to_their_workers() {
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        assert_eq!(
+            disks_to_release(ids.clone(), &["b".to_string()]),
+            ["a", "c"]
+        );
+        assert_eq!(disks_to_release(ids, &[]), ["a", "b", "c"]);
     }
 
     #[test]

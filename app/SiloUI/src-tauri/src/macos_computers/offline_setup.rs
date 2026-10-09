@@ -44,13 +44,12 @@ pub(super) struct Release<'a> {
 pub(super) fn run(
     disk: &Path,
     account: &GuestAccount,
-    public_key: &str,
     release: Option<Release<'_>>,
 ) -> Result<(), String> {
     let mut attached = Attached::attach(disk)?;
     let patched = attached
         .mount_data_volume()
-        .and_then(|mount| patch(&mount, account, public_key, release.as_ref()));
+        .and_then(|mount| patch(&mount, account, release.as_ref()));
     // The guest must never boot while the host still holds its disk.
     let closed = attached.close();
     patched.and(closed)
@@ -267,12 +266,7 @@ fn tool_plist(program: &str, args: &[&str]) -> Result<Dictionary, String> {
 
 // MARK: Patching
 
-fn patch(
-    root: &Path,
-    account: &GuestAccount,
-    public_key: &str,
-    release: Option<&Release<'_>>,
-) -> Result<(), String> {
+fn patch(root: &Path, account: &GuestAccount, release: Option<&Release<'_>>) -> Result<(), String> {
     let users = root.join("private/var/db/dslocal/nodes/Default/users");
     for dir in [users.parent().unwrap_or(&users), &users] {
         make_executable(dir)?;
@@ -282,12 +276,11 @@ fn patch(
         &root.join("private/var/db/dslocal/nodes/Default/groups"),
         &uuid,
     )?;
-    create_home(root, public_key)?;
+    create_home(root)?;
     mark_setup_complete(root, release)?;
     configure_autologin(root, &account.password)?;
     enable_ssh(root)?;
-    configure_power_and_lock(root)?;
-    allow_sudo(root)
+    configure_power_and_lock(root)
 }
 
 fn string_list(value: &str) -> Value {
@@ -473,15 +466,9 @@ fn home(root: &Path) -> PathBuf {
     root.join("Users").join(USER)
 }
 
-fn create_home(root: &Path, public_key: &str) -> Result<(), String> {
+fn create_home(root: &Path) -> Result<(), String> {
     let home = home(root);
-    for relative in [
-        "Library/Preferences",
-        "Library/Preferences/ByHost",
-        "Desktop",
-        "Documents",
-        "Downloads",
-    ] {
+    for relative in ["Library/Preferences", "Library/Preferences/ByHost"] {
         create_dir(&home.join(relative), 0o755)?;
     }
     set_mode(&home, 0o755)?;
@@ -519,14 +506,7 @@ fn create_home(root: &Path, public_key: &str) -> Result<(), String> {
             Format::Binary,
         )?;
     }
-    let ssh = home.join(".ssh");
-    create_dir(&ssh, 0o700)?;
-    write_file(
-        &ssh.join("authorized_keys"),
-        format!("{}\n", public_key.trim()).as_bytes(),
-        0o600,
-        false,
-    )
+    Ok(())
 }
 
 fn mark_setup_complete(root: &Path, release: Option<&Release<'_>>) -> Result<(), String> {
@@ -660,14 +640,11 @@ fn configure_power_and_lock(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// The sudoers entry that lets the account run root commands with `sudo -n`.
+/// The sudoers entry that lets the account run root commands with `sudo -n`. It is
+/// installed from inside the guest: sudo refuses a file the offline edit left owned
+/// by an unknown user.
 pub(super) fn sudoers() -> String {
     format!("{USER} ALL=(ALL) NOPASSWD: ALL\n")
-}
-
-fn allow_sudo(root: &Path) -> Result<(), String> {
-    let path = root.join("private/etc/sudoers.d").join(USER);
-    write_file(&path, sudoers().as_bytes(), 0o440, path.exists())
 }
 
 /// The commands run as root in the guest once it is up. Lume's finalization,
@@ -691,11 +668,16 @@ pub(super) fn finalization_script(public_key: &str) -> String {
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeSiriSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTouchIDSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTrueToneSetup -bool true
-/usr/sbin/chown root:wheel /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
-/bin/chmod 600 /etc/kcpassword /var/db/dslocal/nodes/Default/users/{USER}.plist
+/usr/sbin/chown root:wheel /etc/kcpassword
+/bin/chmod 600 /etc/kcpassword
+/usr/sbin/chown root:wheel /var/db/dslocal/nodes/Default/users/{USER}.plist || true
+/usr/sbin/chown root:wheel /Library/Preferences/com.apple.loginwindow.plist /Library/Preferences/com.apple.SetupAssistant.plist /Library/Preferences/.GlobalPreferences.plist /Library/Preferences/com.apple.PowerManagement.plist || true
+/usr/sbin/chown root:wheel /var/db/com.apple.xpc.launchd/disabled.plist /var/db/com.apple.xpc.launchd/disabled.migrated || true
 /bin/mkdir -p /Users/{USER}/.ssh
 /usr/bin/printf '%s\\n' {authorized_key} > /Users/{USER}/.ssh/authorized_keys
-/usr/sbin/chown -R {UID}:{GID} /Users/{USER}
+/usr/sbin/chown {UID}:{GID} /Users/{USER}
+/usr/sbin/chown {UID}:{GID} /Users/{USER}/.CFUserTextEncoding /Users/{USER}/Library /Users/{USER}/Library/Preferences /Users/{USER}/Library/Preferences/ByHost /Users/{USER}/Library/Preferences/*.plist || true
+/usr/sbin/chown -R {UID}:{GID} /Users/{USER}/.ssh
 /bin/chmod 700 /Users/{USER}/.ssh
 /bin/chmod 600 /Users/{USER}/.ssh/authorized_keys
 /usr/bin/printf '%s\\n' '{sudoers_entry}' > /etc/sudoers.d/{USER}.new
@@ -979,7 +961,8 @@ mod tests {
         assert!(script.contains("launchctl enable system/com.openssh.sshd"));
         assert!(script.contains("visudo -cf /etc/sudoers.d/silo.new"));
         assert!(script.contains("chmod 440 /etc/sudoers.d/silo.new"));
-        assert!(script.contains("chown -R 501:20 /Users/silo"));
+        assert!(script.contains("chown 501:20 /Users/silo\n"));
+        assert!(!script.contains("chown -R 501:20 /Users/silo\n"));
         assert!(script
             .contains("printf '%s\\n' 'ssh-ed25519 AAAA test' > /Users/silo/.ssh/authorized_keys"));
         assert!(script.contains("MARKER_OWNER=%u:%g"));
@@ -1158,7 +1141,6 @@ mod tests {
         patch(
             mount,
             &account(),
-            "ssh-ed25519 AAAA test",
             Some(&Release {
                 version: "26.6.2",
                 build: "25G83",
@@ -1219,17 +1201,10 @@ mod tests {
             read_plist(&mount.join("private/var/db/com.apple.xpc.launchd/disabled.plist")).unwrap();
         assert_eq!(disabled["com.openssh.sshd"].as_boolean(), Some(false));
 
-        let sudoers = mount.join("private/etc/sudoers.d/silo");
-        assert_eq!(fs::read_to_string(&sudoers).unwrap(), sudoers_text());
-        assert_eq!(mode_of(&sudoers), Some(0o440));
-
-        let ssh = mount.join("Users/silo/.ssh");
-        assert_eq!(mode_of(&ssh), Some(0o700));
-        assert_eq!(
-            fs::read_to_string(ssh.join("authorized_keys")).unwrap(),
-            "ssh-ed25519 AAAA test\n"
-        );
-        assert_eq!(mode_of(&ssh.join("authorized_keys")), Some(0o600));
+        // Sudo refuses a sudoers file with an unknown owner, and sshd an unknown owner of
+        // authorized_keys, so both are installed from inside the guest.
+        assert!(!mount.join("private/etc/sudoers.d/silo").exists());
+        assert!(!mount.join("Users/silo/.ssh").exists());
 
         let power =
             read_plist(&mount.join("Library/Preferences/com.apple.PowerManagement.plist")).unwrap();
@@ -1239,19 +1214,15 @@ mod tests {
         );
     }
 
-    fn sudoers_text() -> String {
-        "silo ALL=(ALL) NOPASSWD: ALL\n".into()
-    }
-
     #[test]
     fn patching_twice_keeps_one_account_and_one_group_entry() {
         let root = volume();
-        patch(root.path(), &account(), "ssh-ed25519 AAAA test", None).unwrap();
+        patch(root.path(), &account(), None).unwrap();
         let path = root
             .path()
             .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
         let first = read_plist(&path).unwrap()["generateduid"].clone();
-        patch(root.path(), &account(), "ssh-ed25519 AAAA test", None).unwrap();
+        patch(root.path(), &account(), None).unwrap();
         assert_eq!(read_plist(&path).unwrap()["generateduid"], first);
         let admin = read_plist(
             &root
@@ -1279,7 +1250,7 @@ mod tests {
             Format::Binary,
         )
         .unwrap();
-        let error = patch(root.path(), &account(), "key", None).unwrap_err();
+        let error = patch(root.path(), &account(), None).unwrap_err();
         assert!(error.contains("501"), "{error}");
     }
 
@@ -1292,7 +1263,6 @@ mod tests {
         run(
             Path::new(&disk),
             &account(),
-            "ssh-ed25519 AAAA test",
             Some(Release {
                 version: "26.6.2",
                 build: "25G83",
