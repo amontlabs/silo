@@ -200,7 +200,7 @@ def native_tree(root):
             yield from native_tree(child)
 
 
-def native_picker(browser, wait, evidence, destination):
+def native_picker(browser, wait, evidence, destination, name):
     import pyatspi
     import gi
 
@@ -211,7 +211,7 @@ def native_picker(browser, wait, evidence, destination):
         for app in pyatspi.Registry.getDesktop(0):
             try:
                 for node in native_tree(app):
-                    if node.getRoleName() in ("dialog", "file chooser") and node.name == "Choose a backup destination":
+                    if node.getRoleName() in ("dialog", "file chooser") and node.name == "Choose where to export":
                         return node
             except Exception:
                 continue
@@ -241,11 +241,10 @@ def native_picker(browser, wait, evidence, destination):
             return True
         return False
 
-    click(browser, wait, By.ID, "application-nav-backup")
-    wait.until(lambda _: browser.find_element(By.ID, "application-panel-backup").is_displayed())
-    click(browser, wait, By.XPATH, "//button[normalize-space()='Create backup…']")
-    wait.until(lambda _: browser.find_element(By.CSS_SELECTOR, "input[aria-label='Destination']").is_displayed())
-    click(browser, wait, By.XPATH, "//button[normalize-space()='Change…']")
+    click(browser, wait, By.ID, "application-nav-computers")
+    wait.until(lambda _: browser.find_element(By.ID, "application-panel-computers").is_displayed())
+    click(browser, wait, By.CSS_SELECTOR, f"button[aria-label='More actions for {name}']")
+    click(browser, wait, By.CSS_SELECTOR, f"[role='menuitem'][aria-label='Export {name}']")
     wait.until(lambda _: find_dialog() is not None)
     dialog = find_dialog()
     screenshot(evidence / "native-folder-picker-before.png")
@@ -310,8 +309,6 @@ def native_picker(browser, wait, evidence, destination):
         raise AssertionError("GTK chooser had no activatable Open/Select control after the existing row was selected")
     wait.until(lambda _: find_dialog() is None)
     canonical = str(destination.resolve(strict=True))
-    field = browser.find_element(By.CSS_SELECTOR, "input[aria-label='Destination']")
-    wait.until(lambda _: field.get_attribute("value") == canonical)
     data = Path(os.environ["XDG_DATA_HOME"]) / os.environ["SILO_LINUX_APPLICATION_ID"] / "backup-history.json"
     wait.until(lambda _: data.is_file() and json.loads(data.read_text()).get("destination") == canonical)
     browser.save_screenshot(str(evidence / "native-folder-picker-accepted.png"))
@@ -319,35 +316,8 @@ def native_picker(browser, wait, evidence, destination):
 
 
 def create_source_archive(browser, wait, evidence, name, history_path):
-    # The shared task fixture may also contain imported/fork records from the
-    # separate lineage matrix. Select only the original source for this archive.
-    selected_names = []
-    chooser = browser.find_element(By.CSS_SELECTOR, "[role='group'][aria-label='Choose backup']")
-    rows = browser.execute_script(
-        "return Array.from(arguments[0].querySelectorAll('label')).map(label => ({"
-        "text: Array.from(label.childNodes).filter(node => node.nodeType === Node.TEXT_NODE)"
-        ".map(node => node.textContent).join('').trim(), checkbox: label.querySelector('[role=checkbox]')}))"
-        ".filter(row => row.checkbox)", chooser)
-    for row in rows:
-        label_text = row["text"]
-        if not label_text:
-            continue
-        computer_name = label_text.splitlines()[0].strip()
-        box = row["checkbox"]
-        checked = box.get_attribute("aria-checked") == "true"
-        if computer_name == name:
-            if not checked:
-                box.click()
-            selected_names.append(name)
-        elif checked:
-            box.click()
-    if selected_names != [name]:
-        (evidence / "backup-selection-debug.html").write_text(chooser.get_attribute("outerHTML") or "")
-        raise AssertionError(f"Backup selection did not isolate the original source: {selected_names!r}")
-    click(browser, wait, By.XPATH, "//button[normalize-space()='Review backup']")
-    review = browser.find_element(By.CSS_SELECTOR, "[role='group'][aria-label='Review backup']")
-    assert name in review.text, review.text
-    click(browser, wait, By.XPATH, "//button[normalize-space()='Start backup']")
+    # Accepting the export folder in the native chooser starts the export of
+    # only the named computer, so the archive is awaited here.
     deadline = time.monotonic() + 900
     while time.monotonic() < deadline:
         destination = Path(json.loads(history_path.read_text())["destination"])
@@ -362,7 +332,7 @@ def create_source_archive(browser, wait, evidence, name, history_path):
             }, indent=2))
             return archive
         time.sleep(1)
-    raise TimeoutError("Production UI backup did not produce an archive within 15 minutes")
+    raise TimeoutError("Production UI export did not produce an archive within 15 minutes")
 
 
 def open_or_create_editor_computer(browser, wait, name):
@@ -792,9 +762,7 @@ def run():
             source_row = wait.until(lambda _: browser.find_element(By.CSS_SELECTOR, f"[data-computer-name='{name}']"))
             wait.until(lambda _: "stopped" in source_row.text.lower())
             browser.save_screenshot(str(evidence / "source-overview-stopped.png"))
-            click(browser, wait, By.ID, "application-nav-backup")
-            wait.until(lambda _: browser.find_element(By.ID, "application-panel-backup").is_displayed())
-            history = native_picker(browser, wait, evidence, destination)
+            history = native_picker(browser, wait, evidence, destination, name)
             archive = create_source_archive(browser, wait, evidence, name, history)
         test_editor_lineage(browser, wait, evidence, name, main_handle)
         report = {"passed": True, "app": str(Path(os.environ["SILO_LINUX_APPLICATION"]).resolve()),

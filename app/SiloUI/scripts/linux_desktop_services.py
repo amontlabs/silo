@@ -83,19 +83,21 @@ def verify(browser, wait, environment, evidence):
     call(destination, menu, "com.canonical.dbusmenu", "Event", "(isvu)",
          (open_item[0], "clicked", GLib.Variant("i", 0), 0))
     wait.until(lambda _: main_visible())
-    wait.until(lambda _: browser.find_element(By.ID, "application-nav-backup").is_displayed())
+    wait.until(lambda _: browser.find_element(By.ID, "application-nav-computers").is_displayed())
     checks.append("Ubuntu AppIndicator registers Silo and its real Open Silo menu action reopens the closed window")
 
-    browser.find_element(By.ID, "application-nav-backup").click()
-    wait.until(lambda _: browser.find_element(By.ID, "application-panel-backup").is_displayed())
-    browser.find_element(By.XPATH, "//button[normalize-space()='Choose backup…']").click()
-    dialog = wait.until(lambda _: find_native(lambda node: node.getRoleName() in ("dialog", "file chooser") and "Choose a Silo backup" in node.name))
+    browser.find_element(By.ID, "application-nav-computers").click()
+    wait.until(lambda _: browser.find_element(By.ID, "application-panel-computers").is_displayed())
+    browser.find_element(By.XPATH, "//section[@id='application-panel-computers']//button[normalize-space()='Add']").click()
+    browser.find_element(By.XPATH, "//*[@role='menuitem'][normalize-space()='Import computer…']").click()
+    picker = "Choose a Silo export to import"
+    dialog = wait.until(lambda _: find_native(lambda node: node.getRoleName() in ("dialog", "file chooser") and picker in node.name))
     cancel = next(node for node in nodes(dialog) if node.getRoleName() == "push button" and node.name in ("Cancel", "_Cancel"))
     action(cancel)
-    wait.until(lambda _: not find_native(lambda node: node.getRoleName() in ("dialog", "file chooser") and "Choose a Silo backup" in node.name))
-    wait.until(lambda _: browser.find_element(By.XPATH, "//button[normalize-space()='Choose backup…']").is_enabled())
-    assert "Restore failed" not in browser.find_element(By.TAG_NAME, "body").text
-    checks.append("Production backup picker opens a real native dialog and Cancel returns without starting restore")
+    wait.until(lambda _: not find_native(lambda node: node.getRoleName() in ("dialog", "file chooser") and picker in node.name))
+    wait.until(lambda _: browser.find_element(By.XPATH, "//section[@id='application-panel-computers']//button[normalize-space()='Add']").is_enabled())
+    assert "Import failed" not in browser.find_element(By.TAG_NAME, "body").text
+    checks.append("Production import picker opens a real native dialog and Cancel returns without starting an import")
 
     # A corrupt file only in the harness-owned XDG directory exercises the actual
     # background health transition and native notification adapter. No fake bus,
