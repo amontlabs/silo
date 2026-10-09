@@ -195,39 +195,70 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     entries: Vec::new(),
 });
 
-/// Whether Quit has begun. Creating and starting check it under the same lock that
-/// `stop_all` sets it under, so nothing starts after Quit has taken its snapshot.
-static CLOSED: Mutex<bool> = Mutex::new(false);
+/// Why new computers are refused. Quit and an update each own one flag, so neither
+/// can reopen what the other closed.
+#[derive(Default)]
+struct Closed {
+    quit: bool,
+    update: bool,
+}
 
-fn admission() -> Result<std::sync::MutexGuard<'static, bool>, String> {
-    let closed = CLOSED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if *closed {
-        Err("Silo is quitting and stopping its computers. Wait for shutdown to finish.".into())
-    } else {
-        Ok(closed)
+impl Closed {
+    fn check(&self) -> Result<(), String> {
+        if self.quit {
+            Err("Silo is quitting and stopping its computers. Wait for shutdown to finish.".into())
+        } else if self.update {
+            Err("Silo is installing an update. Wait for it to finish.".into())
+        } else {
+            Ok(())
+        }
     }
+
+    /// Closes for an update unless `busy`; a refusal changes nothing.
+    fn close_for_update(&mut self, busy: bool) -> Result<(), String> {
+        if busy {
+            return Err("Stop your macOS computers before installing the update.".into());
+        }
+        self.update = true;
+        Ok(())
+    }
+}
+
+/// Creating and starting check this under the same lock that `stop_all` and
+/// `close_for_update` set it under, so nothing starts after Quit has taken its
+/// snapshot or after an update has checked that nothing runs.
+static CLOSED: Mutex<Closed> = Mutex::new(Closed {
+    quit: false,
+    update: false,
+});
+
+fn closed() -> std::sync::MutexGuard<'static, Closed> {
+    CLOSED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn admission() -> Result<std::sync::MutexGuard<'static, Closed>, String> {
+    let closed = closed();
+    closed.check()?;
+    Ok(closed)
 }
 
 /// Admits macOS computers again after a Quit was cancelled.
-pub(crate) fn reopen() {
-    *CLOSED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+pub(crate) fn reopen_after_quit() {
+    closed().quit = false;
 }
 
-/// Closes admission for an update unless a macOS computer is busy. Starts and
-/// creations check the same flag under the same lock, so none can slip in after.
+/// Admits macOS computers again after an update did not go ahead.
+pub(crate) fn reopen_after_update() {
+    closed().update = false;
+}
+
+/// Closes admission for an update unless a macOS computer is busy.
 pub(crate) fn close_for_update() -> Result<(), String> {
-    let mut closed = CLOSED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if registry().entries.iter().any(|entry| is_busy(entry.state)) {
-        return Err("Stop your macOS computers before installing the update.".into());
-    }
-    *closed = true;
-    Ok(())
+    let mut closed = closed();
+    let busy = registry().entries.iter().any(|entry| is_busy(entry.state));
+    closed.close_for_update(busy)
 }
 
 fn registry() -> std::sync::MutexGuard<'static, Registry> {
@@ -845,9 +876,7 @@ fn is_busy(state: State) -> bool {
 /// framework's callbacks.
 pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     // From here on nothing new is admitted; anything admitted before is in the snapshot.
-    *CLOSED
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+    closed().quit = true;
     let busy: Vec<(String, State, Arc<AtomicU8>)> = registry()
         .entries
         .iter()
@@ -1023,12 +1052,31 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_admitted_between_quit_and_its_cancellation() {
-        assert!(admission().is_ok());
-        *CLOSED.lock().unwrap() = true;
-        assert!(admission().unwrap_err().contains("quitting"));
-        reopen();
-        assert!(admission().is_ok());
+    fn quit_and_update_close_admission_independently() {
+        let mut closed = Closed::default();
+        assert!(closed.check().is_ok());
+        // Update closes, Quit closes, update reopens: still closed for Quit.
+        closed.close_for_update(false).unwrap();
+        closed.quit = true;
+        closed.update = false;
+        assert!(closed.check().unwrap_err().contains("quitting"));
+        // The reverse: Quit reopens while an update holds admission closed.
+        closed.update = true;
+        closed.quit = false;
+        assert!(closed.check().unwrap_err().contains("update"));
+        closed.update = false;
+        assert!(closed.check().is_ok());
+    }
+
+    #[test]
+    fn a_refused_update_changes_nothing() {
+        let mut closed = Closed::default();
+        closed.quit = true;
+        assert!(closed.close_for_update(true).is_err());
+        assert!(closed.quit && !closed.update);
+        let mut open = Closed::default();
+        assert!(open.close_for_update(true).is_err());
+        assert!(open.check().is_ok());
     }
 
     #[test]
