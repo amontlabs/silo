@@ -61,7 +61,8 @@ fn capture_function() -> Option<CaptureFunction> {
     static FUNCTION: OnceLock<Option<CaptureFunction>> = OnceLock::new();
     *FUNCTION.get_or_init(|| {
         // SAFETY: `dlsym` on the default namespace with a valid C string.
-        let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"CGWindowListCreateImage".as_ptr()) };
+        let symbol =
+            unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"CGWindowListCreateImage".as_ptr()) };
         // SAFETY: The exported function has this signature.
         (!symbol.is_null())
             .then(|| unsafe { std::mem::transmute::<*mut libc::c_void, CaptureFunction>(symbol) })
@@ -113,10 +114,7 @@ pub(super) fn recognize(capture: &Capture) -> Result<Vec<TextLine>, String> {
             let performed: Result<(), Retained<NSError>> =
                 msg_send![&*handler, performRequests: &*requests, error: _];
             performed.map_err(|error| {
-                format!(
-                    "Text recognition failed: {}",
-                    error.localizedDescription()
-                )
+                format!("Text recognition failed: {}", error.localizedDescription())
             })?;
             let results: Option<Retained<NSArray<AnyObject>>> = msg_send![&*request, results];
             let mut lines = Vec::new();

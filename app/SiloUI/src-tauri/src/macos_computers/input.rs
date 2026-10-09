@@ -4,7 +4,10 @@
 //! physical positions, and the guest's layout (US in Recovery) turns them into
 //! characters. Typing text therefore means looking up the US position of each
 //! character, whatever layout the host keyboard has.
-#![cfg_attr(not(all(target_os = "macos", target_arch = "aarch64")), allow(dead_code))]
+#![cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 
 pub(super) const RETURN: u16 = 36;
 pub(super) const RIGHT: u16 = 124;
@@ -260,15 +263,69 @@ mod tests {
 
     #[test]
     fn letters_digits_and_symbols_map_to_us_positions() {
-        assert_eq!(position('a'), Some(Position { code: 0, shift: false }));
-        assert_eq!(position('A'), Some(Position { code: 0, shift: true }));
-        assert_eq!(position('q'), Some(Position { code: 12, shift: false }));
-        assert_eq!(position('0'), Some(Position { code: 29, shift: false }));
-        assert_eq!(position('_'), Some(Position { code: 27, shift: true }));
-        assert_eq!(position('-'), Some(Position { code: 27, shift: false }));
-        assert_eq!(position('/'), Some(Position { code: 44, shift: false }));
-        assert_eq!(position('?'), Some(Position { code: 44, shift: true }));
-        assert_eq!(position(' '), Some(Position { code: 49, shift: false }));
+        assert_eq!(
+            position('a'),
+            Some(Position {
+                code: 0,
+                shift: false
+            })
+        );
+        assert_eq!(
+            position('A'),
+            Some(Position {
+                code: 0,
+                shift: true
+            })
+        );
+        assert_eq!(
+            position('q'),
+            Some(Position {
+                code: 12,
+                shift: false
+            })
+        );
+        assert_eq!(
+            position('0'),
+            Some(Position {
+                code: 29,
+                shift: false
+            })
+        );
+        assert_eq!(
+            position('_'),
+            Some(Position {
+                code: 27,
+                shift: true
+            })
+        );
+        assert_eq!(
+            position('-'),
+            Some(Position {
+                code: 27,
+                shift: false
+            })
+        );
+        assert_eq!(
+            position('/'),
+            Some(Position {
+                code: 44,
+                shift: false
+            })
+        );
+        assert_eq!(
+            position('?'),
+            Some(Position {
+                code: 44,
+                shift: true
+            })
+        );
+        assert_eq!(
+            position(' '),
+            Some(Position {
+                code: 49,
+                shift: false
+            })
+        );
         assert_eq!(position('é'), None);
     }
 
@@ -315,7 +372,9 @@ mod tests {
         let mut keyboard = Keyboard::default();
         let events = keyboard.character('t').unwrap();
         assert_eq!(events.len(), 2);
-        assert!(events.iter().all(|event| event.flags == 0 && event.code == KEY_T));
+        assert!(events
+            .iter()
+            .all(|event| event.flags == 0 && event.code == KEY_T));
     }
 
     #[test]

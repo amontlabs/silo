@@ -927,9 +927,7 @@ fn with_display_window<T: Send + 'static>(
                 .get(&id)
                 .and_then(|slot| slot.view.as_ref())
                 .ok_or("This computer's display isn't open.")?;
-            let window = view
-                .window()
-                .ok_or("This computer's display isn't open.")?;
+            let window = view.window().ok_or("This computer's display isn't open.")?;
             work(&window, view)
         })
     })?

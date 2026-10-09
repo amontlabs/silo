@@ -9,7 +9,7 @@
 //! cirruslabs' macos-image-templates and the prompts follow Lume's `sip`
 //! command (both MIT).
 use super::engine;
-use super::input::{self, Keyboard, KeyEvent, Modifier, PointerKind, TextLine};
+use super::input::{self, KeyEvent, Keyboard, Modifier, PointerKind, TextLine};
 use super::store::Layout;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -258,9 +258,7 @@ impl<G: Guest> Driver<'_, G> {
 
     fn send(&mut self, events: Vec<KeyEvent>) -> Result<(), Failure> {
         self.guest.keys(events).map_err(|message| {
-            Failure::Fatal(format!(
-                "Silo lost the computer's setup window. {message}"
-            ))
+            Failure::Fatal(format!("Silo lost the computer's setup window. {message}"))
         })
     }
 
@@ -290,9 +288,9 @@ impl<G: Guest> Driver<'_, G> {
             (PointerKind::Down, 100),
             (PointerKind::Up, 0),
         ] {
-            self.guest
-                .pointer(kind, x, y)
-                .map_err(|message| Failure::Fatal(format!("Silo lost the setup window. {message}")))?;
+            self.guest.pointer(kind, x, y).map_err(|message| {
+                Failure::Fatal(format!("Silo lost the setup window. {message}"))
+            })?;
             self.guest.pause(Duration::from_millis(gap));
         }
         Ok(())
@@ -421,9 +419,11 @@ fn pick_options<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
 /// Opens Terminal with its shortcut, or from the Utilities menu when the
 /// shortcut does nothing.
 fn open_terminal<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
-    let shortcut = driver
-        .keyboard
-        .chord(&[Modifier::Shift, Modifier::Command], input::KEY_T, Some('t'));
+    let shortcut = driver.keyboard.chord(
+        &[Modifier::Shift, Modifier::Command],
+        input::KEY_T,
+        Some('t'),
+    );
     driver.send(shortcut)?;
     let shown = |screen: &Screen| {
         if screen.contains("bash") {
@@ -432,7 +432,12 @@ fn open_terminal<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
             Check::Waiting
         }
     };
-    match driver.wait_for("Terminal", Duration::from_secs(8), Duration::from_secs(8), shown) {
+    match driver.wait_for(
+        "Terminal",
+        Duration::from_secs(8),
+        Duration::from_secs(8),
+        shown,
+    ) {
         Ok(_) => return Ok(()),
         Err(Failure::Retry(_)) => {}
         Err(other) => return Err(other),
@@ -440,13 +445,23 @@ fn open_terminal<G: Guest>(driver: &mut Driver<'_, G>) -> Result<(), Failure> {
     let menu = driver
         .look()
         .and_then(|screen| screen.line_starting("utilities").cloned())
-        .ok_or_else(|| Failure::Retry(format!("Recovery has no Utilities menu. {}", driver.quote())))?;
+        .ok_or_else(|| {
+            Failure::Retry(format!(
+                "Recovery has no Utilities menu. {}",
+                driver.quote()
+            ))
+        })?;
     driver.click(&menu)?;
     driver.guest.pause(Duration::from_secs(1));
     let item = driver
         .look()
         .and_then(|screen| screen.line_starting("terminal").cloned())
-        .ok_or_else(|| Failure::Retry(format!("The Utilities menu has no Terminal. {}", driver.quote())))?;
+        .ok_or_else(|| {
+            Failure::Retry(format!(
+                "The Utilities menu has no Terminal. {}",
+                driver.quote()
+            ))
+        })?;
     driver.click(&item)?;
     driver.wait_for("Terminal", TERMINAL_WAIT, Duration::from_secs(8), shown)?;
     Ok(())
@@ -472,19 +487,24 @@ fn answer_prompts<G: Guest>(
         return Ok(());
     }
     loop {
-        let wait = if authenticated { RESULT_WAIT } else { PROMPT_WAIT };
-        let prompt = driver.wait_for("a csrutil prompt", wait, Duration::from_secs(5), |screen| {
-            match classify(&screen.text) {
-                Some(Prompt::Done) => Check::Found(Prompt::Done),
-                Some(Prompt::Rejected(reason)) => Check::Rejected(reason),
-                Some(Prompt::Confirm) if !confirmed => Check::Found(Prompt::Confirm),
-                Some(Prompt::Username) if !named => Check::Found(Prompt::Username),
-                Some(Prompt::Password(who)) if !authenticated => {
-                    Check::Found(Prompt::Password(who))
+        let wait = if authenticated {
+            RESULT_WAIT
+        } else {
+            PROMPT_WAIT
+        };
+        let prompt =
+            driver.wait_for("a csrutil prompt", wait, Duration::from_secs(5), |screen| {
+                match classify(&screen.text) {
+                    Some(Prompt::Done) => Check::Found(Prompt::Done),
+                    Some(Prompt::Rejected(reason)) => Check::Rejected(reason),
+                    Some(Prompt::Confirm) if !confirmed => Check::Found(Prompt::Confirm),
+                    Some(Prompt::Username) if !named => Check::Found(Prompt::Username),
+                    Some(Prompt::Password(who)) if !authenticated => {
+                        Check::Found(Prompt::Password(who))
+                    }
+                    _ => Check::Waiting,
                 }
-                _ => Check::Waiting,
-            }
-        })?;
+            })?;
         match prompt {
             Some(Prompt::Done) => return Ok(()),
             Some(Prompt::Confirm) => {
@@ -569,7 +589,10 @@ mod tests {
 
     #[test]
     fn a_line_is_found_by_its_start() {
-        let screen = Screen::new(vec![line("Recovery", 0.1, 0.9), line("Utilities", 0.3, 0.9)]);
+        let screen = Screen::new(vec![
+            line("Recovery", 0.1, 0.9),
+            line("Utilities", 0.3, 0.9),
+        ]);
         assert_eq!(screen.line_starting("utilities").unwrap().x, 0.3);
         assert!(screen.line_starting("terminal").is_none());
     }
@@ -657,7 +680,12 @@ mod tests {
                 }
                 Phase::Main => {
                     if self.menu_open {
-                        vec!["Recovery", "Utilities", "Startup Security Utility", "Terminal ⇧⌘T"]
+                        vec![
+                            "Recovery",
+                            "Utilities",
+                            "Startup Security Utility",
+                            "Terminal ⇧⌘T",
+                        ]
                     } else {
                         vec!["Recovery", "File", "Utilities", "Restore from Time Machine"]
                     }
@@ -668,7 +696,9 @@ mod tests {
                     "Allow booting unsigned operating systems? [y/n]:",
                 ],
                 Phase::Username => vec!["[y/n]: y", "Enter a username of an authorized user:"],
-                Phase::Password if self.username_prompt => vec!["authorized user: silo", "Password:"],
+                Phase::Password if self.username_prompt => {
+                    vec!["authorized user: silo", "Password:"]
+                }
                 Phase::Password => vec!["[y/n]: y", "Enter password for user silo:"],
                 Phase::Result => vec!["System Integrity Protection is off."],
                 Phase::Rejected => vec![
