@@ -10,6 +10,10 @@ mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod guest_screen;
+mod input;
+mod recovery;
 mod restore_image;
 mod store;
 
@@ -773,12 +777,18 @@ fn machine_stopped(app: &AppHandle, id: &str, error: Option<String>) {
 // MARK: Display
 
 fn open_display(app: &AppHandle, id: &str) -> Result<(), String> {
-    use tauri::{WebviewUrl, WebviewWindowBuilder};
     require_supported()?;
     let (record, state) = computer(id)?;
     if state != State::Running {
         return Err("Start the computer to open its display.".into());
     }
+    show_display(app, id, &record.name)
+}
+
+/// Opens the window that shows a running computer's screen, or brings the
+/// existing one forward.
+fn show_display(app: &AppHandle, id: &str, title: &str) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
     let label = display_label(id);
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.show();
@@ -790,7 +800,7 @@ fn open_display(app: &AppHandle, id: &str) -> Result<(), String> {
     // has no access to Silo's commands. The machine's screen is a native view on top.
     let blank = tauri::Url::parse("about:blank").map_err(|error| error.to_string())?;
     let display = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
-        .title(&record.name)
+        .title(title)
         .inner_size(1440., 900.)
         .min_inner_size(640., 400.)
         .resizable(true)

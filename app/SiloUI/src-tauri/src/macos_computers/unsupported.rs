@@ -2,6 +2,7 @@
 //! macOS guests. Every operation reports that the host is unsupported.
 // The shared workflow code names variants that this host never produces.
 #![allow(dead_code)]
+use super::input::{KeyEvent, PointerKind, TextLine};
 use super::store::{HostLimits, Layout, Record};
 use std::path::Path;
 use tauri::AppHandle;
@@ -58,6 +59,44 @@ pub(super) fn install(
 
 pub(super) fn start(_app: &AppHandle, _record: &Record, _layout: &Layout) -> Result<(), String> {
     Err(UNSUPPORTED.into())
+}
+
+pub(super) fn start_in_recovery(
+    _app: &AppHandle,
+    _record: &Record,
+    _layout: &Layout,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn focus_display(_app: &AppHandle, _id: &str) -> Result<isize, String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn send_keys(_app: &AppHandle, _id: &str, _events: Vec<KeyEvent>) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn send_pointer(
+    _app: &AppHandle,
+    _id: &str,
+    _kind: PointerKind,
+    _x: f64,
+    _y: f64,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn read_screen(_app: &AppHandle, _id: &str) -> Result<Vec<TextLine>, String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn wait_until_stopped(
+    _app: &AppHandle,
+    _id: &str,
+    _timeout: std::time::Duration,
+) -> bool {
+    true
 }
 
 pub(super) fn request_stop(_app: &AppHandle, _id: &str) -> Result<(), String> {

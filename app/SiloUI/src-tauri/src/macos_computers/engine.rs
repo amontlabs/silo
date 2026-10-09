@@ -6,6 +6,8 @@
 //! Worker threads reach the main thread through `on_main`, which waits for the
 //! closure's result. The closure itself never waits for a framework callback;
 //! callbacks send their result over a channel that the worker reads.
+use super::guest_screen;
+use super::input::{KeyEvent, PointerKind, TextLine};
 use super::store::{self, HostLimits, Layout, Record};
 use block2::RcBlock;
 use objc2::{
@@ -685,6 +687,24 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 // MARK: Running
 
 pub(super) fn start(app: &AppHandle, record: &Record, layout: &Layout) -> Result<(), String> {
+    start_machine(app, record, layout, false)
+}
+
+/// Starts the computer in macOS Recovery instead of its installed system.
+pub(super) fn start_in_recovery(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+) -> Result<(), String> {
+    start_machine(app, record, layout, true)
+}
+
+fn start_machine(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+    recovery: bool,
+) -> Result<(), String> {
     let model = read(&layout.hardware_model(), "hardware model")?;
     let identifier = read(&layout.machine_identifier(), "identity")?;
     let (send, receive) = mpsc::channel::<Result<(), String>>();
@@ -719,7 +739,15 @@ pub(super) fn start(app: &AppHandle, record: &Record, layout: &Layout) -> Result
             let _ = send.send(result);
         });
         // SAFETY: Main thread; the handler runs on the main queue.
-        unsafe { vm.startWithCompletionHandler(&handler) };
+        unsafe {
+            if recovery {
+                let options = VZMacOSVirtualMachineStartOptions::new();
+                options.setStartUpFromMacOSRecovery(true);
+                vm.startWithOptions_completionHandler(&options, &handler);
+            } else {
+                vm.startWithCompletionHandler(&handler);
+            }
+        }
         Ok(())
     })??;
     // The framework always answers a start. Giving up earlier would leave a machine
@@ -881,6 +909,88 @@ pub(super) fn detach_display(app: &AppHandle, id: &str) {
             }
         });
     });
+}
+
+// MARK: Driving the display
+
+/// Runs `work` on the main thread with the window that shows the machine's screen.
+fn with_display_window<T: Send + 'static>(
+    app: &AppHandle,
+    id: &str,
+    work: impl FnOnce(&NSWindow, &VZVirtualMachineView) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let id = id.to_string();
+    on_main(app, move |_| {
+        SLOTS.with(|slots| {
+            let slots = slots.borrow();
+            let view = slots
+                .get(&id)
+                .and_then(|slot| slot.view.as_ref())
+                .ok_or("This computer's display isn't open.")?;
+            let window = view
+                .window()
+                .ok_or("This computer's display isn't open.")?;
+            work(&window, view)
+        })
+    })?
+}
+
+/// Brings the display window forward with the machine's view first in line for
+/// keys, and returns the window's number.
+pub(super) fn focus_display(app: &AppHandle, id: &str) -> Result<isize, String> {
+    with_display_window(app, id, |window, view| {
+        window.makeKeyAndOrderFront(None);
+        let responder: &NSResponder = view;
+        window.makeFirstResponder(Some(responder));
+        Ok(window.windowNumber())
+    })
+}
+
+pub(super) fn send_keys(app: &AppHandle, id: &str, events: Vec<KeyEvent>) -> Result<(), String> {
+    with_display_window(app, id, move |window, _| {
+        guest_screen::deliver_keys(window, &events)
+    })
+}
+
+/// Moves, presses or releases the pointer at a position given as fractions of
+/// the display window, measured from its bottom left.
+pub(super) fn send_pointer(
+    app: &AppHandle,
+    id: &str,
+    kind: PointerKind,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    with_display_window(app, id, move |window, _| {
+        guest_screen::deliver_pointer(window, kind, x, y)
+    })
+}
+
+/// The text on the machine's screen, as shown in its display window.
+pub(super) fn read_screen(app: &AppHandle, id: &str) -> Result<Vec<TextLine>, String> {
+    let number = with_display_window(app, id, |window, _| Ok(window.windowNumber()))?;
+    let image = guest_screen::capture(number)?;
+    guest_screen::recognize(&image)
+}
+
+/// Whether the machine has stopped (or is gone) within `timeout`.
+pub(super) fn wait_until_stopped(app: &AppHandle, id: &str, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let stopped = machine_states(app).is_ok_and(|states| {
+            states
+                .iter()
+                .find(|(machine, _)| machine == id)
+                .is_none_or(|(_, state)| *state != MachineState::Running)
+        });
+        if stopped {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }
 
 #[cfg(test)]
