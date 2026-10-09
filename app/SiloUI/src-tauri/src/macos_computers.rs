@@ -45,6 +45,8 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 /// How long a guest may ignore a stop request before the computer counts as running again.
 const STOP_IGNORED_AFTER: Duration = Duration::from_secs(20);
 const GRACEFUL_QUIT: Duration = Duration::from_secs(60);
+/// Quit waits less for a guest's SSH shutdown than a user-initiated Stop does.
+const QUIT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 const FORCED_QUIT: Duration = Duration::from_secs(8);
 
 /// Why a creation workflow was asked to end.
@@ -212,6 +214,7 @@ impl Registry {
             entry.state = State::Stopping;
             entry.since = Instant::now();
         }
+        entry.detail = None;
         Some(before)
     }
 
@@ -795,16 +798,80 @@ fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What the guest shows when Stop reaches it through the framework: macOS asks its user to
+/// confirm the shutdown.
+const CONFIRM_IN_SCREEN: &str =
+    "macOS is asking to confirm in the computer's screen. Confirm there, or use Force stop.";
+const SSH_SHUTDOWN: &str = "sudo -n /sbin/shutdown -h now";
+const SSH_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How a graceful stop is first attempted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopPlan {
+    /// The account exists: shut down inside the guest, with no prompt.
+    Shutdown,
+    /// No account to log in with: ask the framework, which makes macOS ask for confirmation.
+    RequestStop,
+}
+
+fn stop_plan(setup_complete: bool) -> StopPlan {
+    if setup_complete {
+        StopPlan::Shutdown
+    } else {
+        StopPlan::RequestStop
+    }
+}
+
+/// Whether the shutdown command was accepted. `ssh` exits with 255 when the guest closes the
+/// connection as it goes down.
+fn shutdown_accepted(result: &Result<guest_access::CommandOutput, String>) -> bool {
+    matches!(result, Ok(output) if output.status == 0 || output.status == 255)
+}
+
+/// Shuts the guest down over SSH; false when it could not be done.
+fn shutdown_over_ssh(app: &AppHandle, record: &Record, timeout: Duration) -> bool {
+    let Ok(data) = app_data(app) else {
+        return false;
+    };
+    let layout = Layout::new(&data, &record.id);
+    shutdown_accepted(&guest_access::run(
+        &layout,
+        record,
+        SSH_SHUTDOWN,
+        None,
+        timeout,
+    ))
+}
+
+/// Asks a running computer to stop. Returns the note to show when the framework's request was
+/// used, because the guest is then waiting for a confirmation nobody gave.
+fn request_graceful_stop(
+    app: &AppHandle,
+    record: &Record,
+    timeout: Duration,
+) -> Result<Option<&'static str>, String> {
+    if stop_plan(record.setup.complete()) == StopPlan::Shutdown
+        && shutdown_over_ssh(app, record, timeout)
+    {
+        return Ok(None);
+    }
+    engine::request_stop(app, &record.id)?;
+    Ok(Some(CONFIRM_IN_SCREEN))
+}
+
 fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (_, state) = computer(id)?;
+    let (record, state) = computer(id)?;
     if !matches!(state, State::Running | State::Stopping) {
         return Err("This computer isn't running.".into());
     }
-    engine::request_stop(app, id)?;
+    let note = request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT)?;
     update(app, id, |entry| {
         if entry.state == State::Running {
             entry.state = State::Stopping;
             entry.since = Instant::now();
+        }
+        if matches!(entry.state, State::Running | State::Stopping) {
+            entry.detail = note.map(str::to_string);
         }
     });
     Ok(())
@@ -1099,9 +1166,18 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     {
         std::thread::sleep(Duration::from_millis(250));
     }
-    for id in &machines {
-        let _ = engine::request_stop(app, id);
-    }
+    // Over SSH each guest shuts itself down without a prompt; the rest are asked through the framework.
+    std::thread::scope(|scope| {
+        for id in &machines {
+            scope.spawn(move || {
+                if let Ok((record, _)) = computer(id) {
+                    let _ = request_graceful_stop(app, &record, QUIT_SHUTDOWN_TIMEOUT);
+                } else {
+                    let _ = engine::request_stop(app, id);
+                }
+            });
+        }
+    });
     let limit = |wait: Duration| {
         let at = Instant::now() + wait;
         deadline.map_or(at, |deadline| at.min(deadline))
@@ -1141,6 +1217,27 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_shuts_down_inside_the_guest_only_once_setup_is_complete() {
+        assert_eq!(stop_plan(true), StopPlan::Shutdown);
+        assert_eq!(stop_plan(false), StopPlan::RequestStop);
+    }
+
+    #[test]
+    fn a_shutdown_counts_when_the_command_ran_or_the_guest_hung_up() {
+        let output = |status| {
+            Ok(guest_access::CommandOutput {
+                status,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        };
+        assert!(shutdown_accepted(&output(0)));
+        assert!(shutdown_accepted(&output(255)));
+        assert!(!shutdown_accepted(&output(1)));
+        assert!(!shutdown_accepted(&Err("took too long".into())));
+    }
 
     #[test]
     fn rows_serialize_to_the_frontend_contract() {

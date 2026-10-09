@@ -72,6 +72,7 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
   const detail = <span className="grid gap-1">
     <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
     {(computer.state === "failed" || settingUp) && computer.detail && <span role={settingUp ? undefined : "alert"} className="whitespace-normal">{computer.detail}</span>}
+    {(computer.state === "running" || computer.state === "stopping") && computer.detail && <span className="whitespace-normal">{computer.detail}</span>}
     {(creating || settingUp) && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
   </span>
 

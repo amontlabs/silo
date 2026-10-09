@@ -18,7 +18,7 @@ use objc2::{
     sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSEvent, NSEventMask, NSResponder, NSToolbar, NSToolbarDelegate,
+    NSEvent, NSEventMask, NSLayoutGuide, NSResponder, NSToolbar, NSToolbarDelegate,
     NSToolbarDisplayMode, NSToolbarItem, NSView, NSWindow,
 };
 use objc2_foundation::{
@@ -1052,14 +1052,29 @@ pub(super) fn attach_display(
                 view.setVirtualMachine(Some(&slot.vm));
                 view.setCapturesSystemKeys(true);
                 view.setAutomaticallyReconfiguresDisplay(true);
-                view.setFrame(content.bounds());
-                view.setAutoresizingMask(
-                    NSAutoresizingMaskOptions::ViewWidthSizable
-                        | NSAutoresizingMaskOptions::ViewHeightSizable,
-                );
                 let responder: &NSResponder = &view;
                 let content_view: &NSView = &content;
                 content_view.addSubview(&view);
+                // The window may draw its content under the title bar and toolbar. The
+                // content layout guide is the area they leave free, and it follows resizing
+                // and full screen, so the screen (and its automatic resolution) fits it.
+                let guide: Retained<NSLayoutGuide> = Retained::cast_unchecked(
+                    native
+                        .contentLayoutGuide()
+                        .ok_or("Silo could not open the display.")?,
+                );
+                view.setTranslatesAutoresizingMaskIntoConstraints(false);
+                for constraint in [
+                    view.topAnchor().constraintEqualToAnchor(&guide.topAnchor()),
+                    view.bottomAnchor()
+                        .constraintEqualToAnchor(&guide.bottomAnchor()),
+                    view.leadingAnchor()
+                        .constraintEqualToAnchor(&guide.leadingAnchor()),
+                    view.trailingAnchor()
+                        .constraintEqualToAnchor(&guide.trailingAnchor()),
+                ] {
+                    constraint.setActive(true);
+                }
                 native.makeFirstResponder(Some(responder));
                 slot.view = Some(view);
             }

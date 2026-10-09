@@ -73,6 +73,15 @@ it("renders every state with its label, resources and progress", async () => {
   expect(within(row("broken")).getByRole("alert")).toHaveTextContent("The macOS download did not finish.")
 })
 
+it("shows the note that macOS is waiting for a confirmation while a computer runs or stops", async () => {
+  const note = "macOS is asking to confirm in the computer's screen. Confirm there, or use Force stop."
+  const running = { ...macosComputerFixtures.find(computer => computer.state === "running")!, name: "waiting", detail: note }
+  renderSection(backendFor([running, { ...running, id: "mac-stopping", name: "going", state: "stopping" }]))
+  await screen.findByText("waiting")
+  expect(row("waiting")).toHaveTextContent(note)
+  expect(row("going")).toHaveTextContent(note)
+})
+
 it("offers the actions that fit each state", async () => {
   renderSection(backendFor(macosComputerFixtures))
   await loaded()
