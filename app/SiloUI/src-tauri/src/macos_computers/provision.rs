@@ -42,7 +42,8 @@ pub(super) fn run(
     };
     let result = provision.steps(record);
     if result.is_err() {
-        provision.stop_machine();
+        // Nothing may report the setup as over while the machine can still run.
+        provision.ensure_stopped();
     }
     result
 }
@@ -100,7 +101,7 @@ impl Provision<'_> {
             return Ok(());
         }
         self.say("Starting macOS")?;
-        self.boot()?;
+        self.boot(Login::Key)?;
         if !record.setup.sip {
             self.say("Checking System Integrity Protection")?;
             self.verify_sip_disabled()?;
@@ -135,21 +136,30 @@ impl Provision<'_> {
         });
         offline_setup::run(&self.layout.disk(), &account, &key, release)?;
         self.say("Starting macOS")?;
-        self.boot()?;
+        self.boot(Login::Password)?;
         self.say("Finishing the account")?;
         self.finalize(&account)?;
         self.shut_down()?;
         self.mark(record, |setup| setup.account = true)
     }
 
+    /// Runs the root script with the account's password, which is the only
+    /// credential a new guest has, then checks that the key and `sudo -n` work.
     fn finalize(&self, account: &guest_access::GuestAccount) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
-        let script = base64_encode(offline_setup::finalization_script().as_bytes());
+        let public_key = guest_access::public_key(account)?;
+        let script = base64_encode(offline_setup::finalization_script(&public_key).as_bytes());
         let command = format!(
-            "printf '%s\\n' {} | /usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'",
-            guest_access::shell_quote(&account.password)
+            "/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'"
         );
-        let output = guest_access::run(&layout, &record, &command, None, GUEST_COMMAND)?;
+        let password = format!("{}\n", account.password);
+        let output = guest_access::run_with_password(
+            &layout,
+            &record,
+            &command,
+            Some(password.as_bytes()),
+            GUEST_COMMAND,
+        )?;
         if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
             return Err(Stop::Failed(format!(
                 "Silo could not finish setting up the account in the computer: {}",
@@ -165,7 +175,7 @@ impl Provision<'_> {
         )?;
         if output.status != 0 {
             return Err(Stop::Failed(
-                "The computer's account cannot run administrator commands without a password."
+                "Silo cannot log in to the computer with its key and run administrator commands."
                     .into(),
             ));
         }
@@ -191,19 +201,24 @@ impl Provision<'_> {
     }
 
     /// Boots the computer without a display and waits for SSH.
-    fn boot(&self) -> Result<(), Stop> {
+    fn boot(&self, login: Login) -> Result<(), Stop> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         engine::start(self.app, &record, &layout)?;
-        guest_access::wait_for_ssh(&layout, &record, SSH_WAIT, &|| self.cancelled()).map_err(
-            |message| {
-                if self.cancelled() {
-                    Stop::Cancelled
-                } else {
-                    Stop::Failed(message)
-                }
-            },
-        )?;
+        let cancelled = || self.cancelled();
+        match login {
+            Login::Key => guest_access::wait_for_ssh(&layout, &record, SSH_WAIT, &cancelled),
+            Login::Password => {
+                guest_access::wait_for_password_ssh(&layout, &record, SSH_WAIT, &cancelled)
+            }
+        }
+        .map_err(|message| {
+            if self.cancelled() {
+                Stop::Cancelled
+            } else {
+                Stop::Failed(message)
+            }
+        })?;
         Ok(())
     }
 
@@ -270,15 +285,33 @@ impl Provision<'_> {
         }
     }
 
-    /// Stops the computer's machine after a failed or cancelled setup.
-    fn stop_machine(&self) {
-        let held = engine::machine_states(self.app)
-            .is_ok_and(|states| states.iter().any(|(id, _)| *id == self.id));
-        if held {
+    /// Stops the computer's machine after a failed or cancelled setup and returns
+    /// only once the framework holds no machine for it. Until then the computer
+    /// stays in setup, so it can be neither deleted nor reported as stopped.
+    fn ensure_stopped(&self) {
+        loop {
+            let held = engine::machine_states(self.app)
+                .map_or(true, |states| states.iter().any(|(id, _)| *id == self.id));
+            if !held {
+                return;
+            }
+            set_detail(self.app, &self.id, "Stopping the computer");
             let _ = engine::force_stop(self.app, &self.id);
-            let _ = self.wait_stopped(FORCED_STOP_WAIT);
+            if self.wait_stopped(FORCED_STOP_WAIT).is_ok() {
+                return;
+            }
+            std::thread::sleep(MACHINE_POLL);
         }
     }
+}
+
+/// How the first connection to a boot proves who it is.
+#[derive(Clone, Copy)]
+enum Login {
+    /// The account's key, installed by the finalization.
+    Key,
+    /// The account's password, for a guest whose key is not installed yet.
+    Password,
 }
 
 fn sip_disabled(csrutil_status: &str) -> bool {
@@ -297,7 +330,7 @@ mod tests {
     #[test]
     fn the_finalization_script_survives_the_shell_round_trip() {
         use base64::Engine;
-        let script = offline_setup::finalization_script();
+        let script = offline_setup::finalization_script("ssh-ed25519 AAAA test");
         let encoded = base64_encode(script.as_bytes());
         assert!(!encoded.contains('\''));
         let decoded = base64::engine::general_purpose::STANDARD

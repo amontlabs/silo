@@ -218,26 +218,89 @@ fn quote_option(path: &Path) -> String {
     format!("\"{}\"", path.to_string_lossy().replace('"', "\\\""))
 }
 
+/// How a connection proves who it is. Only the first connection to a new guest
+/// uses the password; everything after it uses the key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Auth {
+    Key,
+    Password,
+}
+
+fn askpass(layout: &Layout) -> PathBuf {
+    directory(layout).join("askpass")
+}
+
+/// Writes the helper `ssh` runs to ask for the password. It prints the password
+/// file, so the password never appears in an argument or the environment.
+fn ensure_askpass(layout: &Layout) -> Result<PathBuf, String> {
+    let path = askpass(layout);
+    let script = format!(
+        "#!/bin/sh\nexec /bin/cat {}\n",
+        shell_quote(&directory(layout).join("password").to_string_lossy())
+    );
+    if fs::read_to_string(&path).is_ok_and(|current| current == script) {
+        return Ok(path);
+    }
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o700)
+        .open(&path)
+        .and_then(|mut file| file.write_all(script.as_bytes()))
+        .map_err(|error| store::io_error("save the computer's password helper", &error))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+        .map_err(|error| store::io_error("protect the computer's password helper", &error))?;
+    Ok(path)
+}
+
+/// Environment variables a connection needs.
+fn environment(layout: &Layout, auth: Auth) -> Result<Vec<(String, String)>, String> {
+    match auth {
+        Auth::Key => Ok(Vec::new()),
+        Auth::Password => Ok(vec![
+            (
+                "SSH_ASKPASS".into(),
+                ensure_askpass(layout)?.to_string_lossy().into_owned(),
+            ),
+            ("SSH_ASKPASS_REQUIRE".into(), "force".into()),
+        ]),
+    }
+}
+
 /// Options shared by `ssh` and `scp`.
-fn tool_options(layout: &Layout, record: &Record, account: &GuestAccount) -> Vec<String> {
+fn tool_options(
+    layout: &Layout,
+    record: &Record,
+    account: &GuestAccount,
+    auth: Auth,
+) -> Vec<String> {
     let option = |text: String| ["-o".to_string(), text];
-    let mut args = vec![
-        "-F".to_string(),
-        "/dev/null".into(),
-        "-i".into(),
-        account.key.to_string_lossy().into_owned(),
-    ];
-    for text in [
-        "IdentitiesOnly=yes".to_string(),
-        "BatchMode=yes".into(),
-        "PasswordAuthentication=no".into(),
-        "StrictHostKeyChecking=accept-new".into(),
+    let mut args = vec!["-F".to_string(), "/dev/null".into()];
+    let mut options = match auth {
+        Auth::Key => {
+            args.extend(["-i".to_string(), account.key.to_string_lossy().into_owned()]);
+            vec![
+                "IdentitiesOnly=yes".to_string(),
+                "BatchMode=yes".into(),
+                "PasswordAuthentication=no".into(),
+            ]
+        }
+        Auth::Password => vec![
+            "PubkeyAuthentication=no".to_string(),
+            "PreferredAuthentications=password,keyboard-interactive".into(),
+            "NumberOfPasswordPrompts=1".into(),
+        ],
+    };
+    options.extend([
+        "StrictHostKeyChecking=accept-new".to_string(),
         format!("UserKnownHostsFile={}", quote_option(&known_hosts(layout))),
         format!("HostKeyAlias=silo-{}", record.id),
         format!("ConnectTimeout={CONNECT_TIMEOUT}"),
         "ServerAliveInterval=15".into(),
         "LogLevel=ERROR".into(),
-    ] {
+    ]);
+    for text in options {
         args.extend(option(text));
     }
     args
@@ -249,8 +312,9 @@ fn ssh_args(
     account: &GuestAccount,
     address: Ipv4Addr,
     command: &str,
+    auth: Auth,
 ) -> Vec<String> {
-    let mut args = tool_options(layout, record, account);
+    let mut args = tool_options(layout, record, account, auth);
     args.push(format!("{}@{address}", account.user));
     args.push(command.into());
     args
@@ -265,7 +329,7 @@ fn scp_args(
     remote: &str,
 ) -> Vec<String> {
     let mut args = vec!["-q".to_string()];
-    args.extend(tool_options(layout, record, account));
+    args.extend(tool_options(layout, record, account, Auth::Key));
     args.push(local.to_string_lossy().into_owned());
     args.push(format!("{}@{address}:{remote}", account.user));
     args
@@ -278,15 +342,37 @@ pub(crate) fn wait_for_ssh(
     timeout: Duration,
     cancel: &dyn Fn() -> bool,
 ) -> Result<Ipv4Addr, String> {
+    wait(layout, record, timeout, cancel, Auth::Key)
+}
+
+/// Waits until the guest answers a password login. Only a guest whose key is not
+/// installed yet needs this.
+pub(super) fn wait_for_password_ssh(
+    layout: &Layout,
+    record: &Record,
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<Ipv4Addr, String> {
+    wait(layout, record, timeout, cancel, Auth::Password)
+}
+
+fn wait(
+    layout: &Layout,
+    record: &Record,
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+    auth: Auth,
+) -> Result<Ipv4Addr, String> {
     let account = account(layout)?;
+    let envs = environment(layout, auth)?;
     let deadline = Instant::now() + timeout;
     loop {
         if cancel() {
             return Err(CANCELLED.into());
         }
         if let Ok(address) = guest_address(&record.mac_address) {
-            let args = ssh_args(layout, record, &account, address, "true");
-            if exec(SSH, &args, None, SSH_PROBE).is_ok_and(|output| output.status == 0) {
+            let args = ssh_args(layout, record, &account, address, "true", auth);
+            if exec(SSH, &args, None, SSH_PROBE, &envs).is_ok_and(|output| output.status == 0) {
                 return Ok(address);
             }
         }
@@ -305,13 +391,36 @@ pub(crate) fn run(
     stdin: Option<&[u8]>,
     timeout: Duration,
 ) -> Result<CommandOutput, String> {
+    run_as(layout, record, command, stdin, timeout, Auth::Key)
+}
+
+/// Like `run`, logging in with the password.
+pub(super) fn run_with_password(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<CommandOutput, String> {
+    run_as(layout, record, command, stdin, timeout, Auth::Password)
+}
+
+fn run_as(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    stdin: Option<&[u8]>,
+    timeout: Duration,
+    auth: Auth,
+) -> Result<CommandOutput, String> {
     let account = account(layout)?;
     let address = guest_address(&record.mac_address)?;
     exec(
         SSH,
-        &ssh_args(layout, record, &account, address, command),
+        &ssh_args(layout, record, &account, address, command, auth),
         stdin,
         timeout,
+        &environment(layout, auth)?,
     )
 }
 
@@ -332,6 +441,7 @@ pub(crate) fn copy(
         &scp_args(layout, record, &account, address, local, remote),
         None,
         timeout,
+        &[],
     )?;
     if output.status == 0 {
         Ok(())
@@ -349,9 +459,11 @@ fn exec(
     args: &[String],
     stdin: Option<&[u8]>,
     timeout: Duration,
+    envs: &[(String, String)],
 ) -> Result<CommandOutput, String> {
     let mut child = Command::new(program)
         .args(args)
+        .envs(envs.iter().map(|(key, value)| (key, value)))
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -501,6 +613,7 @@ mod tests {
             &account,
             Ipv4Addr::new(192, 168, 64, 9),
             "sudo -n true",
+            Auth::Key,
         );
         assert_eq!(&args[..2], ["-F", "/dev/null"]);
         for option in [
@@ -518,6 +631,47 @@ mod tests {
                 && arg.ends_with("guest-access/known_hosts\"")));
         assert_eq!(args[args.len() - 2], "silo@192.168.64.9");
         assert_eq!(args[args.len() - 1], "sudo -n true");
+    }
+
+    #[test]
+    fn the_first_connection_logs_in_with_the_password_through_an_askpass_helper() {
+        let (_dir, layout, record, account) = fixture();
+        let account_files = super::account(&layout).unwrap();
+        let args = ssh_args(
+            &layout,
+            &record,
+            &account,
+            Ipv4Addr::new(192, 168, 64, 9),
+            "true",
+            Auth::Password,
+        );
+        assert!(args.contains(&"PubkeyAuthentication=no".to_string()));
+        assert!(args.contains(&"NumberOfPasswordPrompts=1".to_string()));
+        assert!(!args.iter().any(|arg| arg == "BatchMode=yes" || arg == "-i"));
+        // The password itself is never an argument.
+        assert!(!args.iter().any(|arg| arg.contains(&account_files.password)));
+
+        let envs = environment(&layout, Auth::Password).unwrap();
+        assert!(envs.contains(&("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string())));
+        let helper = envs.iter().find(|(key, _)| key == "SSH_ASKPASS").unwrap();
+        assert!(envs
+            .iter()
+            .all(|(_, value)| !value.contains(&account_files.password)));
+        let path = PathBuf::from(&helper.1);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let output = exec(
+            path.to_str().unwrap(),
+            &["Password:".to_string()],
+            None,
+            Duration::from_secs(5),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(output.stdout, account_files.password);
+        assert!(environment(&layout, Auth::Key).unwrap().is_empty());
     }
 
     #[test]
@@ -573,6 +727,7 @@ mod tests {
             &args("cat; echo err >&2; exit 3"),
             Some(b"in"),
             Duration::from_secs(5),
+            &[("SILO_TEST".to_string(), "env".to_string())],
         )
         .unwrap();
         assert_eq!(output.status, 3);
@@ -582,7 +737,8 @@ mod tests {
             "/bin/sh",
             &args("sleep 5"),
             None,
-            Duration::from_millis(200)
+            Duration::from_millis(200),
+            &[]
         )
         .is_err());
     }

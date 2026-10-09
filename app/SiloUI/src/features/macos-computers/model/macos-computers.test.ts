@@ -12,7 +12,7 @@ import {
   type MacosComputersBackend,
 } from "./macos-computers"
 
-const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, setupComplete: true }
+const computer: MacosComputer = { id: "a", name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: "26.6.2 (25G83)", state: "stopped", progress: null, detail: null, displayOpen: false, installed: true, setupComplete: true }
 const state = { supported: true, unsupportedReason: null, computers: [computer] }
 
 describe("macOS computers payload", () => {
@@ -27,6 +27,8 @@ describe("macOS computers payload", () => {
     expect(() => parseMacosComputersState({ supported: true, computers: [] })).toThrow()
     const { setupComplete: _omitted, ...withoutSetup } = computer
     expect(() => parseMacosComputersState({ ...state, computers: [withoutSetup] })).toThrow()
+    const { installed: _installed, ...withoutInstalled } = computer
+    expect(() => parseMacosComputersState({ ...state, computers: [withoutInstalled] })).toThrow()
     expect(parseMacosComputersState({ ...state, computers: [{ ...computer, state: "setting-up", detail: "Creating the account", setupComplete: false }] }).computers[0].state).toBe("setting-up")
   })
 })
@@ -55,6 +57,7 @@ describe("macOS computer setup", () => {
     expect(retry({})).toBe(false)
     expect(retry({ setupComplete: false })).toBe(true)
     expect(retry({ setupComplete: false, state: "failed" })).toBe(true)
+    expect(retry({ setupComplete: false, state: "failed", installed: false })).toBe(false)
     expect(retry({ setupComplete: false, state: "setting-up" })).toBe(false)
     expect(retry({ setupComplete: false, state: "running" })).toBe(false)
   })
