@@ -23,6 +23,8 @@ use std::{
     time::Duration,
 };
 
+/// The exit status of the finalization script when the Preboot volume could not be updated.
+pub(super) const PREBOOT_FAILED: i32 = 70;
 const UID: &str = "501";
 const GID: &str = "20";
 const PBKDF2_ITERATIONS: u32 = 50_000;
@@ -670,22 +672,27 @@ pub(super) fn finalization_script(public_key: &str) -> String {
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTrueToneSetup -bool true
 /usr/sbin/chown root:wheel /etc/kcpassword
 /bin/chmod 600 /etc/kcpassword
-/usr/sbin/chown root:wheel /var/db/dslocal/nodes/Default/users/{USER}.plist || true
-/usr/sbin/chown root:wheel /Library/Preferences/com.apple.loginwindow.plist /Library/Preferences/com.apple.SetupAssistant.plist /Library/Preferences/.GlobalPreferences.plist /Library/Preferences/com.apple.PowerManagement.plist || true
-/usr/sbin/chown root:wheel /var/db/com.apple.xpc.launchd/disabled.plist /var/db/com.apple.xpc.launchd/disabled.migrated || true
+/usr/sbin/chown root:wheel /var/db/dslocal/nodes/Default/users/{USER}.plist 2>/dev/null || true
+/usr/sbin/chown root:wheel /Library/Preferences/com.apple.loginwindow.plist /Library/Preferences/com.apple.SetupAssistant.plist /Library/Preferences/.GlobalPreferences.plist /Library/Preferences/com.apple.PowerManagement.plist 2>/dev/null || true
+/usr/sbin/chown root:wheel /var/db/com.apple.xpc.launchd/disabled.plist /var/db/com.apple.xpc.launchd/disabled.migrated 2>/dev/null || true
 /bin/mkdir -p /Users/{USER}/.ssh
 /usr/bin/printf '%s\\n' {authorized_key} > /Users/{USER}/.ssh/authorized_keys
 /usr/sbin/chown {UID}:{GID} /Users/{USER}
-/usr/sbin/chown {UID}:{GID} /Users/{USER}/.CFUserTextEncoding /Users/{USER}/Library /Users/{USER}/Library/Preferences /Users/{USER}/Library/Preferences/ByHost /Users/{USER}/Library/Preferences/*.plist || true
+/usr/sbin/chown {UID}:{GID} /Users/{USER}/.CFUserTextEncoding /Users/{USER}/Library /Users/{USER}/Library/Preferences /Users/{USER}/Library/Preferences/ByHost /Users/{USER}/Library/Preferences/*.plist 2>/dev/null || true
 /usr/sbin/chown -R {UID}:{GID} /Users/{USER}/.ssh
 /bin/chmod 700 /Users/{USER}/.ssh
 /bin/chmod 600 /Users/{USER}/.ssh/authorized_keys
 /usr/bin/printf '%s\\n' '{sudoers_entry}' > /etc/sudoers.d/{USER}.new
-/usr/sbin/visudo -cf /etc/sudoers.d/{USER}.new
+/usr/sbin/visudo -cf /etc/sudoers.d/{USER}.new >/dev/null
 /usr/sbin/chown root:wheel /etc/sudoers.d/{USER}.new
 /bin/chmod 440 /etc/sudoers.d/{USER}.new
 /bin/mv /etc/sudoers.d/{USER}.new /etc/sudoers.d/{USER}
-/usr/sbin/diskutil apfs updatePreboot / >/dev/null
+attempt=0
+until err=$(/usr/sbin/diskutil apfs updatePreboot / 2>&1) || err=$(/usr/sbin/diskutil apfs updatePreboot /System/Volumes/Data 2>&1); do
+attempt=$((attempt + 1))
+if [ \"$attempt\" -ge 5 ]; then echo \"$err\" >&2; exit {PREBOOT_FAILED}; fi
+/bin/sleep 5
+done
 /bin/launchctl enable system/com.openssh.sshd
 /usr/bin/stat -f 'MARKER_OWNER=%u:%g' /var/db/.AppleSetupDone
 "
@@ -957,7 +964,14 @@ mod tests {
         let script = finalization_script("ssh-ed25519 AAAA test");
         assert!(script.starts_with("set -e\n"));
         assert!(script.contains("autoLoginUser -string silo"));
-        assert!(script.contains("diskutil apfs updatePreboot /"));
+        assert!(script.contains("diskutil apfs updatePreboot / 2>&1"));
+        assert!(script.contains("updatePreboot /System/Volumes/Data"));
+        assert!(script.contains("exit 70;"));
+        // Tolerated failures stay out of the script's stderr, which becomes the error.
+        for line in script.lines().filter(|line| line.contains("|| true")) {
+            assert!(line.contains("2>/dev/null"), "{line}");
+        }
+        assert!(script.contains("visudo -cf /etc/sudoers.d/silo.new >/dev/null"));
         assert!(script.contains("launchctl enable system/com.openssh.sshd"));
         assert!(script.contains("visudo -cf /etc/sudoers.d/silo.new"));
         assert!(script.contains("chmod 440 /etc/sudoers.d/silo.new"));
@@ -966,7 +980,7 @@ mod tests {
         assert!(script
             .contains("printf '%s\\n' 'ssh-ed25519 AAAA test' > /Users/silo/.ssh/authorized_keys"));
         assert!(script.contains("MARKER_OWNER=%u:%g"));
-        assert!(!script.contains("lume"));
+        assert!(!script.contains("-string lume"));
     }
 
     #[test]

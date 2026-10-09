@@ -308,20 +308,36 @@ fn finalize_guest(
         GUEST_COMMAND,
     )?;
     if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-        return Err(format!(
-            "Silo could not finish setting up the account in the computer: {} {}",
+        eprintln!(
+            "macOS computer setup: the account script failed with status {}.\nstdout: {}\nstderr: {}",
+            output.status,
             output.stdout.trim(),
             output.stderr.trim()
-        ));
+        );
+        return Err(finalization_failure(output.status));
     }
     let output = guest_access::run(layout, record, "/usr/bin/sudo -n true", None, GUEST_COMMAND)?;
     if output.status != 0 {
-        return Err(format!(
-            "Silo cannot log in to the computer with its key and run administrator commands: {}",
+        eprintln!(
+            "macOS computer setup: key login or sudo -n failed with status {}: {}",
+            output.status,
             output.stderr.trim()
-        ));
+        );
+        return Err(
+            "Silo could not log in to the computer with its key and run administrator commands."
+                .into(),
+        );
     }
     Ok(())
+}
+
+/// A one-sentence reason for a failed account script; the details go to the log.
+fn finalization_failure(status: i32) -> String {
+    if status == offline_setup::PREBOOT_FAILED {
+        "Silo could not finish setting up the account: diskutil could not update the preboot volume.".into()
+    } else {
+        "Silo could not finish setting up the account in the computer.".into()
+    }
 }
 
 fn sip_disabled(csrutil_status: &str) -> bool {
@@ -347,6 +363,16 @@ mod tests {
             .decode(encoded)
             .unwrap();
         assert_eq!(decoded, script.as_bytes());
+    }
+
+    #[test]
+    fn a_failed_account_script_gives_one_sentence_without_raw_output() {
+        assert_eq!(
+            finalization_failure(offline_setup::PREBOOT_FAILED),
+            "Silo could not finish setting up the account: diskutil could not update the preboot volume."
+        );
+        let other = finalization_failure(1);
+        assert!(other.ends_with('.') && !other.contains('\n') && !other.contains("chown"));
     }
 
     #[test]

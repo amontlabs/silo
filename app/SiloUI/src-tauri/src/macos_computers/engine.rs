@@ -709,7 +709,47 @@ pub(super) fn start_in_recovery(
     start_machine(app, record, layout, true)
 }
 
+/// How often a start is retried while the framework still holds the previous
+/// machine's lock on the computer's auxiliary storage, and how long it waits between tries.
+const LOCK_RETRIES: u32 = 6;
+const LOCK_BACKOFF: Duration = Duration::from_secs(2);
+
 fn start_machine(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+    recovery: bool,
+) -> Result<(), String> {
+    retry_while_locked(LOCK_RETRIES, LOCK_BACKOFF, || {
+        start_machine_once(app, record, layout, recovery)
+    })
+}
+
+/// A machine that just ended (an installation, a stopped computer) releases its
+/// auxiliary storage a moment after its object is dropped; the next start fails
+/// with a lock error until then.
+fn retry_while_locked(
+    retries: u32,
+    backoff: Duration,
+    mut attempt: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    let mut tries = 0;
+    loop {
+        match attempt() {
+            Err(message) if tries < retries && is_lock_error(&message) => {
+                tries += 1;
+                std::thread::sleep(backoff);
+            }
+            other => return other,
+        }
+    }
+}
+
+fn is_lock_error(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("lock")
+}
+
+fn start_machine_once(
     app: &AppHandle,
     record: &Record,
     layout: &Layout,
@@ -1216,6 +1256,38 @@ mod tests {
         assert!(!has_virtualization_entitlement());
         let reason = unsupported_reason().unwrap();
         assert!(reason.contains("entitlement"), "{reason}");
+    }
+
+    #[test]
+    fn a_start_is_retried_while_the_auxiliary_storage_is_locked() {
+        let lock = "Invalid virtual machine configuration. Failed to lock auxiliary storage.";
+        let mut calls = 0;
+        let result = retry_while_locked(3, Duration::ZERO, || {
+            calls += 1;
+            if calls < 3 {
+                Err(lock.to_string())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls, 3);
+
+        let mut calls = 0;
+        let result = retry_while_locked(2, Duration::ZERO, || {
+            calls += 1;
+            Err(lock.to_string())
+        });
+        assert_eq!(result, Err(lock.to_string()));
+        assert_eq!(calls, 3);
+
+        let mut calls = 0;
+        let result = retry_while_locked(5, Duration::ZERO, || {
+            calls += 1;
+            Err("macOS allows at most two".to_string())
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]
