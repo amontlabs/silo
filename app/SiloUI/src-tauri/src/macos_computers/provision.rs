@@ -244,6 +244,9 @@ impl Provision<'_> {
         }
         let own = guest_access::account(self.layout)?;
         let template_login = self.layout.clone().with_access(access);
+        if let (Some(log), Ok(template)) = (&self.log, guest_access::account(&template_login)) {
+            log.hide(&template.password);
+        }
         self.say("Personalizing the computer")?;
         let mut shortfall = None;
         // The backing file's length is the target, whatever the record says after an attempt.

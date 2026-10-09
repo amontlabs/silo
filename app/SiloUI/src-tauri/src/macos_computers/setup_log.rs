@@ -12,6 +12,7 @@ use std::{
     io::Write,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use tauri::{AppHandle, Manager};
 
@@ -26,7 +27,8 @@ const REDACTED: &str = "[redacted]";
 
 pub(super) struct SetupLog {
     dir: PathBuf,
-    secrets: Vec<String>,
+    /// Every form of every password the log hides.
+    secrets: Mutex<Vec<String>>,
 }
 
 /// The folder of one computer's retained logs.
@@ -41,18 +43,50 @@ pub(super) fn directory(app: &AppHandle, id: &str) -> Option<PathBuf> {
 }
 
 impl SetupLog {
-    pub(super) fn new(dir: PathBuf, secrets: Vec<String>) -> Self {
-        Self { dir, secrets }
+    pub(super) fn new(dir: PathBuf, passwords: &[String]) -> Self {
+        let log = Self {
+            dir,
+            secrets: Mutex::new(Vec::new()),
+        };
+        for password in passwords {
+            log.hide(password);
+        }
+        log
+    }
+
+    /// Hides `password` and the encodings it travels in (the base64 and hex of the password
+    /// and of the `/etc/kcpassword` content made from it) from every later line.
+    pub(super) fn hide(&self, password: &str) {
+        if password.is_empty() {
+            return;
+        }
+        let kcpassword = super::offline_setup::kcpassword(password);
+        let forms = [
+            password.to_string(),
+            base64_encode(password.as_bytes()),
+            base64_encode(&kcpassword),
+            hex(password.as_bytes(), false),
+            hex(password.as_bytes(), true),
+            hex(&kcpassword, false),
+            hex(&kcpassword, true),
+        ];
+        if let Ok(mut secrets) = self.secrets.lock() {
+            for form in forms {
+                if !secrets.contains(&form) {
+                    secrets.push(form);
+                }
+            }
+        }
     }
 
     /// The log of computer `id`, hiding the password of its account. `None` when the
     /// folder is unknown; logging is best effort and never fails a setup.
     pub(super) fn open(app: &AppHandle, id: &str) -> Option<Self> {
         let layout = Layout::new(&super::app_data(app).ok()?, id);
-        let secrets = super::guest_access::account(&layout)
+        let passwords = super::guest_access::account(&layout)
             .map(|account| vec![account.password])
             .unwrap_or_default();
-        Some(Self::new(directory(app, id)?, secrets))
+        Some(Self::new(directory(app, id)?, &passwords))
     }
 
     pub(super) fn dir(&self) -> &Path {
@@ -66,11 +100,17 @@ impl SetupLog {
 
     /// Appends the result of a command: its status and the tails of its output.
     pub(super) fn command(&self, what: &str, status: i32, stdout: &str, stderr: &str) {
+        // The whole output is cleaned first: a secret cut by the tail would no longer match.
+        let secrets = self.secrets();
         self.line(&format!(
             "{what}: status {status}; stdout: {}; stderr: {}",
-            tail(stdout),
-            tail(stderr)
+            tail(&sanitize(stdout, &secrets)),
+            tail(&sanitize(stderr, &secrets))
         ));
+    }
+
+    fn secrets(&self) -> Vec<String> {
+        self.secrets.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     fn write(&self, message: &str, now: time::OffsetDateTime) -> std::io::Result<()> {
@@ -85,7 +125,7 @@ impl SetupLog {
             .append(true)
             .mode(0o600)
             .open(&path)?;
-        file.write_all(format_line(now, message, &self.secrets).as_bytes())
+        file.write_all(format_line(now, message, &self.secrets()).as_bytes())
     }
 }
 
@@ -102,28 +142,65 @@ fn tail(text: &str) -> String {
     format!("…{}", &text[start..])
 }
 
-/// One log line: the time, then the message on a single line with secrets replaced and
-/// private key blocks dropped.
+/// `text` without private key blocks (an unfinished block is dropped to its end) and with
+/// every secret replaced.
+fn sanitize(text: &str, secrets: &[String]) -> String {
+    let mut kept = Vec::new();
+    let mut in_key = false;
+    for line in text.lines() {
+        if line.contains("-----BEGIN") && line.contains("PRIVATE KEY") {
+            in_key = true;
+        }
+        if in_key {
+            if line.contains("-----END") {
+                in_key = false;
+                kept.push(REDACTED);
+            }
+            continue;
+        }
+        kept.push(line);
+    }
+    if in_key {
+        kept.push(REDACTED);
+    }
+    let mut text = kept.join("\n");
+    // Longest first, so a form that contains another is replaced whole.
+    let mut ordered: Vec<&String> = secrets.iter().filter(|secret| !secret.is_empty()).collect();
+    ordered.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in ordered {
+        text = text.replace(secret.as_str(), REDACTED);
+    }
+    text
+}
+
+/// One log line: the time, then the sanitized message on a single line.
 fn format_line(now: time::OffsetDateTime, message: &str, secrets: &[String]) -> String {
     let stamp = now
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default();
-    let mut text = message.to_string();
-    for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
-        text = text.replace(secret.as_str(), REDACTED);
-    }
-    let text = text
+    let text = sanitize(message, secrets)
         .lines()
-        .map(|line| {
-            if line.contains("PRIVATE KEY") {
-                REDACTED
-            } else {
-                line
-            }
-        })
         .collect::<Vec<_>>()
         .join(" | ");
     format!("{stamp} {text}\n")
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn hex(bytes: &[u8], upper: bool) -> String {
+    bytes
+        .iter()
+        .map(|byte| {
+            if upper {
+                format!("{byte:02X}")
+            } else {
+                format!("{byte:02x}")
+            }
+        })
+        .collect()
 }
 
 /// Moves `path` to `path.1` (and older ones up) once it is past `max` bytes.
@@ -145,17 +222,48 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn a_line_has_a_time_and_hides_secrets_and_keys() {
+    fn a_line_has_a_time_and_hides_secrets_and_whole_key_blocks() {
         let now = time::OffsetDateTime::UNIX_EPOCH;
         let line = format_line(
             now,
-            "login with hunter2\n-----BEGIN OPENSSH PRIVATE KEY-----\nabc",
+            "login with hunter2\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----\nafter",
             &["hunter2".into(), String::new()],
         );
         assert_eq!(
             line,
-            "1970-01-01T00:00:00Z login with [redacted] | [redacted] | abc\n"
+            "1970-01-01T00:00:00Z login with [redacted] | [redacted] | after\n"
         );
+        assert!(!line.contains("b3BlbnNzaC1rZXk"));
+        let open = sanitize("a\n-----BEGIN PRIVATE KEY-----\nsecretbody", &[]);
+        assert_eq!(open, "a\n[redacted]");
+    }
+
+    #[test]
+    fn every_encoding_of_a_password_is_hidden_even_across_the_tail_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = SetupLog::new(dir.path().join("id"), &["Zx3kQ9mTt2pL".to_string()]);
+        let kc = super::super::offline_setup::kcpassword("Zx3kQ9mTt2pL");
+        let forms = [
+            "Zx3kQ9mTt2pL".to_string(),
+            base64_encode(b"Zx3kQ9mTt2pL"),
+            base64_encode(&kc),
+            hex(&kc, false),
+            hex(&kc, true),
+        ];
+        // The secret starts just before the last TAIL_BYTES of the output.
+        for form in forms {
+            let output = format!("{}{form}{}", "a".repeat(TAIL_BYTES - 3), "b".repeat(20));
+            log.command("x", 0, &output, "");
+            let text = fs::read_to_string(log.dir().join(FILE)).unwrap();
+            assert!(!text.contains(&form), "{form}");
+            assert!(!text.contains(&form[form.len() / 2..]), "{form}");
+            fs::remove_file(log.dir().join(FILE)).unwrap();
+        }
+        // A password added later (the template's) is hidden too.
+        log.hide("TemplatePw-77");
+        log.line("old TemplatePw-77");
+        let text = fs::read_to_string(log.dir().join(FILE)).unwrap();
+        assert!(!text.contains("TemplatePw-77"));
     }
 
     #[test]
@@ -170,7 +278,7 @@ mod tests {
     #[test]
     fn the_log_is_private_append_only_and_rotates() {
         let dir = tempfile::tempdir().unwrap();
-        let log = SetupLog::new(dir.path().join("id"), vec!["pw".into()]);
+        let log = SetupLog::new(dir.path().join("id"), &["pw".to_string()]);
         log.line("first pw");
         log.line("second");
         let path = log.dir().join(FILE);

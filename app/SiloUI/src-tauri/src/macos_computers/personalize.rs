@@ -20,7 +20,8 @@ const UNALLOCATED: &str = "SILO_UNALLOCATED=";
 pub(super) const DONE: &str = "SILO_PERSONALIZED";
 const MISSING_SECRETS: i32 = 64;
 
-/// The commands run as root. `grow` adds the expansion of the APFS container into a disk
+/// The commands run as root. The password change is skipped when the new password already
+/// works, so a run that failed after it can be repeated: the old password is gone by then. `grow` adds the expansion of the APFS container into a disk
 /// that was made larger than the template's. The secrets are only ever read into
 /// shell variables and written through the shell's builtin `printf`, so no external process
 /// receives them as an argument.
@@ -35,7 +36,10 @@ IFS= read -r SILO_PASSWORD
 IFS= read -r SILO_KCPASSWORD
 IFS= read -r SILO_OLD_PASSWORD
 if [ -z \"$SILO_PASSWORD\" ] || [ -z \"$SILO_KCPASSWORD\" ] || [ -z \"$SILO_OLD_PASSWORD\" ]; then exit {MISSING_SECRETS}; fi
+silo_authenticates() {{ printf '%s\\n' \"$1\" | /usr/bin/dscl . -authonly {USER} >/dev/null 2>&1; }}
+if ! silo_authenticates \"$SILO_PASSWORD\"; then
 printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_OLD_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
+fi
 printf '%s' \"$SILO_KCPASSWORD\" | /usr/bin/base64 -D > /etc/kcpassword.new
 /usr/sbin/chown root:wheel /etc/kcpassword.new
 /bin/chmod 600 /etc/kcpassword.new
@@ -215,6 +219,8 @@ mod tests {
         // The password reaches only a pipe into dscl, which reads it from standard input.
         assert!(script.contains("IFS= read -r SILO_PASSWORD"));
         assert!(script.contains("| /usr/bin/dscl . -passwd /Users/silo\n"));
+        assert!(script.contains("if ! silo_authenticates \"$SILO_PASSWORD\"; then"));
+        assert!(script.contains("| /usr/bin/dscl . -authonly silo >/dev/null 2>&1"));
         assert!(!script.contains("-passwd /Users/silo \""));
         assert!(!script.contains("sysadminctl"));
         // Only builtins touch the secrets: no external program names them in its arguments.
