@@ -31,11 +31,15 @@ pub(crate) fn start(app: &AppHandle) {
             continue;
         };
         let _ = fs::remove_file(&request);
-        let config: Value = serde_json::from_str(&text).unwrap_or_else(|_| json!({}));
         // A `bench.js` beside the request replaces the built-in script while iterating on it.
         let script =
             fs::read_to_string(directory.join("bench.js")).unwrap_or_else(|_| SCRIPT.into());
-        let result = run(&app, &config, &script).unwrap_or_else(|error| json!({ "error": error }));
+        let result = match serde_json::from_str::<Value>(&text) {
+            Ok(config) if config.is_object() => {
+                run(&app, &config, &script).unwrap_or_else(|error| json!({ "error": error }))
+            }
+            _ => json!({ "error": "The benchmark request is not a JSON object." }),
+        };
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())

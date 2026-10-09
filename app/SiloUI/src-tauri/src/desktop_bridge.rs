@@ -712,18 +712,20 @@ impl Bridge<'_> {
         self.invoke("setAudioActive", json!([active]))
     }
 
-    /// Asks the server for a screen size (`r,WxH,primary`) at 96 DPI (`s,96`),
-    /// then lets the next window resize take the client back to the window's
-    /// size and density. Selkies wants even dimensions of at most 4080.
+    /// Asks the server for a screen size (`r,WxH,primary`) at 96 DPI (`s,96`)
+    /// and lets the next window resize take the client back to the window's
+    /// size and density. The listener is armed first, so no resize can slip in
+    /// between; resizing the screen does not resize the page. Selkies wants
+    /// even dimensions of at most 4080.
     pub(crate) fn reset_resolution(&self, width: u32, height: u32) -> Result<(), String> {
         if !(16..=MAX_SCREEN_EDGE).contains(&width) || !(16..=MAX_SCREEN_EDGE).contains(&height) {
             return Err("Invalid screen size.".into());
         }
+        self.invoke("followWindowOnResize", json!([]))?;
         self.send_frames(&[
             format!("r,{}x{},primary", width & !1, height & !1),
             "s,96".to_string(),
-        ])?;
-        self.invoke("followWindowOnResize", json!([]))
+        ])
     }
 
     /// Selkies `resetResolutionToWindow` page message.
@@ -1133,11 +1135,11 @@ mod tests {
         bridge.reset_resolution(1441, 901).unwrap();
         bridge.set_audio_active(true).unwrap();
         let scripts = page.scripts.borrow();
-        assert!(scripts[0].contains("[\"r,1440x900,primary\",\"s,96\"]"));
         assert_eq!(
-            scripts[1],
+            scripts[0],
             "window.__silo&&window.__silo.invoke(\"followWindowOnResize\",[]);"
         );
+        assert!(scripts[1].contains("[\"r,1440x900,primary\",\"s,96\"]"));
         assert!(scripts[2].ends_with("invoke(\"setAudioActive\",[true]);"));
     }
 

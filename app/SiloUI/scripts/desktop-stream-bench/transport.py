@@ -55,6 +55,7 @@ def msb(options, *command):
 
 def rtts(path, count):
     client = socket.socket(socket.AF_UNIX)
+    client.settimeout(10)
     client.connect(path)
     samples = []
     for _ in range(count):
@@ -62,7 +63,10 @@ def rtts(path, count):
         client.sendall(b'x' * 32)
         received = 0
         while received < 32:
-            received += len(client.recv(64))
+            data = client.recv(64)
+            if not data:
+                raise RuntimeError('the echo connection closed')
+            received += len(data)
         samples.append((time.perf_counter() - started) * 1000)
         time.sleep(0.005)
     client.close()
@@ -74,6 +78,7 @@ def rtts(path, count):
 
 def bulk(path, seconds, result):
     client = socket.socket(socket.AF_UNIX)
+    client.settimeout(10)
     client.connect(path)
     received = 0
     deadline = time.perf_counter() + seconds

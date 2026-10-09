@@ -105,8 +105,10 @@ def main():
         before_files = set(bench.glob('result-*.json'))
         before = guest_cpu(options)
         started = time.monotonic()
-        (bench / 'request.json').write_text(json.dumps(
-            {'probes': probes, 'idleSeconds': idle, 'motionSeconds': motion}))
+        # The app polls for request.json, so it appears complete or not at all.
+        partial = bench / '.request.json.partial'
+        partial.write_text(json.dumps({'probes': probes, 'idleSeconds': idle, 'motionSeconds': motion}))
+        partial.replace(bench / 'request.json')
         deadline = time.monotonic() + 60 + probes * 4 + idle + motion
         result_file = None
         while time.monotonic() < deadline and not result_file:
