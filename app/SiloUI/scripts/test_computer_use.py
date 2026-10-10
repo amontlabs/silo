@@ -68,6 +68,7 @@ class Guest(unittest.TestCase):
         self.served.write_bytes(self.archive.read_bytes())
         self.commands = []
         self.lcu_status = {'lcu_version': '0.8.0', 'setup': {'approval': 'ask'},
+                           'cross_turn': {'enabled': True, 'source': 'unattended'},
                            'compatibility': {'status': 'tested', 'warning': None},
                            'app': {'path': str(self.mount / APP_DIR), 'version': '26.928.31416',
                                    'runtime': '0.0.27/20260927214556-b77d38801cca'}}
@@ -272,7 +273,7 @@ class Apply(Guest):
         result = cu.apply('ask')
         self.assertEqual(result['state'], 'ready')
         names = [Path(argv[0]).name for argv in self.lcu_commands()]
-        self.assertEqual(names, ['install.sh', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu-session'])
+        self.assertEqual(names, ['install.sh', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu-session'])
         install = next(argv for argv in self.lcu_commands() if argv[0].endswith('install.sh'))
         self.assertEqual(install[1:], ['--user', 'silo', '--runtime-only', '--skip-system', '--offline',
                                        '--existing-app', str(self.mount / APP_DIR), '--yes'])
@@ -471,6 +472,22 @@ class Apply(Guest):
         self.setup_code = 2
         self.setup_output = 'No agents detected\n'
         self.assertEqual(cu.apply('ask')['apply']['outcome'], 'failed')
+
+    def test_a_cross_turn_setting_lcu_did_not_store_fails_the_setup_and_is_retried(self):
+        # `lcu setup` warns and exits 0 when it cannot write the setting.
+        self.lcu_status['cross_turn'] = {'enabled': False, 'source': None}
+        result = cu.apply('ask')
+        self.assertEqual((result['state'], result['reason']), ('failed', 'cross-turn-failed'))
+        self.assertEqual(self.receipt()['state'], 'failed')
+        self.lcu_status['cross_turn'] = {'enabled': True, 'source': 'unattended'}
+        self.commands.clear()
+        self.assertEqual(cu.apply('ask')['state'], 'ready')
+        self.assertTrue(any(argv[1:2] == ['setup'] and '--cross-turn' in argv for argv, *_ in self.commands))
+
+    def test_an_lcu_without_cross_turn_is_not_asked_for_it(self):
+        self.new_lcu = False
+        self.lcu_status['cross_turn'] = {'enabled': False}
+        self.assertEqual(cu.apply('ask')['state'], 'ready')
 
     def test_a_failed_readiness_check_does_not_change_the_approval_outcome(self):
         self.failures['lcu-session'] = 'soft'

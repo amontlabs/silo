@@ -1394,6 +1394,18 @@ fn app_start_applies_where_the_last_attempt_is_missing_failed_or_for_another_mod
     assert_eq!(reconcile(gate), 1);
     assert_eq!(guest.modes(), ["ask"]);
     // Everything is current: nothing runs, and the guest is not even asked.
+    let pinned = serde_json::from_str::<Value>(LCU_LOCK).unwrap()["version"]
+        .as_str()
+        .map(str::to_owned);
+    remember(
+        &paths,
+        &id,
+        Known {
+            state: "ready".into(),
+            lcu_version: pinned,
+            ..Known::default()
+        },
+    );
     let inspects = guest.inspects.lock().unwrap().0;
     assert_eq!(reconcile(gate), 0);
     assert_eq!(guest.inspects.lock().unwrap().0, inspects);
@@ -1788,6 +1800,7 @@ fn every_failure_code_has_a_message_and_mount_problems_are_explained() {
     for code in [
         "interrupted",
         "doctor-failed",
+        "cross-turn-failed",
         "desktop-session-not-running",
         "timed-out",
         "lcu-archive-unavailable",
@@ -2966,4 +2979,42 @@ fn a_retry_ends_when_the_computer_is_no_longer_the_same_running_instance() {
     boot_with(&guest, &paths, SHORT).join().unwrap();
     assert_eq!(guest.runs.lock().unwrap().len(), 1);
     assert!(!retry_scheduled(&id));
+}
+
+#[test]
+fn a_running_computer_with_another_lcu_than_the_pin_is_set_up_again_at_app_start() {
+    let pinned = serde_json::from_str::<Value>(LCU_LOCK).unwrap()["version"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let known = |version: Option<&str>| Known {
+        state: "ready".into(),
+        lcu_version: version.map(str::to_owned),
+        ..Known::default()
+    };
+    assert!(!pin_is_stale(Some(&known(Some(&pinned)))));
+    assert!(pin_is_stale(Some(&known(Some("0.10.1")))));
+    assert!(pin_is_stale(Some(&known(None))));
+    assert!(pin_is_stale(None));
+
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let id = computer();
+    write_computers_of(&paths, &id);
+    let guest = Guest::new(&id);
+    let gate = test_gate();
+    boot_of(gate, &guest, &paths).unwrap().join().unwrap();
+    assert!(!read_policy(&paths, &id).needs_apply());
+    let runner: SharedRunner = guest.clone();
+    let reconcile = |version: &str| {
+        remember(&paths, &id, known(Some(version)));
+        let handles = reconcile_in(gate, &runner, &paths, &["dev".to_owned()]);
+        let started = handles.len();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        started
+    };
+    assert_eq!(reconcile(&pinned), 0);
+    assert_eq!(reconcile("0.10.1"), 1);
 }

@@ -291,6 +291,9 @@ register() {
   say "Registering LCU with every agent"
   logged "$LCU" setup --agent all --allow-missing --cross-turn on --unattended --session direct --yes --approval "$APPROVAL" ||
     fail "lcu setup failed"
+  # `lcu setup` warns and still exits 0 when it cannot store the cross-turn setting.
+  [[ $("$LCU" status --json 2>>"$LOG" | plutil -extract cross_turn.enabled raw -o - - 2>/dev/null) == true ]] ||
+    fail "lcu did not turn on Computer Use across turns"
   install_agent
 }
 

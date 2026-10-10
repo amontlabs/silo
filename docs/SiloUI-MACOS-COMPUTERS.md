@@ -420,7 +420,7 @@ macOS 26.6.2 guest on an Apple Silicon Mac running macOS 26.5:
   image download resumed from a partial file and finished at Apple's exact
   length; installation from the cached image took 3 to 4 minutes.
 - Setup ran without input: first boot, offline account, SSH, Recovery with SIP
-  turned off, ChatGPT app and LCU 0.11.0, about 9 minutes in total. Over SSH
+  turned off, ChatGPT app and LCU 0.10.1, about 9 minutes in total. Over SSH
   the guest reported `csrutil status` disabled, the app and LCU installed, and
   an LCU MCP call (`cua.getState()`) answered without a permission prompt.
 - The screen window showed the guest below its toolbar, followed window

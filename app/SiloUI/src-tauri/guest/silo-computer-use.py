@@ -413,7 +413,17 @@ def setup(approval):
     cross_turn = ['--cross-turn', 'on', '--unattended'] if lcu_supports('--cross-turn') else []
     result = run([lcu_command('lcu'), 'setup', *agents, *cross_turn, '--session', 'direct', '--yes',
                   '--approval', approval], user=True, timeout=600, check=False)
-    return classify_setup(result.returncode, result.stdout, approval)
+    outcome = classify_setup(result.returncode, result.stdout, approval)
+    # `lcu setup` reports a failure to store the setting as a warning and still exits 0.
+    if cross_turn and outcome[0] != 'failed' and not cross_turn_enabled(lcu_status()):
+        raise Failure('cross-turn-failed', 'LCU did not turn on Computer Use across turns')
+    return outcome
+
+
+def cross_turn_enabled(report):
+    """Whether `lcu status --json` shows Computer Use kept across turns."""
+    value = report.get('cross_turn') if isinstance(report, dict) else None
+    return isinstance(value, dict) and value.get('enabled') is True
 
 
 def pending_agents(report):

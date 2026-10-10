@@ -59,7 +59,7 @@ Silo's guest image (v4 and later) stages an unextracted LCU release archive for 
 - Linux ARM64 archive SHA-256: `bfb91127e103065e47088545c4d71dcb00714eec05fcf72ff30913212c485dc8`
 - Linux x86-64 archive SHA-256: `12919c3bd94f1d74874e8a4da4e5d7c713138079b613df05e5f81a1e03e6a62c`
 
-The pinned URL and hashes are in `app/SiloUI/src-tauri/guest/lcu-lock.json`. The published v4 image itself contains the LCU 0.8.1 archive (release v0.8.1, SHA-256s `441649e7afe14dc948caaa5bd94034567e4404fc8c0bb6a450bd692b73161806` arm64, `8b0934f8c0c79d40a5073f180db33db8f1568af00177befa4b8da677694731bc` x86-64); images built from the current lock stage 0.9.4. The image contains no ChatGPT application.
+The pinned URL and hashes are in `app/SiloUI/src-tauri/guest/lcu-lock.json`. The published v4 image itself contains the LCU 0.8.1 archive (release v0.8.1, SHA-256s `441649e7afe14dc948caaa5bd94034567e4404fc8c0bb6a450bd692b73161806` arm64, `8b0934f8c0c79d40a5073f180db33db8f1568af00177befa4b8da677694731bc` x86-64); images built from the current lock stage 0.11.0. The image contains no ChatGPT application.
 
 # Silo guest image: Selkies desktop streamer and codecs
 
