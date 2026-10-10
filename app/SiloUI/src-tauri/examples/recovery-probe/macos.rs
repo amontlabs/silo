@@ -3,9 +3,9 @@
 //! guest_screen modules.
 //! Usage: recovery-probe <computer dir> <output dir> [seconds] [keys: 1|0]
 #![allow(dead_code, unused_imports)]
-#[path = "../src/macos_computers/guest_screen.rs"]
+#[path = "../../src/macos_computers/guest_screen.rs"]
 mod guest_screen;
-#[path = "../src/macos_computers/input.rs"]
+#[path = "../../src/macos_computers/input.rs"]
 mod input;
 
 use block2::RcBlock;
@@ -206,7 +206,7 @@ fn keys(codes: &[u16]) {
     }
 }
 
-fn main() {
+pub fn main() {
     let args: Vec<String> = std::env::args().collect();
     let dir = PathBuf::from(&args[1]);
     let out = PathBuf::from(&args[2]);

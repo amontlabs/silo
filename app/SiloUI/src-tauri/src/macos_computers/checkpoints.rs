@@ -299,6 +299,7 @@ fn clone_files(layout: &Layout, dir: &Path) -> Result<(), String> {
         .map_err(copy_error)
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn host_build() -> String {
     let mut buffer = [0u8; 64];
     let mut size = buffer.len();
@@ -318,6 +319,12 @@ pub(super) fn host_build() -> String {
     String::from_utf8_lossy(&buffer[..size.min(buffer.len())])
         .trim_end_matches('\0')
         .to_string()
+}
+
+/// Other hosts run no macOS computers, so none has a build to compare.
+#[cfg(not(target_os = "macos"))]
+pub(super) fn host_build() -> String {
+    String::new()
 }
 
 fn now() -> String {
