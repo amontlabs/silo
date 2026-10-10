@@ -3,7 +3,7 @@
   "package": "chatgpt-macos",
   "version": "26.930.61225",
   "cuaRuntimeVersion": "0.0.27/20260927214556-b77d38801cca",
-  "lcuVersion": "0.10.1",
+  "lcuVersion": "0.11.0",
   "bundleIdentifier": "com.openai.codex",
   "teamIdentifier": "2DC432GLL2",
   "source": "https://persistent.oaistatic.com/codex-app-prod/appcast.xml (Sparkle feed of the official macOS app)",

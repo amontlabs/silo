@@ -428,7 +428,7 @@ mod tests {
         let digest = Pins::bundled().unwrap().lcu_asset().sha256.clone();
         let short = LCU_LOCK.replace(&digest, &digest[..63]);
         assert!(Pins::parse(APP_LOCK, &short).is_err());
-        let other_lcu = LCU_LOCK.replace("0.10.1", "0.10.2");
+        let other_lcu = LCU_LOCK.replace("0.11.0", "0.11.1");
         assert!(Pins::parse(APP_LOCK, &other_lcu).is_err());
     }
 

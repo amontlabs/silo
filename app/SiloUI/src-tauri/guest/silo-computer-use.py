@@ -12,7 +12,8 @@ nothing changed:
   is extracted to local disk and installed in place against that folder;
 * `lcu setup --agent all --allow-missing --session direct --yes --approval <mode>` runs as
   `silo` (LCU 0.8.8 and later: every supported agent is registered, and those not installed
-  yet are recorded as pending; an older LCU falls back to `--agent auto`);
+  yet are recorded as pending; an older LCU falls back to `--agent auto`). From LCU 0.11.0 it
+  also passes `--cross-turn on --unattended`, which keeps Computer Use across turns;
 * `lcu setup --reconcile` registers a pending agent once its binary exists. It runs at the
   end of every `apply` (a boot included), from the `reconcile` command, from a login hook in
   /etc/profile.d and from a small `watch` process that polls the install directories while
@@ -405,9 +406,12 @@ def setup(approval):
 
     Every supported agent is registered, and one that is not installed yet is recorded as
     pending (`--agent all --allow-missing`). An LCU without that flag registers the agents
-    it detects instead."""
+    it detects instead. An LCU with `--cross-turn` (0.11.0) also keeps Computer Use available
+    across turns; `--unattended` skips the owner prompt, as no person is present in the
+    computer. Running it again leaves the setting on."""
     agents = ['--agent', 'all', '--allow-missing'] if lcu_supports('--allow-missing') else ['--agent', 'auto']
-    result = run([lcu_command('lcu'), 'setup', *agents, '--session', 'direct', '--yes',
+    cross_turn = ['--cross-turn', 'on', '--unattended'] if lcu_supports('--cross-turn') else []
+    result = run([lcu_command('lcu'), 'setup', *agents, *cross_turn, '--session', 'direct', '--yes',
                   '--approval', approval], user=True, timeout=600, check=False)
     return classify_setup(result.returncode, result.stdout, approval)
 

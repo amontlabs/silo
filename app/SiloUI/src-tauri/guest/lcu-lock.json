@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "version": "0.9.4",
-  "source": "https://github.com/amontlabs/lcu/releases/tag/v0.9.4",
+  "version": "0.11.0",
+  "source": "https://github.com/amontlabs/lcu/releases/tag/v0.11.0",
   "assets": {
     "arm64": {
-      "url": "https://github.com/amontlabs/lcu/releases/download/v0.9.4/lcu-0.9.4-linux-arm64.tar.gz",
-      "sha256": "2841dfaa0e28721d08bd49d9ef9d82554add95e09ea79c24e8c1d89a8b1f48e5"
+      "url": "https://github.com/amontlabs/lcu/releases/download/v0.11.0/lcu-0.11.0-linux-arm64.tar.gz",
+      "sha256": "bfb91127e103065e47088545c4d71dcb00714eec05fcf72ff30913212c485dc8"
     },
     "amd64": {
-      "url": "https://github.com/amontlabs/lcu/releases/download/v0.9.4/lcu-0.9.4-linux-x64.tar.gz",
-      "sha256": "ad6137c19b46771959c52b803d0f072a08a57ee052e032c93542f2e448280195"
+      "url": "https://github.com/amontlabs/lcu/releases/download/v0.11.0/lcu-0.11.0-linux-x64.tar.gz",
+      "sha256": "12919c3bd94f1d74874e8a4da4e5d7c713138079b613df05e5f81a1e03e6a62c"
     }
   }
 }

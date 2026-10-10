@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": "0.10.1",
-  "source": "https://github.com/amontlabs/lcu/releases/tag/v0.10.1",
+  "version": "0.11.0",
+  "source": "https://github.com/amontlabs/lcu/releases/tag/v0.11.0",
   "assets": {
     "arm64": {
-      "url": "https://github.com/amontlabs/lcu/releases/download/v0.10.1/lcu-0.10.1-darwin-arm64.tar.gz",
-      "sha256": "84be4c61751c59f504347df9297ba323edb951f22bc5984b5f31610b4a19bab4",
-      "bytes": 5861932
+      "url": "https://github.com/amontlabs/lcu/releases/download/v0.11.0/lcu-0.11.0-darwin-arm64.tar.gz",
+      "sha256": "4d230807febb4d4cdae6780643bf4605693f19dd6be18e34249be59c37d90bd2",
+      "bytes": 5872213
     }
   }
 }

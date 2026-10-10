@@ -19,7 +19,8 @@
 #   3. install LCU's runtime against that app (`scripts/install.sh --runtime-only --yes`);
 #   4. grant Accessibility and Screen Recording to the app and its Computer Use helper in the
 #      system TCC database, and pre-write the Screen Recording reminder ledger;
-#   5. register every agent (`lcu setup --agent all --allow-missing ...`) and install a
+#   5. register every agent (`lcu setup --agent all --allow-missing --cross-turn on --unattended ...`, which keeps
+#      Computer Use across turns without the owner prompt) and install a
 #      LaunchAgent that runs `lcu setup --reconcile` at each login.
 # Per-app approvals ("Allow Computer Use to use X?") stay with LCU and are never seeded.
 #
@@ -288,7 +289,7 @@ restart_tccd() {
 
 register() {
   say "Registering LCU with every agent"
-  logged "$LCU" setup --agent all --allow-missing --session direct --yes --approval "$APPROVAL" ||
+  logged "$LCU" setup --agent all --allow-missing --cross-turn on --unattended --session direct --yes --approval "$APPROVAL" ||
     fail "lcu setup failed"
   install_agent
 }

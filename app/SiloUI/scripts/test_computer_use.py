@@ -174,7 +174,7 @@ class Guest(unittest.TestCase):
             report = dict(self.lcu_status, pending=list(self.pending)) if self.new_lcu else self.lcu_status
             return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(report), stderr='')
         if name == 'lcu' and argv[1:3] == ['setup', '--help']:
-            usage = 'usage: lcu setup [--agent ID] [--allow-missing] [--reconcile]\n' if self.new_lcu else 'usage: lcu setup [--agent ID]\n'
+            usage = 'usage: lcu setup [--agent ID] [--allow-missing] [--cross-turn on|off] [--reconcile]\n' if self.new_lcu else 'usage: lcu setup [--agent ID]\n'
             return subprocess.CompletedProcess(argv, 0, stdout=usage, stderr='')
         if name == 'lcu' and argv[1:3] == ['setup', '--reconcile']:
             self.pending = [a for a in self.pending if a not in self.reconciled]
@@ -272,14 +272,14 @@ class Apply(Guest):
         result = cu.apply('ask')
         self.assertEqual(result['state'], 'ready')
         names = [Path(argv[0]).name for argv in self.lcu_commands()]
-        self.assertEqual(names, ['install.sh', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu-session'])
+        self.assertEqual(names, ['install.sh', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu', 'lcu-session'])
         install = next(argv for argv in self.lcu_commands() if argv[0].endswith('install.sh'))
         self.assertEqual(install[1:], ['--user', 'silo', '--runtime-only', '--skip-system', '--offline',
                                        '--existing-app', str(self.mount / APP_DIR), '--yes'])
         setup, = [(argv, user) for argv, user, _ in self.commands
                   if argv[1:2] == ['setup'] and '--session' in argv]
-        self.assertEqual(setup[0][1:], ['setup', '--agent', 'all', '--allow-missing', '--session', 'direct',
-                                        '--yes', '--approval', 'ask'])
+        self.assertEqual(setup[0][1:], ['setup', '--agent', 'all', '--allow-missing', '--cross-turn', 'on',
+                                        '--unattended', '--session', 'direct', '--yes', '--approval', 'ask'])
         self.assertTrue(setup[1], 'setup runs as the working account')
         doctor = self.lcu_commands()[-1]
         self.assertTrue([user for argv, user, _ in self.commands if argv == doctor][0],

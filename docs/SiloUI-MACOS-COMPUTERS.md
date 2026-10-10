@@ -337,7 +337,7 @@ State `setting-up` covers these steps; its detail names the current step.
    guest, and is idempotent: a rerun with the same pins and mode changes nothing.
    Pins: ChatGPT 26.930.61225 (CUA runtime 0.0.27, the runtime LCU's tested macOS
    pair uses; LCU lists its pairing with 26.928.20755, which the feed no longer
-   serves) and LCU 0.10.1. The home folder `/Users/silo` is within the helper's
+   serves) and LCU 0.11.0. The home folder `/Users/silo` is within the helper's
    13-byte limit.
    The approach follows prior art rather than inventing one:
    [trycua/cua `seed-tcc.sh`](https://github.com/trycua/cua/blob/main/libs/images/macos/files/seed-tcc.sh)
@@ -420,7 +420,7 @@ macOS 26.6.2 guest on an Apple Silicon Mac running macOS 26.5:
   image download resumed from a partial file and finished at Apple's exact
   length; installation from the cached image took 3 to 4 minutes.
 - Setup ran without input: first boot, offline account, SSH, Recovery with SIP
-  turned off, ChatGPT app and LCU 0.10.1, about 9 minutes in total. Over SSH
+  turned off, ChatGPT app and LCU 0.11.0, about 9 minutes in total. Over SSH
   the guest reported `csrutil status` disabled, the app and LCU installed, and
   an LCU MCP call (`cua.getState()`) answered without a permission prompt.
 - The screen window showed the guest below its toolbar, followed window

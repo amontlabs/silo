@@ -123,7 +123,7 @@ absolute).
   `--skip-system --offline`.
 - Pinned LCU release archive, hash-checked, staged for installation in the computer
   (done: `guest/lcu-lock.json`, `/usr/local/share/silo/lcu/`). The published v4 image
-  stages LCU 0.8.1; Silo now pins LCU 0.9.4 (below), which a computer downloads and
+  stages LCU 0.8.1; Silo now pins LCU 0.11.0 (below), which a computer downloads and
   verifies at setup until a new image stages it.
 - Accessibility: dconf `toolkit-accessibility=true` system default and an
   autostarted AT-SPI attribute poller for Chromium/Electron.
@@ -144,7 +144,7 @@ absolute).
 - Every device does this itself at its own start, remote ones included; a
   controller never prepares an app for another device.
 
-Done: lock (`lcuVersion` 0.9.4), download, verification, extraction and
+Done: lock (`lcuVersion` 0.11.0), download, verification, extraction and
 publication under `<app data>/chatgpt/published/`, started automatically at app
 start with retries (2026-10-02, replacing the one-time notice), cached status
 reads and a device-level Retry. See [ChatGPT app](SiloUI-CHATGPT-APP.md).
@@ -474,6 +474,22 @@ running instance is up. During a wait the state is `preparing` ("Could not downl
 (network). Silo tries again automatically."); a boot, a switch change, a manual setup, a
 stop/restart or a deletion cancels it. After the last retry the failure stays until the next
 boot or a manual setup.
+
+### LCU 0.11.0 pin and cross-turn Computer Use (2026-10-10)
+
+Silo pins LCU 0.11.0 (tag `v0.11.0`; linux-arm64
+`bfb91127e103065e47088545c4d71dcb00714eec05fcf72ff30913212c485dc8`, linux-x64
+`12919c3bd94f1d74874e8a4da4e5d7c713138079b613df05e5f81a1e03e6a62c`, darwin-arm64
+`4d230807febb4d4cdae6780643bf4605693f19dd6be18e34249be59c37d90bd2`, matching the release's
+notes and verified by download). The ChatGPT app pins are unchanged. 0.11.0 adds an opt-in
+setting that keeps Computer Use available across the turns of a Claude Code session, so a
+background subagent still working after its turn ended does not lose it. Both guest setup
+scripts enable it with `lcu setup ... --cross-turn on --unattended` (`--unattended` skips the
+owner prompt, which no person is present to answer in a computer). The Linux script passes the
+option only when `lcu setup --help` lists it. Computers set up with an earlier pin pick it up
+through the changed pin (Linux receipt: `lcuVersion` and archive hash) or the changed script
+and lock fingerprint (macOS) when setup next runs. Setting it again leaves it on.
+The section below describes the 0.9.4 pin it replaces.
 
 ### LCU 0.9.4 pin (2026-10-05)
 

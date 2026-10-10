@@ -219,7 +219,7 @@ fn bundled_lock_is_valid_and_pins_both_architectures() {
         lock.cua_runtime_version,
         "0.0.27/20260927214556-b77d38801cca"
     );
-    assert_eq!(lock.lcu_version.as_deref(), Some("0.9.4"));
+    assert_eq!(lock.lcu_version.as_deref(), Some("0.11.0"));
     let arm = lock.asset(DebArch::Arm64).unwrap();
     assert_eq!(arm.bytes, 453121290);
     assert!(arm
