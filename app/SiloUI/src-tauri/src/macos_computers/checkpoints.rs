@@ -443,6 +443,18 @@ fn build<M: Machine>(
         size_bytes,
     };
     write_meta(partial, &meta)?;
+    // Everything is on disk before the folder gets its final name, and so before a Restore
+    // may replace the computer's files with it.
+    let mut files = vec![DISK, AUXILIARY_STORAGE];
+    if subject.running {
+        files.push(STATE);
+    }
+    for name in files {
+        fs::File::open(partial.join(name))
+            .and_then(|file| file.sync_all())
+            .map_err(|error| store::io_error("save the checkpoint", &error))?;
+    }
+    store::sync_dir(partial).map_err(|error| store::io_error("save the checkpoint", &error))?;
     Ok(meta)
 }
 
@@ -511,7 +523,11 @@ fn journal_path(layout: &Layout) -> PathBuf {
 
 /// Whether a Restore began and has not been rolled forward or back and finished.
 pub(super) fn restore_unfinished(layout: &Layout) -> bool {
-    journal_path(layout).exists()
+    // Only a journal that is certainly absent counts as no journal.
+    !matches!(
+        fs::metadata(journal_path(layout)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 fn write_journal(layout: &Layout, journal: &Journal) -> Result<(), String> {
@@ -595,8 +611,10 @@ fn swap_files(layout: &Layout, from: &Path, pending: &PendingRestore) -> Result<
 /// pending Restore the journal names when the files now are the checkpoint's, which the
 /// caller saves in the record before calling `finish_restore`.
 pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String> {
-    let Ok(bytes) = fs::read(journal_path(layout)) else {
-        return Ok(None);
+    let bytes = match fs::read(journal_path(layout)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(store::io_error("read the Restore journal", &error)),
     };
     match serde_json::from_slice::<Journal>(&bytes) {
         Ok(Journal {
@@ -628,7 +646,8 @@ pub(super) fn finish_restore(layout: &Layout) {
 /// checkpoint is what the computer's files are being made into, so it can't be deleted.
 pub(super) fn journal_pins(layout: &Layout, id: &str) -> bool {
     match fs::read(journal_path(layout)) {
-        Err(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
         Ok(bytes) => serde_json::from_slice::<Journal>(&bytes).map_or(true, |j| j.target == id),
     }
 }
@@ -1249,6 +1268,18 @@ mod tests {
         assert!(journal_pins(&layout, "other"));
         finish_restore(&layout);
         assert!(!journal_pins(&layout, &meta.id));
+    }
+
+    #[test]
+    fn only_a_missing_journal_means_no_restore_is_unfinished() {
+        let (_data, layout) = computer();
+        assert!(!restore_unfinished(&layout));
+        assert!(!journal_pins(&layout, "any"));
+        // A journal that can't be read is not a missing one.
+        fs::create_dir(journal_path(&layout)).unwrap();
+        assert!(restore_unfinished(&layout));
+        assert!(journal_pins(&layout, "any"));
+        assert!(recover(&layout).is_err());
     }
 
     #[test]

@@ -1138,12 +1138,17 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     watch(app);
     let layout = Layout::new(&data, id);
     let plan = checkpoints::start_plan(&layout, pending.as_ref(), &checkpoints::host_build());
-    let started = offline_setup::ensure_detached(&layout.disk())
+    // The saved memory is used up durably before any machine runs on the disk; a plan that
+    // restores it does so itself, once the memory is in the machine and before it resumes.
+    let consumed =
+        if pending.is_some() && !matches!(plan, checkpoints::StartPlan::RestoreMemory { .. }) {
+            clear_pending_restore(app, id, &layout)
+        } else {
+            Ok(())
+        };
+    let started = consumed
+        .and_then(|()| offline_setup::ensure_detached(&layout.disk()))
         .and_then(|()| start_machine(app, &record, &layout, plan));
-    // The Restore is carried out by this start whether or not it worked out.
-    if pending.is_some() {
-        let _ = clear_pending_restore(app, id, &layout);
-    }
     match started {
         Ok(note) => {
             update(app, id, |entry| {
@@ -1156,10 +1161,32 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             Ok(())
         }
         Err(message) => {
-            set_state(app, id, State::Stopped, None);
+            // Nothing may report the computer as stopped while its machine can still run.
+            match ensure_released(app, id) {
+                Ok(()) => set_state(app, id, State::Stopped, None),
+                Err(held) => set_state(app, id, State::Failed, Some(held)),
+            }
             Err(message)
         }
     }
+}
+
+/// Stops a machine a failed start left behind and returns only once the framework has released
+/// it, or says that it could not be.
+fn ensure_released(app: &AppHandle, id: &str) -> Result<(), String> {
+    for _ in 0..5 {
+        let held = engine::machine_states(app).map_or(true, |states| {
+            states.iter().any(|(machine, _)| machine == id)
+        });
+        if !held {
+            return Ok(());
+        }
+        let _ = engine::force_stop(app, id);
+        if engine::wait_until_stopped(app, id, FORCED_STOP_WAIT) {
+            return Ok(());
+        }
+    }
+    Err("The computer could not be stopped after it failed to start. Use Force stop.".into())
 }
 
 const UNFINISHED_RESTORE: &str =
@@ -1209,6 +1236,8 @@ fn start_machine(
                 Err(engine::StateStartError::Failed(message)) => return Err(message),
                 Err(engine::StateStartError::Rejected(why)) => {
                     log_line(app, &record.id, &format!("memory not restored: {why}"));
+                    // The memory is not coming back: mark it used before booting the disk.
+                    clear_pending_restore(app, &record.id, layout)?;
                     Some(checkpoints::rejected_note(&why))
                 }
             }
