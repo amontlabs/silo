@@ -213,7 +213,10 @@ impl Provision<'_> {
     /// first-boot state, the offline edit, and a second boot to finish what only
     /// the running guest can.
     fn create_account(&self, record: &mut Record) -> Result<(), Stop> {
-        let account = guest_access::account(self.layout)?;
+        let account = guest_access::ensure_account(self.layout)?;
+        if let Some(log) = &self.log {
+            log.hide(&account.password);
+        }
         let image = record.restore_image.clone();
         let mut settle = FIRST_BOOT_SETTLE;
         for attempt in 1..=FIRST_BOOT_ATTEMPTS {
@@ -276,7 +279,10 @@ impl Provision<'_> {
                 templates::TEMPLATE_GONE.into()
             }));
         }
-        let own = guest_access::account(self.layout)?;
+        let own = guest_access::ensure_account(self.layout)?;
+        if let Some(log) = &self.log {
+            log.hide(&own.password);
+        }
         let template_login = self.layout.clone().with_access(access);
         if let (Some(log), Ok(template)) = (&self.log, guest_access::account(&template_login)) {
             log.hide(&template.password);
@@ -802,7 +808,7 @@ mod tests {
     #[ignore = "needs a clone of an installed computer"]
     fn live_offline() {
         let (layout, _) = live_layout();
-        let account = guest_access::account(&layout).unwrap();
+        let account = guest_access::ensure_account(&layout).unwrap();
         let result = offline_setup::run(
             &layout.disk(),
             &account,
@@ -827,7 +833,7 @@ mod tests {
     #[ignore = "needs a running clone"]
     fn live_finalize() {
         let (layout, record) = live_layout();
-        let account = guest_access::account(&layout).unwrap();
+        let account = guest_access::ensure_account(&layout).unwrap();
         let address = guest_access::wait_for_password_ssh(
             &layout,
             &record,

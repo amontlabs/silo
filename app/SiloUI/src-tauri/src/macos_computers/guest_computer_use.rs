@@ -49,33 +49,66 @@ const UPDATE_DRAIN: Duration = Duration::from_secs(60);
 /// The row detail while computer use is being updated.
 const UPDATING: &str = "Updating Computer Use";
 
-/// Computers whose computer use is being updated, each with the Start whose update is
-/// waiting behind the running one (the newest request only).
-static UPDATES: Mutex<Option<HashMap<String, Option<u64>>>> = Mutex::new(None);
+/// A running update's place in `UPDATES`, and the Start whose update waits behind it.
+struct Slot {
+    token: u64,
+    queued: Option<u64>,
+}
 
-fn updates() -> std::sync::MutexGuard<'static, Option<HashMap<String, Option<u64>>>> {
+/// Computers whose computer use is being updated.
+static UPDATES: Mutex<Option<HashMap<String, Slot>>> = Mutex::new(None);
+static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn updates() -> std::sync::MutexGuard<'static, Option<HashMap<String, Slot>>> {
     UPDATES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// The right to run the updates of one computer, one at a time.
-struct UpdateClaim(String);
+/// The right to run the updates of one computer, one at a time. It carries a token, so a
+/// claim that has ended can never remove the place of a newer one.
+struct UpdateClaim {
+    id: String,
+    token: u64,
+}
+
+/// What a request for an update came to.
+enum Request {
+    /// This request runs now.
+    Run(UpdateClaim),
+    /// An update is running; this request waits behind it (the highest Start wins).
+    Queued,
+    /// The request is not from the Start that owns the computer: nothing to do.
+    Stale,
+}
 
 impl UpdateClaim {
-    /// Takes the claim, or queues Start number `attempt` behind the update that holds it:
-    /// that one runs the queued request when it ends, so a request is never dropped.
-    fn take_or_queue(id: &str, attempt: u64) -> Option<Self> {
+    /// Asks for the update of Start number `attempt`. `owns` says whether that Start still
+    /// owns the running computer; a request from any other is refused before it can queue.
+    fn request(id: &str, attempt: u64, owns: bool) -> Request {
+        if !owns {
+            return Request::Stale;
+        }
         let mut updates = updates();
         let map = updates.get_or_insert_with(HashMap::new);
         match map.get_mut(id) {
-            Some(queued) => {
-                *queued = Some(attempt);
-                None
+            Some(slot) => {
+                slot.queued = Some(slot.queued.map_or(attempt, |queued| queued.max(attempt)));
+                Request::Queued
             }
             None => {
-                map.insert(id.to_string(), None);
-                Some(Self(id.to_string()))
+                let token = NEXT_TOKEN.fetch_add(1, Ordering::SeqCst);
+                map.insert(
+                    id.to_string(),
+                    Slot {
+                        token,
+                        queued: None,
+                    },
+                );
+                Request::Run(Self {
+                    id: id.to_string(),
+                    token,
+                })
             }
         }
     }
@@ -85,12 +118,19 @@ impl UpdateClaim {
     fn next_or_release(&self) -> Option<u64> {
         let mut updates = updates();
         let map = updates.get_or_insert_with(HashMap::new);
-        match map.get_mut(&self.0).and_then(Option::take) {
-            Some(attempt) => Some(attempt),
-            None => {
-                map.remove(&self.0);
-                None
-            }
+        let queued = map
+            .get_mut(&self.id)
+            .filter(|slot| slot.token == self.token)
+            .and_then(|slot| slot.queued.take());
+        if queued.is_none() {
+            Self::remove_own(map, &self.id, self.token);
+        }
+        queued
+    }
+
+    fn remove_own(map: &mut HashMap<String, Slot>, id: &str, token: u64) {
+        if map.get(id).is_some_and(|slot| slot.token == token) {
+            map.remove(id);
         }
     }
 }
@@ -98,22 +138,30 @@ impl UpdateClaim {
 impl Drop for UpdateClaim {
     fn drop(&mut self) {
         if let Some(map) = updates().as_mut() {
-            map.remove(&self.0);
+            Self::remove_own(map, &self.id, self.token);
         }
     }
 }
 
 /// Waits until no update of computer `id` is running, for a Delete that has already made
 /// the update's liveness check fail: the update must not touch the computer's folder
-/// (its log, its access material) after the folder is removed.
-pub(super) fn wait_for_update_end(id: &str) {
-    let deadline = std::time::Instant::now() + UPDATE_DRAIN;
+/// after it is removed. Fails when the update has not ended in time; the files stay.
+pub(super) fn wait_for_update_end(id: &str) -> Result<(), String> {
+    wait_for_update_end_within(id, UPDATE_DRAIN)
+}
+
+fn wait_for_update_end_within(id: &str, limit: Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + limit;
     while updates().as_ref().is_some_and(|map| map.contains_key(id)) {
         if std::time::Instant::now() >= deadline {
-            return;
+            return Err(
+                "Computer Use is still being updated in this computer. Try deleting it again in a moment."
+                    .into(),
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+    Ok(())
 }
 
 /// Serializes downloads so two computers never write the same partial file.
@@ -393,7 +441,7 @@ pub(super) fn update_in_background(app: &AppHandle, id: &str, attempt: u64) {
     if !wanted {
         return;
     }
-    let Some(claim) = UpdateClaim::take_or_queue(id, attempt) else {
+    let Request::Run(claim) = UpdateClaim::request(id, attempt, update_may_run(id, attempt)) else {
         return;
     };
     let (app, id) = (app.clone(), id.to_string());
@@ -699,27 +747,66 @@ mod tests {
 
     #[test]
     fn only_one_update_runs_for_a_computer_and_a_later_start_is_queued_behind_it() {
-        let first = UpdateClaim::take_or_queue("update-claim-test", 1).unwrap();
-        // A second Start's request waits; the newest one replaces an older queued one.
-        assert!(UpdateClaim::take_or_queue("update-claim-test", 2).is_none());
-        assert!(UpdateClaim::take_or_queue("update-claim-test", 3).is_none());
-        assert!(UpdateClaim::take_or_queue("update-claim-other", 1).is_some());
+        let run = |id: &str, attempt, owns| UpdateClaim::request(id, attempt, owns);
+        let Request::Run(first) = run("update-claim-test", 1, true) else {
+            panic!("the first request runs");
+        };
+        // A second Start's request waits; the highest queued Start wins whatever the
+        // order the requests arrive in.
+        assert!(matches!(run("update-claim-test", 3, true), Request::Queued));
+        assert!(matches!(run("update-claim-test", 2, true), Request::Queued));
+        // A request from a Start that no longer owns the computer is refused outright.
+        assert!(matches!(run("update-claim-test", 9, false), Request::Stale));
+        assert!(matches!(
+            run("update-claim-other", 1, true),
+            Request::Run(_)
+        ));
         assert_eq!(first.next_or_release(), Some(3));
         // With nothing queued the claim is released in the same step.
         assert_eq!(first.next_or_release(), None);
-        assert!(UpdateClaim::take_or_queue("update-claim-test", 4).is_some());
+        assert!(matches!(run("update-claim-test", 4, true), Request::Run(_)));
+    }
+
+    #[test]
+    fn a_finished_claim_never_removes_a_newer_ones_place() {
+        let Request::Run(old) = UpdateClaim::request("update-token-test", 1, true) else {
+            panic!("runs");
+        };
+        assert_eq!(old.next_or_release(), None);
+        let Request::Run(newer) = UpdateClaim::request("update-token-test", 2, true) else {
+            panic!("runs");
+        };
+        // The old claim's destructor runs after the newer one took the place.
+        drop(old);
+        assert!(matches!(
+            UpdateClaim::request("update-token-test", 3, true),
+            Request::Queued
+        ));
+        assert_eq!(newer.next_or_release(), Some(3));
     }
 
     #[test]
     fn a_delete_waits_for_the_running_update_to_end() {
-        let claim = UpdateClaim::take_or_queue("update-drain-test", 1).unwrap();
+        let Request::Run(claim) = UpdateClaim::request("update-drain-test", 1, true) else {
+            panic!("runs");
+        };
         let waiter = std::thread::spawn(|| wait_for_update_end("update-drain-test"));
         std::thread::sleep(Duration::from_millis(150));
         assert!(!waiter.is_finished());
         drop(claim);
-        waiter.join().unwrap();
+        assert_eq!(waiter.join().unwrap(), Ok(()));
         // Nothing running: it returns at once.
-        wait_for_update_end("update-drain-test");
+        assert_eq!(wait_for_update_end("update-drain-test"), Ok(()));
+    }
+
+    #[test]
+    fn a_delete_that_cannot_drain_the_update_fails_and_keeps_the_files() {
+        let Request::Run(_claim) = UpdateClaim::request("update-stuck-test", 1, true) else {
+            panic!("runs");
+        };
+        let error = wait_for_update_end_within("update-stuck-test", Duration::from_millis(120))
+            .unwrap_err();
+        assert!(error.contains("still being updated"));
     }
 
     #[test]

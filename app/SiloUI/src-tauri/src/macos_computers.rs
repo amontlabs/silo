@@ -1686,7 +1686,10 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
         close_display(app, id);
         // A computer use update stops once the deletion is marked; it must have ended before
         // the folder goes, or it could write to it again.
-        guest_computer_use::wait_for_update_end(id);
+        if let Err(message) = guest_computer_use::wait_for_update_end(id) {
+            update(app, id, |entry| entry.deleting = false);
+            return Err(message);
+        }
         // The entry stays until the files are gone, so a failed removal can be retried.
         match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
