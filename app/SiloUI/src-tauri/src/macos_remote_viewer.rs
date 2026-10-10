@@ -250,11 +250,12 @@ fn endpoint(app: &AppHandle, label: &str, device: &str, computer: &str) -> Resul
         return Ok(url);
     }
     let (device_id, computer_id) = (device.to_string(), computer.to_string());
-    let open: gateway::Open = Arc::new(move || {
+    let open: gateway::Open = Arc::new(move |unwanted| {
         let stream = remote::open_bridge_stream(
             &device_id,
             DISPLAY_STREAM,
             json!({"computerId": computer_id}),
+            unwanted,
         )
         .map_err(|error| error.message)?;
         Ok(Upstream {
@@ -388,7 +389,7 @@ mod tests {
     #[test]
     fn closing_a_device_ends_only_its_gateways() {
         let gateway = |tag: &str| {
-            let open: gateway::Open = Arc::new(|| Err("closed".to_string()));
+            let open: gateway::Open = Arc::new(|_| Err("closed".to_string()));
             let started = Gateway::start(open, Vec::new()).unwrap();
             (tag.to_string(), started)
         };

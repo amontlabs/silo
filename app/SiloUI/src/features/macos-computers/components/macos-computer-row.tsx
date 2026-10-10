@@ -109,7 +109,7 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
         {checkpointsAvailable && <ComputerAction label={`Checkpoints of ${computer.name}`} aria-expanded={checkpointsOpen} onClick={() => setCheckpointsOpen(open => !open)}><History /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} disabled={unavailable} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending || operating || unavailable} onClick={() => void run("stop")}><Square /></ComputerAction>}
-        {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending} onClick={() => void run("setup")}>Retry setup</Button>}
+        {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending || unavailable} onClick={() => void run("setup")}>Retry setup</Button>}
         {settingUp && <ConfirmPopover
           align="end"
           tone="destructive"

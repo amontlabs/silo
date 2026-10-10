@@ -1,4 +1,4 @@
-import type { MacosComputer } from "@/features/macos-computers/model/macos-computers"
+import { remoteMacosComputerId, type MacosComputer, type MacosComputersSnapshot } from "@/features/macos-computers/model/macos-computers"
 import { remoteComputerTarget, type Device } from "./connections"
 import type { ApplicationComputer, ComputerState } from "./application-source"
 
@@ -36,4 +36,14 @@ export function macosLogComputer(computer: MacosComputer, device?: Device): Appl
     githubRepositories: [],
     secretNames: [],
   }
+}
+
+/** The ids of the macOS computers the Logs page may still filter on: this device's, and those of devices that are still connected. */
+export function selectableMacosIds(snapshot: MacosComputersSnapshot | undefined, devices: readonly Pick<Device, "id">[] | undefined): string[] {
+  return [
+    ...(snapshot?.state?.computers.map(({ id }) => id) ?? []),
+    ...Object.entries(snapshot?.remote ?? {})
+      .filter(([deviceId]) => devices?.some(({ id }) => id === deviceId))
+      .flatMap(([deviceId, remote]) => remote.state?.computers.map(({ id }) => remoteMacosComputerId(deviceId, id)) ?? []),
+  ]
 }

@@ -40,8 +40,9 @@ pub(crate) struct Upstream {
     pub keep: Box<dyn Send>,
 }
 
-/// Opens the upstream of one WebSocket connection.
-pub(crate) type Open = Arc<dyn Fn() -> Result<Upstream, String> + Send + Sync>;
+/// Opens the upstream of one WebSocket connection. The argument turns true when the
+/// connection is no longer wanted (replaced, or the gateway stopped), so opening can end early.
+pub(crate) type Open = Arc<dyn Fn(&dyn Fn() -> bool) -> Result<Upstream, String> + Send + Sync>;
 
 pub(crate) struct Gateway {
     port: u16,
@@ -193,7 +194,8 @@ fn serve(socket: TcpStream, policy: &Policy, open: &Open, current: &Current, sto
     if let Some(previous) = previous {
         previous.store(true, Ordering::Release);
     }
-    let upstream = match open() {
+    let unwanted = || superseded.load(Ordering::Acquire) || stopped.load(Ordering::Acquire);
+    let upstream = match open(&unwanted) {
         Ok(upstream) => upstream,
         Err(message) => {
             close(&mut socket, 1011, &message);
@@ -334,7 +336,7 @@ mod tests {
 
     /// An upstream that echoes what it receives, and counts how many were opened.
     fn echo_open(opened: Arc<std::sync::atomic::AtomicUsize>) -> Open {
-        Arc::new(move || {
+        Arc::new(move |_| {
             opened.fetch_add(1, Ordering::AcqRel);
             let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
             let address = listener.local_addr().map_err(|e| e.to_string())?;
@@ -358,7 +360,7 @@ mod tests {
     }
 
     fn refusing_open() -> Open {
-        Arc::new(|| Err("The computer is not running.".to_string()))
+        Arc::new(|_| Err("The computer is not running.".to_string()))
     }
 
     fn gateway(open: Open) -> Gateway {
@@ -522,6 +524,35 @@ mod tests {
             }
         };
         assert!(ended);
+    }
+
+    #[test]
+    fn stopping_the_gateway_cancels_an_upstream_that_is_still_opening() {
+        let seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (flag, begun) = (seen.clone(), started.clone());
+        let open: Open = Arc::new(move |unwanted| {
+            begun.store(true, Ordering::Release);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !unwanted() && std::time::Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            flag.store(unwanted(), Ordering::Release);
+            Err("cancelled".into())
+        });
+        let gateway = gateway(open);
+        let port = port_of(&gateway);
+        let host = format!("127.0.0.1:{port}");
+        let _socket = connect(port, &path(&gateway), Some(&host), Some(ORIGIN), None).unwrap();
+        while !started.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(gateway);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !seen.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(seen.load(Ordering::Acquire));
     }
 
     #[test]

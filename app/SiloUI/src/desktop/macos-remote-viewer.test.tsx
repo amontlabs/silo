@@ -163,11 +163,23 @@ describe("macOS remote viewer", () => {
     expect(getSession).toHaveBeenCalledTimes(1)
   })
 
+  it("retries when the gateway closes an established session, which noVNC reports as clean", async () => {
+    const getSession = vi.fn(() => Promise.resolve(session))
+    mount(getSession)
+    await flush()
+    act(() => { rfbs[0].emit("connect"); rfbs[0].emit("disconnect", { clean: true }) })
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnecting")
+    await advance(1000)
+    await flush()
+    expect(getSession).toHaveBeenCalledTimes(2)
+    expect(rfbs).toHaveLength(2)
+  })
+
   it("disposes the previous connection on reconnect and unmount", async () => {
     const { unmount } = mount()
     await flush()
     const first = rfbs[0]
-    act(() => { first.emit("connect"); first.emit("disconnect", { clean: true }) })
+    act(() => first.emit("disconnect", { clean: false }))
     await act(async () => { screen.getByRole("button", { name: "Reconnect" }).click() })
     await flush()
     expect(first.disconnected).toBe(1)

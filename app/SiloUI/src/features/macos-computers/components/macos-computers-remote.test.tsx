@@ -113,6 +113,13 @@ it("disables the actions of a computer whose device is offline and says so", () 
   expect(screen.getByRole("button", { name: "More actions for remote-off" })).toBeVisible()
 })
 
+it("disables Retry setup while the device is offline", () => {
+  const store = createMacosComputersStore(createFixtureMacosComputersBackend([]))
+  const incomplete = { ...stopped, id: remoteMacosComputerId("studio", "r3"), installed: true, setupComplete: false }
+  render(<TooltipProvider><MacosComputerRow computer={incomplete} store={store} device={{ ...studio, connected: false, computerId: "r3" }} /></TooltipProvider>)
+  expect(screen.getByRole("button", { name: "Retry setup of remote-off" })).toBeDisabled()
+})
+
 it("offers Run on for the devices that can host macOS only, and validates names against the chosen device", async () => {
   const { spies, backend } = setup({ studio: hosting, box: unsupported }, { local: [{ ...stopped, id: "local-1", name: "mine" }] })
   const user = userEvent.setup()

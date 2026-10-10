@@ -171,11 +171,12 @@ export function MacosRemoteViewer({ name, device, getSession, resize, onFullscre
           credentials = null
           connected = false
           if (authFailed) return
-          const clean = event.detail?.clean === true
-          if (!clean && (everConnected || retrying)) scheduleRetry("The connection to the computer was lost.")
+          // noVNC reports a close from the server's side as clean even when the owner dropped the stream,
+          // so any close of an established session is retried.
+          if (everConnected || retrying) scheduleRetry("The connection to the computer was lost.")
           else {
             retrying = false
-            setStatus({ phase: "disconnected", message: clean ? "The computer ended the display session." : "Could not connect to the computer's screen." })
+            setStatus({ phase: "disconnected", message: event.detail?.clean === true ? "The computer ended the display session." : "Could not connect to the computer's screen." })
           }
         }],
       ]

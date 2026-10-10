@@ -154,3 +154,71 @@ fn the_display_methods_are_classified_for_replay_and_streaming() {
     assert_eq!(access("macos.create"), Some(Access::Change));
     assert_eq!(access("macos.action"), Some(Access::Change));
 }
+
+mod opening {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn reply_bytes(value: &Value) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_reply(&mut bytes, value).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn a_reply_that_arrives_is_returned_with_the_reader_after_it() {
+        let (mut peer, ours) = UnixStream::pair().unwrap();
+        peer.write_all(&reply_bytes(&json!({"result":{}}))).unwrap();
+        peer.write_all(b"RFB").unwrap();
+        let (reply, mut rest) = read_reply_cancellable(
+            std::io::BufReader::new(ours),
+            &|| false,
+            Duration::from_secs(5),
+            || panic!("nothing to abort"),
+        )
+        .unwrap();
+        assert_eq!(reply["result"], json!({}));
+        let mut raw = [0u8; 3];
+        rest.read_exact(&mut raw).unwrap();
+        assert_eq!(&raw, b"RFB");
+    }
+
+    #[test]
+    fn cancelling_stops_a_stalled_open_and_ends_what_it_reads_from() {
+        let (_peer, ours) = UnixStream::pair().unwrap();
+        let ender = ours.try_clone().unwrap();
+        let cancelled = AtomicBool::new(false);
+        let started = Instant::now();
+        let result = thread::scope(|scope| {
+            scope.spawn(|| {
+                thread::sleep(Duration::from_millis(150));
+                cancelled.store(true, Ordering::Release);
+            });
+            read_reply_cancellable(
+                std::io::BufReader::new(ours),
+                &|| cancelled.load(Ordering::Acquire),
+                Duration::from_secs(30),
+                || {
+                    let _ = ender.shutdown(std::net::Shutdown::Both);
+                },
+            )
+        });
+        assert_eq!(result.err().as_deref(), Some(OPEN_CANCELLED));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_device_that_never_answers_times_out_and_is_aborted() {
+        let (_peer, ours) = UnixStream::pair().unwrap();
+        let aborted = AtomicBool::new(false);
+        let result = read_reply_cancellable(
+            std::io::BufReader::new(ours),
+            &|| false,
+            Duration::from_millis(200),
+            || aborted.store(true, Ordering::Release),
+        );
+        assert_eq!(result.err().as_deref(), Some(OPEN_TIMED_OUT));
+        assert!(aborted.load(Ordering::Acquire));
+    }
+}

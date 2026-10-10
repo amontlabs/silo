@@ -1873,13 +1873,57 @@ impl Drop for ChildGuard {
         let _ = self.0.wait();
     }
 }
+/// How long a stream may take to be accepted by the other device.
+const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(60);
+/// Reads the bridge's reply on a helper thread while the caller watches `cancelled` and the
+/// deadline. On either, `abort` is called (it must end whatever `output` reads from) and an
+/// error is returned without waiting for the reader. Otherwise returns the reply and `output`,
+/// positioned after it.
+fn read_reply_cancellable<R: std::io::BufRead + Send + 'static>(
+    mut output: R,
+    cancelled: &dyn Fn() -> bool,
+    timeout: Duration,
+    abort: impl FnOnce(),
+) -> Result<(Value, R), String> {
+    let (send, receive) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let reply = read_reply(&mut output);
+        let _ = send.send(reply.map(|reply| (reply, output)));
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        match receive.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("The remote Silo connection ended.".into())
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let stop = if cancelled() {
+            Some(OPEN_CANCELLED)
+        } else if Instant::now() >= deadline {
+            Some(OPEN_TIMED_OUT)
+        } else {
+            None
+        };
+        if let Some(message) = stop {
+            abort();
+            return Err(message.into());
+        }
+    }
+}
+const OPEN_CANCELLED: &str = "Opening the connection was cancelled.";
+const OPEN_TIMED_OUT: &str =
+    "The other device did not answer in time. Check that Silo is running there.";
 /// Opens the stream method `method` on the connected device `device_id` and returns once the
 /// device has accepted it, so a refusal (computer not running, no capacity) comes back as its
-/// own message rather than as a dropped connection.
+/// own message rather than as a dropped connection. Opening ends, and its ssh process is
+/// stopped, when `cancelled` turns true or the device does not answer within a minute.
 pub(crate) fn open_bridge_stream(
     device_id: &str,
     method: &str,
     params: Value,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<BridgeStream, BridgeError> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let device = {
@@ -1899,24 +1943,28 @@ pub(crate) fn open_bridge_stream(
         &crate::channel::current().remote_bridge_command(),
     ]);
     let stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(stderr.try_clone().map_err(|e| e.to_string())?)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let (Some(mut input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
-        let _ = child.kill();
-        let _ = child.wait();
+    let mut child = ChildGuard(
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(stderr.try_clone().map_err(|e| e.to_string())?)
+            .spawn()
+            .map_err(|e| e.to_string())?,
+    );
+    let (Some(mut input), Some(output)) = (child.0.stdin.take(), child.0.stdout.take()) else {
         return Err("SSH is unavailable.".to_string().into());
     };
-    let mut output = std::io::BufReader::new(output);
-    let reply = write_frame(&mut input, &request).and_then(|()| read_reply(&mut output));
-    let reply = match reply {
+    let output = std::io::BufReader::new(output);
+    let reply = write_frame(&mut input, &request).and_then(|()| {
+        read_reply_cancellable(output, cancelled, STREAM_OPEN_TIMEOUT, || {
+            let _ = child.0.kill();
+        })
+    });
+    let (reply, output) = match reply {
         Ok(reply) => reply,
         Err(message) => {
-            let _ = child.kill();
-            let exit = child.wait().ok().and_then(|status| status.code());
+            let _ = child.0.kill();
+            let exit = child.0.wait().ok().and_then(|status| status.code());
             let mut text = String::new();
             let mut stderr = stderr;
             let _ = std::io::Seek::seek(&mut stderr, std::io::SeekFrom::Start(0)).and_then(|_| {
@@ -1924,7 +1972,8 @@ pub(crate) fn open_bridge_stream(
                     .take(65536)
                     .read_to_string(&mut text)
             });
-            return Err(if text.trim().is_empty() {
+            let stopped = message == OPEN_CANCELLED || message == OPEN_TIMED_OUT;
+            return Err(if stopped || text.trim().is_empty() {
                 message.into()
             } else {
                 connection_failure(exit, &text).into()
@@ -1932,12 +1981,10 @@ pub(crate) fn open_bridge_stream(
         }
     };
     if let Err(failure) = decode_reply(&reply) {
-        let _ = child.kill();
-        let _ = child.wait();
         return Err(name_version_mismatch(failure.error(), &device.name));
     }
     Ok(BridgeStream {
-        child: ChildGuard(child),
+        child,
         input,
         output,
     })
