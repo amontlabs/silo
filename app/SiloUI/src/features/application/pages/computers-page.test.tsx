@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it, vi } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
@@ -6,6 +6,8 @@ import type { ApplicationActions, ApplicationActivity, ApplicationSource } from 
 import { createDirectoryStore, type DirectoryPage } from "../model/directory-store"
 import { computerTarget } from "../model/connections"
 import { ComputersPage } from "./computers-page"
+import { createFixtureMacosComputersStore } from "@/fixtures/macos-computers"
+import { MacosComputersContext } from "@/features/macos-computers/model/macos-computers"
 
 function activity(id: string, computer: string): ApplicationActivity {
   return { id, category: "computer", title: `Event ${id}`, detail: "", occurredAt: "2026-09-29T10:00:00.000Z", time: "10:00", tone: "danger", status: "completed", computer }
@@ -138,4 +140,21 @@ it("names a remote computer's Push button by its device", () => {
   dev.device = { id: "office", name: "Office Mac", address: "office.local", connected: true, computerId: "remote-dev" }
   renderFiles(source)
   expect(screen.getByRole("button", { name: "Push 2 commits for acme/silo in dev on Office Mac" })).toBeEnabled()
+})
+
+it("lists a macOS computer on the Logs page and reads its logs by id", async () => {
+  const source = structuredClone(applicationSourceForScenario("complete"))
+  const queryLogs = vi.fn(async () => ({ entries: [], nextCursor: null, oldestAvailableTimestamp: null, newestAvailableTimestamp: null, totalMatches: 0, timestampEstimated: false }))
+  render(
+    <MacosComputersContext.Provider value={createFixtureMacosComputersStore()}>
+      <ComputersPage
+        source={source} section="logs" computers={source.computers} activities={[]} selectedComputerIds={new Set(["mac-running"])}
+        networkActions={{ queryLogs } as unknown as ApplicationActions} onSectionChange={vi.fn()} editor="Editor" onOpenEditor={vi.fn()}
+        directoryStore={createDirectoryStore()} active logQuery="" repositoryPushOperations={[]} browser="Browser"
+        onComputerFilterChange={vi.fn()} onLogQueryChange={vi.fn()} onPushRepository={vi.fn()} onDismissRepositoryPush={vi.fn()}
+      />
+    </MacosComputersContext.Provider>,
+  )
+  await waitFor(() => expect(queryLogs).toHaveBeenCalledWith(expect.objectContaining({ computerId: "mac-running" })))
+  expect(queryLogs).not.toHaveBeenCalledWith(expect.objectContaining({ computerId: source.computers[0].configuration.id }))
 })

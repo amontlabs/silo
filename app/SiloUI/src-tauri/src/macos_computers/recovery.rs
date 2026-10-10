@@ -272,7 +272,7 @@ fn prune_evidence(dir: &Path, kept: usize) {
 }
 
 fn prepare_window(app: &AppHandle, id: &str, title: &str) -> Result<(), Failure> {
-    super::show_display(app, id, title)
+    super::show_display(app, id, title, false)
         .and_then(|()| engine::focus_display(app, id))
         .and_then(|_| engine::lock_input(app, id, LOCKED_SUBTITLE))
         .map_err(Failure::Fatal)

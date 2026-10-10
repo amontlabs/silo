@@ -1258,12 +1258,14 @@ fn open_display(app: &AppHandle, id: &str) -> Result<(), String> {
     if state != State::Running {
         return Err("Start the computer to open its display.".into());
     }
-    show_display(app, id, &record.name)
+    show_display(app, id, &record.name, true)
 }
 
 /// Opens the window that shows a running computer's screen, or brings the
 /// existing one forward.
-fn show_display(app: &AppHandle, id: &str, title: &str) -> Result<(), String> {
+/// `toolbar` adds the clipboard buttons, which belong to the user's own window and not to the
+/// window of a setup that types into the computer itself.
+fn show_display(app: &AppHandle, id: &str, title: &str, toolbar: bool) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
     let label = display_label(id);
     if let Some(existing) = app.get_webview_window(&label) {
@@ -1290,7 +1292,7 @@ fn show_display(app: &AppHandle, id: &str, title: &str) -> Result<(), String> {
         }
     });
     update(app, id, |entry| entry.display_open = true);
-    if let Err(message) = engine::attach_display(app, id, &display) {
+    if let Err(message) = engine::attach_display(app, id, &display, toolbar) {
         let _ = display.destroy();
         return Err(message);
     }

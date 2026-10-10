@@ -118,7 +118,10 @@ impl Provision<'_> {
         finished: impl FnOnce(&mut SetupProgress),
     ) -> Result<(), Stop> {
         finished(&mut record.setup);
-        self.log(&format!("step finished: {:?}", record.setup));
+        self.log(&format!(
+            "setup step finished: {}",
+            setup_summary(&record.setup)
+        ));
         store::save(self.layout, record)?;
         let saved = record.clone();
         super::update(self.app, &self.id, |entry| entry.record = saved);
@@ -543,6 +546,25 @@ impl Provision<'_> {
     }
 }
 
+/// The finished steps of a setup in words, for the log.
+fn setup_summary(setup: &SetupProgress) -> String {
+    let done: Vec<&str> = [
+        (setup.account, "account"),
+        (setup.sip, "sip"),
+        (setup.computer_use, "computer use"),
+        (setup.clipboard, "clipboard"),
+        (!setup.needs_personalizing, "personalized"),
+    ]
+    .into_iter()
+    .filter_map(|(finished, name)| finished.then_some(name))
+    .collect();
+    if done.is_empty() {
+        "nothing done yet".into()
+    } else {
+        format!("{} done", done.join(", "))
+    }
+}
+
 /// Which key a copy of a template answers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LoginKey {
@@ -649,6 +671,18 @@ fn base64_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_setup_log_names_the_finished_steps() {
+        let mut setup = SetupProgress {
+            needs_personalizing: true,
+            ..SetupProgress::default()
+        };
+        assert_eq!(setup_summary(&setup), "nothing done yet");
+        setup.account = true;
+        setup.sip = true;
+        assert_eq!(setup_summary(&setup), "account, sip done");
+    }
 
     #[test]
     fn the_finalization_script_survives_the_shell_round_trip() {

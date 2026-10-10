@@ -1034,6 +1034,7 @@ pub(super) fn attach_display(
     app: &AppHandle,
     id: &str,
     window: &tauri::WebviewWindow,
+    toolbar: bool,
 ) -> Result<(), String> {
     let (id, window, handle) = (id.to_string(), window.clone(), app.clone());
     on_main(app, move |mtm| {
@@ -1045,7 +1046,9 @@ pub(super) fn attach_display(
                 .map_err(|_| "Silo could not open the display.".to_string())?;
             // Tauri owns the NSWindow; this closure runs on its AppKit thread.
             let native = unsafe { &*pointer.cast::<NSWindow>() };
-            install_toolbar(mtm, &handle, &id, native);
+            if toolbar {
+                install_toolbar(mtm, &handle, &id, native);
+            }
             let content = native
                 .contentView()
                 .ok_or("Silo could not open the display.")?;

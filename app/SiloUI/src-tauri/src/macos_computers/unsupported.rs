@@ -134,6 +134,7 @@ pub(super) fn attach_display(
     _app: &AppHandle,
     _id: &str,
     _window: &tauri::WebviewWindow,
+    _toolbar: bool,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }

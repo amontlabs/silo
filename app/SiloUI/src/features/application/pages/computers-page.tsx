@@ -7,6 +7,8 @@ import { ComputerFileTree } from "@/features/application/components/computer-fil
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
 import { useMemo, useState } from "react"
+import { macosLogComputer } from "@/features/application/model/macos-log-computers"
+import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Loader2, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
 import { DisclosureHeader } from "@/components/disclosure-header"
@@ -378,13 +380,21 @@ export function ComputersPage({
       return configuration ? { id: configuration.id, name: configuration.name } : undefined
     },
   })
+  // The Logs section also lists this device's macOS computers: their setup logs are retained
+  // under their ids. Every other section works with the computers of the application source.
+  const macos = useMacosComputers()
+  const macosComputers = macos?.snapshot.state?.supported ? macos.snapshot.state.computers : undefined
+  const listed = useMemo(
+    () => section === "logs" && macosComputers?.length ? [...computers, ...macosComputers.map(macosLogComputer)] : computers,
+    [section, computers, macosComputers],
+  )
   const visibleComputers = useMemo(
-    () => selectedComputerIds.size === 0 ? computers : computers.filter(({ configuration }) => selectedComputerIds.has(configuration.id)),
-    [computers, selectedComputerIds],
+    () => selectedComputerIds.size === 0 ? listed : listed.filter(({ configuration }) => selectedComputerIds.has(configuration.id)),
+    [listed, selectedComputerIds],
   )
   // An empty filter means every computer, so an empty list means there are none yet: offer to
   // create one. Activity still shows system events and those of deleted computers.
-  const hasComputers = computers.length > 0
+  const hasComputers = listed.length > 0
   if (!hasComputers && section !== "activity") {
     return (
       <div className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
@@ -400,7 +410,7 @@ export function ComputersPage({
 
   return (
     <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
-      {hasComputers && <ComputerFilterBar computers={computers} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
+      {hasComputers && <ComputerFilterBar computers={listed} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <Logs key={JSON.stringify(visibleComputers.map(computerTarget))} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} />}
       {section === "network" && <NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} />}
