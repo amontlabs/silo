@@ -1162,12 +1162,20 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         }
         Err(message) => {
             // Nothing may report the computer as stopped while its machine can still run.
-            match ensure_released(app, id) {
-                Ok(()) => set_state(app, id, State::Stopped, None),
-                Err(held) => set_state(app, id, State::Failed, Some(held)),
-            }
+            let (state, detail) = state_after_failed_start(ensure_released(app, id));
+            set_state(app, id, state, detail);
             Err(message)
         }
+    }
+}
+
+/// Where a computer stands once a failed start has tried to release its machine. One whose
+/// machine is still held stays stopping: busy, so it can't be deleted, restored or ignored by
+/// Quit, and open to Force stop.
+fn state_after_failed_start(released: Result<(), String>) -> (State, Option<String>) {
+    match released {
+        Ok(()) => (State::Stopped, None),
+        Err(held) => (State::Stopping, Some(held)),
     }
 }
 
@@ -2327,6 +2335,26 @@ mod tests {
         assert_eq!(registry.entries[0].state, State::Stopping);
         let (mut registry, id) = registry_with(State::Stopped);
         assert!(registry.begin_force_stop(&id).is_err());
+    }
+
+    #[test]
+    fn a_machine_a_failed_start_could_not_release_stays_busy_and_open_to_force_stop() {
+        assert_eq!(state_after_failed_start(Ok(())), (State::Stopped, None));
+        let (state, detail) = state_after_failed_start(Err("still held".into()));
+        assert_eq!(state, State::Stopping);
+        assert_eq!(detail.as_deref(), Some("still held"));
+        assert!(is_busy(state));
+        assert!(store::delete_mode(state).is_err());
+        assert!(store::checkpoint_allowed(
+            state,
+            &registry_with(state).0.entries[0].record,
+            false,
+            false,
+            checkpoints::OperationKind::Restore
+        )
+        .is_err());
+        let (mut registry, id) = registry_with(state);
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Stopping));
     }
 
     #[test]
