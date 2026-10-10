@@ -7,8 +7,8 @@
 //! the detail. Machines started here have no display.
 use super::setup_log::SetupLog;
 use super::{
-    app_data, engine, guest_access, guest_clipboard, guest_computer_use, layout_and_record,
-    offline_setup, personalize, recovery, set_detail,
+    app_data, checkpoints, engine, guest_access, guest_clipboard, guest_computer_use,
+    layout_and_record, offline_setup, personalize, recovery, set_detail,
     store::{self, Layout, Record, SetupProgress},
     templates, Stop, RUN,
 };
@@ -37,6 +37,9 @@ const SSH_POLL: Duration = Duration::from_secs(3);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(120);
 const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
 const MACHINE_POLL: Duration = Duration::from_millis(500);
+
+const INHERITED_ACCESS_GONE: &str =
+    "This fork has lost the access it was copied with. Delete it and fork the checkpoint again.";
 
 /// Runs every unfinished step for `record`, saving progress after each.
 pub(super) fn run(
@@ -231,19 +234,29 @@ impl Provision<'_> {
     /// the script, and a copy that already has its own key skips the script.
     fn personalize(&self, record: &mut Record) -> Result<(), Stop> {
         let data = app_data(self.app)?;
-        let name = record
-            .template
-            .clone()
-            .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
         // A resumed personalization writes as much as a first one, so it needs the space too.
         let _space = match self.reservation.take() {
             Some(held) => held,
             None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
         };
-        let lease = templates::lease_named(&data, &name)?;
-        let access = lease.template.access_dir();
+        // A copy of a template holds a lease on it; a fork has the credentials of its source.
+        let (lease, access) = if record.inherited_access {
+            (None, checkpoints::inherited_access(self.layout))
+        } else {
+            let name = record
+                .template
+                .clone()
+                .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
+            let lease = templates::lease_named(&data, &name)?;
+            let access = lease.template.access_dir();
+            (Some(lease), access)
+        };
         if !access.join("id_ed25519").exists() {
-            return Err(Stop::Failed(templates::TEMPLATE_GONE.into()));
+            return Err(Stop::Failed(if record.inherited_access {
+                INHERITED_ACCESS_GONE.into()
+            } else {
+                templates::TEMPLATE_GONE.into()
+            }));
         }
         let own = guest_access::account(self.layout)?;
         let template_login = self.layout.clone().with_access(access);
@@ -254,7 +267,10 @@ impl Provision<'_> {
         let mut shortfall = None;
         // The backing file's length is the target, whatever the record says after an attempt.
         let requested = personalize::requested_gib(&self.layout.disk())?;
-        let template_gib = lease.template.meta.disk_gib;
+        // A fork has its source's disk size: there is nothing to grow.
+        let template_gib = lease
+            .as_ref()
+            .map_or(requested, |lease| lease.template.meta.disk_gib);
         let grow = requested > template_gib;
         let mut unallocated = None;
         let mut reconciled = None;
@@ -317,7 +333,10 @@ impl Provision<'_> {
         if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
             record.disk_gib = gib;
         }
+        record.inherited_access = false;
         self.mark(record, |setup| setup.needs_personalizing = false)?;
+        // Its own credentials are the only ones left.
+        let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
         // The computer is usable and complete; the message stays as its failure detail.
         shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
     }
@@ -510,12 +529,17 @@ impl Provision<'_> {
     fn wait_stopped(&self, timeout: Duration) -> Result<(), Stop> {
         let deadline = Instant::now() + timeout;
         loop {
-            let states = engine::machine_states(self.app)?;
-            match states.iter().find(|(id, _)| *id == self.id) {
+            let samples = engine::machine_samples(self.app)?;
+            match samples.iter().find(|sample| sample.id == self.id) {
                 None => return Ok(()),
-                Some((_, engine::MachineState::Stopped | engine::MachineState::Failed)) => {
+                Some(sample)
+                    if matches!(
+                        sample.state,
+                        engine::MachineState::Stopped | engine::MachineState::Failed
+                    ) =>
+                {
                     // The framework reported the end, but its delegate has not released the machine.
-                    super::machine_stopped(self.app, &self.id, None);
+                    super::machine_stopped(self.app, &self.id, sample.generation, None);
                 }
                 Some(_) => {}
             }

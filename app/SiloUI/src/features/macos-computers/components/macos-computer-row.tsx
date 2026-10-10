@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Monitor, Play, Square } from "lucide-react"
+import { History, Monitor, Play, Square } from "lucide-react"
 
 import { ActionsMenu, type MenuAction } from "@/components/actions-menu"
 import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
@@ -8,7 +8,9 @@ import { Progress } from "@/components/ui/progress"
 import { ComputerAction, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
 import { clipboardFeedback } from "@/desktop/viewer-clipboard-feedback"
 import { showActionFailure, showQuickConfirmation } from "@/lib/operation-toast"
+import { MacosCheckpointPanel } from "./macos-checkpoint-panel"
 import {
+  canCheckpointMacos,
   canRetryMacosSetup,
   isMacosCreating,
   isMacosSettingUp,
@@ -35,9 +37,16 @@ const tones: Record<MacosComputer["state"], ComputerRowTone> = {
 
 const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete", setup: "set up" }
 
-/** A macOS computer in the computers list. It has no detail page, terminal, editor or reorder handle. */
-export function MacosComputerRow({ computer, store }: { computer: MacosComputer; store: MacosComputersStore }) {
+/**
+ * A macOS computer in the computers list. It has no detail page, terminal, editor or reorder handle;
+ * its checkpoints open under the row, with the list the Linux detail page's Checkpoints tab shows.
+ * `takenNames` are the computer names on this device, for naming a fork.
+ */
+export function MacosComputerRow({ computer, store, takenNames = [] }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[] }) {
   const [pending, setPending] = useState(false)
+  const [checkpointsOpen, setCheckpointsOpen] = useState(false)
+  const checkpointsAvailable = canCheckpointMacos(computer) || (computer.checkpoints?.length ?? 0) > 0
+  const operating = computer.checkpointOperation?.status === "running"
 
   async function run(action: MacosComputerAction) {
     setPending(true)
@@ -68,16 +77,17 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
     { label: "Copy from computer", accessibleLabel: `Copy from ${computer.name}`, onSelect: () => void transferClipboard("copy-from") },
   )
   if (computer.state === "running" || computer.state === "stopping") items.push({ label: "Force stop", accessibleLabel: `Force stop ${computer.name}`, disabled: pending, onSelect: () => void run("force-stop") })
-  if (settled) items.push({ label: "Delete", accessibleLabel: `Delete ${computer.name}`, destructive: true, popover: "delete" })
+  if (settled) items.push({ label: "Delete", accessibleLabel: `Delete ${computer.name}`, destructive: true, popover: "delete", disabled: operating })
 
   const detail = <span className="grid gap-1">
     <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
     {(computer.state === "failed" || settingUp) && computer.detail && <span role={settingUp ? undefined : "alert"} className="whitespace-normal">{computer.detail}</span>}
     {(computer.state === "running" || computer.state === "stopping") && computer.detail && <span className="whitespace-normal">{computer.detail}</span>}
+    {operating && <span>{computer.checkpointOperation?.stage}…</span>}
     {(creating || settingUp) && <Progress value={computer.progress == null ? null : computer.progress * 100} aria-label={`${computer.name} progress`} />}
   </span>
 
-  return <ComputerListItem data-macos-computer-id={computer.id} aria-busy={creating || settingUp || pending || undefined}>
+  return <ComputerListItem data-macos-computer-id={computer.id} aria-busy={creating || settingUp || pending || operating || undefined}>
     <ComputerListRow
       name={computer.name}
       os="macos"
@@ -87,9 +97,10 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
       detail={detail}
       detailClassName="overflow-visible"
       actions={<>
-        {(computer.state === "stopped" || (computer.state === "failed" && computer.installed)) && !computer.needsPersonalizing && <ComputerAction label={`Start ${computer.name}`} disabled={pending} onClick={() => void run("start")}><Play /></ComputerAction>}
+        {(computer.state === "stopped" || (computer.state === "failed" && computer.installed)) && !computer.needsPersonalizing && <ComputerAction label={`Start ${computer.name}`} disabled={pending || operating} onClick={() => void run("start")}><Play /></ComputerAction>}
+        {checkpointsAvailable && <ComputerAction label={`Checkpoints of ${computer.name}`} aria-expanded={checkpointsOpen} onClick={() => setCheckpointsOpen(open => !open)}><History /></ComputerAction>}
         {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
-        {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending} onClick={() => void run("stop")}><Square /></ComputerAction>}
+        {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending || operating} onClick={() => void run("stop")}><Square /></ComputerAction>}
         {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending} onClick={() => void run("setup")}>Retry setup</Button>}
         {settingUp && <ConfirmPopover
           align="end"
@@ -125,6 +136,7 @@ export function MacosComputerRow({ computer, store }: { computer: MacosComputer;
         }} />}
       </>}
     />
+    {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} onStart={() => void run("start")} /></div>}
   </ComputerListItem>
 }
 

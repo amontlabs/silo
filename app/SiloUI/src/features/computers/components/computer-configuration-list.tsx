@@ -512,7 +512,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                 </ComputerListItem>
               )
             })}
-            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} />)}
+            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} takenNames={[...localLinuxNames, ...macosComputers.map(({ name }) => name)]} />)}
         </ComputerList>
         {footer && <div className="mt-3 shrink-0">{footer}</div>}
         <p id={reorderHelpId} className="sr-only">Use the Up and Down arrow keys to reorder.</p>

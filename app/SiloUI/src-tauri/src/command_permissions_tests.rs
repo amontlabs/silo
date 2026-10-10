@@ -27,6 +27,10 @@ fn macos_computer_commands_belong_to_the_main_window_only() {
         "open_macos_display",
         "macos_computer_clipboard",
         "delete_macos_template",
+        "create_macos_checkpoint",
+        "restore_macos_checkpoint",
+        "fork_macos_checkpoint",
+        "delete_macos_checkpoint",
     ] {
         let permission = format!("allow-{}", command.replace('_', "-"));
         assert_eq!(

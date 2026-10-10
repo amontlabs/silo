@@ -23,6 +23,7 @@ pub(super) enum InstallError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MachineState {
     Running,
+    Paused,
     Stopped,
     Failed,
 }
@@ -69,6 +70,57 @@ pub(super) fn start_in_recovery(
     _app: &AppHandle,
     _record: &Record,
     _layout: &Layout,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) enum StateStartError {
+    Rejected(String),
+    Failed(String),
+}
+
+pub(super) fn start_from_state(
+    _app: &AppHandle,
+    _record: &Record,
+    _layout: &Layout,
+    _state: &Path,
+) -> Result<u64, StateStartError> {
+    Err(StateStartError::Failed(UNSUPPORTED.into()))
+}
+
+pub(super) fn resume_paused(_app: &AppHandle, _id: &str) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn resume_stray(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+    _owned: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) const SUPERSEDED: &str = "The computer was started again, or stopped, in the meantime.";
+
+pub(super) fn resume_if(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+    _guard: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn memory_support(_app: &AppHandle, _id: &str) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn save_running(
+    _app: &AppHandle,
+    _id: &str,
+    _state: &Path,
+    _copy: &mut dyn FnMut() -> Result<(), String>,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
@@ -126,6 +178,50 @@ pub(super) fn force_stop(_app: &AppHandle, _id: &str) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct Sample {
+    pub id: String,
+    pub state: MachineState,
+    pub generation: u64,
+}
+
+pub(super) fn machine_samples(_app: &AppHandle) -> Result<Vec<Sample>, String> {
+    Ok(Vec::new())
+}
+
+pub(super) fn force_stop_generation(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn force_stop_if(
+    _app: &AppHandle,
+    _id: &str,
+    _guard: impl Fn() -> bool + Send + 'static,
+) -> Result<Option<u64>, String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn run_if_no_machine(
+    _app: &AppHandle,
+    _id: &str,
+    _apply: impl FnOnce() + Send + 'static,
+) -> Result<bool, String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn wait_until_released(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+    _timeout: std::time::Duration,
+) -> bool {
+    true
+}
+
 pub(super) fn machine_states(_app: &AppHandle) -> Result<Vec<(String, MachineState)>, String> {
     Ok(Vec::new())
 }
@@ -143,7 +239,9 @@ pub(super) fn detach_display(_app: &AppHandle, _id: &str) {}
 
 pub(super) fn set_display_subtitle(_app: &AppHandle, _id: &str, _text: &str) {}
 
-pub(super) fn release_slot(_id: &str) {}
+pub(super) fn release_slot(_id: &str, _generation: u64) -> bool {
+    false
+}
 
 pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
     work();

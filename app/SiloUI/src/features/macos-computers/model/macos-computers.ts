@@ -7,6 +7,23 @@ import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
 export const macosComputerStates = ["preparing", "copying", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
 export type MacosComputerState = (typeof macosComputerStates)[number]
 
+/** A saved checkpoint, in the words of the Linux checkpoint list: `full` includes memory. */
+export const macosCheckpointSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  createdAt: z.string(),
+  scope: z.enum(["full", "disk"]),
+  reason: z.enum(["manual", "before-restore"]),
+  sizeBytes: z.number().int().nonnegative().optional(),
+})
+
+export const macosCheckpointOperationSchema = z.object({
+  kind: z.enum(["capture", "restore", "fork", "delete"]),
+  status: z.enum(["running", "failed"]),
+  stage: z.string(),
+  error: z.string().optional(),
+})
+
 export const macosComputerSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
@@ -22,6 +39,11 @@ export const macosComputerSchema = z.object({
   setupComplete: z.boolean(),
   /** A copy of a template that still has the template's credentials: it can only be set up again or deleted. */
   needsPersonalizing: z.boolean().optional(),
+  /** Newest first. */
+  checkpoints: z.array(macosCheckpointSchema).optional(),
+  checkpointOperation: macosCheckpointOperationSchema.nullable().optional(),
+  /** A Restore that the next Start continues; `memory` when it brings the saved memory back. */
+  pendingRestore: z.object({ checkpointId: z.string(), memory: z.boolean() }).nullable().optional(),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 
@@ -70,6 +92,11 @@ export interface MacosComputersBackend {
   clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
   /** Removes the template; computers made from it are not affected. */
   deleteTemplate(): Promise<void>
+  createCheckpoint(id: string, name: string): Promise<void>
+  restoreCheckpoint(id: string, checkpointId: string): Promise<void>
+  /** Creates a new stopped computer from a checkpoint; resolves once it exists and is being set up. */
+  forkCheckpoint(id: string, checkpointId: string, newName: string): Promise<void>
+  deleteCheckpoint(id: string, checkpointId: string): Promise<void>
   /** Subscribes to state changes; resolves to an unsubscribe function. */
   listen(handler: (state: unknown) => void): Promise<() => void>
 }
@@ -92,6 +119,10 @@ export interface MacosComputersStore {
   openDisplay(id: string): Promise<void>
   clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
   deleteTemplate(): Promise<void>
+  createCheckpoint(id: string, name: string): Promise<void>
+  restoreCheckpoint(id: string, checkpointId: string): Promise<void>
+  forkCheckpoint(id: string, checkpointId: string, newName: string): Promise<void>
+  deleteCheckpoint(id: string, checkpointId: string): Promise<void>
 }
 
 const initialSnapshot: MacosComputersSnapshot = { state: null, error: null, warning: null }
@@ -210,6 +241,10 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
     openDisplay: id => backend.openDisplay(id),
     clipboard: (id, direction) => backend.clipboard(id, direction),
     deleteTemplate: () => readAfter(backend.deleteTemplate()),
+    createCheckpoint: (id, name) => readAfter(backend.createCheckpoint(id, name)),
+    restoreCheckpoint: (id, checkpointId) => readAfter(backend.restoreCheckpoint(id, checkpointId)),
+    forkCheckpoint: (id, checkpointId, newName) => readAfter(backend.forkCheckpoint(id, checkpointId, newName)),
+    deleteCheckpoint: (id, checkpointId) => readAfter(backend.deleteCheckpoint(id, checkpointId)),
   }
 }
 
@@ -257,6 +292,9 @@ export function validateMacosRequest(request: MacosComputerRequest, existingName
 }
 
 export const isMacosCreating = (computer: MacosComputer) => computer.state === "preparing" || computer.state === "copying" || computer.state === "downloading" || computer.state === "installing"
+
+/** Checkpoints need a computer whose setup has finished and that is not changing state or being installed. */
+export const canCheckpointMacos = (computer: MacosComputer) => computer.installed && computer.setupComplete && (computer.state === "stopped" || computer.state === "running" || computer.state === "failed")
 
 export const isMacosSettingUp = (computer: MacosComputer) => computer.state === "setting-up"
 

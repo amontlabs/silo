@@ -8,7 +8,9 @@
 //! `provision` prepares an installed computer for computer use, with `offline_setup`,
 //! `guest_access`, `recovery`, `guest_computer_use` and `guest_clipboard` behind it.
 //! A finished computer becomes a template (`templates`); later computers are copied
-//! from it and made their own by `personalize`.
+//! from it and made their own by `personalize`. `checkpoints` saves and restores a
+//! computer's disk and memory and forks new computers from them.
+mod checkpoints;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -79,6 +81,11 @@ pub(crate) struct MacosComputer {
     setup_complete: bool,
     /// A copy of a template that still has the template's credentials; it cannot be started.
     needs_personalizing: bool,
+    /// Newest first.
+    checkpoints: Vec<checkpoints::Summary>,
+    checkpoint_operation: Option<checkpoints::Operation>,
+    /// A Restore that the next Start continues.
+    pending_restore: Option<checkpoints::PendingRestore>,
 }
 
 /// The template new computers are copied from.
@@ -112,6 +119,14 @@ struct Entry {
     display_open: bool,
     /// Its files are being removed; nothing else may use the computer.
     deleting: bool,
+    /// The saved checkpoints, newest first.
+    checkpoints: Vec<checkpoints::Meta>,
+    /// Which Start owns the computer's `starting` state: counted up each time one is admitted.
+    /// What a Start does afterwards (running, a failed start's cleanup) only counts while it
+    /// still is the current one.
+    attempt: u64,
+    /// A checkpoint operation owns the computer: it can't be started, stopped or deleted.
+    operation: Option<checkpoints::Operation>,
     since: Instant,
     progress_emitted: Option<Instant>,
 }
@@ -126,6 +141,9 @@ impl Entry {
             cancel: Arc::new(AtomicU8::new(RUN)),
             display_open: false,
             deleting: false,
+            checkpoints: Vec::new(),
+            attempt: 0,
+            operation: None,
             since: Instant::now(),
             progress_emitted: None,
         }
@@ -146,6 +164,13 @@ impl Entry {
             installed: self.record.installed,
             setup_complete: self.record.setup.complete(),
             needs_personalizing: self.record.setup.needs_personalizing,
+            checkpoints: self
+                .checkpoints
+                .iter()
+                .map(checkpoints::Meta::summary)
+                .collect(),
+            checkpoint_operation: self.operation.clone(),
+            pending_restore: self.record.pending_restore.clone(),
         }
     }
 }
@@ -156,6 +181,33 @@ enum Finish {
     Kept,
 }
 
+/// Every macOS computer, with the state the UI shows and the rules that keep its operations
+/// from colliding. All transitions happen under this registry's lock (`update`, `set_state`,
+/// and the `begin_*` / `settle_*` methods); the framework's callbacks and the watcher only
+/// ever move a computer forward from a state they have just re-read.
+///
+/// States and events (`-` = refused or no change):
+///
+/// | State | Start | Stop | Force stop | Delete | Checkpoint op | Machine ends |
+/// | --- | --- | --- | --- | --- | --- | --- |
+/// | stopped / failed | starting | - | - | removed | capture, restore, fork, delete | - |
+/// | starting | - | - | stopping | - | fork, delete only | stopped, or failed on error |
+/// | running | - | stopping (ask) | stopping | - | capture, restore, fork, delete | stopped, or failed on error |
+/// | stopping | - | - | stays stopping | - | fork, delete only | stopped |
+/// | preparing .. setting-up | - | - | - | cancel, then removed | - | (creation ends) |
+///
+/// A checkpoint operation (`Entry::operation`) is not a state: the computer keeps its state
+/// and additionally refuses Start, Stop, Force stop and Delete, and a second operation, until
+/// the operation's guard drops. Quit and updates count it as busy; Quit asks it to end first.
+///
+/// Reverts: a refused stop request returns `stopping` to `running`; a failed start whose
+/// machine can't be released becomes `stopping` with Force stop open, never `stopped`/`failed`.
+///
+/// The watcher (every `WATCH_INTERVAL`, on the framework's states): a stopped or failed
+/// machine finishes `running`/`stopping`; a machine still running after `STOP_IGNORED_AFTER`
+/// turns `stopping` back to `running`; a paused machine nobody operates on is resumed, unless
+/// a pending Restore is unconsumed, when it is force-stopped instead; a `stopping` computer
+/// whose machine is gone (checked again against a fresh sample) becomes stopped.
 struct Registry {
     loaded: bool,
     entries: Vec<Entry>,
@@ -168,6 +220,70 @@ struct Registry {
 impl Registry {
     fn entry(&mut self, id: &str) -> Option<&mut Entry> {
         self.entries.iter_mut().find(|entry| entry.record.id == id)
+    }
+
+    /// Marks a failed start as settled, unless something else already moved the computer on
+    /// (a late stop callback that released the machine and set it stopped).
+    fn settle_failed_start(&mut self, id: &str, attempt: u64, released: Result<(), String>) {
+        if let Some(entry) = self.entry(id) {
+            if entry.state == State::Starting && entry.attempt == attempt {
+                let (state, detail) = state_after_failed_start(released);
+                entry.state = state;
+                entry.detail = detail;
+                entry.progress = None;
+                entry.since = Instant::now();
+            }
+        }
+    }
+
+    /// Marks the pending Restore that Start number `attempt` consumed as used. Nothing changes
+    /// unless that Start still owns the computer and the record still names exactly that
+    /// Restore: a newer Restore's reference is never cleared by an older Start. `save` makes the
+    /// new record durable before the registry takes it.
+    fn consume_pending_restore(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        consumed: &checkpoints::PendingRestore,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let entry = self.entry(id).ok_or("This computer no longer exists.")?;
+        if entry.state != State::Starting
+            || entry.attempt != attempt
+            || entry.record.pending_restore.as_ref() != Some(consumed)
+        {
+            return Err(engine::SUPERSEDED.into());
+        }
+        let mut record = entry.record.clone();
+        record.pending_restore = None;
+        save(&record)?;
+        entry.record = record;
+        Ok(())
+    }
+
+    /// Whether Start number `attempt` still owns the computer's `starting` state.
+    fn start_is_current(&self, id: &str, attempt: u64) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.record.id == id && entry.state == State::Starting && entry.attempt == attempt
+        })
+    }
+
+    /// Computers stopping whose machine the framework no longer holds: the stop callback was
+    /// missed or came before the state was set, so nothing else will ever finish them.
+    fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.state == State::Stopping && entry.operation.is_none())
+            .filter(|entry| !held.contains(&entry.record.id))
+            .map(|entry| entry.record.id.clone())
+            .collect()
+    }
+
+    /// Whether any computer is changing state or owned by a checkpoint operation.
+    fn any_busy(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| is_busy(entry.state) || entry.operation.is_some())
     }
 
     /// Whether the creation of `id` may go on: it exists and no Delete cancelled it.
@@ -234,15 +350,24 @@ impl Registry {
     }
 
     /// Marks a force stop as under way. Returns the state to restore if it cannot be issued.
-    fn begin_force_stop(&mut self, id: &str) -> Option<State> {
-        let entry = self.entry(id)?;
+    fn begin_force_stop(&mut self, id: &str) -> Result<State, String> {
+        let entry = self.entry(id).ok_or("This computer no longer exists.")?;
+        if !matches!(
+            entry.state,
+            State::Running | State::Starting | State::Stopping
+        ) {
+            return Err("This computer isn't running.".into());
+        }
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
         let before = entry.state;
         if entry.state == State::Running {
             entry.state = State::Stopping;
             entry.since = Instant::now();
         }
         entry.detail = None;
-        Some(before)
+        Ok(before)
     }
 
     fn undo_force_stop(&mut self, id: &str, before: State) {
@@ -336,7 +461,7 @@ pub(crate) fn reopen_after_update() {
 /// Closes admission for an update unless a macOS computer is busy.
 pub(crate) fn close_for_update() -> Result<(), String> {
     let mut closed = closed();
-    let busy = registry().entries.iter().any(|entry| is_busy(entry.state));
+    let busy = registry().any_busy();
     closed.close_for_update(busy)
 }
 
@@ -352,6 +477,24 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "Silo could not find its data folder.".to_string())
 }
 
+/// Settles a Restore that Silo was interrupted in, so the disk, the auxiliary storage and the
+/// pending Restore in the record agree before anything can start the computer. A Restore that
+/// can't be settled leaves its journal, which keeps the computer from starting.
+fn settle_restore(layout: &Layout, mut record: Record) -> Record {
+    match checkpoints::recover(layout) {
+        Ok(Some(pending)) => {
+            record.pending_restore = Some(pending);
+            record.pristine = false;
+            if store::save(layout, &record).is_ok() {
+                checkpoints::finish_restore(layout);
+            }
+        }
+        Ok(None) => {}
+        Err(message) => eprintln!("A macOS computer's Restore could not be settled: {message}"),
+    }
+    record
+}
+
 fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
     let mut registry = registry();
     if registry.loaded {
@@ -363,7 +506,12 @@ fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
             .into_iter()
             .map(|record| {
                 let (state, detail) = store::initial_state(&record);
-                Entry::new(record, state, detail)
+                let layout = Layout::new(&data, &record.id);
+                checkpoints::sweep(&layout);
+                let record = settle_restore(&layout, record);
+                let mut entry = Entry::new(record, state, detail);
+                entry.checkpoints = checkpoints::list(&layout);
+                entry
             })
             .collect();
         let data = app_data(app)?;
@@ -527,6 +675,22 @@ fn set_progress(app: &AppHandle, id: &str, fraction: f64) {
     }
 }
 
+/// Whether a checkpoint operation owns the computer.
+fn has_operation(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && entry.operation.is_some())
+}
+
+/// Whether the computer is changing state or owned by an operation: Quit waits for it.
+fn is_active(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && (is_busy(entry.state) || entry.operation.is_some()))
+}
+
 fn state_of(id: &str) -> Option<State> {
     registry()
         .entries
@@ -630,6 +794,58 @@ pub(crate) async fn open_macos_display(
     main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
+}
+
+/// Saves a checkpoint of a computer: its memory too when it runs.
+#[tauri::command]
+pub(crate) async fn create_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || create_checkpoint(&app, &id, &name)).await
+}
+
+/// Rewinds a computer to a checkpoint. The computer stays stopped.
+#[tauri::command]
+pub(crate) async fn restore_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || restore_checkpoint(&app, &id, &checkpoint_id)).await
+}
+
+/// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
+#[tauri::command]
+pub(crate) async fn fork_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+    new_name: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
+}
+
+#[tauri::command]
+pub(crate) async fn delete_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || delete_checkpoint(&app, &id, &checkpoint_id)).await
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
@@ -985,38 +1201,181 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             return Err("This computer is being deleted.".into());
         }
         store::start_allowed(entry.state, &entry.record)?;
-        // A computer the user starts is no longer the clean result of its setup.
-        if entry.record.pristine {
-            let mut started = entry.record.clone();
-            started.pristine = false;
-            store::save(&Layout::new(&data, id), &started)?;
-            entry.record = started;
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
         }
+        if checkpoints::restore_unfinished(&Layout::new(&data, id)) {
+            return Err(UNFINISHED_RESTORE.into());
+        }
+        // A computer the user starts is no longer the clean result of its setup. The
+        // pending Restore stays in the record, which keeps its checkpoint from being
+        // deleted, until the start has read it.
+        let mut started = entry.record.clone();
+        started.pristine = false;
+        if started != entry.record {
+            store::save(&Layout::new(&data, id), &started)?;
+        }
+        let pending = entry.record.pending_restore.clone();
+        entry.record = started;
         entry.state = State::Starting;
+        entry.attempt += 1;
         entry.detail = None;
         entry.since = Instant::now();
-        entry.record.clone()
+        (entry.record.clone(), pending, entry.attempt)
     };
+    let (record, pending, attempt) = record;
     emit(app);
     watch(app);
     let layout = Layout::new(&data, id);
-    let started = offline_setup::ensure_detached(&layout.disk())
-        .and_then(|()| engine::start(app, &record, &layout));
+    let plan = checkpoints::start_plan(&layout, pending.as_ref(), &checkpoints::host_build());
+    // The saved memory is used up durably before any machine runs on the disk; a plan that
+    // restores it does so itself, once the memory is in the machine and before it resumes.
+    let consumed = match &pending {
+        Some(pending) if !matches!(plan, checkpoints::StartPlan::RestoreMemory { .. }) => {
+            clear_pending_restore(app, id, &layout, attempt, pending)
+        }
+        _ => Ok(()),
+    };
+    let started = consumed
+        .and_then(|()| offline_setup::ensure_detached(&layout.disk()))
+        .and_then(|()| start_machine(app, &record, &layout, plan, attempt, pending.as_ref()));
     match started {
-        Ok(()) => {
+        Ok(note) => {
             update(app, id, |entry| {
-                if entry.state == State::Starting {
+                if entry.state == State::Starting && entry.attempt == attempt {
                     entry.state = State::Running;
                     entry.since = Instant::now();
+                    entry.detail = note;
                 }
             });
             Ok(())
         }
         Err(message) => {
-            set_state(app, id, State::Stopped, None);
+            // Nothing may report the computer as stopped while its machine can still run.
+            let released = ensure_released(app, id, attempt);
+            registry().settle_failed_start(id, attempt, released);
+            emit(app);
             Err(message)
         }
     }
+}
+
+/// Where a computer stands once a failed start has tried to release its machine. One whose
+/// machine is still held stays stopping: busy, so it can't be deleted, restored or ignored by
+/// Quit, and open to Force stop.
+fn state_after_failed_start(released: Result<(), String>) -> (State, Option<String>) {
+    match released {
+        Ok(()) => (State::Stopped, None),
+        Err(held) => (State::Stopping, Some(held)),
+    }
+}
+
+/// Stops the machine of failed Start number `attempt` and returns only once the framework has
+/// released it, or says that it could not be. It acts only while that Start still owns the
+/// computer: once something else has moved the computer on (the machine ended and a later Start
+/// began), the machine is not this Start's to stop.
+fn ensure_released(app: &AppHandle, id: &str, attempt: u64) -> Result<(), String> {
+    for _ in 0..5 {
+        let guard = {
+            let id = id.to_string();
+            move || registry().start_is_current(&id, attempt)
+        };
+        match engine::force_stop_if(app, id, guard) {
+            // No machine, or no longer this Start's.
+            Ok(None) => return Ok(()),
+            Ok(Some(generation)) => {
+                if engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT) {
+                    return Ok(());
+                }
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(250)),
+        }
+    }
+    Err("The computer could not be stopped after it failed to start. Use Force stop.".into())
+}
+
+const UNFINISHED_RESTORE: &str =
+    "A Restore of this computer did not finish. Restart Silo to settle it before starting the computer.";
+
+/// Marks the pending Restore that Start number `attempt` read as used, durably.
+fn clear_pending_restore(
+    app: &AppHandle,
+    id: &str,
+    layout: &Layout,
+    attempt: u64,
+    consumed: &checkpoints::PendingRestore,
+) -> Result<(), String> {
+    registry()
+        .consume_pending_restore(id, attempt, consumed, |record| store::save(layout, record))?;
+    emit(app);
+    Ok(())
+}
+
+/// Boots the machine as `plan` says. Saved memory the framework refuses is not fatal: the
+/// computer boots from its disk and the returned note says why. A note is also returned when
+/// the plan itself gave up on the memory.
+fn start_machine(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+    plan: checkpoints::StartPlan,
+    attempt: u64,
+    pending: Option<&checkpoints::PendingRestore>,
+) -> Result<Option<String>, String> {
+    use checkpoints::StartPlan;
+    let note = match plan {
+        StartPlan::Boot => None,
+        StartPlan::BootBecause(note) => Some(note),
+        StartPlan::RestoreMemory { state } => {
+            log_line(app, &record.id, "restoring the checkpoint's memory");
+            match engine::start_from_state(app, record, layout, &state) {
+                Ok(generation) => {
+                    // The saved memory is used up before the machine runs, so no later
+                    // Start can apply it to a disk that has changed since. Everything here
+                    // concerns this attempt's machine and this attempt's Restore only.
+                    let used = match pending {
+                        Some(pending) => {
+                            clear_pending_restore(app, &record.id, layout, attempt, pending)
+                        }
+                        None => Err(engine::SUPERSEDED.to_string()),
+                    };
+                    if let Err(message) = used {
+                        let _ = engine::force_stop_generation(app, &record.id, generation);
+                        return Err(format!(
+                            "The checkpoint's memory was not resumed because Silo could not record that it was used: {message}"
+                        ));
+                    }
+                    let guard = {
+                        let id = record.id.clone();
+                        move || registry().start_is_current(&id, attempt)
+                    };
+                    if let Err(message) = engine::resume_if(app, &record.id, generation, guard) {
+                        let _ = engine::force_stop_generation(app, &record.id, generation);
+                        return Err(message);
+                    }
+                    log_line(app, &record.id, "memory restored");
+                    return Ok(None);
+                }
+                Err(engine::StateStartError::Failed(message)) => return Err(message),
+                Err(engine::StateStartError::Rejected(why)) => {
+                    log_line(app, &record.id, &format!("memory not restored: {why}"));
+                    // The memory is not coming back: mark it used before booting the disk.
+                    match pending {
+                        Some(pending) => {
+                            clear_pending_restore(app, &record.id, layout, attempt, pending)?
+                        }
+                        None => return Err(engine::SUPERSEDED.into()),
+                    }
+                    Some(checkpoints::rejected_note(&why))
+                }
+            }
+        }
+    };
+    if let Some(note) = &note {
+        log_line(app, &record.id, &format!("booting from the disk: {note}"));
+    }
+    engine::start(app, record, layout)?;
+    Ok(note)
 }
 
 fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
@@ -1137,11 +1496,34 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (record, state) = computer(id)?;
-    if !matches!(state, State::Running | State::Stopping) {
-        return Err("This computer isn't running.".into());
-    }
-    let note = request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT)?;
+    // The ownership check and the claim of the transition happen under one lock.
+    let (record, before) = {
+        let mut registry = registry();
+        let entry = registry
+            .entry(id)
+            .ok_or("This computer no longer exists.")?;
+        if !matches!(entry.state, State::Running | State::Stopping) {
+            return Err("This computer isn't running.".into());
+        }
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
+        let before = entry.state;
+        if before == State::Running {
+            entry.state = State::Stopping;
+            entry.since = Instant::now();
+        }
+        (entry.record.clone(), before)
+    };
+    emit(app);
+    let note = match request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT) {
+        Ok(note) => note,
+        Err(message) => {
+            registry().undo_force_stop(id, before);
+            emit(app);
+            return Err(message);
+        }
+    };
     update(app, id, |entry| {
         if entry.state == State::Running {
             entry.state = State::Stopping;
@@ -1155,17 +1537,11 @@ fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
 }
 
 fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (_, state) = computer(id)?;
-    if !matches!(state, State::Running | State::Starting | State::Stopping) {
-        return Err("This computer isn't running.".into());
-    }
-    let before = registry().begin_force_stop(id);
+    let before = registry().begin_force_stop(id)?;
     emit(app);
     if let Err(message) = engine::force_stop(app, id) {
-        if let Some(before) = before {
-            registry().undo_force_stop(id, before);
-            emit(app);
-        }
+        registry().undo_force_stop(id, before);
+        emit(app);
         return Err(message);
     }
     Ok(())
@@ -1180,6 +1556,9 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
             .iter()
             .position(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        if registry.entries[index].operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
         match store::delete_mode(registry.entries[index].state)? {
             DeleteMode::Cancel => {
                 let entry = &mut registry.entries[index];
@@ -1223,13 +1602,23 @@ fn force_stop_failed(app: &AppHandle, id: &str, message: String) {
     emit(app);
 }
 
+/// Whether an event of the machine of generation `event` concerns the machine the computer
+/// has now (`current`, `None` when it has none). Machines are never reused: a late event of
+/// an earlier one concerns no one.
+fn slot_is_current(current: Option<u64>, event: u64) -> bool {
+    current == Some(event)
+}
+
 /// The machine ended on its own or at Silo's request.
-fn machine_stopped(app: &AppHandle, id: &str, error: Option<String>) {
+fn machine_stopped(app: &AppHandle, id: &str, generation: u64, error: Option<String>) {
     let (app, id) = (app.clone(), id.to_string());
     // Deferred so the framework callback that reported the stop has returned before
     // its machine is released.
     engine::defer(move || {
-        engine::release_slot(&id);
+        // An event of an earlier machine of this computer changes nothing.
+        if !engine::release_slot(&id, generation) {
+            return;
+        }
         close_display(&app, &id);
         update(&app, &id, |entry| {
             if matches!(
@@ -1248,6 +1637,382 @@ fn machine_stopped(app: &AppHandle, id: &str, error: Option<String>) {
             }
         });
     });
+}
+
+// MARK: Checkpoints
+
+const GIB: u64 = 1 << 30;
+/// How long a forced stop may take before a Restore gives up on it.
+const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
+
+/// Ends a checkpoint operation when dropped, whichever way the work ended.
+struct Held<'a> {
+    app: &'a AppHandle,
+    id: String,
+    record: Record,
+    state: State,
+    cancel: Arc<AtomicU8>,
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        update(self.app, &self.id, |entry| entry.operation = None);
+    }
+}
+
+fn first_stage(kind: checkpoints::OperationKind) -> &'static str {
+    match kind {
+        checkpoints::OperationKind::Capture => "Preparing",
+        checkpoints::OperationKind::Restore => "Preparing",
+        checkpoints::OperationKind::Fork => "Copying the checkpoint",
+        checkpoints::OperationKind::Delete => "Removing the checkpoint",
+    }
+}
+
+/// Claims the computer for one checkpoint operation, if nothing else is using it.
+fn begin_operation<'a>(
+    app: &'a AppHandle,
+    id: &str,
+    kind: checkpoints::OperationKind,
+) -> Result<Held<'a>, String> {
+    let _admitted = admission()?;
+    let (record, state, cancel) = {
+        let mut registry = registry();
+        let entry = registry
+            .entry(id)
+            .ok_or("This computer no longer exists.")?;
+        store::checkpoint_allowed(
+            entry.state,
+            &entry.record,
+            entry.deleting,
+            entry.operation.is_some(),
+            kind,
+        )?;
+        entry.cancel.store(RUN, Ordering::SeqCst);
+        entry.operation = Some(checkpoints::Operation::running(kind, first_stage(kind)));
+        (entry.record.clone(), entry.state, entry.cancel.clone())
+    };
+    emit(app);
+    Ok(Held {
+        app,
+        id: id.to_string(),
+        record,
+        state,
+        cancel,
+    })
+}
+
+/// The machine of a computer as the checkpoint workflows reach it.
+struct LiveMachine<'a> {
+    app: &'a AppHandle,
+    id: &'a str,
+    cancel: &'a AtomicU8,
+}
+
+impl checkpoints::Machine for LiveMachine<'_> {
+    fn memory_support(&self) -> Result<(), String> {
+        engine::memory_support(self.app, self.id)
+    }
+
+    fn save_running(
+        &self,
+        state: &std::path::Path,
+        copy: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), String> {
+        engine::save_running(self.app, self.id, state, copy)
+    }
+
+    fn force_stop(&self) -> Result<(), String> {
+        engine::force_stop(self.app, self.id)?;
+        if engine::wait_until_stopped(self.app, self.id, FORCED_STOP_WAIT) {
+            Ok(())
+        } else {
+            Err("The computer did not stop in time.".into())
+        }
+    }
+
+    fn stage(&self, stage: &str) {
+        update(self.app, self.id, |entry| {
+            if let Some(operation) = &mut entry.operation {
+                operation.stage = stage.to_string();
+            }
+        });
+    }
+
+    fn log(&self, line: &str) {
+        if let Some(log) = setup_log::SetupLog::open(self.app, self.id) {
+            log.line(line);
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst) != RUN
+    }
+}
+
+fn log_line(app: &AppHandle, id: &str, line: &str) {
+    if let Some(log) = setup_log::SetupLog::open(app, id) {
+        log.line(line);
+    }
+}
+
+/// Reads the checkpoints on disk again, after an operation that may have changed them.
+fn refresh_checkpoints(app: &AppHandle, id: &str, layout: &Layout) {
+    let found = checkpoints::list(layout);
+    update(app, id, |entry| entry.checkpoints = found);
+}
+
+/// Space for the memory a checkpoint of a running computer saves.
+fn reserve_for_memory(
+    data: &std::path::Path,
+    record: &Record,
+    running: bool,
+) -> Result<Option<templates::SpaceReservation>, String> {
+    running
+        .then(|| templates::reserve_space(data, record.memory_gib * GIB))
+        .transpose()
+}
+
+fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let name = checkpoints::validate_name(name)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Capture)?;
+    let layout = Layout::new(&data, id);
+    if checkpoints::restore_unfinished(&layout) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
+    let running = held.state == State::Running;
+    log_line(
+        app,
+        id,
+        &format!(
+            "creating checkpoint \"{name}\" ({})",
+            if running { "memory and disk" } else { "disk" }
+        ),
+    );
+    let _space = reserve_for_memory(&data, &held.record, running)?;
+    let machine = LiveMachine {
+        app,
+        id,
+        cancel: &held.cancel,
+    };
+    let subject = checkpoints::Subject {
+        layout: &layout,
+        machine: &machine,
+        running,
+        macos_version: held.record.os_version(),
+    };
+    let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
+    refresh_checkpoints(app, id, &layout);
+    result.map(|_| ())
+}
+
+fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Restore)?;
+    let layout = Layout::new(&data, id);
+    if checkpoints::restore_unfinished(&layout) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
+    let target = checkpoints::find(&layout, checkpoint_id)?;
+    let running = held.state == State::Running;
+    log_line(
+        app,
+        id,
+        &format!("restoring checkpoint \"{}\" ({})", target.name, target.id),
+    );
+    let _space = reserve_for_memory(&data, &held.record, running)?;
+    offline_setup::ensure_detached(&layout.disk())?;
+    let machine = LiveMachine {
+        app,
+        id,
+        cancel: &held.cancel,
+    };
+    let subject = checkpoints::Subject {
+        layout: &layout,
+        machine: &machine,
+        running,
+        macos_version: held.record.os_version(),
+    };
+    let restored = checkpoints::restore(&subject, checkpoint_id);
+    // The recovery checkpoint exists whether or not the rest succeeded.
+    refresh_checkpoints(app, id, &layout);
+    let pending = restored?;
+    let (mut record, _) = computer(id)?;
+    record.pending_restore = Some(pending);
+    // The disk no longer is what the user left, and only what Start restores is the result.
+    record.pristine = false;
+    store::save(&layout, &record)?;
+    // The record and the files agree: the journal has nothing left to settle.
+    checkpoints::finish_restore(&layout);
+    update(app, id, |entry| {
+        entry.record = record;
+        if matches!(entry.state, State::Running | State::Stopping) {
+            entry.state = State::Stopped;
+            entry.since = Instant::now();
+        }
+        entry.detail = None;
+    });
+    Ok(())
+}
+
+fn delete_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Delete)?;
+    let layout = Layout::new(&data, id);
+    let target = checkpoints::find(&layout, checkpoint_id)?;
+    if checkpoints::journal_pins(&layout, &target.id) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
+    if held
+        .record
+        .pending_restore
+        .as_ref()
+        .is_some_and(|pending| pending.checkpoint_id == target.id)
+    {
+        return Err("The next Start of this computer continues from this checkpoint. Start the computer first, or restore another checkpoint.".into());
+    }
+    let removed = checkpoints::remove(&layout, &target.id);
+    refresh_checkpoints(app, id, &layout);
+    if removed.is_ok() {
+        log_line(
+            app,
+            id,
+            &format!("checkpoint deleted: {} ({})", target.name, target.id),
+        );
+    }
+    removed
+}
+
+/// Creates a stopped computer with a copy of a checkpoint's disk, and sets it up in the
+/// background: it gets its own password, keys and name, like a copy of a template.
+fn fork_checkpoint(
+    app: &AppHandle,
+    id: &str,
+    checkpoint_id: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let new_name = new_name.trim().to_string();
+    // Held until the fork is registered and saved, so a Linux creation sees it.
+    let reservation =
+        crate::computer_names::reserve(&[new_name.clone()], &|| runtime::computer_names(app))?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Fork)?;
+    let source = Layout::new(&data, id);
+    let checkpoint = checkpoints::find(&source, checkpoint_id)?;
+    let space = templates::reserve_space(&data, templates::COPY_ESTIMATE)?;
+    let (record, cancel) = {
+        let _admitted = admission()?;
+        let mut registry = registry();
+        let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
+        let request = CreateRequest {
+            name: new_name,
+            cpus: held.record.cpus,
+            memory_gib: held.record.memory_gib,
+            disk_gib: held.record.disk_gib,
+        };
+        store::validate_request(&request, engine::host_limits(), &existing, 0)?;
+        let mut record = store::new_record(&request, engine::random_mac());
+        record.restore_image = held.record.restore_image.clone();
+        record.pristine = false;
+        record.setup_version = held.record.setup_version.clone();
+        // A crash before the files are copied leaves a failed computer that can be deleted.
+        store::save(&Layout::new(&data, &record.id), &record)?;
+        let entry = Entry::new(record.clone(), State::Copying, None);
+        let cancel = entry.cancel.clone();
+        registry.entries.push(entry);
+        (record, cancel)
+    };
+    drop(reservation);
+    emit(app);
+    let fork_id = record.id.clone();
+    let layout = Layout::new(&data, &fork_id);
+    log_line(
+        app,
+        id,
+        &format!(
+            "forking checkpoint \"{}\" ({}) into {}",
+            checkpoint.name, checkpoint.id, record.name
+        ),
+    );
+    let copied = copy_for_fork(&source, &checkpoint.id, &layout, record, &fork_id);
+    // The source is free again; the rest happens on the fork.
+    drop(held);
+    match copied {
+        Ok(record) => {
+            let (app, data) = (app.clone(), data.clone());
+            emit(&app);
+            std::thread::spawn(move || fork_workflow(&app, &data, record, &cancel, space));
+            Ok(())
+        }
+        Err(stop) => {
+            let message = match &stop {
+                Stop::Failed(message) => message.clone(),
+                Stop::Cancelled => "Creating the fork was cancelled.".to_string(),
+            };
+            end_workflow(app, &fork_id, &layout, Err(stop));
+            Err(message)
+        }
+    }
+}
+
+/// Clones the checkpoint into the fork's folder and publishes the fork as installed.
+fn copy_for_fork(
+    source: &Layout,
+    checkpoint: &str,
+    layout: &Layout,
+    mut record: Record,
+    fork_id: &str,
+) -> Result<Record, Stop> {
+    if !registry().creation_continues(fork_id) {
+        return Err(Stop::Cancelled);
+    }
+    checkpoints::clone_for_fork(
+        source,
+        checkpoint,
+        layout,
+        &engine::new_machine_identifier(),
+    )
+    .map_err(|error| Stop::Failed(error.message()))?;
+    record.installed = true;
+    record.inherited_access = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        computer_use: true,
+        clipboard: true,
+        needs_personalizing: true,
+    };
+    // Persist while the fork is still in its creation state, where nothing else can start it.
+    if !registry().creation_continues(fork_id) {
+        return Err(Stop::Cancelled);
+    }
+    store::save(layout, &record)?;
+    if !registry().publish_installed(fork_id, &record, State::SettingUp) {
+        return Err(Stop::Cancelled);
+    }
+    Ok(record)
+}
+
+fn fork_workflow(
+    app: &AppHandle,
+    data: &std::path::Path,
+    mut record: Record,
+    cancel: &AtomicU8,
+    space: templates::SpaceReservation,
+) {
+    let id = record.id.clone();
+    let layout = Layout::new(data, &id);
+    let result = run_setup(app, &layout, &mut record, cancel, Some(space));
+    end_workflow(app, &id, &layout, result);
 }
 
 // MARK: Display
@@ -1318,15 +2083,16 @@ fn watch(app: &AppHandle) {
     STARTED.call_once(move || {
         std::thread::spawn(move || loop {
             std::thread::sleep(WATCH_INTERVAL);
-            if let Ok(states) = engine::machine_states(&app) {
+            if let Ok(states) = engine::machine_samples(&app) {
                 reconcile(&app, &states);
             }
         });
     });
 }
 
-fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
-    for (id, machine) in states {
+fn reconcile(app: &AppHandle, samples: &[engine::Sample]) {
+    for sample in samples {
+        let (id, machine, generation) = (&sample.id, &sample.state, sample.generation);
         let Some((_, state)) = computer(id).ok() else {
             continue;
         };
@@ -1337,7 +2103,36 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
             ) => {
                 let detail = (*machine == engine::MachineState::Failed)
                     .then(|| "The computer stopped unexpectedly.".to_string());
-                machine_stopped(app, id, detail);
+                machine_stopped(app, id, generation, detail);
+            }
+            (engine::MachineState::Paused, State::Running | State::Stopping) => {
+                let (operating, unconsumed) = (has_operation(id), has_pending_restore(id));
+                match paused_action(operating, unconsumed) {
+                    PausedAction::Leave => {}
+                    PausedAction::Resume => {
+                        let owned = {
+                            let id = id.clone();
+                            move || has_operation(&id) || has_pending_restore(&id)
+                        };
+                        let resumed = engine::resume_stray(app, id, generation, owned);
+                        update(app, id, |entry| {
+                            entry.detail = resumed.err().map(|why| {
+                                format!("The computer is paused and could not be resumed ({why}). Use Force stop.")
+                            });
+                        });
+                    }
+                    // Memory that was never marked as used must not run: the machine is
+                    // turned off, and the computer stays busy until it is released.
+                    PausedAction::ForceStop => {
+                        let claimed = registry().begin_force_stop(id);
+                        emit(app);
+                        if claimed.is_ok() {
+                            if let Err(why) = engine::force_stop_generation(app, id, generation) {
+                                force_stop_failed(app, id, why);
+                            }
+                        }
+                    }
+                }
             }
             (engine::MachineState::Running, State::Stopping) => {
                 update(app, id, |entry| {
@@ -1351,6 +2146,69 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
             _ => {}
         }
     }
+    // A stop whose machine is already gone is finished here: the callback that would have
+    // done it has already run, or never will.
+    let held: Vec<String> = samples.iter().map(|sample| sample.id.clone()).collect();
+    // Checked again, and applied, on the main thread where machines are registered, so a machine
+    // that appeared since the sample is never mistaken for a missing one. A query that fails
+    // settles nothing.
+    settle_absent(&REGISTRY, &held, &|id| {
+        let settle = {
+            let (app, id) = (app.clone(), id.to_string());
+            move || stop_finished_without_machine(&app, &id)
+        };
+        let _ = engine::run_if_no_machine(app, id, settle);
+    });
+}
+
+/// Hands each stopping computer without a machine to `dispatch`. The registry is not held while
+/// `dispatch` runs: it waits for the main thread, and the main thread's callbacks take the
+/// registry's lock.
+fn settle_absent(registry: &Mutex<Registry>, held: &[String], dispatch: &dyn Fn(&str)) {
+    let stalled = registry
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .stopping_without_machine(held);
+    for id in stalled {
+        dispatch(&id);
+    }
+}
+
+/// Finishes a stop whose machine is gone: there is no slot left to release.
+fn stop_finished_without_machine(app: &AppHandle, id: &str) {
+    update(app, id, |entry| {
+        if entry.state == State::Stopping && entry.operation.is_none() {
+            entry.state = State::Stopped;
+            entry.progress = None;
+            entry.display_open = false;
+            entry.since = Instant::now();
+        }
+    });
+}
+
+/// What the watcher does with a machine the framework reports as paused.
+#[derive(Debug, PartialEq, Eq)]
+enum PausedAction {
+    Leave,
+    Resume,
+    ForceStop,
+}
+
+fn paused_action(operating: bool, pending_restore_unconsumed: bool) -> PausedAction {
+    if operating {
+        PausedAction::Leave
+    } else if pending_restore_unconsumed {
+        PausedAction::ForceStop
+    } else {
+        PausedAction::Resume
+    }
+}
+
+fn has_pending_restore(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && entry.record.pending_restore.is_some())
 }
 
 // MARK: Quit
@@ -1426,30 +2284,40 @@ fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
 fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     // From here on nothing new is admitted; anything admitted before is in the snapshot.
     closed().quit = true;
-    let busy: Vec<(String, State, Arc<AtomicU8>)> = registry()
+    let busy: Vec<(String, State, Arc<AtomicU8>, bool)> = registry()
         .entries
         .iter()
-        .filter(|entry| is_busy(entry.state))
-        .map(|entry| (entry.record.id.clone(), entry.state, entry.cancel.clone()))
+        .filter(|entry| is_busy(entry.state) || entry.operation.is_some())
+        .map(|entry| {
+            (
+                entry.record.id.clone(),
+                entry.state,
+                entry.cancel.clone(),
+                entry.operation.is_some(),
+            )
+        })
         .collect();
     if busy.is_empty() {
         return Ok(());
     }
     let machines: Vec<&String> = busy
         .iter()
-        .filter(|(_, state, _)| matches!(state, State::Running | State::Starting | State::Stopping))
-        .map(|(id, _, _)| id)
+        .filter(|(_, state, _, _)| {
+            matches!(state, State::Running | State::Starting | State::Stopping)
+        })
+        .map(|(id, _, _, _)| id)
         .collect();
-    for (_, state, cancel) in &busy {
-        if is_creating(*state) {
+    for (_, state, cancel, operating) in &busy {
+        if is_creating(*state) || *operating {
             request_abort(cancel);
         }
     }
-    // A start in flight cannot be asked to stop; let it settle first.
+    // A start in flight cannot be asked to stop, and a checkpoint operation ends at its next
+    // step (a paused machine can't answer a shutdown); let both settle first.
     let settle = Instant::now() + Duration::from_secs(30);
-    while machines
+    while busy
         .iter()
-        .any(|id| state_of(id) == Some(State::Starting))
+        .any(|(id, _, _, _)| state_of(id) == Some(State::Starting) || has_operation(id))
         && Instant::now() < settle
         && deadline.is_none_or(|deadline| Instant::now() < deadline)
     {
@@ -1476,17 +2344,14 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
         let at = Instant::now() + wait;
         deadline.map_or(at, |deadline| at.min(deadline))
     };
-    let all_stopped = |ids: &[&String]| {
-        ids.iter()
-            .all(|id| state_of(id).is_none_or(|state| !is_busy(state)))
-    };
+    let all_stopped = |ids: &[&String]| ids.iter().all(|id| !is_active(id));
     let wait_until = |until: Instant, ids: &[&String]| {
         while !all_stopped(ids) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(250));
         }
         all_stopped(ids)
     };
-    let everything: Vec<&String> = busy.iter().map(|(id, _, _)| id).collect();
+    let everything: Vec<&String> = busy.iter().map(|(id, _, _, _)| id).collect();
     // Installations and setups were aborted; they release their machine (and, for a
     // setup, the disk image) before they stop being busy.
     if wait_until(graceful_until(Instant::now(), deadline), &machines)
@@ -1501,7 +2366,7 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     for id in &everything {
         if state_of(id).is_some_and(|state| state != State::Stopped && state != State::Failed)
             && engine::machine_states(app)
-                .is_ok_and(|states| states.iter().any(|(held, _)| held == *id))
+                .map_or(true, |states| states.iter().any(|(held, _)| held == *id))
         {
             let _ = engine::force_stop(app, id);
         }
@@ -1635,6 +2500,265 @@ mod tests {
         assert!(state["computers"].as_array().unwrap().is_empty());
     }
 
+    #[test]
+    fn rows_carry_checkpoints_the_operation_and_the_pending_restore() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let entry = &mut registry.entries[0];
+        let row = serde_json::to_value(entry.row()).unwrap();
+        assert_eq!(row["checkpoints"], serde_json::json!([]));
+        assert_eq!(row["checkpointOperation"], serde_json::Value::Null);
+        assert_eq!(row["pendingRestore"], serde_json::Value::Null);
+        entry.operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Saving a recovery checkpoint",
+        ));
+        entry.record.pending_restore = Some(checkpoints::PendingRestore {
+            checkpoint_id: "c".into(),
+            memory: true,
+        });
+        let row = serde_json::to_value(entry.row()).unwrap();
+        assert_eq!(
+            row["checkpointOperation"],
+            serde_json::json!({"kind": "restore", "status": "running", "stage": "Saving a recovery checkpoint"})
+        );
+        assert_eq!(
+            row["pendingRestore"],
+            serde_json::json!({"checkpointId": "c", "memory": true})
+        );
+    }
+
+    #[test]
+    fn a_force_stop_is_claimed_under_the_lock_and_refused_during_an_operation() {
+        let (mut registry, id) = registry_with(State::Running);
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        assert_eq!(
+            registry.begin_force_stop(&id),
+            Err(checkpoints::BUSY.to_string())
+        );
+        assert_eq!(registry.entries[0].state, State::Running);
+        registry.entries[0].operation = None;
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Running));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        let (mut registry, id) = registry_with(State::Stopped);
+        assert!(registry.begin_force_stop(&id).is_err());
+    }
+
+    #[test]
+    fn a_machine_a_failed_start_could_not_release_stays_busy_and_open_to_force_stop() {
+        assert_eq!(state_after_failed_start(Ok(())), (State::Stopped, None));
+        let (state, detail) = state_after_failed_start(Err("still held".into()));
+        assert_eq!(state, State::Stopping);
+        assert_eq!(detail.as_deref(), Some("still held"));
+        assert!(is_busy(state));
+        assert!(store::delete_mode(state).is_err());
+        assert!(store::checkpoint_allowed(
+            state,
+            &registry_with(state).0.entries[0].record,
+            false,
+            false,
+            checkpoints::OperationKind::Restore
+        )
+        .is_err());
+        let (mut registry, id) = registry_with(state);
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Stopping));
+    }
+
+    #[test]
+    fn an_event_of_an_earlier_machine_concerns_no_one_once_the_computer_has_a_later_one() {
+        // Machine 1 is replaced by machine 2 while 1's stop callback is still on its way.
+        assert!(slot_is_current(Some(1), 1));
+        assert!(!slot_is_current(Some(2), 1));
+        // Its slot is already gone, e.g. released by a failed start's cleanup.
+        assert!(!slot_is_current(None, 1));
+        // The late callback of machine 1 cannot stop or release machine 2.
+        let mut slots = std::collections::HashMap::new();
+        slots.insert("a", 1u64);
+        let release = |slots: &mut std::collections::HashMap<&str, u64>, event: u64| {
+            if slot_is_current(slots.get("a").copied(), event) {
+                slots.remove("a");
+                true
+            } else {
+                false
+            }
+        };
+        assert!(release(&mut slots, 1));
+        slots.insert("a", 2);
+        assert!(!release(&mut slots, 1));
+        assert_eq!(slots.get("a"), Some(&2));
+        assert!(release(&mut slots, 2));
+    }
+
+    fn registry_starting(attempt: u64) -> (Registry, String) {
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.entries[0].attempt = attempt;
+        (registry, id)
+    }
+
+    #[test]
+    fn settling_absent_machines_never_holds_the_registry_while_it_waits_for_the_main_thread() {
+        let (registry, id) = registry_with(State::Stopping);
+        let registry = Mutex::new(registry);
+        let dispatched = std::cell::Cell::new(0);
+        // The main thread's callbacks need this lock while `dispatch` waits for them; from
+        // another thread, as they would, it must be free at that moment (a regression
+        // blocks here, and the test fails after the timeout instead of hanging).
+        settle_absent(&registry, &[], &|stalled| {
+            dispatched.set(dispatched.get() + 1);
+            assert_eq!(stalled, id);
+            std::thread::scope(|scope| {
+                let free = scope
+                    .spawn(|| {
+                        let start = Instant::now();
+                        while start.elapsed() < Duration::from_secs(5) {
+                            if registry.try_lock().is_ok() {
+                                return true;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        false
+                    })
+                    .join()
+                    .unwrap();
+                assert!(free, "the registry stayed locked during dispatch");
+            });
+        });
+        assert_eq!(dispatched.get(), 1);
+    }
+
+    #[test]
+    fn an_older_start_never_clears_a_newer_restores_reference() {
+        let a = checkpoints::PendingRestore {
+            checkpoint_id: "a".into(),
+            memory: true,
+        };
+        let b = checkpoints::PendingRestore {
+            checkpoint_id: "b".into(),
+            memory: true,
+        };
+        // Start 1 read restore A; the computer was force stopped and restored to B; start 2
+        // is now the current one.
+        let (mut registry, id) = registry_starting(2);
+        registry.entries[0].record.pending_restore = Some(b.clone());
+        let saved = std::cell::Cell::new(false);
+        let save = |_: &Record| {
+            saved.set(true);
+            Ok(())
+        };
+        assert!(registry.consume_pending_restore(&id, 1, &a, save).is_err());
+        assert!(registry.consume_pending_restore(&id, 1, &b, save).is_err());
+        assert!(registry.consume_pending_restore(&id, 2, &a, save).is_err());
+        assert!(!saved.get());
+        assert_eq!(registry.entries[0].record.pending_restore, Some(b.clone()));
+        // The attempt that read B consumes it.
+        assert!(registry.consume_pending_restore(&id, 2, &b, save).is_ok());
+        assert!(saved.get());
+        assert_eq!(registry.entries[0].record.pending_restore, None);
+        // A computer no longer starting refuses too, and a failed save changes nothing.
+        let (mut registry, id) = registry_starting(2);
+        registry.entries[0].record.pending_restore = Some(b.clone());
+        assert!(registry
+            .consume_pending_restore(&id, 2, &b, |_| Err("disk full".into()))
+            .is_err());
+        assert_eq!(registry.entries[0].record.pending_restore, Some(b.clone()));
+        registry.entries[0].state = State::Stopped;
+        assert!(registry.consume_pending_restore(&id, 2, &b, save).is_err());
+    }
+
+    #[test]
+    fn a_failed_starts_cleanup_does_nothing_once_a_later_start_owns_the_computer() {
+        // Start 1 failed and its machine's stop callback set the computer stopped; start 2
+        // was admitted. Start 1's settlement and guard must leave start 2 alone.
+        let (mut registry, id) = registry_starting(2);
+        assert!(!registry.start_is_current(&id, 1));
+        assert!(registry.start_is_current(&id, 2));
+        registry.settle_failed_start(&id, 1, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Starting);
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Starting);
+        assert_eq!(registry.entries[0].detail, None);
+        // Its own settlement still works.
+        registry.settle_failed_start(&id, 2, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert!(!registry.start_is_current(&id, 2));
+    }
+
+    #[test]
+    fn a_start_is_current_only_while_the_computer_is_starting() {
+        let (mut registry, id) = registry_starting(3);
+        registry.entries[0].state = State::Stopped;
+        assert!(!registry.start_is_current(&id, 3));
+        registry.entries[0].state = State::Running;
+        assert!(!registry.start_is_current(&id, 3));
+    }
+
+    #[test]
+    fn a_stale_cleanup_of_a_failed_start_does_not_touch_the_state_of_a_later_one() {
+        // The failed start's cleanup finishes after the computer was stopped and started
+        // again: the new start is `starting`, but its machine's callbacks are its own, and
+        // the settle only acts on a computer still in the failed start's own `starting`.
+        let (mut registry, id) = registry_with(State::Running);
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Running);
+        registry.entries[0].state = State::Stopping;
+        registry.settle_failed_start(&id, 1, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+    }
+
+    #[test]
+    fn a_paused_machine_is_resumed_only_when_nothing_owns_it_and_no_memory_is_pending() {
+        assert_eq!(paused_action(true, false), PausedAction::Leave);
+        assert_eq!(paused_action(true, true), PausedAction::Leave);
+        assert_eq!(paused_action(false, false), PausedAction::Resume);
+        assert_eq!(paused_action(false, true), PausedAction::ForceStop);
+    }
+
+    #[test]
+    fn a_late_stop_callback_is_not_overwritten_by_a_failed_start_settling() {
+        // The machine was released and the computer set stopped before the settle ran.
+        let (mut registry, id) = registry_with(State::Stopped);
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert_eq!(registry.entries[0].detail, None);
+        // Otherwise the outcome of releasing decides.
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.settle_failed_start(&id, 1, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+    }
+
+    #[test]
+    fn a_stopping_computer_without_a_machine_is_found_for_the_watcher() {
+        let (mut registry, id) = registry_with(State::Stopping);
+        assert_eq!(registry.stopping_without_machine(&[]), [id.clone()]);
+        assert!(registry.stopping_without_machine(&[id.clone()]).is_empty());
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Stopping the computer",
+        ));
+        assert!(registry.stopping_without_machine(&[]).is_empty());
+        let (registry, _) = registry_with(State::Running);
+        assert!(registry.stopping_without_machine(&[]).is_empty());
+    }
+
+    #[test]
+    fn quit_and_updates_count_an_operation_on_a_stopped_computer_as_busy() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        assert!(!is_busy(registry.entries[0].state));
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        let mut closed = Closed::default();
+        assert!(registry.any_busy());
+        assert!(closed.close_for_update(registry.any_busy()).is_err());
+        assert!(!closed.update);
+    }
+
     fn registry_with(state: State) -> (Registry, String) {
         let record = store::new_record(
             &CreateRequest {
@@ -1646,13 +2770,14 @@ mod tests {
             "02:00:00:00:00:01".into(),
         );
         let id = record.id.clone();
-        let registry = Registry {
+        let mut registry = Registry {
             loaded: true,
             entries: vec![Entry::new(record, state, None)],
             template: None,
             min_disk_gib: store::MIN_DISK_GIB,
             latest_build: None,
         };
+        registry.entries[0].attempt = 1;
         (registry, id)
     }
 
@@ -1886,7 +3011,7 @@ mod tests {
     fn a_force_stop_failure_is_kept_whenever_it_arrives() {
         // Marked stopping before the framework call: the failure returns it to running.
         let (mut registry, id) = registry_with(State::Running);
-        assert_eq!(registry.begin_force_stop(&id), Some(State::Running));
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Running));
         registry.force_stop_failed(&id, "busy".into());
         assert_eq!(registry.entries[0].state, State::Running);
         assert_eq!(registry.entries[0].detail.as_deref(), Some("busy"));

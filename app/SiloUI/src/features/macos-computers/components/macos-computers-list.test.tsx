@@ -91,8 +91,8 @@ it("offers the actions that fit each state", async () => {
   expect(names(row("sequoia-test"))).toEqual(["Cancel creating sequoia-test"])
   expect(names(row("release-check"))).toEqual(["Cancel creating release-check"])
   expect(names(row("agent-box"))).toEqual(["Cancel setting up agent-box"])
-  expect(names(row("xcode-build"))).toEqual(["Start xcode-build", "More actions for xcode-build"])
-  expect(names(row("daily"))).toEqual(["Show screen of daily", "Stop daily", "More actions for daily"])
+  expect(names(row("xcode-build"))).toEqual(["Start xcode-build", "Checkpoints of xcode-build", "More actions for xcode-build"])
+  expect(names(row("daily"))).toEqual(["Checkpoints of daily", "Show screen of daily", "Stop daily", "More actions for daily"])
   // Never installed, so there is nothing to set up again.
   expect(names(row("broken"))).toEqual(["More actions for broken"])
 })
@@ -444,6 +444,10 @@ it("invokes the native commands with the contract's payloads", async () => {
     open_macos_display: () => undefined,
     macos_computer_clipboard: () => ({ action: "copy", status: "copied", content: "text", message: null }),
     delete_macos_template: () => undefined,
+    create_macos_checkpoint: () => undefined,
+    restore_macos_checkpoint: () => undefined,
+    fork_macos_checkpoint: () => undefined,
+    delete_macos_checkpoint: () => undefined,
   }
   const invoke = nativeBridgeMock(handlers)
   mockIPC((command, payload) => invoke(command, payload as Record<string, unknown>), { shouldMockEvents: true })
@@ -453,6 +457,10 @@ it("invokes the native commands with the contract's payloads", async () => {
   await nativeMacosComputersBackend.openDisplay("a")
   await nativeMacosComputersBackend.clipboard("a", "copy-from")
   await nativeMacosComputersBackend.deleteTemplate()
+  await nativeMacosComputersBackend.createCheckpoint("a", "Before update")
+  await nativeMacosComputersBackend.restoreCheckpoint("a", "c1")
+  await nativeMacosComputersBackend.forkCheckpoint("a", "c1", "fork")
+  await nativeMacosComputersBackend.deleteCheckpoint("a", "c1")
   expect(invoke.mock.calls).toEqual([
     ["read_macos_computers", {}],
     ["create_macos_computer", { request: { name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 } }],
@@ -460,6 +468,10 @@ it("invokes the native commands with the contract's payloads", async () => {
     ["open_macos_display", { id: "a" }],
     ["macos_computer_clipboard", { id: "a", direction: "copy-from" }],
     ["delete_macos_template", {}],
+    ["create_macos_checkpoint", { id: "a", name: "Before update" }],
+    ["restore_macos_checkpoint", { id: "a", checkpointId: "c1" }],
+    ["fork_macos_checkpoint", { id: "a", checkpointId: "c1", newName: "fork" }],
+    ["delete_macos_checkpoint", { id: "a", checkpointId: "c1" }],
   ])
 })
 
