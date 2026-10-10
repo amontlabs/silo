@@ -51,7 +51,12 @@ pub(super) struct Meta {
     pub schema_version: u32,
     pub macos_version: String,
     pub build: String,
+    /// The base fingerprint: everything setup does except computer use.
     pub setup_version: String,
+    /// The computer-use fingerprint the template's guest has; a template without one
+    /// (made before the split) counts as stale.
+    #[serde(default)]
+    pub computer_use_version: String,
     #[serde(rename = "diskGiB")]
     pub disk_gib: u64,
     pub created_at: String,
@@ -87,20 +92,31 @@ impl Template {
 
 // MARK: Setup version
 
-/// A hash of everything setup installs: the pinned ChatGPT app and LCU, the guest
-/// script, the account setup and the initial approval mode. A template made under a
-/// different setup version is never copied.
+/// The base fingerprint: a hash of what setup does to a computer apart from computer
+/// use (the account and its automatic login, SSH, the recovery step). A template made
+/// under a different base is never copied; a computer's base is fixed when its setup ends.
 pub(super) fn setup_version() -> String {
-    setup_version_for(crate::computer_use::initial_approval())
+    hash_inputs([
+        offline_setup::setup_inputs().as_str(),
+        &SETUP_REVISION.to_string(),
+    ])
 }
 
-/// The setup version of a computer set up with `approval`.
-pub(super) fn setup_version_for(approval: crate::computer_use::Approval) -> String {
-    hash_inputs(guest_computer_use::setup_inputs().into_iter().chain([
-        offline_setup::setup_inputs().as_str(),
-        approval.as_str(),
-        &SETUP_REVISION.to_string(),
-    ]))
+/// The computer-use fingerprint of a computer set up with `approval`: the pinned ChatGPT
+/// app and LCU, the guest script and the approval mode. It changes whenever those do, and
+/// a computer or template with another one is brought up to date in place; it is never a
+/// reason to install macOS again.
+pub(super) fn computer_use_version_for(approval: crate::computer_use::Approval) -> String {
+    hash_inputs(
+        guest_computer_use::setup_inputs()
+            .into_iter()
+            .chain([approval.as_str()]),
+    )
+}
+
+/// The computer-use fingerprint a computer created now gets.
+pub(super) fn computer_use_version() -> String {
+    computer_use_version_for(crate::computer_use::initial_approval())
 }
 
 fn hash_inputs<'a>(inputs: impl IntoIterator<Item = &'a str>) -> String {
@@ -116,16 +132,21 @@ fn hash_inputs<'a>(inputs: impl IntoIterator<Item = &'a str>) -> String {
         .collect()
 }
 
-/// The folder name of the template for `build` under `setup_version`.
-pub(super) fn dir_name(build: &str, setup_version: &str) -> Result<String, String> {
+/// The folder name of the template for `build` under `setup_version` and
+/// `computer_use_version`.
+pub(super) fn dir_name(
+    build: &str,
+    setup_version: &str,
+    computer_use_version: &str,
+) -> Result<String, String> {
     let safe = |text: &str| {
         !text.is_empty()
             && text
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
     };
-    if safe(build) && safe(setup_version) {
-        Ok(format!("{build}-{setup_version}"))
+    if safe(build) && safe(setup_version) && safe(computer_use_version) {
+        Ok(format!("{build}-{setup_version}-{computer_use_version}"))
     } else {
         Err("The macOS build has an unexpected name.".into())
     }
@@ -168,16 +189,23 @@ fn created(template: &Template) -> Option<time::OffsetDateTime> {
 
 /// The template a new computer is copied from. `latest_build` is the build the framework
 /// offers; with `None` (the lookup failed, as when offline) the newest template of the
-/// current setup version is used.
+/// current base is used. A template whose base matches is usable even when its computer-use
+/// part is stale (the copy updates it); one that is up to date is preferred.
 pub(super) fn choose<'a>(
     templates: &'a [Template],
     latest_build: Option<&str>,
     setup_version: &str,
+    computer_use_version: &str,
 ) -> Option<&'a Template> {
-    templates.iter().find(|template| {
+    let usable = |template: &&Template| {
         template.meta.setup_version == setup_version
             && latest_build.is_none_or(|build| template.meta.build == build)
-    })
+    };
+    templates
+        .iter()
+        .filter(usable)
+        .find(|template| template.meta.computer_use_version == computer_use_version)
+        .or_else(|| templates.iter().find(usable))
 }
 
 // MARK: Leases
@@ -222,10 +250,17 @@ pub(super) fn lease_matching(
     app_data: &Path,
     latest_build: Option<&str>,
     setup_version: &str,
+    computer_use_version: &str,
 ) -> Option<Lease> {
     let mut guard = leases();
     let templates = list(app_data);
-    let chosen = choose(&templates, latest_build, setup_version)?.clone();
+    let chosen = choose(
+        &templates,
+        latest_build,
+        setup_version,
+        computer_use_version,
+    )?
+    .clone();
     Some(Lease::take(guard.get_or_insert_with(HashMap::new), chosen))
 }
 
@@ -359,13 +394,14 @@ pub(super) fn make(
     record: &Record,
     layout: &Layout,
     setup_version: &str,
+    computer_use_version: &str,
     protected: &dyn Fn() -> Vec<String>,
 ) -> Result<Option<String>, String> {
     if !eligible(record) {
         return Ok(None);
     }
     let image = record.restore_image.as_ref().ok_or("No macOS version.")?;
-    let name = dir_name(&image.build, setup_version)?;
+    let name = dir_name(&image.build, setup_version, computer_use_version)?;
     let _making = MAKING
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -381,7 +417,14 @@ pub(super) fn make(
         .create(&templates)
         .map_err(|error| store::io_error("create the template folder", &error))?;
     let partial = templates.join(format!("{name}{PARTIAL}{}", uuid::Uuid::new_v4()));
-    let built = build(&partial, record, layout, setup_version, image);
+    let built = build(
+        &partial,
+        record,
+        layout,
+        setup_version,
+        computer_use_version,
+        image,
+    );
     if let Err(message) = built {
         let _ = remove_dir(&partial);
         return Err(message);
@@ -401,6 +444,7 @@ fn build(
     record: &Record,
     layout: &Layout,
     setup_version: &str,
+    computer_use_version: &str,
     image: &store::RestoreImageInfo,
 ) -> Result<(), String> {
     fs::DirBuilder::new()
@@ -430,6 +474,7 @@ fn build(
         macos_version: image.version.clone(),
         build: image.build.clone(),
         setup_version: setup_version.to_string(),
+        computer_use_version: computer_use_version.to_string(),
         disk_gib: record.disk_gib,
         created_at: time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -672,11 +717,16 @@ mod tests {
     }
 
     fn meta(build: &str, setup: &str, created: &str) -> Meta {
+        meta_with(build, setup, "cu", created)
+    }
+
+    fn meta_with(build: &str, setup: &str, computer_use: &str, created: &str) -> Meta {
         Meta {
             schema_version: SCHEMA_VERSION,
             macos_version: "26.6.2".into(),
             build: build.into(),
             setup_version: setup.into(),
+            computer_use_version: computer_use.into(),
             disk_gib: 64,
             created_at: created.into(),
             source_computer_id: "source".into(),
@@ -684,11 +734,15 @@ mod tests {
     }
 
     fn template(build: &str, setup: &str, created: &str) -> Template {
-        let name = dir_name(build, setup).unwrap();
+        template_with(build, setup, "cu", created)
+    }
+
+    fn template_with(build: &str, setup: &str, computer_use: &str, created: &str) -> Template {
+        let name = dir_name(build, setup, computer_use).unwrap();
         Template {
             dir: PathBuf::from(&name),
             name,
-            meta: meta(build, setup, created),
+            meta: meta_with(build, setup, computer_use, created),
         }
     }
 
@@ -699,10 +753,10 @@ mod tests {
             template("25G83", "new", "2026-10-01"),
             template("25H1", "new", "2026-10-03"),
         ];
-        let pick = |build, setup| choose(&templates, build, setup).map(|t| t.name.as_str());
-        assert_eq!(pick(Some("25G83"), "new"), Some("25G83-new"));
-        assert_eq!(pick(Some("25G83"), "old"), Some("25G83-old"));
-        assert_eq!(pick(Some("25H1"), "new"), Some("25H1-new"));
+        let pick = |build, setup| choose(&templates, build, setup, "cu").map(|t| t.name.as_str());
+        assert_eq!(pick(Some("25G83"), "new"), Some("25G83-new-cu"));
+        assert_eq!(pick(Some("25G83"), "old"), Some("25G83-old-cu"));
+        assert_eq!(pick(Some("25H1"), "new"), Some("25H1-new-cu"));
         // A newer macOS than any template, or a changed setup, means a fresh install.
         assert_eq!(pick(Some("25J9"), "new"), None);
         assert_eq!(pick(Some("25G83"), "other"), None);
@@ -716,11 +770,62 @@ mod tests {
             template("25G83", "new", "2026-10-01"),
         ];
         assert_eq!(
-            choose(&templates, None, "new").map(|t| t.name.as_str()),
-            Some("25H1-new")
+            choose(&templates, None, "new", "cu").map(|t| t.name.as_str()),
+            Some("25H1-new-cu")
         );
-        assert_eq!(choose(&templates, None, "other"), None);
-        assert_eq!(choose(&[], None, "new"), None);
+        assert_eq!(choose(&templates, None, "other", "cu"), None);
+        assert_eq!(choose(&[], None, "new", "cu"), None);
+    }
+
+    #[test]
+    fn a_template_with_the_base_but_a_stale_computer_use_part_is_still_chosen() {
+        let templates = [
+            template_with("25G83", "base", "old", "2026-10-03"),
+            template_with("25G83", "other", "new", "2026-10-02"),
+        ];
+        let pick = |build, base, cu| choose(&templates, build, base, cu).map(|t| t.name.as_str());
+        // Same base, other computer-use part: the copy updates computer use in place.
+        assert_eq!(pick(Some("25G83"), "base", "new"), Some("25G83-base-old"));
+        assert_eq!(pick(None, "base", "new"), Some("25G83-base-old"));
+        // Another base, or another macOS build, needs a full install.
+        assert_eq!(pick(Some("25G83"), "changed", "new"), None);
+        assert_eq!(pick(Some("25H1"), "base", "old"), None);
+        // An up-to-date template wins over a newer stale one.
+        let both = [
+            template_with("25G83", "base", "old", "2026-10-03"),
+            template_with("25G83", "base", "new", "2026-10-01"),
+        ];
+        assert_eq!(
+            choose(&both, Some("25G83"), "base", "new").map(|t| t.name.as_str()),
+            Some("25G83-base-new")
+        );
+    }
+
+    #[test]
+    fn the_two_fingerprints_depend_on_their_own_inputs_only() {
+        use crate::computer_use::Approval;
+        assert_eq!(setup_version(), setup_version());
+        assert_eq!(
+            computer_use_version_for(Approval::Ask),
+            computer_use_version_for(Approval::Ask)
+        );
+        assert_ne!(
+            computer_use_version_for(Approval::Ask),
+            computer_use_version_for(Approval::Auto)
+        );
+        assert_eq!(computer_use_version_for(Approval::Ask).len(), 16);
+        // The base names no computer-use input.
+        let base = hash_inputs([
+            offline_setup::setup_inputs().as_str(),
+            &SETUP_REVISION.to_string(),
+        ]);
+        assert_eq!(setup_version(), base);
+        // A template made before the split has no computer-use part.
+        let json = serde_json::to_value(meta("25G83", "a", "2026-10-01")).unwrap();
+        let mut old = json.clone();
+        old.as_object_mut().unwrap().remove("computerUseVersion");
+        let parsed: Meta = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.computer_use_version, "");
     }
 
     #[test]
@@ -736,10 +841,14 @@ mod tests {
 
     #[test]
     fn folder_names_stay_inside_the_templates_folder() {
-        assert_eq!(dir_name("25G83", "0123abcd").unwrap(), "25G83-0123abcd");
+        assert_eq!(
+            dir_name("25G83", "0123abcd", "ef01").unwrap(),
+            "25G83-0123abcd-ef01"
+        );
         for bad in ["", "../x", "a/b", "a b"] {
-            assert!(dir_name(bad, "x").is_err(), "{bad}");
-            assert!(dir_name("x", bad).is_err(), "{bad}");
+            assert!(dir_name(bad, "x", "y").is_err(), "{bad}");
+            assert!(dir_name("x", bad, "y").is_err(), "{bad}");
+            assert!(dir_name("x", "y", bad).is_err(), "{bad}");
         }
     }
 
@@ -756,7 +865,7 @@ mod tests {
         computer.setup.clipboard = false;
         assert!(!eligible(&computer));
         computer.setup.clipboard = true;
-        computer.template = Some("25G83-x".into());
+        computer.template = Some("25G83-x-cu".into());
         assert!(!eligible(&computer));
         computer.template = None;
         computer.setup.needs_personalizing = true;
@@ -766,10 +875,10 @@ mod tests {
     #[test]
     fn making_a_template_lays_out_the_files_and_the_source_secrets() {
         let (computer, layout, data) = record(64);
-        let name = make(data.path(), &computer, &layout, "abcd", &none)
+        let name = make(data.path(), &computer, &layout, "abcd", "cu", &none)
             .unwrap()
             .unwrap();
-        assert_eq!(name, "25G83-abcd");
+        assert_eq!(name, "25G83-abcd-cu");
         let listed = list(data.path());
         assert_eq!(listed.len(), 1);
         let made = &listed[0];
@@ -803,7 +912,7 @@ mod tests {
         assert!(!access.join("known_hosts").exists());
         // Making it again changes nothing.
         assert_eq!(
-            make(data.path(), &computer, &layout, "abcd", &none).unwrap(),
+            make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap(),
             None
         );
         let json: serde_json::Value =
@@ -817,7 +926,7 @@ mod tests {
         let (mut computer, layout, data) = record(64);
         computer.pristine = false;
         assert_eq!(
-            make(data.path(), &computer, &layout, "abcd", &none).unwrap(),
+            make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap(),
             None
         );
         assert!(list(data.path()).is_empty());
@@ -826,20 +935,24 @@ mod tests {
     #[test]
     fn a_new_template_replaces_older_ones_unless_they_are_in_use() {
         let (computer, layout, data) = record(64);
-        make(data.path(), &computer, &layout, "one", &none).unwrap();
-        let held = lease_named(data.path(), "25G83-one").unwrap();
-        make(data.path(), &computer, &layout, "two", &none).unwrap();
+        make(data.path(), &computer, &layout, "one", "cu", &none).unwrap();
+        let held = lease_named(data.path(), "25G83-one-cu").unwrap();
+        make(data.path(), &computer, &layout, "two", "cu", &none).unwrap();
         let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
-        assert_eq!(names, ["25G83-two", "25G83-one"], "a leased template stays");
+        assert_eq!(
+            names,
+            ["25G83-two-cu", "25G83-one-cu"],
+            "a leased template stays"
+        );
         drop(held);
         // A template an unfinished copy depends on also stays.
-        let protect = || vec!["25G83-one".to_string()];
-        make(data.path(), &computer, &layout, "three", &protect).unwrap();
+        let protect = || vec!["25G83-one-cu".to_string()];
+        make(data.path(), &computer, &layout, "three", "cu", &protect).unwrap();
         let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
-        assert_eq!(names, ["25G83-three", "25G83-one"]);
-        make(data.path(), &computer, &layout, "four", &none).unwrap();
+        assert_eq!(names, ["25G83-three-cu", "25G83-one-cu"]);
+        make(data.path(), &computer, &layout, "four", "cu", &none).unwrap();
         let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
-        assert_eq!(names, ["25G83-four"]);
+        assert_eq!(names, ["25G83-four-cu"]);
     }
 
     #[test]
@@ -853,7 +966,7 @@ mod tests {
         )
         .unwrap();
         assert!(list(data.path()).is_empty());
-        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
+        make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap();
         assert!(!stale.exists());
         assert_eq!(list(data.path()).len(), 1);
     }
@@ -861,13 +974,13 @@ mod tests {
     #[test]
     fn removing_refuses_while_a_copy_depends_on_the_template() {
         let (computer, layout, data) = record(64);
-        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
-        let lease = lease_matching(data.path(), Some("25G83"), "abcd").unwrap();
+        make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap();
+        let lease = lease_matching(data.path(), Some("25G83"), "abcd", "cu").unwrap();
         assert!(remove_all(data.path(), &none)
             .unwrap_err()
             .contains("being copied"));
         drop(lease);
-        let protect = || vec!["25G83-abcd".to_string()];
+        let protect = || vec!["25G83-abcd-cu".to_string()];
         assert!(remove_all(data.path(), &protect)
             .unwrap_err()
             .contains("still being set up"));
@@ -881,8 +994,8 @@ mod tests {
     #[test]
     fn a_copy_has_the_template_files_a_new_identity_and_none_of_its_secrets() {
         let (computer, layout, data) = record(64);
-        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
-        let lease = lease_matching(data.path(), Some("25G83"), "abcd").unwrap();
+        make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap();
+        let lease = lease_matching(data.path(), Some("25G83"), "abcd", "cu").unwrap();
         let copy = Layout::new(data.path(), "copy-id");
         clone_into(&lease.template, &copy, b"new-identifier", 64).unwrap();
         assert_eq!(fs::read(copy.disk()).unwrap(), vec![7u8; 4096]);
@@ -928,18 +1041,18 @@ mod tests {
     #[test]
     fn a_template_published_while_pruning_is_not_pruned() {
         let (computer, layout, data) = record(64);
-        make(data.path(), &computer, &layout, "one", &none).unwrap();
-        make(data.path(), &computer, &layout, "two", &none).unwrap();
+        make(data.path(), &computer, &layout, "one", "cu", &none).unwrap();
+        make(data.path(), &computer, &layout, "two", "cu", &none).unwrap();
         prune_stale(data.path(), &none).unwrap();
         let names: Vec<_> = list(data.path()).into_iter().map(|t| t.name).collect();
-        assert_eq!(names, ["25G83-two"]);
+        assert_eq!(names, ["25G83-two-cu"]);
     }
 
     #[test]
     fn a_larger_disk_is_grown_and_a_template_sized_disk_is_not() {
         let (computer, layout, data) = record(64);
-        make(data.path(), &computer, &layout, "abcd", &none).unwrap();
-        let lease = lease_matching(data.path(), None, "abcd").unwrap();
+        make(data.path(), &computer, &layout, "abcd", "cu", &none).unwrap();
+        let lease = lease_matching(data.path(), None, "abcd", "cu").unwrap();
         let same = Layout::new(data.path(), "same");
         clone_into(&lease.template, &same, b"id", 64).unwrap();
         assert_eq!(fs::metadata(same.disk()).unwrap().len(), 4096);

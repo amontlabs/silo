@@ -527,8 +527,9 @@ impl Registry {
     /// that is known) counts as current and sets the smallest disk.
     fn refresh_template(&mut self, data: &std::path::Path) {
         let version = templates::setup_version();
+        let computer_use = templates::computer_use_version();
         let all = templates::list(data);
-        let used = templates::choose(&all, self.latest_build.as_deref(), &version)
+        let used = templates::choose(&all, self.latest_build.as_deref(), &version, &computer_use)
             .map(|template| template.name.clone());
         self.min_disk_gib = used
             .as_ref()
@@ -989,11 +990,12 @@ fn run_creation(
     // A template of the newest macOS (or, without a network, of any build) replaces the
     // download and the installation.
     let version = templates::setup_version();
+    let computer_use = templates::computer_use_version();
     let build = latest.as_ref().ok().map(|latest| latest.build.as_str());
     if let Some(build) = build {
         note_latest_build(app, build);
     }
-    if let Some(lease) = templates::lease_matching(data, build, &version) {
+    if let Some(lease) = templates::lease_matching(data, build, &version, &computer_use) {
         // Held until this creation ends: the copy writes during its personalization.
         let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
         if copy_template(app, layout, &mut record, &lease, cancel)? {
@@ -1096,6 +1098,9 @@ fn copy_template(
     record.pristine = false;
     record.template = Some(template.name.clone());
     record.setup_version = Some(template.meta.setup_version.clone());
+    // What the template's guest has; a stale part is updated during this copy's setup.
+    record.computer_use_version = Some(template.meta.computer_use_version.clone());
+    record.computer_use_approval = Some(crate::computer_use::initial_approval());
     match templates::clone_into(
         template,
         layout,
@@ -1145,7 +1150,17 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
     let Some(version) = record.setup_version.as_deref() else {
         return;
     };
-    let made = templates::make(&data, record, layout, version, &protected_templates);
+    let Some(computer_use) = record.computer_use_version.as_deref() else {
+        return;
+    };
+    let made = templates::make(
+        &data,
+        record,
+        layout,
+        version,
+        computer_use,
+        &protected_templates,
+    );
     if let Err(message) = made {
         if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
             log.line(&format!("the template could not be saved: {message}"));
@@ -1924,6 +1939,8 @@ fn fork_checkpoint(
         record.restore_image = held.record.restore_image.clone();
         record.pristine = false;
         record.setup_version = held.record.setup_version.clone();
+        record.computer_use_version = held.record.computer_use_version.clone();
+        record.computer_use_approval = held.record.computer_use_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -2920,14 +2937,18 @@ mod tests {
     #[test]
     fn only_a_template_that_would_be_copied_sets_the_smallest_disk() {
         let data = tempfile::tempdir().unwrap();
-        let dir =
-            templates::root(data.path()).join(format!("25G83-{}", templates::setup_version()));
+        let dir = templates::root(data.path()).join(format!(
+            "25G83-{}-{}",
+            templates::setup_version(),
+            templates::computer_use_version()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let meta = templates::Meta {
             schema_version: 1,
             macos_version: "26.6.2".into(),
             build: "25G83".into(),
             setup_version: templates::setup_version(),
+            computer_use_version: templates::computer_use_version(),
             disk_gib: 128,
             created_at: "2026-10-09T10:00:00Z".into(),
             source_computer_id: "source".into(),

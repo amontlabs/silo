@@ -98,6 +98,14 @@ pub(super) struct Record {
     /// computer use step finished (copies take their template's).
     #[serde(default)]
     pub setup_version: Option<String>,
+    /// The computer-use fingerprint of what the guest has installed (the pinned ChatGPT app
+    /// and LCU, the guest script, the approval mode), fixed when computer use was last set
+    /// up or updated. A record without one (made before the split) is stale.
+    #[serde(default)]
+    pub computer_use_version: Option<String>,
+    /// The approval mode computer use was last set up with; an update keeps it.
+    #[serde(default)]
+    pub computer_use_approval: Option<crate::computer_use::Approval>,
     /// Set by a Restore: what the next Start does before it hands the computer over.
     #[serde(default)]
     pub pending_restore: Option<super::checkpoints::PendingRestore>,
@@ -108,6 +116,16 @@ pub(super) struct Record {
 }
 
 impl Record {
+    /// Whether the guest's computer use differs from what this build installs, or is not
+    /// known to match: the update runs again.
+    pub(super) fn computer_use_stale(&self) -> bool {
+        let approval = self
+            .computer_use_approval
+            .unwrap_or_else(crate::computer_use::initial_approval);
+        self.computer_use_version.as_deref()
+            != Some(super::templates::computer_use_version_for(approval).as_str())
+    }
+
     pub(super) fn os_version(&self) -> Option<String> {
         self.restore_image
             .as_ref()
@@ -195,6 +213,8 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         pristine: true,
         template: None,
         setup_version: None,
+        computer_use_version: None,
+        computer_use_approval: None,
         pending_restore: None,
         inherited_access: false,
     }
@@ -654,6 +674,35 @@ mod tests {
         assert!(!setup.complete());
         setup.needs_personalizing = false;
         assert!(setup.complete());
+    }
+
+    #[test]
+    fn computer_use_is_stale_unless_the_record_has_the_current_fingerprint() {
+        use crate::computer_use::Approval;
+        let mut computer = finished();
+        // A record from before the split has none.
+        assert!(computer.computer_use_stale());
+        for approval in [Approval::Ask, Approval::Auto] {
+            computer.computer_use_approval = Some(approval);
+            computer.computer_use_version =
+                Some(super::super::templates::computer_use_version_for(approval));
+            assert!(!computer.computer_use_stale());
+        }
+        // A fingerprint of another pin, or of another approval, is stale.
+        computer.computer_use_version = Some("0000000000000000".into());
+        assert!(computer.computer_use_stale());
+        computer.computer_use_version = Some(super::super::templates::computer_use_version_for(
+            Approval::Ask,
+        ));
+        computer.computer_use_approval = Some(Approval::Auto);
+        assert!(computer.computer_use_stale());
+        // Records written before the field load without it.
+        let mut json = serde_json::to_value(finished()).unwrap();
+        json.as_object_mut().unwrap().remove("computerUseVersion");
+        json.as_object_mut().unwrap().remove("computerUseApproval");
+        let loaded: Record = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.computer_use_version, None);
+        assert!(loaded.computer_use_stale());
     }
 
     #[test]

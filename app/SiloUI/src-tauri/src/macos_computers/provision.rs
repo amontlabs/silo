@@ -180,7 +180,9 @@ impl Provision<'_> {
             // The mode installed is the one the template's version names.
             let approval = crate::computer_use::initial_approval();
             guest_computer_use::install(self.app, &self.id, approval)?;
-            record.setup_version = Some(templates::setup_version_for(approval));
+            record.setup_version = Some(templates::setup_version());
+            record.computer_use_version = Some(templates::computer_use_version_for(approval));
+            record.computer_use_approval = Some(approval);
             self.mark(record, |setup| setup.computer_use = true)?;
         }
         if !record.setup.clipboard {
