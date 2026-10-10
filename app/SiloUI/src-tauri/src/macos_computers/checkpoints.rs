@@ -530,7 +530,11 @@ pub(super) fn restore_unfinished(layout: &Layout) -> bool {
     )
 }
 
-fn write_journal(layout: &Layout, journal: &Journal) -> Result<(), String> {
+fn write_journal(
+    layout: &Layout,
+    journal: &Journal,
+    sync: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     let json = serde_json::to_vec(journal).map_err(|error| error.to_string())?;
     let mut file = tempfile::NamedTempFile::new_in(&layout.dir)
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
@@ -541,8 +545,14 @@ fn write_journal(layout: &Layout, journal: &Journal) -> Result<(), String> {
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
     file.persist(journal_path(layout))
         .map_err(|error| store::io_error("restore the computer's files", &error.error))?;
-    store::sync_dir(&layout.dir)
-        .map_err(|error| store::io_error("restore the computer's files", &error))
+    sync(&layout.dir).map_err(|error| store::io_error("restore the computer's files", &error))
+}
+
+/// The phase the journal on disk is in, if it can be read.
+fn published_phase(layout: &Layout) -> Option<Phase> {
+    serde_json::from_slice::<Journal>(&fs::read(journal_path(layout)).ok()?)
+        .ok()
+        .map(|journal| journal.phase)
 }
 
 /// The live files and the temporary names their replacements are staged under.
@@ -576,12 +586,21 @@ fn rename_staged(layout: &Layout) -> Result<(), String> {
 /// and from then on `recover` can finish the renames after an interruption. The journal
 /// stays until `finish_restore`, which the caller runs once the new pending Restore is saved.
 fn swap_files(layout: &Layout, from: &Path, pending: &PendingRestore) -> Result<(), String> {
+    swap_files_with(layout, from, pending, &store::sync_dir)
+}
+
+fn swap_files_with(
+    layout: &Layout,
+    from: &Path,
+    pending: &PendingRestore,
+    sync: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     let mut journal = Journal {
         phase: Phase::Staging,
         target: pending.checkpoint_id.clone(),
         memory: pending.memory,
     };
-    write_journal(layout, &journal)?;
+    write_journal(layout, &journal, sync)?;
     remove_staged(layout);
     for ((_, temporary), source) in staged(layout).iter().zip([DISK, AUXILIARY_STORAGE]) {
         if let Err(error) = templates::clone_file(&from.join(source), temporary) {
@@ -597,9 +616,13 @@ fn swap_files(layout: &Layout, from: &Path, pending: &PendingRestore) -> Result<
             .and_then(|file| file.sync_all())
             .map_err(|error| store::io_error("restore the computer's files", &error))
     });
-    if let Err(message) = durable.and_then(|()| write_journal(layout, &journal)) {
-        remove_staged(layout);
-        let _ = fs::remove_file(journal_path(layout));
+    if let Err(message) = durable.and_then(|()| write_journal(layout, &journal, sync)) {
+        // Once `swapping` is published, even if making it durable failed, the staged clones
+        // are what recovery rolls forward with: they and the journal stay.
+        if published_phase(layout) != Some(Phase::Swapping) {
+            remove_staged(layout);
+            let _ = fs::remove_file(journal_path(layout));
+        }
         return Err(message);
     }
     // A failure from here on is finished by `recover`, never by undoing half of it.
@@ -1268,6 +1291,37 @@ mod tests {
         assert!(journal_pins(&layout, "other"));
         finish_restore(&layout);
         assert!(!journal_pins(&layout, &meta.id));
+    }
+
+    #[test]
+    fn a_published_swapping_journal_and_its_staged_clones_survive_a_failed_sync() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let target = create(&subject(&layout, &machine, false), "Good", Reason::Manual).unwrap();
+        fs::write(layout.disk(), b"disk-v2").unwrap();
+        let calls = std::cell::Cell::new(0);
+        // The first sync makes `staging` durable; the second, for `swapping`, fails.
+        let sync = |_: &Path| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 2 {
+                Err(std::io::Error::other("sync failed"))
+            } else {
+                Ok(())
+            }
+        };
+        let pending = PendingRestore {
+            checkpoint_id: target.id.clone(),
+            memory: false,
+        };
+        assert!(swap_files_with(&layout, &dir(&layout, &target.id), &pending, &sync).is_err());
+        assert!(restore_unfinished(&layout));
+        assert!(staged(&layout)
+            .iter()
+            .all(|(_, temporary)| temporary.exists()));
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        let rolled = recover(&layout).unwrap().unwrap();
+        assert_eq!(rolled.checkpoint_id, target.id);
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
     }
 
     #[test]

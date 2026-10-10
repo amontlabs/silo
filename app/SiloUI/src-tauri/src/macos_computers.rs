@@ -176,6 +176,33 @@ enum Finish {
     Kept,
 }
 
+/// Every macOS computer, with the state the UI shows and the rules that keep its operations
+/// from colliding. All transitions happen under this registry's lock (`update`, `set_state`,
+/// and the `begin_*` / `settle_*` methods); the framework's callbacks and the watcher only
+/// ever move a computer forward from a state they have just re-read.
+///
+/// States and events (`-` = refused or no change):
+///
+/// | State | Start | Stop | Force stop | Delete | Checkpoint op | Machine ends |
+/// | --- | --- | --- | --- | --- | --- | --- |
+/// | stopped / failed | starting | - | - | removed | capture, restore, fork, delete | - |
+/// | starting | - | - | stopping | - | fork, delete only | stopped, or failed on error |
+/// | running | - | stopping (ask) | stopping | - | capture, restore, fork, delete | stopped, or failed on error |
+/// | stopping | - | - | stays stopping | - | fork, delete only | stopped |
+/// | preparing .. setting-up | - | - | - | cancel, then removed | - | (creation ends) |
+///
+/// A checkpoint operation (`Entry::operation`) is not a state: the computer keeps its state
+/// and additionally refuses Start, Stop, Force stop and Delete, and a second operation, until
+/// the operation's guard drops. Quit and updates count it as busy; Quit asks it to end first.
+///
+/// Reverts: a refused stop request returns `stopping` to `running`; a failed start whose
+/// machine can't be released becomes `stopping` with Force stop open, never `stopped`/`failed`.
+///
+/// The watcher (every `WATCH_INTERVAL`, on the framework's states): a stopped or failed
+/// machine finishes `running`/`stopping`; a machine still running after `STOP_IGNORED_AFTER`
+/// turns `stopping` back to `running`; a paused machine nobody operates on is resumed, unless
+/// a pending Restore is unconsumed, when it is force-stopped instead; a `stopping` computer
+/// whose machine is gone (checked again against a fresh sample) becomes stopped.
 struct Registry {
     loaded: bool,
     entries: Vec<Entry>,
@@ -188,6 +215,31 @@ struct Registry {
 impl Registry {
     fn entry(&mut self, id: &str) -> Option<&mut Entry> {
         self.entries.iter_mut().find(|entry| entry.record.id == id)
+    }
+
+    /// Marks a failed start as settled, unless something else already moved the computer on
+    /// (a late stop callback that released the machine and set it stopped).
+    fn settle_failed_start(&mut self, id: &str, released: Result<(), String>) {
+        if let Some(entry) = self.entry(id) {
+            if entry.state == State::Starting {
+                let (state, detail) = state_after_failed_start(released);
+                entry.state = state;
+                entry.detail = detail;
+                entry.progress = None;
+                entry.since = Instant::now();
+            }
+        }
+    }
+
+    /// Computers stopping whose machine the framework no longer holds: the stop callback was
+    /// missed or came before the state was set, so nothing else will ever finish them.
+    fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.state == State::Stopping && entry.operation.is_none())
+            .filter(|entry| !held.contains(&entry.record.id))
+            .map(|entry| entry.record.id.clone())
+            .collect()
     }
 
     /// Whether any computer is changing state or owned by a checkpoint operation.
@@ -1162,8 +1214,9 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         }
         Err(message) => {
             // Nothing may report the computer as stopped while its machine can still run.
-            let (state, detail) = state_after_failed_start(ensure_released(app, id));
-            set_state(app, id, state, detail);
+            let released = ensure_released(app, id);
+            registry().settle_failed_start(id, released);
+            emit(app);
             Err(message)
         }
     }
@@ -1974,19 +2027,34 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
                     .then(|| "The computer stopped unexpectedly.".to_string());
                 machine_stopped(app, id, detail);
             }
-            // A machine nothing is checkpointing is never meant to stay paused: resume it, or
-            // say that it is stuck.
-            (engine::MachineState::Paused, State::Running) if !has_operation(id) => {
-                let owned = {
-                    let id = id.clone();
-                    move || has_operation(&id)
-                };
-                let resumed = engine::resume_stray(app, id, owned);
-                update(app, id, |entry| {
-                    entry.detail = resumed.err().map(|why| {
-                        format!("The computer is paused and could not be resumed ({why}). Use Force stop.")
-                    });
-                });
+            (engine::MachineState::Paused, State::Running | State::Stopping) => {
+                let (operating, unconsumed) = (has_operation(id), has_pending_restore(id));
+                match paused_action(operating, unconsumed) {
+                    PausedAction::Leave => {}
+                    PausedAction::Resume => {
+                        let owned = {
+                            let id = id.clone();
+                            move || has_operation(&id) || has_pending_restore(&id)
+                        };
+                        let resumed = engine::resume_stray(app, id, owned);
+                        update(app, id, |entry| {
+                            entry.detail = resumed.err().map(|why| {
+                                format!("The computer is paused and could not be resumed ({why}). Use Force stop.")
+                            });
+                        });
+                    }
+                    // Memory that was never marked as used must not run: the machine is
+                    // turned off, and the computer stays busy until it is released.
+                    PausedAction::ForceStop => {
+                        let claimed = registry().begin_force_stop(id);
+                        emit(app);
+                        if claimed.is_ok() {
+                            if let Err(why) = engine::force_stop(app, id) {
+                                force_stop_failed(app, id, why);
+                            }
+                        }
+                    }
+                }
             }
             (engine::MachineState::Running, State::Stopping) => {
                 update(app, id, |entry| {
@@ -2000,6 +2068,43 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
             _ => {}
         }
     }
+    // A stop whose machine is already gone is finished here: the callback that would have
+    // done it has already run, or never will.
+    let held: Vec<String> = states.iter().map(|(id, _)| id.clone()).collect();
+    let stalled = registry().stopping_without_machine(&held);
+    if !stalled.is_empty() {
+        // Confirmed against a fresh sample: a machine registered since is not gone.
+        let fresh = engine::machine_states(app).unwrap_or_default();
+        let held: Vec<String> = fresh.into_iter().map(|(id, _)| id).collect();
+        for id in registry().stopping_without_machine(&held) {
+            machine_stopped(app, &id, None);
+        }
+    }
+}
+
+/// What the watcher does with a machine the framework reports as paused.
+#[derive(Debug, PartialEq, Eq)]
+enum PausedAction {
+    Leave,
+    Resume,
+    ForceStop,
+}
+
+fn paused_action(operating: bool, pending_restore_unconsumed: bool) -> PausedAction {
+    if operating {
+        PausedAction::Leave
+    } else if pending_restore_unconsumed {
+        PausedAction::ForceStop
+    } else {
+        PausedAction::Resume
+    }
+}
+
+fn has_pending_restore(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && entry.record.pending_restore.is_some())
 }
 
 // MARK: Quit
@@ -2355,6 +2460,44 @@ mod tests {
         .is_err());
         let (mut registry, id) = registry_with(state);
         assert_eq!(registry.begin_force_stop(&id), Ok(State::Stopping));
+    }
+
+    #[test]
+    fn a_paused_machine_is_resumed_only_when_nothing_owns_it_and_no_memory_is_pending() {
+        assert_eq!(paused_action(true, false), PausedAction::Leave);
+        assert_eq!(paused_action(true, true), PausedAction::Leave);
+        assert_eq!(paused_action(false, false), PausedAction::Resume);
+        assert_eq!(paused_action(false, true), PausedAction::ForceStop);
+    }
+
+    #[test]
+    fn a_late_stop_callback_is_not_overwritten_by_a_failed_start_settling() {
+        // The machine was released and the computer set stopped before the settle ran.
+        let (mut registry, id) = registry_with(State::Stopped);
+        registry.settle_failed_start(&id, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert_eq!(registry.entries[0].detail, None);
+        // Otherwise the outcome of releasing decides.
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.settle_failed_start(&id, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.settle_failed_start(&id, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+    }
+
+    #[test]
+    fn a_stopping_computer_without_a_machine_is_found_for_the_watcher() {
+        let (mut registry, id) = registry_with(State::Stopping);
+        assert_eq!(registry.stopping_without_machine(&[]), [id.clone()]);
+        assert!(registry.stopping_without_machine(&[id.clone()]).is_empty());
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Stopping the computer",
+        ));
+        assert!(registry.stopping_without_machine(&[]).is_empty());
+        let (registry, _) = registry_with(State::Running);
+        assert!(registry.stopping_without_machine(&[]).is_empty());
     }
 
     #[test]
