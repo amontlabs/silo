@@ -540,3 +540,21 @@ holding the auxiliary storage lock, power-button Stop waiting on a dialog, the
 toolbar covering the guest display, and a link check that rejected LCU's own
 archive. Lume's whole-disk detection (`contains("s")`) has the same defect Silo
 fixed and is worth reporting upstream.
+
+2026-10-10, Silo Dev from main, same Mac:
+
+- Checkpoints: a checkpoint of a running computer saved its memory; after a
+  change inside the guest, Restore and Start brought back the deleted file and
+  a process killed after the checkpoint, with uptime continuing. Fork made a
+  new computer from the checkpoint's disk with its own hostname, MAC address
+  and key; the original computer's key was refused.
+- An existing computer on LCU 0.10.1 updated itself to 0.11.0 after Start
+  (about 70 seconds), with cross-turn Computer Use on.
+- A new computer installed from the cached image in under 7 minutes; Silo
+  saved a template and deleted the restore image.
+- After the in-place update, an existing computer's Screen Sharing answered a
+  type 30 login from the host with the real desktop and accepted keyboard
+  input.
+- Not run live: a computer on another Mac, controlled from a second device
+  (Connections needs Remote Login on the owning Mac), the noVNC viewer, and
+  resizing a remote screen. Unit and integration tests cover them.
