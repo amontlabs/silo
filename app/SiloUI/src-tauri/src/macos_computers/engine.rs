@@ -786,14 +786,15 @@ enum Boot {
 enum BootFailure {
     /// The machine could not be built, or was already there.
     Setup(String),
-    /// The framework refused to start it, or to restore its saved memory.
-    Machine(String),
+    /// The framework refused to start it, or to restore its saved memory. Carries the
+    /// generation of the machine that was made (0 when none was).
+    Machine(String, u64),
 }
 
 impl BootFailure {
     fn message(self) -> String {
         match self {
-            Self::Setup(message) | Self::Machine(message) => message,
+            Self::Setup(message) | Self::Machine(message, _) => message,
         }
     }
 }
@@ -812,16 +813,18 @@ pub(super) fn start_from_state(
     record: &Record,
     layout: &Layout,
     state: &Path,
-) -> Result<(), StateStartError> {
+) -> Result<u64, StateStartError> {
     let boot = Boot::State(state.to_path_buf());
     let mut tries = 0;
     loop {
         match start_machine_once(app, record, layout, &boot) {
-            Ok(()) => return Ok(()),
+            Ok(generation) => return Ok(generation),
             Err(BootFailure::Setup(message)) => return Err(StateStartError::Failed(message)),
-            Err(BootFailure::Machine(message)) => {
-                // A refused restore leaves a machine that nothing else will release.
-                discard(app, &record.id);
+            Err(BootFailure::Machine(message, generation)) => {
+                // A refused restore leaves a machine that nothing else will release; only
+                // that machine is released, not a later one of the same computer.
+                let id = record.id.clone();
+                let _ = on_main(app, move |_| release_slot(&id, generation));
                 if tries < LOCK_RETRIES && is_lock_error(&message) {
                     tries += 1;
                     std::thread::sleep(LOCK_BACKOFF);
@@ -845,7 +848,9 @@ fn start_machine(
     boot: &Boot,
 ) -> Result<(), String> {
     retry_while_locked(LOCK_RETRIES, LOCK_BACKOFF, || {
-        start_machine_once(app, record, layout, boot).map_err(BootFailure::message)
+        start_machine_once(app, record, layout, boot)
+            .map(|_| ())
+            .map_err(BootFailure::message)
     })
 }
 
@@ -878,7 +883,7 @@ fn start_machine_once(
     record: &Record,
     layout: &Layout,
     boot: &Boot,
-) -> Result<(), BootFailure> {
+) -> Result<u64, BootFailure> {
     let model = read(&layout.hardware_model(), "hardware model").map_err(BootFailure::Setup)?;
     let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
     let (send, receive) = mpsc::channel::<Result<(), String>>();
@@ -888,6 +893,8 @@ fn start_machine_once(
         _ => None,
     };
     let recovery = matches!(boot, Boot::Recovery);
+    let made = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let made_here = made.clone();
     on_main(app, move |mtm| -> Result<(), BootFailure> {
         if SLOTS.with(|slots| slots.borrow().contains_key(&record.id)) {
             return Err(BootFailure::Setup(
@@ -906,10 +913,11 @@ fn start_machine_once(
             .map_err(BootFailure::Setup)?;
         let slot = register(mtm, &app_handle, &record, &configuration, None);
         if let (Some(_), Err(why)) = (&state, &slot.save_restore) {
-            return Err(BootFailure::Machine(why.clone()));
+            return Err(BootFailure::Machine(why.clone(), 0));
         }
         let vm = slot.vm.clone();
         let generation = slot.generation;
+        made_here.store(generation, std::sync::atomic::Ordering::SeqCst);
         SLOTS.with(|slots| slots.borrow_mut().insert(record.id.clone(), slot));
         let id = record.id.clone();
         // SAFETY: Main thread; the handlers run on the main queue.
@@ -956,7 +964,38 @@ fn start_machine_once(
     receive
         .recv()
         .map_err(|_| BootFailure::Setup("The computer did not start.".to_string()))?
-        .map_err(BootFailure::Machine)
+        .map(|()| made.load(std::sync::atomic::Ordering::SeqCst))
+        .map_err(|message| {
+            BootFailure::Machine(message, made.load(std::sync::atomic::Ordering::SeqCst))
+        })
+}
+
+/// Raised by `resume_if` when the guard no longer holds.
+pub(super) const SUPERSEDED: &str = "The computer was started again, or stopped, in the meantime.";
+
+/// Resumes the paused machine of generation `generation`, if `guard` still holds on the main
+/// thread at that moment. A later machine, or a start that was superseded, is left alone and
+/// reported as `SUPERSEDED`.
+pub(super) fn resume_if(
+    app: &AppHandle,
+    id: &str,
+    generation: u64,
+    guard: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    let key = id.to_string();
+    on_machine(app, id, true, move |machine, send| {
+        let current = SLOTS.with(|slots| slots.borrow().get(&key).map(|slot| slot.generation));
+        // SAFETY: Main thread.
+        unsafe {
+            if !super::slot_is_current(current, generation) || !guard() {
+                let _ = send.send(Err(SUPERSEDED.into()));
+            } else if machine.canResume() {
+                machine.resumeWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("The computer is not paused.".into()));
+            }
+        }
+    })
 }
 
 // MARK: Memory

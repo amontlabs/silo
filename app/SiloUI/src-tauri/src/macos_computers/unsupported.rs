@@ -84,7 +84,7 @@ pub(super) fn start_from_state(
     _record: &Record,
     _layout: &Layout,
     _state: &Path,
-) -> Result<(), StateStartError> {
+) -> Result<u64, StateStartError> {
     Err(StateStartError::Failed(UNSUPPORTED.into()))
 }
 
@@ -97,6 +97,17 @@ pub(super) fn resume_stray(
     _id: &str,
     _generation: u64,
     _owned: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) const SUPERSEDED: &str = "The computer was started again, or stopped, in the meantime.";
+
+pub(super) fn resume_if(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+    _guard: impl Fn() -> bool + Send + 'static,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }

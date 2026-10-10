@@ -236,6 +236,31 @@ impl Registry {
         }
     }
 
+    /// Marks the pending Restore that Start number `attempt` consumed as used. Nothing changes
+    /// unless that Start still owns the computer and the record still names exactly that
+    /// Restore: a newer Restore's reference is never cleared by an older Start. `save` makes the
+    /// new record durable before the registry takes it.
+    fn consume_pending_restore(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        consumed: &checkpoints::PendingRestore,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let entry = self.entry(id).ok_or("This computer no longer exists.")?;
+        if entry.state != State::Starting
+            || entry.attempt != attempt
+            || entry.record.pending_restore.as_ref() != Some(consumed)
+        {
+            return Err(engine::SUPERSEDED.into());
+        }
+        let mut record = entry.record.clone();
+        record.pending_restore = None;
+        save(&record)?;
+        entry.record = record;
+        Ok(())
+    }
+
     /// Whether Start number `attempt` still owns the computer's `starting` state.
     fn start_is_current(&self, id: &str, attempt: u64) -> bool {
         self.entries.iter().any(|entry| {
@@ -1205,15 +1230,15 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     let plan = checkpoints::start_plan(&layout, pending.as_ref(), &checkpoints::host_build());
     // The saved memory is used up durably before any machine runs on the disk; a plan that
     // restores it does so itself, once the memory is in the machine and before it resumes.
-    let consumed =
-        if pending.is_some() && !matches!(plan, checkpoints::StartPlan::RestoreMemory { .. }) {
-            clear_pending_restore(app, id, &layout)
-        } else {
-            Ok(())
-        };
+    let consumed = match &pending {
+        Some(pending) if !matches!(plan, checkpoints::StartPlan::RestoreMemory { .. }) => {
+            clear_pending_restore(app, id, &layout, attempt, pending)
+        }
+        _ => Ok(()),
+    };
     let started = consumed
         .and_then(|()| offline_setup::ensure_detached(&layout.disk()))
-        .and_then(|()| start_machine(app, &record, &layout, plan));
+        .and_then(|()| start_machine(app, &record, &layout, plan, attempt, pending.as_ref()));
     match started {
         Ok(note) => {
             update(app, id, |entry| {
@@ -1272,12 +1297,17 @@ fn ensure_released(app: &AppHandle, id: &str, attempt: u64) -> Result<(), String
 const UNFINISHED_RESTORE: &str =
     "A Restore of this computer did not finish. Restart Silo to settle it before starting the computer.";
 
-/// Marks the pending Restore as used, durably.
-fn clear_pending_restore(app: &AppHandle, id: &str, layout: &Layout) -> Result<(), String> {
-    let (mut record, _) = computer(id)?;
-    record.pending_restore = None;
-    store::save(layout, &record)?;
-    update(app, id, |entry| entry.record = record);
+/// Marks the pending Restore that Start number `attempt` read as used, durably.
+fn clear_pending_restore(
+    app: &AppHandle,
+    id: &str,
+    layout: &Layout,
+    attempt: u64,
+    consumed: &checkpoints::PendingRestore,
+) -> Result<(), String> {
+    registry()
+        .consume_pending_restore(id, attempt, consumed, |record| store::save(layout, record))?;
+    emit(app);
     Ok(())
 }
 
@@ -1289,6 +1319,8 @@ fn start_machine(
     record: &Record,
     layout: &Layout,
     plan: checkpoints::StartPlan,
+    attempt: u64,
+    pending: Option<&checkpoints::PendingRestore>,
 ) -> Result<Option<String>, String> {
     use checkpoints::StartPlan;
     let note = match plan {
@@ -1297,17 +1329,28 @@ fn start_machine(
         StartPlan::RestoreMemory { state } => {
             log_line(app, &record.id, "restoring the checkpoint's memory");
             match engine::start_from_state(app, record, layout, &state) {
-                Ok(()) => {
+                Ok(generation) => {
                     // The saved memory is used up before the machine runs, so no later
-                    // Start can apply it to a disk that has changed since.
-                    if let Err(message) = clear_pending_restore(app, &record.id, layout) {
-                        let _ = engine::force_stop(app, &record.id);
+                    // Start can apply it to a disk that has changed since. Everything here
+                    // concerns this attempt's machine and this attempt's Restore only.
+                    let used = match pending {
+                        Some(pending) => {
+                            clear_pending_restore(app, &record.id, layout, attempt, pending)
+                        }
+                        None => Err(engine::SUPERSEDED.to_string()),
+                    };
+                    if let Err(message) = used {
+                        let _ = engine::force_stop_generation(app, &record.id, generation);
                         return Err(format!(
                             "The checkpoint's memory was not resumed because Silo could not record that it was used: {message}"
                         ));
                     }
-                    if let Err(message) = engine::resume_paused(app, &record.id) {
-                        let _ = engine::force_stop(app, &record.id);
+                    let guard = {
+                        let id = record.id.clone();
+                        move || registry().start_is_current(&id, attempt)
+                    };
+                    if let Err(message) = engine::resume_if(app, &record.id, generation, guard) {
+                        let _ = engine::force_stop_generation(app, &record.id, generation);
                         return Err(message);
                     }
                     log_line(app, &record.id, "memory restored");
@@ -1317,7 +1360,12 @@ fn start_machine(
                 Err(engine::StateStartError::Rejected(why)) => {
                     log_line(app, &record.id, &format!("memory not restored: {why}"));
                     // The memory is not coming back: mark it used before booting the disk.
-                    clear_pending_restore(app, &record.id, layout)?;
+                    match pending {
+                        Some(pending) => {
+                            clear_pending_restore(app, &record.id, layout, attempt, pending)?
+                        }
+                        None => return Err(engine::SUPERSEDED.into()),
+                    }
                     Some(checkpoints::rejected_note(&why))
                 }
             }
@@ -2101,15 +2149,28 @@ fn reconcile(app: &AppHandle, samples: &[engine::Sample]) {
     // A stop whose machine is already gone is finished here: the callback that would have
     // done it has already run, or never will.
     let held: Vec<String> = samples.iter().map(|sample| sample.id.clone()).collect();
-    for id in registry().stopping_without_machine(&held) {
-        // Checked again, and applied, on the main thread where machines are registered, so a
-        // machine that appeared since the sample is never mistaken for a missing one. A query
-        // that fails settles nothing.
+    // Checked again, and applied, on the main thread where machines are registered, so a machine
+    // that appeared since the sample is never mistaken for a missing one. A query that fails
+    // settles nothing.
+    settle_absent(&REGISTRY, &held, &|id| {
         let settle = {
-            let (app, id) = (app.clone(), id.clone());
+            let (app, id) = (app.clone(), id.to_string());
             move || stop_finished_without_machine(&app, &id)
         };
-        let _ = engine::run_if_no_machine(app, &id, settle);
+        let _ = engine::run_if_no_machine(app, id, settle);
+    });
+}
+
+/// Hands each stopping computer without a machine to `dispatch`. The registry is not held while
+/// `dispatch` runs: it waits for the main thread, and the main thread's callbacks take the
+/// registry's lock.
+fn settle_absent(registry: &Mutex<Registry>, held: &[String], dispatch: &dyn Fn(&str)) {
+    let stalled = registry
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .stopping_without_machine(held);
+    for id in stalled {
+        dispatch(&id);
     }
 }
 
@@ -2534,6 +2595,76 @@ mod tests {
         let (mut registry, id) = registry_with(State::Starting);
         registry.entries[0].attempt = attempt;
         (registry, id)
+    }
+
+    #[test]
+    fn settling_absent_machines_never_holds_the_registry_while_it_waits_for_the_main_thread() {
+        let (registry, id) = registry_with(State::Stopping);
+        let registry = Mutex::new(registry);
+        let dispatched = std::cell::Cell::new(0);
+        // The main thread's callbacks need this lock while `dispatch` waits for them; from
+        // another thread, as they would, it must be free at that moment (a regression
+        // blocks here, and the test fails after the timeout instead of hanging).
+        settle_absent(&registry, &[], &|stalled| {
+            dispatched.set(dispatched.get() + 1);
+            assert_eq!(stalled, id);
+            std::thread::scope(|scope| {
+                let free = scope
+                    .spawn(|| {
+                        let start = Instant::now();
+                        while start.elapsed() < Duration::from_secs(5) {
+                            if registry.try_lock().is_ok() {
+                                return true;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        false
+                    })
+                    .join()
+                    .unwrap();
+                assert!(free, "the registry stayed locked during dispatch");
+            });
+        });
+        assert_eq!(dispatched.get(), 1);
+    }
+
+    #[test]
+    fn an_older_start_never_clears_a_newer_restores_reference() {
+        let a = checkpoints::PendingRestore {
+            checkpoint_id: "a".into(),
+            memory: true,
+        };
+        let b = checkpoints::PendingRestore {
+            checkpoint_id: "b".into(),
+            memory: true,
+        };
+        // Start 1 read restore A; the computer was force stopped and restored to B; start 2
+        // is now the current one.
+        let (mut registry, id) = registry_starting(2);
+        registry.entries[0].record.pending_restore = Some(b.clone());
+        let saved = std::cell::Cell::new(false);
+        let save = |_: &Record| {
+            saved.set(true);
+            Ok(())
+        };
+        assert!(registry.consume_pending_restore(&id, 1, &a, save).is_err());
+        assert!(registry.consume_pending_restore(&id, 1, &b, save).is_err());
+        assert!(registry.consume_pending_restore(&id, 2, &a, save).is_err());
+        assert!(!saved.get());
+        assert_eq!(registry.entries[0].record.pending_restore, Some(b.clone()));
+        // The attempt that read B consumes it.
+        assert!(registry.consume_pending_restore(&id, 2, &b, save).is_ok());
+        assert!(saved.get());
+        assert_eq!(registry.entries[0].record.pending_restore, None);
+        // A computer no longer starting refuses too, and a failed save changes nothing.
+        let (mut registry, id) = registry_starting(2);
+        registry.entries[0].record.pending_restore = Some(b.clone());
+        assert!(registry
+            .consume_pending_restore(&id, 2, &b, |_| Err("disk full".into()))
+            .is_err());
+        assert_eq!(registry.entries[0].record.pending_restore, Some(b.clone()));
+        registry.entries[0].state = State::Stopped;
+        assert!(registry.consume_pending_restore(&id, 2, &b, save).is_err());
     }
 
     #[test]
