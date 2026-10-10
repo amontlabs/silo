@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expect, it, vi } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
@@ -157,4 +157,20 @@ it("lists a macOS computer on the Logs page and reads its logs by id", async () 
   )
   await waitFor(() => expect(queryLogs).toHaveBeenCalledWith(expect.objectContaining({ computerId: "mac-running" })))
   expect(queryLogs).not.toHaveBeenCalledWith(expect.objectContaining({ computerId: source.computers[0].configuration.id }))
+})
+
+it("ignores a macOS computer selected on the Logs page in the other sections", async () => {
+  const source = structuredClone(applicationSourceForScenario("complete"))
+  render(
+    <MacosComputersContext.Provider value={createFixtureMacosComputersStore()}>
+      <ComputersPage
+        source={source} section="activity" computers={source.computers} activities={[activity("kept", computerTarget(source.computers[0]))]} selectedComputerIds={new Set(["mac-running"])}
+        networkActions={{} as ApplicationActions} onSectionChange={vi.fn()} editor="Editor" onOpenEditor={vi.fn()}
+        directoryStore={createDirectoryStore()} active logQuery="" repositoryPushOperations={[]} browser="Browser"
+        onComputerFilterChange={vi.fn()} onLogQueryChange={vi.fn()} onPushRepository={vi.fn()} onDismissRepositoryPush={vi.fn()}
+      />
+    </MacosComputersContext.Provider>,
+  )
+  await act(async () => { await Promise.resolve() })
+  expect(within(screen.getByRole("list", { name: "Recent activity" })).getByText("Event kept")).toBeVisible()
 })

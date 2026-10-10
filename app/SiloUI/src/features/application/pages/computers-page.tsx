@@ -388,9 +388,21 @@ export function ComputersPage({
     () => section === "logs" && macosComputers?.length ? [...computers, ...macosComputers.map(macosLogComputer)] : computers,
     [section, computers, macosComputers],
   )
+  // A macOS computer selected on the Logs page is not one of the computers of the other
+  // sections: it stays selected for the way back but filters nothing there.
+  const selection = useMemo(() => {
+    if (section === "logs") return selectedComputerIds
+    const known = new Set(computers.map(({ configuration }) => configuration.id))
+    return new Set([...selectedComputerIds].filter((id) => known.has(id)))
+  }, [section, computers, selectedComputerIds])
+  const changeFilter = (next: Set<string>) => {
+    if (section === "logs") return onComputerFilterChange(next)
+    const hidden = [...selectedComputerIds].filter((id) => !selection.has(id))
+    onComputerFilterChange(new Set([...next, ...hidden]))
+  }
   const visibleComputers = useMemo(
-    () => selectedComputerIds.size === 0 ? listed : listed.filter(({ configuration }) => selectedComputerIds.has(configuration.id)),
-    [listed, selectedComputerIds],
+    () => selection.size === 0 ? listed : listed.filter(({ configuration }) => selection.has(configuration.id)),
+    [listed, selection],
   )
   // An empty filter means every computer, so an empty list means there are none yet: offer to
   // create one. Activity still shows system events and those of deleted computers.
@@ -410,11 +422,11 @@ export function ComputersPage({
 
   return (
     <div className={cn("mx-auto grid h-full min-h-0 w-full max-w-4xl gap-4 overflow-hidden px-4 py-5 sm:px-6 sm:py-6", hasComputers ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-[minmax(0,1fr)]")}>
-      {hasComputers && <ComputerFilterBar computers={listed} selectedComputerIds={selectedComputerIds} onChange={onComputerFilterChange} />}
+      {hasComputers && <ComputerFilterBar computers={listed} selectedComputerIds={selection} onChange={changeFilter} />}
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <Logs key={JSON.stringify(visibleComputers.map(computerTarget))} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} />}
       {section === "network" && <NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} />}
-      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selectedComputerIds.size > 0} onShowLogs={activity => {
+      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={activity => {
         const computer = computers.find(item => computerTarget(item) === activity.computer)
         if (computer) onComputerFilterChange(new Set([computer.configuration.id]))
         const time = new Date(activity.occurredAt).getTime()
