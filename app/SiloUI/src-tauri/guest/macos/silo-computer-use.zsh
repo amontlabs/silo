@@ -19,7 +19,10 @@
 #   3. install LCU's runtime against that app (`scripts/install.sh --runtime-only --yes`);
 #   4. grant Accessibility and Screen Recording to the app and its Computer Use helper in the
 #      system TCC database, and pre-write the Screen Recording reminder ledger;
-#   5. register every agent (`lcu setup --agent all --allow-missing --cross-turn on --unattended ...`, which keeps
+#   5. turn on Screen Sharing (the guest's built-in VNC server, which Silo reaches through a
+#      bridge from the controlling device) and grant its two clients Screen Recording,
+#      Accessibility and Post Event, as the "Allow" dialogs would;
+#   6. register every agent (`lcu setup --agent all --allow-missing --cross-turn on --unattended ...`, which keeps
 #      Computer Use across turns without the owner prompt) and install a
 #      LaunchAgent that runs `lcu setup --reconcile` at each login.
 # Per-app approvals ("Allow Computer Use to use X?") stay with LCU and are never seeded.
@@ -51,6 +54,13 @@ AGENT_LABEL=org.silo.computer-use-reconcile
 AGENT_PLIST=$HOME/Library/LaunchAgents/$AGENT_LABEL.plist
 LEDGER=$HOME/Library/Group\ Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist
 SERVICES=(kTCCServiceAccessibility kTCCServiceScreenCapture)
+SHARING_SERVICES=(kTCCServiceScreenCapture kTCCServiceAccessibility kTCCServicePostEvent)
+SHARING_CLIENTS=(
+  "com.apple.screensharing.agent /System/Library/CoreServices/RemoteManagement/ScreensharingAgent.bundle"
+  "com.apple.screensharing.daemon /System/Library/CoreServices/RemoteManagement/screensharingd.bundle"
+)
+SHARING_JOB=system/com.apple.screensharing
+SHARING_PLIST=/System/Library/LaunchDaemons/com.apple.screensharing.plist
 APPROVAL=ask
 
 mkdir -p "$HOME/Library/Logs" "$RECEIPT_DIR"
@@ -250,6 +260,37 @@ grant_clients() {
   done
 }
 
+# Screen Sharing's agent and daemon need the rows an MDM's remote desktop command writes, or a
+# viewer gets a black screen and no input. Type 2 (VNC password) authentication is not switched
+# on: viewers sign in with the computer's account.
+grant_sharing() {
+  local entry client code service
+  for entry in $SHARING_CLIENTS; do
+    client=${entry%% *} code=${entry#* }
+    [[ -d $code ]] || fail "this macOS has no ${code:t}, so Screen Sharing is unavailable"
+    [[ $(app_info "$code" CFBundleIdentifier) == "$client" ]] || fail "${code:t} is not $client"
+    for service in $SHARING_SERVICES; do
+      grant "$service" "$client" "$code" || fail "could not write the $service grant for $client"
+    done
+  done
+  for entry in $SHARING_CLIENTS; do
+    client=${entry%% *}
+    for service in $SHARING_SERVICES; do
+      granted "$service" "$client" || fail "the $service grant for $client did not read back"
+    done
+  done
+}
+
+# Enables and loads Screen Sharing; running it again changes nothing.
+enable_sharing() {
+  [[ -f $SHARING_PLIST ]] || fail "this macOS has no Screen Sharing service"
+  logged ${=SUDO} launchctl enable $SHARING_JOB || fail "could not enable Screen Sharing"
+  if ! ${=SUDO} launchctl print $SHARING_JOB >/dev/null 2>&1; then
+    logged ${=SUDO} launchctl bootstrap system "$SHARING_PLIST" || fail "could not load Screen Sharing"
+  fi
+  ${=SUDO} launchctl print $SHARING_JOB >/dev/null 2>&1 || fail "Screen Sharing did not load"
+}
+
 # Screen Recording on macOS 15 and later asks again after a while; a far-future date in the
 # approvals ledger of replayd stops it. 15.1 and later key it by bundle identifier, earlier
 # releases by executable path.
@@ -326,6 +367,9 @@ apply() {
   say "Granting Accessibility and Screen Recording"
   grant_clients
   write_ledger || fail "could not write the Screen Recording approvals"
+  say "Turning on Screen Sharing"
+  grant_sharing
+  enable_sharing
   restart_tccd
   register
   logged "$LCU" doctor || fail "lcu doctor reported a problem"
@@ -353,6 +397,11 @@ case $command in
     ;;
   links-inside)
     links_stay_inside "$1"
+    ;;
+  sharing-grants)
+    for entry in $SHARING_CLIENTS; do
+      for service in $SHARING_SERVICES; do print -r -- "$service ${entry%% *}"; done
+    done
     ;;
   grant)
     mkdir -p "$WORK"

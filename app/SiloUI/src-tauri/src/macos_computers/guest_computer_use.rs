@@ -989,6 +989,35 @@ mod tests {
             );
         }
 
+        #[test]
+        fn screen_sharing_gets_screen_capture_accessibility_and_post_event() {
+            let home = tempfile::tempdir().unwrap();
+            let output = zsh(&["sharing-grants"], "", home.path());
+            assert!(output.status.success());
+            let rows: Vec<String> = String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect();
+            let mut expected = Vec::new();
+            for client in [
+                "com.apple.screensharing.agent",
+                "com.apple.screensharing.daemon",
+            ] {
+                for service in [
+                    "kTCCServiceScreenCapture",
+                    "kTCCServiceAccessibility",
+                    "kTCCServicePostEvent",
+                ] {
+                    expected.push(format!("{service} {client}"));
+                }
+            }
+            assert_eq!(rows, expected);
+            assert!(super::super::SCRIPT.contains("ScreensharingAgent.bundle"));
+            assert!(super::super::SCRIPT.contains("screensharingd.bundle"));
+            assert!(!super::super::SCRIPT.contains("setvncpw"));
+        }
+
         fn zsh(args: &[&str], stdin: &str, home: &std::path::Path) -> std::process::Output {
             use std::io::Write;
             let mut child = Command::new("/bin/zsh")
