@@ -37,6 +37,7 @@ import { ComputersPage } from "@/features/application/pages/computers-page"
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
+import { selectableMacosIds } from "@/features/application/model/macos-log-computers"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
   const attentionByComputer = new Map(source.computers.map((computer) => [
@@ -176,7 +177,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const transfer = useComputerTransfer(backup, { source: applicationSource, openComputer: (id) => navigation.openComputer(id) })
 
   // macOS computers can be filtered on the Logs page, so their ids stay selected too.
-  const macosIds = useMacosComputers()?.snapshot.state?.computers.map(({ id }) => id).join("\n") ?? ""
+  const macosSnapshot = useMacosComputers()?.snapshot
+  const macosIds = selectableMacosIds(macosSnapshot, source.devices).join("\n")
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
     setSelectedComputerIds((current) => {

@@ -353,6 +353,14 @@ State `setting-up` covers these steps; its detail names the current step.
    - runs `lcu setup --agent all --allow-missing --session direct --yes
      --approval <mode>` and installs a LaunchAgent that runs
      `lcu setup --reconcile` at each login, so agents installed later register.
+   - turns on the guest's own Screen Sharing for [remote viewing](#on-another-mac):
+     `launchctl enable system/com.apple.screensharing` and, unless it is already
+     loaded, `bootstrap` of its launch daemon, plus Screen Recording, Accessibility
+     and Post Event rows for `com.apple.screensharing.agent` and
+     `com.apple.screensharing.daemon`, read back like the others. The legacy VNC
+     password mode stays off: viewers sign in with the computer's account. The
+     script is part of the computer-use fingerprint, so an existing computer gets
+     this through the in-place update at its next start.
    Per-app approvals ("Allow Computer Use to use X?") stay with LCU and are never
    seeded. The script keeps a log (`~/Library/Logs/silo-computer-use.log`) and a
    receipt (`~/Library/Application Support/Silo/computer-use-receipt.json`) in the
@@ -394,6 +402,80 @@ Per-computer secrets live in `macos-computers/<id>/guest-access/` (mode 0700):
 the account password and the SSH key. Anyone who can read that directory can
 also read the computer's disk, so the Keychain would add no protection.
 
+## On another Mac
+
+A macOS computer can run on another Mac that is connected through
+[Connections](SiloUI-CONNECTIONS.md) and be managed and viewed from this Silo, which
+may run on macOS or Linux. The Mac that hosts the virtual machine is the owner; the
+device that shows it is the controller. The owner keeps the virtual machine in its own
+Silo process exactly as for a local computer; the controller only calls the bridge.
+
+- **List.** The owner's macOS computers appear in the Computers list with the device
+  badge, as remote Linux computers do. The controller polls the owner's
+  `macos.snapshot` while the list is on screen. A device that cannot host macOS
+  computers (a Linux device, an Intel Mac) reports that and contributes no rows.
+- **Create.** New computer with the operating system macOS offers Run on: This device,
+  when it can host, and each connected Mac that reports it can. The form's limits (names,
+  the smallest disk, the template notice) follow the chosen device, and Remove template
+  stays local. The owner downloads and installs macOS and sets the computer up, so the
+  work needs the owner's network and disk. The two-computers-at-once limit is the
+  owner's: a third Start fails with the same message as locally.
+- **Start, stop, force stop, delete, retry setup.** These run on the owner through
+  `macos.action`, with the same admission and attempt guards as the local commands. A
+  computer started this way opens no window on the owner. The one exception is setup:
+  its Recovery step still shows a "Setting up" window on the owning Mac, because it
+  reads that window to type the System Integrity Protection sequence.
+- **Show screen.** Opens a Silo window that runs a noVNC viewer. Nothing is installed on
+  the controller or in the guest beyond the Screen Sharing setup above.
+- **Logs.** The Logs page reads a remote computer's retained setup logs through
+  `runtime.logs`, which the owner answers for macOS computers too.
+- **Errors.** The owner reports in plain words that it is not a Mac or cannot host
+  macOS computers, that two macOS computers already run, that the computer is not
+  running, that setup has not finished, and that Screen Sharing is not available yet (a
+  computer set up before Screen Sharing existed is updated in the background shortly
+  after it starts).
+- **Not covered.** Checkpoints and clipboard transfer are not offered for remote
+  computers: their rows hide those actions.
+
+**Display path.** The owner serves three things for a viewer. `macos.display.connect`
+returns the guest account's name and password, once the computer is running and its
+setup has finished, and checks that Screen Sharing answers. `macos.display.stream`
+connects to port 5900 of the guest's NAT address (reachable only from the owner) and
+copies bytes both ways; it is a stream method, like `guest.ssh`. `macos.display.resize`
+reconfigures the first `VZMacGraphicsDisplay` (`reconfigureWithSizeInPixels:`, public
+API) to the viewer window's pixel size, clamped to 640x400 .. 7680x4320 with even
+sides. The controller opens the viewer window (`desktop-shell-macos-<hash>`) and
+starts a loopback WebSocket endpoint for it (`macos_display_gateway.rs`): bound to
+127.0.0.1 only, with a random per-window token as the URL path, a `Host` check against
+the endpoint, an `Origin` check against the app's own web origins, one connection at a
+time and a size limit on messages from the page. Each WebSocket is spliced to a new
+`macos.display.stream` on the owner through the ssh bridge. noVNC speaks RFB with
+Apple's security type 30 (the DH variant) using the credentials from
+`macos.display.connect`; the page receives them in the response to its own request,
+they are not logged and not part of the window's URL, title or any event, and the
+window's commands refuse any window that was not opened for that computer. The page
+resizes the guest after the window is resized (debounced, with `devicePixelRatio`) and
+scales the picture to the window. It shows Connecting, Connected, Reconnecting
+(automatic for lost connections, bounded), and Disconnected with a Reconnect button.
+
+**Why Screen Sharing and noVNC.** The probe in
+[the display research](research/macos-remote-display-2026-10-10.md#probe-and-decision-2026-10-10)
+found that the guest's Screen Sharing starts without prompts, offers type 30 with the
+computer's account, honours ZRLE (an idle Retina frame is 53 KB), and shows the real
+desktop once the TCC rows exist. Its port is reachable from the owner only, unlike the
+private `_VZVNCServer`, which listens on every interface of the owner. noVNC 1.7.0
+(MPL-2.0, bundled unmodified, see `THIRD-PARTY-NOTICES.md`) is the maintained browser
+client for RFB; the WebSocket endpoint uses `tungstenite` (MIT or Apache-2.0) rather than
+a hand-written protocol. The Content Security Policy allows `ws://127.0.0.1:*` for this.
+
+**Status.** Implemented and unit-tested at the pieces: method validation and
+dispatch, the byte splice, the WebSocket checks and splice, resize clamping, the viewer's
+states with a mocked noVNC, the list, the form and the guest script's grant list. Not run
+against two real Macs, so these are unverified: that a computer set up before this
+change picks up Screen Sharing through the in-place update, noVNC against Apple's server
+(type 30 negotiation, keyboard layouts such as AZERTY, cursor), resizing the guest
+display from a remote window, and bandwidth over a real SSH link.
+
 ## Development and signing
 
 Virtualization.framework requires the `com.apple.security.virtualization`
@@ -411,7 +493,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Silo feature | Status for macOS computers |
 | --- | --- |
 | Checkpoints | [Done](#checkpoints) for local computers. Not done: export and import of a checkpoint, a size breakdown (only a memory checkpoint's state file is counted), and abandoning a Restore |
-| Remote computers (Connections) | None. The view must live in the process that runs the computer, so a computer on another device would need a streamed or VNC path, and Apple's license excludes service-style use |
+| Remote computers (Connections) | [Done](#on-another-mac): create, list, start, stop, force stop, delete, setup progress and logs, and Show screen for a computer on a connected Mac. Not done: checkpoints and clipboard transfer for remote computers, and screens before computer use is set up (the installer, Setup Assistant and Recovery); the Recovery step of a remote setup shows its window on the owning Mac |
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
 | Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |

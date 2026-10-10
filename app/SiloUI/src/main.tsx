@@ -12,6 +12,8 @@ import { StatusPanelUnavailable } from "@/desktop/application-loading"
 import { createNativeDependencyStore } from "@/desktop/dependencies"
 import { desktopViewerRoute } from "@/desktop/linux-desktop-state"
 import { NativeLinuxDesktopViewer } from "@/desktop/linux-desktop-viewer"
+import { macosDisplayRoute } from "@/desktop/macos-remote-viewer-state"
+import { NativeMacosRemoteViewer } from "@/desktop/macos-remote-viewer"
 import { ProductionSurface, StartupLoading, Unavailable } from "@/desktop/production-surface"
 import { createProductionSource } from "@/desktop/production-source"
 import { createDesktopSettingsStore, connectSettingsLifecycle } from "@/desktop/settings"
@@ -45,6 +47,12 @@ if (import.meta.hot) import.meta.hot.dispose(() => {
 function start() {
   if (!desktop) {
     root.render(<Unavailable message="Open Silo in the desktop app." />)
+    return
+  }
+
+  const macosDisplay = windowLabel.startsWith("desktop-shell-") ? macosDisplayRoute() : null
+  if (macosDisplay) {
+    root.render(<NativeMacosRemoteViewer name={macosDisplay.name} device={macosDisplay.device} />)
     return
   }
 

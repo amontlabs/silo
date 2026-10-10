@@ -6,6 +6,8 @@ import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { ComputerAction, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
+import { DeviceBadge } from "@/features/computers/components/device-badge"
+import type { ComputerDevice } from "@/features/application/model/connections"
 import { clipboardFeedback } from "@/desktop/viewer-clipboard-feedback"
 import { showActionFailure, showQuickConfirmation } from "@/lib/operation-toast"
 import { MacosCheckpointPanel } from "./macos-checkpoint-panel"
@@ -41,11 +43,15 @@ const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop:
  * A macOS computer in the computers list. It has no detail page, terminal, editor or reorder handle;
  * its checkpoints open under the row, with the list the Linux detail page's Checkpoints tab shows.
  * `takenNames` are the computer names on this device, for naming a fork.
+ * A computer of another device (`device`, with the id it has in the unified list) shows that device's
+ * badge and has no clipboard transfer or checkpoints; while the device is offline or updating its
+ * state is the last known one and its actions are disabled.
  */
-export function MacosComputerRow({ computer, store, takenNames = [] }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[] }) {
+export function MacosComputerRow({ computer, store, takenNames = [], device }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[]; device?: ComputerDevice }) {
   const [pending, setPending] = useState(false)
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
-  const checkpointsAvailable = canCheckpointMacos(computer) || (computer.checkpoints?.length ?? 0) > 0
+  const unavailable = Boolean(device && (!device.connected || device.busy))
+  const checkpointsAvailable = !device && (canCheckpointMacos(computer) || (computer.checkpoints?.length ?? 0) > 0)
   const operating = computer.checkpointOperation?.status === "running"
 
   async function run(action: MacosComputerAction) {
@@ -72,15 +78,15 @@ export function MacosComputerRow({ computer, store, takenNames = [] }: { compute
   const label = macosStateLabel(computer)
   const items: MenuAction[] = []
   // Clipboard transfers go over the guest account that setup creates.
-  if (computer.state === "running" && computer.setupComplete) items.push(
+  if (!device && computer.state === "running" && computer.setupComplete) items.push(
     { label: "Paste into computer", accessibleLabel: `Paste into ${computer.name}`, onSelect: () => void transferClipboard("paste-into") },
     { label: "Copy from computer", accessibleLabel: `Copy from ${computer.name}`, onSelect: () => void transferClipboard("copy-from") },
   )
-  if (computer.state === "running" || computer.state === "stopping") items.push({ label: "Force stop", accessibleLabel: `Force stop ${computer.name}`, disabled: pending, onSelect: () => void run("force-stop") })
-  if (settled) items.push({ label: "Delete", accessibleLabel: `Delete ${computer.name}`, destructive: true, popover: "delete", disabled: operating })
+  if (computer.state === "running" || computer.state === "stopping") items.push({ label: "Force stop", accessibleLabel: `Force stop ${computer.name}`, disabled: pending || unavailable, onSelect: () => void run("force-stop") })
+  if (settled) items.push({ label: "Delete", accessibleLabel: `Delete ${computer.name}`, destructive: true, popover: "delete", disabled: operating || unavailable })
 
   const detail = <span className="grid gap-1">
-    <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}</span>
+    <span className="truncate">{label}{computer.osVersion && ` · macOS ${computer.osVersion}`} · {macosResources(computer)}{device && unavailable && ` · ${device.busy ? "Updating…" : "Offline · last known status"}`}</span>
     {(computer.state === "failed" || settingUp) && computer.detail && <span role={settingUp ? undefined : "alert"} className="whitespace-normal">{computer.detail}</span>}
     {(computer.state === "running" || computer.state === "stopping") && computer.detail && <span className="whitespace-normal">{computer.detail}</span>}
     {operating && <span>{computer.checkpointOperation?.stage}…</span>}
@@ -91,17 +97,19 @@ export function MacosComputerRow({ computer, store, takenNames = [] }: { compute
     <ComputerListRow
       name={computer.name}
       os="macos"
+      remote={Boolean(device)}
+      kindBadge={device ? <DeviceBadge device={device} /> : undefined}
       leading={<span aria-hidden="true" className="size-7 shrink-0" />}
       tone={tones[computer.state]}
       iconState={computer.state === "failed" ? "error" : "normal"}
       detail={detail}
       detailClassName="overflow-visible"
       actions={<>
-        {(computer.state === "stopped" || (computer.state === "failed" && computer.installed)) && !computer.needsPersonalizing && <ComputerAction label={`Start ${computer.name}`} disabled={pending || operating} onClick={() => void run("start")}><Play /></ComputerAction>}
+        {(computer.state === "stopped" || (computer.state === "failed" && computer.installed)) && !computer.needsPersonalizing && <ComputerAction label={`Start ${computer.name}`} disabled={pending || operating || unavailable} onClick={() => void run("start")}><Play /></ComputerAction>}
         {checkpointsAvailable && <ComputerAction label={`Checkpoints of ${computer.name}`} aria-expanded={checkpointsOpen} onClick={() => setCheckpointsOpen(open => !open)}><History /></ComputerAction>}
-        {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
-        {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending || operating} onClick={() => void run("stop")}><Square /></ComputerAction>}
-        {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending} onClick={() => void run("setup")}>Retry setup</Button>}
+        {computer.state === "running" && <ComputerAction label={`Show screen of ${computer.name}`} disabled={unavailable} onClick={() => void showScreen()}><Monitor /></ComputerAction>}
+        {computer.state === "running" && <ComputerAction label={`Stop ${computer.name}`} disabled={pending || operating || unavailable} onClick={() => void run("stop")}><Square /></ComputerAction>}
+        {canRetryMacosSetup(computer) && <Button type="button" variant="ghost" size="xs" aria-label={`Retry setup of ${computer.name}`} disabled={pending || unavailable} onClick={() => void run("setup")}>Retry setup</Button>}
         {settingUp && <ConfirmPopover
           align="end"
           tone="destructive"
@@ -111,7 +119,7 @@ export function MacosComputerRow({ computer, store, takenNames = [] }: { compute
           cancelLabel="Keep setting up"
           onConfirm={() => run("delete")}
         >
-          <Button type="button" variant="ghost" size="xs" aria-label={`Cancel setting up ${computer.name}`} disabled={pending}>Cancel</Button>
+          <Button type="button" variant="ghost" size="xs" aria-label={`Cancel setting up ${computer.name}`} disabled={pending || unavailable}>Cancel</Button>
         </ConfirmPopover>}
         {creating && <ConfirmPopover
           align="end"
@@ -122,7 +130,7 @@ export function MacosComputerRow({ computer, store, takenNames = [] }: { compute
           cancelLabel="Keep creating"
           onConfirm={() => run("delete")}
         >
-          <Button type="button" variant="ghost" size="xs" aria-label={`Cancel creating ${computer.name}`} disabled={pending}>Cancel</Button>
+          <Button type="button" variant="ghost" size="xs" aria-label={`Cancel creating ${computer.name}`} disabled={pending || unavailable}>Cancel</Button>
         </ConfirmPopover>}
         {items.length > 0 && <ActionsMenu label={`More actions for ${computer.name}`} items={items} popovers={{
           delete: close => <ConfirmBody

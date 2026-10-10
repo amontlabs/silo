@@ -16,6 +16,8 @@
     "allow-desktop-viewer-set-audio",
     "allow-desktop-viewer-reset-screen",
     "allow-desktop-viewer-clipboard",
+    "allow-macos-display-session",
+    "allow-macos-display-resize",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:menu:allow-new",

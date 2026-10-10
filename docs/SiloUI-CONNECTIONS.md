@@ -33,6 +33,7 @@ This describes graceful Quit, not process crashes or forced OS termination. Silo
 - `remote_access.rs`, `editor.rs`, and `terminal.rs` route guest access. Per-controller guest private keys stay local; only public keys are authorized by the owner. Guest streams cannot start stopped computers.
 - `remote_network.rs` owns controller loopback SSH tunnels. A remote loopback address is never shown as a local endpoint without a live tunnel. Removing a connection, disappearing/replaced endpoints, loss of remote access, and successful Quit close owned tunnels.
 - Every device downloads its own ChatGPT for Linux copy at its own start (see [ChatGPT app](SiloUI-CHATGPT-APP.md)); a controller never prepares it for another device. The bridge serves `chatgpt.status` (read) and `chatgpt.retry` (change, device level: no computer id). Settings, Connections polls `chatgpt.status` of connected devices and shows only a failure or an unreadable status; an owner whose Silo reports a state this Silo does not know is never reported as a problem. A computer's computer-use state is computed by the owner.
+- `macos_remote.rs` serves the `macos.*` methods (table below) from the owner's Silo and holds the controller commands for them. `macos_remote_viewer.rs` opens the viewer window and answers its two commands; `macos_display_gateway.rs` is its loopback WebSocket endpoint. See [macOS computers on another Mac](SiloUI-MACOS-COMPUTERS.md#on-another-mac).
 - `runtime/shutdown.rs` coordinates local shutdown. Settings exit generations prevent an old canceled timeout from completing a newer Quit.
 - Local and remote sources remain separate in `production-source.ts`; only presentation combines them. Remote failure does not mark local computers unavailable. Controller views refresh remote state periodically; this is not disk or configuration synchronization.
 
@@ -99,7 +100,7 @@ connects inside the guest. Silo retains host-key pinning, private guest keys, an
 normal bridge admission. OpenSSH remains the supported, BSD-licensed OS transport;
 no custom TCP relay or owner sshd Match configuration is required.
 
-The bridge protocol version must match exactly (version 4), so both devices must run the same Silo version. A mismatch fails the version check before key migration. The requesting device names the device to update: "Studio runs an older version of Silo. Update Silo on Studio." or "Studio runs a newer version of Silo. Update Silo on this device." (an address that is not saved yet stands in for the name). The refusal has the error code `incompatible_version` and closes every connection to that device. A device older than version 4 answers "Silo versions are incompatible. Update Silo on both computers." with the code `internal`, which Silo reads as an older version. Version 4 devices start their refusal with "Silo versions are incompatible." and say which side runs the newer version, so a version 3 requester still treats it as a refusal. The matching handshake rewrites Silo's exact
+The bridge protocol version must match exactly (version 5), so both devices must run the same Silo version. A mismatch fails the version check before key migration. The requesting device names the device to update: "Studio runs an older version of Silo. Update Silo on Studio." or "Studio runs a newer version of Silo. Update Silo on this device." (an address that is not saved yet stands in for the name). The refusal has the error code `incompatible_version` and closes every connection to that device. A device older than version 4 answers "Silo versions are incompatible. Update Silo on both computers." with the code `internal`, which Silo reads as an older version. Version 4 devices start their refusal with "Silo versions are incompatible." and say which side runs the newer version, so a version 3 requester still treats it as a refusal. The matching handshake rewrites Silo's exact
 old unrestricted or forwarding-enabled lines; personal/custom key lines remain
 untouched. A failed or externally managed upgrade returns a repair error.
 Restrictions affect new authentications; already authenticated SSH sessions must
@@ -125,6 +126,33 @@ No process-name sweep or change to the remote bridge is involved. Subprocess
 fixture tests verify controller termination, listener closure, descendant exit,
 and survival of an unrelated process; real OpenSSH/ProxyCommand crash behavior
 still requires separate platform qualification.
+
+## macOS computer methods
+
+Protocol version 5 adds these methods for macOS computers on the owner (a Mac running
+Silo). A request for a computer that is not a macOS computer, or to an owner that cannot
+host macOS computers, fails with the owner's message; no method changes the Linux
+computer methods.
+
+| Method | Class | Params | Result |
+| --- | --- | --- | --- |
+| `macos.snapshot` | read | none | the owner's macOS computers, template and minimum disk, and `supported` with `unsupportedReason` for a device that cannot host them |
+| `macos.create` | change | `request`: `name`, `cpus`, `memoryGiB`, `diskGiB` | the new computer's row; installation continues in the background |
+| `macos.action` | change | `computerId` (UUID), `action`: `start`, `stop`, `force-stop`, `delete`, `setup` | the owner's macOS computers afterwards |
+| `macos.display.connect` | read | `computerId` | `username`, `password`, `width`, `height`; requires a running computer whose setup has finished and whose Screen Sharing answers |
+| `macos.display.resize` | read | `computerId`, `widthPx`, `heightPx` | `widthPx`, `heightPx` the display took (clamped to 640x400..7680x4320, even) |
+| `macos.display.stream` | stream | `computerId` | after the reply frame, raw bytes to and from port 5900 of the guest |
+
+`macos.action` and `macos.create` follow the change rules above: one `operationId`, replay
+on a lost connection, `startWithinMs`. Resize is classified as a read because it is
+idempotent and a viewer sends it repeatedly while its window is dragged. The stream is
+admitted against the same stream budget as `guest.ssh`, ends when either side closes or
+Connections are turned off, and opens the guest connection before the reply so a refusal
+(not running, setup unfinished, Screen Sharing unavailable) reaches the viewer as a
+message. The owner's `runtime.logs` also answers for macOS computers: their retained
+setup log is read in place of a runtime log. `macos.display.connect` returns the guest
+account's password to the requesting device only for the viewer window that asked, and
+neither side logs it.
 
 ## Connections settings
 

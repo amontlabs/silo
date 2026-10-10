@@ -10,7 +10,7 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -33,7 +33,7 @@ fn silo_key_comment() -> &'static str {
 }
 /// Bridge protocol version; both devices must match. 3 moves published-port tunnels
 /// into guest SSH so owner management keys no longer permit forwarding.
-const VERSION: u32 = 4;
+const VERSION: u32 = 5;
 const LIMIT: usize = 4 * 1024 * 1024;
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 const CONNECTIONS_NOT_SET_UP: &str =
@@ -263,6 +263,12 @@ const METHODS: &[(&str, Access)] = &[
     ("checkpoint.create", Access::Change),
     ("checkpoint.fork", Access::Change),
     ("checkpoint.restore", Access::Change),
+    ("macos.snapshot", Access::Read),
+    ("macos.create", Access::Change),
+    ("macos.action", Access::Change),
+    ("macos.display.connect", Access::Read),
+    ("macos.display.resize", Access::Read),
+    ("macos.display.stream", Access::Stream),
 ];
 /// The error an older or newer device reports for a method it does not serve.
 const UNSUPPORTED: &str = "This Silo version does not support that remote operation.";
@@ -271,6 +277,10 @@ fn access(method: &str) -> Option<Access> {
         .iter()
         .find(|(name, _)| *name == method)
         .map(|(_, access)| *access)
+}
+/// Whether the method turns its connection into a raw byte stream after the reply.
+fn is_stream_method(method: Option<&str>) -> bool {
+    method.and_then(access) == Some(Access::Stream)
 }
 fn name() -> String {
     let mut bytes = [0u8; 256];
@@ -448,6 +458,7 @@ pub async fn remove_device(app: AppHandle, device_id: String) -> Result<(), Stri
         poll_succeeded(&device_id);
         crate::remote_network::close_device(&device_id);
         crate::desktop_viewer::close_device(&device_id);
+        crate::macos_remote_viewer::close_device(&device_id);
         Ok(())
     })
     .await
@@ -1555,10 +1566,12 @@ pub(crate) fn close_after_failed_poll(device: &str, error: &BridgeError) {
         PollFailure::Disconnected => {
             crate::remote_network::disconnect_device(device);
             crate::desktop_viewer::close_device(device);
+            crate::macos_remote_viewer::close_device(device);
         }
         PollFailure::Revoked => {
             crate::remote_network::close_device(device);
             crate::desktop_viewer::close_device(device);
+            crate::macos_remote_viewer::close_device(device);
         }
     }
 }
@@ -1736,7 +1749,7 @@ pub(crate) fn run_bridge() -> Result<(), String> {
     let mut socket = UnixStream::connect(existing_directory()?.join("control.sock"))
         .map_err(|_| "Silo is not running on this device.".to_string())?;
     let request = read_frame(std::io::stdin().lock())?;
-    let streaming = request["method"] == "guest.ssh";
+    let streaming = is_stream_method(request["method"].as_str());
     write_bridge_request(&mut socket, &request, Duration::from_secs(30))?;
     if !streaming {
         watch_controller(
@@ -1845,6 +1858,137 @@ pub(crate) fn run_remote_stream(
     let _ = child.wait();
     result
 }
+/// An open stream method on another device: the ssh child that runs its bridge, past the reply.
+/// Bytes written to `input` reach the stream and `output` yields what it sends.
+pub(crate) struct BridgeStream {
+    pub child: ChildGuard,
+    pub input: std::process::ChildStdin,
+    pub output: std::io::BufReader<std::process::ChildStdout>,
+}
+/// Ends and reaps its child process when dropped.
+pub(crate) struct ChildGuard(Child);
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+/// How long a stream may take to be accepted by the other device.
+const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(60);
+/// Reads the bridge's reply on a helper thread while the caller watches `cancelled` and the
+/// deadline. On either, `abort` is called (it must end whatever `output` reads from) and an
+/// error is returned without waiting for the reader. Otherwise returns the reply and `output`,
+/// positioned after it.
+fn read_reply_cancellable<R: std::io::BufRead + Send + 'static>(
+    mut output: R,
+    cancelled: &dyn Fn() -> bool,
+    timeout: Duration,
+    abort: impl FnOnce(),
+) -> Result<(Value, R), String> {
+    let (send, receive) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let reply = read_reply(&mut output);
+        let _ = send.send(reply.map(|reply| (reply, output)));
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        match receive.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("The remote Silo connection ended.".into())
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let stop = if cancelled() {
+            Some(OPEN_CANCELLED)
+        } else if Instant::now() >= deadline {
+            Some(OPEN_TIMED_OUT)
+        } else {
+            None
+        };
+        if let Some(message) = stop {
+            abort();
+            return Err(message.into());
+        }
+    }
+}
+const OPEN_CANCELLED: &str = "Opening the connection was cancelled.";
+const OPEN_TIMED_OUT: &str =
+    "The other device did not answer in time. Check that Silo is running there.";
+/// Opens the stream method `method` on the connected device `device_id` and returns once the
+/// device has accepted it, so a refusal (computer not running, no capacity) comes back as its
+/// own message rather than as a dropped connection. Opening ends, and its ssh process is
+/// stopped, when `cancelled` turns true or the device does not answer within a minute.
+pub(crate) fn open_bridge_stream(
+    device_id: &str,
+    method: &str,
+    params: Value,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<BridgeStream, BridgeError> {
+    crate::runtime::shutdown::ensure_accepting_operations()?;
+    let device = {
+        let _guard = config_lock();
+        read_config()?
+            .devices
+            .into_iter()
+            .find(|h| h.id == device_id)
+            .ok_or("This device is no longer connected.")?
+    };
+    debug_assert!(is_stream_method(Some(method)));
+    let request = json!({"version":VERSION,"deviceId":device.id,"method":method,"params":params});
+    let mut command = ssh_for_address(&device.address)?;
+    command.args([
+        "--",
+        &device.address,
+        &crate::channel::current().remote_bridge_command(),
+    ]);
+    let stderr = tempfile::tempfile().map_err(|e| e.to_string())?;
+    let mut child = ChildGuard(
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(stderr.try_clone().map_err(|e| e.to_string())?)
+            .spawn()
+            .map_err(|e| e.to_string())?,
+    );
+    let (Some(mut input), Some(output)) = (child.0.stdin.take(), child.0.stdout.take()) else {
+        return Err("SSH is unavailable.".to_string().into());
+    };
+    let output = std::io::BufReader::new(output);
+    let reply = write_frame(&mut input, &request).and_then(|()| {
+        read_reply_cancellable(output, cancelled, STREAM_OPEN_TIMEOUT, || {
+            let _ = child.0.kill();
+        })
+    });
+    let (reply, output) = match reply {
+        Ok(reply) => reply,
+        Err(message) => {
+            let _ = child.0.kill();
+            let exit = child.0.wait().ok().and_then(|status| status.code());
+            let mut text = String::new();
+            let mut stderr = stderr;
+            let _ = std::io::Seek::seek(&mut stderr, std::io::SeekFrom::Start(0)).and_then(|_| {
+                Read::by_ref(&mut stderr)
+                    .take(65536)
+                    .read_to_string(&mut text)
+            });
+            let stopped = message == OPEN_CANCELLED || message == OPEN_TIMED_OUT;
+            return Err(if stopped || text.trim().is_empty() {
+                message.into()
+            } else {
+                connection_failure(exit, &text).into()
+            });
+        }
+    };
+    if let Err(failure) = decode_reply(&reply) {
+        return Err(name_version_mismatch(failure.error(), &device.name));
+    }
+    Ok(BridgeStream {
+        child,
+        input,
+        output,
+    })
+}
 const ACCEPT_BACKOFF: (Duration, Duration) = (Duration::from_millis(50), Duration::from_secs(2));
 /// Accept errors (EMFILE, ECONNABORTED) are transient: keep serving after a bounded backoff.
 fn serve_connections<S>(
@@ -1943,6 +2087,22 @@ fn listen(app: AppHandle) -> Result<(), String> {
                 let result = read_socket_frame(&mut stream, Duration::from_secs(15))
                     .map_err(BridgeError::from)
                     .and_then(|request| {
+                        if request["method"] == crate::macos_remote::DISPLAY_STREAM {
+                            authorize(&request)?;
+                            serve_display_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |params| crate::macos_remote::open_display_stream(&app, params),
+                                || {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
                         if request["method"] == "guest.ssh" {
                             authorize(&request)?;
                             serve_guest_stream(
@@ -2054,6 +2214,7 @@ fn execute(app: &AppHandle, method: &str, params: &Value) -> Result<Value, Bridg
         _ if method.starts_with("runtime.") => {
             crate::runtime::remote_ops::dispatch(app, method, params.clone())
         }
+        _ if method.starts_with("macos.") => crate::macos_remote::dispatch(app, method, params),
         _ => crate::remote_access::dispatch(app, method, params).map_err(BridgeError::from),
     }
 }
@@ -2669,6 +2830,74 @@ fn serve_guest_stream(
         allowed() && registration.as_ref().map_or(true, |r| !r.revoked())
     })?;
     Ok(())
+}
+/// Opens and relays one `macos.display.stream`: the guest's Screen Sharing connection,
+/// opened by `open`, spliced to the controller's bridge until either side ends.
+fn serve_display_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(&Value) -> Result<std::net::TcpStream, String>,
+    allowed: impl Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let _stream_permit = admit_stream(permit, streams)?;
+    let guest = open(params)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    relay_tcp(stream, guest, allowed)?;
+    Ok(())
+}
+/// Copies bytes both ways between the controller's stream and a TCP connection. Either side
+/// ending, or `allowed` turning false, closes both.
+fn relay_tcp(
+    stream: &UnixStream,
+    guest: std::net::TcpStream,
+    allowed: impl Fn() -> bool,
+) -> Result<(), String> {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    let result = (|| {
+        stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+        stream.set_write_timeout(None).map_err(|e| e.to_string())?;
+        let mut from_controller = stream.try_clone().map_err(|e| e.to_string())?;
+        let mut to_controller = stream.try_clone().map_err(|e| e.to_string())?;
+        let mut to_guest = guest.try_clone().map_err(|e| e.to_string())?;
+        let mut from_guest = guest.try_clone().map_err(|e| e.to_string())?;
+        for io in [&from_controller, &to_controller] {
+            nonblocking(io)?;
+        }
+        for io in [&to_guest, &from_guest] {
+            nonblocking(io)?;
+        }
+        let ended = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let (up_ended, up_cancel) = (ended.clone(), cancelled.clone());
+        let (down_ended, down_cancel) = (ended.clone(), cancelled.clone());
+        let up = thread::spawn(move || {
+            let result = copy_cancellable(&mut from_controller, &mut to_guest, &up_cancel);
+            up_ended.store(true, Ordering::Release);
+            result
+        });
+        let down = thread::spawn(move || {
+            let result = copy_cancellable(&mut from_guest, &mut to_controller, &down_cancel);
+            down_ended.store(true, Ordering::Release);
+            result
+        });
+        while !ended.load(Ordering::Acquire) && allowed() {
+            thread::sleep(Duration::from_millis(100));
+        }
+        cancelled.store(true, Ordering::Release);
+        let _ = guest.shutdown(std::net::Shutdown::Both);
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        let _ = up.join();
+        let _ = down.join();
+        Ok(())
+    })();
+    let _ = guest.shutdown(std::net::Shutdown::Both);
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    result
 }
 /// Drain child output after input EOF; terminate and reap on revocation or a stalled close.
 fn relay_child(
@@ -4620,13 +4849,30 @@ mod dispatch_tests {
                 "checkpoint.create",
                 "checkpoint.fork",
                 "checkpoint.restore",
+                "macos.create",
+                "macos.action",
             ]
         );
-        assert_eq!(methods(Access::Stream), ["guest.ssh"]);
+        assert_eq!(
+            methods(Access::Read)
+                .into_iter()
+                .filter(|method| method.starts_with("macos."))
+                .collect::<Vec<_>>(),
+            [
+                "macos.snapshot",
+                "macos.display.connect",
+                "macos.display.resize"
+            ]
+        );
+        assert_eq!(
+            methods(Access::Stream),
+            ["guest.ssh", "macos.display.stream"]
+        );
         let served: std::collections::BTreeSet<String> =
             method_literals(include_str!("remote_access.rs"))
                 .into_iter()
                 .chain(method_literals(include_str!("runtime/remote_ops.rs")))
+                .chain(method_literals(include_str!("macos_remote.rs")))
                 .collect();
         for method in &served {
             assert!(
@@ -5401,3 +5647,5 @@ mod config_io_limit_tests {
         assert_eq!(fs::read(&path).unwrap(), previous);
     }
 }
+#[cfg(test)]
+mod display_stream_tests;

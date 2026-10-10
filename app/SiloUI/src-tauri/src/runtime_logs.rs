@@ -655,6 +655,20 @@ fn clean_up_if_stopped(
     }
     Ok(())
 }
+/// Like `query_local`, for a request from another device: the computer may be a macOS one,
+/// whose setup log is kept beside Silo's own logs.
+pub(super) fn query_for_remote(
+    app: &AppHandle,
+    paths: &RuntimePaths,
+    request: Query,
+    device_id: &str,
+    device_name: &str,
+) -> Result<Page, String> {
+    if let Some((name, directory)) = crate::macos_computers::log_target(app, &request.computer_id) {
+        return read(&directory, request, &name, device_id, device_name);
+    }
+    query_local(paths, request, device_id, device_name)
+}
 pub(super) fn query_local(
     paths: &RuntimePaths,
     request: Query,

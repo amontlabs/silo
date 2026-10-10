@@ -1,4 +1,4 @@
-import { createMacosComputersStore, type MacosComputer, type MacosComputersBackend, type MacosComputersState } from "@/features/macos-computers/model/macos-computers"
+import { createMacosComputersStore, type MacosComputer, type MacosComputersBackend, type MacosComputersState, type MacosRemoteBackend } from "@/features/macos-computers/model/macos-computers"
 
 export const macosComputerFixtures: readonly MacosComputer[] = [
   { id: "mac-download", name: "sequoia-test", cpus: 4, memoryGiB: 8, diskGiB: 64, osVersion: null, state: "downloading", progress: 0.42, detail: null, displayOpen: false, installed: false, setupComplete: true },
@@ -72,4 +72,33 @@ export function createFixtureMacosComputersBackend(initial: readonly MacosComput
   }
 }
 
-export const createFixtureMacosComputersStore = () => createMacosComputersStore(createFixtureMacosComputersBackend())
+/**
+ * Other devices' macOS computers in memory, by device id: a device given as an Error fails its reads.
+ * Creating adds a preparing row; start, stop and delete change the row at once.
+ */
+export function createFixtureMacosRemoteBackend(devices: Record<string, MacosComputersState | Error>): MacosRemoteBackend {
+  const states = new Map(Object.entries(devices))
+  const stateOf = (deviceId: string) => {
+    const state = states.get(deviceId)
+    if (!state || state instanceof Error) throw state ?? new Error("Device is not connected.")
+    return state
+  }
+  const change = (deviceId: string, computers: MacosComputer[]) => states.set(deviceId, { ...stateOf(deviceId), computers })
+  return {
+    snapshot: async deviceId => stateOf(deviceId),
+    create: async (deviceId, request) => {
+      const created: MacosComputer = { id: `mac-${request.name}`, ...request, osVersion: null, state: "preparing", progress: null, detail: null, displayOpen: false, installed: false, setupComplete: false }
+      change(deviceId, [...stateOf(deviceId).computers, created])
+      return created
+    },
+    action: async (deviceId, computerId, action) => {
+      const computers = stateOf(deviceId).computers
+      if (action === "delete") change(deviceId, computers.filter(({ id }) => id !== computerId))
+      else if (action === "setup") change(deviceId, computers.map(computer => computer.id === computerId ? { ...computer, state: "setting-up" } : computer))
+      else change(deviceId, computers.map(computer => computer.id === computerId ? { ...computer, state: action === "start" ? "running" : "stopped" } : computer))
+    },
+    openDisplay: async () => {},
+  }
+}
+
+export const createFixtureMacosComputersStore =() => createMacosComputersStore(createFixtureMacosComputersBackend())

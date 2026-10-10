@@ -124,3 +124,18 @@ common license texts in `/usr/share/common-licenses/`. Source for each package i
 archive and Launchpad (`apt source <package>=<version>`, https://launchpad.net/ubuntu/+source/). The image includes
 Ubuntu's `ffmpeg`, `libx264-164` and `libx265-199` in addition to the Selkies copies above. The same three-year
 written offer applies to these packages' source.
+
+# noVNC
+
+Silo's window for a macOS computer on another device bundles noVNC 1.7.0
+(`@novnc/novnc`, https://github.com/novnc/noVNC/tree/v1.7.0), the browser RFB
+(VNC) client, unmodified inside the application's web assets. noVNC is licensed under
+MPL-2.0; its bundled `pako` is MIT and zlib licensed. The license texts are in the package's
+`LICENSE.txt`, and the MPL-2.0 source for noVNC is the upstream repository at the tag
+above. Silo does not change noVNC files, so the Source Code Form it distributes is the
+upstream release.
+
+# tungstenite
+
+Silo's native code uses `tungstenite` 0.30 (https://github.com/snapview/tungstenite-rs),
+licensed under MIT or Apache-2.0, for the loopback WebSocket endpoint of that window.

@@ -237,6 +237,19 @@ pub(super) fn attach_display(
 
 pub(super) fn detach_display(_app: &AppHandle, _id: &str) {}
 
+pub(super) fn display_size(_app: &AppHandle, _id: &str) -> Option<(u32, u32)> {
+    None
+}
+
+pub(super) fn reconfigure_display(
+    _app: &AppHandle,
+    _id: &str,
+    _width: u32,
+    _height: u32,
+) -> Result<(u32, u32), String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn set_display_subtitle(_app: &AppHandle, _id: &str, _text: &str) {}
 
 pub(super) fn release_slot(_id: &str, _generation: u64) -> bool {
