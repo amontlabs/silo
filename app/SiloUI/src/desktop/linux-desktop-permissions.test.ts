@@ -20,6 +20,8 @@ it("grants the desktop shell only its desktop controls, clipboard, native menu, 
   expect(allowed.sort()).toEqual([
     "allow-read-desktop-state", "allow-desktop-action", "allow-desktop-viewer-attach", "allow-desktop-viewer-detach", "allow-desktop-viewer-clipboard",
     "allow-desktop-viewer-sound-support", "allow-desktop-viewer-sound-cancel", "allow-desktop-viewer-set-audio", "allow-desktop-viewer-reset-screen",
+    // Both refuse any shell window that was not opened for a remote macOS computer (macos_remote_viewer.rs).
+    "allow-macos-display-session", "allow-macos-display-resize",
     "core:event:allow-listen", "core:event:allow-unlisten",
     "core:window:allow-is-fullscreen", "core:window:allow-set-fullscreen",
     "core:window:allow-inner-size", "core:window:allow-scale-factor",

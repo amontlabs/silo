@@ -309,7 +309,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
     let proxy = Proxy::start(socket, guest, username, password)?;
     Ok((proxy, Some(tunnel)))
 }
-fn viewer_title(name: &str, channel: crate::channel::Channel) -> String {
+pub(crate) fn viewer_title(name: &str, channel: crate::channel::Channel) -> String {
     format!("{name} — {}", channel.product_name())
 }
 

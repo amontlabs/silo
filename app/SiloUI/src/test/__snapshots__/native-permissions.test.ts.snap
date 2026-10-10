@@ -37,6 +37,8 @@ exports[`native command permissions > pins every non-main window grant 1`] = `
       "allow-desktop-viewer-set-audio",
       "allow-desktop-viewer-sound-cancel",
       "allow-desktop-viewer-sound-support",
+      "allow-macos-display-resize",
+      "allow-macos-display-session",
       "allow-read-desktop-state",
       "core:event:allow-listen",
       "core:event:allow-unlisten",

@@ -750,6 +750,7 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
             crate::ssh_access::close_all();
             crate::remote_network::close_all();
             crate::desktop_viewer::close_all();
+            crate::macos_remote_viewer::close_all();
             // exec also skips the single-instance plugin's cleanup: release the
             // claim so the replacement process does not find it and exit (F-09).
             crate::single_instance::release(app);

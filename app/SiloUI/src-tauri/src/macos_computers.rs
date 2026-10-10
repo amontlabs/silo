@@ -26,12 +26,14 @@ mod offline_setup;
 mod personalize;
 mod provision;
 mod recovery;
+mod remote_display;
 mod restore_image;
 mod setup_log;
 mod store;
 mod templates;
 
 use crate::runtime;
+pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
 use std::{
     path::PathBuf,
@@ -41,7 +43,8 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use store::{Action, CreateRequest, DeleteMode, Layout, Record, State};
+pub(crate) use store::{Action, CreateRequest};
+use store::{DeleteMode, Layout, Record, State};
 use tauri::{AppHandle, Emitter, Manager, Window};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
@@ -906,6 +909,61 @@ pub(crate) async fn macos_computer_clipboard(
     main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || guest_clipboard::run(&app, &id, direction)).await
+}
+
+// MARK: For other devices
+
+/// The state of this device's macOS computers as another device reads it. A device that cannot
+/// host them reports `supported: false` with the reason.
+pub(crate) fn state_for_remote(app: &AppHandle) -> Result<MacosComputersState, String> {
+    ensure_loaded(app)?;
+    refresh_template(app);
+    refresh_latest_build(app);
+    Ok(snapshot())
+}
+
+/// Creates a computer on another device's request.
+pub(crate) fn create_for_remote(
+    app: &AppHandle,
+    request: CreateRequest,
+) -> Result<MacosComputer, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    create(app, request)
+}
+
+/// Runs a lifecycle action on another device's request. Start and Setup are refused once Quit
+/// has begun, as they are for the local command. Nothing here opens a window.
+pub(crate) fn action_for_remote(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
+    if matches!(action, Action::Start | Action::Setup) {
+        runtime::shutdown::ensure_accepting_operations()?;
+    }
+    perform(app, id, action)
+}
+
+/// The sign-in for the screen of a running computer, for another device.
+pub(crate) fn display_session(app: &AppHandle, id: &str) -> Result<DisplaySession, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    remote_display::session(app, id)
+}
+
+/// A connection to the Screen Sharing port of a running computer, for the owner to relay.
+pub(crate) fn display_stream(app: &AppHandle, id: &str) -> Result<std::net::TcpStream, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    remote_display::connect(app, id)
+}
+
+/// Resizes a running computer's display to a viewer's window size (pixels, clamped).
+pub(crate) fn resize_display(
+    app: &AppHandle,
+    id: &str,
+    width: u64,
+    height: u64,
+) -> Result<(u32, u32), String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    remote_display::resize(app, id, width, height)
 }
 
 // MARK: Create

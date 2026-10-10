@@ -31,6 +31,10 @@ fn macos_computer_commands_belong_to_the_main_window_only() {
         "restore_macos_checkpoint",
         "fork_macos_checkpoint",
         "delete_macos_checkpoint",
+        "remote_macos_snapshot",
+        "remote_macos_create",
+        "remote_macos_action",
+        "open_macos_remote_display",
     ] {
         let permission = format!("allow-{}", command.replace('_', "-"));
         assert_eq!(
@@ -40,6 +44,19 @@ fn macos_computer_commands_belong_to_the_main_window_only() {
         );
         assert_eq!(granted_to(&permission), ["preview"], "{command}");
     }
+    // The viewer window of a remote macOS computer signs in and resizes its own computer.
+    for command in ["macos_display_session", "macos_display_resize"] {
+        let permission = format!("allow-{}", command.replace('_', "-"));
+        assert_eq!(
+            manifests["__app-acl__"]["permissions"][&permission]["commands"]["allow"],
+            serde_json::json!([command]),
+        );
+        assert_eq!(granted_to(&permission), ["desktop-viewer"], "{command}");
+    }
+    assert_eq!(
+        capabilities["desktop-viewer"]["webviews"],
+        serde_json::json!(["desktop-shell-*"])
+    );
     assert_eq!(
         capabilities["preview"]["windows"],
         serde_json::json!(["main"])

@@ -1532,6 +1532,63 @@ pub(super) fn detach_display(app: &AppHandle, id: &str) {
     });
 }
 
+/// The first display of a running machine, on the main thread.
+fn machine_display(id: &str) -> Result<Retained<VZGraphicsDisplay>, String> {
+    const NO_DISPLAY: &str = "This computer has no display.";
+    SLOTS.with(|slots| {
+        let slots = slots.borrow();
+        let slot = slots.get(id).ok_or("This computer isn't running.")?;
+        // SAFETY: Main thread; both are read-only framework properties.
+        unsafe {
+            let device = slot.vm.graphicsDevices().firstObject().ok_or(NO_DISPLAY)?;
+            device.displays().firstObject().ok_or(NO_DISPLAY.into())
+        }
+    })
+}
+
+/// The pixel size of a running machine's display.
+pub(super) fn display_size(app: &AppHandle, id: &str) -> Option<(u32, u32)> {
+    let id = id.to_string();
+    on_main(app, move |_| {
+        let display = machine_display(&id).ok()?;
+        // SAFETY: Main thread.
+        let size = unsafe { display.sizeInPixels() };
+        Some((size.width as u32, size.height as u32))
+    })
+    .ok()
+    .flatten()
+}
+
+/// Resizes a running machine's display, with no view needed, and returns the size the
+/// framework reports. The guest may not follow it at once.
+pub(super) fn reconfigure_display(
+    app: &AppHandle,
+    id: &str,
+    width: u32,
+    height: u32,
+) -> Result<(u32, u32), String> {
+    let id = id.to_string();
+    on_main(app, move |_| {
+        let display = machine_display(&id)?;
+        // SAFETY: Main thread; the size is within what the caller clamped.
+        unsafe {
+            display
+                .reconfigureWithSizeInPixels_error(objc2_foundation::NSSize::new(
+                    f64::from(width),
+                    f64::from(height),
+                ))
+                .map_err(|error| {
+                    format!(
+                        "The computer's display could not be resized: {}",
+                        describe(&error)
+                    )
+                })?;
+            let size = display.sizeInPixels();
+            Ok((size.width as u32, size.height as u32))
+        }
+    })?
+}
+
 // MARK: Driving the display
 
 /// Runs `work` on the main thread with the window that shows the machine's screen.

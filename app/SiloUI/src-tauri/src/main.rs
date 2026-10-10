@@ -40,6 +40,9 @@ mod host_push_transport;
 mod log_export;
 mod log_retention;
 mod macos_computers;
+mod macos_display_gateway;
+mod macos_remote;
+mod macos_remote_viewer;
 mod network;
 mod notifications;
 mod owned_tunnel;
@@ -150,6 +153,12 @@ fn main() {
             macos_computers::restore_macos_checkpoint,
             macos_computers::fork_macos_checkpoint,
             macos_computers::delete_macos_checkpoint,
+            macos_remote::remote_macos_snapshot,
+            macos_remote::remote_macos_create,
+            macos_remote::remote_macos_action,
+            macos_remote_viewer::open_macos_remote_display,
+            macos_remote_viewer::macos_display_session,
+            macos_remote_viewer::macos_display_resize,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,

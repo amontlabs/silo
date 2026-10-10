@@ -105,6 +105,7 @@ pub(crate) fn stop_local_computers(
                 // cannot restore listeners while local computer shutdown is in progress.
                 crate::ssh_access::close_all();
                 crate::desktop_viewer::close_all();
+                crate::macos_remote_viewer::close_all();
                 // macOS computers live in this process. Quit runs on a worker thread, so the
                 // main thread stays free for the framework's callbacks while they stop.
                 let macos = crate::macos_computers::stop_all(app, deadline);
