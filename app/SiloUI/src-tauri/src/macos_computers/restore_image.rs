@@ -368,6 +368,48 @@ fn prune_other_images(dir: &Path, keep: &str) {
     }
 }
 
+/// Removes the cached restore image of macOS `build` from `dir`, the finished file and a
+/// partial one, except an image an installation is reading. The images in use are checked
+/// while their list is locked, which is also the lock an installation takes before it
+/// reads one, so an image cannot be removed from under it or claimed while it is removed.
+/// Returns the names removed with their sizes.
+pub(super) fn remove_for_build(dir: &Path, build: &str) -> Vec<(String, u64)> {
+    let mut removed = Vec::new();
+    if build.is_empty() {
+        return removed;
+    }
+    let Ok(in_use) = IN_USE.lock() else {
+        return removed;
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return removed;
+    };
+    for entry in entries.flatten() {
+        let file = entry.file_name();
+        let Some(file) = file.to_str() else { continue };
+        let image = file.strip_suffix(PARTIAL_SUFFIX).unwrap_or(file);
+        let is_image = Path::new(image)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION));
+        // Apple's names carry the build as one `_`-separated part: UniversalMac_26.6.2_25G83_Restore.ipsw.
+        let of_build = image
+            .trim_end_matches(&format!(".{EXTENSION}"))
+            .split('_')
+            .any(|part| part == build);
+        let busy = in_use.iter().any(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_str() == Some(image))
+        });
+        if is_image && of_build && !busy {
+            let size = entry.metadata().map_or(0, |meta| meta.len());
+            if fs::remove_file(entry.path()).is_ok() {
+                removed.push((file.to_string(), size));
+            }
+        }
+    }
+    removed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,5 +707,55 @@ mod tests {
         assert!(busy.exists());
         assert!(!dir.path().join("Older_0.7_Restore.ipsw.partial").exists());
         assert!(dir.path().join("notes.txt").exists());
+    }
+
+    #[test]
+    fn the_image_of_a_build_is_removed_complete_and_partial_but_never_while_in_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str| fs::write(dir.path().join(name), b"image").unwrap();
+        write("UniversalMac_26.6.2_25G83_Restore.ipsw");
+        write("UniversalMac_26.6.2_25G83_Restore.ipsw.partial");
+        write("UniversalMac_27.0_26A1_Restore.ipsw");
+        write("UniversalMac_26.6.2_25G83_Restore.txt");
+        write("notes.txt");
+        // A longer build that merely starts with the same characters is another image.
+        write("UniversalMac_26.6.2_25G830_Restore.ipsw");
+        let busy = dir.path().join("UniversalMac_26.6.2_25G83_Restore.ipsw");
+        let guard = InUse::new(&busy);
+        assert!(remove_for_build(dir.path(), "25G83").is_empty());
+        assert!(busy.exists());
+        // Once nothing reads it, the image and its partial file go.
+        drop(guard);
+        let mut removed: Vec<String> = remove_for_build(dir.path(), "25G83")
+            .into_iter()
+            .map(|(name, size)| {
+                assert_eq!(size, 5);
+                name
+            })
+            .collect();
+        removed.sort();
+        assert_eq!(
+            removed,
+            [
+                "UniversalMac_26.6.2_25G83_Restore.ipsw",
+                "UniversalMac_26.6.2_25G83_Restore.ipsw.partial"
+            ]
+        );
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "UniversalMac_26.6.2_25G830_Restore.ipsw",
+                "UniversalMac_26.6.2_25G83_Restore.txt",
+                "UniversalMac_27.0_26A1_Restore.ipsw",
+                "notes.txt"
+            ]
+        );
+        assert!(remove_for_build(dir.path(), "").is_empty());
+        assert!(remove_for_build(&dir.path().join("missing"), "25G83").is_empty());
     }
 }

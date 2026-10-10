@@ -1214,12 +1214,41 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: boo
         refresh,
         &protected_templates,
     );
-    if let Err(message) = made {
-        if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
-            log.line(&format!("the template could not be saved: {message}"));
+    match made {
+        Ok(Some(name)) => {
+            // The installation is not needed again while a template of this build exists.
+            if let Some(image) = &record.restore_image {
+                remove_restore_image(app, &data, record, &name, &image.build);
+            }
+        }
+        Ok(None) => {}
+        Err(message) => {
+            if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
+                log.line(&format!("the template could not be saved: {message}"));
+            }
         }
     }
     refresh_template(app);
+}
+
+/// Deletes the cached restore image of `build` once the template `template` of it is saved.
+/// Installations that are reading an image keep it; the image is downloaded again when a
+/// new macOS build or a changed base setup needs an installation.
+fn remove_restore_image(
+    app: &AppHandle,
+    data: &std::path::Path,
+    record: &Record,
+    template: &str,
+    build: &str,
+) {
+    let removed = restore_image::remove_for_build(&store::restore_images(data), build);
+    if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
+        for (name, bytes) in removed {
+            log.line(&format!(
+                "removed the cached macOS restore image {name} ({bytes} bytes): template {template} replaces the installation"
+            ));
+        }
+    }
 }
 
 /// Two computers created together would otherwise write the same partial image.
