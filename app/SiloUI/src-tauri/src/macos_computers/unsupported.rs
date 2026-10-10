@@ -95,6 +95,7 @@ pub(super) fn resume_paused(_app: &AppHandle, _id: &str) -> Result<(), String> {
 pub(super) fn resume_stray(
     _app: &AppHandle,
     _id: &str,
+    _generation: u64,
     _owned: impl Fn() -> bool + Send + 'static,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())
@@ -166,6 +167,34 @@ pub(super) fn force_stop(_app: &AppHandle, _id: &str) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct Sample {
+    pub id: String,
+    pub state: MachineState,
+    pub generation: u64,
+}
+
+pub(super) fn machine_samples(_app: &AppHandle) -> Result<Vec<Sample>, String> {
+    Ok(Vec::new())
+}
+
+pub(super) fn force_stop_generation(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn wait_until_released(
+    _app: &AppHandle,
+    _id: &str,
+    _generation: u64,
+    _timeout: std::time::Duration,
+) -> bool {
+    true
+}
+
 pub(super) fn machine_states(_app: &AppHandle) -> Result<Vec<(String, MachineState)>, String> {
     Ok(Vec::new())
 }
@@ -183,7 +212,9 @@ pub(super) fn detach_display(_app: &AppHandle, _id: &str) {}
 
 pub(super) fn set_display_subtitle(_app: &AppHandle, _id: &str, _text: &str) {}
 
-pub(super) fn release_slot(_id: &str) {}
+pub(super) fn release_slot(_id: &str, _generation: u64) -> bool {
+    false
+}
 
 pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
     work();

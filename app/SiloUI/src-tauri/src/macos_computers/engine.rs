@@ -45,6 +45,9 @@ const LIMIT_EXCEEDED: &str =
 
 /// What a main-thread slot holds for one computer.
 struct Slot {
+    /// Told apart from every other machine this computer has had: events of an earlier
+    /// machine must never act on a later one.
+    generation: u64,
     vm: Retained<VZVirtualMachine>,
     /// The machine keeps its delegate weakly.
     _delegate: Retained<MachineDelegate>,
@@ -66,7 +69,11 @@ thread_local! {
 struct DelegateState {
     app: AppHandle,
     id: String,
+    /// The generation of the machine the delegate belongs to (0 for a toolbar).
+    generation: u64,
 }
+
+static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 define_class!(
     // SAFETY: NSObject has no subclassing requirements; the delegate state is immutable.
@@ -81,21 +88,35 @@ define_class!(
         #[unsafe(method(guestDidStopVirtualMachine:))]
         fn guest_did_stop(&self, _machine: &VZVirtualMachine) {
             let state = self.ivars();
-            super::machine_stopped(&state.app.clone(), &state.id.clone(), None);
+            super::machine_stopped(
+                &state.app.clone(),
+                &state.id.clone(),
+                state.generation,
+                None,
+            );
         }
 
         #[unsafe(method(virtualMachine:didStopWithError:))]
         fn did_stop_with_error(&self, _machine: &VZVirtualMachine, error: &NSError) {
             let state = self.ivars();
             let detail = format!("The computer stopped unexpectedly. {}", describe(error));
-            super::machine_stopped(&state.app.clone(), &state.id.clone(), Some(detail));
+            super::machine_stopped(
+                &state.app.clone(),
+                &state.id.clone(),
+                state.generation,
+                Some(detail),
+            );
         }
     }
 );
 
 impl MachineDelegate {
-    fn new(mtm: MainThreadMarker, app: AppHandle, id: String) -> Retained<Self> {
-        let allocated = mtm.alloc::<Self>().set_ivars(DelegateState { app, id });
+    fn new(mtm: MainThreadMarker, app: AppHandle, id: String, generation: u64) -> Retained<Self> {
+        let allocated = mtm.alloc::<Self>().set_ivars(DelegateState {
+            app,
+            id,
+            generation,
+        });
         // SAFETY: NSObject's init has the declared signature and initializes our subclass.
         unsafe { msg_send![super(allocated), init] }
     }
@@ -524,7 +545,8 @@ fn register(
     // SAFETY: Called on the main thread; the machine binds to the main queue.
     unsafe {
         let vm = VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), configuration);
-        let delegate = MachineDelegate::new(mtm, app.clone(), record.id.clone());
+        let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let delegate = MachineDelegate::new(mtm, app.clone(), record.id.clone(), generation);
         vm.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         let installer = installer_image.map(|image| {
             VZMacOSInstaller::initWithVirtualMachine_restoreImageURL(
@@ -534,6 +556,7 @@ fn register(
             )
         });
         Slot {
+            generation,
             vm,
             _delegate: delegate,
             installer,
@@ -711,9 +734,16 @@ fn release(id: &str) {
     }
 }
 
-/// Drops a machine and its display view. Call on the main thread.
-pub(super) fn release_slot(id: &str) {
+/// Drops the machine of generation `generation`, if it still is the computer's, and says
+/// whether it did. An event of an earlier machine finds another generation, or none, and
+/// changes nothing. Call on the main thread.
+pub(super) fn release_slot(id: &str, generation: u64) -> bool {
+    let current = SLOTS.with(|slots| slots.borrow().get(id).map(|slot| slot.generation));
+    if !super::slot_is_current(current, generation) {
+        return false;
+    }
     release(id);
+    true
 }
 
 /// Runs `work` on the main thread after the current callback has returned, so a
@@ -879,6 +909,7 @@ fn start_machine_once(
             return Err(BootFailure::Machine(why.clone()));
         }
         let vm = slot.vm.clone();
+        let generation = slot.generation;
         SLOTS.with(|slots| slots.borrow_mut().insert(record.id.clone(), slot));
         let id = record.id.clone();
         // SAFETY: Main thread; the handlers run on the main queue.
@@ -901,7 +932,9 @@ fn start_machine_once(
                     None => Ok(()),
                     Some(error) => {
                         let id = id.clone();
-                        defer(move || release(&id));
+                        defer(move || {
+                            release_slot(&id, generation);
+                        });
                         Err(describe(error))
                     }
                 };
@@ -1000,12 +1033,18 @@ pub(super) fn resume_paused(app: &AppHandle, id: &str) -> Result<(), String> {
 pub(super) fn resume_stray(
     app: &AppHandle,
     id: &str,
+    generation: u64,
     owned: impl Fn() -> bool + Send + 'static,
 ) -> Result<(), String> {
+    let key = id.to_string();
     on_machine(app, id, true, move |machine, send| {
+        let current = SLOTS.with(|slots| slots.borrow().get(&key).map(|slot| slot.generation));
         // SAFETY: Main thread.
         unsafe {
-            if owned() || machine.state() != VZVirtualMachineState::Paused {
+            if !super::slot_is_current(current, generation)
+                || owned()
+                || machine.state() != VZVirtualMachineState::Paused
+            {
                 let _ = send.send(Ok(()));
             } else if machine.canResume() {
                 machine.resumeWithCompletionHandler(&completion(send));
@@ -1079,10 +1118,29 @@ pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {
 }
 
 pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
+    force_stop_machine(app, id, None)
+}
+
+/// Force stops the machine of generation `generation` only; a later machine is left alone.
+pub(super) fn force_stop_generation(
+    app: &AppHandle,
+    id: &str,
+    generation: u64,
+) -> Result<(), String> {
+    force_stop_machine(app, id, Some(generation))
+}
+
+fn force_stop_machine(app: &AppHandle, id: &str, expected: Option<u64>) -> Result<(), String> {
     let (id, handle) = (id.to_string(), app.clone());
     on_main(app, move |_| {
-        let machine = SLOTS.with(|slots| slots.borrow().get(&id).map(|slot| slot.vm.clone()));
-        let Some(vm) = machine else {
+        let machine = SLOTS.with(|slots| {
+            slots
+                .borrow()
+                .get(&id)
+                .filter(|slot| expected.is_none_or(|generation| slot.generation == generation))
+                .map(|slot| (slot.vm.clone(), slot.generation))
+        });
+        let Some((vm, generation)) = machine else {
             return Err("This computer isn't running.".to_string());
         };
         // SAFETY: Main thread.
@@ -1094,16 +1152,22 @@ pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
             vm.stopWithCompletionHandler(&RcBlock::new(move |error: *mut NSError| {
                 // A stop the host requested ends without a delegate callback.
                 match error.as_ref() {
-                    None => super::machine_stopped(&handle, &finished, None),
+                    None => super::machine_stopped(&handle, &finished, generation, None),
                     Some(error) => {
                         let message = describe(error);
                         let state = machine.state();
                         if state == VZVirtualMachineState::Stopped
                             || state == VZVirtualMachineState::Error
                         {
-                            super::machine_stopped(&handle, &finished, Some(message));
+                            super::machine_stopped(&handle, &finished, generation, Some(message));
                         } else {
-                            super::force_stop_failed(&handle, &finished, message);
+                            // A failure of an earlier machine's stop says nothing about the
+                            // machine the computer has now.
+                            let current = SLOTS
+                                .with(|slots| slots.borrow().get(&finished).map(|s| s.generation));
+                            if super::slot_is_current(current, generation) {
+                                super::force_stop_failed(&handle, &finished, message);
+                            }
                         }
                     }
                 }
@@ -1125,6 +1189,23 @@ pub(super) enum MachineState {
 
 /// The framework's state of every machine Silo holds.
 pub(super) fn machine_states(app: &AppHandle) -> Result<Vec<(String, MachineState)>, String> {
+    Ok(machine_samples(app)?
+        .into_iter()
+        .map(|sample| (sample.id, sample.state))
+        .collect())
+}
+
+/// A machine as it was at the moment it was sampled.
+#[derive(Clone, Debug)]
+pub(super) struct Sample {
+    pub id: String,
+    pub state: MachineState,
+    pub generation: u64,
+}
+
+/// The machines Silo holds, with the generation each one is, so that what is done about a
+/// sample reaches that machine and no later one.
+pub(super) fn machine_samples(app: &AppHandle) -> Result<Vec<Sample>, String> {
     on_main(app, |_| {
         SLOTS.with(|slots| {
             slots
@@ -1144,7 +1225,11 @@ pub(super) fn machine_states(app: &AppHandle) -> Result<Vec<(String, MachineStat
                     } else {
                         MachineState::Other
                     };
-                    (id.clone(), state)
+                    Sample {
+                        id: id.clone(),
+                        state,
+                        generation: slot.generation,
+                    }
                 })
                 .collect()
         })
@@ -1242,6 +1327,7 @@ define_class!(
 /// Adds the clipboard buttons to `native`'s toolbar. Call on the main thread.
 fn install_toolbar(mtm: MainThreadMarker, app: &AppHandle, id: &str, native: &NSWindow) {
     let delegate = mtm.alloc::<ToolbarDelegate>().set_ivars(DelegateState {
+        generation: 0,
         app: app.clone(),
         id: id.to_string(),
     });
@@ -1531,6 +1617,30 @@ pub(super) fn unlock_input(app: &AppHandle, id: &str) {
             }
         });
     });
+}
+
+/// Whether the machine of generation `generation` has been released within `timeout`.
+pub(super) fn wait_until_released(
+    app: &AppHandle,
+    id: &str,
+    generation: u64,
+    timeout: Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let released = machine_samples(app).is_ok_and(|samples| {
+            !samples
+                .iter()
+                .any(|sample| sample.id == id && sample.generation == generation)
+        });
+        if released {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 /// Whether the machine has stopped and been released within `timeout`. A machine

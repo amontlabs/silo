@@ -1235,15 +1235,27 @@ fn state_after_failed_start(released: Result<(), String>) -> (State, Option<Stri
 /// Stops a machine a failed start left behind and returns only once the framework has released
 /// it, or says that it could not be.
 fn ensure_released(app: &AppHandle, id: &str) -> Result<(), String> {
+    // The machine this start made is the only one the computer can have while it is starting,
+    // so the generation sampled now is the one to stop and to wait for. A query that fails
+    // does not show that there is none: it is asked again, and the stop falls back to the id.
+    let mut generation = None;
     for _ in 0..5 {
-        let held = engine::machine_states(app).map_or(true, |states| {
-            states.iter().any(|(machine, _)| machine == id)
-        });
-        if !held {
-            return Ok(());
+        let sampled = engine::machine_samples(app).ok();
+        if let Some(samples) = &sampled {
+            match samples.iter().find(|sample| sample.id == id) {
+                None => return Ok(()),
+                Some(sample) => generation = Some(sample.generation),
+            }
         }
-        let _ = engine::force_stop(app, id);
-        if engine::wait_until_stopped(app, id, FORCED_STOP_WAIT) {
+        let stopped = match generation {
+            Some(generation) => engine::force_stop_generation(app, id, generation),
+            None => engine::force_stop(app, id),
+        };
+        let released = match generation {
+            Some(generation) => engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT),
+            None => stopped.is_ok() && engine::wait_until_stopped(app, id, FORCED_STOP_WAIT),
+        };
+        if released {
             return Ok(());
         }
     }
@@ -1535,13 +1547,23 @@ fn force_stop_failed(app: &AppHandle, id: &str, message: String) {
     emit(app);
 }
 
+/// Whether an event of the machine of generation `event` concerns the machine the computer
+/// has now (`current`, `None` when it has none). Machines are never reused: a late event of
+/// an earlier one concerns no one.
+fn slot_is_current(current: Option<u64>, event: u64) -> bool {
+    current == Some(event)
+}
+
 /// The machine ended on its own or at Silo's request.
-fn machine_stopped(app: &AppHandle, id: &str, error: Option<String>) {
+fn machine_stopped(app: &AppHandle, id: &str, generation: u64, error: Option<String>) {
     let (app, id) = (app.clone(), id.to_string());
     // Deferred so the framework callback that reported the stop has returned before
     // its machine is released.
     engine::defer(move || {
-        engine::release_slot(&id);
+        // An event of an earlier machine of this computer changes nothing.
+        if !engine::release_slot(&id, generation) {
+            return;
+        }
         close_display(&app, &id);
         update(&app, &id, |entry| {
             if matches!(
@@ -2006,15 +2028,16 @@ fn watch(app: &AppHandle) {
     STARTED.call_once(move || {
         std::thread::spawn(move || loop {
             std::thread::sleep(WATCH_INTERVAL);
-            if let Ok(states) = engine::machine_states(&app) {
+            if let Ok(states) = engine::machine_samples(&app) {
                 reconcile(&app, &states);
             }
         });
     });
 }
 
-fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
-    for (id, machine) in states {
+fn reconcile(app: &AppHandle, samples: &[engine::Sample]) {
+    for sample in samples {
+        let (id, machine, generation) = (&sample.id, &sample.state, sample.generation);
         let Some((_, state)) = computer(id).ok() else {
             continue;
         };
@@ -2025,7 +2048,7 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
             ) => {
                 let detail = (*machine == engine::MachineState::Failed)
                     .then(|| "The computer stopped unexpectedly.".to_string());
-                machine_stopped(app, id, detail);
+                machine_stopped(app, id, generation, detail);
             }
             (engine::MachineState::Paused, State::Running | State::Stopping) => {
                 let (operating, unconsumed) = (has_operation(id), has_pending_restore(id));
@@ -2036,7 +2059,7 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
                             let id = id.clone();
                             move || has_operation(&id) || has_pending_restore(&id)
                         };
-                        let resumed = engine::resume_stray(app, id, owned);
+                        let resumed = engine::resume_stray(app, id, generation, owned);
                         update(app, id, |entry| {
                             entry.detail = resumed.err().map(|why| {
                                 format!("The computer is paused and could not be resumed ({why}). Use Force stop.")
@@ -2049,7 +2072,7 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
                         let claimed = registry().begin_force_stop(id);
                         emit(app);
                         if claimed.is_ok() {
-                            if let Err(why) = engine::force_stop(app, id) {
+                            if let Err(why) = engine::force_stop_generation(app, id, generation) {
                                 force_stop_failed(app, id, why);
                             }
                         }
@@ -2070,16 +2093,31 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
     }
     // A stop whose machine is already gone is finished here: the callback that would have
     // done it has already run, or never will.
-    let held: Vec<String> = states.iter().map(|(id, _)| id.clone()).collect();
+    let held: Vec<String> = samples.iter().map(|sample| sample.id.clone()).collect();
     let stalled = registry().stopping_without_machine(&held);
     if !stalled.is_empty() {
-        // Confirmed against a fresh sample: a machine registered since is not gone.
-        let fresh = engine::machine_states(app).unwrap_or_default();
-        let held: Vec<String> = fresh.into_iter().map(|(id, _)| id).collect();
+        // Confirmed against a fresh sample: a machine registered since is not gone. A query
+        // that fails says nothing about the machines, so nothing is settled on it.
+        let Ok(fresh) = engine::machine_samples(app) else {
+            return;
+        };
+        let held: Vec<String> = fresh.into_iter().map(|sample| sample.id).collect();
         for id in registry().stopping_without_machine(&held) {
-            machine_stopped(app, &id, None);
+            stop_finished_without_machine(app, &id);
         }
     }
+}
+
+/// Finishes a stop whose machine is gone: there is no slot left to release.
+fn stop_finished_without_machine(app: &AppHandle, id: &str) {
+    update(app, id, |entry| {
+        if entry.state == State::Stopping && entry.operation.is_none() {
+            entry.state = State::Stopped;
+            entry.progress = None;
+            entry.display_open = false;
+            entry.since = Instant::now();
+        }
+    });
 }
 
 /// What the watcher does with a machine the framework reports as paused.
@@ -2262,7 +2300,7 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     for id in &everything {
         if state_of(id).is_some_and(|state| state != State::Stopped && state != State::Failed)
             && engine::machine_states(app)
-                .is_ok_and(|states| states.iter().any(|(held, _)| held == *id))
+                .map_or(true, |states| states.iter().any(|(held, _)| held == *id))
         {
             let _ = engine::force_stop(app, id);
         }
@@ -2460,6 +2498,44 @@ mod tests {
         .is_err());
         let (mut registry, id) = registry_with(state);
         assert_eq!(registry.begin_force_stop(&id), Ok(State::Stopping));
+    }
+
+    #[test]
+    fn an_event_of_an_earlier_machine_concerns_no_one_once_the_computer_has_a_later_one() {
+        // Machine 1 is replaced by machine 2 while 1's stop callback is still on its way.
+        assert!(slot_is_current(Some(1), 1));
+        assert!(!slot_is_current(Some(2), 1));
+        // Its slot is already gone, e.g. released by a failed start's cleanup.
+        assert!(!slot_is_current(None, 1));
+        // The late callback of machine 1 cannot stop or release machine 2.
+        let mut slots = std::collections::HashMap::new();
+        slots.insert("a", 1u64);
+        let release = |slots: &mut std::collections::HashMap<&str, u64>, event: u64| {
+            if slot_is_current(slots.get("a").copied(), event) {
+                slots.remove("a");
+                true
+            } else {
+                false
+            }
+        };
+        assert!(release(&mut slots, 1));
+        slots.insert("a", 2);
+        assert!(!release(&mut slots, 1));
+        assert_eq!(slots.get("a"), Some(&2));
+        assert!(release(&mut slots, 2));
+    }
+
+    #[test]
+    fn a_stale_cleanup_of_a_failed_start_does_not_touch_the_state_of_a_later_one() {
+        // The failed start's cleanup finishes after the computer was stopped and started
+        // again: the new start is `starting`, but its machine's callbacks are its own, and
+        // the settle only acts on a computer still in the failed start's own `starting`.
+        let (mut registry, id) = registry_with(State::Running);
+        registry.settle_failed_start(&id, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Running);
+        registry.entries[0].state = State::Stopping;
+        registry.settle_failed_start(&id, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopping);
     }
 
     #[test]

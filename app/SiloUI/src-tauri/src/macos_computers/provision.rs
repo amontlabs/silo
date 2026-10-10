@@ -529,12 +529,17 @@ impl Provision<'_> {
     fn wait_stopped(&self, timeout: Duration) -> Result<(), Stop> {
         let deadline = Instant::now() + timeout;
         loop {
-            let states = engine::machine_states(self.app)?;
-            match states.iter().find(|(id, _)| *id == self.id) {
+            let samples = engine::machine_samples(self.app)?;
+            match samples.iter().find(|sample| sample.id == self.id) {
                 None => return Ok(()),
-                Some((_, engine::MachineState::Stopped | engine::MachineState::Failed)) => {
+                Some(sample)
+                    if matches!(
+                        sample.state,
+                        engine::MachineState::Stopped | engine::MachineState::Failed
+                    ) =>
+                {
                     // The framework reported the end, but its delegate has not released the machine.
-                    super::machine_stopped(self.app, &self.id, None);
+                    super::machine_stopped(self.app, &self.id, sample.generation, None);
                 }
                 Some(_) => {}
             }

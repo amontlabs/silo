@@ -497,6 +497,7 @@ pub(super) fn restore<M: Machine>(
 // MARK: Restore journal
 
 const JOURNAL: &str = "restore-journal.json";
+const UNREADABLE_JOURNAL: &str = "The journal of an unfinished Restore can't be read. Silo kept its files and will not start this computer. Contact support or delete the computer.";
 const RESTORING: &str = ".restoring";
 
 /// How far a Restore got in replacing the computer's files.
@@ -651,11 +652,18 @@ pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String>
                 memory,
             }))
         }
-        _ => {
+        // Only a journal that positively says `staging` may be rolled back.
+        Ok(Journal {
+            phase: Phase::Staging,
+            ..
+        }) => {
             remove_staged(layout);
             finish_restore(layout);
             Ok(None)
         }
+        // A journal that can't be understood keeps every file of the transaction, and keeps
+        // the computer from starting, until someone can look at it.
+        Err(_) => Err(UNREADABLE_JOURNAL.into()),
     }
 }
 
@@ -1337,12 +1345,21 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_journal_rolls_back() {
-        let (_data, layout, _) = interrupted("swapping");
-        fs::write(journal_path(&layout), b"{").unwrap();
-        assert_eq!(recover(&layout), Ok(None));
-        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
-        assert!(!restore_unfinished(&layout));
+    fn an_unreadable_or_unknown_journal_keeps_every_file_and_blocks_the_computer() {
+        for journal in [
+            &b"{"[..],
+            br#"{"phase":"later","target":"x","memory":false}"#,
+        ] {
+            let (_data, layout, _) = interrupted("swapping");
+            fs::write(journal_path(&layout), journal).unwrap();
+            assert_eq!(recover(&layout), Err(UNREADABLE_JOURNAL.to_string()));
+            assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+            assert!(staged(&layout)
+                .iter()
+                .all(|(_, temporary)| temporary.exists()));
+            assert!(restore_unfinished(&layout));
+            assert!(journal_pins(&layout, "anything"));
+        }
     }
 
     #[test]
