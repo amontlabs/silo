@@ -268,6 +268,47 @@ impl Registry {
         })
     }
 
+    /// Whether Start number `attempt` still owns a running computer that nothing else
+    /// operates on: the only time its computer use may be updated.
+    fn update_may_run(&self, id: &str, attempt: u64) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.record.id == id
+                && entry.state == State::Running
+                && entry.attempt == attempt
+                && !entry.deleting
+                && entry.operation.is_none()
+        })
+    }
+
+    /// Records that Start number `attempt` brought the guest's computer use to `version`,
+    /// durably through `save`, unless the computer moved on meanwhile (stopped, restored,
+    /// forked from, deleted or started again). Then nothing is recorded and the update
+    /// runs again at a later Start. Returns whether it was recorded.
+    fn finish_computer_use_update(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        version: &str,
+        approval: crate::computer_use::Approval,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let Some(entry) = self.entries.iter_mut().find(|entry| {
+            entry.record.id == id
+                && entry.attempt == attempt
+                && matches!(entry.state, State::Running | State::Stopping)
+                && !entry.deleting
+                && entry.operation.is_none()
+        }) else {
+            return Ok(false);
+        };
+        let mut record = entry.record.clone();
+        record.computer_use_version = Some(version.to_string());
+        record.computer_use_approval = Some(approval);
+        save(&record)?;
+        entry.record = record;
+        Ok(true)
+    }
+
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
     /// missed or came before the state was set, so nothing else will ever finish them.
     fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
@@ -483,6 +524,10 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
 fn settle_restore(layout: &Layout, mut record: Record) -> Record {
     match checkpoints::recover(layout) {
         Ok(Some(pending)) => {
+            // Without the checkpoint's record the guest's computer use is unknown: stale.
+            record.computer_use_version = checkpoints::find(layout, &pending.checkpoint_id)
+                .ok()
+                .and_then(|meta| meta.computer_use_version);
             record.pending_restore = Some(pending);
             record.pristine = false;
             if store::save(layout, &record).is_ok() {
@@ -1263,6 +1308,7 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
                     entry.detail = note;
                 }
             });
+            guest_computer_use::update_in_background(app, id, attempt);
             Ok(())
         }
         Err(message) => {
@@ -1818,6 +1864,7 @@ fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String
         machine: &machine,
         running,
         macos_version: held.record.os_version(),
+        computer_use_version: held.record.computer_use_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -1852,6 +1899,7 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
         machine: &machine,
         running,
         macos_version: held.record.os_version(),
+        computer_use_version: held.record.computer_use_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -1859,6 +1907,8 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
     let pending = restored?;
     let (mut record, _) = computer(id)?;
     record.pending_restore = Some(pending);
+    // The guest comes back with the computer use it had when the checkpoint was taken.
+    record.computer_use_version = target.computer_use_version.clone();
     // The disk no longer is what the user left, and only what Start restores is the result.
     record.pristine = false;
     store::save(&layout, &record)?;
@@ -1939,7 +1989,7 @@ fn fork_checkpoint(
         record.restore_image = held.record.restore_image.clone();
         record.pristine = false;
         record.setup_version = held.record.setup_version.clone();
-        record.computer_use_version = held.record.computer_use_version.clone();
+        record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
@@ -2796,6 +2846,83 @@ mod tests {
         };
         registry.entries[0].attempt = 1;
         (registry, id)
+    }
+
+    #[test]
+    fn a_computer_use_update_runs_only_for_the_start_that_owns_a_free_running_computer() {
+        let (mut registry, id) = registry_with(State::Running);
+        assert!(registry.update_may_run(&id, 1));
+        // Another Start, a stop, a deletion or a checkpoint operation ends it.
+        assert!(!registry.update_may_run(&id, 2));
+        assert!(!registry.update_may_run("other", 1));
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        assert!(!registry.update_may_run(&id, 1));
+        registry.entries[0].operation = None;
+        registry.entries[0].deleting = true;
+        assert!(!registry.update_may_run(&id, 1));
+        registry.entries[0].deleting = false;
+        for state in [State::Stopping, State::Stopped, State::Starting] {
+            registry.entries[0].state = state;
+            assert!(!registry.update_may_run(&id, 1), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn the_updated_version_is_saved_only_while_the_computer_is_still_this_starts() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Running);
+        let saved = std::cell::RefCell::new(Vec::new());
+        let save = |record: &Record| {
+            saved.borrow_mut().push(record.computer_use_version.clone());
+            Ok(())
+        };
+        assert_eq!(registry.entries[0].record.computer_use_version, None);
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Auto, save),
+            Ok(true)
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_version.as_deref(),
+            Some("v2")
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_approval,
+            Some(Approval::Auto)
+        );
+        assert_eq!(*saved.borrow(), [Some("v2".to_string())]);
+        // A computer that was stopped and started again, restored or deleted meanwhile
+        // keeps its record: the update runs again later.
+        registry.entries[0].record.computer_use_version = None;
+        let never = |_: &Record| -> Result<(), String> { panic!("must not save") };
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 2, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].state = State::Stopped;
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].state = State::Running;
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Restoring",
+        ));
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].operation = None;
+        // A failed save leaves the old version in the record.
+        let failing = |_: &Record| Err("disk full".to_string());
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, failing),
+            Err("disk full".to_string())
+        );
+        assert_eq!(registry.entries[0].record.computer_use_version, None);
     }
 
     #[test]

@@ -7,11 +7,14 @@
 //! TCC rows and registers LCU's agents; see its header for the steps.
 use super::guest_access::{self as access, CommandOutput};
 use super::store::Layout;
-use super::{app_data, layout_and_record, restore_image, set_detail};
+use super::{
+    app_data, layout_and_record, registry, restore_image, set_detail, setup_log, store, templates,
+};
 use crate::computer_use;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -38,6 +41,38 @@ const QUICK_COMMAND: Duration = Duration::from_secs(60);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(1800);
 /// Lines of the script's output a failure quotes.
 const QUOTE_LINES: usize = 3;
+
+/// How long a started computer may take to accept SSH logins before its update gives up.
+const UPDATE_SSH_WAIT: Duration = Duration::from_secs(600);
+/// The row detail while computer use is being updated.
+const UPDATING: &str = "Updating Computer Use";
+
+/// Computers whose computer use is being updated, so a second Start never runs a second one.
+static UPDATING_IDS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+struct UpdateClaim(String);
+
+impl UpdateClaim {
+    fn take(id: &str) -> Option<Self> {
+        let mut ids = UPDATING_IDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ids.get_or_insert_with(HashSet::new)
+            .insert(id.to_string())
+            .then(|| Self(id.to_string()))
+    }
+}
+
+impl Drop for UpdateClaim {
+    fn drop(&mut self) {
+        let mut ids = UPDATING_IDS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(ids) = ids.as_mut() {
+            ids.remove(&self.0);
+        }
+    }
+}
 
 /// Serializes downloads so two computers never write the same partial file.
 static DOWNLOAD_TURN: Mutex<()> = Mutex::new(());
@@ -183,21 +218,62 @@ pub(super) fn setup_inputs() -> [&'static str; 3] {
     [APP_LOCK, LCU_LOCK, SCRIPT]
 }
 
-/// Installs computer use in the running computer `id`.
+/// How a run reports progress and learns that it must end. Setup of a new computer ties both
+/// to the creation; an update of a running computer ties them to that Start.
+pub(super) struct Job<'a> {
+    /// False once the run must stop: the computer was stopped, deleted or restored, or
+    /// Silo is quitting.
+    pub live: &'a dyn Fn() -> bool,
+    /// Names the current step.
+    pub announce: &'a dyn Fn(&str),
+}
+
+impl Job<'_> {
+    fn ensure(&self) -> Result<(), String> {
+        if (self.live)() {
+            Ok(())
+        } else {
+            Err(access::CANCELLED.into())
+        }
+    }
+}
+
+/// Installs computer use in the running computer `id` during its setup.
 pub(super) fn install(
     app: &AppHandle,
     id: &str,
     approval: computer_use::Approval,
 ) -> Result<(), String> {
+    let live = || ensure_live(id).is_ok();
+    let announce = |step: &str| set_detail(app, id, step);
+    install_with(
+        app,
+        id,
+        approval,
+        &Job {
+            live: &live,
+            announce: &announce,
+        },
+    )
+}
+
+/// Installs or updates computer use in the running computer `id`. The script is idempotent:
+/// it keeps what already is the pinned app and LCU, replaces what is not, writes the same
+/// grants again and registers the agents with the current options.
+pub(super) fn install_with(
+    app: &AppHandle,
+    id: &str,
+    approval: computer_use::Approval,
+    job: &Job,
+) -> Result<(), String> {
     let pins = Pins::bundled()?;
     let cache = app_data(app)?.join(CACHE_DIR);
-    let app_zip = cached(app, id, &cache, "ChatGPT", pins.app_asset())?;
-    let lcu_archive = cached(app, id, &cache, "LCU", pins.lcu_asset())?;
+    let lcu_archive = cached(job, &cache, "LCU", pins.lcu_asset())?;
     let (layout, record) = layout_and_record(app, id)?;
 
-    set_detail(app, id, "Copying computer use to the computer");
-    ensure_live(id)?;
-    let cancelled = || ensure_live(id).is_err();
+    (job.announce)("Copying computer use to the computer");
+    job.ensure()?;
+    let cancelled = || !(job.live)();
     stage(&layout, &record, &pins, &lcu_archive, &cancelled)?;
     let present = access::run_cancellable(
         &layout,
@@ -207,8 +283,10 @@ pub(super) fn install(
         &cancelled,
     )?;
     if present.status != 0 {
-        set_detail(app, id, "Copying the ChatGPT app to the computer");
-        ensure_live(id)?;
+        // The large download happens only when the computer lacks the pinned app.
+        let app_zip = cached(job, &cache, "ChatGPT", pins.app_asset())?;
+        (job.announce)("Copying the ChatGPT app to the computer");
+        job.ensure()?;
         access::copy_cancellable(
             &layout,
             &record,
@@ -222,8 +300,8 @@ pub(super) fn install(
         )?;
     }
 
-    set_detail(app, id, "Installing computer use");
-    ensure_live(id)?;
+    (job.announce)("Installing computer use");
+    job.ensure()?;
     let output = access::run_cancellable(
         &layout,
         &record,
@@ -248,6 +326,124 @@ pub(super) fn install(
     } else {
         Err(failure(&output))
     }
+}
+
+/// Whether a started computer's computer use must be updated: its setup is complete and what
+/// its guest has is not what this build installs.
+pub(super) fn update_wanted(record: &store::Record) -> bool {
+    record.installed && record.setup.complete() && record.computer_use_stale()
+}
+
+/// After Start number `attempt` of computer `id` is running: updates its computer use on a
+/// host thread when it is stale. Returns at once. The update never holds up the user: it
+/// ends as soon as the computer is stopped, deleted, restored, forked from or started
+/// again, or Silo quits, and a failure only leaves the old version recorded (it is tried
+/// again at the next Start) and a line in the computer's log.
+pub(super) fn update_in_background(app: &AppHandle, id: &str, attempt: u64) {
+    let wanted = registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .is_some_and(|entry| update_wanted(&entry.record));
+    if !wanted {
+        return;
+    }
+    let Some(claim) = UpdateClaim::take(id) else {
+        return;
+    };
+    let (app, id) = (app.clone(), id.to_string());
+    let _ = std::thread::Builder::new()
+        .name("macos-computer-use-update".into())
+        .spawn(move || {
+            let _claim = claim;
+            run_update(&app, &id, attempt);
+        });
+}
+
+fn update_may_run(id: &str, attempt: u64) -> bool {
+    super::runtime::shutdown::ensure_accepting_operations().is_ok()
+        && registry().update_may_run(id, attempt)
+}
+
+fn run_update(app: &AppHandle, id: &str, attempt: u64) {
+    let log = setup_log::SetupLog::open(app, id);
+    let say = |line: &str| {
+        if let Some(log) = &log {
+            log.line(line);
+        }
+    };
+    let live = || update_may_run(id, attempt);
+    let clear = |app: &AppHandle| {
+        super::update(app, id, |entry| {
+            if entry.attempt == attempt
+                && entry
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.starts_with(UPDATING))
+            {
+                entry.detail = None;
+            }
+        });
+    };
+    let Ok((layout, record)) = layout_and_record(app, id) else {
+        return;
+    };
+    if !update_wanted(&record) {
+        return;
+    }
+    let approval = record
+        .computer_use_approval
+        .unwrap_or_else(computer_use::initial_approval);
+    let version = templates::computer_use_version_for(approval);
+    if access::wait_for_ssh(&layout, &record, UPDATE_SSH_WAIT, &|| !live()).is_err() {
+        say("computer use update skipped: the computer did not accept SSH logins while it was running");
+        return;
+    }
+    if !live() {
+        return;
+    }
+    say("computer use update started");
+    let announce = |step: &str| {
+        super::update(app, id, |entry| {
+            if entry.attempt == attempt && entry.state == super::State::Running {
+                entry.detail = Some(format!("{UPDATING}: {step}"));
+            }
+        });
+    };
+    announce("starting");
+    let result = install_with(
+        app,
+        id,
+        approval,
+        &Job {
+            live: &live,
+            announce: &announce,
+        },
+    );
+    match result {
+        Ok(()) => {
+            let recorded =
+                registry().finish_computer_use_update(id, attempt, &version, approval, |record| {
+                    store::save(&layout, record)
+                });
+            match recorded {
+                Ok(true) => say("computer use updated"),
+                Ok(false) => say(
+                    "computer use was updated, but the computer changed meanwhile; it is checked again at the next start",
+                ),
+                Err(message) => say(&format!(
+                    "computer use was updated, but its version could not be saved: {message}"
+                )),
+            }
+        }
+        Err(message) if message == access::CANCELLED => {
+            say("computer use update cancelled; it runs again at the next start");
+        }
+        Err(message) => say(&format!(
+            "computer use update failed: {message}; it runs again at the next start"
+        )),
+    }
+    clear(app);
 }
 
 /// Fails when the setup of computer `id` was cancelled.
@@ -333,41 +529,34 @@ fn stage(
 }
 
 /// The downloaded, verified file for `asset` in `cache`.
-fn cached(
-    app: &AppHandle,
-    id: &str,
-    cache: &Path,
-    label: &str,
-    asset: &Asset,
-) -> Result<PathBuf, String> {
+fn cached(job: &Job, cache: &Path, label: &str, asset: &Asset) -> Result<PathBuf, String> {
     let name = file_name(&asset.url).ok_or("Silo's computer use information is invalid.")?;
-    let cancelled = || ensure_live(id).is_err();
+    let cancelled = || !(job.live)();
     let _turn = loop {
         match DOWNLOAD_TURN.try_lock() {
             Ok(turn) => break turn,
             Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
-                ensure_live(id)?;
+                job.ensure()?;
                 std::thread::sleep(Duration::from_millis(250));
             }
         }
     };
     for attempt in 0..2 {
-        set_detail(app, id, &format!("Downloading {label}"));
+        (job.announce)(&format!("Downloading {label}"));
         let path =
             restore_image::download_as(&asset.url, cache, &name, &cancelled, &mut |done, total| {
                 let total = total.unwrap_or(asset.bytes).max(1);
-                set_detail(
-                    app,
-                    id,
-                    &format!("Downloading {label} ({}%)", (done * 100 / total).min(100)),
-                );
+                (job.announce)(&format!(
+                    "Downloading {label} ({}%)",
+                    (done * 100 / total).min(100)
+                ));
             })
             .map_err(|error| match error {
                 restore_image::DownloadError::Cancelled => access::CANCELLED.to_string(),
                 restore_image::DownloadError::Failed(message) => message,
             })?;
-        set_detail(app, id, &format!("Checking {label}"));
+        (job.announce)(&format!("Checking {label}"));
         if matches_pin(&path, asset)? {
             return Ok(path);
         }
@@ -419,6 +608,66 @@ mod tests {
         assert!(file_name(&pins.lcu_asset().url)
             .unwrap()
             .contains(&pins.lcu.version));
+    }
+
+    #[test]
+    fn an_update_is_wanted_for_a_complete_computer_without_the_current_fingerprint() {
+        use super::super::store::{CreateRequest, SetupProgress};
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        record.installed = true;
+        record.setup = SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        // A record from before the fingerprint split is stale.
+        assert!(update_wanted(&record));
+        let approval = computer_use::Approval::Ask;
+        record.computer_use_approval = Some(approval);
+        record.computer_use_version = Some(templates::computer_use_version_for(approval));
+        assert!(!update_wanted(&record));
+        record.computer_use_version = Some("old".into());
+        assert!(update_wanted(&record));
+        // A setup that did not finish is resumed, not updated.
+        record.setup.clipboard = false;
+        assert!(!update_wanted(&record));
+        record.setup.clipboard = true;
+        record.installed = false;
+        assert!(!update_wanted(&record));
+    }
+
+    #[test]
+    fn only_one_update_runs_for_a_computer() {
+        let first = UpdateClaim::take("update-claim-test").unwrap();
+        assert!(UpdateClaim::take("update-claim-test").is_none());
+        assert!(UpdateClaim::take("update-claim-other").is_some());
+        drop(first);
+        assert!(UpdateClaim::take("update-claim-test").is_some());
+    }
+
+    #[test]
+    fn a_job_that_is_no_longer_live_cancels_the_run() {
+        let announced = std::cell::RefCell::new(Vec::new());
+        let announce = |step: &str| announced.borrow_mut().push(step.to_string());
+        let live = std::cell::Cell::new(true);
+        let check = || live.get();
+        let job = Job {
+            live: &check,
+            announce: &announce,
+        };
+        assert_eq!(job.ensure(), Ok(()));
+        live.set(false);
+        assert_eq!(job.ensure(), Err(access::CANCELLED.to_string()));
     }
 
     #[test]
