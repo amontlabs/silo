@@ -165,7 +165,11 @@ impl Provision<'_> {
             })?;
             self.check()?;
         }
-        if record.setup.sip && record.setup.computer_use && record.setup.clipboard {
+        if record.setup.sip
+            && record.setup.computer_use
+            && record.setup.clipboard
+            && !record.computer_use_stale()
+        {
             return Ok(());
         }
         self.say("Starting macOS")?;
@@ -189,6 +193,18 @@ impl Provision<'_> {
             self.say("Setting up the clipboard")?;
             guest_clipboard::install(self.app, &self.id)?;
             self.mark(record, |setup| setup.clipboard = true)?;
+        }
+        // A copy of a template made with another computer use brings it up to date here,
+        // before the computer is handed over.
+        if record.setup.computer_use && record.computer_use_stale() {
+            self.say("Updating Computer Use")?;
+            let approval = record
+                .computer_use_approval
+                .unwrap_or_else(crate::computer_use::initial_approval);
+            guest_computer_use::install(self.app, &self.id, approval)?;
+            record.computer_use_version = Some(templates::computer_use_version_for(approval));
+            record.computer_use_approval = Some(approval);
+            self.mark(record, |_| {})?;
         }
         self.shut_down()
     }

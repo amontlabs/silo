@@ -1179,15 +1179,22 @@ fn run_setup(
     cancel: &AtomicU8,
     reservation: Option<templates::SpaceReservation>,
 ) -> Result<(), Stop> {
+    // A copy of a template with a stale computer use part, once updated, replaces it.
+    let stale_copy = record.template.is_some() && record.computer_use_stale();
     provision::run(app, layout, record, cancel, reservation)?;
-    if cancel.load(Ordering::SeqCst) == RUN && templates::eligible(record) {
-        save_template(app, layout, record);
+    if cancel.load(Ordering::SeqCst) == RUN {
+        if templates::eligible(record) {
+            save_template(app, layout, record, false);
+        } else if stale_copy && app_data(app).is_ok_and(|data| templates::refreshes(&data, record))
+        {
+            save_template(app, layout, record, true);
+        }
     }
     Ok(())
 }
 
 /// Makes the template of `record`. A failure only costs the speed of later computers.
-fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
+fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: bool) {
     let Ok(data) = app_data(app) else {
         return;
     };
@@ -1204,6 +1211,7 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
         layout,
         version,
         computer_use,
+        refresh,
         &protected_templates,
     );
     if let Err(message) = made {
