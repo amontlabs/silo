@@ -186,6 +186,22 @@ pub(super) fn force_stop_generation(
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn force_stop_if(
+    _app: &AppHandle,
+    _id: &str,
+    _guard: impl Fn() -> bool + Send + 'static,
+) -> Result<Option<u64>, String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn run_if_no_machine(
+    _app: &AppHandle,
+    _id: &str,
+    _apply: impl FnOnce() + Send + 'static,
+) -> Result<bool, String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn wait_until_released(
     _app: &AppHandle,
     _id: &str,

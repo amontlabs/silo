@@ -549,11 +549,23 @@ fn write_journal(
     sync(&layout.dir).map_err(|error| store::io_error("restore the computer's files", &error))
 }
 
-/// The phase the journal on disk is in, if it can be read.
-fn published_phase(layout: &Layout) -> Option<Phase> {
-    serde_json::from_slice::<Journal>(&fs::read(journal_path(layout)).ok()?)
-        .ok()
-        .map(|journal| journal.phase)
+/// What reading the journal back says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Readback {
+    /// Certainly no journal.
+    Absent,
+    Phase(Phase),
+    /// A read error or a journal that can't be understood: nothing is known.
+    Unknown,
+}
+
+fn read_back(layout: &Layout) -> Readback {
+    match fs::read(journal_path(layout)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Readback::Absent,
+        Err(_) => Readback::Unknown,
+        Ok(bytes) => serde_json::from_slice::<Journal>(&bytes)
+            .map_or(Readback::Unknown, |journal| Readback::Phase(journal.phase)),
+    }
 }
 
 /// The live files and the temporary names their replacements are staged under.
@@ -596,6 +608,16 @@ fn swap_files_with(
     pending: &PendingRestore,
     sync: &dyn Fn(&Path) -> std::io::Result<()>,
 ) -> Result<(), String> {
+    swap_files_core(layout, from, pending, sync, &read_back)
+}
+
+fn swap_files_core(
+    layout: &Layout,
+    from: &Path,
+    pending: &PendingRestore,
+    sync: &dyn Fn(&Path) -> std::io::Result<()>,
+    read_back: &dyn Fn(&Layout) -> Readback,
+) -> Result<(), String> {
     let mut journal = Journal {
         phase: Phase::Staging,
         target: pending.checkpoint_id.clone(),
@@ -619,8 +641,13 @@ fn swap_files_with(
     });
     if let Err(message) = durable.and_then(|()| write_journal(layout, &journal, sync)) {
         // Once `swapping` is published, even if making it durable failed, the staged clones
-        // are what recovery rolls forward with: they and the journal stay.
-        if published_phase(layout) != Some(Phase::Swapping) {
+        // are what recovery rolls forward with. Only a journal known to be `staging` (or
+        // known to be absent) lets them go; when nothing is known they stay, with the journal,
+        // and `restore_unfinished` keeps the computer from starting.
+        if matches!(
+            read_back(layout),
+            Readback::Absent | Readback::Phase(Phase::Staging)
+        ) {
             remove_staged(layout);
             let _ = fs::remove_file(journal_path(layout));
         }
@@ -1330,6 +1357,49 @@ mod tests {
         let rolled = recover(&layout).unwrap().unwrap();
         assert_eq!(rolled.checkpoint_id, target.id);
         assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
+    }
+
+    #[test]
+    fn staged_clones_go_only_when_the_journal_is_known_to_be_staging_or_absent() {
+        for (readback, kept) in [
+            (Readback::Unknown, true),
+            (Readback::Phase(Phase::Swapping), true),
+            (Readback::Phase(Phase::Staging), false),
+            (Readback::Absent, false),
+        ] {
+            let (_data, layout) = computer();
+            let machine = Fake::default();
+            let target =
+                create(&subject(&layout, &machine, false), "Good", Reason::Manual).unwrap();
+            let calls = std::cell::Cell::new(0);
+            let sync = |_: &Path| {
+                calls.set(calls.get() + 1);
+                if calls.get() == 2 {
+                    Err(std::io::Error::other("sync failed"))
+                } else {
+                    Ok(())
+                }
+            };
+            let pending = PendingRestore {
+                checkpoint_id: target.id.clone(),
+                memory: false,
+            };
+            let outcome = swap_files_core(
+                &layout,
+                &dir(&layout, &target.id),
+                &pending,
+                &sync,
+                &|_: &Layout| readback,
+            );
+            assert!(outcome.is_err());
+            assert_eq!(
+                staged(&layout).iter().all(|(_, t)| t.exists()),
+                kept,
+                "{readback:?}"
+            );
+            assert_eq!(journal_path(&layout).exists(), kept, "{readback:?}");
+            assert_eq!(restore_unfinished(&layout), kept, "{readback:?}");
+        }
     }
 
     #[test]

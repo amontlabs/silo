@@ -1118,7 +1118,38 @@ pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {
 }
 
 pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    force_stop_machine(app, id, None)
+    force_stop_machine(app, id, None, None).map(|_| ())
+}
+
+/// Force stops whatever machine the computer has, but only if `guard` still holds at the
+/// moment on the main thread when the machine is picked, which is also when machines are
+/// registered, so no later machine can be the one stopped. Returns the generation of the
+/// machine whose stop was issued, or `None` when the guard failed or there is no machine.
+pub(super) fn force_stop_if(
+    app: &AppHandle,
+    id: &str,
+    guard: impl Fn() -> bool + Send + 'static,
+) -> Result<Option<u64>, String> {
+    force_stop_machine(app, id, None, Some(Box::new(guard)))
+}
+
+/// Runs `apply` on the main thread if the computer has no machine at that moment. Machines
+/// are registered on the main thread too, so a machine can't appear between the check and
+/// `apply`. Returns whether `apply` ran.
+pub(super) fn run_if_no_machine(
+    app: &AppHandle,
+    id: &str,
+    apply: impl FnOnce() + Send + 'static,
+) -> Result<bool, String> {
+    let id = id.to_string();
+    on_main(app, move |_| {
+        if SLOTS.with(|slots| slots.borrow().contains_key(&id)) {
+            false
+        } else {
+            apply();
+            true
+        }
+    })
 }
 
 /// Force stops the machine of generation `generation` only; a later machine is left alone.
@@ -1127,12 +1158,22 @@ pub(super) fn force_stop_generation(
     id: &str,
     generation: u64,
 ) -> Result<(), String> {
-    force_stop_machine(app, id, Some(generation))
+    force_stop_machine(app, id, Some(generation), None).map(|_| ())
 }
 
-fn force_stop_machine(app: &AppHandle, id: &str, expected: Option<u64>) -> Result<(), String> {
+type Guard = Box<dyn Fn() -> bool + Send>;
+
+fn force_stop_machine(
+    app: &AppHandle,
+    id: &str,
+    expected: Option<u64>,
+    guard: Option<Guard>,
+) -> Result<Option<u64>, String> {
     let (id, handle) = (id.to_string(), app.clone());
     on_main(app, move |_| {
+        if guard.as_ref().is_some_and(|guard| !guard()) {
+            return Ok(None);
+        }
         let machine = SLOTS.with(|slots| {
             slots
                 .borrow()
@@ -1141,7 +1182,11 @@ fn force_stop_machine(app: &AppHandle, id: &str, expected: Option<u64>) -> Resul
                 .map(|slot| (slot.vm.clone(), slot.generation))
         });
         let Some((vm, generation)) = machine else {
-            return Err("This computer isn't running.".to_string());
+            return if guard.is_some() {
+                Ok(None)
+            } else {
+                Err("This computer isn't running.".to_string())
+            };
         };
         // SAFETY: Main thread.
         unsafe {
@@ -1173,7 +1218,7 @@ fn force_stop_machine(app: &AppHandle, id: &str, expected: Option<u64>) -> Resul
                 }
             }));
         }
-        Ok(())
+        Ok(Some(generation))
     })?
 }
 

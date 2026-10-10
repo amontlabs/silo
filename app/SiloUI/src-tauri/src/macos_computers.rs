@@ -121,6 +121,10 @@ struct Entry {
     deleting: bool,
     /// The saved checkpoints, newest first.
     checkpoints: Vec<checkpoints::Meta>,
+    /// Which Start owns the computer's `starting` state: counted up each time one is admitted.
+    /// What a Start does afterwards (running, a failed start's cleanup) only counts while it
+    /// still is the current one.
+    attempt: u64,
     /// A checkpoint operation owns the computer: it can't be started, stopped or deleted.
     operation: Option<checkpoints::Operation>,
     since: Instant,
@@ -138,6 +142,7 @@ impl Entry {
             display_open: false,
             deleting: false,
             checkpoints: Vec::new(),
+            attempt: 0,
             operation: None,
             since: Instant::now(),
             progress_emitted: None,
@@ -219,9 +224,9 @@ impl Registry {
 
     /// Marks a failed start as settled, unless something else already moved the computer on
     /// (a late stop callback that released the machine and set it stopped).
-    fn settle_failed_start(&mut self, id: &str, released: Result<(), String>) {
+    fn settle_failed_start(&mut self, id: &str, attempt: u64, released: Result<(), String>) {
         if let Some(entry) = self.entry(id) {
-            if entry.state == State::Starting {
+            if entry.state == State::Starting && entry.attempt == attempt {
                 let (state, detail) = state_after_failed_start(released);
                 entry.state = state;
                 entry.detail = detail;
@@ -229,6 +234,13 @@ impl Registry {
                 entry.since = Instant::now();
             }
         }
+    }
+
+    /// Whether Start number `attempt` still owns the computer's `starting` state.
+    fn start_is_current(&self, id: &str, attempt: u64) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.record.id == id && entry.state == State::Starting && entry.attempt == attempt
+        })
     }
 
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
@@ -1181,11 +1193,12 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         let pending = entry.record.pending_restore.clone();
         entry.record = started;
         entry.state = State::Starting;
+        entry.attempt += 1;
         entry.detail = None;
         entry.since = Instant::now();
-        (entry.record.clone(), pending)
+        (entry.record.clone(), pending, entry.attempt)
     };
-    let (record, pending) = record;
+    let (record, pending, attempt) = record;
     emit(app);
     watch(app);
     let layout = Layout::new(&data, id);
@@ -1204,7 +1217,7 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     match started {
         Ok(note) => {
             update(app, id, |entry| {
-                if entry.state == State::Starting {
+                if entry.state == State::Starting && entry.attempt == attempt {
                     entry.state = State::Running;
                     entry.since = Instant::now();
                     entry.detail = note;
@@ -1214,8 +1227,8 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         }
         Err(message) => {
             // Nothing may report the computer as stopped while its machine can still run.
-            let released = ensure_released(app, id);
-            registry().settle_failed_start(id, released);
+            let released = ensure_released(app, id, attempt);
+            registry().settle_failed_start(id, attempt, released);
             emit(app);
             Err(message)
         }
@@ -1232,31 +1245,25 @@ fn state_after_failed_start(released: Result<(), String>) -> (State, Option<Stri
     }
 }
 
-/// Stops a machine a failed start left behind and returns only once the framework has released
-/// it, or says that it could not be.
-fn ensure_released(app: &AppHandle, id: &str) -> Result<(), String> {
-    // The machine this start made is the only one the computer can have while it is starting,
-    // so the generation sampled now is the one to stop and to wait for. A query that fails
-    // does not show that there is none: it is asked again, and the stop falls back to the id.
-    let mut generation = None;
+/// Stops the machine of failed Start number `attempt` and returns only once the framework has
+/// released it, or says that it could not be. It acts only while that Start still owns the
+/// computer: once something else has moved the computer on (the machine ended and a later Start
+/// began), the machine is not this Start's to stop.
+fn ensure_released(app: &AppHandle, id: &str, attempt: u64) -> Result<(), String> {
     for _ in 0..5 {
-        let sampled = engine::machine_samples(app).ok();
-        if let Some(samples) = &sampled {
-            match samples.iter().find(|sample| sample.id == id) {
-                None => return Ok(()),
-                Some(sample) => generation = Some(sample.generation),
+        let guard = {
+            let id = id.to_string();
+            move || registry().start_is_current(&id, attempt)
+        };
+        match engine::force_stop_if(app, id, guard) {
+            // No machine, or no longer this Start's.
+            Ok(None) => return Ok(()),
+            Ok(Some(generation)) => {
+                if engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT) {
+                    return Ok(());
+                }
             }
-        }
-        let stopped = match generation {
-            Some(generation) => engine::force_stop_generation(app, id, generation),
-            None => engine::force_stop(app, id),
-        };
-        let released = match generation {
-            Some(generation) => engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT),
-            None => stopped.is_ok() && engine::wait_until_stopped(app, id, FORCED_STOP_WAIT),
-        };
-        if released {
-            return Ok(());
+            Err(_) => std::thread::sleep(Duration::from_millis(250)),
         }
     }
     Err("The computer could not be stopped after it failed to start. Use Force stop.".into())
@@ -2094,17 +2101,15 @@ fn reconcile(app: &AppHandle, samples: &[engine::Sample]) {
     // A stop whose machine is already gone is finished here: the callback that would have
     // done it has already run, or never will.
     let held: Vec<String> = samples.iter().map(|sample| sample.id.clone()).collect();
-    let stalled = registry().stopping_without_machine(&held);
-    if !stalled.is_empty() {
-        // Confirmed against a fresh sample: a machine registered since is not gone. A query
-        // that fails says nothing about the machines, so nothing is settled on it.
-        let Ok(fresh) = engine::machine_samples(app) else {
-            return;
+    for id in registry().stopping_without_machine(&held) {
+        // Checked again, and applied, on the main thread where machines are registered, so a
+        // machine that appeared since the sample is never mistaken for a missing one. A query
+        // that fails settles nothing.
+        let settle = {
+            let (app, id) = (app.clone(), id.clone());
+            move || stop_finished_without_machine(&app, &id)
         };
-        let held: Vec<String> = fresh.into_iter().map(|sample| sample.id).collect();
-        for id in registry().stopping_without_machine(&held) {
-            stop_finished_without_machine(app, &id);
-        }
+        let _ = engine::run_if_no_machine(app, &id, settle);
     }
 }
 
@@ -2525,16 +2530,49 @@ mod tests {
         assert!(release(&mut slots, 2));
     }
 
+    fn registry_starting(attempt: u64) -> (Registry, String) {
+        let (mut registry, id) = registry_with(State::Starting);
+        registry.entries[0].attempt = attempt;
+        (registry, id)
+    }
+
+    #[test]
+    fn a_failed_starts_cleanup_does_nothing_once_a_later_start_owns_the_computer() {
+        // Start 1 failed and its machine's stop callback set the computer stopped; start 2
+        // was admitted. Start 1's settlement and guard must leave start 2 alone.
+        let (mut registry, id) = registry_starting(2);
+        assert!(!registry.start_is_current(&id, 1));
+        assert!(registry.start_is_current(&id, 2));
+        registry.settle_failed_start(&id, 1, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Starting);
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Starting);
+        assert_eq!(registry.entries[0].detail, None);
+        // Its own settlement still works.
+        registry.settle_failed_start(&id, 2, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        assert!(!registry.start_is_current(&id, 2));
+    }
+
+    #[test]
+    fn a_start_is_current_only_while_the_computer_is_starting() {
+        let (mut registry, id) = registry_starting(3);
+        registry.entries[0].state = State::Stopped;
+        assert!(!registry.start_is_current(&id, 3));
+        registry.entries[0].state = State::Running;
+        assert!(!registry.start_is_current(&id, 3));
+    }
+
     #[test]
     fn a_stale_cleanup_of_a_failed_start_does_not_touch_the_state_of_a_later_one() {
         // The failed start's cleanup finishes after the computer was stopped and started
         // again: the new start is `starting`, but its machine's callbacks are its own, and
         // the settle only acts on a computer still in the failed start's own `starting`.
         let (mut registry, id) = registry_with(State::Running);
-        registry.settle_failed_start(&id, Err("still held".into()));
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
         assert_eq!(registry.entries[0].state, State::Running);
         registry.entries[0].state = State::Stopping;
-        registry.settle_failed_start(&id, Ok(()));
+        registry.settle_failed_start(&id, 1, Ok(()));
         assert_eq!(registry.entries[0].state, State::Stopping);
     }
 
@@ -2550,15 +2588,15 @@ mod tests {
     fn a_late_stop_callback_is_not_overwritten_by_a_failed_start_settling() {
         // The machine was released and the computer set stopped before the settle ran.
         let (mut registry, id) = registry_with(State::Stopped);
-        registry.settle_failed_start(&id, Err("still held".into()));
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
         assert_eq!(registry.entries[0].state, State::Stopped);
         assert_eq!(registry.entries[0].detail, None);
         // Otherwise the outcome of releasing decides.
         let (mut registry, id) = registry_with(State::Starting);
-        registry.settle_failed_start(&id, Err("still held".into()));
+        registry.settle_failed_start(&id, 1, Err("still held".into()));
         assert_eq!(registry.entries[0].state, State::Stopping);
         let (mut registry, id) = registry_with(State::Starting);
-        registry.settle_failed_start(&id, Ok(()));
+        registry.settle_failed_start(&id, 1, Ok(()));
         assert_eq!(registry.entries[0].state, State::Stopped);
     }
 
@@ -2601,13 +2639,14 @@ mod tests {
             "02:00:00:00:00:01".into(),
         );
         let id = record.id.clone();
-        let registry = Registry {
+        let mut registry = Registry {
             loaded: true,
             entries: vec![Entry::new(record, state, None)],
             template: None,
             min_disk_gib: store::MIN_DISK_GIB,
             latest_build: None,
         };
+        registry.entries[0].attempt = 1;
         (registry, id)
     }
 
