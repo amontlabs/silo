@@ -6,7 +6,7 @@ import { createNativeDependencyStore, validateDependencyReport } from "./depende
 const checks = [
   { id: "system-os", title: "Supported OS", status: "pass", detail: "Supported.", remediation: null },
   { id: "system-virtualization", title: "Virtualization", status: "pass", detail: "Available.", remediation: null },
-  { id: "runtime-microsandbox", title: "MicroSandbox runtime", status: "pass", detail: "0.7.6", remediation: null },
+  { id: "runtime-microsandbox", title: "Computer runtime", status: "pass", detail: "0.7.6", remediation: null },
   { id: "tool-git", title: "Git", status: "pass", detail: "2.53.0", remediation: null },
   { id: "tool-git-lfs", title: "Git LFS", status: "pass", detail: "3.7.1", remediation: null },
 ] as const

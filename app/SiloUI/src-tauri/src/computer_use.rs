@@ -19,7 +19,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::Read,
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -736,6 +736,81 @@ fn is_computer_use_mount(mount: &Value) -> bool {
 fn read_only(mount: &Value) -> bool {
     mount.pointer("/options/readonly").and_then(Value::as_bool) == Some(true)
         || mount.get("readonly").and_then(Value::as_bool) == Some(true)
+}
+
+/// The host folder a computer's inspected configuration records as its LCU mount source.
+fn lcu_mount_source(config: &Value) -> Option<PathBuf> {
+    config
+        .get("mounts")?
+        .as_array()?
+        .iter()
+        .find(|mount| {
+            mount.get("type").and_then(Value::as_str) == Some("Bind")
+                && mount.get("guest").and_then(Value::as_str) == Some(LCU_GUEST_MOUNT)
+        })?
+        .get("host")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+}
+
+/// Gives a computer's recorded LCU mount source a folder again when it is gone. The runtime
+/// cannot change a computer's mounts after creation and refuses to boot one whose mount
+/// source is missing, yet LCU updates replace the folders computers recorded. The recreated
+/// folder holds the current LCU archive, or nothing when Silo has none yet (the guest then
+/// downloads LCU itself, like a computer created without the mount). Only a direct child of
+/// Silo's LCU folder is recreated; returns whether a folder was.
+pub(crate) fn repair_lcu_mount(config: &Value, root: &Path, current: Option<&Path>) -> bool {
+    let Some(source) = lcu_mount_source(config) else {
+        return false;
+    };
+    if source.is_dir() || source.symlink_metadata().is_ok() {
+        return false;
+    }
+    let (Some(parent), Some(name)) = (source.parent(), source.file_name()) else {
+        return false;
+    };
+    let (Ok(parent), Ok(root)) = (parent.canonicalize(), root.canonicalize()) else {
+        return false;
+    };
+    if parent != root || name.to_string_lossy().starts_with('.') {
+        return false;
+    }
+    let target = root.join(name);
+    let populated = (|| -> std::io::Result<()> {
+        fs::create_dir(&target)?;
+        if let Some(current) = current {
+            for entry in fs::read_dir(current)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    let destination = target.join(entry.file_name());
+                    if fs::hard_link(entry.path(), &destination).is_err() {
+                        fs::copy(entry.path(), &destination)?;
+                        fs::set_permissions(&destination, fs::Permissions::from_mode(0o444))?;
+                    }
+                }
+            }
+        }
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o555))
+    })();
+    if populated.is_err() {
+        let _ = fs::set_permissions(&target, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&target);
+        return false;
+    }
+    true
+}
+
+/// Repairs a missing LCU mount source before the computer boots. Best effort: a computer
+/// whose configuration cannot be read is left to the runtime to report.
+pub(crate) fn repair_lcu_mount_before_start(paths: &RuntimePaths, computer: &str) {
+    let Some(root) = crate::preparation::lcu_root() else {
+        return;
+    };
+    let Ok(inspected) = runtime::inspect_computer(&runtime::ProcessRunner, paths, computer) else {
+        return;
+    };
+    let current = crate::preparation::lcu_folder();
+    repair_lcu_mount(&inspected.config, &root, current.as_deref());
 }
 
 /// Removes the computer-use mount from a configuration about to be exported. Its host

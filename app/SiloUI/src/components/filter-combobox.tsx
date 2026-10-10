@@ -90,7 +90,8 @@ export function FilterCombobox<Value extends string>({
               aria-expanded={open}
               aria-controls={listboxId}
               aria-activedescendant={open && results[activeIndex] ? `${listboxId}-${activeIndex}` : undefined}
-              className={cn("pl-8 text-xs", compact ? "h-7 w-36" : "h-8 w-48")}
+              size={compact ? "sm" : undefined}
+              className={cn("pl-8", compact ? "w-36" : "w-48")}
               placeholder={placeholder}
               value={query}
               onFocus={event => { if (!isRestoringFocus(event.currentTarget)) setOpen(true) }}
@@ -170,7 +171,7 @@ export function FilterCombobox<Value extends string>({
               aria-label={`Remove ${option.label}`}
               onClick={() => removeValue(option.value)}
               className={cn(
-                "grid shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "grid shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground focus-ring",
                 compact ? "size-5" : "size-6",
               )}
             >

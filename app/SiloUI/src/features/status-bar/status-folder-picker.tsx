@@ -80,8 +80,8 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
       <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
         <Button ref={back} variant="ghost" size="icon-xs" aria-label="Back to computers" onClick={onBack}><ArrowLeft /></Button>
         <div className="min-w-0">
-          <h2 className="truncate text-[13px] font-medium" title={`${computer.configuration.name} folders`}>{computer.configuration.name} folders</h2>
-          <p className="text-[11px] text-muted-foreground">Choose a folder to open in {editor}</p>
+          <h2 className="truncate text-ui font-medium" title={`${computer.configuration.name} folders`}>{computer.configuration.name} folders</h2>
+          <p className="text-caption text-muted-foreground">Choose a folder to open in {editor}</p>
         </div>
       </header>
       <div className="grid min-h-0 flex-auto content-start gap-2 overflow-y-auto p-3">
@@ -95,7 +95,7 @@ export function StatusFolderPicker({ computer, editor, onBack, onOpen, listDirec
           {filtered.length > 0 ? <ul aria-label="Folders" className="divide-y">
             {filtered.map((entry) => (
               <li key={entry.name}>
-                <button type="button" className="flex min-h-9 w-full items-center gap-2 px-2.5 text-left text-xs hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => navigate([...segments, entry.name])}>
+                <button type="button" className="flex min-h-9 w-full items-center gap-2 px-2.5 text-left text-xs hover:bg-muted/50 focus-ring-inset" onClick={() => navigate([...segments, entry.name])}>
                   <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate" title={visibleText(entry.name)}>{visibleText(entry.name)}</span>
                   <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />

@@ -44,6 +44,8 @@ use tauri::{AppHandle, Emitter, Manager};
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(180);
 const STOP_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long a runtime child may take to exit after SIGTERM before it is killed.
+const RUNTIME_TERMINATE_GRACE: Duration = Duration::from_secs(2);
 const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 pub(crate) const WORKSPACE_MOUNT: &str = "/workspace";
 const MAX_COMPUTER_COUNT: usize = 64;
@@ -60,8 +62,11 @@ pub fn read_operation_queue() -> operation_gate::OperationQueue {
 /// Ask to cancel a queued or running operation by its queue id. A waiting operation
 /// leaves the queue; a running operation is stopped only when it opted in as cancellable.
 #[tauri::command]
-pub fn cancel_operation(id: u64) -> Result<(), BridgeError> {
-    OPERATIONS.cancel(id).map_err(BridgeError::from)
+pub async fn cancel_operation(id: u64) -> Result<(), BridgeError> {
+    // A running operation that has not yet opted in is awaited for a grace period.
+    tauri::async_runtime::spawn_blocking(move || OPERATIONS.cancel(id).map_err(BridgeError::from))
+        .await
+        .map_err(|_| BridgeError::from("Silo could not cancel the operation."))?
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
@@ -277,11 +282,20 @@ pub(crate) trait RuntimeRunner {
         args: &[String],
         timeout: Duration,
     ) -> Result<CommandOutput, RuntimeError>;
+
+    /// This runner as one that independent calls may share across threads, when it is.
+    fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+        None
+    }
 }
 
 pub(crate) struct ProcessRunner;
 
 impl RuntimeRunner for ProcessRunner {
+    fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+        Some(self)
+    }
+
     fn run(
         &self,
         paths: &RuntimePaths,
@@ -1353,6 +1367,11 @@ fn run_msb_process(
         }
     }
     ensure_runtime_files(paths)?;
+    if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+        if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
+            crate::computer_use::repair_lcu_mount_before_start(paths, computer);
+        }
+    }
     let mut secret_revision = None;
     let general_secrets = if let Some(computer) = github_command_computer(args) {
         secret_revision =
@@ -1613,6 +1632,7 @@ fn spawn_runtime(
     } else {
         None
     };
+    let launched = SystemTime::now();
     let mut worker_lock = if takes_worker_lock(args) {
         Some(runtime_worker_lock(paths, args, timeout)?)
     } else {
@@ -1679,8 +1699,13 @@ fn spawn_runtime(
         lock.mark_inherited_by_child();
     }
     let mut stop_child = |child: &mut std::process::Child| {
-        let _ = child.kill();
-        if child.wait().is_ok() {
+        // Quit and session end keep their own deadlines, so they kill without a grace.
+        let grace = if shutdown::quitting() {
+            Duration::ZERO
+        } else {
+            RUNTIME_TERMINATE_GRACE
+        };
+        if crate::child_process::terminate_child(child, grace).is_ok() {
             if let Some(lock) = worker_lock.as_mut() {
                 lock.mark_child_exited();
             }
@@ -1745,7 +1770,9 @@ fn spawn_runtime(
                     > MAX_OUTPUT_BYTES
             };
             if too_large(stdout_file) || too_large(stderr_file) {
-                stop_child(&mut child);
+                if exited.is_none() {
+                    stop_child(&mut child);
+                }
                 return Err(RuntimeError::Failed {
                     operation: operation_name(args),
                     exit_code: None,
@@ -1803,11 +1830,16 @@ fn spawn_runtime(
         } else {
             &stderr_detail
         };
+        let boot_detail = raw_detail
+            .trim()
+            .is_empty()
+            .then(|| boot_failure_detail(paths, args, launched))
+            .flatten();
         return Err(RuntimeError::Failed {
             operation: operation_name(args),
             // A child ended by a signal has no exit status; report it as -1.
             exit_code: Some(status.code().unwrap_or(-1)),
-            detail: clean_detail(raw_detail, &paths.home),
+            detail: clean_detail(boot_detail.as_deref().unwrap_or(raw_detail), &paths.home),
         });
     }
     Ok(CommandOutput { stdout, stderr })
@@ -1870,6 +1902,31 @@ fn operation_name(args: &[String]) -> String {
         Some("inspect") | Some("list") => "Reading computer state".into(),
         _ => "The computer operation".into(),
     }
+}
+
+/// What the runtime recorded in the computer's `boot-error.json` when a start fails without
+/// printing anything, as long as it was written by this attempt (`since`).
+fn boot_failure_detail(paths: &RuntimePaths, args: &[String], since: SystemTime) -> Option<String> {
+    if !matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+        return None;
+    }
+    let name = args.get(1).filter(|name| validate_name(name).is_ok())?;
+    let file = computer_logs(paths, name).join("boot-error.json");
+    let metadata = fs::metadata(&file).ok()?;
+    if metadata.len() > 64 * 1024 || metadata.modified().ok()? < since {
+        return None;
+    }
+    let record: Value = serde_json::from_slice(&fs::read(&file).ok()?).ok()?;
+    let stage = record.get("stage").and_then(Value::as_str)?;
+    let message = record.get("message").and_then(Value::as_str)?;
+    let hint = if stage == "mount" {
+        " A folder Silo shares with the computer could not be mounted. Restart Silo and start the computer again."
+    } else {
+        ""
+    };
+    Some(format!(
+        "the computer failed to boot ({stage}): {message}.{hint}"
+    ))
 }
 
 fn clean_detail(detail: &str, home: &Path) -> String {
@@ -2774,6 +2831,14 @@ fn clean_expired_logs(
     gate: &operation_gate::OperationGate,
     names: &[String],
 ) {
+    /// Clears the pass flag on every exit, including a panic.
+    struct PassDone;
+    impl Drop for PassDone {
+        fn drop(&mut self) {
+            log_cleanup().running = false;
+        }
+    }
+    let _done = PassDone;
     if let Ok(_guard) = gate.try_device_hidden("Cleaning up expired logs") {
         for name in names {
             if !inspect_computer(runner, paths, name)
@@ -2792,7 +2857,6 @@ fn clean_expired_logs(
             }
         }
     }
-    log_cleanup().running = false;
 }
 
 /// Run `work` for `key` one caller at a time, so concurrent readers (for example two
@@ -2835,19 +2899,31 @@ fn enrich_application_state(
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
-            for computer in &mut source.computers {
-                if matches!(computer.state, ComputerState::Running)
+            let scanned = |computer: &ApplicationComputer| {
+                matches!(computer.state, ComputerState::Running)
                     && !computer.settling
                     && computer.freshness == Freshness::Fresh
-                {
+            };
+            crate::host_push::prefetch(
+                paths,
+                source
+                    .computers
+                    .iter()
+                    .filter(|computer| scanned(computer))
+                    .map(|computer| (computer.configuration.name(), computer.configuration.id())),
+            );
+            let first_deadline = crate::host_push::first_discovery_deadline();
+            for computer in &mut source.computers {
+                if scanned(computer) {
                     let name = computer.configuration.name();
                     let key = format!("{}:{}", paths.home.display(), computer.configuration.id());
                     match single_flight(key, || {
-                        crate::host_push::discover(
+                        crate::host_push::discover_until(
                             paths,
                             name,
                             computer.configuration.id(),
                             refresh,
+                            first_deadline,
                         )
                     }) {
                         Ok(repositories) => computer.repositories = repositories,
@@ -4130,6 +4206,34 @@ fn normalize_request_id(request_id: Option<String>) -> Result<String, String> {
     Ok(request_id)
 }
 
+/// The one computer a setup adds, removes or edits, when it concerns exactly one.
+fn changed_computer(
+    previous: &ComputerConfigurationRequest,
+    request: &ComputerConfigurationRequest,
+) -> Option<String> {
+    let mut changed: Vec<&str> = Vec::new();
+    for computer in &request.computers {
+        if previous.computers.iter().all(|old| old != computer) {
+            changed.push(computer.name());
+        }
+    }
+    for computer in &previous.computers {
+        if request
+            .computers
+            .iter()
+            .all(|new| new.id() != computer.id())
+        {
+            changed.push(computer.name());
+        }
+    }
+    changed.sort_unstable();
+    changed.dedup();
+    match changed.as_slice() {
+        [only] => Some((*only).to_owned()),
+        _ => None,
+    }
+}
+
 /// Validate, save and verify a finalized configuration with the shared journal,
 /// progress events and completion outcome. The caller holds the operation gate and
 /// supplies the exact `request` to persist (a whole-list save or a targeted change
@@ -4169,6 +4273,9 @@ fn apply_configuration_with_progress(
             },
         )
     });
+    let setup_computer = changed_computer(&previous, &request)
+        .or_else(|| retry_computer.clone())
+        .unwrap_or_default();
     let journal = Mutex::new(ActivityJournal::start(paths, request_id)?);
     let publish = |event: ComputerConfigurationProgress| {
         let mut journal = journal.lock().unwrap_or_else(|error| error.into_inner());
@@ -4182,7 +4289,12 @@ fn apply_configuration_with_progress(
         }
         let _ = app.emit_to("main", "silo://computer-configuration-progress", &event);
     };
-    publish(computer_progress(request_id, "setup-started", "", 0));
+    publish(computer_progress(
+        request_id,
+        "setup-started",
+        &setup_computer,
+        0,
+    ));
     let progress = |step: &str, computer: &str, fraction: u8| {
         publish(computer_progress(request_id, step, computer, fraction));
     };
@@ -4215,7 +4327,7 @@ fn apply_configuration_with_progress(
         } else {
             "setup-failed"
         },
-        "",
+        &setup_computer,
         0,
     );
     if let Err(error) = &result {
@@ -4231,7 +4343,7 @@ fn apply_configuration_with_progress(
             .events
             .back()
             .cloned();
-        if let Some(last) = last {
+        if let Some(last) = last.filter(|last| !last.computer.is_empty()) {
             outcome.computer = last.computer;
         }
         outcome.message = format!("Computer setup failed: {}", report.summary);
@@ -4387,6 +4499,9 @@ enum Unread {
     Failed(RuntimeError),
 }
 
+/// Most computers a read inspects at once.
+const READ_PARALLELISM: usize = 4;
+
 const INVENTORY_MISMATCH: &str = "Silo's saved computer configuration does not match its managed runtime state. No computer operation was performed.";
 
 /// List and inspect every configured computer. Only a failure that no single computer
@@ -4415,37 +4530,69 @@ fn read_rows(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Vec<Row
         let listed = listed_names.contains(configuration.name());
         checkpoints::pending_view(paths, configuration.id(), listed).unwrap_or(!listed)
     };
-    let mut rows = Vec::with_capacity(metadata.computers.len());
+    let mut pending = Vec::new();
+    let mut rows: Vec<Option<Row>> = Vec::with_capacity(metadata.computers.len());
     for configuration in metadata.computers.iter().cloned() {
         let listed = listed_names.contains(configuration.name());
-        let row = match (from_record(&configuration), listed) {
-            (true, false) => Row {
+        rows.push(match (from_record(&configuration), listed) {
+            (true, false) => Some(Row {
                 computer: checkpoints::pending_computer(configuration)?,
                 unread: None,
-            },
-            (true, true) | (false, false) => Row {
+            }),
+            (true, true) | (false, false) => Some(Row {
                 computer: unread_computer(configuration),
                 unread: Some(Unread::Mismatch),
-            },
+            }),
             (false, true) => {
-                match inspect_computer(runner, paths, configuration.name()).and_then(|inspected| {
-                    ensure_managed(&inspected)?;
-                    Ok(inspected)
-                }) {
-                    Ok(inspected) => Row {
-                        computer: application_computer(paths, configuration, &inspected),
-                        unread: None,
-                    },
-                    Err(error) => Row {
-                        computer: unread_computer(configuration),
-                        unread: Some(Unread::Failed(error)),
-                    },
-                }
+                pending.push((rows.len(), configuration));
+                None
             }
-        };
-        rows.push(row);
+        });
     }
-    Ok(rows)
+    let inspect = |configuration: &ComputerConfiguration, runner: &dyn RuntimeRunner| {
+        inspect_computer(runner, paths, configuration.name()).and_then(|inspected| {
+            ensure_managed(&inspected)?;
+            Ok(inspected)
+        })
+    };
+    let mut inspections = Vec::with_capacity(pending.len());
+    match runner.concurrent() {
+        Some(shared) => {
+            for batch in pending.chunks(READ_PARALLELISM) {
+                std::thread::scope(|scope| {
+                    let handles: Vec<_> = batch
+                        .iter()
+                        .map(|(_, configuration)| scope.spawn(|| inspect(configuration, shared)))
+                        .collect();
+                    for handle in handles {
+                        inspections.push(handle.join().unwrap_or_else(|_| {
+                            Err(RuntimeError::Unavailable(
+                                "Reading the computer stopped unexpectedly.".into(),
+                            ))
+                        }));
+                    }
+                });
+            }
+        }
+        None => inspections.extend(
+            pending
+                .iter()
+                .map(|(_, configuration)| inspect(configuration, runner)),
+        ),
+    }
+    for ((index, configuration), inspection) in pending.into_iter().zip(inspections) {
+        rows[index] = Some(match inspection {
+            Ok(inspected) => Row {
+                computer: application_computer(paths, configuration, &inspected),
+                unread: None,
+            },
+            Err(error) => Row {
+                computer: unread_computer(configuration),
+                unread: Some(Unread::Failed(error)),
+            },
+        });
+    }
+    Ok(rows.into_iter().flatten().collect())
 }
 
 /// Publish rows. `settled(id)` is true when no operation touched the computer during the read.
@@ -4699,7 +4846,9 @@ fn application_source_for_computers(
 ) -> Result<ApplicationSource, RuntimeError> {
     let secrets = crate::secrets::snapshot().map_err(RuntimeError::Unavailable)?;
     // Journal read failures are reported as an Activity warning by read() below.
-    let mut failures = runtime_activity::failures(paths).unwrap_or_default();
+    let (mut failures, history) = runtime_activity::failures_and_read(paths);
+    let mut pending_revocations =
+        crate::secrets::pending_names_by_computer().map_err(RuntimeError::Unavailable)?;
     for computer in &mut computers {
         computer.lifecycle_failure = failures.remove(computer.configuration.id());
         match checkpoints::load(paths, computer.configuration.id()) {
@@ -4725,9 +4874,9 @@ fn application_source_for_computers(
                     });
             }
         }
-        computer.pending_secret_revocations =
-            crate::secrets::pending_names(computer.configuration.name())
-                .map_err(RuntimeError::Unavailable)?;
+        computer.pending_secret_revocations = pending_revocations
+            .remove(computer.configuration.name())
+            .unwrap_or_default();
         if !computer.pending_secret_revocations.is_empty() {
             let warning = secret_revocation_warning(&computer.pending_secret_revocations);
             if let Some(attention) = &mut computer.attention {
@@ -4753,7 +4902,7 @@ fn application_source_for_computers(
             .filter_map(|secret| secret["name"].as_str().map(str::to_owned))
             .collect();
     }
-    let mut activities = runtime_activity::read(paths)?;
+    let mut activities = history?;
     activities.extend(crate::secrets::activities().map_err(RuntimeError::Unavailable)?);
     activities.sort_by(|a, b| b["occurredAt"].as_str().cmp(&a["occurredAt"].as_str()));
     activities.truncate(200);
@@ -9859,6 +10008,67 @@ exit 9
     }
 
     #[test]
+    fn a_concurrent_runner_inspects_computers_together_and_keeps_their_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _test_state = crate::test_support::global_state();
+        struct Concurrent {
+            paths: RuntimePaths,
+            in_flight: AtomicUsize,
+            peak: AtomicUsize,
+        }
+        impl RuntimeRunner for Concurrent {
+            fn concurrent(&self) -> Option<&(dyn RuntimeRunner + Sync)> {
+                Some(self)
+            }
+            fn run(
+                &self,
+                _paths: &RuntimePaths,
+                args: &[String],
+                _timeout: Duration,
+            ) -> Result<CommandOutput, RuntimeError> {
+                let value = if args[0] == "inspect" {
+                    let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                    self.peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(200));
+                    self.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    let configuration = if args[1] == "dev" {
+                        computer()
+                    } else {
+                        second_computer()
+                    };
+                    inspect_named(&self.paths, &configuration, "Running")
+                } else {
+                    json!([{"name": "dev"}, {"name": "work"}])
+                };
+                Ok(CommandOutput {
+                    stdout: value.to_string(),
+                    stderr: String::new(),
+                })
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let runner = Concurrent {
+            paths: paths.clone(),
+            in_flight: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+        };
+        let rows = read_rows(&runner, &paths).unwrap();
+        assert_eq!(runner.peak.load(Ordering::SeqCst), 2);
+        let names: Vec<_> = rows
+            .iter()
+            .map(|row| row.computer.configuration.name())
+            .collect();
+        assert_eq!(names, ["dev", "work"]);
+        assert!(rows.iter().all(|row| row.unread.is_none()));
+    }
+
+    #[test]
     fn health_checks_budget_each_runtime_call_instead_of_the_whole_reading() {
         let _test_state = crate::test_support::global_state();
         struct SlowRunner {
@@ -12884,6 +13094,40 @@ exit 9
         assert!(error.to_string().contains("Stop computer 'dev'"));
         assert_eq!(runner.calls.lock().unwrap().len(), 1);
     }
+
+    fn write_boot_error(paths: &RuntimePaths, name: &str, record: &str) {
+        let logs = computer_logs(paths, name);
+        fs::create_dir_all(&logs).unwrap();
+        fs::write(logs.join("boot-error.json"), record).unwrap();
+    }
+
+    const MOUNT_BOOT_ERROR: &str = r#"{"t":"2026-10-07T10:00:00Z","stage":"mount","errno":2,"message":"mount opt_silo_lc_7be8715d: No such file or directory (os error 2)"}"#;
+
+    #[test]
+    fn a_silent_boot_failure_reports_the_recorded_mount_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let before = SystemTime::now() - Duration::from_secs(60);
+        write_boot_error(&paths, "dev", MOUNT_BOOT_ERROR);
+        let detail = boot_failure_detail(&paths, &["start".into(), "dev".into()], before).unwrap();
+        assert!(detail.contains("failed to boot (mount)"), "{detail}");
+        assert!(detail.contains("opt_silo_lc_7be8715d"), "{detail}");
+        assert!(detail.contains("Restart Silo"), "{detail}");
+        assert!(!clean_detail(&detail, &paths.home).contains("did not provide"));
+    }
+
+    #[test]
+    fn a_boot_error_from_an_earlier_attempt_or_another_command_is_not_reported() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_boot_error(&paths, "dev", MOUNT_BOOT_ERROR);
+        let after = SystemTime::now() + Duration::from_secs(60);
+        assert!(boot_failure_detail(&paths, &["start".into(), "dev".into()], after).is_none());
+        let before = SystemTime::now() - Duration::from_secs(60);
+        assert!(boot_failure_detail(&paths, &["stop".into(), "dev".into()], before).is_none());
+        write_boot_error(&paths, "dev", "{ truncated");
+        assert!(boot_failure_detail(&paths, &["start".into(), "dev".into()], before).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -13108,6 +13352,39 @@ mod change_configuration_tests {
             runtime_storage_gib: 10,
             desktop: None,
         }
+    }
+
+    #[test]
+    fn a_setup_names_the_one_computer_it_changes() {
+        const A: &str = "00000000-0000-4000-8000-00000000000a";
+        const B: &str = "00000000-0000-4000-8000-00000000000b";
+        let request = |computers| ComputerConfigurationRequest {
+            schema_version: 1,
+            computers,
+        };
+        let (one, two) = (computer(A, "one", 2), computer(B, "two", 2));
+        let empty = request(vec![]);
+        assert_eq!(
+            changed_computer(&empty, &request(vec![one.clone()])).as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(&request(vec![one.clone()]), &empty).as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(
+                &request(vec![one.clone(), two.clone()]),
+                &request(vec![computer(A, "one", 3), two.clone()])
+            )
+            .as_deref(),
+            Some("one")
+        );
+        assert_eq!(
+            changed_computer(&request(vec![one.clone()]), &request(vec![one.clone()])),
+            None
+        );
+        assert_eq!(changed_computer(&empty, &request(vec![one, two])), None);
     }
 
     fn upsert(

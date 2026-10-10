@@ -1,6 +1,7 @@
-import { AlertCircle, Check, Clock3, LoaderCircle } from "lucide-react"
+import { AlertCircle, Check, Clock3 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import type { OnboardingStep, OnboardingViewModel } from "@/features/onboarding/model/onboarding-state"
 
 interface OnboardingFooterProps {
@@ -31,7 +32,7 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
   const statusText = completed
     ? "Complete · Silo is ready"
     : checkingDependencies
-      ? "Checking · Verifying required compatibility"
+      ? "Checking · Making sure this device can run computers"
     : viewModel.dependencyStatus === "failed"
       ? "Failed · Resolve dependency checks to continue"
       : failed
@@ -46,14 +47,16 @@ export function OnboardingFooter({ activeStep, viewModel, onBack, onContinue, co
               : completedStepMessage ? completedStepMessage
               : isReview && viewModel.finishEnabled ? "Ready · Finish setup"
               : activeStep === "dependencies" && viewModel.dependencyStatus === "succeeded" ? "Ready · Continue to configure computers"
-                : "Not started · Continue to start this step"
+                : activeStep === "computers" ? "Not started · Continue to create your computers. The first time can take a few minutes."
+                : activeStep === "github" ? "Not started · Continue to save GitHub access and Git identities"
+                : "Not started · Continue to begin this step"
 
   return (
     <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-border bg-muted/20 px-4 py-3 sm:px-6" aria-label="Onboarding actions">
       <div className="flex min-w-0 flex-[1_1_12rem] items-start gap-2 text-xs leading-5 text-muted-foreground" aria-live="polite">
         {(failed || blocker?.action === "start") && !completed ? <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-          : complete || stepComplete ? <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            : checkingDependencies || runningItem ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+          : complete || stepComplete ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
+            : checkingDependencies || runningItem ? <Spinner className="mt-0.5 shrink-0" />
               : <Clock3 className="mt-0.5 size-3.5 shrink-0" />}
         <span className="break-words">{statusText}</span>
       </div>

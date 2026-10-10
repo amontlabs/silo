@@ -54,7 +54,7 @@ export function configurationStepText(event: SiloProgressEvent | undefined): str
     case "computer-disk-preparation": return "Creating disks"
     case "computer-image-preparation": return "Checking the computer image"
     case "computer-image-import": return IMAGE_IMPORT_STEP
-    case "computer-image-wait": return "Waiting for the VM image"
+    case "computer-image-wait": return "Waiting for the computer image"
     case "chatgpt-app-wait": return "Waiting for ChatGPT for Linux"
     case "chatgpt-app-download": return chatGptDownloadText(event)
     case "chatgpt-app-failed": return event.message ? `ChatGPT for Linux failed: ${event.message}` : "ChatGPT for Linux download failed"

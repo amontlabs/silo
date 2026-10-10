@@ -3,8 +3,10 @@ import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
-import { dismissOperationToast, errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
-import { baseName, formatBytes, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
+import { dismissOperationToast, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
+import { runToastedOperation } from "@/lib/run-toasted-operation"
+import { formatDecimalBytes } from "@/lib/format-bytes"
+import { baseName, summarizeNames, type ConflictPolicy, type FileTransferActions, type TransferProgress } from "@/features/application/model/file-transfer"
 
 export interface FileTransferControls {
   /** True while a transfer runs: the computer's side allows one at a time. */
@@ -51,7 +53,7 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
       const known = progress.bytesTotal > 0
       showOperationProgress(current.id, {
         title: `${current.verb} ${current.label}`,
-        step: [progress.name && `“${progress.name}”`, progress.fileCount > 1 && `${progress.fileIndex + 1} of ${progress.fileCount}`, known && `${formatBytes(progress.bytesDone)} of ${formatBytes(progress.bytesTotal)}`].filter(Boolean).join(" · "),
+        step: [progress.name && `“${progress.name}”`, progress.fileCount > 1 && `${progress.fileIndex + 1} of ${progress.fileCount}`, known && `${formatDecimalBytes(progress.bytesDone)} of ${formatDecimalBytes(progress.bytesTotal)}`].filter(Boolean).join(" · "),
         progress: known ? progress.bytesDone / progress.bytesTotal : null,
         cancel: { onCancel: () => void api.cancel(current.id).catch(() => {}) },
       })
@@ -74,9 +76,7 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
     const id = nextId()
     active.current = { id, label, verb }
     try {
-      await work(id)
-    } catch (error) {
-      showOperationFailure(id, `${verb === "Uploading" ? "Upload" : "Download"} failed`, { description: errorMessage(error), native: false })
+      await runToastedOperation({ id, work: () => work(id), failure: { title: `${verb === "Uploading" ? "Upload" : "Download"} failed`, native: false } })
     } finally {
       active.current = null
       running.current = false
@@ -160,7 +160,7 @@ function ConflictDialog({ pending }: { pending: PendingConflict | null }) {
         event.preventDefault()
         restoreFocus(previousFocus.current)
       }} className="fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 gap-2 rounded-xl border border-border bg-popover p-4 text-xs text-popover-foreground shadow-2xl outline-none">
-        <AlertDialog.Title className="text-[13px] font-medium">{subject} in this folder</AlertDialog.Title>
+        <AlertDialog.Title className="text-ui font-medium">{subject} in this folder</AlertDialog.Title>
         <AlertDialog.Description className="text-muted-foreground">
           {names.length > 1 && <span className="mb-1 block max-h-24 overflow-y-auto break-all">{names.map(name => `“${name}”`).join(", ")}</span>}
           Replace {names.length === 1 ? "it" : "them"} with the files you chose, or keep both and add a number to the new {names.length === 1 ? "name" : "names"}.

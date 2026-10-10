@@ -791,6 +791,35 @@ fn document_path() -> Option<PathBuf> {
 fn load(app: &tauri::AppHandle) -> Result<Document, String> {
     load_at(&path(app)?)
 }
+type FileIdentity = (u64, Option<std::time::SystemTime>, u64, i64, i64);
+static OBSERVED: Mutex<Option<(std::path::PathBuf, FileIdentity, Document)>> = Mutex::new(None);
+fn file_identity(path: &std::path::Path) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::metadata(path).ok()?;
+    Some((
+        metadata.len(),
+        metadata.modified().ok(),
+        metadata.ino(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ))
+}
+/// The saved configuration for a state refresh: reparsed only when the file changed (or
+/// was saved by this process), since every refresh reads it.
+fn load_observed(path: &std::path::Path) -> Result<Document, String> {
+    let identity = file_identity(path);
+    let mut observed = OBSERVED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let (Some(identity), Some((cached_path, cached_identity, document))) =
+        (identity, observed.as_ref())
+    {
+        if cached_path == path && *cached_identity == identity {
+            return Ok(document.clone());
+        }
+    }
+    let document = load_at(path)?;
+    *observed = identity.map(|identity| (path.to_path_buf(), identity, document.clone()));
+    Ok(document)
+}
 const MAX_CONFIGURATION_BYTES: usize = 16 * 1024 * 1024;
 fn load_at(path: &std::path::Path) -> Result<Document, String> {
     match fs::File::open(path) {
@@ -841,8 +870,10 @@ fn save_at(p: &std::path::Path, d: &Document) -> Result<(), String> {
     f.as_file()
         .sync_all()
         .map_err(|_| "Cannot sync GitHub configuration.")?;
+    *OBSERVED.lock().unwrap_or_else(PoisonError::into_inner) = None;
     f.persist(p)
         .map_err(|_| "Cannot save GitHub configuration.")?;
+    *OBSERVED.lock().unwrap_or_else(PoisonError::into_inner) = None;
     fs::File::open(parent)
         .and_then(|f| f.sync_all())
         .map_err(|_| "Cannot sync GitHub configuration directory.".to_string())?;
@@ -1139,7 +1170,11 @@ fn device_identity() -> Option<crate::device_identity::DeviceIdentity> {
     })
 }
 pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
-    let mut value = observed_snapshot(load(app)?, observed_credential(), device_identity());
+    let mut value = observed_snapshot(
+        load_observed(&path(app)?)?,
+        observed_credential(),
+        device_identity(),
+    );
     // Saved choices for a computer that has no runtime yet are not a failure; they apply
     // once it starts.
     if let Some(operations) = value["computerOperations"].as_array_mut() {
@@ -3431,6 +3466,36 @@ pub async fn retry_github_configuration(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn state_refreshes_reparse_the_configuration_only_when_it_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("github.json");
+        let write = |revision: u64| {
+            let document = super::Document {
+                revision,
+                ..super::Document::default()
+            };
+            super::save_at(&path, &document).unwrap();
+        };
+        write(1);
+        assert_eq!(super::load_observed(&path).unwrap().revision, 1);
+        // An unchanged file keeps its cached reading.
+        assert_eq!(
+            super::OBSERVED.lock().unwrap().as_ref().unwrap().1,
+            super::file_identity(&path).unwrap()
+        );
+        // A change in place, even one that keeps the size and modification time, is seen.
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let modified = file.metadata().unwrap().modified().unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, original.replace("\"revision\":1", "\"revision\":2")).unwrap();
+        file.set_modified(modified).unwrap();
+        assert_eq!(super::load_observed(&path).unwrap().revision, 2);
+        // A save replaces the file and the next read sees it.
+        write(3);
+        assert_eq!(super::load_observed(&path).unwrap().revision, 3);
+    }
 
     #[test]
     fn migrated_repository_settings_load() {

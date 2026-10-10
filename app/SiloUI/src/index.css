@@ -10,19 +10,22 @@
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-terminal: var(--terminal);
+    --color-terminal-foreground: var(--terminal-foreground);
+    --text-caption: 0.6875rem;
+    --text-caption--line-height: 1rem;
+    --text-ui: 0.8125rem;
+    --text-ui--line-height: 1rem;
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -64,23 +67,23 @@
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.48 0.18 27.325);
+    /* Status text and dots: success and warning meet WCAG AA as small text on every neutral surface. */
+    --success: oklch(0.508 0.118 165.612);
+    --success-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.555 0.163 48.998);
+    --warning-foreground: oklch(0.985 0 0);
+    --terminal: oklch(0.141 0.005 285.823);
+    --terminal-foreground: oklch(0.92 0.004 286.32);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --ring: oklch(0.55 0 0);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.97 0 0);
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar-ring: oklch(0.55 0 0);
 }
 
 html.dark {
@@ -100,18 +103,17 @@ html.dark {
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.78 0.12 22.216);
+    --success: oklch(0.765 0.177 163.223);
+    --success-foreground: oklch(0.205 0 0);
+    --warning: oklch(0.828 0.189 84.429);
+    --warning-foreground: oklch(0.205 0 0);
+    --terminal: oklch(0.141 0.005 285.823);
+    --terminal-foreground: oklch(0.92 0.004 286.32);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
@@ -125,8 +127,19 @@ html.dark {
   body {
     @apply m-0 bg-background text-foreground antialiased;
     }
-  button:not(:disabled), [role="button"]:not(:disabled) {
+  button, [role="button"] {
+    cursor: default;
+    }
+  a[href] {
     cursor: pointer;
+    }
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    }
+  input, textarea, [contenteditable]:not([contenteditable="false"]), pre, code, kbd, samp, .font-mono, .select-text {
+    -webkit-user-select: text;
+    user-select: text;
     }
   html {
     @apply font-sans;
@@ -134,6 +147,36 @@ html.dark {
   ::selection {
     @apply bg-primary/20;
     }
+}
+
+/* The one keyboard focus indicator for custom focusable elements; form fields and buttons carry
+   their own border and ring through the shared primitives. */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@utility focus-ring-inset {
+  outline: none;
+  &:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+}
+
+/* The one hover and keyboard-focus tint for rows in lists. */
+@utility row-hover {
+  @media (hover: hover) {
+    &:hover {
+      background-color: color-mix(in oklab, var(--muted) 40%, transparent);
+    }
+  }
+  &:focus-within {
+    background-color: color-mix(in oklab, var(--muted) 40%, transparent);
+  }
 }
 
 [data-appearance="borderless"] {
@@ -163,27 +206,27 @@ html.dark {
 }
 
 .collapsible-content-motion[data-state="open"] {
-  animation: collapsible-content-reveal 180ms ease-out;
+  animation: collapsible-content-reveal 120ms ease-out;
 }
 
 .collapsible-content-motion[data-state="closed"] {
-  animation: collapsible-content-collapse 180ms ease-in;
+  animation: collapsible-content-collapse 100ms ease-in;
 }
 
 .file-pane-content-motion[data-state="open"] {
-  animation: file-pane-content-reveal 180ms ease-out;
+  animation: file-pane-content-reveal 120ms ease-out;
 }
 
 .file-pane-content-motion[data-state="closed"] {
-  animation: file-pane-content-collapse 140ms ease-in;
+  animation: file-pane-content-collapse 100ms ease-in;
 }
 
 [data-files-layout][data-file-tree-state="open"] [data-files-pane-scroll="repositories"] {
-  animation: suppress-repository-overflow-after-tree-expand 200ms;
+  animation: suppress-repository-overflow-after-tree-expand 120ms;
 }
 
 [data-files-layout][data-file-tree-state="closed"] [data-files-pane-scroll="repositories"] {
-  animation: suppress-repository-overflow-after-tree-collapse 200ms;
+  animation: suppress-repository-overflow-after-tree-collapse 120ms;
 }
 
 @keyframes collapsible-content-reveal {
@@ -219,6 +262,22 @@ html.dark {
     opacity: 0;
     clip-path: inset(0 0 0.5rem 0);
     transform: translateY(-0.25rem);
+  }
+}
+
+/* The status panel's size; the native window is resized to its content up to this height
+   (desktop/use-status-panel-size.ts), and the page inside leaves room for the panel's border. */
+@layer components {
+  .status-panel {
+    --status-panel-width: 380px;
+    --status-panel-height: 520px;
+    --status-panel-border: 2px;
+    width: var(--status-panel-width);
+    max-height: var(--status-panel-height);
+  }
+
+  .status-panel-page {
+    max-height: calc(var(--status-panel-height) - var(--status-panel-border));
   }
 }
 
@@ -413,4 +472,11 @@ html.native-status body {
   [data-files-pane-scroll="repositories"] {
     animation: none !important;
   }
+}
+
+/* Toast text, such as an error message, can be selected and copied. */
+.silo-toaster [data-sonner-toast] [data-title],
+.silo-toaster [data-sonner-toast] [data-description] {
+  -webkit-user-select: text;
+  user-select: text;
 }

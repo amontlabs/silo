@@ -116,6 +116,27 @@ class SystemUpdateTests(unittest.TestCase):
             sender.join(timeout=2)
             self.assertFalse(sender.is_alive())
 
+    def test_update_must_be_requested_by_the_process_that_started_the_helper(self):
+        # pkexec execs the helper, so the helper (300) is a direct child of silo-ui (100).
+        parents = {300: 100, 301: 200, 200: 100, 400: 50}
+        exes = {'/proc/200/exe': '/usr/bin/pkexec', '/proc/50/exe': '/usr/bin/python3'}
+        times = {100: 'a', 101: 'c', 50: 'b'}
+
+        def requested(pid, helper_pid, started=times.__getitem__):
+            return helper.requested_by(pid, helper_pid, parents.__getitem__, lambda path: exes.get(path, '/usr/bin/silo-ui'), started)
+
+        self.assertTrue(requested(100, 300))
+        self.assertTrue(requested(100, 301))
+        self.assertFalse(requested(101, 300))
+        self.assertTrue(requested(50, 400))
+        self.assertFalse(requested(100, 400))
+        def vanished(pid):
+            raise FileNotFoundError(pid)
+
+        self.assertFalse(requested(100, 300, started=vanished))
+        reused = iter(['a', 'z'])
+        self.assertFalse(requested(100, 300, started=lambda pid: next(reused)))
+
     def test_running_process_exception_requires_exact_live_processes_and_root_owned_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp, 'permit')

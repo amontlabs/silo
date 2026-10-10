@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
+import { isMac } from "@/lib/platform"
+import { errorMessage } from "@/lib/error-message"
 import { type OperationStep, dismissOperationToast, showActionFailure, showOperationFailure, showOperationNotice, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 import type { ApplicationSource } from "@/features/application/model/application-source"
 import type { BackupController, BackupPhase, VerifiedExport } from "@/features/application/model/backup-source"
@@ -9,11 +11,7 @@ import { ImportPopover, type ImportReview } from "@/features/application/compone
  * notification tied to backend truth across navigation. */
 const TRANSFER_TOAST_ID = "backup-operation"
 
-const revealLabel = () => (navigator.platform.startsWith("Mac") ? "Show in Finder" : "Show in folder")
-
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
-}
+const revealLabel = () => (isMac() ? "Show in Finder" : "Show in folder")
 
 const stepState: Record<BackupPhase["tone"], OperationStep["state"]> = { succeeded: "done", running: "current", waiting: "pending", failed: "failed" }
 
@@ -66,7 +64,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     }
     let destination: string | null
     try { destination = await controller.actions.chooseDestination() }
-    catch (error) { showOperationFailure(TRANSFER_TOAST_ID, "Could not choose a folder", { description: `${errorText(error)} No export was created.`, native: false }); return null }
+    catch (error) { showOperationFailure(TRANSFER_TOAST_ID, "Could not choose a folder", { description: `${errorMessage(error)} No export was created.`, native: false }); return null }
     if (!destination) return null
     // Another export or import is running: leave its toast and Retry untouched (E-52).
     if (backupRef.current.state.operation?.kind === "running") return null
@@ -87,7 +85,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     inspectionRef.current = inspection
     let result
     try { result = await controller.actions.chooseArchive(() => { if (!inspection.signal.aborted) setReview({ kind: "checking" }) }, inspection.signal) }
-    catch (error) { if (!inspection.signal.aborted) setReview({ kind: "invalid", reason: errorText(error) }); return }
+    catch (error) { if (!inspection.signal.aborted) setReview({ kind: "invalid", reason: errorMessage(error) }); return }
     // A review closed (or replaced) while the file was checked ignores the late result.
     if (inspection.signal.aborted) return
     inspectionRef.current = null
@@ -144,7 +142,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
       const title = isExport ? (archive.checkpointName ? "Checkpoint exported" : "Exported") : `Imported ${operation.targetName ?? archive.computers[0] ?? "computer"}`
       const action = isExport
         ? { label: revealLabel(), onClick: () => {
-            backupRef.current.actions.revealArchive(archive).catch((error) => showActionFailure("Could not reveal the export", errorText(error), undefined, { native: false }))
+            backupRef.current.actions.revealArchive(archive).catch((error) => showActionFailure("Could not reveal the export", errorMessage(error), undefined, { native: false }))
           } }
         : (() => {
             // Resolve the computer when Open is clicked: the application snapshot can

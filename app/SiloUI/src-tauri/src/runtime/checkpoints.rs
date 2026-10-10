@@ -3047,13 +3047,16 @@ pub(crate) fn remove_deleted_snapshots(
         .into_iter()
         .map(|(key, _)| key)
         .collect();
+    let group = record.snapshot_group.as_deref().unwrap_or(computer);
     if referenced.is_empty() && record.snapshot_group.is_none() {
         if let Err(failure) = retry_deleted_snapshots(runner, paths) {
             eprintln!("Previously deleted checkpoint data was kept: {failure}");
         }
+        if valid_snapshot_group(group) {
+            native::remove_empty_group(paths, group);
+        }
         return Ok(());
     }
-    let group = record.snapshot_group.as_deref().unwrap_or(computer);
     let mut queued = load_cleanup(paths)?;
     let inventory = native::inventory(runner, paths)?;
     for member in inventory {
@@ -3070,6 +3073,9 @@ pub(crate) fn remove_deleted_snapshots(
     // The durable journal keeps failed removals; the computer deletion can finish.
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
+    }
+    if valid_snapshot_group(group) {
+        native::remove_empty_group(paths, group);
     }
     Ok(())
 }
@@ -6562,6 +6568,86 @@ mod tests {
         assert_eq!(store.names(), [A, B]);
         delete_checkpoint_with(&store, &paths, FORK_ID, B).unwrap();
         assert!(store.names().is_empty());
+    }
+
+    fn group_directory(paths: &RuntimePaths, group: &str, head: &str) -> std::path::PathBuf {
+        let directory = paths.home.join("snapshots").join(group);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("group.json"), head).unwrap();
+        fs::write(directory.join(".group.lock"), "").unwrap();
+        directory
+    }
+
+    const EMPTY_GROUP: &str = r#"{"schema":"microsandbox.snapshot-group/1","head":null}"#;
+
+    #[test]
+    fn deleting_a_computer_removes_its_empty_snapshot_group() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let mut record = Record::default();
+        record.snapshot_group = Some("dev".into());
+        let paths = delete_fixture(&directory, vec![], None);
+        save(&paths, ID, &record).unwrap();
+        let own = group_directory(&paths, "dev", EMPTY_GROUP);
+        let other = group_directory(&paths, "other", EMPTY_GROUP);
+        let store = Store::new(vec![]);
+        remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
+        assert!(!own.exists());
+        assert!(other.exists());
+    }
+
+    #[test]
+    fn an_empty_snapshot_group_is_kept_while_it_holds_anything_else_or_is_locked() {
+        use std::os::unix::io::AsRawFd;
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let populated = group_directory(&paths, "populated", EMPTY_GROUP);
+        fs::create_dir(populated.join("snap_a")).unwrap();
+        native::remove_empty_group(&paths, "populated");
+        assert!(populated.join("snap_a").exists());
+
+        let headed = group_directory(&paths, "headed", r#"{"head":"snap_a"}"#);
+        native::remove_empty_group(&paths, "headed");
+        assert!(headed.exists());
+
+        let locked = group_directory(&paths, "locked", EMPTY_GROUP);
+        let holder = fs::File::open(locked.join(".group.lock")).unwrap();
+        assert_eq!(
+            unsafe { libc::flock(holder.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        native::remove_empty_group(&paths, "locked");
+        assert!(locked.exists());
+        drop(holder);
+        native::remove_empty_group(&paths, "locked");
+        assert!(!locked.exists());
+
+        let unlocked = group_directory(&paths, "unlocked", EMPTY_GROUP);
+        fs::remove_file(unlocked.join(".group.lock")).unwrap();
+        native::remove_empty_group(&paths, "unlocked");
+        assert!(unlocked.join("group.json").exists());
+
+        let raced = group_directory(&paths, "raced", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "raced", || {
+            fs::write(raced.join("group.json"), r#"{"head":"snap_new"}"#).unwrap();
+        });
+        assert!(raced.join("group.json").exists() && raced.join(".group.lock").exists());
+
+        let member = group_directory(&paths, "member", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "member", || {
+            fs::create_dir(member.join("snap_new")).unwrap();
+        });
+        assert!(member.join("snap_new").exists());
+
+        let replaced = group_directory(&paths, "replaced", EMPTY_GROUP);
+        native::remove_empty_group_after_lock(&paths, "replaced", || {
+            fs::remove_file(replaced.join(".group.lock")).unwrap();
+            fs::write(replaced.join(".group.lock"), "").unwrap();
+        });
+        assert!(replaced.join("group.json").exists());
+
+        native::remove_empty_group(&paths, "../outside");
+        native::remove_empty_group(&paths, "missing");
     }
 
     #[test]

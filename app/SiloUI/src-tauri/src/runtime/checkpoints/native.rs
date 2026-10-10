@@ -402,6 +402,76 @@ pub(crate) fn silo_member(key: &Key) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+/// Removes `<snapshots>/<group>` when it holds only the group's empty head record and its
+/// lock, and no other process holds that lock. Everything is checked again under the lock,
+/// and anything else in the directory is left alone.
+pub(crate) fn remove_empty_group(paths: &RuntimePaths, group: &str) {
+    remove_empty_group_after_lock(paths, group, || {});
+}
+
+pub(super) fn remove_empty_group_after_lock(
+    paths: &RuntimePaths,
+    group: &str,
+    after_lock: impl FnOnce(),
+) {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::unix::io::AsRawFd;
+    const HEAD: &str = "group.json";
+    const LOCK: &str = ".group.lock";
+    if group.is_empty() || group.contains(['/', '\\']) || group.starts_with('.') {
+        return;
+    }
+    let directory = paths.home.join("snapshots").join(group);
+    let (head, lock) = (directory.join(HEAD), directory.join(LOCK));
+    if !fs::symlink_metadata(&directory).is_ok_and(|m| m.is_dir()) {
+        return;
+    }
+    let Ok(held) = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&lock)
+    else {
+        return;
+    };
+    // SAFETY: the open file owns this descriptor for the duration of the call.
+    if unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return;
+    }
+    after_lock();
+    // The lock counts only if it is still the file at the path.
+    let current = match (held.metadata(), fs::symlink_metadata(&lock)) {
+        (Ok(held), Ok(path)) => {
+            path.is_file() && (held.dev(), held.ino()) == (path.dev(), path.ino())
+        }
+        _ => false,
+    };
+    if !current {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return;
+    };
+    let only_bookkeeping = entries
+        .filter_map(Result::ok)
+        .all(|entry| matches!(entry.file_name().to_str(), Some(HEAD | LOCK)));
+    let empty = fs::symlink_metadata(&head).is_ok_and(|m| m.is_file())
+        && fs::File::open(&head)
+            .ok()
+            .and_then(|file| {
+                let mut bytes = Vec::new();
+                file.take(4096).read_to_end(&mut bytes).ok()?;
+                serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+            })
+            .is_some_and(|value| value["head"].is_null());
+    if !only_bookkeeping || !empty {
+        return;
+    }
+    if fs::remove_file(&head).is_ok() && fs::remove_file(&lock).is_ok() {
+        let _ = fs::remove_dir(&directory);
+    }
+}
+
 /// Host allocation of a member's artifact directory, when it lies inside the runtime's
 /// snapshot store. Symlinks are never followed.
 pub(crate) fn artifact_bytes(paths: &RuntimePaths, member: &Member) -> Option<u64> {

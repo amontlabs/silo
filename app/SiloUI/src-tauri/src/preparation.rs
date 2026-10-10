@@ -337,6 +337,12 @@ pub fn lcu_folder() -> Option<PathBuf> {
     published(root, &spec)
 }
 
+/// The folder LCU archives are published under (a computer's recorded mount source may
+/// still name a folder of an older version there).
+pub fn lcu_root() -> Option<PathBuf> {
+    LCU_ROOT.get().cloned()
+}
+
 /// Returns the folder once the archive is downloaded and verified (joins or starts the download).
 pub fn ensure_lcu(report: &dyn Fn(Option<u8>)) -> Result<PathBuf, String> {
     let root = LCU_ROOT
@@ -366,9 +372,16 @@ pub(crate) fn retry_preparation() -> PreparationStatus {
 
 // -------------------------------------------------------------- archives
 
-/// A pinned download published below a root as `<root>/<version>/<archive>`.
+/// The folder the LCU archive is published in. Its name never changes, so the host path
+/// a computer records as its mount source stays valid across LCU updates.
+const LCU_FOLDER: &str = "current";
+
+/// A pinned download published below a root as `<root>/<folder>/<archive>`, where the folder
+/// is the version unless the spec names a fixed one.
 struct ArchiveSpec {
     version: String,
+    /// A fixed folder name that does not change with the version.
+    stable_folder: Option<&'static str>,
     archive: String,
     url: String,
     sha256: String,
@@ -393,6 +406,7 @@ impl ArchiveSpec {
     fn image(pinned: &PinnedImage) -> Self {
         Self {
             version: pinned.manifest.version.clone(),
+            stable_folder: None,
             archive: guest_image::ARCHIVE_FILE.into(),
             url: pinned.url.clone(),
             sha256: pinned.manifest.archive_sha256.clone(),
@@ -427,6 +441,7 @@ impl ArchiveSpec {
         }
         Ok(Self {
             version: version.into(),
+            stable_folder: Some(LCU_FOLDER),
             archive: archive.into(),
             url: url.into(),
             sha256: sha256.into(),
@@ -434,6 +449,10 @@ impl ArchiveSpec {
             what: "LCU",
             file: "LCU file",
         })
+    }
+
+    fn folder(&self) -> &str {
+        self.stable_folder.unwrap_or(&self.version)
     }
 
     fn part_name(&self) -> String {
@@ -449,7 +468,7 @@ static VERIFIED: Mutex<Vec<Stamp>> = Mutex::new(Vec::new());
 /// The folder of the verified archive, `None` when it is missing or does not match the spec.
 /// The checksum is read once per process and again when the file changes.
 fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
-    let folder = root.join(&spec.version);
+    let folder = root.join(spec.folder());
     let file = folder.join(&spec.archive);
     let meta = fs::symlink_metadata(&file).ok()?;
     if !meta.is_file() || (spec.bytes > 0 && meta.len() != spec.bytes) {
@@ -509,7 +528,7 @@ fn storage_failure(spec: &ArchiveSpec) -> impl Fn(std::io::Error) -> Failure + '
 }
 
 /// Downloads the pinned archive (resuming a partial file), verifies its size and checksum and
-/// publishes it read-only as `<root>/<version>/<archive>`, then removes every other version.
+/// publishes it read-only as `<root>/<folder>/<archive>`, then removes every other folder.
 /// `progress` receives the bytes downloaded so far.
 fn download_and_publish(
     root: &Path,
@@ -547,7 +566,7 @@ fn download_and_publish(
         std::process::id(),
         UNIQUE.fetch_add(1, Ordering::Relaxed)
     ));
-    let target = root.join(&spec.version);
+    let target = root.join(spec.folder());
     let moved = std::cell::Cell::new(false);
     let publish = || -> std::io::Result<()> {
         fs::create_dir(&staging)?;
@@ -567,13 +586,13 @@ fn download_and_publish(
         }
         return Err(saving(error));
     }
-    collect_garbage(root, &spec.version);
+    collect_garbage(root, spec.folder(), &spec.version);
     Ok(())
 }
 
-/// Removes every version but `keep`, any unfinished staging directory and the partial
+/// Removes every folder but `keep`, any unfinished staging directory and the partial
 /// downloads of other versions.
-fn collect_garbage(root: &Path, keep: &str) {
+fn collect_garbage(root: &Path, keep: &str, version: &str) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -583,7 +602,7 @@ fn collect_garbage(root: &Path, keep: &str) {
             continue;
         }
         if name == DOWNLOAD_DIR {
-            remove_other_partials(&entry.path(), keep);
+            remove_other_partials(&entry.path(), version);
         } else if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
             remove_tree(&entry.path());
         }

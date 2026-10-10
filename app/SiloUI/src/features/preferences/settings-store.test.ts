@@ -4,6 +4,23 @@ import { createMemorySettingsStore, createSettingsStore, type SettingsBackend, t
 const snapshot = (revision = 0, settings = {}): SettingsSnapshot => ({ revision, settings, onboardingDraft: null, saveError: null })
 
 describe("settings synchronization", () => {
+  it("clears write protection after the backend resets the settings file", async () => {
+    const protectedSnapshot: SettingsSnapshot = { ...snapshot(1), saveError: "Settings use an unsupported file version.", writeProtected: true }
+    const resetProtected = vi.fn().mockResolvedValue(snapshot(2))
+    const store = createSettingsStore({
+      subscribe: async () => () => {}, read: async () => protectedSnapshot, flush: async () => {},
+      updateSettings: async () => snapshot(), updateOnboardingDraft: async () => snapshot(), resetProtected,
+    })
+    try {
+      await store.initialize()
+      expect(store.getSnapshot()).toMatchObject({ writeProtected: true })
+      await store.resetProtected()
+      expect(resetProtected).toHaveBeenCalledOnce()
+      expect(store.getSnapshot()).toMatchObject({ revision: 2, saveError: null })
+      expect(store.getSnapshot().writeProtected).toBeUndefined()
+    } finally { store.dispose() }
+  })
+
   it.each(["read", "flush"] as const)("handles a late %s failure after a newer settings event during flush", async phase => {
     let receive!: (value: SettingsSnapshot) => void
     let reject!: (error: Error) => void

@@ -1,7 +1,9 @@
+import { errorMessage } from "@/lib/error-message"
 import { useState, type ReactNode } from "react"
 import { CircleCheck, HardDrive, TriangleAlert } from "lucide-react"
 
 import { ConfirmPopover } from "@/components/confirm-popover"
+import { InlineAlert } from "@/components/inline-alert"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { SiloWindow } from "@/components/silo-window"
 import { Button } from "@/components/ui/button"
@@ -15,10 +17,6 @@ import {
   type PreUpgradeBackupBackend,
   type PreUpgradeBackupState,
 } from "@/features/storage/pre-upgrade-backup"
-
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
 
 /**
  * Shown once after a migration that converted every computer, before the application: Silo kept the
@@ -43,10 +41,10 @@ export function MigrationBackupGate({ backend, transferResult, children }: { bac
   if (decision === null) return <SiloWindow title="Silo" label="Silo"><span role="status" className="sr-only">Opening Silo…</span></SiloWindow>
   return <BackupNotice state={backup} result={transfer.notice} onContinue={async () => {
     // The notice is shown once; failing to record that only shows it again at the next launch.
-    void backup.acknowledge().catch((cause: unknown) => console.error("Silo pre-upgrade backup:", message(cause)))
+    void backup.acknowledge().catch((cause: unknown) => console.error("Silo pre-upgrade backup:", errorMessage(cause)))
     // The result is acknowledged before the application opens, so it does not show the same result
     // again. If that fails the result stays unseen and the application shows it: never lost.
-    await transfer.acknowledge().catch((cause: unknown) => console.error("Silo export and import result:", message(cause)))
+    await transfer.acknowledge().catch((cause: unknown) => console.error("Silo export and import result:", errorMessage(cause)))
     setDecision("open")
   }} />
 }
@@ -57,12 +55,12 @@ function BackupNotice({ state, result, onContinue }: { state: PreUpgradeBackupSt
   const [opening, setOpening] = useState(false)
   async function remove() {
     setError(null)
-    try { await state.remove() } catch (cause) { setError(message(cause)) }
+    try { await state.remove() } catch (cause) { setError(errorMessage(cause)) }
   }
   return <SiloWindow title="Silo" label="Silo migration complete">
     <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-6 py-8">
       <div className="flex items-start gap-3">
-        <CircleCheck aria-hidden="true" className="mt-0.5 size-5 text-emerald-600 dark:text-emerald-400" />
+        <CircleCheck aria-hidden="true" className="mt-0.5 size-5 text-success" />
         <div>
           <h1 className="text-lg font-semibold">Your computers were updated</h1>
           <p className="mt-1 text-sm text-muted-foreground">Silo kept a pre-upgrade backup of their previous storage, in case something looks wrong.</p>
@@ -83,7 +81,7 @@ function BackupNotice({ state, result, onContinue }: { state: PreUpgradeBackupSt
         <p className="text-xs text-muted-foreground">{preUpgradeBackupContents} Going back to an earlier version of Silo isn't supported, so keep it only to check or copy something from before the upgrade. To show it or delete it later, open Settings, General, Storage.</p>
       </> : <p role="status" className="text-sm">The pre-upgrade backup was deleted.</p>}
       {result && <TransferResult result={result} />}
-      {error && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/[.06] p-3 text-sm text-destructive">{error}</p>}
+      {error && <InlineAlert size="lg">{error}</InlineAlert>}
       <div><Button size="sm" disabled={opening} onClick={() => { setOpening(true); void onContinue() }}>Open Silo</Button></div>
     </main>
   </SiloWindow>
@@ -92,9 +90,9 @@ function BackupNotice({ state, result, onContinue }: { state: PreUpgradeBackupSt
 /** What became of the export or import the upgrade interrupted, in the words the export and import page uses. */
 function TransferResult({ result }: { result: TransferResultNotice }) {
   const Icon = result.outcome === "success" ? CircleCheck : TriangleAlert
-  const tone = result.outcome === "failed" ? "border-amber-500/30 bg-amber-500/[.07]" : "bg-muted/30"
+  const tone = result.outcome === "failed" ? "border-warning/30 bg-warning/[.07]" : "bg-muted/30"
   return <section aria-labelledby="transfer-result-title" className={`flex items-start gap-2.5 rounded-md border p-3 text-sm ${tone}`}>
-    <Icon aria-hidden="true" className={`mt-0.5 size-4 shrink-0 ${result.outcome === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`} />
+    <Icon aria-hidden="true" className={`mt-0.5 size-4 shrink-0 ${result.outcome === "success" ? "text-success" : "text-warning"}`} />
     <div className="min-w-0">
       <h2 id="transfer-result-title" className="font-medium">{result.title}</h2>
       <p className="mt-0.5 text-muted-foreground">{[result.message, result.detail].filter(Boolean).join(" ")}</p>

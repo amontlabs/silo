@@ -33,7 +33,7 @@ export interface DependencyStore {
 const pendingChecks: SiloPreflightCheck[] = [
   { id: "system-os", title: "Supported OS", status: "pending", detail: "Checking the operating system and build architecture…", remediation: null },
   { id: "system-virtualization", title: "Virtualization", status: "pending", detail: "Waiting for the operating system check…", remediation: null },
-  { id: "runtime-microsandbox", title: "MicroSandbox runtime", status: "pending", detail: "Checking the bundled computer runtime…", remediation: null },
+  { id: "runtime-microsandbox", title: "Computer runtime", status: "pending", detail: "Checking the bundled computer runtime…", remediation: null },
   { id: "tool-git", title: "Git", status: "pending", detail: "Checking bundled Git…", remediation: null },
   { id: "tool-git-lfs", title: "Git LFS", status: "pending", detail: "Checking bundled Git LFS…", remediation: null },
 ]

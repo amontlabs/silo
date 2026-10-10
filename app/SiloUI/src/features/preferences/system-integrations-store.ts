@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react"
 import { z } from "zod"
 
@@ -37,10 +38,6 @@ const unknown: SystemIntegrations = {
   notifications: { state: "notDetermined", error: null },
 }
 
-function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
-}
-
 export function createSystemIntegrationStore(
   service: SystemIntegrationService,
   settings: SettingsStore,
@@ -62,7 +59,7 @@ export function createSystemIntegrationStore(
   }
 
   async function report(error: unknown) {
-    const text = message(error)
+    const text = errorMessage(error)
     console.error("Silo system integrations:", text)
     try { await service.showError(text) }
     catch (dialogError) { console.error("Silo system integration dialog:", dialogError) }
@@ -90,7 +87,7 @@ export function createSystemIntegrationStore(
       // Keep both switches disabled until a later refresh supplies a snapshot.
       publish({ initialized: false })
       if (reportInitialFailure) await report(error)
-      else console.error("Silo system integrations:", message(error))
+      else console.error("Silo system integrations:", errorMessage(error))
     }
   }
 

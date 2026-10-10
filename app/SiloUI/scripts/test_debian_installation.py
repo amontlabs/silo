@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 SCRIPTS = Path(__file__).parent
@@ -14,10 +15,21 @@ TOOLS_DIR = 'usr/libexec/silo/tools'
 PTRACE_TRACEME, PTRACE_DETACH = 0, 17
 
 
-def fake_package_tree(tree):
+# A shell standing in for the running Silo app. For each request line (a directory and
+# a version) read from the FIFO, it starts the update helper as its own child with root
+# privileges and the caller's PKEXEC_UID, which is how pkexec runs the real helper.
+APP_LOOP = '''exec 3<>"$1"
+while read -r directory version <&3; do
+  "$2" -p -c 'exec setpriv --reuid=0 --regid=0 --clear-groups env PKEXEC_UID="$1" /usr/lib/silo/silo-system-update "$2" "$3"' \\
+    privileged "$(id -u)" "$$" "$version" < "$directory/input" > "$directory/stdout" 2> "$directory/stderr"
+  echo $? > "$directory/status.tmp" && mv "$directory/status.tmp" "$directory/status"
+done'''
+
+
+def fake_package_tree(tree, app='/bin/sleep'):
     """Silo's packaged layout: the app in /usr/bin, its tools and runtime in libexec."""
     (tree / 'usr/bin').mkdir(parents=True)
-    shutil.copy('/bin/sleep', tree / 'usr/bin/silo-ui')
+    shutil.copy(app, tree / 'usr/bin/silo-ui')
     tools = tree / TOOLS_DIR
     tools.mkdir(parents=True)
     for name in ('msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https', 'libkrunfw.so.5.6.1'):
@@ -63,7 +75,7 @@ class InstallerTests(unittest.TestCase):
         arch = run('dpkg', '--print-architecture').stdout.decode().strip()
         for version, target, package in fixture.packages:
             tree = fixture.root / f'{version}-{target}'
-            fake_package_tree(tree)
+            fake_package_tree(tree, '/bin/sh')
             run('dpkg-deb', '--build', str(tree), str(package))
             run('python3', str(SCRIPTS / 'package-debian-release.py'), str(package))
         old = [item for item in fixture.packages if item[0] == '0.1.0']
@@ -100,32 +112,62 @@ class InstallerTests(unittest.TestCase):
             published.unlink(); published.symlink_to(new_site, target_is_directory=True)
             # No apt refresh here: reproduce the exact reported stale candidate.
             self.assertIn(b'Candidate: 0.1.0', run('apt-cache', 'policy', 'silo').stdout)
-            process = subprocess.Popen(['/usr/bin/silo-ui', '600'], user=65534)
-            env['PKEXEC_UID'] = '65534'
+            # Only the process that starts the helper may request an update, so the
+            # running app launches it through a setuid-root shell, as it would through pkexec.
+            requests = Path(tempfile.mkdtemp(prefix='silo-update-requests-'))
+            self.addCleanup(shutil.rmtree, requests, ignore_errors=True)
+            requests.chmod(0o755)
+            privileged = requests / 'privileged'
+            shutil.copy('/bin/sh', privileged)
+            privileged.chmod(0o4755)
+            fifo = requests / 'requests'
+            os.mkfifo(fifo, 0o666)
+            os.chmod(fifo, 0o666)
+            process = subprocess.Popen(['/usr/bin/silo-ui', '-c', APP_LOOP, 'silo-ui', str(fifo), str(privileged)], user=65534)
+            counter = iter(range(1000))
+            def request(version, answer):
+                directory = requests / str(next(counter))
+                directory.mkdir()
+                directory.chmod(0o777)
+                (directory / 'input').write_bytes(answer)
+                (directory / 'input').chmod(0o644)
+                with fifo.open('w') as stream:
+                    stream.write(f'{directory} {version}\n')
+                deadline = time.monotonic() + 600
+                while not (directory / 'status').exists():
+                    self.assertLess(time.monotonic(), deadline, 'The update helper did not finish')
+                    time.sleep(.1)
+                return subprocess.CompletedProcess([], int((directory / 'status').read_text()), (directory / 'stdout').read_bytes(), (directory / 'stderr').read_bytes())
             # A second, uncoordinated Silo instance must still block installation.
-            other = subprocess.Popen(['/usr/bin/silo-ui', '600'], user=65534)
+            other = subprocess.Popen(['/usr/bin/silo-ui', '-c', 'read line'], stdin=subprocess.PIPE, user=65534)
             try:
-                result = run('/usr/lib/silo/silo-system-update', str(process.pid), '0.2.0', check=False, input=b'install\n')
+                result = request('0.2.0', b'install\n')
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(b'Quit Silo', result.stderr)
                 self.assertIsNone(other.poll())
                 self.assertIsNone(process.poll())
             finally:
-                other.terminate(); other.wait()
+                other.terminate(); other.wait(); other.stdin.close()
             # Without the go-ahead after the download, nothing is installed.
-            result = run('/usr/lib/silo/silo-system-update', str(process.pid), '0.2.0', check=False, input=b'cancel\n')
+            result = request('0.2.0', b'cancel\n')
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout.decode().splitlines(), ['refreshing', 'downloading', 'ready'])
             self.assertEqual(run('dpkg-query', '-W', '-f=${Version}', 'silo').stdout, b'0.1.0')
-            result = run('/usr/lib/silo/silo-system-update', str(process.pid), '0.2.0', input=b'install\n')
+            result = request('0.2.0', b'install\n')
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.decode().splitlines(), ['refreshing', 'downloading', 'ready', 'installing'])
             self.assertEqual(run('dpkg-query', '-W', '-f=${Version}', 'silo').stdout, b'0.2.0')
             self.assertIsNone(process.poll(), 'The updater never kills the UI')
             self.assertFalse(Path('/run/silo/system-update.json').exists())
             self.assertFalse(MARKER.exists())
             # An already updated package only needs the older running app to restart.
-            self.assertEqual(run('/usr/lib/silo/silo-system-update', str(process.pid), '0.2.0', input=b'install\n').stdout, b'ready\n')
-            self.assertNotEqual(run('/usr/lib/silo/silo-system-update', str(process.pid), '0.1.0', check=False, input=b'install\n').returncode, 0)
+            self.assertEqual(request('0.2.0', b'install\n').stdout, b'ready\n')
+            self.assertNotEqual(request('0.1.0', b'install\n').returncode, 0)
+            # A caller that did not start the helper is refused even if it names the running app.
+            env['PKEXEC_UID'] = '65534'
+            result = run('/usr/lib/silo/silo-system-update', str(process.pid), '0.2.0', check=False, input=b'install\n')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'must be requested by the installed Silo application', result.stderr)
         finally:
             if process is not None:
                 process.terminate(); process.wait()

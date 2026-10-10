@@ -969,6 +969,42 @@ pub(crate) fn connection_local(
     connection_with(&runtime::ProcessRunner, &paths, computer, expected_id)
 }
 
+/// Random hex the guest XORs the password with, because the runtime records a command's
+/// output in the computer's execution log.
+fn one_time_pad() -> String {
+    (0..4)
+        .map(|_| uuid::Uuid::new_v4().simple().to_string())
+        .collect()
+}
+
+/// Asks for the sealed connection. A helper installed before sealing existed does not know
+/// the action, so it is asked for the plain connection until its next update installs the
+/// current helper.
+fn connection_script(pad: &str) -> String {
+    let helper = "/usr/local/bin/silo-desktop";
+    format!(
+        "if grep -q connection-sealed {helper}; then {helper} connection-sealed {pad}; else {helper} connection; fi"
+    )
+}
+
+fn unseal(pad: &str, sealed: Option<&str>) -> Option<String> {
+    let bytes = |hex: &str| -> Option<Vec<u8>> {
+        (hex.len() % 2 == 0 && hex.is_ascii())
+            .then(|| {
+                (0..hex.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+                    .collect()
+            })
+            .flatten()
+    };
+    let (pad, sealed) = (bytes(pad)?, bytes(sealed?)?);
+    if sealed.len() > pad.len() {
+        return None;
+    }
+    String::from_utf8(sealed.iter().zip(&pad).map(|(a, b)| a ^ b).collect()).ok()
+}
+
 fn connection_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -980,19 +1016,25 @@ fn connection_with(
     if status_with(runner, paths, &configuration)?["state"] != "running" {
         return Err("The desktop is not running.".into());
     }
+    let pad = one_time_pad();
     let output = guest(
         runner,
         paths,
         computer,
-        "/usr/local/bin/silo-desktop connection",
+        &connection_script(&pad),
         Duration::from_secs(15),
         false,
     )
     .map_err(|_| "Could not read desktop connection credentials.")?;
     // A read stays ungated; reject credentials if the computer changed while it ran.
     computer_at(runner, paths, computer, Some(configuration.id()))?;
-    let value: Value = serde_json::from_str(output.trim())
+    let mut value: Value = serde_json::from_str(output.trim())
         .map_err(|_| "Invalid desktop connection credentials.")?;
+    if value.get("password").is_none() || value.get("sealed").is_some() {
+        value["password"] = unseal(&pad, value["sealed"].as_str())
+            .map(Value::from)
+            .ok_or("Invalid desktop connection credentials.")?;
+    }
     let username = value["username"].as_str().filter(|s| {
         !s.is_empty()
             && s.len() <= 64
@@ -1623,6 +1665,7 @@ mod tests {
         configuration: ComputerConfiguration,
         calls: std::sync::Mutex<Vec<Vec<String>>>,
         on_connection: Option<Box<dyn Fn(&RuntimePaths) + Send + Sync>>,
+        old_helper: bool,
     }
     impl RuntimeRunner for ConnectionRunner {
         fn run(
@@ -1640,12 +1683,33 @@ mod tests {
                 .to_string(),
                 Some("exec")
                     if args.last().map(String::as_str)
-                        == Some("/usr/local/bin/silo-desktop connection") =>
+                        .is_some_and(|script| script.contains("silo-desktop connection-sealed ")) =>
                 {
                     if let Some(change) = &self.on_connection {
                         change(paths);
                     }
-                    json!({"port":6901,"username":"silo","password":"b".repeat(64)}).to_string()
+                    let script = args.last().unwrap();
+                    let pad = script
+                        .split("silo-desktop connection-sealed ")
+                        .nth(1)
+                        .and_then(|rest| rest.split(';').next())
+                        .unwrap();
+                    if self.old_helper {
+                        return Ok(runtime::CommandOutput {
+                            stdout: json!({"port":6901,"username":"silo","password":"b".repeat(64)})
+                                .to_string(),
+                            stderr: String::new(),
+                        });
+                    }
+                    let sealed: String = "b"
+                        .repeat(64)
+                        .bytes()
+                        .zip((0..pad.len()).step_by(2))
+                        .map(|(byte, i)| {
+                            format!("{:02x}", byte ^ u8::from_str_radix(&pad[i..i + 2], 16).unwrap())
+                        })
+                        .collect();
+                    json!({"port":6901,"username":"silo","sealed":sealed}).to_string()
                 }
                 Some("exec")
                     if args.last().is_some_and(|script| {
@@ -1684,6 +1748,7 @@ mod tests {
             configuration: replacement,
             calls: Default::default(),
             on_connection: None,
+            old_helper: false,
         };
         let removed_id = "00000000-0000-4000-8000-000000000002";
         let result = connection_with(&runner, &paths, "dev", Some(removed_id));
@@ -1729,6 +1794,7 @@ mod tests {
                 )
                 .unwrap();
             })),
+            old_helper: false,
         };
         let result = connection_with(&runner, &paths, "dev", Some(original.id()));
         assert!(
@@ -1760,6 +1826,7 @@ mod tests {
                 configuration: configuration.clone(),
                 calls: Default::default(),
                 on_connection: None,
+                old_helper: false,
             };
             let result = connection_with(&runner, &paths, "dev", expected).unwrap();
             assert_eq!(
@@ -1773,6 +1840,65 @@ mod tests {
                 .filter(|args| args[0] == "exec")
                 .all(|args| args.iter().any(|arg| arg == "--no-start")));
         }
+    }
+
+    #[test]
+    fn a_helper_that_predates_sealing_is_asked_for_the_plain_connection() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths(dir.path());
+        let configuration = built_in_computer();
+        runtime::write_metadata(
+            &paths.metadata,
+            &runtime::ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![configuration.clone()],
+            },
+        )
+        .unwrap();
+        let runner = ConnectionRunner {
+            configuration,
+            calls: Default::default(),
+            on_connection: None,
+            old_helper: true,
+        };
+        let result = connection_with(&runner, &paths, "dev", None).unwrap();
+        assert_eq!(
+            result,
+            json!({"port":6901,"username":"silo","password":"b".repeat(64)})
+        );
+        let pad = one_time_pad();
+        let script = connection_script(&pad);
+        assert!(script.contains("grep -q connection-sealed /usr/local/bin/silo-desktop;"));
+        assert!(script.ends_with("else /usr/local/bin/silo-desktop connection; fi"));
+    }
+
+    #[test]
+    fn sealed_credentials_open_only_with_their_pad() {
+        let pad = one_time_pad();
+        assert_eq!(pad.len(), 128);
+        assert_ne!(pad, one_time_pad());
+        let seal = |text: &str, pad: &str| -> String {
+            text.bytes()
+                .zip((0..pad.len()).step_by(2))
+                .map(|(byte, i)| {
+                    format!(
+                        "{:02x}",
+                        byte ^ u8::from_str_radix(&pad[i..i + 2], 16).unwrap()
+                    )
+                })
+                .collect()
+        };
+        let sealed = seal("0123abcd", &pad);
+        assert!(!sealed.contains("0123abcd"));
+        assert_eq!(unseal(&pad, Some(&sealed)).as_deref(), Some("0123abcd"));
+        assert_ne!(
+            unseal(&one_time_pad(), Some(&sealed)).as_deref(),
+            Some("0123abcd")
+        );
+        assert_eq!(unseal(&pad, None), None);
+        assert_eq!(unseal(&pad, Some("zz")), None);
+        assert_eq!(unseal("ab", Some("abcd")), None);
     }
 
     #[test]

@@ -10,6 +10,8 @@ import { createFixtureSystemIntegrationStore } from "@/fixtures/system-integrati
 import { PreUpgradeBackupProvider } from "@/features/storage/pre-upgrade-backup"
 import { createFixturePreUpgradeBackup } from "@/fixtures/pre-upgrade-backup"
 import { Toaster } from "@/components/ui/sonner"
+import { createComputerUseBridge, type ComputerUseBackend } from "@/desktop/computer-use-bridge"
+import { ComputerUseProvider } from "@/desktop/computer-use-provider"
 
 it.each(["default", "empty"] as const)("persists the %s startup selection when enabled without editing the selection", async (selection) => {
   const user = userEvent.setup()
@@ -93,7 +95,7 @@ it("lists the pre-upgrade backup under Storage, after the other sections, until 
   const headings = screen.getAllByRole("heading", { level: 3 }).map(heading => heading.textContent)
   expect(headings.slice(-2)).toEqual(["Accessibility", "Storage"])
   expect(storage).toHaveTextContent("Pre-upgrade backup")
-  expect(await screen.findByText("12.40 GiB · deleted on October 15, 2026")).toBeVisible()
+  expect(await screen.findByText("12.4 GiB · deleted on October 15, 2026")).toBeVisible()
   await user.click(screen.getByRole("button", { name: "Delete now" }))
   await user.click(await screen.findByRole("button", { name: "Delete permanently" }))
   await waitFor(() => expect(screen.queryByRole("region", { name: "Storage" })).not.toBeInTheDocument())
@@ -147,4 +149,20 @@ it("explains write-protected settings without offering a save retry", () => {
   expect(screen.getByRole("alert")).toHaveTextContent("Changes last for this session")
   expect(screen.queryByRole("button", { name: "Retry saving settings" })).not.toBeInTheDocument()
   settings.dispose()
+})
+
+it("offers the new-computer computer use approval where the other general settings are", async () => {
+  const store = createMemorySettingsStore()
+  const source = applicationSourceForScenario("running")
+  const backend: ComputerUseBackend = {
+    readDesktopState: async () => ({}), setApproval: async () => ({}), setup: async () => ({}),
+    chatGptStatus: async () => ({ state: "ready", path: "/p", version: "1" }), retry: async () => ({}), listenStatus: async () => () => {},
+  }
+  render(<SettingsProvider store={store}><SystemIntegrationProvider store={createFixtureSystemIntegrationStore(store)}><ComputerUseProvider bridge={createComputerUseBridge(backend)}>
+    <GeneralPage source={source} applicationPreferences={source.preferences} onApplicationPreferencesChange={vi.fn()} reduceMotion={false} onReduceMotionChange={vi.fn()} />
+  </ComputerUseProvider></SystemIntegrationProvider></SettingsProvider>)
+  const toggle = screen.getByRole("switch", { name: "Allow agents to use the desktop without asking in new computers" })
+  expect(screen.getByRole("region", { name: "Computer use" })).toContainElement(toggle)
+  await userEvent.setup().click(toggle)
+  await waitFor(() => expect(store.getSnapshot().settings.computerUseAutoApproval).toBe(true))
 })

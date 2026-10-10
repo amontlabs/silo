@@ -120,7 +120,7 @@ it("formats activity dates in the user's locale and timezone", () => {
 it("keeps secret edits across navigation and shows pending changes on affected computers", async () => {
   const { user, actions } = renderApplication()
   await user.click(within(appNavigation()).getByRole("button", { name: "Secrets" }))
-  await user.click(screen.getByRole("button", { name: "Edit PACKAGE_TOKEN" }))
+  await user.click(await screen.findByRole("button", { name: "Edit PACKAGE_TOKEN" }))
   const form = within(screen.getByRole("form", { name: "Edit PACKAGE_TOKEN" }))
   await user.click(form.getByRole("combobox", { name: "Add computer" }))
   await user.click(screen.getByRole("option", { name: "personal" }))
@@ -190,7 +190,7 @@ it("collapses the sidebar to labelled icons and keeps every destination usable",
   }
   await user.click(navigation.getByRole("button", { name: "Settings" }))
   await user.click(navigation.getByRole("button", { name: "Notifications" }))
-  expect(within(appPanel("Settings")).getByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
+  expect(await within(appPanel("Settings")).findByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
   await user.click(screen.getByRole("button", { name: "Expand sidebar" }))
   expect(appNavigation()).toHaveAttribute("data-collapsed", "false")
   expect(navigation.getByRole("button", { name: "Notifications" })).toHaveAttribute("aria-current", "page")
@@ -530,9 +530,9 @@ it("fits a new computer to the capacity this device reports (I-24)", async () =>
   const panel = within(appPanel("Computers"))
   await user.click(panel.getByRole("button", { name: "Add" }))
   await user.click(screen.getByRole("menuitem", { name: "New computer" }))
-  expect(panel.getByRole("combobox", { name: "CPUs ceiling" })).toHaveValue("8")
-  expect(panel.getByRole("combobox", { name: "Memory ceiling" })).toHaveValue("16")
-  expect(panel.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(panel.getByRole("combobox", { name: "Maximum CPUs" })).toHaveValue("8")
+  expect(panel.getByRole("combobox", { name: "Maximum memory" })).toHaveValue("16")
+  expect(panel.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
 })
 
 
@@ -541,11 +541,11 @@ it("keeps an unsaved computer edit while visiting another section (I-37)", async
   const computerSections = within(within(appNavigation()).getByRole("group", { name: "Computer sections" }))
   await user.click(screen.getByRole("button", { name: "More actions for dev" }))
   await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
-  await user.selectOptions(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(computerSections.getByRole("button", { name: "Files" }))
-  expect(within(appPanel("Computers")).queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+  expect(within(appPanel("Computers")).queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   await user.click(computerSections.getByRole("button", { name: "All computers" }))
-  expect(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
 })
 
 

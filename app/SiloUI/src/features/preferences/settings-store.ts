@@ -1,4 +1,5 @@
-import { createContext, createElement, useContext, useState, useSyncExternalStore, type ReactNode } from "react"
+import { errorMessage } from "@/lib/error-message"
+import { createContext, createElement, useContext, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import { onboardingDraftSchema, type OnboardingDraft } from "@/features/onboarding/model/onboarding-draft"
 import { defaultSettings, readSettingsOverrides, settingsPatchSchema, type Settings, type SettingsPatch } from "./model/settings"
 
@@ -17,17 +18,18 @@ export interface SettingsBackend {
   updateSettings: (patch: SettingsPatch) => Promise<SettingsSnapshot>
   updateOnboardingDraft: (draft: OnboardingDraft | null) => Promise<SettingsSnapshot>
   flush: () => Promise<void>
+  /** Set a write-protected settings file aside and start from defaults. */
+  resetProtected?: () => Promise<SettingsSnapshot>
 }
 
 type Change = { kind: "settings"; patch: SettingsPatch } | { kind: "draft"; draft: OnboardingDraft | null }
 export interface SettingsView extends Omit<SettingsSnapshot, "settings"> { settings: Settings }
 
-function errorText(error: unknown) { return error instanceof Error ? error.message : String(error) }
 /**
  * The native store validated and refused the change (`settings.rs` update and
  * update_draft). Resending it can never succeed, unlike a failed delivery.
  */
-function isRejection(error: unknown) { return /^Invalid (settings change|onboarding draft)$/.test(errorText(error)) }
+function isRejection(error: unknown) { return /^Invalid (settings change|onboarding draft)$/.test(errorMessage(error)) }
 
 export function createSettingsStore(backend: SettingsBackend, initialSettings: SettingsPatch = {}, initialSnapshot?: SettingsSnapshot) {
   const defaults = { ...defaultSettings, ...initialSettings }
@@ -86,7 +88,7 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
   }
 
   function failed(error: unknown) {
-    transportError = errorText(error)
+    transportError = errorMessage(error)
     console.error("Silo settings:", transportError)
     publish()
   }
@@ -111,7 +113,7 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
             // Roll back the refused change instead of resending it forever, which
             // would also block every later change behind it.
             pending.shift()
-            rejection = errorText(error)
+            rejection = errorMessage(error)
             console.error("Silo settings: change rejected:", rejection)
             publish()
             continue
@@ -208,6 +210,17 @@ export function createSettingsStore(backend: SettingsBackend, initialSettings: S
         } while (pending.length || draining)
       } catch (error) { failed(error) }
     },
+    canResetProtected: backend.resetProtected !== undefined,
+    async resetProtected() {
+      if (!backend.resetProtected) return
+      try {
+        const snapshot = await backend.resetProtected()
+        transportError = null
+        rejection = null
+        receive(snapshot)
+        publish()
+      } catch (error) { failed(error) }
+    },
     dispose() { disposed = true; unsubscribe?.(); listeners.clear() },
   }
 }
@@ -245,13 +258,45 @@ export function SettingsProvider({ store, initialSettings, children }: { store?:
 }
 
 export function useSettings(initialSettings?: SettingsPatch) {
+  const store = useSettingsStore(initialSettings)
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush, canResetProtected: store.canResetProtected, resetProtected: store.resetProtected }
+}
+
+/** The settings store in context, or a private in-memory one when no provider exists. */
+export function useSettingsStore(initialSettings?: SettingsPatch) {
   const inherited = useContext(SettingsContext)
   const [local] = useState(() => {
     const value = createMemorySettingsStore()
     value.updateDefaults(initialSettings ?? {})
     return value
   })
-  const store = inherited ?? local
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
-  return { ...snapshot, store, updateSettings: store.updateSettings, updateOnboardingDraft: store.updateOnboardingDraft, flush: store.flush }
+  return inherited ?? local
+}
+
+/**
+ * Subscribes to a derived value of the settings view. The component re-renders only when
+ * the selection changes under `isEqual` (reference equality by default).
+ */
+export function useSettingsSelector<T>(select: (view: SettingsView) => T, isEqual: (a: T, b: T) => boolean = Object.is, initialSettings?: SettingsPatch): T {
+  const store = useSettingsStore(initialSettings)
+  const memo = useRef<{ view: SettingsView; select: typeof select; value: T } | null>(null)
+  const getSelection = () => {
+    const view = store.getSnapshot()
+    const previous = memo.current
+    if (previous && previous.view === view && previous.select === select) return previous.value
+    const value = select(view)
+    if (previous && isEqual(previous.value, value)) {
+      memo.current = { view, select, value: previous.value }
+      return previous.value
+    }
+    memo.current = { view, select, value }
+    return value
+  }
+  return useSyncExternalStore(store.subscribe, getSelection)
+}
+
+export function shallowEqual<T extends Record<string, unknown>>(a: T, b: T) {
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]))
 }

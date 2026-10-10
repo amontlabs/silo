@@ -1,5 +1,7 @@
 import { useId, useRef, useState } from "react"
 import { CalendarDays } from "lucide-react"
+import { formatDateTime } from "@/lib/format-date"
+import { errorMessage } from "@/lib/error-message"
 import { FilterCombobox, type FilterOption } from "@/components/filter-combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,7 +57,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
       if (from && to && from > to) throw new Error("The start date is after the end date. Change the date filter to see logs.")
       onChange({ source, since: from, until: to })
       setError(""); setOpen(false)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { setError(errorMessage(cause)) }
   }
   const fields = [
     { label: "From", date: fromDate, time: fromTime, setDate: setFromDate, setTime: setFromTime },
@@ -72,7 +74,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
           emptyMessage="No matching filters." compact className="min-w-0 flex-1"
         />
         {hasDates && <Button type="button" size="xs" variant="ghost" aria-label="Edit date filter" onClick={editDates} className="max-w-full text-muted-foreground">
-          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate">{rangeLabel(since, until)}</span>
+          <CalendarDays aria-hidden="true" className="size-3.5" /><span className="truncate" title={rangeLabel(since, until)}>{rangeLabel(since, until)}</span>
         </Button>}
       </div>
     </PopoverAnchor>
@@ -100,7 +102,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
           <Input technical aria-label={`${field.label} date`} placeholder="YYYY-MM-DD" value={field.date} autoComplete="off" spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={event => { field.setDate(event.target.value); setError("") }} className="h-8 font-mono text-xs" />
           <Input technical aria-label={`${field.label} time`} placeholder="HH:mm" value={field.time} autoComplete="off" spellCheck={false} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} onChange={event => { field.setTime(event.target.value); setError("") }} className="h-8 font-mono text-xs" />
         </fieldset>)}
-        <p className="text-[11px] leading-relaxed text-muted-foreground">Either date can be left blank. Leave times blank to include the full day.</p>
+        <p className="text-caption leading-relaxed text-muted-foreground">Either date can be left blank. Leave times blank to include the full day.</p>
         {error && <p id={errorId} role="alert" className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end gap-2"><Button type="button" size="xs" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button><Button type="submit" size="xs">Apply</Button></div>
       </form>
@@ -128,6 +130,6 @@ function boundary(date: string, time: string, end: boolean): string {
   return value.toISOString()
 }
 function rangeLabel(since: string, until: string): string {
-  const format = (value: string) => new Date(value).toLocaleString("en", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+  const format = (value: string) => formatDateTime(value)
   return since && until ? `${format(since)} → ${format(until)}` : since ? `Since ${format(since)}` : `Until ${format(until)}`
 }

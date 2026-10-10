@@ -30,7 +30,7 @@ export function ForkBody({ computerName, title, description, disabled = false, t
     onSubmit={() => onFork(trimmed)}
     onClose={onClose}
     fields={<>
-      <Input technical aria-label="New computer name" aria-invalid={Boolean(nameError)} aria-describedby={nameError ? errorID : undefined} className="h-7 text-xs" maxLength={32} value={name} placeholder="New computer name" onChange={event => setName(event.target.value)} />
+      <Input size="sm" technical aria-label="New computer name" aria-invalid={Boolean(nameError)} aria-describedby={nameError ? errorID : undefined} maxLength={32} value={name} placeholder="New computer name" onChange={event => setName(event.target.value)} />
       {nameError && <p id={errorID} className="text-xs text-destructive">{nameError}</p>}
     </>}
   />

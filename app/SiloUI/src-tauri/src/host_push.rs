@@ -22,18 +22,36 @@ struct Discovery {
     last: Option<(Instant, Result<Vec<Value>, String>)>,
     running: bool,
     generation: u64,
+    /// The last rows predate a change to a repository; they are served only when a newer
+    /// read does not finish in time.
+    stale: bool,
+    /// What a caller was last given while a newer read was still in flight.
+    served: Option<Result<Vec<Value>, String>>,
 }
 impl Discovery {
+    /// Whether this finished read differs from what callers were given in the meantime.
+    fn differs_from_served(&mut self) -> bool {
+        match (self.served.take(), &self.last) {
+            (Some(served), Some((_, result))) => served != *result,
+            _ => false,
+        }
+    }
     fn invalidate(&mut self) {
-        self.last = None;
+        self.stale = true;
         self.generation = self.generation.wrapping_add(1);
     }
     fn finish(&mut self, generation: u64, started: Instant, result: Result<Vec<Value>, String>) {
         if generation == self.generation {
             self.last = Some((started, result));
+            self.stale = false;
         }
         self.running = false;
     }
+}
+static NOTIFY_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+/// Lets a finished discovery tell the UI when it changes rows a state read already served.
+pub(crate) fn install(app: &tauri::AppHandle) {
+    let _ = NOTIFY_APP.set(app.clone());
 }
 type Discoveries = (Mutex<HashMap<String, Discovery>>, std::sync::Condvar);
 static DISCOVERIES: OnceLock<Discoveries> = OnceLock::new();
@@ -213,12 +231,75 @@ origin=$(git -C "$1" remote get-url origin) || exit 0
 git -C "$1" update-ref --no-deref "$2" "$3" "$4"
 "#;
 /// Rows at most this old are served without reading the guest again.
-const DISCOVERY_FRESH: Duration = Duration::from_secs(15);
+const DISCOVERY_FRESH: Duration = Duration::from_secs(60);
 /// A state refresh waits this long for a computer's first discovery; later refreshes
 /// never wait, so a slow or hostile guest cannot stall them.
 const DISCOVERY_FIRST_WAIT: Duration = Duration::from_secs(3);
 /// Guest time limit for one discovery; an explicit refresh waits for it.
 const DISCOVERY_SECONDS: u64 = 20;
+
+/// Starts a background read for a computer unless its rows are current or a read is in flight.
+fn ensure_running(
+    entries: &mut HashMap<String, Discovery>,
+    paths: &RuntimePaths,
+    name: &str,
+    key: &str,
+) {
+    let entry = entries.entry(key.to_owned()).or_default();
+    if entry.running {
+        return;
+    }
+    entry.running = true;
+    let generation = entry.generation;
+    let (paths, name, key) = (paths.clone(), name.to_owned(), key.to_owned());
+    thread::spawn(move || {
+        let started = Instant::now();
+        let result = contain_panic(|| discover_uncached(&paths, &name));
+        let (lock, changed) = discoveries();
+        let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if entries.len() > 64 {
+            entries.retain(|other, entry| entry.running || *other == key);
+        }
+        let entry = entries.entry(key).or_default();
+        entry.finish(generation, started, result);
+        let update = entry.differs_from_served();
+        drop(entries);
+        changed.notify_all();
+        if update {
+            if let Some(app) = NOTIFY_APP.get() {
+                let _ = app.emit("silo://application-state-changed", ());
+            }
+        }
+    });
+}
+
+/// Begins the background reads of the given running computers (`(name, computer id)`) so
+/// they proceed together while the caller collects their rows with `discover_until`.
+pub(crate) fn prefetch<'a>(
+    paths: &RuntimePaths,
+    computers: impl IntoIterator<Item = (&'a str, &'a str)>,
+) {
+    let (lock, _) = discoveries();
+    let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for (name, computer_id) in computers {
+        let key = format!("{}:{computer_id}", paths.home.display());
+        let current = entries.get(&key).is_some_and(|entry| {
+            !entry.stale
+                && entry
+                    .last
+                    .as_ref()
+                    .is_some_and(|(started, _)| started.elapsed() < DISCOVERY_FRESH)
+        });
+        if !current {
+            ensure_running(&mut entries, paths, name, &key);
+        }
+    }
+}
+
+/// The deadline by which a state refresh stops waiting for first discoveries.
+pub(crate) fn first_discovery_deadline() -> Instant {
+    Instant::now() + DISCOVERY_FIRST_WAIT
+}
 
 /// Repositories of a running computer. Reads run in the background, one per computer at a
 /// time; callers get the last known rows while a newer read is in flight.
@@ -229,62 +310,74 @@ pub(crate) fn discover(
     computer_id: &str,
     refresh: bool,
 ) -> Result<Vec<Value>, String> {
+    discover_until(
+        paths,
+        name,
+        computer_id,
+        refresh,
+        first_discovery_deadline(),
+    )
+}
+
+/// `discover` where a non-refresh call waits for a first (or post-change) read only until
+/// `first_deadline`, so several computers can share one wait.
+pub(crate) fn discover_until(
+    paths: &RuntimePaths,
+    name: &str,
+    computer_id: &str,
+    refresh: bool,
+    first_deadline: Instant,
+) -> Result<Vec<Value>, String> {
     let requested = Instant::now();
     let key = format!("{}:{computer_id}", paths.home.display());
     let (lock, changed) = discoveries();
-    let wait_until = requested
-        + if refresh {
-            Duration::from_secs(DISCOVERY_SECONDS + 20)
-        } else {
-            DISCOVERY_FIRST_WAIT
-        };
-    let mut entries = lock.lock().map_err(|_| "Repository state unavailable.")?;
+    let wait_until = if refresh {
+        requested + Duration::from_secs(DISCOVERY_SECONDS + 20)
+    } else {
+        first_deadline
+    };
+    let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     loop {
         let entry = entries.entry(key.clone()).or_default();
         if let Some((started, result)) = &entry.last {
             let current = if refresh {
                 *started >= requested
             } else {
-                started.elapsed() < DISCOVERY_FRESH
+                !entry.stale && started.elapsed() < DISCOVERY_FRESH
             };
             if current {
                 return result.clone();
             }
         }
-        if !entry.running {
-            entry.running = true;
-            let generation = entry.generation;
-            let (paths, name, key) = (paths.clone(), name.to_owned(), key.clone());
-            thread::spawn(move || {
-                let started = Instant::now();
-                let result = discover_uncached(&paths, &name);
-                let (lock, changed) = discoveries();
-                let mut entries = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                if entries.len() > 64 {
-                    entries.retain(|other, entry| entry.running || *other == key);
-                }
-                let entry = entries.entry(key).or_default();
-                entry.finish(generation, started, result);
-                changed.notify_all();
-            });
-        }
-        if !refresh {
+        ensure_running(&mut entries, paths, name, &key);
+        let entry = entries.get_mut(&key).expect("entry exists");
+        if !refresh && !entry.stale {
             if let Some((_, result)) = &entry.last {
-                return result.clone();
+                let result = result.clone();
+                entry.served = Some(result.clone());
+                return result;
             }
         }
         let now = Instant::now();
         if now >= wait_until {
-            return match &entry.last {
+            let result = match &entry.last {
                 Some((_, result)) => result.clone(),
                 None => Ok(Vec::new()),
             };
+            entry.served = Some(result.clone());
+            return result;
         }
         entries = changed
             .wait_timeout(entries, wait_until - now)
-            .map_err(|_| "Repository state unavailable.")?
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .0;
     }
+}
+
+/// A panicking discovery still reports a result, so its entry stops running.
+fn contain_panic(work: impl FnOnce() -> Result<Vec<Value>, String>) -> Result<Vec<Value>, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("Repository discovery failed unexpectedly.".into()))
 }
 // The guest deadline and runtime output budget bound discovery. An entry-count
 // cutoff discards every result when a computer contains many Git worktrees.
@@ -1314,6 +1407,13 @@ fn finished_result(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_panicking_discovery_reports_an_error() {
+        let result = super::contain_panic(|| panic!("discovery bug"));
+        assert!(result.is_err());
+        assert_eq!(super::contain_panic(|| Ok(Vec::new())), Ok(Vec::new()));
+    }
+
+    #[test]
     fn dismissal_removes_finished_results_but_preserves_active_pushes() {
         let mut entries = std::collections::HashMap::new();
         for status in ["failed", "succeeded", "pushing"] {
@@ -1355,6 +1455,8 @@ mod tests {
                 last: Some((Instant::now(), Ok(cached.clone()))),
                 running: false,
                 generation: 0,
+                stale: false,
+                served: None,
             },
         );
         assert_eq!(
@@ -1392,6 +1494,8 @@ mod tests {
                 last: Some((Instant::now(), Ok(cached.clone()))),
                 running: false,
                 generation: 0,
+                stale: false,
+                served: None,
             },
         );
         assert_eq!(
@@ -1495,7 +1599,7 @@ mod tests {
             Ok(vec![json!({"path":"/workspace/repo","ahead":1})]),
         );
         assert!(
-            entry.last.is_none(),
+            entry.stale && entry.last.is_none(),
             "the pre-push discovery restored stale rows"
         );
         assert!(
@@ -1599,6 +1703,75 @@ mod tests {
         });
         assert_eq!(runs(&count), 2);
         discoveries().0.lock().unwrap().remove(&key);
+    }
+
+    #[test]
+    fn a_change_keeps_known_rows_as_a_fallback_while_the_next_read_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let (paths, _count) = slow_discovery_runtime(root.path(), "sleep 6");
+        let key = format!("{}:computer-stale", paths.home.display());
+        let known = Ok(vec![json!({"path":"/workspace/repo","ahead":3})]);
+        {
+            let mut entries = discoveries().0.lock().unwrap();
+            let entry = entries.entry(key.clone()).or_default();
+            entry.running = true;
+            entry.finish(entry.generation, Instant::now(), known);
+            entry.invalidate();
+        }
+        let started = Instant::now();
+        let rows = discover_until(
+            &paths,
+            "dev",
+            "computer-stale",
+            false,
+            Instant::now() + Duration::from_millis(300),
+        )
+        .unwrap();
+        assert_eq!(rows[0]["ahead"], 3);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        discoveries().0.lock().unwrap().remove(&key);
+    }
+
+    #[test]
+    fn a_finished_read_is_announced_only_when_it_differs_from_what_was_served() {
+        let rows = |ahead: u64| Ok(vec![json!({"path":"/workspace/repo","ahead":ahead})]);
+        let mut entry = Discovery {
+            running: true,
+            served: Some(rows(1)),
+            ..Discovery::default()
+        };
+        entry.finish(entry.generation, Instant::now(), rows(0));
+        assert!(entry.differs_from_served());
+        entry.running = true;
+        entry.served = Some(rows(0));
+        entry.finish(entry.generation, Instant::now(), rows(0));
+        assert!(!entry.differs_from_served());
+        entry.running = true;
+        entry.finish(entry.generation, Instant::now(), rows(5));
+        assert!(!entry.differs_from_served(), "nothing was served meanwhile");
+    }
+
+    #[test]
+    fn computers_share_one_first_discovery_wait() {
+        let root = tempfile::tempdir().unwrap();
+        let (paths, _count) = slow_discovery_runtime(root.path(), "sleep 6");
+        let ids = ["shared-1", "shared-2", "shared-3"];
+        prefetch(&paths, ids.iter().map(|id| ("dev", *id)));
+        let deadline = Instant::now() + Duration::from_millis(600);
+        let started = Instant::now();
+        for id in ids {
+            assert!(discover_until(&paths, "dev", id, false, deadline)
+                .unwrap()
+                .is_empty());
+        }
+        assert!(started.elapsed() < Duration::from_secs(2));
+        for id in ids {
+            discoveries()
+                .0
+                .lock()
+                .unwrap()
+                .remove(&format!("{}:{id}", paths.home.display()));
+        }
     }
 
     #[test]

@@ -10,6 +10,11 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 static QUIT_GENERATION: AtomicU64 = AtomicU64::new(0);
 static MAINTENANCE_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
 
+/// Whether Quit or a session end is in progress.
+pub(crate) fn quitting() -> bool {
+    QUITTING.load(Ordering::SeqCst)
+}
+
 pub(crate) fn begin() {
     if let Ok(mut deadline) = MAINTENANCE_DEADLINE.lock() {
         *deadline = Some(Instant::now() + storage::TRIM_BUDGET);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 
 import { dismissOperationToast, showOperationProgress } from "@/lib/operation-toast"
+import { useClock } from "@/lib/use-clock"
 
 import {
   emptyOperationQueue,
@@ -26,23 +27,12 @@ function CancelOperationButton({ entry, onCancel }: { entry: OperationEntry; onC
       aria-label={`Cancel ${entry.label}`}
       title={`Cancel ${entry.label}`}
       onClick={() => onCancel(entry.id)}
-      className="flex shrink-0 items-center gap-1 rounded px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex shrink-0 items-center gap-1 rounded px-1 text-muted-foreground hover:text-foreground focus-ring"
     >
       <X aria-hidden="true" className="size-3" />
       Cancel
     </button>
   )
-}
-
-/** Re-renders on an interval so a shown toast keeps its elapsed time and stuck flag current. */
-function useNow(active: boolean, intervalMs = 1000): number {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!active) return
-    const timer = window.setInterval(() => setNow(Date.now()), intervalMs)
-    return () => window.clearInterval(timer)
-  }, [active, intervalMs])
-  return now
 }
 
 /** Step line for the operation-queue toast: a stuck warning, else a summary of waiting entries. */
@@ -70,7 +60,7 @@ export function OperationQueueToast({ queue, onCancel }: { queue?: OperationQueu
   const earliest = active ? Math.min(...[...running, ...waiting].map((entry) => entry.sinceMs)) : 0
   const [debouncedSince, setDebouncedSince] = useState<number>()
   const show = active && debouncedSince === earliest
-  const now = useNow(show)
+  const now = useClock(show)
 
   useEffect(() => {
     if (!active) {

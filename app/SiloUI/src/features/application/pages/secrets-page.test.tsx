@@ -416,7 +416,7 @@ describe("SecretsPage", () => {
 
     await user.click(list.getByRole("button", { name: "Remove DATABASE_URL" }))
     await user.click(confirm())
-    expect(screen.getByText("No secrets configured.")).toBeVisible()
+    expect(screen.getByText("No secrets configured")).toBeVisible()
     expect(screen.getByText("0 configured")).toBeVisible()
     expect(screen.getByRole("button", { name: "Add secret" })).toBeVisible()
   })

@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest"
 
-import { afterEach, beforeEach, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, vi } from "vitest"
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks"
 import { toast } from "sonner"
 import { collectUnexpectedConsoleErrors, installConsoleErrorGuard } from "./console-error-guard"
@@ -8,6 +8,14 @@ import { gateSonnerStyleSheet, purgeDetachedStyleSheets } from "./stylesheets"
 
 // Sonner keeps its toast store at module scope; clear it so notifications never leak between tests.
 afterEach(() => { toast.dismiss() })
+
+// Sonner removes a dismissed toast 200 ms later, even after its Toaster unmounted, and
+// updating state once the file's jsdom window is gone is an unhandled error. Let those
+// timers run before the environment is torn down.
+const SONNER_REMOVAL_DELAY_MS = 250
+afterAll(async () => {
+  if (toast.getHistory().length > 0 && !vi.isFakeTimers()) await new Promise((resolve) => setTimeout(resolve, SONNER_REMOVAL_DELAY_MS))
+})
 
 // Keep stylesheets no element can match out of jsdom's style computation: Sonner's
 // sheet while no toast is shown, and sheets jsdom leaks from removed components.

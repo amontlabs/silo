@@ -1,6 +1,9 @@
 import { useLayoutEffect, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core"
 
+/** The tallest the status panel grows; keep equal to `--status-panel-height` in index.css. */
+export const STATUS_PANEL_MAX_HEIGHT = 520
+
 export function useStatusPanelSize(content: RefObject<HTMLDivElement | null>) {
   useLayoutEffect(() => {
     if (!content.current) return
@@ -52,7 +55,7 @@ export function useStatusPanelSize(content: RefObject<HTMLDivElement | null>) {
     function measure() {
       if (!page) return
       const border = element.offsetHeight - element.clientHeight
-      target = Math.ceil(Math.min(520, Math.max(1, page.getBoundingClientRect().height + border)))
+      target = Math.ceil(Math.min(STATUS_PANEL_MAX_HEIGHT, Math.max(1, page.getBoundingClientRect().height + border)))
       void resize()
     }
     const observer = new ResizeObserver(measure)

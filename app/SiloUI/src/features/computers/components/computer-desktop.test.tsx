@@ -100,7 +100,7 @@ describe("optional Linux desktop", () => {
   it("still explains the computer stop required by a resource change", async () => {
     const user = userEvent.setup()
     editor({ ...configuration, desktop: { startWithComputer: true } }, true)
-    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
     expect(screen.getByRole("button", { name: "Stop and save…" })).toBeVisible()
   })
 })

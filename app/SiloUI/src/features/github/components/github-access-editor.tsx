@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
-import { Check, ExternalLink, GitBranch, Info, LoaderCircle, RotateCcw, Search, Trash2, X } from "lucide-react"
+import { Check, ExternalLink, GitBranch, Info, RotateCcw, Search, Trash2, X } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { DisclosureHeader } from "@/components/disclosure-header"
 import { ConfirmPopover } from "@/components/confirm-popover"
+import { EmptyState } from "@/components/empty-state"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 
 export type GitHubConnectionState = "disconnected" | "connecting" | "connected"
 
@@ -183,7 +185,7 @@ function RepositoryCombobox({ computer, repositoryOptions, selectedRepositories,
             <span className="min-w-0 break-all">{repository}</span>
           </button>
         )) : (
-          <p className="px-2 py-1.5 text-xs text-muted-foreground">No repositories found.</p>
+          <EmptyState variant="inline" title="No repositories found" />
         )}
         {searchActions.map((action, index) => (
           <button
@@ -284,14 +286,14 @@ export function GitHubAccessEditor({
         aria-live={connectionState === "connecting" ? "polite" : undefined}
       >
         <ListRow
-          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex ${compactConnection ? "hover:bg-muted/35 focus-within:bg-muted/35" : connectionState === "connected" ? "gap-x-3 p-0" : "gap-x-3 p-4"}`}
+          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex ${compactConnection ? "row-hover" : connectionState === "connected" ? "gap-x-3 p-0" : "gap-x-3 p-4"}`}
           icon={
             <ListRowIcon
               aria-hidden="true"
-              className={`${compactConnection ? "" : "size-9 rounded-full"} ${connectionState === "connected" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : ""}`}
+              className={`${compactConnection ? "" : "size-9 rounded-full"} ${connectionState === "connected" ? "bg-success/10 text-success" : ""}`}
             >
               {connectionState === "connected" ? <Check className={compactConnection ? "size-3.5" : "size-4"} />
-                : connectionState === "connecting" ? <LoaderCircle className={`${compactConnection ? "size-3.5" : "size-4"} animate-spin motion-reduce:animate-none`} />
+                : connectionState === "connecting" ? <Spinner className={compactConnection ? undefined : "size-4"} />
                   : <GitBranch className={compactConnection ? "size-3.5" : "size-4"} />}
             </ListRowIcon>
           }
@@ -313,7 +315,7 @@ export function GitHubAccessEditor({
       {tokenConnection}
       {notice && <div className="shrink-0">{notice}</div>}
 
-      <ScrollArea className="min-h-0 flex-1 rounded-md border border-border" role="region" aria-label="Computer Git identity and repository access" aria-busy={busy || undefined}>
+      <ScrollArea className="min-h-0 flex-initial rounded-md border border-border" role="region" aria-label="Computer Git identity and repository access" aria-busy={busy || undefined}>
         <div className="divide-y divide-border">
           {computers.map((computer) => {
             const { name } = computer
@@ -339,7 +341,7 @@ export function GitHubAccessEditor({
                             <span
                               tabIndex={0}
                               aria-label={`About Git identity for ${name}`}
-                              className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                              className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground focus-ring"
                             >
                               <GitBranch aria-hidden="true" className="size-3.5" />
                             </span>
@@ -347,10 +349,10 @@ export function GitHubAccessEditor({
                           <TooltipContent>Name and email used for Git commits in this computer.</TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
-                      <Input technical
+                      <Input size="sm" technical
                         aria-label={`Git name for ${name}`}
                         autoComplete="off"
-                        className="h-7 min-w-0 flex-[0.8] rounded-md px-2 text-[11px] md:text-[11px]"
+                        className="flex-[0.8]"
                         placeholder="Name"
                         disabled={computerDisabled}
                         value={identity.name}
@@ -360,10 +362,10 @@ export function GitHubAccessEditor({
                           if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur()
                         }}
                       />
-                      <Input technical
+                      <Input size="sm" technical
                         aria-label={`Git email for ${name}`}
                         autoComplete="off"
-                        className="h-7 min-w-0 flex-[1.2] rounded-md px-2 text-[11px] md:text-[11px]"
+                        className="flex-[1.2]"
                         inputMode="email"
                         placeholder="Email"
                         type="email"
@@ -375,7 +377,7 @@ export function GitHubAccessEditor({
                           if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur()
                         }}
                       />
-                      <label className="flex shrink-0 items-center gap-1 text-[11px]">
+                      <label className="flex shrink-0 items-center gap-1 text-caption">
                         <Checkbox
                           aria-label={`Apply Git identity to ${name}`}
                           checked={identity.apply}
@@ -459,7 +461,7 @@ export function GitHubAccessEditor({
                         )}
                         {access.repositoryMode !== "all" && selections.length > 0 && (
                           <div role="table" aria-label={`Selected repositories for ${name}`} className="overflow-hidden rounded-md border border-border">
-                            <div role="row" className={`grid ${repositoryGridColumns} items-center gap-2 bg-muted/50 px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground`}>
+                            <div role="row" className={`grid ${repositoryGridColumns} items-center gap-2 bg-muted/50 px-2 py-1.5 text-left text-caption font-medium text-muted-foreground`}>
                               <span role="columnheader">Repository</span>
                               <span role="columnheader" className="flex items-center justify-start gap-0.5 text-left">
                                 Allow GitHub changes

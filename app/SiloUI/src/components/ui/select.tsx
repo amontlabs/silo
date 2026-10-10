@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { useReduceMotion } from "@/components/ui/reduce-motion"
+import { fieldVariants, type FieldSize } from "@/components/ui/field"
 import { cn } from "@/lib/utils"
 
 function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
@@ -15,12 +16,13 @@ function SelectValue(props: React.ComponentProps<typeof SelectPrimitive.Value>) 
   return <SelectPrimitive.Value data-slot="select-value" {...props} />
 }
 
-function SelectTrigger({ className, children, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger>) {
+function SelectTrigger({ className, children, size, ...props }: React.ComponentProps<typeof SelectPrimitive.Trigger> & { size?: FieldSize }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       className={cn(
-        "flex h-8 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 text-xs whitespace-nowrap shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground [&>span]:min-w-0 [&>span]:truncate",
+        fieldVariants({ size }),
+        "flex items-center justify-between gap-2 whitespace-nowrap [&>span]:min-w-0 [&>span]:truncate",
         className,
       )}
       {...props}

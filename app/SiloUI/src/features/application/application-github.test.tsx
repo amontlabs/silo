@@ -33,7 +33,7 @@ it("preserves unsaved Git identity and pending repository choices during source 
   const { actions, user, rerender } = renderApplication("running", source)
   await user.click(within(appNavigation()).getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
-  const name = github.getByLabelText("Git name for dev")
+  const name = await github.findByLabelText("Git name for dev")
   await user.clear(name)
   await user.type(name, "Unfinished Author")
   rerender(<ApplicationPreview source={structuredClone(source)} actions={actions} />)
@@ -52,7 +52,7 @@ it("applies repository changes immediately and commits identity fields on blur",
   await user.click(within(appNavigation()).getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
 
-  const name = github.getByLabelText("Git name for playgrounds")
+  const name = await github.findByLabelText("Git name for playgrounds")
   await user.clear(name)
   await user.type(name, "Morgan Example")
   expect(actions.saveGitHubConfiguration).not.toHaveBeenCalled()
@@ -134,7 +134,7 @@ it("shows per-computer GitHub apply progress, success, and actionable failure th
   }
 
   // Only changes the user starts notify; background operations never do.
-  await application.user.click(github.getByRole("button", { name: "Disable access" }))
+  await application.user.click(github.getByRole("button", { name: "Disable for all computers" }))
   next("applying", 1)
   expect(await screen.findByText("Applying repository access…")).toBeVisible()
   expect(github.getByRole("region", { name: "Computer Git identity and repository access" })).toHaveAttribute("aria-busy", "true")
@@ -143,7 +143,7 @@ it("shows per-computer GitHub apply progress, success, and actionable failure th
   expect(await screen.findByText("GitHub settings applied")).toBeVisible()
   expect(screen.queryByText("Applying repository access…")).not.toBeInTheDocument()
 
-  await application.user.click(github.getByRole("button", { name: "Disable access" }))
+  await application.user.click(github.getByRole("button", { name: "Disable for all computers" }))
   next("failed", 3)
   expect(await screen.findByText(/GitHub settings could not be applied\./)).toBeVisible()
   expect(screen.queryByText("GitHub settings applied")).not.toBeInTheDocument()

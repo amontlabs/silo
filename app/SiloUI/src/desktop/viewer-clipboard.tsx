@@ -1,3 +1,4 @@
+import { isMac } from "@/lib/platform"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
@@ -10,8 +11,6 @@ const FEEDBACK_MS = 4000
 function isReport(value: unknown): value is ClipboardReport {
   return typeof value === "object" && value !== null && "status" in value && "action" in value
 }
-
-const isMac = () => typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
 
 /** Paste and Copy buttons for the computer's clipboard, with brief status feedback. Shortcut-started
  * transfers report through the same status. The backend says when a desktop does not support the

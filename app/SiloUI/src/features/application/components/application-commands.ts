@@ -54,8 +54,8 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     ...computerSections.map(({ section, label, icon, keywords }) => ({ label, icon, route: { computerSection: section }, keywords: [...keywords] })),
     { label: "GitHub", icon: GitFork, route: { tab: "github" }, keywords: ["git", "account", "access"] },
     { label: "Secrets", icon: KeyRound, route: { tab: "secrets" }, keywords: ["tokens", "credentials"] },
-    { label: "Settings", icon: Settings2, route: { settingsSection: "general" }, keywords: ["general", "preferences", "applications"] },
-    { label: "Connections", icon: Monitor, route: { settingsSection: "connections" }, keywords: ["remote", "ssh", "connections", "management"] },
+    { label: "Settings", icon: Settings2, route: { settingsSection: "general" }, keywords: ["general", "preferences", "applications", "computer use", "agents", "approval"] },
+    { label: "Connections", icon: Monitor, route: { settingsSection: "connections" }, keywords: ["remote", "ssh", "connections", "management", "devices"] },
     { label: "Notifications", icon: Bell, route: { settingsSection: "notifications" }, keywords: ["alerts"] },
   ]
   if (source.runtimeRepair) {
@@ -121,7 +121,6 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
       commands.push({
         id: `${id}:${label}`, label: `${label} ${name}${confirm ? "…" : ""}`, icon, group: "Actions", keywords: ["computer", ...computerKeywords], confirm,
         run: () => {
-          navigate({ computerSection: "overview" })
           if (confirm) guard.confirm(computer, action)
           else guard.request(computer, action)
         },

@@ -1,16 +1,17 @@
 import { TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useSettings } from "@/features/preferences/settings-store"
+import { shallowEqual, useSettingsSelector, useSettingsStore } from "@/features/preferences/settings-store"
 
 /** A one-time warning that Silo can lose data. Dismissing it is saved with the other settings. */
 export function AlphaNotice() {
-  const { revision, settings, updateSettings } = useSettings()
+  const { updateSettings } = useSettingsStore()
+  const { loaded, dismissed } = useSettingsSelector((view) => ({ loaded: view.revision >= 0, dismissed: view.settings.alphaNoticeDismissed }), shallowEqual)
   // Before the saved settings arrive, the default would show it again to someone who dismissed it.
-  if (revision < 0 || settings.alphaNoticeDismissed) return null
+  if (!loaded || dismissed) return null
   const dismiss = () => { void updateSettings({ alphaNoticeDismissed: true }) }
   return <div className="mx-auto w-full max-w-4xl px-4 pt-4 sm:px-6">
-    <section aria-labelledby="alpha-notice-title" className="flex items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/[.07] px-3 py-2.5 text-xs">
-      <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
+    <section aria-labelledby="alpha-notice-title" className="flex items-start gap-2.5 rounded-md border border-warning/30 bg-warning/[.07] px-3 py-2.5 text-xs">
+      <TriangleAlert className="mt-px size-3.5 shrink-0 text-warning" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <h2 id="alpha-notice-title" className="font-medium">Silo is in alpha</h2>
         <p className="mt-0.5 text-muted-foreground">An update or a bug can lose computer data. Export computers you care about regularly from their actions menu (Export…), and push your work to GitHub often.</p>

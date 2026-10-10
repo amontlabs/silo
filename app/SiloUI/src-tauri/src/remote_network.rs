@@ -767,8 +767,9 @@ fn row_host<'a>(state: &'a Value, target: &str) -> Option<&'a str> {
         .find(|row| row["computer"] == target)?["host"]
         .as_str()
 }
-/// Closes every tunnel (quit).
+/// Closes every tunnel and shared SSH connection (quit).
 pub(crate) fn close_all() {
+    crate::remote::multiplex::close_all();
     let closed: Vec<Tunnel> = {
         let mut tunnels = tunnels();
         tunnels.saves.clear();

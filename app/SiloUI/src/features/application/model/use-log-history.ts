@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
-import { errorMessage } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
 import type { ApplicationComputer } from "./application-source"
-import { isUnsupportedRemote, logIdentity, LOG_ROW_HEIGHT, type LogEntry, type LogLoader, type LogPage, type LogQuery } from "./logs"
+import { isUnsupportedRemote, logEntryKey, logIdentity, LOG_ROW_HEIGHT, type LogEntry, type LogLoader, type LogPage, type LogQuery } from "./logs"
 
 export type LogHistoryRow = { entry: LogEntry; computer: ApplicationComputer }
 export type LogHistoryResult = { computer: ApplicationComputer; page: LogPage; request: LogQuery }
@@ -24,6 +24,8 @@ type Snapshot = {
   ready: boolean
   error: string
   scrollTop: number
+  /** Counts the times the store itself set `scrollTop`, as opposed to following the viewport. */
+  scrollEpoch: number
   expandedRows: ReadonlyMap<string, number>
   historyLimited: boolean
 }
@@ -56,11 +58,9 @@ export function unsupportedLogsNotice(results: LogHistoryResult[]): string {
 }
 function ownerKey(computer: ApplicationComputer): string {
   const identity = logIdentity(computer)
-  return JSON.stringify([identity.deviceId ?? "local", identity.computerId])
+  return `${identity.deviceId ?? "local"}\u0000${identity.computerId}`
 }
-function entryKey(entry: LogEntry): string {
-  return JSON.stringify([entry.deviceId, entry.computerId, entry.id])
-}
+const entryKey = logEntryKey
 function descending(a: string, b: string): number { return a === b ? 0 : a < b ? 1 : -1 }
 function newestFirst(a: { entry: OrderKey }, b: { entry: OrderKey }): number {
   return descending(a.entry.occurredAt, b.entry.occurredAt)
@@ -106,7 +106,7 @@ class HistoryStore {
   private cache: Map<string, HistoryStore>
   private loader: LogLoader
   private requests: { computer: ApplicationComputer; request: LogQuery }[]
-  private snapshot: Snapshot = { results: [], busy: false, loadingOlder: false, ready: false, error: "", scrollTop: 0, expandedRows: new Map(), historyLimited: false }
+  private snapshot: Snapshot = { results: [], busy: false, loadingOlder: false, ready: false, error: "", scrollTop: 0, scrollEpoch: 0, expandedRows: new Map(), historyLimited: false }
   private listeners = new Set<() => void>()
   private errors = new Map<string, string>()
   private failedPaging = new Set<string>()
@@ -130,7 +130,8 @@ class HistoryStore {
     return () => { this.lastUsedAt = Date.now(); this.listeners.delete(listener); prune(this.cache) }
   }
   private update(change: Partial<Snapshot>) {
-    this.snapshot = { ...this.snapshot, ...change }
+    const scrollEpoch = "scrollTop" in change ? this.snapshot.scrollEpoch + 1 : this.snapshot.scrollEpoch
+    this.snapshot = { ...this.snapshot, ...change, scrollEpoch }
     for (const listener of this.listeners) listener()
   }
   private errorMessage() {
@@ -169,8 +170,11 @@ class HistoryStore {
       expandedRows,
     }
   }
-  setScrollTop = (scrollTop: number) => {
-    if (scrollTop !== this.snapshot.scrollTop) this.update({ scrollTop })
+  /** `notify: false` records plain scrolling without re-rendering subscribers; the snapshot stays current for the next render. */
+  setScrollTop = (scrollTop: number, notify = true) => {
+    if (scrollTop === this.snapshot.scrollTop) return
+    if (notify) this.update({ scrollTop })
+    else this.snapshot.scrollTop = scrollTop
   }
   setExpandedRows = (update: (current: ReadonlyMap<string, number>) => ReadonlyMap<string, number>) => {
     const expandedRows = update(this.snapshot.expandedRows)

@@ -110,11 +110,11 @@ it("uses subtle row tones and readable labels for every fixture state", async ()
   // One availability rule (I-12): Stop waits for a start to finish, and a computer whose
   // status could not be refreshed (the error fixture is stale) takes no lifecycle action.
   const cases: Array<{ mode: ComputerFixtureMode; state: string; tone: string; labelClass: string; hoverClass: string; stopShown: boolean; lifecycleEnabled: boolean; restartEnabled: boolean }> = [
-    { mode: "running", state: "running", tone: "running", labelClass: "text-emerald-700", hoverClass: "hover:bg-emerald-500/[0.07]", stopShown: true, lifecycleEnabled: true, restartEnabled: true },
-    { mode: "starting", state: "starting", tone: "starting", labelClass: "text-amber-700", hoverClass: "hover:bg-amber-500/[0.07]", stopShown: true, lifecycleEnabled: false, restartEnabled: false },
-    { mode: "stopped", state: "stopped", tone: "stopped", labelClass: "text-muted-foreground", hoverClass: "hover:bg-muted/35", stopShown: false, lifecycleEnabled: true, restartEnabled: false },
-    { mode: "warning", state: "stopped", tone: "warning", labelClass: "text-muted-foreground", hoverClass: "hover:bg-amber-500/[0.08]", stopShown: false, lifecycleEnabled: true, restartEnabled: false },
-    { mode: "error", state: "failed", tone: "error", labelClass: "text-destructive", hoverClass: "hover:bg-destructive/[0.07]", stopShown: false, lifecycleEnabled: false, restartEnabled: false },
+    { mode: "running", state: "running", tone: "running", labelClass: "text-success", hoverClass: "hover:bg-success/10", stopShown: true, lifecycleEnabled: true, restartEnabled: true },
+    { mode: "starting", state: "starting", tone: "starting", labelClass: "text-warning", hoverClass: "hover:bg-warning/10", stopShown: true, lifecycleEnabled: false, restartEnabled: false },
+    { mode: "stopped", state: "stopped", tone: "stopped", labelClass: "text-muted-foreground", hoverClass: "row-hover", stopShown: false, lifecycleEnabled: true, restartEnabled: false },
+    { mode: "warning", state: "stopped", tone: "warning", labelClass: "text-muted-foreground", hoverClass: "hover:bg-warning/10", stopShown: false, lifecycleEnabled: true, restartEnabled: false },
+    { mode: "error", state: "failed", tone: "error", labelClass: "text-destructive", hoverClass: "hover:bg-destructive/10", stopShown: false, lifecycleEnabled: false, restartEnabled: false },
   ]
 
   for (const { mode, state, tone, labelClass, hoverClass, stopShown, lifecycleEnabled, restartEnabled } of cases) {
@@ -252,7 +252,7 @@ it("keeps committed detail pages stable while an edit is being applied", async (
   expect(overview.getByRole("combobox", { name: "Runtime disk" })).toBeDisabled()
   await user.hover(overview.getByLabelText(/Workspace disk: .*read-only/))
   expect(await screen.findByRole("tooltip")).toHaveTextContent("Disk size is read-only.")
-  await user.selectOptions(overview.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(overview.getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(overview.getByRole("button", { name: "Stop and save…" }))
   await user.click(overview.getByRole("button", { name: "Stop and save" }))
 
@@ -270,7 +270,7 @@ it("keeps committed detail pages stable while an edit is being applied", async (
 
   await user.click(navigation.getByRole("button", { name: "Settings" }))
   const settings = within(appPanel("Settings"))
-  await user.click(settings.getByRole("switch", { name: "Start computers at launch" }))
+  await user.click(await settings.findByRole("switch", { name: "Start computers at launch" }))
   expect(settings.getByRole("button", { name: "Remove dev" })).toBeVisible()
   expect(actions.saveComputerConfiguration).toHaveBeenLastCalledWith(expect.objectContaining({
     computers: expect.arrayContaining([expect.objectContaining({ name: "dev", cpus: 4 })]),
@@ -514,12 +514,12 @@ it("renders the native app domains in the polished Silo shell", async () => {
 
   await user.click(navigation.getByRole("button", { name: "GitHub" }))
   const github = within(appPanel("GitHub"))
-  expect(github.getByText("Connected as @taylor")).toBeVisible()
+  expect(await github.findByText("Connected as @taylor")).toBeVisible()
   expect(github.getByRole("region", { name: "Computer Git identity and repository access" })).toBeVisible()
 
   await user.click(navigation.getByRole("button", { name: "Secrets" }))
   const secrets = within(appPanel("Secrets"))
-  expect(secrets.getByText("DATABASE_URL")).toBeVisible()
+  expect(await secrets.findByText("DATABASE_URL")).toBeVisible()
   expect(secrets.queryByRole("alert")).not.toBeInTheDocument()
   const secretList = within(secrets.getByRole("list", { name: "Configured secrets" }))
   const pendingSecret = secretList.getAllByRole("listitem").find((row) => row.textContent?.includes("DATABASE_URL"))!
@@ -538,7 +538,7 @@ it("applies Reduce motion to tooltips outside the app window and restores animat
     await user.click(navigation.getByRole("button", { name: "Settings" }))
     await user.click(screen.getByRole("switch", { name: "Reduce motion" }))
     await user.click(navigation.getByRole("button", { name: "Secrets" }))
-    act(() => screen.getByRole("button", { name: "Edit PACKAGE_TOKEN" }).focus())
+    const edit = await screen.findByRole("button", { name: "Edit PACKAGE_TOKEN" }); act(() => edit.focus())
 
     const tooltip = screen.getByRole("tooltip", { name: "Edit PACKAGE_TOKEN" }).closest<HTMLElement>('[data-slot="tooltip-content"]')!
     expect(tooltip).not.toBeNull()
@@ -558,7 +558,7 @@ it("preserves notification and general preferences across app sections", async (
   const settingsNavigation = within(navigation.getByRole("group", { name: "Settings sections" }))
   await user.click(settingsNavigation.getByRole("button", { name: "Notifications" }))
   const settings = within(appPanel("Settings"))
-  await user.click(settings.getByRole("switch", { name: "Enable notifications" }))
+  await user.click(await settings.findByRole("switch", { name: "Enable notifications" }))
   expect(settings.getByRole("switch", { name: "Unexpected computer changes" })).toBeDisabled()
 
   await user.click(settingsNavigation.getByRole("button", { name: "General" }))

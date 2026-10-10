@@ -38,3 +38,15 @@ it("addresses a remote computer by its device target and names the device", () =
   commands.find(command => command.id === `${remote.configuration.id}:editor`)!.run()
   expect(actions.openEditor).toHaveBeenCalledWith(target)
 })
+
+it("asks Stop in the palette without navigating away from the current page", () => {
+  const { source, local } = remoteRunningSource()
+  const actions = { stopComputer: vi.fn() } as unknown as ApplicationActions
+  const navigate = vi.fn()
+  const commands = applicationCommands(source, actions, navigate)
+  const stop = commands.find(command => command.id === `${local.configuration.id}:Stop`)!
+  expect(stop.confirm).toMatchObject({ confirmLabel: "Stop" })
+  stop.run()
+  expect(navigate).not.toHaveBeenCalled()
+  expect(actions.stopComputer).toHaveBeenCalledWith(computerTarget(local))
+})

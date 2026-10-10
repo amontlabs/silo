@@ -50,13 +50,13 @@ export function StatusPanel({ source: input, actions, notice }: { source: Applic
 
   return <TooltipProvider delayDuration={150} reduceMotion={source.preferences.reduceMotion}>
     <div ref={content} role="dialog" aria-label="Silo" tabIndex={-1}
-      className="silo-window flex max-h-[520px] w-[380px] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground outline-none"
+      className="silo-window status-panel flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground outline-none"
       data-reduce-motion={source.preferences.reduceMotion}
       onKeyDown={(event) => {
         // Nested menus consume Escape first; the next Escape dismisses the panel.
         if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); void desktopCommand("hide_status") }
       }}>
-      <ShutdownBoundary compact>{notice && <p role="status" className="shrink-0 px-3 pt-2 text-[11px] text-muted-foreground">{notice}</p>}<StatusBarContent computerMenu={NativeComputerMenu} key={opening} source={source} actions={nativeActions} focusContent={() => content.current?.focus()} /></ShutdownBoundary>
+      <ShutdownBoundary compact>{notice && <p role="status" className="shrink-0 px-3 pt-2 text-caption text-muted-foreground">{notice}</p>}<StatusBarContent computerMenu={NativeComputerMenu} key={opening} source={source} actions={nativeActions} focusContent={() => content.current?.focus()} /></ShutdownBoundary>
     </div>
     <Toaster position="bottom-center" offset={8} mobileOffset={8} visibleToasts={3} expand={false} reduceMotion={source.preferences.reduceMotion} toastOptions={{ classNames: { toast: "cn-toast !w-[calc(100vw-16px)] max-w-[364px]" } }} />
   </TooltipProvider>

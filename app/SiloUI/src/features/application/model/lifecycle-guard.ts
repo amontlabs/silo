@@ -50,7 +50,10 @@ export function lifecycleCheck(source: ApplicationSource, computer: ApplicationC
 /** The tray's inline Stop/Restart confirmation, in words every surface shares. */
 export function interruptionPrompt(computer: ApplicationComputer, action: "stop" | "restart"): LifecyclePrompt {
   const label = action === "stop" ? "Stop" : "Restart"
-  return { title: `${label} ${computerName(computer)}?`, description: "Running processes will be interrupted.", confirmLabel: label, tone: "destructive" }
+  const description = action === "stop"
+    ? "Running processes will be interrupted. Files in /workspace are kept."
+    : "Running processes will be interrupted, then the computer starts again. Files in /workspace are kept."
+  return { title: `${label} ${computerName(computer)}?`, description, confirmLabel: label, tone: "destructive" }
 }
 
 /** Sends the action to the computer's own device. */

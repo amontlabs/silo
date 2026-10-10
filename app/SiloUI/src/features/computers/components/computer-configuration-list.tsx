@@ -1,18 +1,16 @@
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
 import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react"
-import { CopyPlus, GripVertical, Pencil, Plus, Trash2 } from "lucide-react"
+import { GripVertical, Plus } from "lucide-react"
 import { DropdownMenu } from "radix-ui"
 
-import { ConfirmPopover } from "@/components/confirm-popover"
 import { ListHeader, listHeadingClassName } from "@/components/list-header"
 import { Button } from "@/components/ui/button"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
 import { configurationRequest } from "@/features/onboarding/model/computer-configuration"
 import { ComputerEditor } from "@/features/computers/components/computer-editor"
 import { useComputerEditing } from "@/features/computers/model/use-computer-editing"
-import { ComputerAction, ComputerList, ComputerListItem, ComputerListRow, type ComputerIconState, type ComputerRowTone } from "@/features/computers/components/computer-list"
+import { ComputerList, ComputerListItem, ComputerListRow, type ComputerIconState, type ComputerRowTone } from "@/features/computers/components/computer-list"
 import { computerSummary } from "@/features/computers/model/computer-summary"
-import { deleteComputerDescription, deleteComputerTitle } from "@/features/computers/model/delete-computer-copy"
 import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
 import { computerEditMenu } from "@/features/computers/model/computer-edit-menu"
 import { restoreFocus } from "@/lib/focus"
@@ -95,7 +93,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
     editorFocusRequest, setEditorFocusRequest,
     baselineRef,
     captureBaseline, beginOperation, dispatchChange,
-    startEdit, startAdd, startDuplicate, save, remove, reviewConflict, deleteWithNotice,
+    startEdit, startAdd, startDuplicate, save, reviewConflict, deleteWithNotice,
   } = useComputerEditing({ configurations, getDeviceId, onCommitComputer, onDeleteComputer, onConfigurationsChange, validateOperation, isComputerRunning, onEditorDraftChange, initialEditorDraft, interactionDisabled: interactionDisabledProp, getDeviceCapacity, getConfigurationBusyReason, draftKey: editorDraftKey })
 
   const [addOpen, setAddOpen] = useState(false)
@@ -289,8 +287,9 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
               const runningVM = Boolean(isComputerRunning?.(configuration))
               // Starting or stopping computers can be neither edited nor deleted until they settle.
               const busyReason = getConfigurationBusyReason?.(configuration)
-              const deleteTooltip = runningVM ? "Stop the computer before deleting it." : busyReason
               const presentation = getRowPresentation?.(configuration)
+              // Rows without their own menu still get the shared Edit, Duplicate and Delete menu.
+              const menuActions = presentation?.menuActions ?? (presentation?.suppressInteractions ? undefined : [])
               const rowInteractionsDisabled = interactionDisabled || Boolean(presentation?.suppressInteractions)
               const reorderDisabled = rowInteractionsDisabled || Boolean(editor)
               const deviceName = devices?.find(device => device.id === getDeviceId?.(configuration))?.name
@@ -306,7 +305,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                   onDrop={(event) => drop(event, configuration, Boolean(presentation?.suppressInteractions))}
                 >
                   {isEditing && editor ? (
-                    <ComputerEditor key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
+                    <ComputerEditor key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={devices ? <label className="grid gap-1 text-caption text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
                   ) : (
                     <ComputerListRow
                       name={configuration.name}
@@ -326,7 +325,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         aria-label={`Reorder ${configuration.name}`}
                         aria-describedby={reorderHelpId}
                         aria-disabled={reorderDisabled || undefined}
-                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-40"
+                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground focus-ring hover:bg-muted active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-50"
                         onKeyDown={(event) => { if (!reorderDisabled) handleReorderKey(event, configuration) }}
                         onDragStart={(event) => {
                           if (reorderDisabled) { event.preventDefault(); return }
@@ -340,16 +339,17 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                       >
                         <GripVertical className="size-4" aria-hidden="true" />
                       </span>}
-                      actions={presentation?.actions || presentation?.menuActions ? <>{presentation?.actions}{presentation?.menuActions && <ActionsMenu ref={node => { if (node) editorTriggers.current.set(configuration.id, node); else editorTriggers.current.delete(configuration.id) }} label={`More actions for ${configuration.name}`} popovers={{
-                        ...presentation.popovers,
+                      actions={presentation?.actions || menuActions ? <>{presentation?.actions}{menuActions && <ActionsMenu ref={node => { if (node) editorTriggers.current.set(configuration.id, node); else editorTriggers.current.delete(configuration.id) }} label={`More actions for ${configuration.name}`} popovers={{
+                        ...presentation?.popovers,
                         delete: close => <DeleteComputerBody
                           displayName={deletionName}
-                          details={presentation.deleteDetails}
+                          details={presentation?.deleteDetails}
+                          draft={Boolean(isComputerCreated) && !isComputerCreated?.(configuration)}
                           onClose={close}
                           onDelete={() => deleteWithNotice(configuration)}
                         />,
                       }} items={[
-                        ...presentation.menuActions,
+                        ...menuActions,
                         // The menu stays open to navigation while work runs; its items that
                         // change the computer follow the row's interaction lock.
                         ...computerEditMenu({
@@ -359,7 +359,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                           busyReason,
                           created: Boolean(isComputerCreated?.(configuration)),
                           running: runningVM,
-                          separatorBefore: presentation.menuActions.length > 0,
+                          separatorBefore: menuActions.length > 0,
                           onEdit: () => startEdit(configuration),
                           onDuplicate: () => startDuplicate(configuration),
                           onAddDesktop: (vm) => {
@@ -370,17 +370,6 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         }),
                       ]} />}</> : undefined}
                       actionsClassName={presentation?.actionsClassName}
-                      hoverActions={presentation?.suppressInteractions || presentation?.menuActions ? undefined : <>
-                        <ComputerAction ref={node => { if (node) editorTriggers.current.set(configuration.id, node); else editorTriggers.current.delete(configuration.id) }} label={`Edit ${configuration.name}`} tooltip={busyReason} disabled={interactionDisabled || Boolean(busyReason)} onClick={() => startEdit(configuration)}><Pencil /></ComputerAction>
-                        <ComputerAction tooltip="Create a new empty computer with the same settings." label={`Duplicate settings for ${configuration.name}`} disabled={interactionDisabled} onClick={() => startDuplicate(configuration)}>
-                          <CopyPlus />
-                        </ComputerAction>
-                        <ConfirmPopover align="end" tone="destructive" title={deleteComputerTitle(deletionName)} description={deleteComputerDescription()} confirmLabel="Delete permanently" tooltip={deleteTooltip ?? `Delete ${deletionName}`} onConfirm={() => remove(configuration)}>
-                          <Button type="button" variant="ghost" size="icon-xs" aria-label={`Delete ${deletionName}`} disabled={interactionDisabled || runningVM || Boolean(busyReason)}>
-                            <Trash2 />
-                          </Button>
-                        </ConfirmPopover>
-                      </>}
                     />
                   )}
                   {!isEditing && presentation?.expandedContent}

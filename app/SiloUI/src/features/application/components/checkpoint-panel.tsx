@@ -1,6 +1,8 @@
+import { formatMonthDayTime } from "@/lib/format-date"
 import { useEffect, useEffectEvent, useState } from "react"
 import { History, ShieldCheck, TriangleAlert } from "lucide-react"
 import { ActionsMenu } from "@/components/actions-menu"
+import { SectionHeading } from "@/components/page"
 import { ConfirmBody, ConfirmPopover, FormPopover } from "@/components/confirm-popover"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
@@ -11,11 +13,10 @@ import { runCheckpointOperation } from "@/features/application/model/checkpoint-
 import { ForkBody } from "./fork-popover"
 import type { ApplicationActions, ApplicationComputer } from "@/features/application/model/application-source"
 import type { CheckpointUsage, ComputerCheckpoint } from "@/features/application/model/checkpoint-source"
-import { formatStorageBytes } from "@/features/application/model/workspace-storage"
+import { formatBinaryBytes } from "@/lib/format-bytes"
 
 function suggestedName(now = new Date()) {
-  // Always English: the UI copy is English, so the system locale must not leak month names.
-  return `Checkpoint ${now.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })}`
+  return `Checkpoint ${formatMonthDayTime(now)}`
 }
 
 function checkpointTag(checkpoint: ComputerCheckpoint) {
@@ -27,7 +28,7 @@ type CheckpointUsageEntry = CheckpointUsage["checkpoints"][number]
 
 function deleteDescription(checkpoint: ComputerCheckpoint, info: CheckpointUsageEntry | undefined) {
   const recovery = checkpoint.reason === "before-restore" ? "This is the recovery point saved before a Restore; you can no longer undo the Restore it was saved for. " : ""
-  const freed = info?.sizeBytes != null ? `, freeing up to ${formatStorageBytes(info.sizeBytes)}` : ""
+  const freed = info?.sizeBytes != null ? `, freeing up to ${formatBinaryBytes(info.sizeBytes)}` : ""
   return `${recovery}Its saved state is removed from this device${freed}. This can’t be undone.`
 }
 
@@ -169,7 +170,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
   return <TooltipProvider delayDuration={250}>
     <section aria-label={`Checkpoints for ${computer.configuration.name}`} aria-busy={busy || undefined} className="grid gap-1.5 text-xs">
       <div className="flex min-h-6 items-center justify-between gap-2">
-        <h3 className="text-xs font-medium">Checkpoints</h3>
+        <SectionHeading>Checkpoints</SectionHeading>
         {actions.createCheckpoint && <FormPopover
           open={createOpen}
           onOpenChange={open => { if (!open || !locked) { setCreateOpen(open); if (open) setName(suggestedName()) } }}
@@ -178,18 +179,18 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
           confirmLabel="Create"
           canSubmit={!locked && name.trim().length > 0}
           onSubmit={create}
-          fields={<Input aria-label="Checkpoint name" className="h-7 text-xs" maxLength={80} value={name} placeholder="Checkpoint name" onChange={event => setName(event.target.value)} />}
+          fields={<Input size="sm" aria-label="Checkpoint name" maxLength={80} value={name} placeholder="Checkpoint name" onChange={event => setName(event.target.value)} />}
         >
           <Button size="xs" variant="outline" className="shrink-0" disabled={locked}>New checkpoint</Button>
         </FormPopover>}
       </div>
-      <p className="text-[11px] text-muted-foreground">Checkpoints let you rewind this computer. Restore replaces its current files; Fork creates a new stopped computer with a copy of its files.</p>
+      <p className="text-caption text-muted-foreground">Checkpoints let you rewind this computer. Restore replaces its current files; Fork creates a new stopped computer with a copy of its files.</p>
 
       {staleFailure && <p className="text-muted-foreground">Last checkpoint operation failed: <span className="text-destructive">{staleFailure}</span></p>}
 
       {unfinished && <div role="group" aria-label="Unfinished Restore" className="grid gap-2 rounded-md border border-border p-2.5">
         <div className="flex items-start gap-2">
-          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-warning" />
           <div className="grid gap-1">
             <p>
               The Restore to {unfinished.checkpointName ? `“${unfinished.checkpointName}”` : "a checkpoint"} did not finish.{" "}
@@ -239,7 +240,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
               detail={<>
                 <time dateTime={checkpoint.createdAt} title={formatAbsoluteTime(checkpoint.createdAt)}>{formatRelativeTime(checkpoint.createdAt) || formatAbsoluteTime(checkpoint.createdAt)}</time>
                 {" · "}{checkpointTag(checkpoint)}
-                {info?.sizeBytes != null && <>{" · "}{formatStorageBytes(info.sizeBytes)}</>}
+                {info?.sizeBytes != null && <>{" · "}{formatBinaryBytes(info.sizeBytes)}</>}
                 {info?.usedBy?.length ? <>{" · "}Used by {info.usedBy.join(", ")}</> : null}
                 {info?.deleteBlocker && <span className="block text-muted-foreground">{info.deleteBlocker}</span>}
               </>}
@@ -275,7 +276,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
         </ListCard>
       )}
 
-      {!actions.createCheckpoint && <p className="text-muted-foreground">Checkpoint operations are unavailable in this build.</p>}
+      {!actions.createCheckpoint && <p className="text-muted-foreground">Checkpoints cannot be created or restored here. Use the Silo desktop app instead.</p>}
 
     </section>
   </TooltipProvider>

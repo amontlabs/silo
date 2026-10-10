@@ -761,17 +761,17 @@ fn set_operation(controller: &Controller, operation: Operation) -> Result<(), St
     controller
         .view
         .lock()
-        .map_err(|_| {
-            "Export and import status could not be read. Relaunch Silo and retry.".to_string()
-        })?
+        .unwrap_or_else(|error| error.into_inner())
         .operation = Some(operation);
     Ok(())
 }
 
 fn finish(controller: &Controller) {
-    if let Ok(mut view) = controller.view.lock() {
-        view.cancellation = None;
-    }
+    controller
+        .view
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .cancellation = None;
     controller.busy.store(false, Ordering::Release);
 }
 

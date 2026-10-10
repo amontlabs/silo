@@ -60,15 +60,6 @@ export interface FileTransferActions {
 /** The Downloads folder of the account computers work as. */
 export const DOWNLOADS_FOLDER = "/home/silo/Downloads"
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1000) return `${bytes} bytes`
-  const units = ["KB", "MB", "GB"]
-  let value = bytes
-  let unit = -1
-  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++ }
-  return `${value.toFixed(1)} ${units[unit]}`
-}
-
 export function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }

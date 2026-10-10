@@ -355,6 +355,27 @@ Phase 4 is independent of the bridge and can run in parallel with Phases 1-3.
   not a documented API. P1 pins them; a Selkies upgrade must re-verify them.
 - **Shortcut capture.** If neither menu accelerators nor native monitors see
   Cmd+V before WKWebView, paste falls back to the toolbar and menu only.
+- **Guest page requests from the host.** The viewer loads the guest's web
+  desktop from the loopback proxy, so its scripts run on the device and their
+  requests bypass the guest's egress policy. The proxy
+  ([desktop_proxy.rs](../app/SiloUI/src-tauri/src/desktop_proxy.rs)) drops any
+  upstream `Content-Security-Policy` and `Content-Security-Policy-Report-Only`
+  from every HTTP response and adds its own: same-origin assets, `blob:`/`data:`
+  media and workers, `connect-src` limited to the proxy origin (HTTP and
+  `ws://127.0.0.1:<port>`), `form-action 'self'`, `base-uri 'none'`,
+  `object-src 'none'`. A response head that is malformed, over 32 KiB or whose
+  line endings are ambiguous is answered with 502. WebSocket upgrade responses
+  and bodies pass through unchanged. Residual risks: `RTCPeerConnection` is not
+  governed by `connect-src`, so a page can still open WebRTC connections (Selkies
+  2.0.0 uses its WebSocket transport, so Silo does not need WebRTC); navigation
+  is limited separately by the viewer's `on_navigation` filter. The script
+  policy keeps `'unsafe-inline'`/`'unsafe-eval'` because the guest client needs
+  them, so the policy confines network reach, not guest script execution. The
+  policy has not been exercised against a live Selkies desktop; it needs a
+  visible check that video, input, clipboard, audio and reconnects still work.
+- **Guest clipboard text.** Text copied from a computer has control characters
+  (C0, DEL and C1, including escape) removed before it reaches the device
+  clipboard; tab, newline and carriage return are kept.
 - **Guest-forged replies.** A guest can answer a copy request with arbitrary
   content. That is inherent to copying from an untrusted computer; the device
   clipboard is written only after the user's action, with size caps.

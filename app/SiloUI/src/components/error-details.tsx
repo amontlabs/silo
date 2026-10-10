@@ -19,7 +19,7 @@ export function ErrorDetails({ message, diagnostic, fallbackSummary, className }
   const shown = summary ?? fallbackSummary
   return (
     <div className={cn("grid min-w-0 gap-1.5", className)} data-slot="error-details">
-      {shown && <p className="min-w-0 whitespace-pre-wrap break-words">{shown}</p>}
+      {shown && <p className="min-w-0 whitespace-pre-wrap break-words select-text">{shown}</p>}
       {details && <LogDisclosure
         title="Details"
         output={details}
