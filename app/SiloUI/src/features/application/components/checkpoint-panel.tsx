@@ -31,12 +31,21 @@ function deleteDescription(checkpoint: ComputerCheckpoint, info: CheckpointUsage
   return `${recovery}Its saved state is removed from this device${freed}. This can’t be undone.`
 }
 
-export function CheckpointPanel({ computer, target, actions, disabled, onExport, exportDisabled = false, forkedAction, restoredAction, takenNames }: {
-  computer: ApplicationComputer
+/** What the panel reads of a computer: a Linux computer as the application lists it, or a macOS computer shaped like one. */
+export type CheckpointSubject = Pick<ApplicationComputer, "checkpoints" | "checkpointOperation" | "unfinishedRestore" | "pendingCheckpointRestore" | "state" | "device"> & {
+  configuration: Pick<ApplicationComputer["configuration"], "id" | "name">
+}
+
+export type CheckpointActions = Pick<ApplicationActions, "createCheckpoint" | "forkCheckpoint" | "restoreCheckpoint" | "abandonRestore" | "deleteCheckpoint" | "readCheckpointUsage">
+
+export function CheckpointPanel({ computer, target, actions, disabled, onExport, exportDisabled = false, forkedAction, restoredAction, takenNames, forkCopy }: {
+  computer: CheckpointSubject
+  /** Words that differ between kinds of computer: what a fork copies and what happens after it is created. */
+  forkCopy?: { description?: string; created?: (name: string) => string }
   /** Computer names already used on this computer's device, so a fork name conflict shows inline. */
   takenNames?: readonly string[]
   target: string
-  actions: ApplicationActions
+  actions: CheckpointActions
   disabled: boolean
   onExport?: (checkpoint: ComputerCheckpoint) => void
   exportDisabled?: boolean
@@ -123,7 +132,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
       noticeComputer,
       title: `Creating fork ${newName}`,
       run: () => actions.forkCheckpoint!(target, checkpoint.id, newName),
-      success: { title: "Fork created", description: `${newName} is stopped. Start it when you’re ready.`, action: forkedAction?.(newName) },
+      success: { title: "Fork created", description: forkCopy?.created?.(newName) ?? `${newName} is stopped. Start it when you’re ready.`, action: forkedAction?.(newName) },
       failureTitle: `Could not create fork ${newName}`,
     })
   }
@@ -259,7 +268,7 @@ export function CheckpointPanel({ computer, target, actions, disabled, onExport,
                   label={`Checkpoint actions for ${checkpoint.name}`}
                   disabled={locked}
                   popovers={{
-                    fork: close => <ForkBody computerName={computerName} title={`Fork from “${checkpoint.name}”`} description="Creates a new stopped computer with a copy of this computer’s files at this checkpoint. Select Start when ready." disabled={locked} takenNames={takenNames} onFork={newName => fork(checkpoint, newName)} onClose={close} />,
+                    fork: close => <ForkBody computerName={computerName} title={`Fork from “${checkpoint.name}”`} description={forkCopy?.description ?? "Creates a new stopped computer with a copy of this computer’s files at this checkpoint. Select Start when ready."} disabled={locked} takenNames={takenNames} onFork={newName => fork(checkpoint, newName)} onClose={close} />,
                     delete: close => <ConfirmBody tone="destructive" title={`Delete “${checkpoint.name}”?`} description={deleteDescription(checkpoint, info)} confirmLabel="Delete" onConfirm={() => remove(checkpoint)} onClose={close} />,
                   }}
                   items={[

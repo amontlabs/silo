@@ -50,6 +50,9 @@ struct Slot {
     _delegate: Retained<MachineDelegate>,
     installer: Option<Retained<VZMacOSInstaller>>,
     view: Option<Retained<VZVirtualMachineView>>,
+    /// Whether the framework can save and restore this machine's memory, as asked when it
+    /// was configured.
+    save_restore: Result<(), String>,
 }
 
 thread_local! {
@@ -513,6 +516,9 @@ fn register(
             _delegate: delegate,
             installer,
             view: None,
+            save_restore: configuration
+                .validateSaveRestoreSupportWithError()
+                .map_err(|error| describe(&error)),
         }
     }
 }
@@ -704,7 +710,7 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 // MARK: Running
 
 pub(super) fn start(app: &AppHandle, record: &Record, layout: &Layout) -> Result<(), String> {
-    start_machine(app, record, layout, false)
+    start_machine(app, record, layout, &Boot::Normal)
 }
 
 /// Starts the computer in macOS Recovery instead of its installed system.
@@ -713,7 +719,65 @@ pub(super) fn start_in_recovery(
     record: &Record,
     layout: &Layout,
 ) -> Result<(), String> {
-    start_machine(app, record, layout, true)
+    start_machine(app, record, layout, &Boot::Recovery)
+}
+
+/// How a machine begins running.
+enum Boot {
+    Normal,
+    Recovery,
+    /// Restores the memory saved in this file, then resumes.
+    State(std::path::PathBuf),
+}
+
+/// Why a start failed.
+enum BootFailure {
+    /// The machine could not be built, or was already there.
+    Setup(String),
+    /// The framework refused to start it, or to restore its saved memory.
+    Machine(String),
+}
+
+impl BootFailure {
+    fn message(self) -> String {
+        match self {
+            Self::Setup(message) | Self::Machine(message) => message,
+        }
+    }
+}
+
+/// Why a start from saved memory did not happen. The machine is released in both cases.
+pub(super) enum StateStartError {
+    /// The framework refused the saved memory; the computer can still boot from its disk.
+    Rejected(String),
+    Failed(String),
+}
+
+/// Starts the computer from the memory saved in `state`, leaving it running.
+pub(super) fn start_from_state(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+    state: &Path,
+) -> Result<(), StateStartError> {
+    let boot = Boot::State(state.to_path_buf());
+    let mut tries = 0;
+    loop {
+        match start_machine_once(app, record, layout, &boot) {
+            Ok(()) => return Ok(()),
+            Err(BootFailure::Setup(message)) => return Err(StateStartError::Failed(message)),
+            Err(BootFailure::Machine(message)) => {
+                // A refused restore leaves a machine that nothing else will release.
+                discard(app, &record.id);
+                if tries < LOCK_RETRIES && is_lock_error(&message) {
+                    tries += 1;
+                    std::thread::sleep(LOCK_BACKOFF);
+                } else {
+                    return Err(StateStartError::Rejected(message));
+                }
+            }
+        }
+    }
 }
 
 /// How often a start is retried while the framework still holds the previous
@@ -725,10 +789,10 @@ fn start_machine(
     app: &AppHandle,
     record: &Record,
     layout: &Layout,
-    recovery: bool,
+    boot: &Boot,
 ) -> Result<(), String> {
     retry_while_locked(LOCK_RETRIES, LOCK_BACKOFF, || {
-        start_machine_once(app, record, layout, recovery)
+        start_machine_once(app, record, layout, boot).map_err(BootFailure::message)
     })
 }
 
@@ -760,17 +824,24 @@ fn start_machine_once(
     app: &AppHandle,
     record: &Record,
     layout: &Layout,
-    recovery: bool,
-) -> Result<(), String> {
-    let model = read(&layout.hardware_model(), "hardware model")?;
-    let identifier = read(&layout.machine_identifier(), "identity")?;
+    boot: &Boot,
+) -> Result<(), BootFailure> {
+    let model = read(&layout.hardware_model(), "hardware model").map_err(BootFailure::Setup)?;
+    let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
     let (send, receive) = mpsc::channel::<Result<(), String>>();
     let (app_handle, record, layout) = (app.clone(), record.clone(), layout.clone());
-    on_main(app, move |mtm| -> Result<(), String> {
+    let state = match boot {
+        Boot::State(path) => Some(path.clone()),
+        _ => None,
+    };
+    let recovery = matches!(boot, Boot::Recovery);
+    on_main(app, move |mtm| -> Result<(), BootFailure> {
         if SLOTS.with(|slots| slots.borrow().contains_key(&record.id)) {
-            return Err("This computer is already running.".into());
+            return Err(BootFailure::Setup(
+                "This computer is already running.".into(),
+            ));
         }
-        let identifier = machine_identifier_from(&identifier)?;
+        let identifier = machine_identifier_from(&identifier).map_err(BootFailure::Setup)?;
         // SAFETY: Main thread; the storage opens an existing file.
         let auxiliary = unsafe {
             VZMacAuxiliaryStorage::initWithURL(
@@ -778,25 +849,49 @@ fn start_machine_once(
                 &nsurl(&layout.auxiliary_storage()),
             )
         };
-        let configuration = configuration(&record, &layout, &model, &auxiliary, &identifier)?;
+        let configuration = configuration(&record, &layout, &model, &auxiliary, &identifier)
+            .map_err(BootFailure::Setup)?;
         let slot = register(mtm, &app_handle, &record, &configuration, None);
+        if let (Some(_), Err(why)) = (&state, &slot.save_restore) {
+            return Err(BootFailure::Machine(why.clone()));
+        }
         let vm = slot.vm.clone();
         SLOTS.with(|slots| slots.borrow_mut().insert(record.id.clone(), slot));
         let id = record.id.clone();
-        let handler = RcBlock::new(move |error: *mut NSError| {
-            // SAFETY: The framework passes null or a valid error.
-            let result = match unsafe { error.as_ref() } {
-                None => Ok(()),
-                Some(error) => {
-                    let id = id.clone();
-                    defer(move || release(&id));
-                    Err(describe(error))
-                }
-            };
-            let _ = send.send(result);
-        });
-        // SAFETY: Main thread; the handler runs on the main queue.
+        // SAFETY: Main thread; the handlers run on the main queue.
         unsafe {
+            if let Some(path) = &state {
+                // A restore that failed is released by the caller, before it falls back.
+                let machine = vm.clone();
+                let restored = RcBlock::new(move |error: *mut NSError| match error.as_ref() {
+                    Some(error) => {
+                        let _ = send.send(Err(describe(error)));
+                    }
+                    None => {
+                        let send = send.clone();
+                        let resumed = RcBlock::new(move |error: *mut NSError| {
+                            let _ = send.send(match error.as_ref() {
+                                None => Ok(()),
+                                Some(error) => Err(describe(error)),
+                            });
+                        });
+                        machine.resumeWithCompletionHandler(&resumed);
+                    }
+                });
+                vm.restoreMachineStateFromURL_completionHandler(&nsurl(path), &restored);
+                return Ok(());
+            }
+            let handler = RcBlock::new(move |error: *mut NSError| {
+                let result = match error.as_ref() {
+                    None => Ok(()),
+                    Some(error) => {
+                        let id = id.clone();
+                        defer(move || release(&id));
+                        Err(describe(error))
+                    }
+                };
+                let _ = send.send(result);
+            });
             if recovery {
                 let options = VZMacOSVirtualMachineStartOptions::new();
                 options.setStartUpFromMacOSRecovery(true);
@@ -806,12 +901,111 @@ fn start_machine_once(
             }
         }
         Ok(())
-    })??;
+    })
+    .map_err(BootFailure::Setup)??;
     // The framework always answers a start. Giving up earlier would leave a machine
     // that may still come up without anything tracking it as started.
     receive
         .recv()
-        .map_err(|_| "The computer did not start.".to_string())?
+        .map_err(|_| BootFailure::Setup("The computer did not start.".to_string()))?
+        .map_err(BootFailure::Machine)
+}
+
+// MARK: Memory
+
+fn completion(send: mpsc::Sender<Result<(), String>>) -> RcBlock<dyn Fn(*mut NSError)> {
+    RcBlock::new(move |error: *mut NSError| {
+        // SAFETY: The framework passes null or a valid error.
+        let result = match unsafe { error.as_ref() } {
+            None => Ok(()),
+            Some(error) => Err(describe(error)),
+        };
+        let _ = send.send(result);
+    })
+}
+
+/// Calls `call` on the main thread with the running machine of computer `id` and a sender
+/// for its completion handler, then waits for what the handler reports.
+fn on_machine(
+    app: &AppHandle,
+    id: &str,
+    call: impl FnOnce(&VZVirtualMachine, mpsc::Sender<Result<(), String>>) + Send + 'static,
+) -> Result<(), String> {
+    let (send, receive) = mpsc::channel();
+    let id = id.to_string();
+    on_main(app, move |_| -> Result<(), String> {
+        let machine = SLOTS
+            .with(|slots| slots.borrow().get(&id).map(|slot| slot.vm.clone()))
+            .ok_or("This computer isn't running.")?;
+        call(&machine, send);
+        Ok(())
+    })??;
+    receive
+        .recv()
+        .map_err(|_| "The computer did not answer.".to_string())?
+}
+
+/// Whether the framework can save the running machine's memory, or why not.
+pub(super) fn memory_support(app: &AppHandle, id: &str) -> Result<(), String> {
+    let id = id.to_string();
+    on_main(app, move |_| {
+        SLOTS.with(|slots| {
+            slots
+                .borrow()
+                .get(&id)
+                .map(|slot| slot.save_restore.clone())
+                .unwrap_or_else(|| Err("This computer isn't running.".into()))
+        })
+    })?
+}
+
+/// Pauses the running machine, saves its memory to `state`, calls `copy` while it is paused
+/// and resumes it. The machine is resumed whatever `copy` returned; a machine that could not
+/// be paused is left as it was.
+pub(super) fn save_running(
+    app: &AppHandle,
+    id: &str,
+    state: &Path,
+    copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    on_machine(app, id, |machine, send| {
+        // SAFETY: Main thread; the machine is a framework object in a slot.
+        unsafe {
+            if machine.canPause() {
+                machine.pauseWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("This computer can't be paused right now.".into()));
+            }
+        }
+    })?;
+    let url = state.to_path_buf();
+    let saved = on_machine(app, id, move |machine, send| {
+        // SAFETY: Main thread; the machine is paused and the URL names a new file.
+        unsafe {
+            machine.saveMachineStateToURL_completionHandler(&nsurl(&url), &completion(send));
+        }
+    })
+    .and_then(|()| copy());
+    let resumed = on_machine(app, id, |machine, send| {
+        // SAFETY: Main thread.
+        unsafe {
+            if machine.canResume() {
+                machine.resumeWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("The computer is not paused.".into()));
+            }
+        }
+    });
+    match (saved, resumed) {
+        (saved, Ok(())) => saved,
+        (saved, Err(why)) => Err(format!(
+            "{}The computer could not be resumed ({why}). Use Force stop.",
+            saved
+                .err()
+                .map(|message| format!("{message} "))
+                .unwrap_or_default()
+        )),
+    }
 }
 
 pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {

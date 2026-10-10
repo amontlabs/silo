@@ -527,7 +527,7 @@ impl CopyError {
 /// and costs no space until one side changes; elsewhere (the tests, on Linux) it is a
 /// plain copy.
 #[cfg(target_os = "macos")]
-fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
+pub(super) fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
     use std::os::unix::ffi::OsStrExt;
     let cstring = |path: &Path| {
         std::ffi::CString::new(path.as_os_str().as_bytes())
@@ -549,7 +549,7 @@ fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
+pub(super) fn clone_file(from: &Path, to: &Path) -> Result<(), CopyError> {
     fs::copy(from, to)
         .map(|_| ())
         .map_err(|error| CopyError::Failed(store::io_error("copy the computer's files", &error)))
@@ -578,7 +578,7 @@ fn available_space(path: &Path) -> Option<u64> {
 fn enough_space(available: Option<u64>, needed: u64) -> Result<(), String> {
     match available {
         Some(available) if available < needed.saturating_add(FREE_RESERVE) => Err(format!(
-            "This Mac is low on disk space: about {} GB are free and a new computer needs {} GB more than the {} GB Silo leaves free.",
+            "This Mac is low on disk space: about {} GB are free and this needs {} GB more than the {} GB Silo leaves free.",
             available / 1_000_000_000,
             needed.div_ceil(1_000_000_000),
             FREE_RESERVE / 1_000_000_000

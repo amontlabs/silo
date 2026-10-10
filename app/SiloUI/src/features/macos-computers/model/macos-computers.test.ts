@@ -106,6 +106,10 @@ describe("createMacosComputersStore", () => {
       action: vi.fn(async () => {}),
       openDisplay: vi.fn(async () => {}),
       deleteTemplate: vi.fn(async () => {}),
+      createCheckpoint: vi.fn(async () => {}),
+      restoreCheckpoint: vi.fn(async () => {}),
+      forkCheckpoint: vi.fn(async () => {}),
+      deleteCheckpoint: vi.fn(async () => {}),
       clipboard: vi.fn(async () => ({ action: "paste" as const, status: "pasted" as const })),
       listen: vi.fn(async next => { handler = next; return unlisten }),
     }

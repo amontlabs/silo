@@ -8,7 +8,9 @@
 //! `provision` prepares an installed computer for computer use, with `offline_setup`,
 //! `guest_access`, `recovery`, `guest_computer_use` and `guest_clipboard` behind it.
 //! A finished computer becomes a template (`templates`); later computers are copied
-//! from it and made their own by `personalize`.
+//! from it and made their own by `personalize`. `checkpoints` saves and restores a
+//! computer's disk and memory and forks new computers from them.
+mod checkpoints;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -79,6 +81,11 @@ pub(crate) struct MacosComputer {
     setup_complete: bool,
     /// A copy of a template that still has the template's credentials; it cannot be started.
     needs_personalizing: bool,
+    /// Newest first.
+    checkpoints: Vec<checkpoints::Summary>,
+    checkpoint_operation: Option<checkpoints::Operation>,
+    /// A Restore that the next Start continues.
+    pending_restore: Option<checkpoints::PendingRestore>,
 }
 
 /// The template new computers are copied from.
@@ -112,6 +119,10 @@ struct Entry {
     display_open: bool,
     /// Its files are being removed; nothing else may use the computer.
     deleting: bool,
+    /// The saved checkpoints, newest first.
+    checkpoints: Vec<checkpoints::Meta>,
+    /// A checkpoint operation owns the computer: it can't be started, stopped or deleted.
+    operation: Option<checkpoints::Operation>,
     since: Instant,
     progress_emitted: Option<Instant>,
 }
@@ -126,6 +137,8 @@ impl Entry {
             cancel: Arc::new(AtomicU8::new(RUN)),
             display_open: false,
             deleting: false,
+            checkpoints: Vec::new(),
+            operation: None,
             since: Instant::now(),
             progress_emitted: None,
         }
@@ -146,6 +159,13 @@ impl Entry {
             installed: self.record.installed,
             setup_complete: self.record.setup.complete(),
             needs_personalizing: self.record.setup.needs_personalizing,
+            checkpoints: self
+                .checkpoints
+                .iter()
+                .map(checkpoints::Meta::summary)
+                .collect(),
+            checkpoint_operation: self.operation.clone(),
+            pending_restore: self.record.pending_restore.clone(),
         }
     }
 }
@@ -168,6 +188,13 @@ struct Registry {
 impl Registry {
     fn entry(&mut self, id: &str) -> Option<&mut Entry> {
         self.entries.iter_mut().find(|entry| entry.record.id == id)
+    }
+
+    /// Whether any computer is changing state or owned by a checkpoint operation.
+    fn any_busy(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| is_busy(entry.state) || entry.operation.is_some())
     }
 
     /// Whether the creation of `id` may go on: it exists and no Delete cancelled it.
@@ -336,7 +363,7 @@ pub(crate) fn reopen_after_update() {
 /// Closes admission for an update unless a macOS computer is busy.
 pub(crate) fn close_for_update() -> Result<(), String> {
     let mut closed = closed();
-    let busy = registry().entries.iter().any(|entry| is_busy(entry.state));
+    let busy = registry().any_busy();
     closed.close_for_update(busy)
 }
 
@@ -363,7 +390,11 @@ fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
             .into_iter()
             .map(|record| {
                 let (state, detail) = store::initial_state(&record);
-                Entry::new(record, state, detail)
+                let layout = Layout::new(&data, &record.id);
+                checkpoints::sweep(&layout);
+                let mut entry = Entry::new(record, state, detail);
+                entry.checkpoints = checkpoints::list(&layout);
+                entry
             })
             .collect();
         let data = app_data(app)?;
@@ -527,6 +558,22 @@ fn set_progress(app: &AppHandle, id: &str, fraction: f64) {
     }
 }
 
+/// Whether a checkpoint operation owns the computer.
+fn has_operation(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && entry.operation.is_some())
+}
+
+/// Whether the computer is changing state or owned by an operation: Quit waits for it.
+fn is_active(id: &str) -> bool {
+    registry()
+        .entries
+        .iter()
+        .any(|entry| entry.record.id == id && (is_busy(entry.state) || entry.operation.is_some()))
+}
+
 fn state_of(id: &str) -> Option<State> {
     registry()
         .entries
@@ -630,6 +677,58 @@ pub(crate) async fn open_macos_display(
     main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
+}
+
+/// Saves a checkpoint of a computer: its memory too when it runs.
+#[tauri::command]
+pub(crate) async fn create_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || create_checkpoint(&app, &id, &name)).await
+}
+
+/// Rewinds a computer to a checkpoint. The computer stays stopped.
+#[tauri::command]
+pub(crate) async fn restore_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || restore_checkpoint(&app, &id, &checkpoint_id)).await
+}
+
+/// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
+#[tauri::command]
+pub(crate) async fn fork_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+    new_name: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
+}
+
+#[tauri::command]
+pub(crate) async fn delete_macos_checkpoint(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    checkpoint_id: String,
+) -> Result<(), String> {
+    main_window_only(&window)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || delete_checkpoint(&app, &id, &checkpoint_id)).await
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
@@ -985,29 +1084,38 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             return Err("This computer is being deleted.".into());
         }
         store::start_allowed(entry.state, &entry.record)?;
-        // A computer the user starts is no longer the clean result of its setup.
-        if entry.record.pristine {
-            let mut started = entry.record.clone();
-            started.pristine = false;
-            store::save(&Layout::new(&data, id), &started)?;
-            entry.record = started;
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
         }
+        // A computer the user starts is no longer the clean result of its setup, and a
+        // Restore is carried out by this start whether or not it works out.
+        let mut started = entry.record.clone();
+        started.pristine = false;
+        started.pending_restore = None;
+        if started != entry.record {
+            store::save(&Layout::new(&data, id), &started)?;
+        }
+        let pending = entry.record.pending_restore.clone();
+        entry.record = started;
         entry.state = State::Starting;
         entry.detail = None;
         entry.since = Instant::now();
-        entry.record.clone()
+        (entry.record.clone(), pending)
     };
+    let (record, pending) = record;
     emit(app);
     watch(app);
     let layout = Layout::new(&data, id);
+    let plan = checkpoints::start_plan(&layout, pending.as_ref(), &checkpoints::host_build());
     let started = offline_setup::ensure_detached(&layout.disk())
-        .and_then(|()| engine::start(app, &record, &layout));
+        .and_then(|()| start_machine(app, &record, &layout, plan));
     match started {
-        Ok(()) => {
+        Ok(note) => {
             update(app, id, |entry| {
                 if entry.state == State::Starting {
                     entry.state = State::Running;
                     entry.since = Instant::now();
+                    entry.detail = note;
                 }
             });
             Ok(())
@@ -1017,6 +1125,41 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             Err(message)
         }
     }
+}
+
+/// Boots the machine as `plan` says. Saved memory the framework refuses is not fatal: the
+/// computer boots from its disk and the returned note says why. A note is also returned when
+/// the plan itself gave up on the memory.
+fn start_machine(
+    app: &AppHandle,
+    record: &Record,
+    layout: &Layout,
+    plan: checkpoints::StartPlan,
+) -> Result<Option<String>, String> {
+    use checkpoints::StartPlan;
+    let note = match plan {
+        StartPlan::Boot => None,
+        StartPlan::BootBecause(note) => Some(note),
+        StartPlan::RestoreMemory { state } => {
+            log_line(app, &record.id, "restoring the checkpoint's memory");
+            match engine::start_from_state(app, record, layout, &state) {
+                Ok(()) => {
+                    log_line(app, &record.id, "memory restored");
+                    return Ok(None);
+                }
+                Err(engine::StateStartError::Failed(message)) => return Err(message),
+                Err(engine::StateStartError::Rejected(why)) => {
+                    log_line(app, &record.id, &format!("memory not restored: {why}"));
+                    Some(checkpoints::rejected_note(&why))
+                }
+            }
+        }
+    };
+    if let Some(note) = &note {
+        log_line(app, &record.id, &format!("booting from the disk: {note}"));
+    }
+    engine::start(app, record, layout)?;
+    Ok(note)
 }
 
 fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
@@ -1141,6 +1284,9 @@ fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
     if !matches!(state, State::Running | State::Stopping) {
         return Err("This computer isn't running.".into());
     }
+    if has_operation(id) {
+        return Err(checkpoints::BUSY.into());
+    }
     let note = request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT)?;
     update(app, id, |entry| {
         if entry.state == State::Running {
@@ -1158,6 +1304,9 @@ fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
     let (_, state) = computer(id)?;
     if !matches!(state, State::Running | State::Starting | State::Stopping) {
         return Err("This computer isn't running.".into());
+    }
+    if has_operation(id) {
+        return Err(checkpoints::BUSY.into());
     }
     let before = registry().begin_force_stop(id);
     emit(app);
@@ -1180,6 +1329,9 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
             .iter()
             .position(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        if registry.entries[index].operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
         match store::delete_mode(registry.entries[index].state)? {
             DeleteMode::Cancel => {
                 let entry = &mut registry.entries[index];
@@ -1248,6 +1400,371 @@ fn machine_stopped(app: &AppHandle, id: &str, error: Option<String>) {
             }
         });
     });
+}
+
+// MARK: Checkpoints
+
+const GIB: u64 = 1 << 30;
+/// How long a forced stop may take before a Restore gives up on it.
+const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
+
+/// Ends a checkpoint operation when dropped, whichever way the work ended.
+struct Held<'a> {
+    app: &'a AppHandle,
+    id: String,
+    record: Record,
+    state: State,
+    cancel: Arc<AtomicU8>,
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        update(self.app, &self.id, |entry| entry.operation = None);
+    }
+}
+
+fn first_stage(kind: checkpoints::OperationKind) -> &'static str {
+    match kind {
+        checkpoints::OperationKind::Capture => "Preparing",
+        checkpoints::OperationKind::Restore => "Preparing",
+        checkpoints::OperationKind::Fork => "Copying the checkpoint",
+        checkpoints::OperationKind::Delete => "Removing the checkpoint",
+    }
+}
+
+/// Claims the computer for one checkpoint operation, if nothing else is using it.
+fn begin_operation<'a>(
+    app: &'a AppHandle,
+    id: &str,
+    kind: checkpoints::OperationKind,
+) -> Result<Held<'a>, String> {
+    let _admitted = admission()?;
+    let (record, state, cancel) = {
+        let mut registry = registry();
+        let entry = registry
+            .entry(id)
+            .ok_or("This computer no longer exists.")?;
+        store::checkpoint_allowed(
+            entry.state,
+            &entry.record,
+            entry.deleting,
+            entry.operation.is_some(),
+            kind,
+        )?;
+        entry.cancel.store(RUN, Ordering::SeqCst);
+        entry.operation = Some(checkpoints::Operation::running(kind, first_stage(kind)));
+        (entry.record.clone(), entry.state, entry.cancel.clone())
+    };
+    emit(app);
+    Ok(Held {
+        app,
+        id: id.to_string(),
+        record,
+        state,
+        cancel,
+    })
+}
+
+/// The machine of a computer as the checkpoint workflows reach it.
+struct LiveMachine<'a> {
+    app: &'a AppHandle,
+    id: &'a str,
+    cancel: &'a AtomicU8,
+}
+
+impl checkpoints::Machine for LiveMachine<'_> {
+    fn memory_support(&self) -> Result<(), String> {
+        engine::memory_support(self.app, self.id)
+    }
+
+    fn save_running(
+        &self,
+        state: &std::path::Path,
+        copy: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), String> {
+        engine::save_running(self.app, self.id, state, copy)
+    }
+
+    fn force_stop(&self) -> Result<(), String> {
+        engine::force_stop(self.app, self.id)?;
+        if engine::wait_until_stopped(self.app, self.id, FORCED_STOP_WAIT) {
+            Ok(())
+        } else {
+            Err("The computer did not stop in time.".into())
+        }
+    }
+
+    fn stage(&self, stage: &str) {
+        update(self.app, self.id, |entry| {
+            if let Some(operation) = &mut entry.operation {
+                operation.stage = stage.to_string();
+            }
+        });
+    }
+
+    fn log(&self, line: &str) {
+        if let Some(log) = setup_log::SetupLog::open(self.app, self.id) {
+            log.line(line);
+        }
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst) != RUN
+    }
+}
+
+fn log_line(app: &AppHandle, id: &str, line: &str) {
+    if let Some(log) = setup_log::SetupLog::open(app, id) {
+        log.line(line);
+    }
+}
+
+/// Reads the checkpoints on disk again, after an operation that may have changed them.
+fn refresh_checkpoints(app: &AppHandle, id: &str, layout: &Layout) {
+    let found = checkpoints::list(layout);
+    update(app, id, |entry| entry.checkpoints = found);
+}
+
+/// Space for the memory a checkpoint of a running computer saves.
+fn reserve_for_memory(
+    data: &std::path::Path,
+    record: &Record,
+    running: bool,
+) -> Result<Option<templates::SpaceReservation>, String> {
+    running
+        .then(|| templates::reserve_space(data, record.memory_gib * GIB))
+        .transpose()
+}
+
+fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let name = checkpoints::validate_name(name)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Capture)?;
+    let layout = Layout::new(&data, id);
+    let running = held.state == State::Running;
+    log_line(
+        app,
+        id,
+        &format!(
+            "creating checkpoint \"{name}\" ({})",
+            if running { "memory and disk" } else { "disk" }
+        ),
+    );
+    let _space = reserve_for_memory(&data, &held.record, running)?;
+    let machine = LiveMachine {
+        app,
+        id,
+        cancel: &held.cancel,
+    };
+    let subject = checkpoints::Subject {
+        layout: &layout,
+        machine: &machine,
+        running,
+        macos_version: held.record.os_version(),
+    };
+    let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
+    refresh_checkpoints(app, id, &layout);
+    result.map(|_| ())
+}
+
+fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Restore)?;
+    let layout = Layout::new(&data, id);
+    let target = checkpoints::find(&layout, checkpoint_id)?;
+    let running = held.state == State::Running;
+    log_line(
+        app,
+        id,
+        &format!("restoring checkpoint \"{}\" ({})", target.name, target.id),
+    );
+    let _space = reserve_for_memory(&data, &held.record, running)?;
+    offline_setup::ensure_detached(&layout.disk())?;
+    let machine = LiveMachine {
+        app,
+        id,
+        cancel: &held.cancel,
+    };
+    let subject = checkpoints::Subject {
+        layout: &layout,
+        machine: &machine,
+        running,
+        macos_version: held.record.os_version(),
+    };
+    let restored = checkpoints::restore(&subject, checkpoint_id);
+    // The recovery checkpoint exists whether or not the rest succeeded.
+    refresh_checkpoints(app, id, &layout);
+    let pending = restored?;
+    let (mut record, _) = computer(id)?;
+    record.pending_restore = Some(pending);
+    // The disk no longer is what the user left, and only what Start restores is the result.
+    record.pristine = false;
+    store::save(&layout, &record)?;
+    update(app, id, |entry| {
+        entry.record = record;
+        if matches!(entry.state, State::Running | State::Stopping) {
+            entry.state = State::Stopped;
+            entry.since = Instant::now();
+        }
+        entry.detail = None;
+    });
+    Ok(())
+}
+
+fn delete_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Delete)?;
+    let layout = Layout::new(&data, id);
+    let target = checkpoints::find(&layout, checkpoint_id)?;
+    if held
+        .record
+        .pending_restore
+        .as_ref()
+        .is_some_and(|pending| pending.checkpoint_id == target.id)
+    {
+        return Err("The next Start of this computer continues from this checkpoint. Start the computer first, or restore another checkpoint.".into());
+    }
+    let removed = checkpoints::remove(&layout, &target.id);
+    refresh_checkpoints(app, id, &layout);
+    if removed.is_ok() {
+        log_line(
+            app,
+            id,
+            &format!("checkpoint deleted: {} ({})", target.name, target.id),
+        );
+    }
+    removed
+}
+
+/// Creates a stopped computer with a copy of a checkpoint's disk, and sets it up in the
+/// background: it gets its own password, keys and name, like a copy of a template.
+fn fork_checkpoint(
+    app: &AppHandle,
+    id: &str,
+    checkpoint_id: &str,
+    new_name: &str,
+) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let new_name = new_name.trim().to_string();
+    // Held until the fork is registered and saved, so a Linux creation sees it.
+    let reservation =
+        crate::computer_names::reserve(&[new_name.clone()], &|| runtime::computer_names(app))?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Fork)?;
+    let source = Layout::new(&data, id);
+    let checkpoint = checkpoints::find(&source, checkpoint_id)?;
+    let space = templates::reserve_space(&data, templates::COPY_ESTIMATE)?;
+    let (record, cancel) = {
+        let _admitted = admission()?;
+        let mut registry = registry();
+        let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
+        let request = CreateRequest {
+            name: new_name,
+            cpus: held.record.cpus,
+            memory_gib: held.record.memory_gib,
+            disk_gib: held.record.disk_gib,
+        };
+        store::validate_request(&request, engine::host_limits(), &existing, 0)?;
+        let mut record = store::new_record(&request, engine::random_mac());
+        record.restore_image = held.record.restore_image.clone();
+        record.pristine = false;
+        record.setup_version = held.record.setup_version.clone();
+        // A crash before the files are copied leaves a failed computer that can be deleted.
+        store::save(&Layout::new(&data, &record.id), &record)?;
+        let entry = Entry::new(record.clone(), State::Copying, None);
+        let cancel = entry.cancel.clone();
+        registry.entries.push(entry);
+        (record, cancel)
+    };
+    drop(reservation);
+    emit(app);
+    let fork_id = record.id.clone();
+    let layout = Layout::new(&data, &fork_id);
+    log_line(
+        app,
+        id,
+        &format!(
+            "forking checkpoint \"{}\" ({}) into {}",
+            checkpoint.name, checkpoint.id, record.name
+        ),
+    );
+    let copied = copy_for_fork(&source, &checkpoint.id, &layout, record, &fork_id);
+    // The source is free again; the rest happens on the fork.
+    drop(held);
+    match copied {
+        Ok(record) => {
+            let (app, data) = (app.clone(), data.clone());
+            emit(&app);
+            std::thread::spawn(move || fork_workflow(&app, &data, record, &cancel, space));
+            Ok(())
+        }
+        Err(stop) => {
+            let message = match &stop {
+                Stop::Failed(message) => message.clone(),
+                Stop::Cancelled => "Creating the fork was cancelled.".to_string(),
+            };
+            end_workflow(app, &fork_id, &layout, Err(stop));
+            Err(message)
+        }
+    }
+}
+
+/// Clones the checkpoint into the fork's folder and publishes the fork as installed.
+fn copy_for_fork(
+    source: &Layout,
+    checkpoint: &str,
+    layout: &Layout,
+    mut record: Record,
+    fork_id: &str,
+) -> Result<Record, Stop> {
+    if !registry().creation_continues(fork_id) {
+        return Err(Stop::Cancelled);
+    }
+    checkpoints::clone_for_fork(
+        source,
+        checkpoint,
+        layout,
+        &engine::new_machine_identifier(),
+    )
+    .map_err(|error| Stop::Failed(error.message()))?;
+    record.installed = true;
+    record.inherited_access = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        computer_use: true,
+        clipboard: true,
+        needs_personalizing: true,
+    };
+    // Persist while the fork is still in its creation state, where nothing else can start it.
+    if !registry().creation_continues(fork_id) {
+        return Err(Stop::Cancelled);
+    }
+    store::save(layout, &record)?;
+    if !registry().publish_installed(fork_id, &record, State::SettingUp) {
+        return Err(Stop::Cancelled);
+    }
+    Ok(record)
+}
+
+fn fork_workflow(
+    app: &AppHandle,
+    data: &std::path::Path,
+    mut record: Record,
+    cancel: &AtomicU8,
+    space: templates::SpaceReservation,
+) {
+    let id = record.id.clone();
+    let layout = Layout::new(data, &id);
+    let result = run_setup(app, &layout, &mut record, cancel, Some(space));
+    end_workflow(app, &id, &layout, result);
 }
 
 // MARK: Display
@@ -1426,30 +1943,40 @@ fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
 fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     // From here on nothing new is admitted; anything admitted before is in the snapshot.
     closed().quit = true;
-    let busy: Vec<(String, State, Arc<AtomicU8>)> = registry()
+    let busy: Vec<(String, State, Arc<AtomicU8>, bool)> = registry()
         .entries
         .iter()
-        .filter(|entry| is_busy(entry.state))
-        .map(|entry| (entry.record.id.clone(), entry.state, entry.cancel.clone()))
+        .filter(|entry| is_busy(entry.state) || entry.operation.is_some())
+        .map(|entry| {
+            (
+                entry.record.id.clone(),
+                entry.state,
+                entry.cancel.clone(),
+                entry.operation.is_some(),
+            )
+        })
         .collect();
     if busy.is_empty() {
         return Ok(());
     }
     let machines: Vec<&String> = busy
         .iter()
-        .filter(|(_, state, _)| matches!(state, State::Running | State::Starting | State::Stopping))
-        .map(|(id, _, _)| id)
+        .filter(|(_, state, _, _)| {
+            matches!(state, State::Running | State::Starting | State::Stopping)
+        })
+        .map(|(id, _, _, _)| id)
         .collect();
-    for (_, state, cancel) in &busy {
-        if is_creating(*state) {
+    for (_, state, cancel, operating) in &busy {
+        if is_creating(*state) || *operating {
             request_abort(cancel);
         }
     }
-    // A start in flight cannot be asked to stop; let it settle first.
+    // A start in flight cannot be asked to stop, and a checkpoint operation ends at its next
+    // step (a paused machine can't answer a shutdown); let both settle first.
     let settle = Instant::now() + Duration::from_secs(30);
-    while machines
+    while busy
         .iter()
-        .any(|id| state_of(id) == Some(State::Starting))
+        .any(|(id, _, _, _)| state_of(id) == Some(State::Starting) || has_operation(id))
         && Instant::now() < settle
         && deadline.is_none_or(|deadline| Instant::now() < deadline)
     {
@@ -1476,17 +2003,14 @@ fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
         let at = Instant::now() + wait;
         deadline.map_or(at, |deadline| at.min(deadline))
     };
-    let all_stopped = |ids: &[&String]| {
-        ids.iter()
-            .all(|id| state_of(id).is_none_or(|state| !is_busy(state)))
-    };
+    let all_stopped = |ids: &[&String]| ids.iter().all(|id| !is_active(id));
     let wait_until = |until: Instant, ids: &[&String]| {
         while !all_stopped(ids) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(250));
         }
         all_stopped(ids)
     };
-    let everything: Vec<&String> = busy.iter().map(|(id, _, _)| id).collect();
+    let everything: Vec<&String> = busy.iter().map(|(id, _, _, _)| id).collect();
     // Installations and setups were aborted; they release their machine (and, for a
     // setup, the disk image) before they stop being busy.
     if wait_until(graceful_until(Instant::now(), deadline), &machines)
@@ -1633,6 +2157,47 @@ mod tests {
         );
         assert_eq!(state["minDiskGiB"], 64);
         assert!(state["computers"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn rows_carry_checkpoints_the_operation_and_the_pending_restore() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let entry = &mut registry.entries[0];
+        let row = serde_json::to_value(entry.row()).unwrap();
+        assert_eq!(row["checkpoints"], serde_json::json!([]));
+        assert_eq!(row["checkpointOperation"], serde_json::Value::Null);
+        assert_eq!(row["pendingRestore"], serde_json::Value::Null);
+        entry.operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Saving a recovery checkpoint",
+        ));
+        entry.record.pending_restore = Some(checkpoints::PendingRestore {
+            checkpoint_id: "c".into(),
+            memory: true,
+        });
+        let row = serde_json::to_value(entry.row()).unwrap();
+        assert_eq!(
+            row["checkpointOperation"],
+            serde_json::json!({"kind": "restore", "status": "running", "stage": "Saving a recovery checkpoint"})
+        );
+        assert_eq!(
+            row["pendingRestore"],
+            serde_json::json!({"checkpointId": "c", "memory": true})
+        );
+    }
+
+    #[test]
+    fn quit_and_updates_count_an_operation_on_a_stopped_computer_as_busy() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        assert!(!is_busy(registry.entries[0].state));
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        let mut closed = Closed::default();
+        assert!(registry.any_busy());
+        assert!(closed.close_for_update(registry.any_busy()).is_err());
+        assert!(!closed.update);
     }
 
     fn registry_with(state: State) -> (Registry, String) {

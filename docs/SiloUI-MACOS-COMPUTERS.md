@@ -7,7 +7,7 @@ engine choice, framework limits and Apple's license terms are in
 [macOS guest engine research](research/macos-guest-engine-2026-10-09.md).
 
 This is a first vertical slice: create, set up for computer use, start, view,
-stop and delete. Most other Linux computer features do not apply yet; see
+stop, checkpoint and delete. Most other Linux computer features do not apply yet; see
 [not covered yet](#not-covered-yet).
 
 ## Behaviour
@@ -53,6 +53,9 @@ stop and delete. Most other Linux computer features do not apply yet; see
   creation (including the copy and its personalization) the same action cancels
   it. Delete never removes the template; the macOS form's Remove template does,
   unless a copy is being made from it.
+- **Checkpoints.** Each set-up computer has a Checkpoints button in its row that
+  opens the same list, New checkpoint, Restore, Fork and Delete as the Linux
+  computer page. See [checkpoints](#checkpoints).
 - **Quit.** Quit asks running macOS computers to shut down, then turns off any
   that have not stopped by the deadline, as it stops local Linux computers.
   A creation in progress is cancelled and shows as failed on the next launch.
@@ -67,6 +70,8 @@ All paths are inside the channel's application data directory
 | `macos-computers/<id>/computer.json` | Name, resources, MAC address, installed macOS version |
 | `macos-computers/<id>/disk.img` | Sparse raw disk; uses only what macOS has written |
 | `macos-computers/<id>/auxiliary-storage.img`, `hardware-model.bin`, `machine-identifier.bin` | The framework's per-computer platform identity |
+| `macos-computers/<id>/checkpoints/<checkpoint id>/` | One [checkpoint](#checkpoints): `checkpoint.json`, `disk.img` and `auxiliary-storage.img` (APFS clones), and `state.vzvmsave` (mode 0600) for a memory checkpoint |
+| `macos-computers/<id>/inherited-access/` | A fork's copy of its source's password and SSH key (mode 0700), until its own personalization replaces them |
 | `macos-templates/<build>-<setup version>/` | The template: `disk.img`, `auxiliary-storage.img` and `hardware-model.bin` as APFS clones of the source computer, `template.json` (macOS version and build, setup version, disk size, creation time, source computer), and `template-access/` (mode 0700), the source computer's password and SSH key |
 | `macos-restore-images/<file>.ipsw` | The last downloaded restore image, kept so the next computer does not download it again; a `.partial` file resumes an interrupted download |
 
@@ -180,6 +185,91 @@ redistributing macOS, and the restore image is downloaded from Apple for each
 Mac. A downloadable pre-installed image would be a redistribution of macOS, so
 Silo installs on the user's own Mac and shares copy-on-write blocks only between
 that Mac's own computers.
+
+## Checkpoints
+
+A checkpoint is a copy of a computer at one moment, made and used with the commands
+of the Linux checkpoint list (Create, Restore, Fork, Delete). Only computers whose
+setup has finished have them; a copy still waiting for its personalization does not.
+
+**Create.** On a stopped computer a checkpoint holds the disk and the auxiliary
+storage (the NVRAM, which changes while the computer runs), both `clonefile` copies
+that cost only what the computer later changes. On a running computer Silo also
+saves its memory: it asks the framework whether this machine can be saved
+(`validateSaveRestoreSupport`, asked when the machine was configured), pauses it,
+saves its state with `saveMachineStateTo`, clones the disk and the auxiliary
+storage while it is paused, and resumes it. The computer is paused for the save and
+the clones, a few seconds. If anything fails the computer is resumed and the partial
+checkpoint removed. If the framework says the memory can't be saved, a running
+computer gets no checkpoint and the message says so and offers a checkpoint of the
+stopped computer; Silo never silently takes a different kind. A checkpoint folder is
+built under a partial name and renamed, and a folder without a readable
+`checkpoint.json` or without its files is not listed and is swept on launch.
+`checkpoint.json` records the Mac's build (`kern.osversion`) too.
+
+**Restore.** Silo first saves a recovery checkpoint named "Before restore" (with
+memory when the computer runs), then turns a running computer off, then replaces the
+computer's disk and auxiliary storage with clones of the checkpoint's (both clones
+are made before either file is replaced). The computer stays stopped and its record
+remembers the Restore. A failure before the files are replaced changes nothing and
+leaves the recovery checkpoint in the list. The next Start does the rest: for a
+memory checkpoint it builds the machine from the computer's own configuration,
+restores the saved state and resumes it, so the computer is where the checkpoint was
+taken; for a disk checkpoint it boots from the restored disk. The state is not tried
+when the Mac's build has changed since it was saved (the framework refuses states
+after some host updates), when the state file is gone, or when the framework
+rejects it; the computer then boots from the restored disk (which is exactly the disk
+of the checkpoint) and the running computer's detail says why. The pending restore is
+cleared by that Start whatever happens, so a later Start never uses an old state.
+The machine's MAC address must be the one the state was saved with; Silo always
+builds a computer with the MAC in its record.
+
+**Fork.** A fork is a new, independent computer in the Computers list. It is made
+from a checkpoint's disk and auxiliary storage (a memory state can't move to a new
+MAC address and machine identifier, so forks start from the disk, as after a power
+cut) and from the source's hardware model, with a new MAC address and machine
+identifier. The fork's guest still has the source's password and keys, so it goes
+through the same personalization as a copy of a template ([Personalizing](#templates)):
+Silo logs in with the source's credentials, kept in `inherited-access/`, and sets the
+fork's own password, SSH key, host keys, keychain and name. The fork shows as setting
+up with the personalization step, takes about a minute, and counts as a macOS
+computer for names (the shared name reservation) and for the two-running limit like
+any other. The Fork command returns once the files are cloned; the fork can't be
+started until its setup finishes.
+
+**Delete.** Removes the checkpoint's folder (the record first). A checkpoint a
+pending Restore will use can't be deleted. Deleting a computer deletes its
+checkpoints with it; forks are independent files and are not affected.
+
+**Lifecycle.** A computer runs one checkpoint operation at a time. While one runs
+the row shows its step, the computer can't be started, stopped, force-stopped or
+deleted, and a second operation is refused. Quit and an update count the operation
+as work in progress: Quit asks it to end at its next step (a paused machine can't
+answer a shutdown), waits for it, then stops the computer as usual. Operations are
+refused after Quit has started. The Start of a computer that is changing state or
+is being personalized is refused as before.
+
+**Where they are.** macOS computers have no detail page, so the row has a
+Checkpoints button that opens the list under it; it is the Linux
+`CheckpointPanel` fed through a thin adapter (`macos-checkpoint-panel.tsx`), not a
+second list. Setup logs record each operation (Logs page, per computer).
+
+**Measured** (2026-10-10, Silo's configuration, an 8 GiB guest after 60 seconds of
+use): pause 0.02 s, save 2.1 s into a 2.95 GB file, clones about 1 s, restore 3.5 s,
+resume 0.4 s. See [the research](research/macos-checkpoints-2026-10-10.md).
+
+**Status.** Implemented and unit-tested; the framework sequence was run live in a
+probe (pause, save, stop, restore, resume). Not yet run through Silo's UI against a
+live guest: memory restore on Start, the Restore of a running computer, and the
+personalization of a fork.
+
+**Prior art.** Lume (MIT) has no memory save; cua-vmm (MIT) models a checkpoint as a
+stopped clone; Tart (FSL, insight only) has one suspend slot and keeps
+`state.vzvmsave`; UTM (Apache-2.0) has a suspend slot, and snapshots with memory only
+on macOS 27; VMPal (proprietary) has named snapshots with a cold boot when a saved
+session can't be restored. Silo uses the framework sequence directly and falls back
+to the disk with a notice, as VMPal does. See
+[the comparison](research/macos-checkpoints-2026-10-10.md).
 
 ## Provisioning for computer use
 
@@ -298,11 +388,11 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 
 | Silo feature | Status for macOS computers |
 | --- | --- |
-| Checkpoints | None. Framework save/restore state (macOS 14+) is tied to this Mac and needs a paused computer and a configuration that passes `validateSaveRestoreSupportWithError`; disk clones (APFS `clonefile`) are the likely checkpoint route. Not designed yet |
+| Checkpoints | [Done](#checkpoints) for local computers. Not done: export and import of a checkpoint, a size breakdown (only a memory checkpoint's state file is counted), and abandoning a Restore |
 | Remote computers (Connections) | None. The view must live in the process that runs the computer, so a computer on another device would need a streamed or VNC path, and Apple's license excludes service-style use |
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
-| Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: checkpoints from clones, a template per macOS build kept side by side, and shrinking a template's disk |
+| Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
 | Export, import and backup | None |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |

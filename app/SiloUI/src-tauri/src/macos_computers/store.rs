@@ -98,6 +98,13 @@ pub(super) struct Record {
     /// computer use step finished (copies take their template's).
     #[serde(default)]
     pub setup_version: Option<String>,
+    /// Set by a Restore: what the next Start does before it hands the computer over.
+    #[serde(default)]
+    pub pending_restore: Option<super::checkpoints::PendingRestore>,
+    /// A fork whose guest still has the credentials of the computer it was copied from; they
+    /// are in `inherited-access/` until its personalization has replaced them.
+    #[serde(default)]
+    pub inherited_access: bool,
 }
 
 impl Record {
@@ -188,6 +195,8 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         pristine: true,
         template: None,
         setup_version: None,
+        pending_restore: None,
+        inherited_access: false,
     }
 }
 
@@ -237,6 +246,45 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
             Err("macOS is still being installed on this computer.".into())
         }
         State::SettingUp => Err("This computer is still being set up.".into()),
+    }
+}
+
+/// Whether a checkpoint operation may begin on a computer. Saving and restoring need the
+/// machine settled (stopped, or running and not changing state); forking and deleting only
+/// read or remove checkpoint files, so a computer that is changing state is fine for them.
+pub(super) fn checkpoint_allowed(
+    state: State,
+    record: &Record,
+    deleting: bool,
+    operation_running: bool,
+    kind: super::checkpoints::OperationKind,
+) -> Result<(), String> {
+    use super::checkpoints::OperationKind;
+    if deleting {
+        return Err("This computer is being deleted.".into());
+    }
+    if operation_running {
+        return Err(super::checkpoints::BUSY.into());
+    }
+    if !record.installed {
+        return Err(INTERRUPTED_INSTALL.into());
+    }
+    if !record.setup.complete() {
+        return Err(super::checkpoints::NOT_READY.into());
+    }
+    match state {
+        State::Preparing | State::Copying | State::Downloading | State::Installing => {
+            Err("macOS is still being installed on this computer.".into())
+        }
+        State::SettingUp => Err("This computer is still being set up.".into()),
+        State::Starting | State::Stopping
+            if matches!(kind, OperationKind::Capture | OperationKind::Restore) =>
+        {
+            Err("Wait for the computer to finish starting or stopping.".into())
+        }
+        State::Stopped | State::Failed | State::Starting | State::Running | State::Stopping => {
+            Ok(())
+        }
     }
 }
 
@@ -467,6 +515,99 @@ mod tests {
             ..request()
         };
         assert_eq!(validate_request(&edge, HOST, &[], 0), Ok(()));
+    }
+
+    fn finished() -> Record {
+        let mut record = record(&request());
+        record.installed = true;
+        record.setup = SetupProgress {
+            account: true,
+            sip: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        record
+    }
+
+    #[test]
+    fn checkpoints_need_a_finished_idle_computer() {
+        use super::super::checkpoints::OperationKind::{Capture, Delete, Fork, Restore};
+        let allowed = |state, record: &Record, deleting, busy, kind| {
+            checkpoint_allowed(state, record, deleting, busy, kind)
+        };
+        let ready = finished();
+        for kind in [Capture, Restore, Fork, Delete] {
+            for state in [State::Stopped, State::Running, State::Failed] {
+                assert_eq!(allowed(state, &ready, false, false, kind), Ok(()));
+            }
+            assert!(allowed(State::Stopped, &ready, true, false, kind)
+                .unwrap_err()
+                .contains("deleted"));
+            assert!(allowed(State::Stopped, &ready, false, true, kind)
+                .unwrap_err()
+                .contains("in progress"));
+            for state in [
+                State::Preparing,
+                State::Copying,
+                State::Downloading,
+                State::Installing,
+                State::SettingUp,
+            ] {
+                assert!(
+                    allowed(state, &ready, false, false, kind).is_err(),
+                    "{state:?}"
+                );
+            }
+        }
+        // Saving and restoring need a settled machine; forking and deleting only touch files.
+        for state in [State::Starting, State::Stopping] {
+            assert!(allowed(state, &ready, false, false, Capture).is_err());
+            assert!(allowed(state, &ready, false, false, Restore).is_err());
+            assert_eq!(allowed(state, &ready, false, false, Fork), Ok(()));
+            assert_eq!(allowed(state, &ready, false, false, Delete), Ok(()));
+        }
+        let mut unfinished = finished();
+        unfinished.setup.sip = false;
+        assert_eq!(
+            allowed(State::Stopped, &unfinished, false, false, Capture),
+            Err(super::super::checkpoints::NOT_READY.to_string())
+        );
+        let mut copy = finished();
+        copy.setup.needs_personalizing = true;
+        assert!(allowed(State::Stopped, &copy, false, false, Capture).is_err());
+        let mut interrupted = finished();
+        interrupted.installed = false;
+        assert_eq!(
+            allowed(State::Failed, &interrupted, false, false, Capture),
+            Err(INTERRUPTED_INSTALL.to_string())
+        );
+    }
+
+    #[test]
+    fn a_record_saved_before_checkpoints_still_loads() {
+        let mut json = serde_json::to_value(finished()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.remove("pendingRestore");
+        object.remove("inheritedAccess");
+        let loaded: Record = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.pending_restore, None);
+        assert!(!loaded.inherited_access);
+    }
+
+    #[test]
+    fn a_pending_restore_survives_a_save() {
+        let data = tempfile::tempdir().unwrap();
+        let layout = Layout::new(data.path(), "one");
+        let mut record = finished();
+        record.id = "one".into();
+        record.pending_restore = Some(super::super::checkpoints::PendingRestore {
+            checkpoint_id: "c".into(),
+            memory: true,
+        });
+        save(&layout, &record).unwrap();
+        let loaded = load_all(data.path());
+        assert_eq!(loaded, [record]);
     }
 
     #[test]

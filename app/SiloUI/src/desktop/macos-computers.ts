@@ -9,6 +9,10 @@ export const nativeMacosComputersBackend: MacosComputersBackend = {
   openDisplay: id => invoke("open_macos_display", { id }),
   clipboard: (id, direction) => invoke("macos_computer_clipboard", { id, direction }),
   deleteTemplate: () => invoke("delete_macos_template"),
+  createCheckpoint: (id, name) => invoke("create_macos_checkpoint", { id, name }),
+  restoreCheckpoint: (id, checkpointId) => invoke("restore_macos_checkpoint", { id, checkpointId }),
+  forkCheckpoint: (id, checkpointId, newName) => invoke("fork_macos_checkpoint", { id, checkpointId, newName }),
+  deleteCheckpoint: (id, checkpointId) => invoke("delete_macos_checkpoint", { id, checkpointId }),
   listen: handler => listen("silo://macos-computers-changed", event => handler(event.payload)),
 }
 

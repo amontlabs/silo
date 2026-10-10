@@ -73,6 +73,33 @@ pub(super) fn start_in_recovery(
     Err(UNSUPPORTED.into())
 }
 
+pub(super) enum StateStartError {
+    Rejected(String),
+    Failed(String),
+}
+
+pub(super) fn start_from_state(
+    _app: &AppHandle,
+    _record: &Record,
+    _layout: &Layout,
+    _state: &Path,
+) -> Result<(), StateStartError> {
+    Err(StateStartError::Failed(UNSUPPORTED.into()))
+}
+
+pub(super) fn memory_support(_app: &AppHandle, _id: &str) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn save_running(
+    _app: &AppHandle,
+    _id: &str,
+    _state: &Path,
+    _copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn focus_display(_app: &AppHandle, _id: &str) -> Result<isize, String> {
     Err(UNSUPPORTED.into())
 }
