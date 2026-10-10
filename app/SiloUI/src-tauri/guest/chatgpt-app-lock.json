@@ -3,7 +3,7 @@
   "package": "chatgpt",
   "version": "26.928.31416",
   "cuaRuntimeVersion": "0.0.27/20260927214556-b77d38801cca",
-  "lcuVersion": "0.9.4",
+  "lcuVersion": "0.11.0",
   "source": "https://persistent.oaistatic.com/codex-app-prod/linux/deb (suite stable, key 3BFA0E4AE8B8CC16A2D9BA684A3B4A566C4660E4)",
   "architectures": {
     "arm64": {

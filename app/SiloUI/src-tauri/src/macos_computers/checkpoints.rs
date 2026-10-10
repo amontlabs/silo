@@ -79,6 +79,10 @@ pub(super) struct Meta {
     /// Bytes of the saved memory; the clones share their blocks with the computer.
     #[serde(default)]
     pub size_bytes: Option<u64>,
+    /// The computer-use fingerprint the guest had when this was taken; a Restore or a fork
+    /// gives it back to the computer. Missing (an older checkpoint) counts as stale.
+    #[serde(default)]
+    pub computer_use_version: Option<String>,
 }
 
 /// A checkpoint as the UI lists it.
@@ -351,6 +355,8 @@ pub(super) struct Subject<'a, M: Machine> {
     pub machine: &'a M,
     pub running: bool,
     pub macos_version: Option<String>,
+    /// The record's computer-use fingerprint, stored in the checkpoint.
+    pub computer_use_version: Option<String>,
 }
 
 // MARK: Create
@@ -441,6 +447,7 @@ fn build<M: Machine>(
         macos_version: subject.macos_version.clone(),
         host_build: host_build(),
         size_bytes,
+        computer_use_version: subject.computer_use_version.clone(),
     };
     write_meta(partial, &meta)?;
     // Everything is on disk before the folder gets its final name, and so before a Restore
@@ -903,6 +910,7 @@ mod tests {
             machine,
             running,
             macos_version: Some("26.6.2 (25G83)".into()),
+            computer_use_version: Some("cu-1".into()),
         }
     }
 
@@ -932,6 +940,13 @@ mod tests {
         assert_eq!(meta.name, "First");
         assert_eq!(meta.kind, Kind::Disk);
         assert_eq!(meta.size_bytes, None);
+        // The fingerprint of the guest's computer use travels with the checkpoint, and an
+        // older checkpoint that has none reads as unknown.
+        assert_eq!(meta.computer_use_version.as_deref(), Some("cu-1"));
+        let mut json: serde_json::Value = serde_json::to_value(&meta).unwrap();
+        json.as_object_mut().unwrap().remove("computerUseVersion");
+        let older: Meta = serde_json::from_value(json).unwrap();
+        assert_eq!(older.computer_use_version, None);
         let folder = dir(&layout, &meta.id);
         assert_eq!(fs::read(folder.join(DISK)).unwrap(), b"disk-v1");
         assert_eq!(fs::read(folder.join(AUXILIARY_STORAGE)).unwrap(), b"aux-v1");

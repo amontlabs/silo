@@ -1292,7 +1292,8 @@ fn apply_once(
 
 /// At app start, after the runtime is ready: finishes approval changes whose apply never
 /// ran, failed or was cut short (the app quit, the guest failed, the computer stopped), so a
-/// running guest does not keep an old mode. The host never reads the guest to decide:
+/// running guest does not keep an old mode, and brings running guests whose last reported
+/// LCU is not the pinned one up to date. The host never reads the guest to decide:
 /// its own record of the last attempt is enough. Returns the threads started, one per
 /// Computer that needs it (for tests).
 fn reconcile_in(
@@ -1305,12 +1306,25 @@ fn reconcile_in(
         .iter()
         .filter_map(|name| {
             let configuration = built_in_computer(paths, name)?;
-            read_policy(paths, configuration.id())
-                .needs_apply()
-                .then_some(())?;
+            let id = configuration.id();
+            // A computer that kept running through an update still has the previous LCU
+            // pin and helper; a boot-style apply installs the current ones.
+            if pin_is_stale(read_json::<Known>(observed_path(paths, id)).as_ref()) {
+                return apply_with(gate, runner.clone(), paths, name, Trigger::Boot);
+            }
+            read_policy(paths, id).needs_apply().then_some(())?;
             apply_with(gate, runner.clone(), paths, name, Trigger::Change)
         })
         .collect()
+}
+
+/// Whether the guest last reported an LCU other than the one this build pins. A computer
+/// that never reported one counts as stale.
+fn pin_is_stale(known: Option<&Known>) -> bool {
+    let pinned = serde_json::from_str::<Value>(LCU_LOCK)
+        .ok()
+        .and_then(|lock| lock["version"].as_str().map(str::to_owned));
+    pinned.is_some() && known.and_then(|known| known.lcu_version.as_deref()) != pinned.as_deref()
 }
 
 /// `reconcile_in` for every running computer of this device. Returns at once.
@@ -1359,6 +1373,7 @@ fn reason_text(code: &str) -> &'static str {
     match code {
         "interrupted" => "Setup was interrupted. Try again.",
         "doctor-failed" => "LCU's readiness check failed. Details are in /var/log/silo-computer-use.log in the computer.",
+        "cross-turn-failed" => "LCU could not turn on Computer Use across turns. Silo retries at the next start.",
         "desktop-session-not-running" => "The Linux desktop was not running. Start it, then try again.",
         "timed-out" => "Setup timed out. Try again.",
         "lcu-archive-unavailable" => "Could not download LCU (network). Silo retries at the next start; check this computer's network.",

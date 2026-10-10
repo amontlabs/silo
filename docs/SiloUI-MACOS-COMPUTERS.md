@@ -31,7 +31,7 @@ stop, checkpoint and delete. Most other Linux computer features do not apply yet
   up with the detail "Personalizing the computer" (about a minute), so the second
   computer takes about a minute instead of about fifteen. A copy keeps its
   template's disk size, so the form's smallest disk is the template's, but only
-  while that template is the one a new computer would use (current setup version,
+  while that template is the one a new computer would use (current base setup,
   and the newest macOS when Silo knows it); a larger
   disk is grown, and the guest's APFS container is expanded to fill it. Without a
   network, a current template is used even when a newer macOS exists.
@@ -72,8 +72,8 @@ All paths are inside the channel's application data directory
 | `macos-computers/<id>/auxiliary-storage.img`, `hardware-model.bin`, `machine-identifier.bin` | The framework's per-computer platform identity |
 | `macos-computers/<id>/checkpoints/<checkpoint id>/` | One [checkpoint](#checkpoints): `checkpoint.json`, `disk.img` and `auxiliary-storage.img` (APFS clones), and `state.vzvmsave` (mode 0600) for a memory checkpoint |
 | `macos-computers/<id>/inherited-access/` | A fork's copy of its source's password and SSH key (mode 0700), until its own personalization replaces them |
-| `macos-templates/<build>-<setup version>/` | The template: `disk.img`, `auxiliary-storage.img` and `hardware-model.bin` as APFS clones of the source computer, `template.json` (macOS version and build, setup version, disk size, creation time, source computer), and `template-access/` (mode 0700), the source computer's password and SSH key |
-| `macos-restore-images/<file>.ipsw` | The last downloaded restore image, kept so the next computer does not download it again; a `.partial` file resumes an interrupted download |
+| `macos-templates/<build>-<base version>-<computer use version>/` | The template: `disk.img`, `auxiliary-storage.img` and `hardware-model.bin` as APFS clones of the source computer, `template.json` (macOS version and build, the two versions, disk size, creation time, source computer), and `template-access/` (mode 0700), the source computer's password and SSH key |
+| `macos-restore-images/<file>.ipsw` | The restore image of the macOS being installed (about 20 GB). A `.partial` file resumes an interrupted download. It is kept only until a template of that build is saved: Silo then deletes the image and its partial file (not while an installation reads it) and notes it in the computer's log. It is downloaded again only when a computer must be installed: no template exists, the base setup changed, or Apple offers a newer macOS build. Computer use updates never need it |
 
 macOS computers are not entries in the MicroSandbox registry
 (`computers.json`), so the Linux lifecycle, health, backup and Connections code
@@ -88,7 +88,7 @@ template, and every later computer starts from a copy of it.
 **Making one.** At the end of setup, with the computer stopped and before the
 user could start it, Silo clones `disk.img`, `auxiliary-storage.img` and
 `hardware-model.bin` with `clonefile` (copy-on-write: the template costs only
-what the computer later changes) into `macos-templates/<build>-<setup version>/`,
+what the computer later changes) into `macos-templates/<build>-<base version>-<computer use version>/`,
 writes `template.json`, and copies the computer's guest-access secrets to
 `template-access/`. The folder is built under a partial name and renamed, so an
 interrupted run leaves nothing a copy could use. Only the newest template is
@@ -96,19 +96,41 @@ kept: making one removes older ones, except any a copy is being made from. A
 computer qualifies only if it came from an installation (not from a template),
 finished all four setup steps, and was never started by the user afterwards
 (`pristine` in `computer.json`, cleared by Start). Computers created before
-templates existed never qualify.
+templates existed never qualify. The one exception is a copy of a template whose
+computer use is stale: once its setup has updated computer use, a fresh template
+is saved from it (only when its disk is the template's size) and the stale one
+is removed.
 
-**Setup version.** A hash of everything setup installs: the pinned ChatGPT app
-and LCU locks, the guest script, the offline account setup and the initial
-computer use approval mode. The computer's record keeps the version of what it
-actually has installed (the approval mode used when its computer use step ran), and a
-template is made under that, not under the setting at the time of the copy. A template with a different setup version is never
-copied, so changing a pin or the script makes the next computer install from
-scratch and produce a new template.
+**Setup versions.** Two hashes, so that a new LCU never means installing macOS again.
+The base version covers the offline account setup and the first-boot finalization
+(everything except computer use). The computer use version covers the pinned
+ChatGPT app and LCU locks, the guest script and the approval mode. The
+computer's record keeps both for what it actually has installed (`setupVersion`,
+`computerUseVersion`, and the approval mode its computer use step ran with), and
+a template is named and made under those, not under the settings at the time of
+the copy. A record without a computer use version (made before the split) counts
+as stale. Checkpoints store the computer use version of the moment they were
+taken, and a Restore or fork gives it back (an older checkpoint reads as stale).
+
+- A template with a different base version, or of another macOS build, is never
+  copied: the next computer is installed from scratch (the restore image is
+  downloaded again if it was removed) and produces a new template.
+- A template with the current base but a stale computer use version is still
+  copied. The copy's setup then runs the computer use step ("Updating Computer
+  Use"), and the result becomes the new template.
+- A computer that already exists is updated the same way after it starts: when
+  SSH answers and its computer use version differs, Silo runs the computer use
+  script again in the background (row detail "Updating Computer Use", output in the
+  computer's log). The script keeps what already is the pinned app and LCU, replaces what
+  is not, writes the same Accessibility and Screen Recording rows and registers the
+  agents with the current options. The update does not block the computer: Stop,
+  Quit, Delete, a checkpoint operation or a new Start ends it, and the version is
+  recorded only after it succeeds, while the computer is still the Start that began
+  it. A failure is logged and retried at the next Start.
 
 **Copying.** `create_macos_computer` asks the framework for the newest supported
-macOS as before. A template of that build with the current setup version is
-copied; if the lookup fails (offline) the newest current template is copied;
+macOS as before. A template of that build with the current base version is
+copied; if the lookup fails (offline) the newest such template is copied;
 otherwise the computer is installed. Silo checks free space (the copy writes a
 few GB; it keeps 5 GB free for the Mac), clones the three files into the new
 computer's folder, writes a new machine identifier (`VZMacMachineIdentifier`) and
@@ -337,7 +359,7 @@ State `setting-up` covers these steps; its detail names the current step.
    guest, and is idempotent: a rerun with the same pins and mode changes nothing.
    Pins: ChatGPT 26.930.61225 (CUA runtime 0.0.27, the runtime LCU's tested macOS
    pair uses; LCU lists its pairing with 26.928.20755, which the feed no longer
-   serves) and LCU 0.10.1. The home folder `/Users/silo` is within the helper's
+   serves) and LCU 0.11.0. The home folder `/Users/silo` is within the helper's
    13-byte limit.
    The approach follows prior art rather than inventing one:
    [trycua/cua `seed-tcc.sh`](https://github.com/trycua/cua/blob/main/libs/images/macos/files/seed-tcc.sh)

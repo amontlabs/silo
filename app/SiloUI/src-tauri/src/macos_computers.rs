@@ -268,6 +268,47 @@ impl Registry {
         })
     }
 
+    /// Whether Start number `attempt` still owns a running computer that nothing else
+    /// operates on: the only time its computer use may be updated.
+    fn update_may_run(&self, id: &str, attempt: u64) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.record.id == id
+                && entry.state == State::Running
+                && entry.attempt == attempt
+                && !entry.deleting
+                && entry.operation.is_none()
+        })
+    }
+
+    /// Records that Start number `attempt` brought the guest's computer use to `version`,
+    /// durably through `save`, unless the computer moved on meanwhile (stopped, restored,
+    /// forked from, deleted or started again). Then nothing is recorded and the update
+    /// runs again at a later Start. Returns whether it was recorded.
+    fn finish_computer_use_update(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        version: &str,
+        approval: crate::computer_use::Approval,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let Some(entry) = self.entries.iter_mut().find(|entry| {
+            entry.record.id == id
+                && entry.attempt == attempt
+                && matches!(entry.state, State::Running | State::Stopping)
+                && !entry.deleting
+                && entry.operation.is_none()
+        }) else {
+            return Ok(false);
+        };
+        let mut record = entry.record.clone();
+        record.computer_use_version = Some(version.to_string());
+        record.computer_use_approval = Some(approval);
+        save(&record)?;
+        entry.record = record;
+        Ok(true)
+    }
+
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
     /// missed or came before the state was set, so nothing else will ever finish them.
     fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
@@ -483,6 +524,10 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
 fn settle_restore(layout: &Layout, mut record: Record) -> Record {
     match checkpoints::recover(layout) {
         Ok(Some(pending)) => {
+            // Without the checkpoint's record the guest's computer use is unknown: stale.
+            record.computer_use_version = checkpoints::find(layout, &pending.checkpoint_id)
+                .ok()
+                .and_then(|meta| meta.computer_use_version);
             record.pending_restore = Some(pending);
             record.pristine = false;
             if store::save(layout, &record).is_ok() {
@@ -527,8 +572,9 @@ impl Registry {
     /// that is known) counts as current and sets the smallest disk.
     fn refresh_template(&mut self, data: &std::path::Path) {
         let version = templates::setup_version();
+        let computer_use = templates::computer_use_version();
         let all = templates::list(data);
-        let used = templates::choose(&all, self.latest_build.as_deref(), &version)
+        let used = templates::choose(&all, self.latest_build.as_deref(), &version, &computer_use)
             .map(|template| template.name.clone());
         self.min_disk_gib = used
             .as_ref()
@@ -948,7 +994,7 @@ fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), S
     // The outcome is decided under the lock a Delete takes, so a Delete accepted
     // before it is never lost.
     let finish = registry().finish_workflow(id, result);
-    match finish {
+    match &finish {
         Finish::Remove => {
             let removal = remove_computer(layout);
             registry().finish_cancelled(id, removal);
@@ -957,6 +1003,8 @@ fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), S
     }
     // A copy that ended no longer holds its template.
     prune_templates(app);
+    // An installation that held a restore image may have been the last reason to keep it.
+    remove_restore_images(app, matches!(finish, Finish::Kept).then_some(id));
     emit(app);
 }
 
@@ -989,11 +1037,12 @@ fn run_creation(
     // A template of the newest macOS (or, without a network, of any build) replaces the
     // download and the installation.
     let version = templates::setup_version();
+    let computer_use = templates::computer_use_version();
     let build = latest.as_ref().ok().map(|latest| latest.build.as_str());
     if let Some(build) = build {
         note_latest_build(app, build);
     }
-    if let Some(lease) = templates::lease_matching(data, build, &version) {
+    if let Some(lease) = templates::lease_matching(data, build, &version, &computer_use) {
         // Held until this creation ends: the copy writes during its personalization.
         let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
         if copy_template(app, layout, &mut record, &lease, cancel)? {
@@ -1096,6 +1145,9 @@ fn copy_template(
     record.pristine = false;
     record.template = Some(template.name.clone());
     record.setup_version = Some(template.meta.setup_version.clone());
+    // What the template's guest has; a stale part is updated during this copy's setup.
+    record.computer_use_version = Some(template.meta.computer_use_version.clone());
+    record.computer_use_approval = Some(crate::computer_use::initial_approval());
     match templates::clone_into(
         template,
         layout,
@@ -1129,15 +1181,22 @@ fn run_setup(
     cancel: &AtomicU8,
     reservation: Option<templates::SpaceReservation>,
 ) -> Result<(), Stop> {
+    // A copy of a template with a stale computer use part, once updated, replaces it.
+    let stale_copy = record.template.is_some() && record.computer_use_stale();
     provision::run(app, layout, record, cancel, reservation)?;
-    if cancel.load(Ordering::SeqCst) == RUN && templates::eligible(record) {
-        save_template(app, layout, record);
+    if cancel.load(Ordering::SeqCst) == RUN {
+        if templates::eligible(record) {
+            save_template(app, layout, record, false);
+        } else if stale_copy && app_data(app).is_ok_and(|data| templates::refreshes(&data, record))
+        {
+            save_template(app, layout, record, true);
+        }
     }
     Ok(())
 }
 
 /// Makes the template of `record`. A failure only costs the speed of later computers.
-fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
+fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: bool) {
     let Ok(data) = app_data(app) else {
         return;
     };
@@ -1145,13 +1204,59 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record) {
     let Some(version) = record.setup_version.as_deref() else {
         return;
     };
-    let made = templates::make(&data, record, layout, version, &protected_templates);
-    if let Err(message) = made {
-        if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
-            log.line(&format!("the template could not be saved: {message}"));
+    let Some(computer_use) = record.computer_use_version.as_deref() else {
+        return;
+    };
+    let made = templates::make(
+        &data,
+        record,
+        layout,
+        version,
+        computer_use,
+        refresh,
+        &protected_templates,
+    );
+    match made {
+        Ok(Some(_)) => remove_restore_images(app, Some(&record.id)),
+        Ok(None) => {}
+        Err(message) => {
+            if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
+                log.line(&format!("the template could not be saved: {message}"));
+            }
         }
     }
     refresh_template(app);
+}
+
+/// Deletes the cached restore image of every macOS build that has a usable template (the
+/// current base setup): an installation is not needed again while it exists. Installations
+/// that are reading an image keep it, so this runs again whenever one ends. The image is
+/// downloaded again when a new macOS build or a changed base setup needs an installation.
+/// `log_to` names the computer whose log notes the removal, when it still exists.
+fn remove_restore_images(app: &AppHandle, log_to: Option<&str>) {
+    let Ok(data) = app_data(app) else {
+        return;
+    };
+    let images = store::restore_images(&data);
+    let builds = templates::builds_with_usable_template(
+        &templates::list(&data),
+        &templates::setup_version(),
+    );
+    // Writing to the log of a computer that is gone would recreate its folder.
+    let log_to = log_to.filter(|id| computer(id).is_ok());
+    for build in builds {
+        for (name, bytes) in restore_image::remove_for_build(&images, &build) {
+            if let Some(id) = log_to {
+                log_line(
+                    app,
+                    id,
+                    &format!(
+                        "removed the cached macOS restore image {name} ({bytes} bytes): a template of macOS build {build} replaces the installation"
+                    ),
+                );
+            }
+        }
+    }
 }
 
 /// Two computers created together would otherwise write the same partial image.
@@ -1248,6 +1353,7 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
                     entry.detail = note;
                 }
             });
+            guest_computer_use::update_in_background(app, id, attempt);
             Ok(())
         }
         Err(message) => {
@@ -1578,6 +1684,12 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     };
     if removed {
         close_display(app, id);
+        // A computer use update stops once the deletion is marked; it must have ended before
+        // the folder goes, or it could write to it again.
+        if let Err(message) = guest_computer_use::wait_for_update_end(id) {
+            update(app, id, |entry| entry.deleting = false);
+            return Err(message);
+        }
         // The entry stays until the files are gone, so a failed removal can be retried.
         match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
@@ -1803,6 +1915,7 @@ fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String
         machine: &machine,
         running,
         macos_version: held.record.os_version(),
+        computer_use_version: held.record.computer_use_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -1837,6 +1950,7 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
         machine: &machine,
         running,
         macos_version: held.record.os_version(),
+        computer_use_version: held.record.computer_use_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -1844,6 +1958,8 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
     let pending = restored?;
     let (mut record, _) = computer(id)?;
     record.pending_restore = Some(pending);
+    // The guest comes back with the computer use it had when the checkpoint was taken.
+    record.computer_use_version = target.computer_use_version.clone();
     // The disk no longer is what the user left, and only what Start restores is the result.
     record.pristine = false;
     store::save(&layout, &record)?;
@@ -1924,6 +2040,8 @@ fn fork_checkpoint(
         record.restore_image = held.record.restore_image.clone();
         record.pristine = false;
         record.setup_version = held.record.setup_version.clone();
+        record.computer_use_version = checkpoint.computer_use_version.clone();
+        record.computer_use_approval = held.record.computer_use_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -2782,6 +2900,83 @@ mod tests {
     }
 
     #[test]
+    fn a_computer_use_update_runs_only_for_the_start_that_owns_a_free_running_computer() {
+        let (mut registry, id) = registry_with(State::Running);
+        assert!(registry.update_may_run(&id, 1));
+        // Another Start, a stop, a deletion or a checkpoint operation ends it.
+        assert!(!registry.update_may_run(&id, 2));
+        assert!(!registry.update_may_run("other", 1));
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        assert!(!registry.update_may_run(&id, 1));
+        registry.entries[0].operation = None;
+        registry.entries[0].deleting = true;
+        assert!(!registry.update_may_run(&id, 1));
+        registry.entries[0].deleting = false;
+        for state in [State::Stopping, State::Stopped, State::Starting] {
+            registry.entries[0].state = state;
+            assert!(!registry.update_may_run(&id, 1), "{state:?}");
+        }
+    }
+
+    #[test]
+    fn the_updated_version_is_saved_only_while_the_computer_is_still_this_starts() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Running);
+        let saved = std::cell::RefCell::new(Vec::new());
+        let save = |record: &Record| {
+            saved.borrow_mut().push(record.computer_use_version.clone());
+            Ok(())
+        };
+        assert_eq!(registry.entries[0].record.computer_use_version, None);
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Auto, save),
+            Ok(true)
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_version.as_deref(),
+            Some("v2")
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_approval,
+            Some(Approval::Auto)
+        );
+        assert_eq!(*saved.borrow(), [Some("v2".to_string())]);
+        // A computer that was stopped and started again, restored or deleted meanwhile
+        // keeps its record: the update runs again later.
+        registry.entries[0].record.computer_use_version = None;
+        let never = |_: &Record| -> Result<(), String> { panic!("must not save") };
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 2, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].state = State::Stopped;
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].state = State::Running;
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Restore,
+            "Restoring",
+        ));
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, never),
+            Ok(false)
+        );
+        registry.entries[0].operation = None;
+        // A failed save leaves the old version in the record.
+        let failing = |_: &Record| Err("disk full".to_string());
+        assert_eq!(
+            registry.finish_computer_use_update(&id, 1, "v2", Approval::Ask, failing),
+            Err("disk full".to_string())
+        );
+        assert_eq!(registry.entries[0].record.computer_use_version, None);
+    }
+
+    #[test]
     fn a_finished_installation_is_published_unless_cancelled() {
         let (mut registry, id) = registry_with(State::Installing);
         let mut record = registry.entries[0].record.clone();
@@ -2920,14 +3115,18 @@ mod tests {
     #[test]
     fn only_a_template_that_would_be_copied_sets_the_smallest_disk() {
         let data = tempfile::tempdir().unwrap();
-        let dir =
-            templates::root(data.path()).join(format!("25G83-{}", templates::setup_version()));
+        let dir = templates::root(data.path()).join(format!(
+            "25G83-{}-{}",
+            templates::setup_version(),
+            templates::computer_use_version()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let meta = templates::Meta {
             schema_version: 1,
             macos_version: "26.6.2".into(),
             build: "25G83".into(),
             setup_version: templates::setup_version(),
+            computer_use_version: templates::computer_use_version(),
             disk_gib: 128,
             created_at: "2026-10-09T10:00:00Z".into(),
             source_computer_id: "source".into(),

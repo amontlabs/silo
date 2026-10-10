@@ -80,9 +80,13 @@ impl SetupLog {
     }
 
     /// The log of computer `id`, hiding the password of its account. `None` when the
-    /// folder is unknown; logging is best effort and never fails a setup.
+    /// computer's folder is gone or unknown; logging is best effort and never fails a
+    /// setup, and it never creates the computer's folder or its credentials.
     pub(super) fn open(app: &AppHandle, id: &str) -> Option<Self> {
         let layout = Layout::new(&super::app_data(app).ok()?, id);
+        if !layout.dir.is_dir() {
+            return None;
+        }
         let passwords = super::guest_access::account(&layout)
             .map(|account| vec![account.password])
             .unwrap_or_default();

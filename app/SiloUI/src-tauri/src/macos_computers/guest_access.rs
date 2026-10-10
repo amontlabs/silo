@@ -71,8 +71,33 @@ pub(super) fn reset_host_keys(layout: &Layout) -> Result<(), String> {
     }
 }
 
-/// The account of this computer; its password and key are created the first time.
+/// The account of this computer, read from what exists. It creates nothing: a computer whose
+/// folder or access material is gone (deleted, or never provisioned) has no account, so
+/// nothing that runs later can bring either back.
 pub(crate) fn account(layout: &Layout) -> Result<GuestAccount, String> {
+    const MISSING: &str = "This computer's access is missing.";
+    let dir = credentials_dir(layout);
+    if !directory(layout).is_dir() || !dir.is_dir() {
+        return Err(MISSING.into());
+    }
+    let password = match fs::read_to_string(dir.join("password")) {
+        Ok(text) if !text.trim().is_empty() => text.trim().to_string(),
+        _ => return Err(MISSING.into()),
+    };
+    let key = dir.join("id_ed25519");
+    if !key.is_file() {
+        return Err(MISSING.into());
+    }
+    Ok(GuestAccount {
+        user: USER.into(),
+        password,
+        key,
+    })
+}
+
+/// The account of this computer; its password and key are created the first time. Only
+/// provisioning calls this: everything else reads with `account`.
+pub(crate) fn ensure_account(layout: &Layout) -> Result<GuestAccount, String> {
     // The known hosts live in the computer's own folder even when the secrets do not.
     for dir in [directory(layout), credentials_dir(layout)] {
         fs::DirBuilder::new()
@@ -787,7 +812,7 @@ mod tests {
     #[test]
     fn the_first_connection_logs_in_with_the_password_through_an_askpass_helper() {
         let (_dir, layout, record, account) = fixture();
-        let account_files = super::account(&layout).unwrap();
+        let account_files = super::ensure_account(&layout).unwrap();
         let args = ssh_args(
             &layout,
             &record,
@@ -845,8 +870,8 @@ mod tests {
     #[test]
     fn secrets_are_created_once_and_protected() {
         let (_dir, layout, _record, _account) = fixture();
-        let first = account(&layout).unwrap();
-        let second = account(&layout).unwrap();
+        let first = ensure_account(&layout).unwrap();
+        let second = ensure_account(&layout).unwrap();
         assert_eq!(first.user, "silo");
         assert_eq!(first.password, second.password);
         assert_eq!(first.password.len(), PASSWORD_LENGTH);
@@ -861,10 +886,10 @@ mod tests {
     #[test]
     fn a_lost_public_key_is_derived_again() {
         let (_dir, layout, _record, _account) = fixture();
-        let first = account(&layout).unwrap();
+        let first = ensure_account(&layout).unwrap();
         let before = public_key(&first).unwrap();
         fs::remove_file(public_key_path(&first.key)).unwrap();
-        let again = account(&layout).unwrap();
+        let again = ensure_account(&layout).unwrap();
         assert_eq!(
             public_key(&again).unwrap().split(' ').nth(1),
             before.split(' ').nth(1)
@@ -945,5 +970,26 @@ mod tests {
     #[test]
     fn shell_words_are_quoted() {
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn reading_the_account_creates_nothing_and_fails_without_the_access_material() {
+        let data = tempfile::tempdir().unwrap();
+        let layout = Layout::new(data.path(), "gone-computer");
+        assert!(account(&layout).is_err());
+        assert!(!layout.dir.exists(), "no folder is created");
+        // A folder without credentials stays without them.
+        fs::create_dir_all(&layout.dir).unwrap();
+        assert!(account(&layout).is_err());
+        assert!(!directory(&layout).exists());
+        // Provisioning creates them; reading then gives the same account.
+        let created = ensure_account(&layout).unwrap();
+        let read = account(&layout).unwrap();
+        assert_eq!(created.password, read.password);
+        assert_eq!(created.key, read.key);
+        // Once the folder is removed, reading fails again and recreates nothing.
+        fs::remove_dir_all(&layout.dir).unwrap();
+        assert!(account(&layout).is_err());
+        assert!(!layout.dir.exists());
     }
 }

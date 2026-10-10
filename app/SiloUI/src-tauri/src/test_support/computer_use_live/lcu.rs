@@ -137,7 +137,7 @@ fn live_lcu_drives_the_desktop_without_a_model() {
     eprintln!("lcu status: {report}");
     let report: Value = serde_json::from_str(report.split("\nEXIT:").next().unwrap()).unwrap();
     assert_eq!(report["compatibility"]["status"], "tested");
-    assert_eq!(report["lcu_version"], "0.9.4");
+    assert_eq!(report["lcu_version"], "0.11.0");
     let doctor = fixture.exec_in_session(
         name,
         "/opt/lcu/current/bin/lcu doctor --non-interactive --require-ready",

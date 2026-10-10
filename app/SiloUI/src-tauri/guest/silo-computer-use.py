@@ -12,7 +12,8 @@ nothing changed:
   is extracted to local disk and installed in place against that folder;
 * `lcu setup --agent all --allow-missing --session direct --yes --approval <mode>` runs as
   `silo` (LCU 0.8.8 and later: every supported agent is registered, and those not installed
-  yet are recorded as pending; an older LCU falls back to `--agent auto`);
+  yet are recorded as pending; an older LCU falls back to `--agent auto`). From LCU 0.11.0 it
+  also passes `--cross-turn on --unattended`, which keeps Computer Use across turns;
 * `lcu setup --reconcile` registers a pending agent once its binary exists. It runs at the
   end of every `apply` (a boot included), from the `reconcile` command, from a login hook in
   /etc/profile.d and from a small `watch` process that polls the install directories while
@@ -401,15 +402,28 @@ def lcu_supports(flag):
 
 def setup(approval):
     """Runs `lcu setup` for the working account and reports this run's outcome:
-    `(outcome, agents, reason)`, see `classify_setup`.
+    `(outcome, agents, reason, stored)`, see `classify_setup`; `stored` is false when
+    cross-turn was requested and LCU does not report it on.
 
     Every supported agent is registered, and one that is not installed yet is recorded as
     pending (`--agent all --allow-missing`). An LCU without that flag registers the agents
-    it detects instead."""
+    it detects instead. An LCU with `--cross-turn` (0.11.0) also keeps Computer Use available
+    across turns; `--unattended` skips the owner prompt, as no person is present in the
+    computer. Running it again leaves the setting on."""
     agents = ['--agent', 'all', '--allow-missing'] if lcu_supports('--allow-missing') else ['--agent', 'auto']
-    result = run([lcu_command('lcu'), 'setup', *agents, '--session', 'direct', '--yes',
+    cross_turn = ['--cross-turn', 'on', '--unattended'] if lcu_supports('--cross-turn') else []
+    result = run([lcu_command('lcu'), 'setup', *agents, *cross_turn, '--session', 'direct', '--yes',
                   '--approval', approval], user=True, timeout=600, check=False)
-    return classify_setup(result.returncode, result.stdout, approval)
+    outcome, agents, reason = classify_setup(result.returncode, result.stdout, approval)
+    # `lcu setup` reports a failure to store the setting as a warning and still exits 0.
+    stored = not cross_turn or outcome == 'failed' or cross_turn_enabled(lcu_status())
+    return outcome, agents, reason, stored
+
+
+def cross_turn_enabled(report):
+    """Whether `lcu status --json` shows Computer Use kept across turns."""
+    value = report.get('cross_turn') if isinstance(report, dict) else None
+    return isinstance(value, dict) and value.get('enabled') is True
 
 
 def pending_agents(report):
@@ -770,14 +784,17 @@ def update(pinned, mode, force, boot):
             install(pinned, STAGE)
             configured = False
         if configured:
-            outcome, agents, reason = 'applied', existing.get('agents', []), None
+            outcome, agents, reason, stored = 'applied', existing.get('agents', []), None, True
             pending = list(existing.get('pending') or [])
         else:
-            outcome, agents, reason = setup(mode)
+            outcome, agents, reason, stored = setup(mode)
             pending = None
         if outcome == 'failed':
             raise Failure(reason)
         result = report(mode, outcome, reason)
+        if not stored:
+            # The approval outcome is kept; readiness fails and the next boot retries.
+            raise Failure('cross-turn-failed', 'LCU did not turn on Computer Use across turns')
         if pending is None:
             pending = pending_agents(lcu_status()) or []
         # A setup that just ran has registered what is installed; a verified boot asks LCU.
