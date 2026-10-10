@@ -3,6 +3,8 @@ import { z } from "zod"
 
 import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
+import { bridgeErrorMessage, hasBridgeErrorCode } from "@/contracts/bridge-error"
+import { parseRemoteComputerTarget, remoteComputerTarget } from "@/features/application/model/connections"
 
 export const macosComputerStates = ["preparing", "copying", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
 export type MacosComputerState = (typeof macosComputerStates)[number]
@@ -82,8 +84,19 @@ export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "
 /** Which way an explicit clipboard transfer goes: this Mac to the computer, or back. */
 export type MacosClipboardDirection = "paste-into" | "copy-from"
 
+/** The commands for macOS computers hosted by another connected device; `computerId` is the owner's own id. */
+export interface MacosRemoteBackend {
+  /** The owner's macOS state, in the shape of `MacosComputersBackend.read`. */
+  snapshot(deviceId: string): Promise<unknown>
+  create(deviceId: string, request: MacosComputerRequest): Promise<unknown>
+  action(deviceId: string, computerId: string, action: MacosComputerAction): Promise<void>
+  openDisplay(deviceId: string, computerId: string): Promise<void>
+}
+
 /** What the section needs from its host: the native commands in production, fixtures in the browser preview. */
 export interface MacosComputersBackend {
+  /** Absent where this build cannot reach other devices. */
+  remote?: MacosRemoteBackend
   read(): Promise<unknown>
   create(request: MacosComputerRequest): Promise<unknown>
   action(id: string, action: MacosComputerAction): Promise<void>
@@ -101,8 +114,24 @@ export interface MacosComputersBackend {
   listen(handler: (state: unknown) => void): Promise<() => void>
 }
 
+/** What the last read of one connected device's macOS computers returned. */
+export interface MacosRemoteState {
+  /** The owner's state as last read; kept while a later read fails. */
+  state: MacosComputersState | null
+  error: string | null
+  /** The owner is changing its computer configuration; its state is read again afterwards. */
+  updating: boolean
+}
+
+export interface MacosRemoteDevice {
+  id: string
+  connected: boolean
+}
+
 export interface MacosComputersSnapshot {
   state: MacosComputersState | null
+  /** Other devices' macOS computers by device id, for the devices given to `setRemoteDevices`. */
+  remote: Readonly<Record<string, MacosRemoteState>>
   /** The state could not be read. Cleared by the next valid state. */
   error: string | null
   /** Updates are late or incomplete (a malformed event, or no change events); the state shown may be behind. */
@@ -114,18 +143,43 @@ export interface MacosComputersStore {
   getSnapshot(): MacosComputersSnapshot
   /** Reads the state again. */
   refresh(): Promise<void>
+  /**
+   * Sets the devices whose macOS computers `owner` (a surface showing them) needs: they are read once
+   * now, then at an interval while anything subscribes. The devices of all owners are read together;
+   * an empty list withdraws the owner. Disconnected devices keep their last state and are not read.
+   */
+  setRemoteDevices(owner: string, devices: readonly MacosRemoteDevice[]): void
   create(request: MacosComputerRequest): Promise<void>
+  /** Creates a computer on another device. */
+  createRemote(deviceId: string, request: MacosComputerRequest): Promise<void>
+  /** `id` is a local id or a remote one from `remoteMacosComputerId`; it picks the host. */
   action(id: string, action: MacosComputerAction): Promise<void>
   openDisplay(id: string): Promise<void>
+  /** Local computers only. */
   clipboard(id: string, direction: MacosClipboardDirection): Promise<ClipboardReport>
   deleteTemplate(): Promise<void>
+  /** The checkpoint operations are for local computers only. */
   createCheckpoint(id: string, name: string): Promise<void>
   restoreCheckpoint(id: string, checkpointId: string): Promise<void>
   forkCheckpoint(id: string, checkpointId: string, newName: string): Promise<void>
   deleteCheckpoint(id: string, checkpointId: string): Promise<void>
 }
 
-const initialSnapshot: MacosComputersSnapshot = { state: null, error: null, warning: null }
+const initialSnapshot: MacosComputersSnapshot = { state: null, remote: {}, error: null, warning: null }
+
+/** The id a computer of another device has in the unified list. */
+export const remoteMacosComputerId = remoteComputerTarget
+
+/** How often the macOS computers of connected devices are read while something is subscribed. */
+export const remoteMacosPollMs = 10_000
+
+const notLocalMessage = "This is not supported for macOS computers on other devices."
+const remoteUnavailableMessage = "This build cannot manage macOS computers on other devices."
+const remoteUnreadableMessage = "The macOS computers of this device were unreadable."
+
+function remoteFailureMessage(error: unknown) {
+  return bridgeErrorMessage(error) ?? (error instanceof Error && error.message.trim() ? error.message : typeof error === "string" && error.trim() ? error : "The macOS computers of this device could not be read.")
+}
 
 function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "The state of macOS computers could not be read."
@@ -150,6 +204,12 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
   let eventCount = 0
   let listening = false
   let readCount = 0
+  const remoteDevices = new Map<string, boolean>()
+  const remoteOwners = new Map<string, readonly MacosRemoteDevice[]>()
+  const remoteReads = new Map<string, Promise<void>>()
+  const remoteReadAgain = new Set<string>()
+  const remoteRevisions = new Map<string, number>()
+  let remoteTimer: ReturnType<typeof setInterval> | undefined
 
   function publish(next: MacosComputersSnapshot) {
     snapshot = next
@@ -158,7 +218,7 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
 
   function accept(value: unknown, fromEvent: boolean) {
     const parsed = macosComputersStateSchema.safeParse(value)
-    if (parsed.success) publish({ state: parsed.data, error: null, warning: fromEvent || listening ? null : snapshot.warning })
+    if (parsed.success) publish({ ...snapshot, state: parsed.data, error: null, warning: fromEvent || listening ? null : snapshot.warning })
     else if (fromEvent && snapshot.state) publish({ ...snapshot, warning: "An update to the macOS computers was unreadable. Refreshing…" })
     else publish({ ...snapshot, error: unreadableMessage })
   }
@@ -203,10 +263,85 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
     const mine = ++generation
     listening = false
     void register(mine, 0).then(() => read(mine))
+    syncRemoteTimer()
+    remoteDevices.forEach((connected, id) => { if (connected) void readRemote(id) })
+  }
+
+  const remoteRevision = (deviceId: string) => remoteRevisions.get(deviceId) ?? 0
+  /** A change to a device's computers drops reads that started before it. */
+  const bumpRemote = (deviceId: string) => remoteRevisions.set(deviceId, remoteRevision(deviceId) + 1)
+
+  function setRemote(deviceId: string, next: MacosRemoteState) {
+    publish({ ...snapshot, remote: { ...snapshot.remote, [deviceId]: next } })
+  }
+
+  function readRemote(deviceId: string): Promise<void> {
+    const remote = backend.remote
+    if (!remote || listeners.size === 0 || !remoteDevices.has(deviceId)) return Promise.resolve()
+    const inFlight = remoteReads.get(deviceId)
+    if (inFlight) { remoteReadAgain.add(deviceId); return inFlight }
+    const mine = generation
+    const stale = () => mine !== generation || !remoteDevices.has(deviceId)
+    const run: Promise<void> = (async () => {
+      do {
+        remoteReadAgain.delete(deviceId)
+        const revision = remoteRevision(deviceId)
+        let outcome: { value: unknown } | { cause: unknown }
+        try { outcome = { value: await remote.snapshot(deviceId) } } catch (cause) { outcome = { cause } }
+        if (stale()) return
+        // A change during the read makes it older than what is shown; read again.
+        if (revision !== remoteRevision(deviceId)) { remoteReadAgain.add(deviceId); continue }
+        const previous = snapshot.remote[deviceId]?.state ?? null
+        if ("cause" in outcome) {
+          // An owner that predates macOS computers on other devices has none to show.
+          if (hasBridgeErrorCode(outcome.cause, "unsupported_remote_operation")) setRemote(deviceId, { state: null, error: null, updating: false })
+          else if (hasBridgeErrorCode(outcome.cause, "update_in_progress")) setRemote(deviceId, { state: previous, error: null, updating: true })
+          else setRemote(deviceId, { state: previous, error: remoteFailureMessage(outcome.cause), updating: false })
+          continue
+        }
+        const parsed = macosComputersStateSchema.safeParse(outcome.value)
+        setRemote(deviceId, parsed.success ? { state: parsed.data, error: null, updating: false } : { state: previous, error: remoteUnreadableMessage, updating: false })
+      } while (remoteReadAgain.has(deviceId))
+    })().finally(() => { if (remoteReads.get(deviceId) === run) remoteReads.delete(deviceId) })
+    remoteReads.set(deviceId, run)
+    return run
+  }
+
+  function syncRemoteTimer() {
+    const wanted = listeners.size > 0 && remoteDevices.size > 0 && Boolean(backend.remote)
+    if (!wanted) { clearInterval(remoteTimer); remoteTimer = undefined; return }
+    remoteTimer ??= setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+      remoteDevices.forEach((connected, id) => { if (connected) void readRemote(id) })
+    }, remoteMacosPollMs)
+  }
+
+  function setRemoteDevices(owner: string, devices: readonly MacosRemoteDevice[]) {
+    const previous = new Map(remoteDevices)
+    if (devices.length > 0) remoteOwners.set(owner, devices)
+    else remoteOwners.delete(owner)
+    remoteDevices.clear()
+    remoteOwners.forEach(owned => owned.forEach(({ id, connected }) => remoteDevices.set(id, connected || remoteDevices.get(id) === true)))
+    const kept = Object.fromEntries(Object.entries(snapshot.remote).filter(([id]) => remoteDevices.has(id)))
+    // Devices that left the list lose their state; with no surface left, the last state waits for the next one.
+    if (remoteOwners.size > 0 && Object.keys(kept).length !== Object.keys(snapshot.remote).length) publish({ ...snapshot, remote: kept })
+    syncRemoteTimer()
+    remoteDevices.forEach((connected, id) => { if (connected && previous.get(id) !== true) void readRemote(id) })
+  }
+
+  /** Runs a command on another device, then reads that device's computers again. */
+  async function remoteOperation<T>(deviceId: string, operation: (remote: MacosRemoteBackend) => Promise<T>): Promise<T> {
+    if (!backend.remote) throw new Error(remoteUnavailableMessage)
+    bumpRemote(deviceId)
+    try { return await operation(backend.remote) } finally { bumpRemote(deviceId); void readRemote(deviceId) }
+  }
+
+  function localOnly(id: string) {
+    if (parseRemoteComputerTarget(id)) throw new Error(notLocalMessage)
   }
 
   async function refresh() {
-    await read(generation)
+    await Promise.all([read(generation), ...[...remoteDevices].filter(([, connected]) => connected).map(([id]) => readRemote(id))])
   }
 
   // Without change events, an operation's effect is only visible by reading again.
@@ -222,6 +357,9 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
         listeners.delete(listener)
         if (listeners.size === 0) {
           generation++
+          remoteReads.clear()
+          remoteReadAgain.clear()
+          syncRemoteTimer()
           clearTimeout(retry)
           stop?.()
           stop = undefined
@@ -231,20 +369,35 @@ export function createMacosComputersStore(backend: MacosComputersBackend): Macos
     },
     getSnapshot: () => snapshot,
     refresh,
+    setRemoteDevices,
+    async createRemote(deviceId, request) {
+      const created = macosComputerSchema.parse(await remoteOperation(deviceId, remote => remote.create(deviceId, request)))
+      // The read after the creation normally shows it; the returned row covers a read that missed it.
+      const current = snapshot.remote[deviceId]
+      if (current?.state && !current.state.computers.some(({ id }) => id === created.id)) setRemote(deviceId, { ...current, state: { ...current.state, computers: [...current.state.computers, created] } })
+    },
     async create(request) {
       const created = macosComputerSchema.parse(await readAfter(backend.create(request)))
       // The change event normally arrives first; the returned row covers a missed one.
       const current = snapshot.state
       if (current && !current.computers.some(({ id }) => id === created.id)) publish({ ...snapshot, state: { ...current, computers: [...current.computers, created] } })
     },
-    action: (id, action) => readAfter(backend.action(id, action)),
-    openDisplay: id => backend.openDisplay(id),
-    clipboard: (id, direction) => backend.clipboard(id, direction),
+    action: (id, action) => {
+      const target = parseRemoteComputerTarget(id)
+      return target ? remoteOperation(target.deviceId, remote => remote.action(target.deviceId, target.computerId, action)) : readAfter(backend.action(id, action))
+    },
+    openDisplay: async id => {
+      const target = parseRemoteComputerTarget(id)
+      if (!target) return backend.openDisplay(id)
+      if (!backend.remote) throw new Error(remoteUnavailableMessage)
+      return backend.remote.openDisplay(target.deviceId, target.computerId)
+    },
+    clipboard: async (id, direction) => { localOnly(id); return backend.clipboard(id, direction) },
     deleteTemplate: () => readAfter(backend.deleteTemplate()),
-    createCheckpoint: (id, name) => readAfter(backend.createCheckpoint(id, name)),
-    restoreCheckpoint: (id, checkpointId) => readAfter(backend.restoreCheckpoint(id, checkpointId)),
-    forkCheckpoint: (id, checkpointId, newName) => readAfter(backend.forkCheckpoint(id, checkpointId, newName)),
-    deleteCheckpoint: (id, checkpointId) => readAfter(backend.deleteCheckpoint(id, checkpointId)),
+    createCheckpoint: async (id, name) => { localOnly(id); return readAfter(backend.createCheckpoint(id, name)) },
+    restoreCheckpoint: async (id, checkpointId) => { localOnly(id); return readAfter(backend.restoreCheckpoint(id, checkpointId)) },
+    forkCheckpoint: async (id, checkpointId, newName) => { localOnly(id); return readAfter(backend.forkCheckpoint(id, checkpointId, newName)) },
+    deleteCheckpoint: async (id, checkpointId) => { localOnly(id); return readAfter(backend.deleteCheckpoint(id, checkpointId)) },
   }
 }
 

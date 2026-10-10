@@ -13,6 +13,12 @@ export const nativeMacosComputersBackend: MacosComputersBackend = {
   restoreCheckpoint: (id, checkpointId) => invoke("restore_macos_checkpoint", { id, checkpointId }),
   forkCheckpoint: (id, checkpointId, newName) => invoke("fork_macos_checkpoint", { id, checkpointId, newName }),
   deleteCheckpoint: (id, checkpointId) => invoke("delete_macos_checkpoint", { id, checkpointId }),
+  remote: {
+    snapshot: deviceId => invoke("remote_macos_snapshot", { deviceId }),
+    create: (deviceId, request) => invoke("remote_macos_create", { deviceId, request }),
+    action: (deviceId, computerId, action) => invoke("remote_macos_action", { deviceId, computerId, action }),
+    openDisplay: (deviceId, computerId) => invoke("open_macos_remote_display", { deviceId, computerId }),
+  },
   listen: handler => listen("silo://macos-computers-changed", event => handler(event.payload)),
 }
 

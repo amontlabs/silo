@@ -17,13 +17,13 @@ import {
 export const macosLicenseNotice = "Silo downloads macOS from Apple (about 20 GB) and installs it. Apple's macOS license allows up to two macOS virtual computers per Mac, for software development, testing, or personal non-commercial use. After installation, Silo sets the computer up for computer use, which takes a few minutes."
 
 /** The fields of a new macOS computer, shown in place of the Linux editor when macOS is chosen as its operating system. The host owns the values so they survive navigation. */
-export function MacosComputerForm({ fields, onChange, creating, existingNames, otherNames, capacity, template, minDiskGiB, onRemoveTemplate, osField, onCancel, onCreate }: {
+export function MacosComputerForm({ fields, onChange, creating, existingNames, otherNames, capacity, template, minDiskGiB, onRemoveTemplate, osField, runOnField, onCancel, onCreate }: {
   fields: MacosFormFields
   onChange: (changes: Partial<MacosFormFields>) => void
   /** A creation is in flight: every field stays locked. */
   creating: boolean
   existingNames: readonly string[]
-  /** This device's Linux computers, whose names a macOS computer cannot reuse. */
+  /** The Linux computers on the hosting device, whose names a macOS computer cannot reuse. */
   otherNames: readonly string[]
   capacity?: DeviceCapacity
   /** The set-up computer new ones are copied from, if there is one. */
@@ -32,6 +32,8 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
   minDiskGiB?: number
   onRemoveTemplate?: () => Promise<void>
   osField: ReactNode
+  /** The choice of the device that hosts the computer, when more than one can. */
+  runOnField?: ReactNode
   onCancel: () => void
   onCreate: (request: MacosComputerRequest) => void
 }) {
@@ -57,6 +59,7 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
       <span className="min-w-0 flex-1 text-xs font-semibold">Computer details</span>
     </div>
     {osField}
+    {runOnField}
     <fieldset disabled={creating} className="m-0 grid min-w-0 gap-3 border-0 p-0">
       {field("Computer name", "name", false)}
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">

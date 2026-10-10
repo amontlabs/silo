@@ -36,6 +36,8 @@ export interface MacosEditorState {
   cpus: string
   memoryGiB: string
   diskGiB: string
+  /** The device that will host the computer; "" or absent is this device. */
+  deviceId?: string
   /** A macOS creation started from this editor has not finished. */
   creating: boolean
 }
