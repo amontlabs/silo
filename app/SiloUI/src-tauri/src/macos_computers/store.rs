@@ -391,9 +391,17 @@ pub(super) fn save(layout: &Layout, record: &Record) -> Result<(), String> {
         .map_err(|error| io_error("save the computer", &error))?;
     std::io::Write::write_all(&mut file, &json)
         .map_err(|error| io_error("save the computer", &error))?;
+    file.as_file()
+        .sync_all()
+        .map_err(|error| io_error("save the computer", &error))?;
     file.persist(layout.record())
         .map_err(|error| io_error("save the computer", &error.error))?;
-    Ok(())
+    sync_dir(&layout.dir).map_err(|error| io_error("save the computer", &error))
+}
+
+/// Makes the entries of a folder (a rename, a new or removed file) durable.
+pub(super) fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    fs::File::open(dir)?.sync_all()
 }
 
 /// Every readable computer, ordered by creation. Unreadable entries are skipped.

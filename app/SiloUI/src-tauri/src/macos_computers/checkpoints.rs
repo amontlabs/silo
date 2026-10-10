@@ -209,7 +209,10 @@ fn write_meta(dir: &Path, meta: &Meta) -> Result<(), String> {
         .create_new(true)
         .mode(0o600)
         .open(dir.join(META))
-        .and_then(|mut file| file.write_all(&json))
+        .and_then(|mut file| {
+            file.write_all(&json)?;
+            file.sync_all()
+        })
         .map_err(|error| store::io_error("save the checkpoint", &error))
 }
 
@@ -376,6 +379,8 @@ pub(super) fn create<M: Machine>(
                 let _ = fs::remove_dir_all(&partial);
                 store::io_error("save the checkpoint", &error)
             })?;
+            store::sync_dir(&root(layout))
+                .map_err(|error| store::io_error("save the checkpoint", &error))?;
             machine.log(&format!(
                 "checkpoint saved: {} ({} {})",
                 meta.name,
@@ -515,9 +520,13 @@ fn write_journal(layout: &Layout, journal: &Journal) -> Result<(), String> {
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
     file.write_all(&json)
         .map_err(|error| store::io_error("restore the computer's files", &error))?;
+    file.as_file()
+        .sync_all()
+        .map_err(|error| store::io_error("restore the computer's files", &error))?;
     file.persist(journal_path(layout))
         .map_err(|error| store::io_error("restore the computer's files", &error.error))?;
-    Ok(())
+    store::sync_dir(&layout.dir)
+        .map_err(|error| store::io_error("restore the computer's files", &error))
 }
 
 /// The live files and the temporary names their replacements are staged under.
@@ -542,7 +551,8 @@ fn rename_staged(layout: &Layout) -> Result<(), String> {
                 .map_err(|error| store::io_error("restore the computer's files", &error))?;
         }
     }
-    Ok(())
+    store::sync_dir(&layout.dir)
+        .map_err(|error| store::io_error("restore the computer's files", &error))
 }
 
 /// Replaces the computer's disk and auxiliary storage with clones of the checkpoint's, as a
@@ -565,7 +575,13 @@ fn swap_files(layout: &Layout, from: &Path, pending: &PendingRestore) -> Result<
         }
     }
     journal.phase = Phase::Swapping;
-    if let Err(message) = write_journal(layout, &journal) {
+    // The staged files are on disk before the journal says that they are complete.
+    let durable = staged(layout).iter().try_for_each(|(_, temporary)| {
+        fs::File::open(temporary)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| store::io_error("restore the computer's files", &error))
+    });
+    if let Err(message) = durable.and_then(|()| write_journal(layout, &journal)) {
         remove_staged(layout);
         let _ = fs::remove_file(journal_path(layout));
         return Err(message);
@@ -605,6 +621,16 @@ pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String>
 /// Ends the journal once the record names the Restore the files already carry out.
 pub(super) fn finish_restore(layout: &Layout) {
     let _ = fs::remove_file(journal_path(layout));
+    let _ = store::sync_dir(&layout.dir);
+}
+
+/// Whether an unfinished Restore names checkpoint `id` (or can't say which it names): that
+/// checkpoint is what the computer's files are being made into, so it can't be deleted.
+pub(super) fn journal_pins(layout: &Layout, id: &str) -> bool {
+    match fs::read(journal_path(layout)) {
+        Err(_) => false,
+        Ok(bytes) => serde_json::from_slice::<Journal>(&bytes).map_or(true, |j| j.target == id),
+    }
 }
 
 // MARK: Start
@@ -1212,6 +1238,17 @@ mod tests {
             finish_restore(&layout);
             assert_eq!(recover(&layout), Ok(None));
         }
+    }
+
+    #[test]
+    fn an_unfinished_restore_pins_its_target() {
+        let (_data, layout, meta) = interrupted("swapping");
+        assert!(journal_pins(&layout, &meta.id));
+        assert!(!journal_pins(&layout, "other"));
+        fs::write(journal_path(&layout), b"{").unwrap();
+        assert!(journal_pins(&layout, "other"));
+        finish_restore(&layout);
+        assert!(!journal_pins(&layout, &meta.id));
     }
 
     #[test]

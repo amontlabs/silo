@@ -775,7 +775,8 @@ pub(super) enum StateStartError {
     Failed(String),
 }
 
-/// Starts the computer from the memory saved in `state`, leaving it running.
+/// Restores the memory saved in `state` into a new machine, which is left paused: resume it
+/// with `resume_paused` once the saved memory has been marked as used.
 pub(super) fn start_from_state(
     app: &AppHandle,
     record: &Record,
@@ -883,22 +884,14 @@ fn start_machine_once(
         // SAFETY: Main thread; the handlers run on the main queue.
         unsafe {
             if let Some(path) = &state {
-                // A restore that failed is released by the caller, before it falls back.
-                let machine = vm.clone();
-                let restored = RcBlock::new(move |error: *mut NSError| match error.as_ref() {
-                    Some(error) => {
-                        let _ = send.send(Err(describe(error)));
-                    }
-                    None => {
-                        let send = send.clone();
-                        let resumed = RcBlock::new(move |error: *mut NSError| {
-                            let _ = send.send(match error.as_ref() {
-                                None => Ok(()),
-                                Some(error) => Err(describe(error)),
-                            });
-                        });
-                        machine.resumeWithCompletionHandler(&resumed);
-                    }
+                // The restored machine stays paused: the caller records that the saved memory
+                // is used up before it resumes. A restore that failed is released by the
+                // caller, before it falls back.
+                let restored = RcBlock::new(move |error: *mut NSError| {
+                    let _ = send.send(match error.as_ref() {
+                        None => Ok(()),
+                        Some(error) => Err(describe(error)),
+                    });
                 });
                 vm.restoreMachineStateFromURL_completionHandler(&nsurl(path), &restored);
                 return Ok(());
@@ -997,6 +990,27 @@ pub(super) fn resume_paused(app: &AppHandle, id: &str) -> Result<(), String> {
                 machine.resumeWithCompletionHandler(&completion(send));
             } else {
                 let _ = send.send(Err("The computer is not paused.".into()));
+            }
+        }
+    })
+}
+
+/// Resumes a machine the watcher found paused, unless a checkpoint operation owns it. Both are
+/// checked on the main thread at the moment of the resume, not when the machine was sampled.
+pub(super) fn resume_stray(
+    app: &AppHandle,
+    id: &str,
+    owned: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    on_machine(app, id, true, move |machine, send| {
+        // SAFETY: Main thread.
+        unsafe {
+            if owned() || machine.state() != VZVirtualMachineState::Paused {
+                let _ = send.send(Ok(()));
+            } else if machine.canResume() {
+                machine.resumeWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("The computer can't be resumed right now.".into()));
             }
         }
     })

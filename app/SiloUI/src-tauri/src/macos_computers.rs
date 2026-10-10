@@ -1142,7 +1142,7 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         .and_then(|()| start_machine(app, &record, &layout, plan));
     // The Restore is carried out by this start whether or not it worked out.
     if pending.is_some() {
-        clear_pending_restore(app, id, &layout);
+        let _ = clear_pending_restore(app, id, &layout);
     }
     match started {
         Ok(note) => {
@@ -1165,14 +1165,13 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
 const UNFINISHED_RESTORE: &str =
     "A Restore of this computer did not finish. Restart Silo to settle it before starting the computer.";
 
-fn clear_pending_restore(app: &AppHandle, id: &str, layout: &Layout) {
-    let Ok((mut record, _)) = computer(id) else {
-        return;
-    };
+/// Marks the pending Restore as used, durably.
+fn clear_pending_restore(app: &AppHandle, id: &str, layout: &Layout) -> Result<(), String> {
+    let (mut record, _) = computer(id)?;
     record.pending_restore = None;
-    if store::save(layout, &record).is_ok() {
-        update(app, id, |entry| entry.record = record);
-    }
+    store::save(layout, &record)?;
+    update(app, id, |entry| entry.record = record);
+    Ok(())
 }
 
 /// Boots the machine as `plan` says. Saved memory the framework refuses is not fatal: the
@@ -1192,6 +1191,18 @@ fn start_machine(
             log_line(app, &record.id, "restoring the checkpoint's memory");
             match engine::start_from_state(app, record, layout, &state) {
                 Ok(()) => {
+                    // The saved memory is used up before the machine runs, so no later
+                    // Start can apply it to a disk that has changed since.
+                    if let Err(message) = clear_pending_restore(app, &record.id, layout) {
+                        let _ = engine::force_stop(app, &record.id);
+                        return Err(format!(
+                            "The checkpoint's memory was not resumed because Silo could not record that it was used: {message}"
+                        ));
+                    }
+                    if let Err(message) = engine::resume_paused(app, &record.id) {
+                        let _ = engine::force_stop(app, &record.id);
+                        return Err(message);
+                    }
                     log_line(app, &record.id, "memory restored");
                     return Ok(None);
                 }
@@ -1689,6 +1700,9 @@ fn delete_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(
     let held = begin_operation(app, id, checkpoints::OperationKind::Delete)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
+    if checkpoints::journal_pins(&layout, &target.id) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
     if held
         .record
         .pending_restore
@@ -1926,7 +1940,11 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
             // A machine nothing is checkpointing is never meant to stay paused: resume it, or
             // say that it is stuck.
             (engine::MachineState::Paused, State::Running) if !has_operation(id) => {
-                let resumed = engine::resume_paused(app, id);
+                let owned = {
+                    let id = id.clone();
+                    move || has_operation(&id)
+                };
+                let resumed = engine::resume_stray(app, id, owned);
                 update(app, id, |entry| {
                     entry.detail = resumed.err().map(|why| {
                         format!("The computer is paused and could not be resumed ({why}). Use Force stop.")

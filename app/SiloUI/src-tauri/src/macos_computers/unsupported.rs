@@ -92,6 +92,14 @@ pub(super) fn resume_paused(_app: &AppHandle, _id: &str) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn resume_stray(
+    _app: &AppHandle,
+    _id: &str,
+    _owned: impl Fn() -> bool + Send + 'static,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn memory_support(_app: &AppHandle, _id: &str) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
