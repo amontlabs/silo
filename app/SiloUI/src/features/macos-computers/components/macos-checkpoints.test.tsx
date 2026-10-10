@@ -7,8 +7,11 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createFixtureMacosComputersBackend, macosComputerFixtures } from "@/fixtures/macos-computers"
 import { SettingsProvider } from "@/features/preferences/settings-store"
+import { showActionFailure } from "@/lib/operation-toast"
 import { createMacosComputersStore, MacosComputersContext, useMacosComputers, type MacosComputer } from "../model/macos-computers"
 import { MacosComputerRow } from "./macos-computer-row"
+
+vi.mock("@/lib/operation-toast", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/operation-toast")>(), showActionFailure: vi.fn() }))
 
 afterEach(() => { toast.dismiss() })
 
@@ -146,4 +149,16 @@ it("keeps a stopped computer's Start disabled during an operation", async () => 
   const busy: MacosComputer = { ...macosComputerFixtures.find(computer => computer.id === "mac-stopped")!, checkpointOperation: { kind: "restore", status: "running", stage: "Saving a recovery checkpoint" } }
   renderRows([busy])
   expect(await screen.findByRole("button", { name: "Start xcode-build" })).toBeDisabled()
+})
+
+it("reports a Start that fails after a Restore through the row's own error path", async () => {
+  const user = userEvent.setup()
+  const backend = renderRows()
+  backend.action.mockRejectedValueOnce("A Restore of this computer did not finish.")
+  const panel = await openCheckpoints(user)
+  const target = panel.querySelector<HTMLElement>('[data-checkpoint-name="Fresh install"]')!
+  await user.click(within(target).getByRole("button", { name: "Restore" }))
+  await user.click(popoverButton("Restore"))
+  await user.click(await screen.findByRole("button", { name: "Start" }))
+  await waitFor(() => expect(showActionFailure).toHaveBeenCalledWith("Could not start xcode-build", "A Restore of this computer did not finish.", undefined, { native: false }))
 })

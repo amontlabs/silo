@@ -161,6 +161,28 @@ pub(super) fn on_main<T: Send + 'static>(
     }
 }
 
+/// Like `on_main`, but the work is never abandoned: it runs however late the main thread gets
+/// to it. For steps that undo an earlier one (resuming a paused machine), whose skipping
+/// would leave the machine in a state nothing tracks.
+fn on_main_patient<T: Send + 'static>(
+    app: &AppHandle,
+    work: impl FnOnce(MainThreadMarker) -> T + Send + 'static,
+) -> Result<T, String> {
+    if MainThreadMarker::new().is_some() {
+        return Err("macOS computers cannot wait on the main thread.".into());
+    }
+    let (send, receive) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        if let Some(mtm) = MainThreadMarker::new() {
+            let _ = send.send(work(mtm));
+        }
+    })
+    .map_err(|_| "Silo could not reach its main thread.".to_string())?;
+    receive
+        .recv()
+        .map_err(|_| "Silo's main thread did not respond.".to_string())
+}
+
 #[derive(PartialEq, Eq)]
 enum Phase {
     Pending,
@@ -929,17 +951,23 @@ fn completion(send: mpsc::Sender<Result<(), String>>) -> RcBlock<dyn Fn(*mut NSE
 fn on_machine(
     app: &AppHandle,
     id: &str,
+    patient: bool,
     call: impl FnOnce(&VZVirtualMachine, mpsc::Sender<Result<(), String>>) + Send + 'static,
 ) -> Result<(), String> {
     let (send, receive) = mpsc::channel();
     let id = id.to_string();
-    on_main(app, move |_| -> Result<(), String> {
+    let work = move |_: MainThreadMarker| -> Result<(), String> {
         let machine = SLOTS
             .with(|slots| slots.borrow().get(&id).map(|slot| slot.vm.clone()))
             .ok_or("This computer isn't running.")?;
         call(&machine, send);
         Ok(())
-    })??;
+    };
+    if patient {
+        on_main_patient(app, work)??;
+    } else {
+        on_main(app, work)??;
+    }
     receive
         .recv()
         .map_err(|_| "The computer did not answer.".to_string())?
@@ -959,6 +987,21 @@ pub(super) fn memory_support(app: &AppHandle, id: &str) -> Result<(), String> {
     })?
 }
 
+/// Resumes a paused machine. Not abandoned if the main thread is slow: a machine left paused
+/// would look running to everything else.
+pub(super) fn resume_paused(app: &AppHandle, id: &str) -> Result<(), String> {
+    on_machine(app, id, true, |machine, send| {
+        // SAFETY: Main thread.
+        unsafe {
+            if machine.canResume() {
+                machine.resumeWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("The computer is not paused.".into()));
+            }
+        }
+    })
+}
+
 /// Pauses the running machine, saves its memory to `state`, calls `copy` while it is paused
 /// and resumes it. The machine is resumed whatever `copy` returned; a machine that could not
 /// be paused is left as it was.
@@ -968,7 +1011,7 @@ pub(super) fn save_running(
     state: &Path,
     copy: &mut dyn FnMut() -> Result<(), String>,
 ) -> Result<(), String> {
-    on_machine(app, id, |machine, send| {
+    on_machine(app, id, false, |machine, send| {
         // SAFETY: Main thread; the machine is a framework object in a slot.
         unsafe {
             if machine.canPause() {
@@ -979,23 +1022,14 @@ pub(super) fn save_running(
         }
     })?;
     let url = state.to_path_buf();
-    let saved = on_machine(app, id, move |machine, send| {
+    let saved = on_machine(app, id, false, move |machine, send| {
         // SAFETY: Main thread; the machine is paused and the URL names a new file.
         unsafe {
             machine.saveMachineStateToURL_completionHandler(&nsurl(&url), &completion(send));
         }
     })
     .and_then(|()| copy());
-    let resumed = on_machine(app, id, |machine, send| {
-        // SAFETY: Main thread.
-        unsafe {
-            if machine.canResume() {
-                machine.resumeWithCompletionHandler(&completion(send));
-            } else {
-                let _ = send.send(Err("The computer is not paused.".into()));
-            }
-        }
-    });
+    let resumed = resume_paused(app, id);
     match (saved, resumed) {
         (saved, Ok(())) => saved,
         (saved, Err(why)) => Err(format!(
@@ -1068,6 +1102,8 @@ pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MachineState {
     Running,
+    /// Paused by a checkpoint operation, or left paused by one that could not resume it.
+    Paused,
     Stopped,
     Failed,
     Other,
@@ -1085,6 +1121,8 @@ pub(super) fn machine_states(app: &AppHandle) -> Result<Vec<(String, MachineStat
                     let state = unsafe { slot.vm.state() };
                     let state = if state == VZVirtualMachineState::Running {
                         MachineState::Running
+                    } else if state == VZVirtualMachineState::Paused {
+                        MachineState::Paused
                     } else if state == VZVirtualMachineState::Stopped {
                         MachineState::Stopped
                     } else if state == VZVirtualMachineState::Error {

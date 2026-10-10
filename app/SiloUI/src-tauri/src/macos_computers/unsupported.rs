@@ -23,6 +23,7 @@ pub(super) enum InstallError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MachineState {
     Running,
+    Paused,
     Stopped,
     Failed,
 }
@@ -85,6 +86,10 @@ pub(super) fn start_from_state(
     _state: &Path,
 ) -> Result<(), StateStartError> {
     Err(StateStartError::Failed(UNSUPPORTED.into()))
+}
+
+pub(super) fn resume_paused(_app: &AppHandle, _id: &str) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
 }
 
 pub(super) fn memory_support(_app: &AppHandle, _id: &str) -> Result<(), String> {

@@ -136,7 +136,7 @@ export function MacosComputerRow({ computer, store, takenNames = [] }: { compute
         }} />}
       </>}
     />
-    {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} /></div>}
+    {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} onStart={() => void run("start")} /></div>}
   </ComputerListItem>
 }
 

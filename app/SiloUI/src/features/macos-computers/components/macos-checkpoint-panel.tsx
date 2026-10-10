@@ -10,7 +10,13 @@ const forkDescription = "Creates a new stopped macOS computer with a copy of thi
  * computer shaped like a Linux one, so this only translates: the same Create, Restore, Fork
  * and Delete, backed by the macOS checkpoint commands.
  */
-export function MacosCheckpointPanel({ computer, store, takenNames }: { computer: MacosComputer; store: MacosComputersStore; takenNames: readonly string[] }) {
+export function MacosCheckpointPanel({ computer, store, takenNames, onStart }: {
+  computer: MacosComputer
+  store: MacosComputersStore
+  takenNames: readonly string[]
+  /** Starts the computer through the row's own path, which reports a refusal or failure. */
+  onStart: () => void
+}) {
   const subject = useMemo<CheckpointSubject>(() => ({
     configuration: { id: computer.id, name: computer.name },
     state: computer.state === "running" ? "running" : "stopped",
@@ -28,7 +34,7 @@ export function MacosCheckpointPanel({ computer, store, takenNames }: { computer
   }), [store, computer.id])
   const pending = computer.pendingRestore
   const pendingName = pending ? computer.checkpoints?.find(checkpoint => checkpoint.id === pending.checkpointId)?.name : undefined
-  const startAction = { label: "Start", onClick: () => { void store.action(computer.id, "start").catch(() => undefined) } }
+  const startAction = { label: "Start", onClick: onStart }
 
   return <div className="grid gap-2" data-macos-checkpoints={computer.id}>
     {pending && computer.state !== "running" && <p className="text-xs text-muted-foreground">

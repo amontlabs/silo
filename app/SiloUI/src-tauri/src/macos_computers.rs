@@ -261,15 +261,24 @@ impl Registry {
     }
 
     /// Marks a force stop as under way. Returns the state to restore if it cannot be issued.
-    fn begin_force_stop(&mut self, id: &str) -> Option<State> {
-        let entry = self.entry(id)?;
+    fn begin_force_stop(&mut self, id: &str) -> Result<State, String> {
+        let entry = self.entry(id).ok_or("This computer no longer exists.")?;
+        if !matches!(
+            entry.state,
+            State::Running | State::Starting | State::Stopping
+        ) {
+            return Err("This computer isn't running.".into());
+        }
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
         let before = entry.state;
         if entry.state == State::Running {
             entry.state = State::Stopping;
             entry.since = Instant::now();
         }
         entry.detail = None;
-        Some(before)
+        Ok(before)
     }
 
     fn undo_force_stop(&mut self, id: &str, before: State) {
@@ -379,6 +388,24 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "Silo could not find its data folder.".to_string())
 }
 
+/// Settles a Restore that Silo was interrupted in, so the disk, the auxiliary storage and the
+/// pending Restore in the record agree before anything can start the computer. A Restore that
+/// can't be settled leaves its journal, which keeps the computer from starting.
+fn settle_restore(layout: &Layout, mut record: Record) -> Record {
+    match checkpoints::recover(layout) {
+        Ok(Some(pending)) => {
+            record.pending_restore = Some(pending);
+            record.pristine = false;
+            if store::save(layout, &record).is_ok() {
+                checkpoints::finish_restore(layout);
+            }
+        }
+        Ok(None) => {}
+        Err(message) => eprintln!("A macOS computer's Restore could not be settled: {message}"),
+    }
+    record
+}
+
 fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
     let mut registry = registry();
     if registry.loaded {
@@ -392,6 +419,7 @@ fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
                 let (state, detail) = store::initial_state(&record);
                 let layout = Layout::new(&data, &record.id);
                 checkpoints::sweep(&layout);
+                let record = settle_restore(&layout, record);
                 let mut entry = Entry::new(record, state, detail);
                 entry.checkpoints = checkpoints::list(&layout);
                 entry
@@ -1087,11 +1115,14 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
         if entry.operation.is_some() {
             return Err(checkpoints::BUSY.into());
         }
-        // A computer the user starts is no longer the clean result of its setup, and a
-        // Restore is carried out by this start whether or not it works out.
+        if checkpoints::restore_unfinished(&Layout::new(&data, id)) {
+            return Err(UNFINISHED_RESTORE.into());
+        }
+        // A computer the user starts is no longer the clean result of its setup. The
+        // pending Restore stays in the record, which keeps its checkpoint from being
+        // deleted, until the start has read it.
         let mut started = entry.record.clone();
         started.pristine = false;
-        started.pending_restore = None;
         if started != entry.record {
             store::save(&Layout::new(&data, id), &started)?;
         }
@@ -1109,6 +1140,10 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
     let plan = checkpoints::start_plan(&layout, pending.as_ref(), &checkpoints::host_build());
     let started = offline_setup::ensure_detached(&layout.disk())
         .and_then(|()| start_machine(app, &record, &layout, plan));
+    // The Restore is carried out by this start whether or not it worked out.
+    if pending.is_some() {
+        clear_pending_restore(app, id, &layout);
+    }
     match started {
         Ok(note) => {
             update(app, id, |entry| {
@@ -1124,6 +1159,19 @@ fn start(app: &AppHandle, id: &str) -> Result<(), String> {
             set_state(app, id, State::Stopped, None);
             Err(message)
         }
+    }
+}
+
+const UNFINISHED_RESTORE: &str =
+    "A Restore of this computer did not finish. Restart Silo to settle it before starting the computer.";
+
+fn clear_pending_restore(app: &AppHandle, id: &str, layout: &Layout) {
+    let Ok((mut record, _)) = computer(id) else {
+        return;
+    };
+    record.pending_restore = None;
+    if store::save(layout, &record).is_ok() {
+        update(app, id, |entry| entry.record = record);
     }
 }
 
@@ -1280,14 +1328,34 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (record, state) = computer(id)?;
-    if !matches!(state, State::Running | State::Stopping) {
-        return Err("This computer isn't running.".into());
-    }
-    if has_operation(id) {
-        return Err(checkpoints::BUSY.into());
-    }
-    let note = request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT)?;
+    // The ownership check and the claim of the transition happen under one lock.
+    let (record, before) = {
+        let mut registry = registry();
+        let entry = registry
+            .entry(id)
+            .ok_or("This computer no longer exists.")?;
+        if !matches!(entry.state, State::Running | State::Stopping) {
+            return Err("This computer isn't running.".into());
+        }
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
+        let before = entry.state;
+        if before == State::Running {
+            entry.state = State::Stopping;
+            entry.since = Instant::now();
+        }
+        (entry.record.clone(), before)
+    };
+    emit(app);
+    let note = match request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT) {
+        Ok(note) => note,
+        Err(message) => {
+            registry().undo_force_stop(id, before);
+            emit(app);
+            return Err(message);
+        }
+    };
     update(app, id, |entry| {
         if entry.state == State::Running {
             entry.state = State::Stopping;
@@ -1301,20 +1369,11 @@ fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
 }
 
 fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (_, state) = computer(id)?;
-    if !matches!(state, State::Running | State::Starting | State::Stopping) {
-        return Err("This computer isn't running.".into());
-    }
-    if has_operation(id) {
-        return Err(checkpoints::BUSY.into());
-    }
-    let before = registry().begin_force_stop(id);
+    let before = registry().begin_force_stop(id)?;
     emit(app);
     if let Err(message) = engine::force_stop(app, id) {
-        if let Some(before) = before {
-            registry().undo_force_stop(id, before);
-            emit(app);
-        }
+        registry().undo_force_stop(id, before);
+        emit(app);
         return Err(message);
     }
     Ok(())
@@ -1543,6 +1602,9 @@ fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String
     let data = app_data(app)?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Capture)?;
     let layout = Layout::new(&data, id);
+    if checkpoints::restore_unfinished(&layout) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
     let running = held.state == State::Running;
     log_line(
         app,
@@ -1575,6 +1637,9 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
     let data = app_data(app)?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Restore)?;
     let layout = Layout::new(&data, id);
+    if checkpoints::restore_unfinished(&layout) {
+        return Err(UNFINISHED_RESTORE.into());
+    }
     let target = checkpoints::find(&layout, checkpoint_id)?;
     let running = held.state == State::Running;
     log_line(
@@ -1604,6 +1669,8 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
     // The disk no longer is what the user left, and only what Start restores is the result.
     record.pristine = false;
     store::save(&layout, &record)?;
+    // The record and the files agree: the journal has nothing left to settle.
+    checkpoints::finish_restore(&layout);
     update(app, id, |entry| {
         entry.record = record;
         if matches!(entry.state, State::Running | State::Stopping) {
@@ -1855,6 +1922,16 @@ fn reconcile(app: &AppHandle, states: &[(String, engine::MachineState)]) {
                 let detail = (*machine == engine::MachineState::Failed)
                     .then(|| "The computer stopped unexpectedly.".to_string());
                 machine_stopped(app, id, detail);
+            }
+            // A machine nothing is checkpointing is never meant to stay paused: resume it, or
+            // say that it is stuck.
+            (engine::MachineState::Paused, State::Running) if !has_operation(id) => {
+                let resumed = engine::resume_paused(app, id);
+                update(app, id, |entry| {
+                    entry.detail = resumed.err().map(|why| {
+                        format!("The computer is paused and could not be resumed ({why}). Use Force stop.")
+                    });
+                });
             }
             (engine::MachineState::Running, State::Stopping) => {
                 update(app, id, |entry| {
@@ -2187,6 +2264,25 @@ mod tests {
     }
 
     #[test]
+    fn a_force_stop_is_claimed_under_the_lock_and_refused_during_an_operation() {
+        let (mut registry, id) = registry_with(State::Running);
+        registry.entries[0].operation = Some(checkpoints::Operation::running(
+            checkpoints::OperationKind::Capture,
+            "Copying the disk",
+        ));
+        assert_eq!(
+            registry.begin_force_stop(&id),
+            Err(checkpoints::BUSY.to_string())
+        );
+        assert_eq!(registry.entries[0].state, State::Running);
+        registry.entries[0].operation = None;
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Running));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        let (mut registry, id) = registry_with(State::Stopped);
+        assert!(registry.begin_force_stop(&id).is_err());
+    }
+
+    #[test]
     fn quit_and_updates_count_an_operation_on_a_stopped_computer_as_busy() {
         let (mut registry, _) = registry_with(State::Stopped);
         assert!(!is_busy(registry.entries[0].state));
@@ -2451,7 +2547,7 @@ mod tests {
     fn a_force_stop_failure_is_kept_whenever_it_arrives() {
         // Marked stopping before the framework call: the failure returns it to running.
         let (mut registry, id) = registry_with(State::Running);
-        assert_eq!(registry.begin_force_stop(&id), Some(State::Running));
+        assert_eq!(registry.begin_force_stop(&id), Ok(State::Running));
         registry.force_stop_failed(&id, "busy".into());
         assert_eq!(registry.entries[0].state, State::Running);
         assert_eq!(registry.entries[0].detail.as_deref(), Some("busy"));

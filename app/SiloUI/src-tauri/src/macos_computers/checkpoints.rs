@@ -465,48 +465,146 @@ pub(super) fn restore<M: Machine>(
         machine.force_stop()?;
     }
     machine.stage("Restoring the disk");
-    replace_files(layout, &dir(layout, &target.id))?;
+    let pending = PendingRestore {
+        checkpoint_id: target.id.clone(),
+        memory: target.kind == Kind::Memory,
+    };
+    swap_files(layout, &dir(layout, &target.id), &pending)?;
     machine.log(&format!(
         "restored checkpoint: {} ({})",
         target.name, target.id
     ));
-    Ok(PendingRestore {
-        checkpoint_id: target.id,
-        memory: target.kind == Kind::Memory,
+    Ok(pending)
+}
+
+// MARK: Restore journal
+
+const JOURNAL: &str = "restore-journal.json";
+const RESTORING: &str = ".restoring";
+
+/// How far a Restore got in replacing the computer's files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Phase {
+    /// The clones are being made under temporary names; the live files are untouched.
+    Staging,
+    /// Both clones are complete; the live files are being replaced by renaming them.
+    Swapping,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Journal {
+    phase: Phase,
+    target: String,
+    memory: bool,
+}
+
+fn journal_path(layout: &Layout) -> PathBuf {
+    layout.dir.join(JOURNAL)
+}
+
+/// Whether a Restore began and has not been rolled forward or back and finished.
+pub(super) fn restore_unfinished(layout: &Layout) -> bool {
+    journal_path(layout).exists()
+}
+
+fn write_journal(layout: &Layout, journal: &Journal) -> Result<(), String> {
+    let json = serde_json::to_vec(journal).map_err(|error| error.to_string())?;
+    let mut file = tempfile::NamedTempFile::new_in(&layout.dir)
+        .map_err(|error| store::io_error("restore the computer's files", &error))?;
+    file.write_all(&json)
+        .map_err(|error| store::io_error("restore the computer's files", &error))?;
+    file.persist(journal_path(layout))
+        .map_err(|error| store::io_error("restore the computer's files", &error.error))?;
+    Ok(())
+}
+
+/// The live files and the temporary names their replacements are staged under.
+fn staged(layout: &Layout) -> [(PathBuf, PathBuf); 2] {
+    [layout.disk(), layout.auxiliary_storage()].map(|live| {
+        let mut name = live.as_os_str().to_os_string();
+        name.push(RESTORING);
+        (live, PathBuf::from(name))
     })
 }
 
-/// Replaces the computer's disk and auxiliary storage with clones of the checkpoint's. Both
-/// clones are made before either replaces its file.
-fn replace_files(layout: &Layout, from: &Path) -> Result<(), String> {
-    let staged = [
-        (from.join(DISK), layout.disk()),
-        (from.join(AUXILIARY_STORAGE), layout.auxiliary_storage()),
-    ]
-    .map(|(source, live)| {
-        let mut name = live.as_os_str().to_os_string();
-        name.push(".restoring");
-        (source, live, PathBuf::from(name))
-    });
-    let cleanup = || {
-        for (_, _, temporary) in &staged {
-            let _ = fs::remove_file(temporary);
-        }
-    };
-    for (source, _, temporary) in &staged {
+fn remove_staged(layout: &Layout) {
+    for (_, temporary) in staged(layout) {
         let _ = fs::remove_file(temporary);
-        if let Err(error) = templates::clone_file(source, temporary) {
-            cleanup();
-            return Err(copy_error(error));
-        }
     }
-    for (_, live, temporary) in &staged {
-        if let Err(error) = fs::rename(temporary, live) {
-            cleanup();
-            return Err(store::io_error("restore the computer's files", &error));
+}
+
+fn rename_staged(layout: &Layout) -> Result<(), String> {
+    for (live, temporary) in staged(layout) {
+        if temporary.exists() {
+            fs::rename(&temporary, &live)
+                .map_err(|error| store::io_error("restore the computer's files", &error))?;
         }
     }
     Ok(())
+}
+
+/// Replaces the computer's disk and auxiliary storage with clones of the checkpoint's, as a
+/// journaled step: both clones are staged and complete before the journal says `swapping`,
+/// and from then on `recover` can finish the renames after an interruption. The journal
+/// stays until `finish_restore`, which the caller runs once the new pending Restore is saved.
+fn swap_files(layout: &Layout, from: &Path, pending: &PendingRestore) -> Result<(), String> {
+    let mut journal = Journal {
+        phase: Phase::Staging,
+        target: pending.checkpoint_id.clone(),
+        memory: pending.memory,
+    };
+    write_journal(layout, &journal)?;
+    remove_staged(layout);
+    for ((_, temporary), source) in staged(layout).iter().zip([DISK, AUXILIARY_STORAGE]) {
+        if let Err(error) = templates::clone_file(&from.join(source), temporary) {
+            remove_staged(layout);
+            let _ = fs::remove_file(journal_path(layout));
+            return Err(copy_error(error));
+        }
+    }
+    journal.phase = Phase::Swapping;
+    if let Err(message) = write_journal(layout, &journal) {
+        remove_staged(layout);
+        let _ = fs::remove_file(journal_path(layout));
+        return Err(message);
+    }
+    // A failure from here on is finished by `recover`, never by undoing half of it.
+    rename_staged(layout)
+}
+
+/// Settles a Restore that was interrupted. Before the clones were complete nothing is
+/// changed (the staged files are dropped); after, the renames are finished. Returns the
+/// pending Restore the journal names when the files now are the checkpoint's, which the
+/// caller saves in the record before calling `finish_restore`.
+pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String> {
+    let Ok(bytes) = fs::read(journal_path(layout)) else {
+        return Ok(None);
+    };
+    match serde_json::from_slice::<Journal>(&bytes) {
+        Ok(Journal {
+            phase: Phase::Swapping,
+            target,
+            memory,
+        }) => {
+            rename_staged(layout)?;
+            Ok(Some(PendingRestore {
+                checkpoint_id: target,
+                memory,
+            }))
+        }
+        _ => {
+            remove_staged(layout);
+            finish_restore(layout);
+            Ok(None)
+        }
+    }
+}
+
+/// Ends the journal once the record names the Restore the files already carry out.
+pub(super) fn finish_restore(layout: &Layout) {
+    let _ = fs::remove_file(journal_path(layout));
 }
 
 // MARK: Start
@@ -1053,6 +1151,76 @@ mod tests {
         }
         // A memory state never moves to a new machine identifier.
         assert!(!target.dir.join(STATE).exists());
+    }
+
+    fn interrupted(phase: &str) -> (tempfile::TempDir, Layout, Meta) {
+        let (data, layout) = computer();
+        let machine = Fake::default();
+        let meta = create(&subject(&layout, &machine, false), "Good", Reason::Manual).unwrap();
+        fs::write(layout.disk(), b"disk-v2").unwrap();
+        fs::write(layout.auxiliary_storage(), b"aux-v2").unwrap();
+        for ((_, temporary), content) in staged(&layout).iter().zip(["disk-v1", "aux-v1"]) {
+            fs::write(temporary, content).unwrap();
+        }
+        let journal = format!(
+            r#"{{"phase":"{phase}","target":"{}","memory":false}}"#,
+            meta.id
+        );
+        fs::write(journal_path(&layout), journal).unwrap();
+        (data, layout, meta)
+    }
+
+    #[test]
+    fn a_restore_finishes_with_its_journal_until_the_record_is_saved() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let target = create(&subject(&layout, &machine, false), "Good", Reason::Manual).unwrap();
+        restore(&subject(&layout, &machine, false), &target.id).unwrap();
+        assert!(restore_unfinished(&layout));
+        finish_restore(&layout);
+        assert!(!restore_unfinished(&layout));
+        assert_eq!(recover(&layout), Ok(None));
+    }
+
+    #[test]
+    fn an_interruption_while_staging_rolls_back() {
+        let (_data, layout, _) = interrupted("staging");
+        assert_eq!(recover(&layout), Ok(None));
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert_eq!(fs::read(layout.auxiliary_storage()).unwrap(), b"aux-v2");
+        assert!(!restore_unfinished(&layout));
+        assert!(staged(&layout)
+            .iter()
+            .all(|(_, temporary)| !temporary.exists()));
+    }
+
+    #[test]
+    fn an_interruption_while_swapping_rolls_forward_to_matching_files_and_pending() {
+        for already_renamed in [false, true] {
+            let (_data, layout, meta) = interrupted("swapping");
+            if already_renamed {
+                let (live, temporary) = staged(&layout)[0].clone();
+                fs::rename(temporary, live).unwrap();
+            }
+            let pending = recover(&layout).unwrap().unwrap();
+            assert_eq!(pending.checkpoint_id, meta.id);
+            assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
+            assert_eq!(fs::read(layout.auxiliary_storage()).unwrap(), b"aux-v1");
+            // The journal stays until the record carries the pending Restore.
+            assert!(restore_unfinished(&layout));
+            assert_eq!(recover(&layout).unwrap().unwrap(), pending);
+            finish_restore(&layout);
+            assert_eq!(recover(&layout), Ok(None));
+        }
+    }
+
+    #[test]
+    fn an_unreadable_journal_rolls_back() {
+        let (_data, layout, _) = interrupted("swapping");
+        fs::write(journal_path(&layout), b"{").unwrap();
+        assert_eq!(recover(&layout), Ok(None));
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert!(!restore_unfinished(&layout));
     }
 
     #[test]
