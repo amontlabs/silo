@@ -14,7 +14,7 @@ use crate::computer_use;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -44,33 +44,75 @@ const QUOTE_LINES: usize = 3;
 
 /// How long a started computer may take to accept SSH logins before its update gives up.
 const UPDATE_SSH_WAIT: Duration = Duration::from_secs(600);
+/// How long a Delete waits for a running update to notice and end.
+const UPDATE_DRAIN: Duration = Duration::from_secs(60);
 /// The row detail while computer use is being updated.
 const UPDATING: &str = "Updating Computer Use";
 
-/// Computers whose computer use is being updated, so a second Start never runs a second one.
-static UPDATING_IDS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Computers whose computer use is being updated, each with the Start whose update is
+/// waiting behind the running one (the newest request only).
+static UPDATES: Mutex<Option<HashMap<String, Option<u64>>>> = Mutex::new(None);
 
+fn updates() -> std::sync::MutexGuard<'static, Option<HashMap<String, Option<u64>>>> {
+    UPDATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The right to run the updates of one computer, one at a time.
 struct UpdateClaim(String);
 
 impl UpdateClaim {
-    fn take(id: &str) -> Option<Self> {
-        let mut ids = UPDATING_IDS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        ids.get_or_insert_with(HashSet::new)
-            .insert(id.to_string())
-            .then(|| Self(id.to_string()))
+    /// Takes the claim, or queues Start number `attempt` behind the update that holds it:
+    /// that one runs the queued request when it ends, so a request is never dropped.
+    fn take_or_queue(id: &str, attempt: u64) -> Option<Self> {
+        let mut updates = updates();
+        let map = updates.get_or_insert_with(HashMap::new);
+        match map.get_mut(id) {
+            Some(queued) => {
+                *queued = Some(attempt);
+                None
+            }
+            None => {
+                map.insert(id.to_string(), None);
+                Some(Self(id.to_string()))
+            }
+        }
+    }
+
+    /// The queued request to run next; with none, the claim is given up in the same step,
+    /// so a request cannot slip in between.
+    fn next_or_release(&self) -> Option<u64> {
+        let mut updates = updates();
+        let map = updates.get_or_insert_with(HashMap::new);
+        match map.get_mut(&self.0).and_then(Option::take) {
+            Some(attempt) => Some(attempt),
+            None => {
+                map.remove(&self.0);
+                None
+            }
+        }
     }
 }
 
 impl Drop for UpdateClaim {
     fn drop(&mut self) {
-        let mut ids = UPDATING_IDS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(ids) = ids.as_mut() {
-            ids.remove(&self.0);
+        if let Some(map) = updates().as_mut() {
+            map.remove(&self.0);
         }
+    }
+}
+
+/// Waits until no update of computer `id` is running, for a Delete that has already made
+/// the update's liveness check fail: the update must not touch the computer's folder
+/// (its log, its access material) after the folder is removed.
+pub(super) fn wait_for_update_end(id: &str) {
+    let deadline = std::time::Instant::now() + UPDATE_DRAIN;
+    while updates().as_ref().is_some_and(|map| map.contains_key(id)) {
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -312,14 +354,17 @@ pub(super) fn install_with(
         APPLY_TIMEOUT,
         &cancelled,
     );
-    // Best effort, also after a cancellation: the archives are large.
-    let _ = access::run(
-        &layout,
-        &record,
-        &format!("rm -rf {STAGE}"),
-        None,
-        QUICK_COMMAND,
-    );
+    // Best effort, also after a cancellation: the archives are large. Only a computer whose
+    // access material exists is logged in to; this never creates any.
+    if access::credentials_dir(&layout).join("id_ed25519").exists() {
+        let _ = access::run(
+            &layout,
+            &record,
+            &format!("rm -rf {STAGE}"),
+            None,
+            QUICK_COMMAND,
+        );
+    }
     let output = output?;
     if output.status == 0 {
         Ok(())
@@ -348,15 +393,17 @@ pub(super) fn update_in_background(app: &AppHandle, id: &str, attempt: u64) {
     if !wanted {
         return;
     }
-    let Some(claim) = UpdateClaim::take(id) else {
+    let Some(claim) = UpdateClaim::take_or_queue(id, attempt) else {
         return;
     };
     let (app, id) = (app.clone(), id.to_string());
     let _ = std::thread::Builder::new()
         .name("macos-computer-use-update".into())
         .spawn(move || {
-            let _claim = claim;
             run_update(&app, &id, attempt);
+            while let Some(next) = claim.next_or_release() {
+                run_update(&app, &id, next);
+            }
         });
 }
 
@@ -366,13 +413,17 @@ fn update_may_run(id: &str, attempt: u64) -> bool {
 }
 
 fn run_update(app: &AppHandle, id: &str, attempt: u64) {
+    let live = || update_may_run(id, attempt);
+    // Nothing below may touch the computer's folder once the computer is not this Start's.
+    if !live() {
+        return;
+    }
     let log = setup_log::SetupLog::open(app, id);
     let say = |line: &str| {
         if let Some(log) = &log {
             log.line(line);
         }
     };
-    let live = || update_may_run(id, attempt);
     let clear = |app: &AppHandle| {
         super::update(app, id, |entry| {
             if entry.attempt == attempt
@@ -647,12 +698,28 @@ mod tests {
     }
 
     #[test]
-    fn only_one_update_runs_for_a_computer() {
-        let first = UpdateClaim::take("update-claim-test").unwrap();
-        assert!(UpdateClaim::take("update-claim-test").is_none());
-        assert!(UpdateClaim::take("update-claim-other").is_some());
-        drop(first);
-        assert!(UpdateClaim::take("update-claim-test").is_some());
+    fn only_one_update_runs_for_a_computer_and_a_later_start_is_queued_behind_it() {
+        let first = UpdateClaim::take_or_queue("update-claim-test", 1).unwrap();
+        // A second Start's request waits; the newest one replaces an older queued one.
+        assert!(UpdateClaim::take_or_queue("update-claim-test", 2).is_none());
+        assert!(UpdateClaim::take_or_queue("update-claim-test", 3).is_none());
+        assert!(UpdateClaim::take_or_queue("update-claim-other", 1).is_some());
+        assert_eq!(first.next_or_release(), Some(3));
+        // With nothing queued the claim is released in the same step.
+        assert_eq!(first.next_or_release(), None);
+        assert!(UpdateClaim::take_or_queue("update-claim-test", 4).is_some());
+    }
+
+    #[test]
+    fn a_delete_waits_for_the_running_update_to_end() {
+        let claim = UpdateClaim::take_or_queue("update-drain-test", 1).unwrap();
+        let waiter = std::thread::spawn(|| wait_for_update_end("update-drain-test"));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!waiter.is_finished());
+        drop(claim);
+        waiter.join().unwrap();
+        // Nothing running: it returns at once.
+        wait_for_update_end("update-drain-test");
     }
 
     #[test]

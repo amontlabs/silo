@@ -994,7 +994,7 @@ fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), S
     // The outcome is decided under the lock a Delete takes, so a Delete accepted
     // before it is never lost.
     let finish = registry().finish_workflow(id, result);
-    match finish {
+    match &finish {
         Finish::Remove => {
             let removal = remove_computer(layout);
             registry().finish_cancelled(id, removal);
@@ -1003,6 +1003,8 @@ fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), S
     }
     // A copy that ended no longer holds its template.
     prune_templates(app);
+    // An installation that held a restore image may have been the last reason to keep it.
+    remove_restore_images(app, matches!(finish, Finish::Kept).then_some(id));
     emit(app);
 }
 
@@ -1215,12 +1217,7 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: boo
         &protected_templates,
     );
     match made {
-        Ok(Some(name)) => {
-            // The installation is not needed again while a template of this build exists.
-            if let Some(image) = &record.restore_image {
-                remove_restore_image(app, &data, record, &name, &image.build);
-            }
-        }
+        Ok(Some(_)) => remove_restore_images(app, Some(&record.id)),
         Ok(None) => {}
         Err(message) => {
             if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
@@ -1231,22 +1228,33 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: boo
     refresh_template(app);
 }
 
-/// Deletes the cached restore image of `build` once the template `template` of it is saved.
-/// Installations that are reading an image keep it; the image is downloaded again when a
-/// new macOS build or a changed base setup needs an installation.
-fn remove_restore_image(
-    app: &AppHandle,
-    data: &std::path::Path,
-    record: &Record,
-    template: &str,
-    build: &str,
-) {
-    let removed = restore_image::remove_for_build(&store::restore_images(data), build);
-    if let Some(log) = setup_log::SetupLog::open(app, &record.id) {
-        for (name, bytes) in removed {
-            log.line(&format!(
-                "removed the cached macOS restore image {name} ({bytes} bytes): template {template} replaces the installation"
-            ));
+/// Deletes the cached restore image of every macOS build that has a usable template (the
+/// current base setup): an installation is not needed again while it exists. Installations
+/// that are reading an image keep it, so this runs again whenever one ends. The image is
+/// downloaded again when a new macOS build or a changed base setup needs an installation.
+/// `log_to` names the computer whose log notes the removal, when it still exists.
+fn remove_restore_images(app: &AppHandle, log_to: Option<&str>) {
+    let Ok(data) = app_data(app) else {
+        return;
+    };
+    let images = store::restore_images(&data);
+    let builds = templates::builds_with_usable_template(
+        &templates::list(&data),
+        &templates::setup_version(),
+    );
+    // Writing to the log of a computer that is gone would recreate its folder.
+    let log_to = log_to.filter(|id| computer(id).is_ok());
+    for build in builds {
+        for (name, bytes) in restore_image::remove_for_build(&images, &build) {
+            if let Some(id) = log_to {
+                log_line(
+                    app,
+                    id,
+                    &format!(
+                        "removed the cached macOS restore image {name} ({bytes} bytes): a template of macOS build {build} replaces the installation"
+                    ),
+                );
+            }
         }
     }
 }
@@ -1676,6 +1684,9 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     };
     if removed {
         close_display(app, id);
+        // A computer use update stops once the deletion is marked; it must have ended before
+        // the folder goes, or it could write to it again.
+        guest_computer_use::wait_for_update_end(id);
         // The entry stays until the files are gone, so a failed removal can be retried.
         match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => registry().entries.retain(|entry| entry.record.id != id),

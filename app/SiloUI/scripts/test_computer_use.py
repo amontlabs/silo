@@ -478,7 +478,10 @@ class Apply(Guest):
         self.lcu_status['cross_turn'] = {'enabled': False, 'source': None}
         result = cu.apply('ask')
         self.assertEqual((result['state'], result['reason']), ('failed', 'cross-turn-failed'))
+        # The approval was applied: that outcome is kept while readiness is reported failed.
+        self.assertEqual(result['apply'], {'approval': 'ask', 'outcome': 'applied', 'reason': None})
         self.assertEqual(self.receipt()['state'], 'failed')
+        self.assertEqual(self.receipt()['approvalOutcome'], 'applied')
         self.lcu_status['cross_turn'] = {'enabled': True, 'source': 'unattended'}
         self.commands.clear()
         self.assertEqual(cu.apply('ask')['state'], 'ready')

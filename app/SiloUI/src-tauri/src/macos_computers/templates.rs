@@ -208,6 +208,20 @@ pub(super) fn choose<'a>(
         .or_else(|| templates.iter().find(usable))
 }
 
+/// The macOS builds a template of the current base exists for: computers of these builds are
+/// copied, so their restore image is not needed. A template of another base does not count,
+/// since a changed base installs macOS again.
+pub(super) fn builds_with_usable_template(templates: &[Template], base: &str) -> Vec<String> {
+    let mut builds: Vec<String> = templates
+        .iter()
+        .filter(|template| template.meta.setup_version == base)
+        .map(|template| template.meta.build.clone())
+        .collect();
+    builds.sort();
+    builds.dedup();
+    builds
+}
+
 // MARK: Leases
 
 /// Folders of templates that copies are being made from, with their counts.
@@ -828,6 +842,18 @@ mod tests {
             choose(&both, Some("25G83"), "base", "new").map(|t| t.name.as_str()),
             Some("25G83-base-new")
         );
+    }
+
+    #[test]
+    fn only_builds_with_a_template_of_the_current_base_lose_their_restore_image() {
+        let templates = [
+            template_with("25G83", "base", "old", "2026-10-03"),
+            template_with("25G83", "base", "new", "2026-10-02"),
+            template_with("25H1", "changed", "new", "2026-10-01"),
+        ];
+        assert_eq!(builds_with_usable_template(&templates, "base"), ["25G83"]);
+        assert!(builds_with_usable_template(&templates, "other").is_empty());
+        assert!(builds_with_usable_template(&[], "base").is_empty());
     }
 
     #[test]

@@ -402,7 +402,8 @@ def lcu_supports(flag):
 
 def setup(approval):
     """Runs `lcu setup` for the working account and reports this run's outcome:
-    `(outcome, agents, reason)`, see `classify_setup`.
+    `(outcome, agents, reason, stored)`, see `classify_setup`; `stored` is false when
+    cross-turn was requested and LCU does not report it on.
 
     Every supported agent is registered, and one that is not installed yet is recorded as
     pending (`--agent all --allow-missing`). An LCU without that flag registers the agents
@@ -413,11 +414,10 @@ def setup(approval):
     cross_turn = ['--cross-turn', 'on', '--unattended'] if lcu_supports('--cross-turn') else []
     result = run([lcu_command('lcu'), 'setup', *agents, *cross_turn, '--session', 'direct', '--yes',
                   '--approval', approval], user=True, timeout=600, check=False)
-    outcome = classify_setup(result.returncode, result.stdout, approval)
+    outcome, agents, reason = classify_setup(result.returncode, result.stdout, approval)
     # `lcu setup` reports a failure to store the setting as a warning and still exits 0.
-    if cross_turn and outcome[0] != 'failed' and not cross_turn_enabled(lcu_status()):
-        raise Failure('cross-turn-failed', 'LCU did not turn on Computer Use across turns')
-    return outcome
+    stored = not cross_turn or outcome == 'failed' or cross_turn_enabled(lcu_status())
+    return outcome, agents, reason, stored
 
 
 def cross_turn_enabled(report):
@@ -784,14 +784,17 @@ def update(pinned, mode, force, boot):
             install(pinned, STAGE)
             configured = False
         if configured:
-            outcome, agents, reason = 'applied', existing.get('agents', []), None
+            outcome, agents, reason, stored = 'applied', existing.get('agents', []), None, True
             pending = list(existing.get('pending') or [])
         else:
-            outcome, agents, reason = setup(mode)
+            outcome, agents, reason, stored = setup(mode)
             pending = None
         if outcome == 'failed':
             raise Failure(reason)
         result = report(mode, outcome, reason)
+        if not stored:
+            # The approval outcome is kept; readiness fails and the next boot retries.
+            raise Failure('cross-turn-failed', 'LCU did not turn on Computer Use across turns')
         if pending is None:
             pending = pending_agents(lcu_status()) or []
         # A setup that just ran has registered what is installed; a verified boot asks LCU.
