@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+pub(crate) use silo_engine::runtime::OPERATIONS;
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::{
@@ -48,9 +49,6 @@ const MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 pub(crate) const WORKSPACE_MOUNT: &str = "/workspace";
 const MAX_COMPUTER_COUNT: usize = 64;
 const MANAGED_LABEL: &str = "silo.managed=true";
-
-/// Ordered admission for computer-changing operations on this device. See `operation_gate`.
-pub(crate) static OPERATIONS: operation_gate::OperationGate = operation_gate::OperationGate::new();
 
 #[tauri::command]
 pub fn read_operation_queue() -> operation_gate::OperationQueue {

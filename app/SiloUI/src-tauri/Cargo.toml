@@ -9,6 +9,7 @@ edition = "2021"
 
 [workspace]
 members = ["engine"]
+default-members = [".", "engine"]
 resolver = "2"
 
 [build-dependencies]

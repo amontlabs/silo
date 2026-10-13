@@ -12,6 +12,13 @@ UI's `TauriEngineContext` supplies those capabilities. Backend module groups
 move into the library incrementally; commands remain in `silo-ui` as adapters
 until their group is extracted.
 
+## Current extraction state
+
+The build channel and runtime operation gate, including its process-wide
+`OPERATIONS` instance, now live in `silo-engine`. `silo-ui` re-exports the gate
+for backend modules that have not moved yet. Both workspace packages are Cargo's
+default test members, so `cargo test --locked` covers the engine tests.
+
 ## macOS VM window host seam
 
 The macOS VM host must not depend on a Tauri webview. When the VZ display code is

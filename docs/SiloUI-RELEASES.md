@@ -288,8 +288,9 @@ checks; a blocking [Rust formatting check](https://github.com/rust-lang/rustfmt#
 using the pinned toolchain; the Rust
 suites on Linux and macOS with synthetic GitHub configuration and the patched updater library tests;
 [Cargo's default package selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#package-selection)
-runs only the root package, so the updater requires an explicit `-p` command; and a relative-link
-check of the Markdown documentation with [lychee](https://github.com/lycheeverse/lychee)
+uses the workspace's configured default members (`silo-ui` and `silo-engine`); the patched
+updater still requires an explicit `-p` command. A relative-link check of the Markdown
+documentation with [lychee](https://github.com/lycheeverse/lychee)
 in offline mode. The macOS job also runs `test_macos_release.py` against
 ad hoc signed disposable binaries; the Linux discovery run skips these
 platform-specific cases. CI also explicitly runs Debian package lifecycle

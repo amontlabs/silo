@@ -2,6 +2,7 @@
 
 pub mod channel;
 pub mod context;
+pub mod runtime;
 
 pub use channel::{Channel, Keychain};
 pub use context::{
