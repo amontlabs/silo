@@ -29,6 +29,7 @@
 //! symlink whose link text is exactly the backup's `microsandbox` directory.
 use crate::{runtime::image_cache, runtime_migration};
 use serde::{Deserialize, Serialize};
+use silo_engine::{Audience, Event};
 use std::{
     collections::HashSet,
     fs,
@@ -37,7 +38,6 @@ use std::{
     sync::{Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime, UtcOffset};
 
 const FILE: &str = "pre-upgrade-backup.json";
@@ -48,6 +48,12 @@ const RETENTION: time::Duration = time::Duration::days(14);
 /// check that finds nothing due only reads one small file.
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 const CHANGED: &str = "silo://pre-upgrade-backup-changed";
+
+pub(crate) fn publish_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
+    }
+}
 
 const NOT_A_BACKUP: &str = "The previous computer storage is only treated as a deletable backup after a migration that converted every computer. Nothing was deleted.";
 const IN_USE: &str = "Silo reads computers from this folder, so it was not deleted.";
@@ -435,19 +441,19 @@ fn delete_if_due(
 
 /// Checks at launch and then every hour while Silo runs. A backup that came due while Silo
 /// was closed is therefore deleted at the next launch.
-pub(crate) fn install(app: &AppHandle) {
-    let Ok(app_data) = app.path().app_data_dir() else {
+pub(crate) fn install() {
+    let Some(context) = silo_engine::context::current() else {
         return;
     };
-    let user_home = app.path().home_dir().ok();
-    let app = app.clone();
+    let app_data = context.paths().app_data.clone();
+    let user_home = Some(context.paths().home.clone());
     let spawned = std::thread::Builder::new()
         .name("pre-upgrade-backup".into())
         .spawn(move || loop {
             match delete_if_due(&app_data, user_home.as_deref(), OffsetDateTime::now_utc()) {
                 Ok(true) => {
                     eprintln!("Silo deleted the pre-upgrade backup after 14 days.");
-                    let _ = app.emit(CHANGED, ());
+                    context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
                 }
                 Ok(false) => {}
                 Err(message) => eprintln!("The pre-upgrade backup was kept: {message}"),
@@ -459,95 +465,32 @@ pub(crate) fn install(app: &AppHandle) {
     }
 }
 
-fn require_main(window: &WebviewWindow) -> Result<(), String> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err("Only the main window can manage the pre-upgrade backup.".into())
-    }
-}
-
-fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map_err(|_| "Silo application storage is unavailable.".into())
-}
-
-/// File reads, a directory walk and deletion run off the async workers.
-async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(work)
-        .await
-        .map_err(|_| "The pre-upgrade backup could not be read. Relaunch Silo and retry.")?
-}
-
 /// Whether a pre-upgrade backup exists and when it is deleted. Cheap: it measures nothing.
-#[tauri::command]
-pub(crate) async fn read_pre_upgrade_backup(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<Status>, String> {
-    require_main(&window)?;
-    let app_data = app_data(&app)?;
-    blocking(move || status(&app_data, OffsetDateTime::now_utc())).await
+pub(crate) fn read_status(app_data: &Path) -> Result<Option<Status>, String> {
+    status(app_data, OffsetDateTime::now_utc())
 }
 
 /// Allocated bytes of the backup, or `None` once it is gone. Walks the folder.
-#[tauri::command]
-pub(crate) async fn measure_pre_upgrade_backup(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<u64>, String> {
-    require_main(&window)?;
-    let app_data = app_data(&app)?;
-    blocking(move || measure(&app_data)).await
+pub(crate) fn measure_backup(app_data: &Path) -> Result<Option<u64>, String> {
+    measure(app_data)
 }
 
-#[tauri::command]
-pub(crate) async fn delete_pre_upgrade_backup(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<(), String> {
-    require_main(&window)?;
-    let app_data = app_data(&app)?;
-    let user_home = app.path().home_dir().ok();
-    let removed = blocking(move || delete_backup(&app_data, user_home.as_deref())).await?;
-    if removed {
-        let _ = app.emit(CHANGED, ());
+pub(crate) fn delete_backup_for_user(app_data: &Path, user_home: &Path) -> Result<bool, String> {
+    delete_backup(app_data, Some(user_home))
+}
+
+pub(crate) fn reveal_path(app_data: &Path) -> Result<PathBuf, String> {
+    match inspect(app_data) {
+        Backup::Present(previous) => Ok(previous),
+        Backup::Gone => Err("The pre-upgrade backup has already been deleted.".into()),
+        Backup::NotABackup => Err(NOT_A_BACKUP.into()),
+        Backup::Refused(reason) => Err(reason.into()),
     }
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn reveal_pre_upgrade_backup(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<(), String> {
-    require_main(&window)?;
-    let app_data = app_data(&app)?;
-    blocking(move || {
-        let previous = match inspect(&app_data) {
-            Backup::Present(previous) => previous,
-            Backup::Gone => return Err("The pre-upgrade backup has already been deleted.".into()),
-            Backup::NotABackup => return Err(NOT_A_BACKUP.into()),
-            Backup::Refused(reason) => return Err(reason.into()),
-        };
-        tauri_plugin_opener::reveal_item_in_dir(&previous)
-            .map_err(|error| format!("Silo could not show the pre-upgrade backup: {error}"))
-    })
-    .await
 }
 
 /// The migration screen told the user about the backup.
-#[tauri::command]
-pub(crate) async fn acknowledge_pre_upgrade_backup_notice(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<(), String> {
-    require_main(&window)?;
-    let app_data = app_data(&app)?;
-    blocking(move || acknowledge(&app_data, OffsetDateTime::now_utc())).await
+pub(crate) fn acknowledge_notice(app_data: &Path) -> Result<(), String> {
+    acknowledge(app_data, OffsetDateTime::now_utc())
 }
 
 #[cfg(test)]
