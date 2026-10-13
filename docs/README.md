@@ -22,6 +22,7 @@ has been exercised.
 | --- | --- |
 | Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, sandboxed) and the identifiers that keep older names |
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [Linux system updates](SiloUI-LINUX-UPDATES.md), [distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
+| Engine | [Engine crate extraction](SiloUI-ENGINE.md): workspace location, host context boundary, and macOS VM-window seam for `silod` |
 | Runtime | [Packaging](SiloUI-RUNTIME-PACKAGING.md), [guest images](SiloUI-GUEST-IMAGES.md) (downloaded on first use), [SSH agent TLS regression](SiloUI-ZCODE-TLS-INVESTIGATION.md), and the [current runtime pins](../app/SiloUI/runtime-inputs.json). The dated [runtime and backup decision log](SiloUI-RUNTIME-BACKUP-FINDINGS.md) was validated against MicroSandbox 0.6.17 unless a section says otherwise; its Backup page became per-sandbox Export and Import. |
 | Checkpoints | [Checkpoint implementation plan and qualification](SiloUI-CHECKPOINTS-PLAN.md), [snapshot lineage groups](research/silo-snapshot-lineage-groups-2026-09-26.md) |
 | Native tests | [Rust test support and live-test boundaries](SiloUI-RUST-TEST-SUPPORT.md), [skipped and ignored test audit, 2026-10-02](SiloUI-TEST-SKIP-AUDIT-2026-10-02.md) |

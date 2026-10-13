@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# Cargo build output, including the worktree-level CARGO_TARGET_DIR.
+target/
+
 .gazette
 
 # Smithers run store (ephemeral — never commit)

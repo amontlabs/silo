@@ -22,6 +22,7 @@ mod desktop_viewer_bench;
 mod desktop_viewer_media;
 mod device_identity;
 mod editor;
+mod engine_context;
 mod files;
 mod github;
 #[cfg(test)]
@@ -291,6 +292,7 @@ fn main() {
         .setup(|app| {
             // Tauri panics on a setup error. Explain the failure and exit instead.
             let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+                engine_context::install(app)?;
                 runtime_migration::vocabulary::run(app.handle())?;
                 settings::install(app.handle());
                 system_shutdown::install(app.handle());
