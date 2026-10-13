@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use crate::channel::Channel;
 
@@ -75,4 +76,18 @@ pub trait MainThread: Send + Sync {
 pub trait ProcessControl: Send + Sync {
     fn exit(&self, code: i32);
     fn restart(&self) -> !;
+}
+
+static CONTEXT: OnceLock<Arc<dyn EngineContext>> = OnceLock::new();
+
+/// Installs the host's context once, at startup. Engine code reads it with [`current`].
+pub fn install(context: Arc<dyn EngineContext>) -> Result<(), String> {
+    CONTEXT
+        .set(context)
+        .map_err(|_| "The engine context is already installed".to_owned())
+}
+
+/// The installed host context, or `None` before [`install`] (for example in unit tests).
+pub fn current() -> Option<Arc<dyn EngineContext>> {
+    CONTEXT.get().cloned()
 }

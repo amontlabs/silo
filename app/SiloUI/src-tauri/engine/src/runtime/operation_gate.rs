@@ -627,11 +627,7 @@ impl OperationGate {
 
     /// Wait for a device-wide turn that deletes the computers `ids`, so that work
     /// running on one of them can see the deletion queued (`removal_queued`).
-    pub fn removing(
-        &self,
-        ids: &[String],
-        label: &str,
-    ) -> Result<OperationGuard<'_>, GateError> {
+    pub fn removing(&self, ids: &[String], label: &str) -> Result<OperationGuard<'_>, GateError> {
         REMOVES.with(|removes| *removes.borrow_mut() = ids.to_vec());
         let guard = self
             .kind(OperationKind::ComputerConfiguration)

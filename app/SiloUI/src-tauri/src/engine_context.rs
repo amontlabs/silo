@@ -4,6 +4,7 @@ use silo_engine::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
+#[derive(Clone)]
 pub(crate) struct TauriEngineContext {
     app: AppHandle,
     paths: EnginePaths,
@@ -97,6 +98,7 @@ impl ProcessControl for TauriEngineContext {
 
 pub(crate) fn install(app: &mut tauri::App) -> Result<(), String> {
     let context = TauriEngineContext::from_app(app.handle())?;
+    silo_engine::context::install(std::sync::Arc::new(context.clone()))?;
     app.manage(context);
     Ok(())
 }

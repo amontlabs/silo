@@ -1,5 +1,5 @@
-pub mod operation_gate;
 pub mod image_cache;
+pub mod operation_gate;
 
 #[cfg(test)]
 pub(crate) mod contract_tests;
