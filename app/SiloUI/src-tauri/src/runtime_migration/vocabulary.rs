@@ -89,7 +89,6 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Manager};
 
 mod convert;
 #[cfg(test)]
@@ -170,14 +169,13 @@ impl Target {
 
 /// Converts the saved data of this channel unless a previous launch already did, and
 /// returns a message for the user when it could not. Call before anything reads the files.
-pub(crate) fn run(app: &AppHandle) -> Result<(), String> {
-    let path = app.path();
-    let fail = |_| FAILED.to_string();
-    let home = path.home_dir().map_err(fail)?;
+pub(crate) fn run() -> Result<(), String> {
+    let context = silo_engine::context::current().ok_or_else(|| FAILED.to_string())?;
+    let paths = context.paths();
     let locations = Locations {
-        config: path.app_config_dir().map_err(fail)?,
-        app_data: path.app_data_dir().map_err(fail)?,
-        state: crate::channel::current().state_dir(&home),
+        config: paths.app_config.clone(),
+        app_data: paths.app_data.clone(),
+        state: crate::channel::current().state_dir(&paths.home),
     };
     run_in(&locations, &|_| Ok(())).inspect_err(|error| eprintln!("Saved data update: {error}"))?;
     Ok(())
