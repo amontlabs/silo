@@ -14,10 +14,11 @@ until their group is extracted.
 
 ## Current extraction state
 
-The build channel and runtime operation gate, including its process-wide
-`OPERATIONS` instance, now live in `silo-engine`. `silo-ui` re-exports the gate
-for backend modules that have not moved yet. Both workspace packages are Cargo's
-default test members, so `cargo test --locked` covers the engine tests.
+The build channel, runtime operation gate (including its process-wide
+`OPERATIONS` instance), and image-cache repair logic now live in `silo-engine`.
+`silo-ui` re-exports the gate and image-cache functions for backend modules that
+have not moved yet. Both workspace packages are Cargo's default test members, so
+`cargo test --locked` covers the engine tests.
 
 ## macOS VM window host seam
 
