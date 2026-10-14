@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod computers;
 pub mod display;
 pub mod guest;
+pub mod operations;
 pub mod services;
 
 /// The macOS computer inventory is process-global. Tests that seed or reset it hold this
@@ -207,6 +208,9 @@ pub(crate) async fn dispatch(
     method: MethodName,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
+    if let Some(result) = operations::handle(method, params, context).await {
+        return result;
+    }
     if let Some(result) = computers::handle(method, params, context).await {
         return result;
     }

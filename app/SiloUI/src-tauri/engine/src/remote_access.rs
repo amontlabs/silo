@@ -72,6 +72,7 @@ const ACCESS_METHODS: &[&str] = &[
     "secrets.save",
     "secrets.remove",
     "secrets.retry",
+    "operations.list",
     "operations.job.get",
     "operations.cancel",
     "operations.job.acknowledge",

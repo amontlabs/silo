@@ -209,6 +209,16 @@ impl SilodContext {
         })
     }
 
+    /// The operations queue as this engine's own clients see it, for an owner answering a
+    /// controller's `operations.list`.
+    pub fn operation_queue(&self) -> Result<silo_api::methods::operations::OperationQueue, String> {
+        let _projection = self
+            .queue_projection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.operation_queue_unlocked()
+    }
+
     pub fn notifications_snapshot(
         &self,
         client_id: &ClientId,

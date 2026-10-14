@@ -329,6 +329,7 @@ const METHODS: &[(&str, Access)] = &[
     ("network.publish", Access::Change),
     ("network.unpublish", Access::Change),
     ("connections.keys.revoke", Access::Change),
+    ("operations.list", Access::Read),
     ("operations.job.get", Access::Read),
     ("operations.cancel", Access::Change),
     ("operations.job.acknowledge", Access::Change),

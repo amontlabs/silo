@@ -16,7 +16,7 @@ use std::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use silo_api::{
-    jobs::{ErrorCode, JobFinished, JobId, JobState},
+    jobs::{ErrorCode, JobId, JobState},
     methods::{
         common::JobStartResult, connections, github, network, push, secrets, ssh_access, MethodName,
     },
@@ -356,7 +356,10 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
     fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
-            "operations.job.get" | "operations.cancel" | "operations.job.acknowledge" => {
+            "operations.list"
+            | "operations.job.get"
+            | "operations.cancel"
+            | "operations.job.acknowledge" => {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
             _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
@@ -518,7 +521,7 @@ async fn blocking_bridge<T: Send + 'static>(
 
 /// Every request to another device's engine goes through here. Tests answer for the
 /// devices they stub, so no SSH connection is needed to exercise the controller side.
-fn call_owner(device: &str, method: &str, params: Value) -> Result<Value, BridgeError> {
+pub(crate) fn call_owner(device: &str, method: &str, params: Value) -> Result<Value, BridgeError> {
     #[cfg(test)]
     if let Some(reply) = tests::stubbed_owner(device, method, &params) {
         return reply;
@@ -1105,7 +1108,7 @@ async fn github_connect(
     let typed = context.decode_params::<github::GitHubConnectParams>(params)?;
     let engine = context.silod_context().clone();
     let job_id = match remote_target(context, typed.device_id.as_deref()) {
-        Some(device) => tokio::task::spawn_blocking(move || start_remote_connect(&engine, &device))
+        Some(device) => tokio::task::spawn_blocking(move || start_remote_connect(&device))
             .await
             .map_err(|_| DispatchError::internal("The remote operation could not finish."))??,
         // Allocation reads SQLite and the credential lock can span Keychain access.
@@ -1223,6 +1226,10 @@ fn owner_job_operation(
     method: &str,
     params: &Value,
 ) -> Result<Value, BridgeError> {
+    if method == "operations.list" {
+        let queue = ctx.operation_queue().map_err(BridgeError::from)?;
+        return serde_json::to_value(queue).map_err(|error| BridgeError::from(error.to_string()));
+    }
     let job_id = params["jobId"]
         .as_str()
         .ok_or_else(|| BridgeError::from("Missing job identity."))
@@ -1253,10 +1260,20 @@ fn owner_job_operation(
             ctx.job_registry()?
                 .acknowledge(&job_id)
                 .map_err(registry_error)?;
+            // The outcome is acknowledged: the replay of an exec job is no longer needed.
+            silo_engine::guest::forget_finished(&job_id);
             ctx.job_queue_changed();
             Ok(Value::Null)
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn owner_job_operation_for_tests(
+    ctx: &SilodContext,
+    method: &str,
+) -> Result<Value, BridgeError> {
+    owner_job_operation(ctx, method, &json!({}))
 }
 
 /// Owner side of a controller's `github.connect`: starts the job and, once its browser
@@ -1357,24 +1374,23 @@ fn cancel_owner_job(device: &str, job: &str) {
 }
 
 /// Controller side of `github.connect` for a device: the owner runs the sign-in as its
-/// own job; this engine reserves the callback port, carries the browser's callback to
-/// the owner, and mirrors the owner's outcome in a job of its own.
-fn start_remote_connect(ctx: &SilodContext, device: &str) -> Result<JobId, DispatchError> {
+/// own job and keeps it, so the client follows it by `(deviceId, jobId)` through
+/// `operations.*`. This engine reserves the callback port, carries the browser's callback
+/// to the owner, and closes the route when the owner's job ends.
+fn start_remote_connect(device: &str) -> Result<JobId, DispatchError> {
     let reply = call_owner(device, "github.connect", json!({}))
         .map_err(HandlerContext::map_engine_error)?;
     let owner_job = reply["jobId"]
         .as_str()
         .ok_or_else(|| DispatchError::internal("The other Mac returned no connection job."))?
         .to_owned();
-    follow_owner_connect(ctx, device, owner_job, reply["url"].as_str())
+    follow_owner_connect(device, owner_job, reply["url"].as_str())
 }
 
 /// Everything after the owner accepted its sign-in: reserve the callback port, carry the
-/// browser's callback, and mirror the owner's outcome in a job of this engine. Any step
-/// that fails unwinds what the earlier ones created: the route, the owner's job and this
-/// engine's job.
+/// browser's callback, and watch the owner's job so the route ends with it. Any step that
+/// fails unwinds what the earlier ones created: the route and the owner's job.
 fn follow_owner_connect(
-    ctx: &SilodContext,
     device: &str,
     owner_job: String,
     url: Option<&str>,
@@ -1383,6 +1399,8 @@ fn follow_owner_connect(
         cancel_owner_job(device, &owner_job);
         DispatchError::internal(message)
     };
+    let job = JobId::new(owner_job.clone())
+        .map_err(|_| fail("The other Mac returned an invalid connection job."))?;
     let url = url.ok_or_else(|| fail("The other Mac did not produce a GitHub link. Try again."))?;
     let port = silo_engine::github::callback_port(url)
         .map_err(|message| fail(&message))?
@@ -1416,55 +1434,17 @@ fn follow_owner_connect(
         close_callback_route(device);
         return Err(fail("Could not listen for GitHub's reply on this Mac."));
     }
-    let job = match silo_engine::jobs::allocate(ctx, "github.connect") {
-        Ok(accepted) => accepted.job_id,
-        Err(error) => {
-            close_route_if_current(device, &stop);
-            cancel_owner_job(device, &owner_job);
-            return Err(HandlerContext::map_registry_error(error));
-        }
-    };
-    #[cfg(test)]
-    tests::note_mirror_job(device, &job);
-    if let Ok(registry) = ctx.job_registry() {
-        let (device, owner_job) = (device.to_owned(), owner_job.clone());
-        registry.register_cancel(
-            job.clone(),
-            silo_engine::jobs::CancelRoute::Github,
-            move || {
-                call_owner(&device, "operations.cancel", json!({ "jobId": owner_job }))
-                    .map(|_| ())
-                    .map_err(|error| error.message)
-            },
-        );
-    }
-    let mirrored = {
-        let (ctx, device, owner_job, mirror, stop) = (
-            ctx.clone(),
-            device.to_owned(),
-            owner_job.clone(),
-            job.clone(),
-            stop.clone(),
-        );
-        spawn_named("silod-github-mirror", move || {
-            mirror_owner_connect(&ctx, &device, &owner_job, mirror, &stop)
+    let watching = {
+        let (device, owner_job, stop) = (device.to_owned(), owner_job.clone(), stop.clone());
+        spawn_named("silod-github-route", move || {
+            watch_owner_connect(&device, &owner_job, &stop)
         })
     };
-    if mirrored.is_err() {
-        // Nothing will follow the owner: close the route, stop the owner's sign-in and end
-        // this engine's job, so no listener or unfinished job outlives the request.
+    if watching.is_err() {
+        // Nothing would end the route with the sign-in: close it and stop the owner's flow,
+        // so no listener outlives the request.
         close_route_if_current(device, &stop);
-        cancel_owner_job(device, &owner_job);
-        let _ = silo_engine::jobs::finish_with_error(
-            ctx,
-            job,
-            ErrorCode::Internal,
-            "Could not follow the other Mac's GitHub sign-in.",
-            Audience::All,
-        );
-        return Err(DispatchError::internal(
-            "Could not follow the other Mac's GitHub sign-in.",
-        ));
+        return Err(fail("Could not follow the other Mac's GitHub sign-in."));
     }
     Ok(job)
 }
@@ -1591,103 +1571,31 @@ fn read_callback_header(browser: &mut TcpStream) -> Option<Vec<u8>> {
     None
 }
 
-/// Follows the owner's job until it ends, then closes the callback route and finishes
-/// this engine's job with the same outcome.
-fn mirror_owner_connect(
-    ctx: &SilodContext,
-    device: &str,
-    owner_job: &str,
-    job: JobId,
-    stop: &Arc<AtomicBool>,
-) {
+/// Follows the owner's job until it ends and then closes the callback route. The outcome
+/// stays with the owner until a client acknowledges it by `(deviceId, jobId)`.
+fn watch_owner_connect(device: &str, owner_job: &str, stop: &Arc<AtomicBool>) {
     let mut failures = 0u32;
-    let outcome = loop {
+    while !stop.load(Ordering::Acquire) {
         thread::sleep(OWNER_POLL);
         match call_owner(device, "operations.job.get", json!({ "jobId": owner_job })) {
-            Err(error) if error.code == silo_engine::bridge_error::ErrorCode::NotFound => {
-                break Err((
-                    ErrorCode::Internal,
-                    "The other Mac no longer has this sign-in. Connect again.".to_owned(),
-                ));
-            }
+            Err(error) if error.code == silo_engine::bridge_error::ErrorCode::NotFound => break,
             Ok(value) => {
                 failures = 0;
                 match serde_json::from_value::<silo_api::jobs::JobLookupResult>(value) {
-                    Ok(found) if found.state == JobState::Finished => {
-                        break found.outcome.ok_or_else(|| {
-                            (
-                                ErrorCode::Internal,
-                                "The other Mac finished without a result.".to_owned(),
-                            )
-                        });
-                    }
+                    Ok(found) if found.state == JobState::Finished => break,
                     Ok(_) => {}
-                    Err(_) => {
-                        break Err((
-                            ErrorCode::Internal,
-                            "The other Mac sent an unreadable job.".to_owned(),
-                        ))
-                    }
+                    Err(_) => break,
                 }
             }
-            Err(error) => {
+            Err(_) => {
                 failures += 1;
                 if failures >= OWNER_POLL_FAILURES {
-                    break Err((
-                        ErrorCode::Internal,
-                        format!(
-                            "Lost contact with the other Mac during GitHub sign-in: {}",
-                            error.message
-                        ),
-                    ));
+                    break;
                 }
             }
         }
-    };
+    }
     close_route_if_current(device, stop);
-    let (finished, owner_outcome) = match outcome {
-        Ok(outcome) => (
-            match (outcome.result, outcome.error) {
-                (_, Some(error)) => finish_error(job, error.code, error.message),
-                (Some(result), None) => JobFinished {
-                    job_id: job,
-                    result: Some(result),
-                    error: None,
-                    outcome_chunked: false,
-                },
-                (None, None) => finish_error(
-                    job,
-                    ErrorCode::Internal,
-                    "The other Mac finished without a result.".to_owned(),
-                ),
-            },
-            true,
-        ),
-        Err((code, message)) => (finish_error(job, code, message), false),
-    };
-    // The owner deletes its outcome when acknowledged, so acknowledge only once this
-    // engine holds the same outcome durably. If storing it failed, the owner keeps it.
-    let stored = silo_engine::jobs::publish_finished(ctx, finished, Audience::All).is_ok();
-    if owner_outcome && stored {
-        let _ = call_owner(
-            device,
-            "operations.job.acknowledge",
-            json!({ "jobId": owner_job }),
-        );
-    }
-}
-
-fn finish_error(job_id: JobId, code: ErrorCode, message: String) -> JobFinished {
-    JobFinished {
-        job_id,
-        result: None,
-        error: Some(silo_api::transport::ErrorObject {
-            code,
-            message,
-            diagnostics: None,
-        }),
-        outcome_chunked: false,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2330,7 +2238,7 @@ async fn connections_ssh_command(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::{
         os::unix::net::UnixStream,
         sync::OnceLock,
@@ -2365,15 +2273,15 @@ mod tests {
         }
     }
 
-    struct Fixture {
+    pub(crate) struct Fixture {
         _root: tempfile::TempDir,
-        context: Arc<SilodContext>,
+        pub(crate) context: Arc<SilodContext>,
         home: PathBuf,
     }
 
     /// One engine context for the whole test binary: the engine's GitHub, secrets and
     /// Connections state are process-wide, so every test shares this temporary home.
-    fn fixture() -> &'static Fixture {
+    pub(crate) fn fixture() -> &'static Fixture {
         static FIXTURE: OnceLock<Fixture> = OnceLock::new();
         FIXTURE.get_or_init(|| {
             let root = tempfile::tempdir().unwrap();
@@ -2443,7 +2351,7 @@ mod tests {
         })
     }
 
-    fn request_context() -> HandlerContext {
+    pub(crate) fn request_context() -> HandlerContext {
         HandlerContext::new(
             fixture().context.clone(),
             RequestContext {
@@ -2494,7 +2402,7 @@ mod tests {
     /// Stand-ins for other devices' engines, by device id.
     static OWNER_STUBS: Mutex<BTreeMap<String, OwnerStub>> = Mutex::new(BTreeMap::new());
 
-    pub(super) fn stubbed_owner(
+    pub(crate) fn stubbed_owner(
         device: &str,
         method: &str,
         params: &Value,
@@ -2508,9 +2416,9 @@ mod tests {
     }
 
     /// Answers requests to `device` with `answer` until the guard drops.
-    struct StubOwner(String);
+    pub(crate) struct StubOwner(String);
 
-    fn stub_owner(
+    pub(crate) fn stub_owner(
         device: &str,
         answer: impl Fn(&str, &Value) -> Result<Value, BridgeError> + Send + Sync + 'static,
     ) -> StubOwner {
@@ -2560,16 +2468,6 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .retain(|name| *name != self.0);
         }
-    }
-
-    /// The job this engine allocated to mirror the owner's sign-in on each device.
-    static MIRROR_JOBS: Mutex<BTreeMap<String, JobId>> = Mutex::new(BTreeMap::new());
-
-    pub(super) fn note_mirror_job(device: &str, job: &JobId) {
-        MIRROR_JOBS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(device.to_owned(), job.clone());
     }
 
     /// The threads that ran blocking work, by label.
@@ -2930,47 +2828,6 @@ mod tests {
             .port()
     }
 
-    fn job_outcome(job: &str) -> Option<silo_api::jobs::JobOutcome> {
-        let engine = fixture().context.clone();
-        silo_engine::jobs::get_at(&*engine, &JobId::new(job.to_owned()).unwrap(), None)
-            .unwrap()
-            .and_then(|found| found.outcome)
-    }
-
-    #[tokio::test]
-    async fn a_mirror_thread_that_cannot_start_unwinds_the_route_the_owner_job_and_the_local_job() {
-        let _flow = CONNECT_LOCK.lock().await;
-        let _push = PUSH_LOCK.lock().await;
-        let owner = "77777777-7777-4777-8777-77777777777b";
-        let calls = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
-        let seen = calls.clone();
-        let _stub = stub_owner(owner, move |method, params| {
-            seen.lock()
-                .unwrap()
-                .push((method.to_owned(), params.clone()));
-            Ok(Value::Null)
-        });
-        let _refused = FailSpawn::new("silod-github-mirror");
-        let link = link_with_callback(free_port());
-        let engine = fixture().context.clone();
-
-        let error =
-            follow_owner_connect(&engine, owner, "job:5003".to_owned(), Some(&link)).unwrap_err();
-        assert!(error.message.contains("Could not follow"));
-
-        // The callback route is closed and its listener told to stop.
-        assert!(callback_routes().get(owner).is_none());
-        // The owner's sign-in was cancelled, not left running.
-        let calls = calls.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "operations.cancel");
-        assert_eq!(calls[0].1["jobId"], "job:5003");
-        // This engine's own job ended with the failure instead of waiting forever.
-        let job = MIRROR_JOBS.lock().unwrap().get(owner).unwrap().clone();
-        let outcome = job_outcome(job.as_str()).expect("the local job was finished");
-        assert_eq!(outcome.error.unwrap().code, ErrorCode::Internal);
-    }
-
     fn owner_not_found() -> BridgeError {
         BridgeError::new(
             silo_engine::bridge_error::ErrorCode::NotFound,
@@ -2986,63 +2843,66 @@ mod tests {
         })
     }
 
-    fn fail_persisting(job: &JobId) -> rusqlite::Connection {
-        let registry = fixture().context.job_registry().unwrap();
-        let connection = rusqlite::Connection::open(registry.path()).unwrap();
-        connection
-            .execute_batch(&format!(
-                "CREATE TRIGGER fail_mirror_finish BEFORE UPDATE OF state ON jobs
-                 WHEN NEW.job_id = '{}' AND NEW.state = 'finished'
-                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
-                job.as_str()
-            ))
-            .unwrap();
-        connection
+    #[tokio::test]
+    async fn a_route_watcher_that_cannot_start_unwinds_the_route_and_the_owner_job() {
+        let _flow = CONNECT_LOCK.lock().await;
+        let _push = PUSH_LOCK.lock().await;
+        let owner = "77777777-7777-4777-8777-77777777777b";
+        let calls = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let seen = calls.clone();
+        let _stub = stub_owner(owner, move |method, params| {
+            seen.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            Ok(Value::Null)
+        });
+        let _refused = FailSpawn::new("silod-github-route");
+        let link = link_with_callback(free_port());
+
+        let error = follow_owner_connect(owner, "job:5003".to_owned(), Some(&link)).unwrap_err();
+        assert!(error.message.contains("Could not follow"));
+
+        // The callback route is closed and its listener told to stop.
+        assert!(callback_routes().get(owner).is_none());
+        // The owner's sign-in was cancelled, not left running.
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "operations.cancel");
+        assert_eq!(calls[0].1["jobId"], "job:5003");
     }
 
     #[tokio::test]
-    async fn the_owners_outcome_is_acknowledged_only_after_it_was_stored_here() {
+    async fn a_remote_sign_in_is_the_owners_job_and_its_route_ends_with_it() {
         let _flow = CONNECT_LOCK.lock().await;
         let _push = PUSH_LOCK.lock().await;
         let owner = "77777777-7777-4777-8777-77777777777c";
-        let engine = fixture().context.clone();
-        let acknowledged = Arc::new(Mutex::new(Vec::<String>::new()));
-        let seen = acknowledged.clone();
+        let link = link_with_callback(free_port());
+        let finished = Arc::new(AtomicBool::new(false));
+        let (done, reply_url) = (finished.clone(), link.clone());
         let _stub = stub_owner(owner, move |method, params| match method {
-            "operations.job.get" => Ok(finished_owner_job(params["jobId"].as_str().unwrap())),
-            "operations.job.acknowledge" => {
-                seen.lock()
-                    .unwrap()
-                    .push(params["jobId"].as_str().unwrap().to_owned());
-                Ok(Value::Null)
+            "github.connect" => Ok(json!({"jobId": "job:5001", "url": reply_url})),
+            "operations.job.get" if done.load(Ordering::SeqCst) => {
+                Ok(finished_owner_job(params["jobId"].as_str().unwrap()))
             }
-            other => panic!("unexpected owner request {other}"),
+            "operations.job.get" => Ok(json!({"jobId": params["jobId"], "state": "running"})),
+            other => panic!("the controller must not send {other}"),
         });
-        let stop = Arc::new(AtomicBool::new(false));
 
-        // Storing the outcome fails: the owner keeps the only durable copy.
-        let lost = silo_engine::jobs::allocate(&*engine, "github.connect")
-            .unwrap()
-            .job_id;
-        let trigger = fail_persisting(&lost);
-        mirror_owner_connect(&engine, owner, "job:5001", lost.clone(), &stop);
-        assert!(acknowledged.lock().unwrap().is_empty());
-        // The registry heals once storage works again; the outcome is still the owner's.
-        trigger
-            .execute_batch("DROP TRIGGER fail_mirror_finish;")
+        let started = call(MethodName::GitHubConnect, json!({"deviceId": owner}))
+            .await
             .unwrap();
-        let healed = silo_engine::jobs::get_at(&*engine, &lost, None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(healed.state, JobState::Finished);
+        // The client follows the owner's own job: no job of this engine stands in for it.
+        assert_eq!(started["jobId"], "job:5001");
+        assert!(callback_routes().get(owner).is_some());
 
-        // Storing it works: only then does the owner drop its copy.
-        let kept = silo_engine::jobs::allocate(&*engine, "github.connect")
-            .unwrap()
-            .job_id;
-        mirror_owner_connect(&engine, owner, "job:5002", kept.clone(), &stop);
-        assert_eq!(*acknowledged.lock().unwrap(), vec!["job:5002"]);
-        assert!(job_outcome(kept.as_str()).unwrap().result.is_some());
+        // The owner's job ends; the controller closes the route and acknowledges nothing:
+        // the owner keeps the outcome until a client acknowledges it by (deviceId, jobId).
+        finished.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while callback_routes().get(owner).is_some() {
+            assert!(Instant::now() < deadline, "the route outlived the sign-in");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     #[tokio::test]

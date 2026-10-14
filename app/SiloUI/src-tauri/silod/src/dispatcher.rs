@@ -9,7 +9,6 @@ use silo_api::{
         guest::{GuestSshParams, GuestSshPurpose},
         method_registry,
         notifications::NotificationsListParams,
-        operations::{AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationsListParams},
         MethodDescriptor, MethodName,
     },
     transport::{
@@ -204,54 +203,6 @@ impl MethodRegistry for CoreMethodRegistry {
                         &silo_engine::context::ClientId::new(request.client_id.clone()),
                         &params.subscription,
                     ));
-                    Ok(Value::Null)
-                }
-                MethodName::OperationsJobGet => {
-                    let params: GetJobParams = parse_params(params)?;
-                    let result = silo_engine::jobs::get_at(
-                        context.as_ref(),
-                        &params.job_id,
-                        params.offset_bytes,
-                    )
-                        .map_err(HandlerContext::map_registry_error)?
-                        .ok_or_else(|| DispatchError {
-                            code: ErrorCode::NotFound,
-                            message: "The job was not found.".to_owned(),
-                        })?;
-                    serde_json::to_value(result)
-                        .map_err(|error| DispatchError::internal(error.to_string()))
-                }
-                MethodName::OperationsJobAcknowledge => {
-                    let params: AcknowledgeJobParams = parse_params(params)?;
-                    context
-                        .job_registry()
-                        .map_err(DispatchError::internal)?
-                        .acknowledge(&params.job_id)
-                        .map_err(HandlerContext::map_registry_error)?;
-                    // The outcome is saved and acknowledged: the replay of an exec job is
-                    // no longer needed (and does nothing for any other job).
-                    silo_engine::guest::forget_finished(&params.job_id);
-                    context.job_queue_changed();
-                    Ok(Value::Null)
-                }
-                MethodName::OperationsList => {
-                    let _: OperationsListParams = parse_params(params)?;
-                    let snapshot = context
-                        .operation_queue_snapshot(&silo_engine::context::ClientId::new(
-                            request.client_id.clone(),
-                        ))
-                        .map_err(DispatchError::internal)?;
-                    event_barrier = Some(snapshot.event_barrier);
-                    serde_json::to_value(snapshot.queue)
-                        .map_err(|error| DispatchError::internal(error.to_string()))
-                }
-                MethodName::OperationsCancel => {
-                    let params: CancelJobParams = parse_params(params)?;
-                    context
-                        .job_registry()
-                        .map_err(DispatchError::internal)?
-                        .cancel(&params.job_id)
-                        .map_err(HandlerContext::map_registry_error)?;
                     Ok(Value::Null)
                 }
                 MethodName::NotificationsList => {
