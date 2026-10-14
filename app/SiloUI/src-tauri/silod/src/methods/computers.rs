@@ -1288,7 +1288,7 @@ type DisplayKey = (String, String, String);
 
 /// Loopback gateways of the screens a client has open, one per (client, device, computer):
 /// a client reopening a screen replaces its own gateway and no other client's (95 A-28).
-fn display_gateways(
+pub(crate) fn display_gateways(
 ) -> std::sync::MutexGuard<'static, HashMap<DisplayKey, silo_engine::macos_display_gateway::Gateway>>
 {
     static GATEWAYS: OnceLock<
@@ -1314,6 +1314,31 @@ fn close_displays_where(matches: impl Fn(&DisplayKey) -> bool) {
     };
     // Dropping a gateway stops it; that must not happen under the registry lock.
     drop(removed);
+}
+
+/// Registers a client's gateway unless that client is already gone. A request that was
+/// still opening its screen when the connection ended must not leave a gateway behind:
+/// the check and the insertion happen under the registry lock, and teardown disconnects
+/// the client before it takes that lock to remove the client's gateways.
+pub(crate) fn register_display(
+    context: &SilodContext,
+    key: DisplayKey,
+    gateway: silo_engine::macos_display_gateway::Gateway,
+) -> Result<(), DispatchError> {
+    let replaced = {
+        let mut gateways = display_gateways();
+        if !context.is_client_connected(&silo_engine::context::ClientId::new(key.0.clone())) {
+            drop(gateways);
+            drop(gateway);
+            return Err(DispatchError {
+                code: ErrorCode::Cancelled,
+                message: "The client disconnected before its screen opened.".to_owned(),
+            });
+        }
+        gateways.insert(key, gateway)
+    };
+    drop(replaced);
+    Ok(())
 }
 
 /// Ends the screens of one client, as it disconnects.
@@ -1436,8 +1461,7 @@ async fn macos_display_session(
         silo_engine::macos_display_gateway::Gateway::start(open, display_origins(context))
             .map_err(invalid)?;
     let url = gateway.url();
-    let replaced = display_gateways().insert(key, gateway);
-    drop(replaced);
+    register_display(context.silod_context(), key, gateway)?;
     Ok(plain(encode(MacosDisplaySessionResult {
         url,
         username: credentials.username,
@@ -1543,7 +1567,7 @@ async fn route(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use serde_json::{json, Value};
@@ -2343,11 +2367,6 @@ mod tests {
 
     #[tokio::test]
     async fn each_clients_screens_end_on_their_own() {
-        fn gateway() -> silo_engine::macos_display_gateway::Gateway {
-            let open: silo_engine::macos_display_gateway::Open =
-                Arc::new(|_| Err("no guest in this test".to_owned()));
-            silo_engine::macos_display_gateway::Gateway::start(open, vec![]).unwrap()
-        }
         let (a, b) = (
             format!("screens-a-{}", uuid::Uuid::new_v4()),
             format!("screens-b-{}", uuid::Uuid::new_v4()),
@@ -2441,6 +2460,44 @@ mod tests {
                 descriptor.name
             );
         }
+    }
+
+    pub(crate) fn gateway() -> silo_engine::macos_display_gateway::Gateway {
+        let open: silo_engine::macos_display_gateway::Open =
+            Arc::new(|_| Err("no guest in this test".to_owned()));
+        silo_engine::macos_display_gateway::Gateway::start(open, vec![]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_disconnected_client_cannot_register_a_screen_and_others_keep_theirs() {
+        let a = fixture();
+        let b = another_client(&a);
+        let silod = a.context.silod_context();
+        let a_id = a.context.client_identity().client_id.clone();
+        // A second connection of the same engine, as a different client.
+        let b_id = silod
+            .connected_clients()
+            .into_iter()
+            .find(|id| *id != a_id)
+            .unwrap();
+        let (a_key, b_key) = (
+            (a_id.clone(), "d".to_owned(), "c".to_owned()),
+            (b_id.clone(), "d".to_owned(), "c".to_owned()),
+        );
+        register_display(silod, a_key.clone(), gateway()).unwrap();
+        register_display(silod, b_key.clone(), gateway()).unwrap();
+
+        // Client A's connection ends: its screen closes and nothing of B's does.
+        silod.disconnect_events(&ClientId::new(a_id.clone()));
+        assert!(!display_gateways().contains_key(&a_key));
+        assert!(display_gateways().get(&b_key).unwrap().running());
+
+        // A request that was still opening A's screen cannot register it afterwards.
+        let late = register_display(silod, a_key.clone(), gateway()).unwrap_err();
+        assert_eq!(late.code, ErrorCode::Cancelled);
+        assert!(!display_gateways().contains_key(&a_key));
+        drop(b);
+        close_client_displays(&b_id);
     }
 
     /// A second connected client of the same engine, subscribed like the fixture's own.

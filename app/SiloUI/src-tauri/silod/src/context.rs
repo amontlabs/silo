@@ -110,6 +110,17 @@ impl SilodContext {
         self.wire_events.unsubscribe(client_id, subscription)
     }
 
+    /// Whether the client's connection is still open: its event stream exists until the
+    /// socket tears the session down.
+    pub fn is_client_connected(&self, client_id: &ClientId) -> bool {
+        self.wire_events.is_connected(client_id)
+    }
+
+    /// The clients with an open connection.
+    pub fn connected_clients(&self) -> Vec<String> {
+        self.wire_events.connected_clients()
+    }
+
     pub fn disconnect_events(&self, client_id: &ClientId) {
         self.wire_events.disconnect(client_id);
         // A client's open screens end with its connection and never another client's.
