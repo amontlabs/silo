@@ -59,6 +59,21 @@ class SelkiesDisplayPatchTests(unittest.TestCase):
             self.assertEqual(PATCH.patch_package(root, 'amd64', modules), 'already patched')
             self.assertEqual(set(os.listdir(root)), {'display_utils.py', 'websockets_mode.py'})
 
+    def test_a_module_a_later_patch_changed_counts_as_patched(self):
+        modules = self.synthetic_modules()
+        later = SYNTHETIC_WEBSOCKETS + b'# a later patch\n'
+        modules['websockets_mode.py']['later'] = (digest(later),)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'display_utils.py').write_bytes(SYNTHETIC)
+            (root / 'websockets_mode.py').write_bytes(later)
+            self.assertEqual(PATCH.patch_package(root, 'amd64', modules), 'patched')
+            self.assertEqual((root / 'websockets_mode.py').read_bytes(), later)
+            self.assertEqual(PATCH.patch_package(root, 'amd64', modules), 'already patched')
+            (root / 'websockets_mode.py').write_bytes(later + b'# unknown\n')
+            with self.assertRaisesRegex(ValueError, 'websockets_mode.py source hash'):
+                PATCH.patch_package(root, 'amd64', modules)
+
     def test_each_module_refuses_a_changed_hash_and_nothing_is_written(self):
         modules = self.synthetic_modules()
         for changed in modules:

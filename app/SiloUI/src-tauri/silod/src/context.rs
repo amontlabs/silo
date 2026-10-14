@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -26,6 +27,8 @@ pub struct SilodContext {
     wire_events: EventBus,
     main_thread: Arc<dyn MainThread>,
     process: Arc<dyn ProcessControl>,
+    migration: Arc<silo_engine::runtime_migration::Controller>,
+    backup: Arc<Mutex<Option<Arc<silo_engine::backup_controller::Controller>>>>,
     state: Arc<Mutex<EngineState>>,
     queue_projection: Arc<Mutex<()>>,
     notice_projection: Arc<Mutex<()>>,
@@ -40,6 +43,9 @@ impl SilodContext {
         process: Arc<dyn ProcessControl>,
     ) -> Self {
         let wire_events = EventBus::with_device_id(local_device.device_id.clone());
+        let migration = Arc::new(silo_engine::runtime_migration::Controller::new(
+            paths.app_data.clone(),
+        ));
         Self {
             paths,
             identity,
@@ -49,6 +55,8 @@ impl SilodContext {
             wire_events,
             main_thread,
             process,
+            migration,
+            backup: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(EngineState {
                 shutting_down: false,
                 phase: ShutdownPhase::Idle,
@@ -63,6 +71,44 @@ impl SilodContext {
 
     pub fn local_device(&self) -> &LocalDeviceIdentity {
         &self.local_device
+    }
+
+    pub fn migration_controller(&self) -> Arc<silo_engine::runtime_migration::Controller> {
+        self.migration.clone()
+    }
+
+    pub fn runtime_host(&self) -> Arc<dyn silo_engine::runtime::RuntimeHost> {
+        Arc::new(SilodRuntimeHost {
+            context: Arc::new(self.clone()),
+            migration: self.migration.clone(),
+        })
+    }
+
+    /// The macOS computer adapter for work that opens no display: checkpoints, and export
+    /// and import through the runtime host.
+    pub fn macos_context(&self) -> silo_engine::macos_computers_engine::MacosContext {
+        silo_engine::macos_computers_engine::MacosContext::new(
+            Arc::new(self.clone()),
+            Arc::new(NoDisplayMacosHost {
+                host: self.runtime_host(),
+            }),
+        )
+    }
+
+    pub fn backup_controller(
+        &self,
+    ) -> Result<Arc<silo_engine::backup_controller::Controller>, String> {
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| "Backup runtime services are unavailable.".to_owned())?;
+        let mut backup = self.backup.lock().map_err(|_| {
+            "Export and import status could not be read. Relaunch Silo and retry.".to_owned()
+        })?;
+        if let Some(controller) = backup.as_ref() {
+            return Ok(controller.clone());
+        }
+        let controller = silo_engine::backup_controller::install(self.runtime_host(), runtime)?;
+        *backup = Some(controller.clone());
+        Ok(controller)
     }
 
     pub fn engine_state(&self) -> EngineState {
@@ -249,6 +295,72 @@ impl SilodContext {
         .map_err(|error| error.to_string())?;
         self.publish_unlocked(Event::new("notifications.cleared", payload), audience);
         Ok(())
+    }
+}
+
+/// The macOS side reaches no display window from checkpoint, export or import work; the
+/// Linux names it reserves fork names against come from this device's inventory.
+struct NoDisplayMacosHost {
+    host: Arc<dyn silo_engine::runtime::RuntimeHost>,
+}
+
+impl silo_engine::macos_computers_engine::MacosHost for NoDisplayMacosHost {
+    fn show_display(
+        &self,
+        _context: &silo_engine::macos_computers_engine::MacosContext,
+        _id: &str,
+        _title: &str,
+        _toolbar: bool,
+    ) -> Result<(), String> {
+        Err("This operation does not open a display.".to_owned())
+    }
+
+    fn close_display(&self, _id: &str) {}
+
+    fn linux_computer_names(&self) -> Vec<String> {
+        silo_engine::runtime::computer_names(self.host.as_ref())
+    }
+}
+
+struct SilodRuntimeHost {
+    context: Arc<SilodContext>,
+    migration: Arc<silo_engine::runtime_migration::Controller>,
+}
+
+impl silo_engine::runtime::RuntimeHost for SilodRuntimeHost {
+    fn engine_context(&self) -> Arc<dyn EngineContext> {
+        self.context.clone()
+    }
+
+    fn macos_context(&self) -> Option<silo_engine::macos_computers_engine::MacosContext> {
+        Some(self.context.macos_context())
+    }
+
+    fn runtime_storage(&self) -> Result<PathBuf, String> {
+        self.migration.runtime_storage()
+    }
+
+    fn blocks_operations(&self) -> bool {
+        self.migration.blocks_operations()
+    }
+
+    fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
+        let executable = std::env::current_exe()
+            .map_err(|_| "Silo could not locate its bundled tools.".to_owned())?;
+        silo_engine::bundled_tools::resolve(
+            &executable,
+            &self.context.paths.resources,
+            Some(silo_engine::bundled_tools::BundleKind::App),
+            None,
+        )
+    }
+
+    fn ensure_runtime_ready(&self) -> Result<(), String> {
+        self.migration.ensure_ready()
+    }
+
+    fn runtime_package_kind(&self) -> silo_engine::runtime::RuntimePackageKind {
+        silo_engine::runtime::RuntimePackageKind::MacApp
     }
 }
 

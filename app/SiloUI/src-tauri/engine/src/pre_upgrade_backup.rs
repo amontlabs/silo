@@ -51,8 +51,42 @@ const CHANGED: &str = "silo://pre-upgrade-backup-changed";
 
 pub fn publish_changed() {
     if let Some(context) = silo_engine::context::current() {
-        context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
+        announce_changed(context.as_ref());
     }
+}
+
+/// Tells every client the backup changed: the legacy hint, then the canonical
+/// `migration.preUpgradeBackup.changed` with what `migration.preUpgradeBackup.get` returns.
+pub fn announce_changed(context: &dyn silo_engine::EngineContext) {
+    context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
+    match api_status(&context.paths().app_data) {
+        Ok(status) => match serde_json::to_value(status) {
+            Ok(payload) => context.publish(
+                Event::new("migration.preUpgradeBackup.changed", payload),
+                Audience::All,
+            ),
+            Err(error) => eprintln!("Silo could not encode the pre-upgrade backup state: {error}"),
+        },
+        Err(error) => eprintln!("Silo could not read the pre-upgrade backup state: {error}"),
+    }
+}
+
+/// `migration.preUpgradeBackup.get`: the status plus the folder a client reveals itself.
+/// `None` when there is no backup.
+pub fn api_status(
+    app_data: &Path,
+) -> Result<Option<silo_api::methods::migration::PreUpgradeBackup>, String> {
+    let Some(status) = read_status(app_data)? else {
+        return Ok(None);
+    };
+    Ok(Some(silo_api::methods::migration::PreUpgradeBackup {
+        path: reveal_path(app_data)?
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "The pre-upgrade backup path is not valid UTF-8.".to_owned())?,
+        delete_at: status.delete_at,
+        notice_pending: status.notice_pending,
+    }))
 }
 
 const NOT_A_BACKUP: &str = "The previous computer storage is only treated as a deletable backup after a migration that converted every computer. Nothing was deleted.";
@@ -453,7 +487,7 @@ pub fn install() {
             match delete_if_due(&app_data, user_home.as_deref(), OffsetDateTime::now_utc()) {
                 Ok(true) => {
                     eprintln!("Silo deleted the pre-upgrade backup after 14 days.");
-                    context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
+                    announce_changed(context.as_ref());
                 }
                 Ok(false) => {}
                 Err(message) => eprintln!("The pre-upgrade backup was kept: {message}"),

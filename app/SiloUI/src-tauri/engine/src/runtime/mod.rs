@@ -10960,7 +10960,7 @@ exit 9
         // For example, written by a newer Silo before a downgrade.
         fs::write(
             directory.join(format!("{}.json", configuration.id())),
-            json!({"version": 2, "checkpoints": []}).to_string(),
+            json!({"version": 3, "checkpoints": []}).to_string(),
         )
         .unwrap();
     }
@@ -13456,7 +13456,7 @@ exit 9
         let directory = paths.metadata.with_file_name("checkpoints");
         fs::create_dir_all(&directory).unwrap();
         let mut record = json!({
-            "version": 1,
+            "version": 2,
             "checkpoints": [],
             "snapshotGroup": "dev",
             "pendingCheckpointRestore": {"checkpointId": "c000000000000000000000000000000", "sourceComputer": "dev", "state": "full"},

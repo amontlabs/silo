@@ -7,6 +7,8 @@ export interface ComputerCheckpoint {
   createdAt: string
   scope: "full" | "disk"
   reason: "manual" | "before-restore"
+  /** Who made it: you (`manual`) or an unattended run (`automatic`, deleted by the engine). */
+  kind?: "manual" | "automatic"
   sizeBytes?: number
 }
 

@@ -572,6 +572,15 @@ class DesktopLifecycle(unittest.TestCase):
 
         receipt_value['recipeVersion'] = 4
         service.write(receipt, receipt_value)
+        with common_patches[0], common_patches[1], common_patches[2], common_patches[3], \
+             common_patches[4], common_patches[5], common_patches[6], common_patches[7]:
+            result = service.status()
+        self.assertEqual(result['state'], 'running')
+        self.assertFalse(result['updateRequired'])
+        self.assertTrue(result['updateAvailable'])
+
+        receipt_value['recipeVersion'] = 5
+        service.write(receipt, receipt_value)
         current_patches = (
             patch.object(service, 'SELKIES_EXECUTABLE', executable),
             patch.object(service.os, 'uname', return_value=SimpleNamespace(machine='aarch64')),
