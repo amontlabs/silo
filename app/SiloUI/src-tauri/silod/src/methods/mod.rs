@@ -174,12 +174,15 @@ fn is_built_in(method: MethodName) -> bool {
     )
 }
 
-/// Owned by a domain module but answered with a typed refusal for every caller, so the
-/// handshake must not advertise them.
+/// Owned by a domain module but answered with a typed refusal for every `engine.sock`
+/// caller, so the handshake must not advertise them. `desktop.connect` is engine-to-engine
+/// only: a peer reaches it through the owner-side bridge, never through this socket.
 fn is_never_served(method: MethodName) -> bool {
     matches!(
         method,
-        MethodName::MacosDisplayStream | MethodName::DisplayNativeAttach
+        MethodName::MacosDisplayStream
+            | MethodName::DisplayNativeAttach
+            | MethodName::DesktopConnect
     )
 }
 
@@ -247,7 +250,6 @@ mod tests {
             "exports.state",
             "migration.state",
             "display.show",
-            "desktop.connect",
             "settings.read",
             "engine.shutdown",
         ] {
@@ -255,13 +257,21 @@ mod tests {
         }
         assert!(!served.contains(&"macos.display.stream"));
         assert!(!served.contains(&"display.native.attach"));
+        assert!(!served.contains(&"desktop.connect"));
         // Everything in the catalogue is either served or deliberately withheld.
         let withheld: Vec<_> = method_registry()
             .iter()
             .filter(|descriptor| !serves(descriptor.method))
             .map(|descriptor| descriptor.name)
             .collect();
-        assert_eq!(withheld, ["display.native.attach", "macos.display.stream"]);
+        assert_eq!(
+            withheld,
+            [
+                "desktop.connect",
+                "display.native.attach",
+                "macos.display.stream"
+            ]
+        );
     }
 
     fn core_method(method: MethodName) -> bool {
