@@ -2803,7 +2803,7 @@ fn execute(
         "chatgpt.retry" => local_access.chatgpt_retry().map_err(BridgeError::from),
         _ => {
             let paths = paths().map_err(BridgeError::from)?;
-            crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
+            crate::remote_access::dispatch_typed(&paths, method, params, checkpoints, local_access)
         }
     }
 }

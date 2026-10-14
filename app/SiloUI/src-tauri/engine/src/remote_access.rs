@@ -77,7 +77,19 @@ const ACCESS_METHODS: &[&str] = &[
     "operations.job.acknowledge",
 ];
 
+/// Runs one owner-side request for callers that report plain messages.
 pub(crate) fn dispatch(
+    paths: &runtime::RuntimePaths,
+    method: &str,
+    params: &Value,
+    checkpoints: &CheckpointHandler,
+    local: &dyn LocalAccess,
+) -> Result<Value, String> {
+    dispatch_typed(paths, method, params, checkpoints, local).map_err(|error| error.message)
+}
+
+/// Runs one owner-side request and keeps the canonical code of an access-domain failure.
+pub(crate) fn dispatch_typed(
     paths: &runtime::RuntimePaths,
     method: &str,
     params: &Value,
@@ -544,7 +556,7 @@ mod typed_access_tests {
         ] {
             assert!(ACCESS_METHODS.contains(&method));
             let error =
-                dispatch(&paths, method, &json!({}), checkpoints, &TypedAccess).unwrap_err();
+                dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess).unwrap_err();
             assert_eq!(error.code, code, "{method}");
         }
     }
