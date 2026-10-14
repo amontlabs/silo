@@ -1646,6 +1646,11 @@ mod tests {
         let socket = root.path().join("engine.sock");
         let euid = unsafe { libc::geteuid() };
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        // No child process may be forked while the first listener exists: it would inherit
+        // the descriptor and keep the dropped socket live.
+        let _no_fork = crate::FORK_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let listener = StdUnixListener::bind(&socket).unwrap();
         drop(listener);
         // The returned connection refusal marks this owned socket as stale.

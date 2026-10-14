@@ -16,6 +16,13 @@ pub mod paths;
 pub mod service;
 pub mod socket;
 
+/// Tests that start a child process hold this while they spawn, and tests that need a
+/// closed socket hold it from creating the socket until they have used it. macOS has no
+/// atomic close-on-exec for new sockets, so a child forked in between keeps the listener
+/// open and the socket looks live after it is dropped.
+#[cfg(test)]
+pub(crate) static FORK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn entry(args: &[String]) -> Result<i32, String> {
     match args.get(1).map(String::as_str) {
         Some("--service") => service::run_command(&args[2..]),

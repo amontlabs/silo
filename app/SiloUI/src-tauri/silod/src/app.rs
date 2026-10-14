@@ -228,6 +228,9 @@ mod channel_startup_tests {
             silo_engine::channel::PRODUCTION_IDENTIFIER,
             silo_engine::channel::DEVELOPMENT_IDENTIFIER,
         ] {
+            let _spawning = crate::FORK_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let output = Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",

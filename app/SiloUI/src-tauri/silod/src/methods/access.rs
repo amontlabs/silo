@@ -2305,7 +2305,11 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(json!({"id": id, "name": "Remote Mac", "address": address}));
-        std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+        // Other tests read this file while they run, so replace it whole; a truncating
+        // write would let them see it empty and report the settings as damaged.
+        let mut staged = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+        std::io::Write::write_all(&mut staged, &serde_json::to_vec(&config).unwrap()).unwrap();
+        staged.persist(path).unwrap();
     }
 
     fn saved_device_ids() -> Vec<String> {
@@ -2778,6 +2782,7 @@ mod tests {
 
     #[tokio::test]
     async fn connections_status_list_and_enabled_state() {
+        let _key = KEY_LOCK.lock().await;
         let status = call(MethodName::ConnectionsStatus, json!({}))
             .await
             .unwrap();
@@ -2798,6 +2803,9 @@ mod tests {
 
     #[tokio::test]
     async fn connections_health_is_a_side_effect_free_projection() {
+        // `save_device` rewrites the shared settings; without the lock another test's
+        // rewrite can drop this device between saving it and asking for its health.
+        let _key = KEY_LOCK.lock().await;
         let device = "66666666-6666-4666-8666-666666666666";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let health = call(MethodName::ConnectionsDevicesHealth, json!({}))

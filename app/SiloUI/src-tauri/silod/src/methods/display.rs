@@ -1433,7 +1433,12 @@ mod tests {
         let port = proxy.port;
         let mut command = std::process::Command::new("/bin/sleep");
         command.arg("60");
-        let tunnel = silo_engine::owned_tunnel::Tunnel::spawn(&command, None).unwrap();
+        let tunnel = {
+            let _spawning = crate::FORK_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            silo_engine::owned_tunnel::Tunnel::spawn(&command, None).unwrap()
+        };
         let opened = finish(client, &connection_id, generation, proxy, tunnel, "Fixture")
             .unwrap_or_else(|(message, _, _)| panic!("{message}"));
         (connection_id, opened.cookie_name, opened.cookie_value, port)

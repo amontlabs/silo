@@ -209,7 +209,11 @@ mod tests {
                 Err(error) => format!("arbitration-error:{error}"),
             },
         };
-        fs::write(&outcome_path, outcome).unwrap();
+        // The parent treats the file appearing as the outcome being complete, so publish it
+        // whole; a plain write exposes the file empty for a moment.
+        let staged = home.join(format!("staging-{id}"));
+        fs::write(&staged, outcome).unwrap();
+        fs::rename(&staged, &outcome_path).unwrap();
         if owner.is_some() {
             wait_for_marker(&home.join("release-owner"));
         }
@@ -224,6 +228,9 @@ mod tests {
         let mut children = Vec::new();
         let mut child_ids = Vec::new();
         for _ in 0..2 {
+            let _spawning = crate::FORK_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             children.push(
                 Command::new(&executable)
                     .args([
@@ -262,7 +269,8 @@ mod tests {
 
         assert_eq!(
             results.iter().filter(|result| *result == "owner").count(),
-            1
+            1,
+            "exactly one cold start must own the engine: {results:?}"
         );
         assert_eq!(
             results
