@@ -8,17 +8,36 @@ struct TauriSecretsRuntime {
 
 impl RuntimeAccess for TauriSecretsRuntime {
     fn apply_secrets(&self, computer: &str) -> Result<Vec<String>, String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return crate::commands::macos_computers::proxy_apply_secrets(&self.app, computer);
+        }
         crate::runtime::apply_secrets(&crate::commands::runtime::host(&self.app), computer)
     }
 
     fn validate_computers(&self, computers: &[String]) -> Result<(), String> {
-        crate::runtime::validate_secret_computers(
-            &crate::commands::runtime::host(&self.app),
-            computers,
-        )
+        let (macos, linux): (Vec<_>, Vec<_>) = computers.iter().cloned().partition(|computer| {
+            crate::commands::macos_computers::proxy_contains_name(&self.app, computer)
+        });
+        if !macos.is_empty() {
+            crate::commands::macos_computers::proxy_validate_computers(&self.app, &macos)?;
+        }
+        if !linux.is_empty() {
+            crate::runtime::validate_secret_computers(
+                &crate::commands::runtime::host(&self.app),
+                &linux,
+            )?;
+        }
+        Ok(())
     }
 
     fn revoke_secret(&self, record: &PendingRevocation) -> Result<bool, String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, record.computer()) {
+            return crate::commands::macos_computers::proxy_revoke_secret(
+                &self.app,
+                record.computer(),
+                record.name(),
+            );
+        }
         crate::runtime::revoke_secret(&crate::commands::runtime::host(&self.app), record)
     }
 }

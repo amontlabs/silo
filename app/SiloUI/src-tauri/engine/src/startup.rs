@@ -49,6 +49,11 @@ pub trait StartupServices: Send + Sync + 'static {
     fn wait_for_recovery(&self) -> Result<(), String>;
     fn prepare_runtime(&self);
     fn recover_configuration(&self) -> Result<(), String>;
+    /// Converts legacy macOS guests after backup and configuration recovery, before
+    /// any saved lifecycle action or launch preference can start them.
+    fn migrate_macos_proxy_bootstraps(&self) -> Result<(), String> {
+        Ok(())
+    }
     fn recover_lifecycle(&self) -> Result<RecoveredActions, String>;
     fn recover_update(&self) -> Result<bool, String>;
     fn current_launch_settings(&self) -> Result<(Map<String, Value>, PathBuf), String>;
@@ -235,6 +240,17 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
         ));
         return;
     }
+    if let Err(message) = services.migrate_macos_proxy_bootstraps() {
+        services.notify_failure(
+            "startup:macos-proxy-bootstrap",
+            "macOS network setup couldn’t finish",
+            &message,
+        );
+        services.show_integration_error(format!(
+            "{message}\n\nSilo kept the computer data and will retry this migration the next time it starts."
+        ));
+        return;
+    }
     let (recovered_stops, failure) = after_lifecycle_recovery(services.recover_lifecycle());
     if let Some(message) = failure {
         services.notify_failure(
@@ -312,6 +328,79 @@ pub fn cancel_and_wait<T>(_host: T) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[derive(Default)]
+    struct StartupOrder(Mutex<Vec<&'static str>>);
+
+    impl StartupServices for StartupOrder {
+        fn blocks_runtime_operations(&self) -> bool {
+            self.0.lock().unwrap().push("runtime-gate");
+            false
+        }
+
+        fn wait_for_recovery(&self) -> Result<(), String> {
+            self.0.lock().unwrap().push("backup-recovery");
+            Ok(())
+        }
+
+        fn prepare_runtime(&self) {
+            self.0.lock().unwrap().push("prepare-runtime");
+        }
+
+        fn recover_configuration(&self) -> Result<(), String> {
+            self.0.lock().unwrap().push("configuration-recovery");
+            Ok(())
+        }
+
+        fn migrate_macos_proxy_bootstraps(&self) -> Result<(), String> {
+            self.0.lock().unwrap().push("proxy-migration");
+            Ok(())
+        }
+
+        fn recover_lifecycle(&self) -> Result<RecoveredActions, String> {
+            self.0.lock().unwrap().push("lifecycle-recovery");
+            Ok(RecoveredActions::default())
+        }
+
+        fn recover_update(&self) -> Result<bool, String> {
+            self.0.lock().unwrap().push("update-recovery");
+            Ok(false)
+        }
+
+        fn current_launch_settings(&self) -> Result<(Map<String, Value>, PathBuf), String> {
+            self.0.lock().unwrap().push("launch-settings");
+            Ok((Map::new(), PathBuf::new()))
+        }
+
+        fn start_at_launch(&self, _: &str, _: &AtomicBool) -> Result<(), String> {
+            panic!("empty launch settings must not start a computer")
+        }
+
+        fn update_recovery_failed(&self, _: String) {}
+
+        fn notify_failure(&self, _: &str, _: &str, _: &str) {}
+
+        fn show_integration_error(&self, _: String) {}
+    }
+
+    #[test]
+    fn proxy_migration_runs_after_recovery_and_before_lifecycle_or_launch_start() {
+        let services = Arc::new(StartupOrder::default());
+        install(Arc::new(StartupState::default()), services.clone());
+        assert_eq!(
+            services.0.lock().unwrap().as_slice(),
+            &[
+                "runtime-gate",
+                "backup-recovery",
+                "prepare-runtime",
+                "configuration-recovery",
+                "proxy-migration",
+                "lifecycle-recovery",
+                "update-recovery",
+                "launch-settings",
+            ]
+        );
+    }
 
     fn computer(id: &str, name: &str) -> Value {
         json!({"id":id, "name":name, "cpus":2, "maxCPUs":2,

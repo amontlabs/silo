@@ -102,13 +102,9 @@ impl HandlerContext {
             .as_str()
             .split_once(':')
             .expect("JobId validation guarantees a space separator");
-        let accepted = silo_engine::jobs::accept_domain_id(
-            self.engine_context(),
-            space,
-            domain_id,
-            method,
-        )
-        .map_err(Self::map_registry_error)?;
+        let accepted =
+            silo_engine::jobs::accept_domain_id(self.engine_context(), space, domain_id, method)
+                .map_err(Self::map_registry_error)?;
         Ok(JobStartResult {
             job_id: accepted.job_id,
         })
@@ -120,9 +116,7 @@ impl HandlerContext {
 
         let code = match error.code {
             EngineErrorCode::UpdateInProgress => ApiErrorCode::UpdateInProgress,
-            EngineErrorCode::UnsupportedRemoteOperation => {
-                ApiErrorCode::UnsupportedRemoteOperation
-            }
+            EngineErrorCode::UnsupportedRemoteOperation => ApiErrorCode::UnsupportedRemoteOperation,
             EngineErrorCode::Cancelled => ApiErrorCode::Cancelled,
             EngineErrorCode::AlreadyQueued => ApiErrorCode::AlreadyQueued,
             EngineErrorCode::Busy => ApiErrorCode::Busy,
@@ -146,8 +140,7 @@ impl HandlerContext {
             RegistryErrorKind::Storage | RegistryErrorKind::Internal => {
                 if message == "not_found" {
                     ApiErrorCode::NotFound
-                } else if message.starts_with("busy:")
-                    || message.contains("cannot be acknowledged")
+                } else if message.starts_with("busy:") || message.contains("cannot be acknowledged")
                 {
                     ApiErrorCode::Busy
                 } else {
@@ -237,6 +230,5 @@ mod tests {
                 );
             }
         }
-
     }
 }

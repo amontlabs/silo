@@ -690,6 +690,15 @@ pub fn dispatch(paths: &RuntimePaths, method: &str, params: &Value) -> Result<Va
     )
 }
 
+/// The durable job a desktop action runs for: its queue entry carries the job id, so the
+/// queue shows it and `operations.cancel` reaches it while it waits or runs.
+pub struct JobLink {
+    pub registry: std::sync::Arc<crate::jobs::JobRegistry>,
+    pub job_id: silo_api::jobs::JobId,
+    pub cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(test)]
 fn prepare_local<'a>(
     gate: &'a runtime::operation_gate::OperationGate,
     runner: &dyn RuntimeRunner,
@@ -697,6 +706,24 @@ fn prepare_local<'a>(
     computer: &str,
     action: Option<&str>,
     expected_id: Option<&str>,
+) -> Result<
+    (
+        Option<runtime::operation_gate::OperationGuard<'a>>,
+        ComputerConfiguration,
+    ),
+    String,
+> {
+    prepare_local_for_job(gate, runner, paths, computer, action, expected_id, None)
+}
+
+fn prepare_local_for_job<'a>(
+    gate: &'a runtime::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    action: Option<&str>,
+    expected_id: Option<&str>,
+    job: Option<&JobLink>,
 ) -> Result<
     (
         Option<runtime::operation_gate::OperationGuard<'a>>,
@@ -714,13 +741,33 @@ fn prepare_local<'a>(
     let guard = match action {
         Some(action) => {
             let computer_id = computer_id.as_deref().ok_or("Missing computer identity.")?;
-            let guard = gate
-                .computer(
-                    computer_id,
-                    computer,
-                    &format!("Updating {computer} desktop"),
-                )
-                .map_err(|e| e.to_string())?;
+            let label = format!("Updating {computer} desktop");
+            let guard = match job {
+                Some(job) => {
+                    let guard = gate
+                        .kind(runtime::operation_gate::OperationKind::Other)
+                        .acquire_for_job(
+                            runtime::operation_gate::Scope::Computer {
+                                id: computer_id.to_owned(),
+                            },
+                            Some(computer.to_owned()),
+                            &label,
+                            None,
+                            job.job_id.clone(),
+                            Some(job.cancellation.clone()),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    job.registry
+                        .mark_running(&job.job_id)
+                        .map_err(|e| e.to_string())?;
+                    job.registry
+                        .associate_gate(guard.request_id(), job.job_id.clone());
+                    guard
+                }
+                None => gate
+                    .computer(computer_id, computer, &label)
+                    .map_err(|e| e.to_string())?,
+            };
             // Desktop/guest setup is cancellable; installs legitimately run up
             // to their guest timeout, so only flag them after that.
             guard.allow_cancel();
@@ -749,16 +796,28 @@ pub fn local(
     action: Option<&str>,
     expected_id: Option<&str>,
 ) -> Result<Value, String> {
+    local_for_job(paths, computer, action, expected_id, None)
+}
+
+/// Like [`local`], for an action that runs as a durable job.
+pub fn local_for_job(
+    paths: &RuntimePaths,
+    computer: &str,
+    action: Option<&str>,
+    expected_id: Option<&str>,
+    job: Option<&JobLink>,
+) -> Result<Value, String> {
     // A desktop action changes only this computer's guest (and may start the computer); it
     // waits its turn per computer. Reading desktop status observes only, so it takes
     // no gate and stays available during other operations.
-    let (_guard, configuration) = prepare_local(
+    let (_guard, configuration) = prepare_local_for_job(
         &runtime::OPERATIONS,
         &runtime::ProcessRunner,
         &paths,
         computer,
         action,
         expected_id,
+        job,
     )?;
     if let Some(action) = action {
         runtime::shutdown::ensure_accepting_operations()?;

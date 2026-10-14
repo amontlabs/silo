@@ -742,6 +742,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         record.developer_tools_version = Some(super::developer_tools::version());
