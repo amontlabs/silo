@@ -3,8 +3,6 @@ mod commands;
 pub(crate) use silo_engine::*;
 #[cfg(test)]
 mod command_permissions_tests;
-#[cfg(debug_assertions)]
-mod desktop_viewer_bench;
 mod engine_client;
 mod engine_context;
 mod host_launch;
@@ -262,8 +260,6 @@ fn main() {
                 commands::backup_controller::install(app.handle())?;
                 commands::runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
-                #[cfg(debug_assertions)]
-                desktop_viewer_bench::start(app.handle());
                 tray::install(app.handle())?;
                 app_menu::install(app.handle())?;
                 let window = app
