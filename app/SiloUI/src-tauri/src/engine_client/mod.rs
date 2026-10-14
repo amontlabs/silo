@@ -287,6 +287,51 @@ impl EngineClient {
         Ok(connected.client.request_with(method, params, options).await?)
     }
 
+    /// The stable id of the computer called `name` (or already named by id), local to this
+    /// engine. Commands that still address computers by display name resolve through here.
+    pub(crate) async fn computer_id(&self, name: &str) -> Result<String, EngineError> {
+        let listed = self.call("computers.list", json!({})).await?;
+        let linux = listed
+            .pointer("/linux/computers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|computer| computer.get("configuration"));
+        let macos = listed
+            .pointer("/macos/computers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        linux
+            .chain(macos)
+            .find(|computer| {
+                computer.get("name").and_then(Value::as_str) == Some(name)
+                    || computer.get("id").and_then(Value::as_str) == Some(name)
+            })
+            .and_then(|computer| computer.get("id").and_then(Value::as_str))
+            .map(str::to_owned)
+            .ok_or_else(|| EngineError {
+                code: "not_found".to_owned(),
+                message: "This computer no longer exists on this device.".to_owned(),
+            })
+    }
+
+    /// The Linux application state: what `computers.list` calls `linux`.
+    pub(crate) async fn application_source(
+        &self,
+        refresh_repositories: bool,
+    ) -> Result<Value, EngineError> {
+        let mut params = json!({});
+        if refresh_repositories {
+            params["refreshRepositories"] = Value::Bool(true);
+        }
+        let listed = self.call("computers.list", params).await?;
+        listed
+            .get("linux")
+            .cloned()
+            .ok_or_else(|| EngineError::internal("The engine returned no computer state."))
+    }
+
     /// Starts a job method and waits for its terminal outcome, then acknowledges it.
     /// Losing the connection while waiting never invents a failure: the job continues in
     /// the engine, so the wait resumes on the next connection.

@@ -7,6 +7,7 @@ mod command_permissions_tests;
 mod desktop_viewer_bench;
 mod engine_client;
 mod engine_context;
+mod host_launch;
 #[cfg(test)]
 mod github_build_tests;
 #[cfg(test)]
