@@ -28,6 +28,7 @@
           {
             "createdAt": 1767225600000,
             "id": "point-1",
+            "kind": "manual",
             "name": "Before change",
             "nativeId": "native-1",
             "reason": "manual",
@@ -109,6 +110,7 @@
           {
             "createdAt": 1767225600000,
             "id": "point-1",
+            "kind": "manual",
             "name": "Before change",
             "nativeId": "native-1",
             "reason": "manual",
@@ -190,6 +192,7 @@
           {
             "createdAt": 1767225600000,
             "id": "point-1",
+            "kind": "manual",
             "name": "Before change",
             "nativeId": "native-1",
             "reason": "manual",
@@ -275,6 +278,7 @@
           {
             "createdAt": 1767225600000,
             "id": "point-1",
+            "kind": "manual",
             "name": "Before change",
             "nativeId": "native-1",
             "reason": "manual",
