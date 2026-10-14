@@ -257,8 +257,8 @@ pub fn install_health_watch(context: Arc<SilodContext>) {
     }));
 }
 
-/// The engine-owned VM window belongs to the display domain (95 A-21). The computers domain
-/// never opens a window, so asking this host for one is refused instead of pretending.
+/// The engine-owned VM window belongs to the display domain (95 A-21). Setup and recovery
+/// type into the screen, so this host opens the same engine-owned window `display.show` does.
 struct SilodMacosHost {
     runtime: SilodRuntimeHost,
 }
@@ -266,15 +266,23 @@ struct SilodMacosHost {
 impl silo_engine::macos_computers::MacosHost for SilodMacosHost {
     fn show_display(
         &self,
-        _context: &MacosContext,
-        _id: &str,
-        _title: &str,
-        _toolbar: bool,
+        context: &MacosContext,
+        id: &str,
+        title: &str,
+        toolbar: bool,
     ) -> Result<(), String> {
-        Err("Use display.show to open a macOS computer's screen.".to_owned())
+        silo_engine::macos_computers::MacosHost::show_display(
+            &super::display::SilodMacosHost,
+            context,
+            id,
+            title,
+            toolbar,
+        )
     }
 
-    fn close_display(&self, _id: &str) {}
+    fn close_display(&self, id: &str) {
+        silo_engine::macos_computers::MacosHost::close_display(&super::display::SilodMacosHost, id);
+    }
 
     fn linux_computer_names(&self) -> Vec<String> {
         silo_engine::runtime::computer_names(&self.runtime)
@@ -1640,6 +1648,25 @@ mod tests {
 
     async fn code_of(fixture: &Fixture, method: MethodName, params: Value) -> ErrorCode {
         fixture.call(method, params).await.unwrap_err().code
+    }
+
+    #[test]
+    fn the_computers_host_opens_the_engine_window_instead_of_sending_the_caller_away() {
+        // Setup and recovery call this host from inside a job: a refusal that points at
+        // `display.show` strands them (live qualification, 2026-10-14). The delegate fails
+        // here for want of an AppKit main thread and an installed engine, not by policy.
+        let fixture = fixture();
+        let host = SilodRuntimeHost::for_engine(Arc::new(fixture.context.silod_context().clone()));
+        let macos = host.macos_context();
+        let message = silo_engine::macos_computers::MacosHost::show_display(
+            &SilodMacosHost { runtime: host },
+            &macos,
+            UNKNOWN,
+            "Computer",
+            false,
+        )
+        .unwrap_err();
+        assert!(!message.contains("display.show"), "{message}");
     }
 
     #[test]

@@ -194,7 +194,9 @@ impl RuntimeHost for DisplayRuntimeHost {
     }
 }
 
-struct SilodMacosHost;
+/// The host whose display windows belong to the engine process (95 A-21). The computers
+/// domain delegates to it, so a macOS computer's setup and recovery can open their screen.
+pub(super) struct SilodMacosHost;
 
 impl silo_engine::macos_computers_engine::MacosHost for SilodMacosHost {
     fn show_display(
