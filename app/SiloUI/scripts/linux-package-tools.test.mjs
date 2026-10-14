@@ -107,6 +107,8 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
     "binaries/git-remote-http", "binaries/git-remote-https",
   ])
   assert.deepEqual(macos.bundle.externalBin, [
+    "binaries/msb", "binaries/git", "binaries/git-lfs",
+    "binaries/git-remote-http", "binaries/git-remote-https",
     "binaries/silo-macos-gateway", "binaries/silo-network-bootstrap",
   ])
   assert.deepEqual(linux.bundle.resources, {

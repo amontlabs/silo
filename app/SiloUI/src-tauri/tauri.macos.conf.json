@@ -2,6 +2,11 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "externalBin": [
+      "binaries/msb",
+      "binaries/git",
+      "binaries/git-lfs",
+      "binaries/git-remote-http",
+      "binaries/git-remote-https",
       "binaries/silo-macos-gateway",
       "binaries/silo-network-bootstrap"
     ],

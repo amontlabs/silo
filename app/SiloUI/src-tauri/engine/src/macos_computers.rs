@@ -569,6 +569,27 @@ static CLOSED: Mutex<Closed> = Mutex::new(Closed {
     update: false,
 });
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+static PROXY_BOOTSTRAP_MIGRATION_READY: AtomicBool = AtomicBool::new(true);
+
+/// Closes macOS Start and computer-changing work until the launch migration has
+/// staged the legacy guest bootstrap. Called synchronously during app setup.
+pub fn begin_proxy_bootstrap_migration() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    PROXY_BOOTSTRAP_MIGRATION_READY.store(false, Ordering::SeqCst);
+}
+
+fn ensure_proxy_bootstrap_migration_ready() -> Result<(), String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if !PROXY_BOOTSTRAP_MIGRATION_READY.load(Ordering::SeqCst) {
+        return Err(
+            "Silo is preparing macOS network access. Wait for startup to finish, then retry."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn closed() -> std::sync::MutexGuard<'static, Closed> {
     CLOSED
         .lock()
@@ -578,6 +599,7 @@ fn closed() -> std::sync::MutexGuard<'static, Closed> {
 fn admission() -> Result<std::sync::MutexGuard<'static, Closed>, String> {
     let closed = closed();
     closed.check()?;
+    ensure_proxy_bootstrap_migration_ready()?;
     Ok(closed)
 }
 
@@ -1757,6 +1779,7 @@ fn with_macos_computer_operation<T>(
     label: &str,
     work: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    ensure_proxy_bootstrap_migration_ready()?;
     ensure_loaded(app)?;
     let (record, _) = computer(id)?;
     with_computer_operation(id, &record.name, kind, label, work)
@@ -1764,6 +1787,9 @@ fn with_macos_computer_operation<T>(
 
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
     ensure_loaded(app)?;
+    if !matches!(action, Action::Stop | Action::ForceStop) {
+        ensure_proxy_bootstrap_migration_ready()?;
+    }
     let (record, _) = computer(id)?;
     match action {
         Action::Start => with_computer_operation(
@@ -1875,6 +1901,7 @@ pub fn start_at_launch(
     id: &str,
     cancelled: &AtomicBool,
 ) -> Result<bool, String> {
+    ensure_proxy_bootstrap_migration_ready()?;
     ensure_loaded(app)?;
     let Some(record) = registry()
         .entries
@@ -1940,6 +1967,88 @@ pub fn computer_ids(app: &MacosContext) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Runs the sole conversion path for installed macOS computers created before the
+/// proxy bootstrap existed. The caller invokes this from startup after backup and
+/// configuration recovery, before lifecycle recovery or launch preferences.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), String> {
+    let failures = {
+        let _migration = runtime::OPERATIONS
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .hidden()
+            .device("Preparing macOS network access")
+            .map_err(|error| error.to_string())?;
+        ensure_loaded(app)?;
+        let data = app_data(app)?;
+        let mut failures = Vec::new();
+        for id in store::computer_ids(&data) {
+            let layout = Layout::new(&data, &id);
+            let record = match store::read_record(&layout) {
+                Ok(record) if record.id == id => record,
+                Ok(_) => {
+                    failures.push(format!(
+                        "A macOS computer record in {} has a different identity.",
+                        layout.dir.display()
+                    ));
+                    continue;
+                }
+                Err(_) => {
+                    failures.push(format!(
+                        "A macOS computer record in {} could not be read.",
+                        layout.dir.display()
+                    ));
+                    continue;
+                }
+            };
+            if !record.installed || !record.setup.complete() {
+                continue;
+            }
+            if checkpoints::restore_unfinished(&layout) {
+                failures.push(format!(
+                    "{} has an unfinished Restore. Silo left its computer files untouched.",
+                    record.name
+                ));
+                continue;
+            }
+            if record.pending_restore.as_ref().is_some_and(|restore| restore.memory) {
+                failures.push(format!(
+                    "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
+                    record.name
+                ));
+                continue;
+            }
+            if let Err(error) = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout) {
+                // Never move to another guest until Virtualization.framework has
+                // released this one's machine, even after a timeout or stop error.
+                let samples = engine::machine_samples(app).map_err(|_| {
+                    "Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string()
+                })?;
+                if samples.iter().any(|sample| sample.id == id) {
+                    return Err(format!(
+                        "{} could not be stopped after network setup failed: {error}",
+                        record.name
+                    ));
+                }
+                failures.push(format!("{}: {error}", record.name));
+            }
+        }
+        failures
+    };
+    // Per-computer failures remain fail-closed at `require_guest_bootstrap`; valid
+    // computers can still start while the user retries this launch migration later.
+    PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn migrate_proxy_bootstraps_at_launch(_app: &MacosContext) -> Result<(), String> {
+    Ok(())
+}
+
 /// The name and retained-log folder of the macOS computer `id`, for the Logs page.
 pub fn log_target(app: &MacosContext, id: &str) -> Option<(String, std::path::PathBuf)> {
     let (record, _) = computer(id).ok()?;
@@ -1957,6 +2066,7 @@ fn computer(id: &str) -> Result<(Record, State), String> {
 
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
+    ensure_proxy_bootstrap_migration_ready()?;
     let data = app_data(app)?;
     // The state check and the change to `starting` happen under one lock.
     let record = {

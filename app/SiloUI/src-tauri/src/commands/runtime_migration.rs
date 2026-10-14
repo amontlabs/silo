@@ -33,7 +33,12 @@ pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
         .app_data_dir()
         .map_err(|_| "Silo application storage is unavailable.")?;
     app.manage(Arc::new(Controller::new(app_data)));
+    crate::commands::macos_computers::begin_proxy_bootstrap_migration();
     Ok(())
+}
+
+pub(crate) fn migrate_macos_proxy_bootstraps(app: &AppHandle) -> Result<(), String> {
+    crate::commands::macos_computers::migrate_proxy_bootstraps_at_launch(app)
 }
 
 /// Automatic conversion starts only after the export/import controller is installed,

@@ -408,6 +408,14 @@ pub(crate) fn proxy_is_pending_restore(app: &AppHandle, computer: &str) -> bool 
     new_context(app).is_ok_and(|context| engine::proxy_is_pending_restore(&context, computer))
 }
 
+pub(crate) fn begin_proxy_bootstrap_migration() {
+    engine::begin_proxy_bootstrap_migration();
+}
+
+pub(crate) fn migrate_proxy_bootstraps_at_launch(app: &AppHandle) -> Result<(), String> {
+    engine::migrate_proxy_bootstraps_at_launch(&new_context(app)?)
+}
+
 pub(crate) fn computer_ids(app: &AppHandle) -> Vec<String> {
     new_context(app).map_or_else(|_| Vec::new(), |context| engine::computer_ids(&context))
 }
