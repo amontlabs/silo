@@ -61,6 +61,8 @@ struct GuestConfig<'a> {
     router: std::net::Ipv4Addr,
     dns_server: std::net::Ipv4Addr,
     ca_fingerprint: &'a str,
+    /// The guest helper decodes `probeURL` (capital URL), which camelCase would not write.
+    #[serde(rename = "probeURL")]
     probe_url: &'static str,
 }
 
@@ -819,6 +821,35 @@ mod tests {
             "-----BEGIN PRIVATE KEY-----\na2V5\n-----END PRIVATE KEY-----\n".into(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn the_guest_config_has_the_keys_the_guest_helper_decodes() {
+        // The helper's `BootstrapConfig` is case-sensitive: a key spelled `probeUrl` made it
+        // fail with `configuration_read_failed` on every boot (live qualification, 2026-10-14).
+        let example: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../guest/macos/network-bootstrap-config.example.json"
+        ))
+        .unwrap();
+        let address = address();
+        let written = serde_json::to_value(GuestConfig {
+            version: BOOTSTRAP_VERSION,
+            computer_id: "computer-a",
+            expected_mac: "02:00:00:00:00:02",
+            address: address.guest(),
+            prefix_length: 30,
+            router: address.host(),
+            dns_server: address.host(),
+            ca_fingerprint: "00",
+            probe_url: PROBE_URL,
+        })
+        .unwrap();
+        let keys = |value: &serde_json::Value| {
+            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(keys(&written), keys(&example));
     }
 
     #[test]
