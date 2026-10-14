@@ -34,8 +34,13 @@ length. That mode does not access inherited frame or control descriptors.
 The parent sends one `init` message with `version`, `slot`, `guest_ipv4`, `guest_mac`, required
 `dns_nameservers`, `loopback_ports`, and `ca:{cert_pem,key_pem}`; `mtu`, strict `policy`,
 `intercepted_ports`, initial `secrets`, and `github_profile_json` are optional. An empty
-`dns_nameservers` list leaves DNS discovery to MicroSandbox's
-macOS resolver integration, preserving VPN and split-DNS configuration. Empty credentials are
+`dns_nameservers` list leaves DNS to MicroSandbox's host resolver table: the primary resolver,
+each service's supplemental match domains, and `/etc/resolver/*`. A name goes to the resolver with
+the longest matching domain, otherwise to the primary one, and the table is re-read whenever the
+host's DNS configuration changes while the gateway runs. Only queries addressed to the gateway
+use it, so the guest still cannot choose its upstream. A UDP answer is limited to the EDNS buffer
+the guest advertised and to one datagram of `mtu`; a larger one is truncated (TC=1) so the
+guest retries over TCP. Empty credentials are
 valid when an adapter will apply them later.
 
 `loopback_ports` contains exactly two TCP entries: `{host_port:0,guest_port:22}` and
