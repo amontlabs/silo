@@ -892,23 +892,21 @@ fn microsandbox_check(paths: &ProbePaths, deadline: Instant) -> DependencyCheck 
         .runtime_library
         .as_ref()
         .expect("Linux dependency probes receive the resolved runtime library");
-    #[cfg(target_os = "linux")]
-    let library = library.as_path();
-    for candidate in [&executable, &library] {
+    for candidate in [executable.as_path(), library.as_path()] {
         if let Err(error) = readable_file(candidate) {
             return error.to_check(id, title, true);
         }
     }
     #[cfg(target_os = "macos")]
-    for candidate in [&executable, &library] {
+    for candidate in [executable.as_path(), library.as_path()] {
         if let Err(error) = verify_macos_signature(candidate, deadline) {
             return error.to_check(id, title, true);
         }
     }
     #[cfg(target_os = "linux")]
     for (candidate, expected) in [
-        (&executable, manifest.executable.sha256.as_str()),
-        (&library, manifest.library.sha256.as_str()),
+        (executable.as_path(), manifest.executable.sha256.as_str()),
+        (library.as_path(), manifest.library.sha256.as_str()),
     ] {
         if let Err(error) = verify_linux_hash(candidate, expected, deadline) {
             return error.to_check(id, title, true);
