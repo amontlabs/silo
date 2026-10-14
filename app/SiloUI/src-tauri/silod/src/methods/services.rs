@@ -154,7 +154,9 @@ fn publish_settings(
 fn canonical_settings_snapshot(
     snapshot: silo_engine::settings::Snapshot,
 ) -> Result<SettingsSnapshot, DispatchError> {
-    let value = serde_json::to_value(snapshot)
+    // The same projection every public settings event uses: no draft ever reaches the
+    // canonical shape, so a draft the engine still holds can't fail a write that succeeded.
+    let value = serde_json::to_value(silo_engine::settings::public_snapshot(&snapshot))
         .map_err(|error| DispatchError::internal(error.to_string()))?;
     serde_json::from_value(value).map_err(|error| {
         DispatchError::internal(format!("The settings snapshot is invalid: {error}"))
@@ -594,6 +596,14 @@ async fn updates_set_automatic_checks(
 /// previous engine update saved before anything else advances them, and runs the engine
 /// update schedule on its own timer (95 A-26). Call once after the context is installed.
 pub fn start(context: Arc<SilodContext>) {
+    // Launch migration (95 §3: no legacy support but this): the canonical settings have no
+    // onboarding draft, so one a previous app version left in the file is dropped here and
+    // never handled when settings are read or written.
+    if let Err(error) = silo_engine::settings::current_settings()
+        .and_then(|_| silo_engine::settings::discard_onboarding_draft())
+    {
+        eprintln!("silod: could not migrate the settings at launch: {error}");
+    }
     let state = update_state(context.as_ref());
     state.set_platform(Arc::new(ServicesPlatform::new(context.clone())));
     // Visible in `engine.state` from the first request, before the recovery thread runs.

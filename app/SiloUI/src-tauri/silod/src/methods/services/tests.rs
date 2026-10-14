@@ -521,6 +521,70 @@ async fn settings_read_update_and_flush_use_canonical_fields() {
     assert_eq!(changed, 3, "two updates and the flush each published");
 }
 
+#[tokio::test]
+async fn a_legacy_onboarding_draft_does_not_turn_successful_settings_writes_into_errors() {
+    let fixture = installed();
+    let mut receiver = fixture
+        .silod
+        .connect_event_stream(fixture.handler.client_id().clone());
+    let subscription = fixture
+        .silod
+        .subscribe_events(fixture.handler.client_id(), vec!["settings.*".to_owned()])
+        .unwrap();
+    fixture
+        .silod
+        .activate_events(fixture.handler.client_id(), &subscription)
+        .unwrap();
+    silo_engine::settings::current_settings().unwrap();
+    // An earlier app version left a valid draft in the settings document.
+    silo_engine::settings::update_draft(json!({
+        "currentStep": "computers",
+        "computers": [{
+            "id": "95168b7e-aa9f-4dc1-a5de-2865c1b0bb64", "name": "dev",
+            "cpus": 2, "maxCPUs": 4, "memoryGiB": 4, "maxMemoryGiB": 8,
+            "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
+        }],
+        "unfinishedComputerEditor": null,
+        "computerSelections": {},
+        "computerIdentities": {}
+    }))
+    .unwrap();
+    assert!(!silo_engine::settings::read(true)
+        .map(|snapshot| serde_json::to_value(snapshot).unwrap()["onboardingDraft"].is_null())
+        .unwrap());
+
+    let updated = ok(
+        fixture,
+        MethodName::SettingsUpdate,
+        json!({"patch": {"theme": "light"}}),
+    )
+    .await;
+    assert_eq!(updated["settings"]["theme"], "light");
+    assert_eq!(updated["onboardingDraft"], Value::Null);
+    let read = ok(fixture, MethodName::SettingsRead, json!({})).await;
+    assert_eq!(read["settings"]["theme"], "light");
+    assert!(ok(fixture, MethodName::SettingsFlush, json!({}))
+        .await
+        .is_null());
+    let mut changed = 0;
+    while let Some(delivery) = receiver.recv().await {
+        if matches!(delivery, silo_engine::events::EventDelivery::Event(ref event) if event.event.name == "settings.changed" && event.event.payload["onboardingDraft"].is_null())
+        {
+            changed += 1;
+            if changed == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(changed, 2, "the update and the flush each published");
+
+    // The launch migration drops the draft once; nothing handles it per request after that.
+    silo_engine::settings::discard_onboarding_draft().unwrap();
+    let after = serde_json::to_value(silo_engine::settings::read(true).unwrap()).unwrap();
+    assert!(after["onboardingDraft"].is_null());
+    silo_engine::settings::discard_onboarding_draft().unwrap();
+}
+
 // MARK: Engine lifecycle
 
 #[tokio::test]
