@@ -5,6 +5,7 @@
 //! guest shutdown; the next engine start restores exactly that set; `engine.update.abort`
 //! resumes it in place. [`UpdateState`] is the per-engine lifecycle state those methods share.
 pub mod adapter;
+pub mod guards;
 pub mod hold;
 pub mod journal;
 pub mod transaction;

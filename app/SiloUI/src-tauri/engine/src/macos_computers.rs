@@ -49,6 +49,9 @@ mod setup_log;
 mod store;
 #[path = "macos_computers/templates.rs"]
 mod templates;
+#[path = "macos_computers/update_save.rs"]
+mod update_save;
+pub use update_save::{close_for_save, MacosUpdateAdapter};
 
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
