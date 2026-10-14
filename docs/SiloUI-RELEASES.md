@@ -5,6 +5,8 @@ Every native Silo build requires the GitHub App configuration. The build reads
 Explicit environment variables take precedence, which is how GitHub Actions
 supplies the same configuration. Missing, empty, malformed, or multiline values
 stop the native build instead of producing an app with broken GitHub access.
+Silo's supported host is Apple Silicon macOS 14+. Linux host apps and packages
+are discontinued; Linux computers remain supported as guests on a Mac.
 
 ## Release a new version
 
@@ -75,8 +77,8 @@ pending changesets, a commit already on `origin/main`, and no release tag on
 `origin` for a newer version or for this version at another commit. These checks
 run locally, before any tag is pushed. Changesets creates the `vVERSION` tag; the command pushes
 only that tag to `origin`. The tag push automatically runs **Build Silo release**.
-Approve `release-signing` in GitHub Actions if requested. All three platforms
-must pass before the complete draft appears under GitHub Releases. Nothing is
+Approve `release-signing` in GitHub Actions if requested. The macOS build and
+shared validation jobs must pass before the draft appears under GitHub Releases. Nothing is
 published to npm, and no public app update is announced yet.
 
 Test the draft installers on clean supported systems and upgrade an earlier real
@@ -183,8 +185,8 @@ npm --prefix app/SiloUI run desktop:build
 
 Only run the command needed: `desktop` starts development mode;
 `desktop:build:debug` builds the Silo Dev app with ad-hoc signing (Dev channel);
-`desktop:build` produces a verified optimized local app on macOS and native
-release-mode packages on Linux. macOS DMG and updater artifacts are produced
+`desktop:build` produces a verified optimized local macOS app. The macOS DMG
+and updater artifacts are produced
 by the release workflow, after VM signature finalization. Platform resource
 preparation runs before native compilation and needs network access on a cold
 cache. Install Rust 1.94.0 (`rustup toolchain install 1.94.0`) for the pinned
@@ -286,17 +288,13 @@ Continuous integration runs the same checks. `.github/workflows/ci.yml` runs on
 every push to `main` and every pull request: frontend, script, website and demo
 checks; a blocking [Rust formatting check](https://github.com/rust-lang/rustfmt#verifying-code-is-formatted)
 using the pinned toolchain; the Rust
-suites on Linux and macOS with synthetic GitHub configuration and the patched updater library tests;
+suites on macOS with synthetic GitHub configuration and the patched updater library tests;
 [Cargo's default package selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#package-selection)
 uses the workspace's configured default members (`silo-ui` and `silo-engine`); the patched
 updater still requires an explicit `-p` command. A relative-link check of the Markdown
 documentation with [lychee](https://github.com/lycheeverse/lychee)
 in offline mode. The macOS job also runs `test_macos_release.py` against
-ad hoc signed disposable binaries; the Linux discovery run skips these
-platform-specific cases. CI also explicitly runs Debian package lifecycle
-tests as root on its disposable Ubuntu runner, after ordinary non-root discovery.
-Local discovery keeps the lifecycle opt-in disabled because those tests install
-packages and write system APT paths. The jobs do not run the ignored live computer tests.
+ad hoc signed disposable binaries. CI does not run the ignored live computer tests.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
@@ -309,10 +307,9 @@ lychee --offline --no-progress README.md AGENTS.md 'docs/**/*.md' 'app/SiloUI/*.
   'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
 ```
 
-`.github/workflows/linux-packaging.yml` builds the Debian package and AppImage
-like a release (without signing), adds the maintainer scripts, installs and
-removes the package on the runner, and checks the AppImage layout. It runs only
-when packaging inputs change, and nightly; its packages are never uploaded.
+Linux host build, package-installation and AppImage verification workflows have
+been removed with Linux host support. Linux guest behavior remains part of the
+Mac-hosted engine and runtime tests.
 
 Every workflow pins third-party actions to a full commit SHA with the release
 version as a comment (`scripts/test_workflow_pins.py` enforces it).
@@ -379,17 +376,9 @@ Supported packages:
 | Platform | Installer | In-app updates |
 | --- | --- | --- |
 | Apple Silicon macOS | DMG | Signed Tauri app archive |
-| Linux x86-64 | AppImage and Debian package | Signed AppImage replacement; Debian through authenticated APT |
-| Linux ARM64 | AppImage and Debian package | Signed AppImage replacement; Debian through authenticated APT |
 
-Linux builds target Ubuntu 24.04-compatible systems and require KVM for computers.
-AppImage bundles application libraries but does not make glibc or GPU support
-universal. Debian upgrades use authenticated APT from Silo or the system package
-manager and never replace package-owned binaries in place. See
-[in-app Debian updates](SiloUI-LINUX-UPDATES.md#in-app-debian-updates-14-september-2026).
-Intel macOS and Windows are unsupported.
-Linux packages keep runtime/Git helpers in `/usr/libexec/silo/tools`; they never
-overwrite system Git in `/usr/bin`. AppImage keeps its helpers inside the image.
+Linux host apps and packages are discontinued. Linux VMs continue to run on a
+Mac host. Intel macOS and Windows are unsupported.
 The native runtime, host Git/LFS tools and notices are packaged with
 the application. The guest VM image is not: Silo downloads it once from the pinned
 guest-image release on first use ([guest images](SiloUI-GUEST-IMAGES.md#download-on-first-use)),
@@ -466,65 +455,46 @@ only the separate publication workflow can make the draft public.
 
 The app reads
 `https://github.com/amontlabs/silo/releases/latest/download/latest.json`.
-That file references immutable version-specific download URLs and all three
-platform signatures. Partial build/upload failures leave the prior public release
+That file references immutable version-specific download URLs and the macOS
+updater signature. Partial build/upload failures leave the prior public release
 and update feed unchanged. A partial draft must be inspected and explicitly
 removed before retrying; the scripts never silently clobber it. A bad published
 release is fixed with a newer version, not an automatic data downgrade.
 
 GitHub release immutability was enabled for this repository on 2026-09-10.
 The workflow also refuses existing release versions and older stable versions.
-The `publish-release.py` tests cover missing/empty/unexpected assets, symlinks,
-invalid signature encoding, version bounds, complete checksums and platform URLs.
-`verify-release-metadata.py` also rejects an old signed package advertised under
-a new version. It reads macOS Info.plist/Mach-O headers, Debian control metadata,
-and the signed Debian and AppImage release-info resources without executing any
-package. Debian data is inspected through `dpkg-deb --fsys-tarfile` as a stream;
-control fields and bundled release metadata must both match the release.
+The `publish-release.py` tests cover missing/empty/unexpected macOS assets,
+symlinks, invalid signature encoding, version bounds, complete checksums and
+platform URLs. `verify-release-metadata.py` inspects the macOS Info.plist and
+Mach-O headers without executing the app.
 
-### Linux software source
+### Legacy Linux packages
 
-After publication, **Publish Silo system updates** verifies the public Debian
-packages and deploys signed APT metadata to GitHub Pages. Confirm that workflow
-succeeds before announcing availability through Software Updater. Initial
-setup, key rotation, migration, and installer tests are documented in
-[Linux system updates](SiloUI-LINUX-UPDATES.md).
-
-Candidate indexes advertise the latest two complete releases. Historical signed
-metadata, its by-hash indexes, and every referenced package remain available
-until that metadata's 14-day `Valid-Until` expires, across successive deployments.
-The publisher verifies historical signatures and object digests before copying
-them; expired metadata and objects without a current reference are omitted from
-the new site. This follows APT's signed Release-to-index-to-package chain described
-in [apt-ftparchive](https://manpages.debian.org/bookworm/apt-utils/apt-ftparchive.1.en.html).
-The existing GitHub Pages publisher rejects a site above 900 MiB, including retained
-objects, before deployment. If release volume reaches that limit, choose storage
-that can hold the full validity window; do not shorten retention silently.
+Previously published Debian packages and AppImages remain historical downloads;
+new releases contain only the macOS host app. Linux host packages receive no
+engine updates and are not covered by current build or release checks. Linux
+guest computers on Mac hosts remain supported.
 
 ### Required release acceptance evidence
 
-- Clean install from actual downloaded DMG, AppImage and Debian package.
+- Clean install from the actual downloaded DMG.
 - Real signed version-to-version update and app relaunch; preserved settings,
   account, secrets, computer disks and previous running state.
 - Invalid signature, interrupted/offline download, low disk space, read-only
   installation directory and interrupted installation.
 - macOS quarantine first launch, signature verification and Keychain behavior
   after upgrading an ad-hoc signed app.
-- AppImage extraction, library resolution, tray/notifications/desktop integration
-  on both architectures; package-manager upgrade for Debian installations.
-- Built-in computer use qualified on real Linux devices, one x86-64 and one ARM64
-  with KVM, using the release's own Linux packages (the release workflows cannot
-  run VMs). On each device, run the opt-in live tests
+- Built-in computer use qualified on an Apple Silicon Mac using the supported
+  Mac host app and Linux guest image. Run the opt-in live tests
   `backup_controller::tests::live_built_in_computer_use_sets_up_and_survives_export_and_import`
   and `live_built_in_desktop_boots_repeatedly` with the v4 guest image, a
   published ChatGPT app and the packaged `msb`; see
   [ChatGPT app](SiloUI-CHATGPT-APP.md#integration-2026-10-02) for the inputs
-  and `SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures`. Then confirm in the
-  installed package, with throwaway `e2e-*` computers: a fresh boot, a
-  stop and start, a checkpoint restore, an export and import, and LCU readiness
-  (`computerUse` is `ready` and `lcu doctor` passes) after each. Record the device,
-  architecture, package version, commands and results with the release evidence.
-  Without it, built-in computer use is not claimed for that architecture.
+  and `SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures`. Then confirm on the Mac
+  host with throwaway `e2e-*` computers: a fresh boot, a stop and start, a
+  checkpoint restore, an export and import, and LCU readiness (`computerUse` is
+  `ready` and `lcu doctor` passes) after each. Record the device, app version,
+  commands and results with the release evidence.
 - No public-release claim until these checks have real evidence. Unit/build
   success does not substitute for clean installation or computer execution.
 
@@ -677,9 +647,9 @@ all other suites. The global worker limit remains overridable with
 `npm --prefix app/SiloUI test -- --maxWorkers=2`; do not inherit that limit into
 individual projects because project limits override the CLI root limit.
 
-The release workflow runs native and updater checks on all three platforms in
-parallel with package compilation. The draft job requires the entire native
-matrix, frontend checks, package checks and minimum-macOS checks to pass. Native
+The release workflow runs native and updater checks on macOS in parallel with
+the app build. The draft job requires the native checks, frontend checks,
+package checks and minimum-macOS checks to pass. Native
 test jobs receive no signing credentials. Only the reviewed public release dependencies
 described above are cached; application and native-test products are excluded.
 

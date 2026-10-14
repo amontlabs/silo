@@ -54,7 +54,7 @@ class PublicationGateTests(unittest.TestCase):
             self.assertTrue(check)
             name = Path(command[1]).name
             self.verifiers.append(name)
-            self.assertTrue(Path(command[2], 'Silo-linux-arm64.AppImage').is_file())
+            self.assertTrue(Path(command[2], 'Silo-macos-arm64.app.tar.gz').is_file())
             if name == fail_verifier:
                 raise subprocess.CalledProcessError(1, command)
             return subprocess.CompletedProcess(command, 0)
@@ -83,14 +83,14 @@ class PublicationGateTests(unittest.TestCase):
         self.assertFalse(any(call[:2] == ('release', 'edit') for call in self.calls))
 
     def test_empty_required_draft_asset_cannot_publish(self):
-        (self.assets / 'Silo-linux-arm64.AppImage').write_bytes(b'')
+        (self.assets / 'Silo-macos-arm64.app.tar.gz').write_bytes(b'')
         with self.assertRaisesRegex(RuntimeError, 'Draft is incomplete'):
             self.run_publish()
         self.assertFalse(any(call[:2] == ('release', 'download') for call in self.calls))
         self.assertFalse(any(call[:2] == ('release', 'edit') for call in self.calls))
 
     def test_changed_downloaded_package_cannot_publish(self):
-        (self.assets / 'Silo-linux-arm64.AppImage').write_text('changed after checksum creation')
+        (self.assets / 'Silo-macos-arm64.app.tar.gz').write_text('changed after checksum creation')
         with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
             self.run_publish()
         self.assert_not_published()
@@ -98,7 +98,7 @@ class PublicationGateTests(unittest.TestCase):
 
     def test_feed_url_outside_versioned_release_cannot_publish_even_with_matching_checksum(self):
         feed = json.loads((self.assets / 'latest.json').read_text())
-        feed['platforms']['linux-aarch64']['url'] = 'https://example.invalid/other.AppImage'
+        feed['platforms']['darwin-aarch64']['url'] = 'https://example.invalid/other.tar.gz'
         (self.assets / 'latest.json').write_text(json.dumps(feed))
         self.checksum('latest.json')
         with self.assertRaisesRegex(RuntimeError, 'unexpected URL'):

@@ -75,27 +75,22 @@ class CargoCoverageTests(unittest.TestCase):
 
 
 class PlatformCoverageTests(unittest.TestCase):
-    def test_ci_exercises_macos_native_and_signing_suites(self):
+    def test_ci_runs_host_rust_and_signing_suites_on_macos(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         rust = re.search(r'(?ms)^  rust:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
-        runners = re.search(r'(?m)^ +runner: \[([^\]]+)\]', rust)
-        self.assertIsNotNone(runners, 'macOS cfg(test) modules cannot run on a Linux-only job')
-        self.assertIn('macos-15', [item.strip() for item in runners[1].split(',')])
-        self.assertIn('runs-on: ${{ matrix.runner }}', rust)
+        self.assertIn('runs-on: macos-15', rust)
+        self.assertNotIn('matrix.runner', rust)
         signing = [step for step in re.split(r'(?m)^ {6}- ', rust) if "-p 'test_macos_release.py'" in step]
         self.assertEqual(len(signing), 1, 'the macOS signing suite must execute on macOS')
-        self.assertIn("if: runner.os == 'macOS'", signing[0])
+        self.assertNotIn("if: runner.os == 'macOS'", signing[0])
 
 
-class DebianCoverageTests(unittest.TestCase):
-    def test_ci_opts_into_disposable_root_lifecycle_tests(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        commands = re.findall(r'(?m)^ +(?:- )?run: (sudo env .+)$', workflow)
-        lifecycle = [shlex.split(command) for command in commands if 'test_debian_installation.py' in command]
-        self.assertEqual(len(lifecycle), 1, 'ordinary discovery skips the root-only lifecycle suite')
-        self.assertIn('SILO_APT_LIFECYCLE_TEST=1', lifecycle[0])
-        self.assertEqual(lifecycle[0][:2], ['sudo', 'env'])
-        self.assertIn('pkexec', workflow, 'the lifecycle fixture requires the system authentication helper')
+class LinuxHostCoverageTests(unittest.TestCase):
+    def test_ci_does_not_build_or_install_linux_host_packages(self):
+        for name in ('ci.yml', 'release-tooling.yml'):
+            workflow = (ROOT / '.github/workflows' / name).read_text()
+            self.assertNotIn('SILO_APT_LIFECYCLE_TEST=1', workflow, name)
+            self.assertNotIn('test_debian_installation.py', workflow, name)
 
 
 class DocumentationCoverageTests(unittest.TestCase):

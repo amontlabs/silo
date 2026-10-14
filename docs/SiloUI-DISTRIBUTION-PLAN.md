@@ -1,5 +1,9 @@
 # Distribution and update acceptance
 
+> Historical plan. Linux host packages and their updater paths are discontinued;
+> current releases contain only the macOS host app. Linux guest computers on
+> Mac hosts remain supported.
+
 Approved scope: GitHub-hosted versioned releases, ad-hoc macOS signing, signed
 Tauri updates, Apple Silicon DMG, Linux ARM64/x86-64 AppImage and Debian packages.
 No Apple membership, update server, forced installation, or public publication

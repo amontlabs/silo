@@ -18,7 +18,7 @@ class ReleaseTests(unittest.TestCase):
         for name in publish.EXPECTED:
             (self.root/name).write_text('signedfixture' if name.endswith('.sig') else 'package')
 
-    def test_complete_matrix_has_version_pinned_feed_and_every_checksum(self):
+    def test_macos_release_has_version_pinned_feed_and_every_checksum(self):
         publish.prepare(self.root, '0.1.0', 'test/repo', 'Release notes')
         feed = json.loads((self.root/'latest.json').read_text())
         self.assertEqual(feed['version'], '0.1.0')
@@ -33,7 +33,7 @@ class ReleaseTests(unittest.TestCase):
         page = publish.release_page('0.2.0', 'test/repo', notes)
         self.assertTrue(page.startswith('| Download | |'))
         self.assertNotIn('# Silo', page)
-        for name in publish.PACKAGES - set(publish.PLATFORMS.values()) | {'Silo-linux-x64.AppImage', 'Silo-linux-arm64.AppImage'}:
+        for name in publish.PACKAGES - set(publish.PLATFORMS.values()):
             self.assertIn(f'(https://github.com/test/repo/releases/download/v0.2.0/{name})', page)
         self.assertLess(page.index('### Highlights'), page.index('<details>'))
         self.assertIn('<summary>All changes (2)</summary>', page)
@@ -58,8 +58,8 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(Path('release-page.md').read_text().startswith('| Download | |'))
             self.assertEqual(json.loads((assets/'latest.json').read_text())['notes'], Path('release-notes.md').read_text())
 
-    def test_missing_architecture_fails_before_feed(self):
-        (self.root/'Silo-linux-arm64.AppImage').unlink()
+    def test_missing_updater_archive_fails_before_feed(self):
+        (self.root/'Silo-macos-arm64.app.tar.gz').unlink()
         with self.assertRaises(RuntimeError): publish.prepare(self.root,'0.1.0','test/repo','notes')
         self.assertFalse((self.root/'latest.json').exists())
 
@@ -72,11 +72,11 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): publish.prepare(self.root,'0.1.0','test/repo','notes')
 
     def test_symlink_rejected(self):
-        name=self.root/'Silo-macos-arm64.dmg';name.unlink();name.symlink_to(self.root/'Silo-linux-x64.deb')
+        name=self.root/'Silo-macos-arm64.dmg';name.unlink();name.symlink_to(self.root/'Silo-macos-arm64.app.tar.gz')
         with self.assertRaises(RuntimeError): publish.prepare(self.root,'0.1.0','test/repo','notes')
 
     def test_bad_signature_rejected(self):
-        (self.root/'Silo-linux-arm64.AppImage.sig').write_text('not a signature')
+        (self.root/'Silo-macos-arm64.app.tar.gz.sig').write_text('not a signature')
         with self.assertRaises(RuntimeError): publish.prepare(self.root,'0.1.0','test/repo','notes')
 
     def test_only_stable_nonzero_versions(self):

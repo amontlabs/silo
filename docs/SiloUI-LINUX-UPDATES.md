@@ -1,5 +1,9 @@
 # Linux system updates
 
+> Historical procedures for previously published Linux host packages. Linux
+> host packages no longer receive engine updates; current Silo releases contain
+> only the macOS host app. Linux guest computers on Mac hosts remain supported.
+
 Silo's Debian installer registers a signed APT source, so Ubuntu/Xubuntu can
 install subsequent releases through Software Updater. AppImage remains an
 optional portable download with its existing in-app updater. macOS is unchanged.

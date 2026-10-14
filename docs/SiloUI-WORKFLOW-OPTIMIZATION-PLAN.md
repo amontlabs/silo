@@ -2,6 +2,9 @@
 
 2026-09-14. Investigation by three GPT-6 Astra subagents plus the coordinating agent. This is a plan, not an implemented optimization or a new benchmark result. No builds or releases were triggered for this investigation.
 
+> Historical plan. Linux host build and cache work is closed because Linux is
+> no longer a supported host; Linux guest computers on Mac hosts remain supported.
+
 ## Decision
 
 Optimize early failure detection, redundant compilation, and dependency compilation before tuning test execution. Keep ordinary development independent of release packaging. Preserve all release validation, platform, signature and provenance checks.
