@@ -332,18 +332,25 @@ async fn serve_connection(
             let Some(selected) = selected else {
                 continue;
             };
-            let (bytes, byte_permit, ack, event_progress, _backlog_reservation) = match selected {
-                OutboundFrame::Reply(reply) => {
-                    (reply.bytes, reply.byte_permit, reply.ack, None, None)
-                }
-                OutboundFrame::Event(event) => (
-                    event.bytes,
-                    event.byte_permit,
-                    None,
-                    Some((event.subscription, event.seq)),
-                    event.backlog_reservation,
-                ),
-            };
+            let (bytes, byte_permit, ack, event_progress, _backlog_reservation, close_after_reply) =
+                match selected {
+                    OutboundFrame::Reply(reply) => (
+                        reply.bytes,
+                        reply.byte_permit,
+                        reply.ack,
+                        None,
+                        None,
+                        reply.close_after_reply,
+                    ),
+                    OutboundFrame::Event(event) => (
+                        event.bytes,
+                        event.byte_permit,
+                        None,
+                        Some((event.subscription, event.seq)),
+                        event.backlog_reservation,
+                        false,
+                    ),
+                };
             let result =
                 match time::timeout(REPLY_WRITE_TIMEOUT, write_frame_bytes(&mut writer, &bytes))
                     .await
@@ -368,6 +375,9 @@ async fn serve_connection(
             }
             if let Some((subscription, seq)) = event_progress {
                 written_event_seq.insert(subscription, seq);
+            }
+            if close_after_reply {
+                return Ok(());
             }
         }
         Ok::<(), io::Error>(())
@@ -541,7 +551,12 @@ async fn serve_connection(
                     let result = dispatcher.execute(invoke).await;
                     let queued = if let Some(response) = result.response {
                         if let Some(reserved_reply) = reserved_reply {
-                            match reserved_reply.enqueue(response, None, result.event_barrier) {
+                            match reserved_reply.enqueue(
+                                response,
+                                None,
+                                result.event_barrier,
+                                result.close,
+                            ) {
                                 Ok(()) => true,
                                 Err(error) => {
                                     eprintln!("silod: could not enqueue ordered reply: {error}");
@@ -555,6 +570,7 @@ async fn serve_connection(
                                 response,
                                 None,
                                 result.event_barrier,
+                                result.close,
                             )
                             .await
                             {
@@ -673,6 +689,7 @@ struct OutboundReply {
     byte_permit: OwnedSemaphorePermit,
     ack: Option<oneshot::Sender<Result<(), String>>>,
     event_barrier: Option<HashMap<String, u64>>,
+    close_after_reply: bool,
 }
 
 struct OutboundEvent {
@@ -694,6 +711,7 @@ impl ReservedReply {
         response: ResponseEnvelope<Value>,
         ack: Option<oneshot::Sender<Result<(), String>>>,
         event_barrier: Option<HashMap<String, u64>>,
+        close_after_reply: bool,
     ) -> Result<(), String> {
         let bytes = encode_response(&response)?;
         let byte_permit = self
@@ -706,6 +724,7 @@ impl ReservedReply {
             byte_permit,
             ack,
             event_barrier,
+            close_after_reply,
         });
         Ok(())
     }
@@ -731,7 +750,9 @@ fn spawn_inline_response(
     let byte_budget = byte_budget.clone();
     tasks.spawn(async move {
         let _permit = permit;
-        if let Err(error) = enqueue_response(&sender, &byte_budget, response, ack, None).await {
+        if let Err(error) =
+            enqueue_response(&sender, &byte_budget, response, ack, None, false).await
+        {
             eprintln!("silod: could not enqueue inline reply: {error}");
         }
     });
@@ -744,6 +765,7 @@ async fn enqueue_response(
     response: ResponseEnvelope<Value>,
     ack: Option<oneshot::Sender<Result<(), String>>>,
     event_barrier: Option<HashMap<String, u64>>,
+    close_after_reply: bool,
 ) -> Result<(), String> {
     let bytes = encode_response(&response)?;
     let byte_count = u32::try_from(bytes.len()).map_err(|error| error.to_string())?;
@@ -758,6 +780,7 @@ async fn enqueue_response(
             byte_permit,
             ack,
             event_barrier,
+            close_after_reply,
         })
         .await
         .map_err(|error| error.to_string())
@@ -1145,6 +1168,7 @@ mod tests {
                 },
                 None,
                 None,
+                false,
             )
             .unwrap();
         order.lock().await.push("reply");
@@ -1176,7 +1200,7 @@ mod tests {
             }),
         };
 
-        enqueue_response(&sender, &byte_budget, response, None, None)
+        enqueue_response(&sender, &byte_budget, response, None, None, false)
             .await
             .unwrap();
         let queued = receiver.recv().await.unwrap();
@@ -1210,7 +1234,7 @@ mod tests {
             }),
         };
 
-        enqueue_response(&sender, &byte_budget, response, None, None)
+        enqueue_response(&sender, &byte_budget, response, None, None, false)
             .await
             .unwrap();
         let queued = receiver.recv().await.unwrap();

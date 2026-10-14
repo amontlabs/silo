@@ -261,9 +261,6 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         | "reduceMotion"
         | "computerUseAutoApproval"
         | "notificationsEnabled"
-        | "notifyHealth"
-        | "notifyActions"
-        | "notifyBackup"
         | "notifyFailures"
         | "notifyChanges"
         | "notifyCompletions"
@@ -287,6 +284,9 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         "computerOrder" => value.as_array().is_some_and(|keys| {
             keys.len() <= 1024 && keys.iter().all(|key| bounded_string(key, 512, false))
         }),
+        "automaticCheckpointRetentionCount" => value
+            .as_u64()
+            .is_some_and(|count| count <= u64::from(u32::MAX)),
         _ => return None,
     })
 }
@@ -1138,7 +1138,7 @@ mod tests {
             "startComputersAtLaunch": false, "startupComputerIds": [],
             "terminal": "iTerm", "editor": "Cursor", "browser": "Firefox",
             "reduceMotion": true, "notificationsEnabled": false,
-            "notifyHealth": true, "notifyActions": false, "notifyBackup": true,
+            "notifyFailures": true, "notifyChanges": false, "notifyCompletions": true,
             "alphaNoticeDismissed": true,
             "editorIncludeNoticeDismissed": "Include \"/home/user/.silo/bbbbbbbbbbbb/ssh/*.conf\""
         });

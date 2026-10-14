@@ -66,10 +66,22 @@ impl SilodContext {
     }
 
     pub fn engine_state(&self) -> EngineState {
-        self.state
+        let mut state = self
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .clone();
+        // The engine lifecycle owns shutdown, session end and update state (05 §6); the
+        // stored value is the idle baseline.
+        let lifecycle = self.runtime_state.update().engine_state();
+        state.shutting_down |= lifecycle.shutting_down;
+        state.update_pending |= lifecycle.update_pending;
+        state.session_ending |= lifecycle.session_ending;
+        state.generation = state.generation.max(lifecycle.generation);
+        if lifecycle.shutting_down {
+            state.phase = lifecycle.phase;
+        }
+        state
     }
 
     /// Registers an in-process destination for events belonging to one local client.
