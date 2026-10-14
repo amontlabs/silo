@@ -31,7 +31,8 @@ pub fn run_agent() -> Result<i32, String> {
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let resources = default_resource_dir(&executable)?;
     let manifest = service::current_bundle_manifest()?;
-    let paths = SilodPaths::resolve(manifest.channel()?, resources)?;
+    let channel = initialize_channel(&manifest)?;
+    let paths = SilodPaths::resolve(channel, resources)?;
     let euid = unsafe { libc::geteuid() };
     ensure_private_directory(&paths.state_dir, euid).map_err(|error| error.to_string())?;
 
@@ -54,6 +55,14 @@ pub fn run_agent() -> Result<i32, String> {
 
     let engine_version = manifest.engine_version;
     autoreleasepool(|_| run_appkit(paths, local_device, owner, euid, engine_version))
+}
+
+fn initialize_channel(
+    manifest: &crate::manifest::EngineManifest,
+) -> Result<silo_engine::channel::Channel, String> {
+    let channel = manifest.channel()?;
+    silo_engine::channel::init(&manifest.channel_identifier);
+    Ok(channel)
 }
 
 fn run_appkit(
@@ -151,6 +160,65 @@ fn run_appkit(
 fn set_private_umask() {
     unsafe {
         libc::umask(0o077);
+    }
+}
+
+#[cfg(test)]
+mod channel_startup_tests {
+    use std::{path::PathBuf, process::Command};
+
+    use super::*;
+    use crate::{manifest::EngineManifest, paths::SilodPaths};
+    use silo_engine::{channel, context::EngineIdentity};
+
+    const CHANNEL_IDENTIFIER_ENV: &str = "SILOD_TEST_CHANNEL_IDENTIFIER";
+
+    #[test]
+    fn channel_startup_subprocess() {
+        let Ok(identifier) = std::env::var(CHANNEL_IDENTIFIER_ENV) else {
+            return;
+        };
+        let manifest = EngineManifest {
+            channel_identifier: identifier.clone(),
+            engine_version: "0.1.0".to_owned(),
+            engine_build: "test".to_owned(),
+            protocol_min: 6,
+            protocol_max: 6,
+        };
+        let channel = initialize_channel(&manifest).unwrap();
+        let identity: EngineIdentity = SilodPaths::for_home(
+            channel,
+            PathBuf::from("/fixture-home"),
+            PathBuf::new(),
+        )
+        .identity(&manifest.engine_version);
+
+        assert_eq!(channel::current(), identity.channel);
+        assert_eq!(identity.channel, manifest.channel().unwrap());
+    }
+
+    #[test]
+    fn startup_initializes_the_global_channel_for_both_builds() {
+        for identifier in [
+            silo_engine::channel::PRODUCTION_IDENTIFIER,
+            silo_engine::channel::DEVELOPMENT_IDENTIFIER,
+        ] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "app::channel_startup_tests::channel_startup_subprocess",
+                    "--nocapture",
+                ])
+                .env(CHANNEL_IDENTIFIER_ENV, identifier)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "channel startup failed for {identifier}:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }
 
