@@ -115,7 +115,7 @@ fn output_fitting(value: impl Serialize, what: &str) -> Result<HandlerOutput, Di
     })
 }
 
-fn guest_error(error: GuestError) -> DispatchError {
+pub(super) fn guest_error(error: GuestError) -> DispatchError {
     DispatchError {
         code: error.code,
         message: error.message,
@@ -126,8 +126,9 @@ fn engine_of(context: &HandlerContext) -> Arc<SilodContext> {
     Arc::new(context.silod_context().clone())
 }
 
-/// For the methods `remote::route` does not forward (launchers, SSH wiring, uploads and
-/// downloads, watches): a request naming another device is refused.
+/// For the methods that cannot name another device: a request naming one is refused. The
+/// methods that can (launchers, SSH wiring, transfers, watches) take their own branch to
+/// `guest_remote` first.
 fn local_device(context: &HandlerContext, device_id: Option<&str>) -> Result<(), DispatchError> {
     if device_id
         .is_some_and(|device_id| device_id != context.silod_context().local_device().device_id)
@@ -574,11 +575,42 @@ async fn guest_files_remove(
     output(GuestFilesRemoveResult { removed })
 }
 
+/// Starts the folder watch of `computer_id` on this engine: `emit` gets the watched folder of
+/// each hint and the watch ends when `wanted` turns false.
+fn start_target_watch(
+    engine: &SilodContext,
+    computer_id: &str,
+    paths: &[String],
+    emit: Arc<dyn Fn(String) + Send + Sync>,
+    wanted: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Result<(), GuestError> {
+    let target = resolve(engine, computer_id)?;
+    guest::start_watch(&target, paths, emit, wanted).map(|_| ())
+}
+
+/// The owner's half of a controller's `guest.files.watch` stream (`remote_watch`).
+pub(crate) fn start_owner_watch(
+    engine: &SilodContext,
+    params: &Value,
+    emit: Arc<dyn Fn(String) + Send + Sync>,
+    wanted: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Result<(), String> {
+    let computer_id = params["computerId"]
+        .as_str()
+        .ok_or("Invalid params: computerId is required.")?;
+    let paths: Vec<String> = serde_json::from_value(params["paths"].clone())
+        .map_err(|_| "Invalid params: paths must be a list of folders.".to_owned())?;
+    start_target_watch(engine, computer_id, &paths, emit, wanted).map_err(|error| error.message)
+}
+
 async fn guest_files_watch(
     params: &Value,
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: GuestFilesWatchParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::files_watch(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
     let client = context.client_id().clone();
@@ -592,7 +624,6 @@ async fn guest_files_watch(
     let started = {
         let (client, subscription, bus) = (client.clone(), subscription.clone(), bus);
         blocking(move || {
-            let target = resolve(&engine, &params.computer_id)?;
             let emit = {
                 let (client, subscription, bus) =
                     (client.clone(), subscription.clone(), bus.clone());
@@ -611,7 +642,7 @@ async fn guest_files_watch(
                 })
             };
             let wanted = Arc::new(move || bus.has_subscription(&client, &subscription));
-            guest::start_watch(&target, &params.paths, emit, wanted).map(|_| ())
+            start_target_watch(&engine, &params.computer_id, &params.paths, emit, wanted)
         })
         .await
     };
@@ -655,6 +686,9 @@ async fn ssh_alias_ensure(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: GuestSshAliasEnsureParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::ssh_alias_ensure(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
     let macos = super::display::macos_context(context);
@@ -685,6 +719,9 @@ async fn ssh_alias_remove(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: GuestSshAliasRemoveParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::ssh_alias_remove(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
     let macos = super::display::macos_context(context);
@@ -762,7 +799,7 @@ async fn files_list(
     output(page)
 }
 
-fn check_transfer_id(id: &str) -> Result<(), DispatchError> {
+pub(super) fn check_transfer_id(id: &str) -> Result<(), DispatchError> {
     if id.is_empty()
         || id.len() > 64
         || !id
@@ -778,7 +815,7 @@ fn check_transfer_id(id: &str) -> Result<(), DispatchError> {
 
 /// Starts a transfer on a worker thread and returns once its job exists, so the client
 /// always gets a `jobId` it can follow, cancel and read back later.
-async fn run_transfer(
+pub(super) async fn run_transfer(
     engine: Arc<SilodContext>,
     job_id: JobId,
     work: impl FnOnce() -> Result<(), String> + Send + 'static,
@@ -833,6 +870,9 @@ async fn files_upload(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: FileUploadParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::files_upload(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     check_transfer_id(&params.transfer_id)?;
     if params.selection.is_some() {
@@ -911,6 +951,9 @@ async fn files_download(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: FileDownloadParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::files_download(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     check_transfer_id(&params.transfer_id)?;
     if params
@@ -963,6 +1006,9 @@ async fn terminal_command(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: TerminalCommandParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::terminal_command(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
     let macos = super::display::macos_context(context);
@@ -982,6 +1028,9 @@ async fn editor_command(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: EditorCommandParams = context.decode_params(params)?;
+    if let Some(device) = super::guest_remote::remote_device(context, params.device_id.as_deref()) {
+        return super::guest_remote::editor_command(device, params, context).await;
+    }
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
     let macos = super::display::macos_context(context);
@@ -1234,10 +1283,6 @@ exit 2
                 MethodName::GuestFilesWrite,
                 json!({"path": "/x", "data": [], "mode": 384, "replace": "always"}),
             ),
-            (MethodName::GuestFilesWatch, json!({"paths": ["/"]})),
-            (MethodName::GuestSshAliasRemove, json!({})),
-            (MethodName::TerminalCommand, json!({})),
-            (MethodName::EditorCommand, json!({})),
         ] {
             let mut params = params;
             params["computerId"] = json!(COMPUTER);
@@ -1247,6 +1292,26 @@ exit 2
                 ErrorCode::UnsupportedRemoteOperation,
                 "{method:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn launchers_aliases_and_watches_for_another_device_ask_that_device() {
+        let fixture = Fixture::new();
+        // They act on this device's own SSH files and clients, so they do the local half
+        // themselves and reach for the owner; a device that is not connected is the answer.
+        for (method, params) in [
+            (MethodName::GuestFilesWatch, json!({"paths": ["/"]})),
+            (MethodName::GuestSshAliasEnsure, json!({})),
+            (MethodName::GuestSshAliasRemove, json!({})),
+            (MethodName::TerminalCommand, json!({})),
+            (MethodName::EditorCommand, json!({})),
+        ] {
+            let mut params = params;
+            params["computerId"] = json!(COMPUTER);
+            params["deviceId"] = json!("another-device");
+            let code = fixture.code(method, params).await;
+            assert_ne!(code, ErrorCode::UnsupportedRemoteOperation, "{method:?}");
         }
     }
 
@@ -1752,6 +1817,147 @@ exit 2
             bad["computerId"] = json!(COMPUTER);
             assert!(fixture.call(MethodName::GuestPrepare, bad).await.is_err());
         }
+    }
+
+    /// Another engine for the owner side of a remote request: the controller's request
+    /// reaches this engine's real handlers, and only the SSH hop is missing.
+    fn engine_as_owner(device: &str, owner: &Fixture) -> crate::methods::access::tests::StubOwner {
+        let engine = owner.engine.clone();
+        crate::methods::access::tests::stub_owner(device, move |method, params| {
+            crate::methods::remote::serve_owner(&engine, method, params)
+        })
+    }
+
+    #[tokio::test]
+    async fn a_remote_alias_authorizes_the_controllers_key_on_the_owners_real_guest() {
+        const OWNER_DEVICE: &str = "88888888-8888-4888-8888-888888888831";
+        let owner = Fixture::new();
+        let controller = Fixture::new();
+        let _owner = engine_as_owner(OWNER_DEVICE, &owner);
+        let result = controller
+            .ok(
+                MethodName::GuestSshAliasEnsure,
+                json!({"computerId": COMPUTER, "deviceId": OWNER_DEVICE, "path": "/workspace/project"}),
+            )
+            .await;
+        // The account comes from the owner's guest, and the alias lives on the controller.
+        assert_eq!(result["user"], "silo");
+        assert!(result["home"].as_str().unwrap().starts_with('/'));
+        let config = std::path::PathBuf::from(result["configPath"].as_str().unwrap());
+        assert!(
+            config.starts_with(controller.directory.path()),
+            "{config:?}"
+        );
+        assert!(!config.starts_with(owner.directory.path()));
+        let config_text = std::fs::read_to_string(&config).unwrap();
+        assert!(config_text.contains(&format!("'--remote-guest' '{OWNER_DEVICE}' '{COMPUTER}'")));
+        // The controller's per-device key is now authorized in the owner's guest account.
+        let key = config.parent().unwrap().join(format!("{OWNER_DEVICE}.key"));
+        let public = std::process::Command::new("/usr/bin/ssh-keygen")
+            .arg("-y")
+            .arg("-f")
+            .arg(&key)
+            .output()
+            .unwrap();
+        let public = String::from_utf8(public.stdout).unwrap();
+        let authorized =
+            std::fs::read_to_string(owner.directory.path().join("home/ssh/authorized_keys"))
+                .unwrap();
+        let wire_key = public
+            .split_whitespace()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            authorized.lines().any(|line| line == wire_key),
+            "{authorized}"
+        );
+        // The pinned host key is the owner's.
+        let known_hosts = std::fs::read_to_string(config.with_extension("known_hosts")).unwrap();
+        assert!(known_hosts.contains("ssh-ed25519 "), "{known_hosts}");
+        // A folder outside the workspace is refused by the owner, with its message.
+        let error = controller
+            .call(
+                MethodName::GuestSshAliasEnsure,
+                json!({"computerId": COMPUTER, "deviceId": OWNER_DEVICE, "path": "/etc"}),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("/workspace"), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_remote_watch_runs_on_the_owner_and_reaches_the_controllers_subscription() {
+        const OWNER_DEVICE: &str = "88888888-8888-4888-8888-888888888832";
+        let owner = Fixture::new();
+        let controller = Fixture::new();
+        let folder = owner.path("inbox");
+        std::fs::create_dir(&folder).unwrap();
+        // The owner side is the real stream loop over a socket pair; the controller reads it
+        // with the real frame decoder.
+        let engine = owner.engine.clone();
+        let _stream = super::super::guest_remote::tests::stub_watch(OWNER_DEVICE, move |params| {
+            let (mut client, mut server) =
+                std::os::unix::net::UnixStream::pair().map_err(|error| error.to_string())?;
+            let watching =
+                silo_engine::remote_watch::Watching::start(params, |params, emit, wanted| {
+                    super::start_owner_watch(&engine, params, emit, wanted)
+                })?;
+            let peer = server.try_clone().map_err(|error| error.to_string())?;
+            std::thread::spawn(move || {
+                silo_engine::remote_watch::serve(
+                    &mut server,
+                    &watching,
+                    &|| silo_engine::remote::connection_open(&peer),
+                    &|| true,
+                    Duration::from_millis(200),
+                );
+            });
+            let reader = client.try_clone().map_err(|error| error.to_string())?;
+            let (sender, frames) = std::sync::mpsc::sync_channel(64);
+            std::thread::spawn(move || {
+                let mut reader = reader;
+                loop {
+                    let frame = silo_engine::remote_watch::read_watch_frame(&mut reader);
+                    let failed = frame.is_err();
+                    if sender.send(frame).is_err() || failed {
+                        break;
+                    }
+                }
+            });
+            let _ = &mut client;
+            Ok(super::super::guest_remote::WatchLink {
+                frames,
+                _guard: Box::new(client),
+            })
+        });
+        let client = ClientId::new("client-a");
+        let mut events = controller.engine.connect_event_stream(client.clone());
+        let watch = controller
+            .ok(
+                MethodName::GuestFilesWatch,
+                json!({"computerId": COMPUTER, "deviceId": OWNER_DEVICE, "paths": [folder]}),
+            )
+            .await;
+        let subscription = watch["subscriptionId"].as_str().unwrap().to_owned();
+        controller
+            .engine
+            .activate_events(&client, &subscription)
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        std::fs::write(format!("{folder}/message"), b"hi").unwrap();
+        let delivery = tokio::time::timeout(Duration::from_secs(20), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let EventDelivery::Event(event) = delivery else {
+            panic!("expected a change event");
+        };
+        assert_eq!(event.subscription, subscription);
+        assert_eq!(event.event.name, "guest.files.changed");
+        assert_eq!(event.event.payload["path"], folder);
+        // Unsubscribing ends the relay, which lets go of the stream and so of the watch.
+        controller.engine.unsubscribe_events(&client, &subscription);
     }
 
     #[tokio::test]

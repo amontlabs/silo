@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod computers;
 pub mod display;
 pub mod guest;
+pub mod guest_remote;
 pub mod operations;
 pub mod remote;
 pub mod services;

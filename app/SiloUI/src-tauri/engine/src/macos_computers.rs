@@ -2555,6 +2555,11 @@ pub fn open_guest_ssh_stream(
 }
 pub use ssh_stream::{GuestSshGuard, GuestSshStream};
 
+/// The folders a macOS computer's transfers may use: its workspace and Downloads.
+pub fn transfer_roots() -> Vec<String> {
+    files::transfer_roots()
+}
+
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
 pub fn resize_display(
     app: &MacosContext,

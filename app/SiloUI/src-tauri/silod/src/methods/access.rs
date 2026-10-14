@@ -408,6 +408,15 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         .map(|source| Box::new(source) as Box<dyn silo_engine::remote_events::EventSource>)
     }
 
+    fn start_guest_watch(
+        &self,
+        params: &Value,
+        emit: Arc<dyn Fn(String) + Send + Sync>,
+        wanted: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Result<(), String> {
+        super::guest::start_owner_watch(self.0.context.as_ref(), params, emit, wanted)
+    }
+
     fn github_callback_stream(&self, params: &Value) -> Result<TcpStream, String> {
         let job_id = params["jobId"]
             .as_str()

@@ -59,6 +59,7 @@ pub mod remote_access;
 pub mod remote_events;
 pub mod remote_network;
 pub mod remote_ssh_access;
+pub mod remote_watch;
 pub mod runtime;
 pub mod runtime_migration;
 pub mod secrets;

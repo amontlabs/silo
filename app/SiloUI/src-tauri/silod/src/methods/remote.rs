@@ -579,6 +579,15 @@ mod tests {
         "logs.export",
         // The owner's own key revocation, sent by the controller when a device is removed.
         "connections.keys.revoke",
+        // The controller's own half (its SSH configuration, files and subscription), then
+        // the owner's `guest.account`, `guest.prepare`, `guest.ssh` or `guest.files.watch`.
+        "editor.command",
+        "terminal.command",
+        "guest.sshAlias.ensure",
+        "guest.sshAlias.remove",
+        "files.upload",
+        "files.download",
+        "guest.files.watch",
     ];
 
     /// Methods whose `deviceId` names the device itself, not where a computer lives.
@@ -586,21 +595,10 @@ mod tests {
 
     /// Methods that take a `deviceId` and refuse another device, with the reason.
     const REFUSES_REMOTE: &[&str] = &[
-        // Local launchers and the controller's own SSH configuration.
-        "editor.command",
-        "terminal.command",
-        "guest.prepare",
-        "guest.sshAlias.ensure",
-        "guest.sshAlias.remove",
         // The local window and viewer connections of this engine's clients.
         "display.show",
         "display.close",
         "clipboard.transfer",
-        // Local file paths on the controller need a data transport between the engines.
-        "files.upload",
-        "files.download",
-        // The change events of a watch are client-scoped and not relayed.
-        "guest.files.watch",
     ];
 
     #[test]

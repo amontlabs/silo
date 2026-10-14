@@ -307,6 +307,7 @@ const METHODS: &[(&str, Access)] = &[
     ("github.connect", Access::Change),
     ("github.connect.callback", Access::Stream),
     ("events.subscribe", Access::Stream),
+    ("guest.files.watch", Access::Stream),
     ("github.connect.reopen", Access::Read),
     ("github.repositories.manage", Access::Read),
     ("github.repositories.refresh", Access::Change),
@@ -324,7 +325,6 @@ const METHODS: &[(&str, Access)] = &[
     ("ssh.access.state", Access::Read),
     ("ssh.access.connection", Access::Change),
     ("ssh.access.save", Access::Change),
-    ("guest.prepare", Access::Change),
     ("guest.exec.start", Access::Change),
     ("guest.exec.get", Access::Read),
     ("guest.exec.input", Access::Change),
@@ -403,6 +403,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("guest.files.read", false),
     ("guest.files.remove", true),
     ("guest.files.write", true),
+    ("guest.prepare", true),
     ("logs.query", false),
     ("macos.setup.retry", true),
     ("macos.template.delete", true),
@@ -2898,8 +2899,49 @@ fn listen() -> Result<(), String> {
                             )?;
                             return Ok(None);
                         }
+                        if request["method"] == crate::remote_access::GUEST_WATCH_STREAM {
+                            authorize(&request)?;
+                            serve_watch_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |params| {
+                                    crate::remote_watch::Watching::start(
+                                        params,
+                                        |params, emit, wanted| {
+                                            local_access.start_guest_watch(params, emit, wanted)
+                                        },
+                                    )
+                                },
+                                &|| {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
                         if request["method"] == "guest.ssh" {
                             authorize(&request)?;
+                            let running = || {
+                                REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                    && crate::runtime::shutdown::ensure_accepting_operations()
+                                        .is_ok()
+                            };
+                            if !is_linux_computer(&paths()?, &request["params"]) {
+                                // A macOS computer: the transport is a TCP connection to the
+                                // guest's SSH port, not a runtime process.
+                                serve_guest_tcp(
+                                    &mut stream,
+                                    &mut permit,
+                                    &STREAMS,
+                                    &request["params"],
+                                    open_macos_guest_ssh,
+                                    running,
+                                )?;
+                                return Ok(None);
+                            }
                             serve_guest_stream(
                                 &mut stream,
                                 &mut permit,
@@ -3642,6 +3684,58 @@ pub(crate) fn revoke_port_streams(computer: &str, port: u16) {
     }
 }
 
+/// Whether the `computerId` of `guest.ssh` params names a Linux computer on this device;
+/// anything else is served as a macOS computer, which reports its own absence.
+fn is_linux_computer(paths: &crate::runtime::RuntimePaths, params: &Value) -> bool {
+    params["computerId"]
+        .as_str()
+        .is_some_and(|id| crate::runtime::remote_ops::local_computer_name_in(paths, id).is_ok())
+}
+
+/// A macOS computer's SSH transport and the means to learn that it must end.
+type GuestTcp = (std::net::TcpStream, Box<dyn Fn() -> bool + Send>);
+
+/// Opens the SSH transport of a macOS computer for a `guest.ssh` stream: its guest address on
+/// port 22, ended when the computer stops or the forward it carries is unpublished.
+fn open_macos_guest_ssh(params: &Value, port: Option<u16>) -> Result<GuestTcp, String> {
+    let id = params["computerId"].as_str().ok_or("Missing computerId.")?;
+    let context = crate::context::current().ok_or("The engine is not ready.")?;
+    let opened =
+        crate::macos_computers::open_guest_ssh_stream(&context.paths().app_data, id, port)?;
+    let crate::macos_computers::GuestSshStream { stream, guard } = opened;
+    Ok((stream, Box::new(move || guard.allowed())))
+}
+
+/// Opens and relays one `guest.ssh` stream to a macOS computer, registering a published-port
+/// forward until it ends.
+fn serve_guest_tcp(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(&Value, Option<u16>) -> Result<GuestTcp, String>,
+    allowed: impl Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let kind = guest_stream_kind(params)?;
+    let _stream_permit = admit_stream(permit, streams)?;
+    let (registration, label) = match kind {
+        GuestStream::Port(port) => (
+            Some(PortRegistration::open(
+                params["computerId"].as_str().ok_or("Missing computerId.")?,
+                port,
+            )),
+            Some(port),
+        ),
+        GuestStream::Interactive => (None, None),
+    };
+    let (guest, guard) = open(params, label)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    relay_tcp(stream, guest, || {
+        allowed() && guard() && registration.as_ref().map_or(true, |r| !r.revoked())
+    })?;
+    Ok(())
+}
+
 /// Opens and relays one `guest.ssh` stream, registering a published-port forward until it ends.
 fn serve_guest_stream(
     stream: &mut UnixStream,
@@ -3726,6 +3820,36 @@ fn serve_event_stream_with(
         allowed,
         heartbeat,
     );
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    Ok(())
+}
+/// Serves one controller's `guest.files.watch`: the owner starts the watch and writes its
+/// hints until the controller leaves. The watch takes one stream permit, and a refusal (no
+/// such computer, not running, too many watches) comes back before the reply.
+fn serve_watch_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(&Value) -> Result<crate::remote_watch::Watching, String>,
+    allowed: &dyn Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let _stream_permit = admit_stream(permit, streams)?;
+    let watching = open(params)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    let peer = stream.try_clone().map_err(|e| e.to_string())?;
+    crate::remote_watch::serve(
+        &mut *stream,
+        &watching,
+        &|| connection_open(&peer),
+        allowed,
+        crate::remote_watch::HEARTBEAT,
+    );
+    drop(watching);
     let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
@@ -4210,6 +4334,210 @@ mod port_stream_tests {
         }
         assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
         assert_eq!(registered(computer, 4000), 0);
+    }
+
+    /// A guest's SSH port: echoes what it is sent, like `cat` for the Linux transport.
+    fn echo_guest() -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 64];
+            while let Ok(read) = connection.read(&mut buffer) {
+                if read == 0 || connection.write_all(&buffer[..read]).is_err() {
+                    break;
+                }
+            }
+        });
+        (address, worker)
+    }
+
+    fn open_tcp(
+        budget: &'static Budget,
+        params: Value,
+        guest: std::net::SocketAddr,
+        ends: Arc<std::sync::atomic::AtomicBool>,
+        labels: Arc<Mutex<Vec<Option<u16>>>>,
+    ) -> Open {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let worker = thread::spawn(move || {
+            let mut permit = None;
+            serve_guest_tcp(
+                &mut server,
+                &mut permit,
+                budget,
+                &params,
+                move |_, label| {
+                    labels.lock().unwrap().push(label);
+                    let stream = std::net::TcpStream::connect(guest).map_err(|e| e.to_string())?;
+                    Ok((
+                        stream,
+                        Box::new(move || !ends.load(Ordering::Acquire))
+                            as Box<dyn Fn() -> bool + Send>,
+                    ))
+                },
+                || true,
+            )
+        });
+        let reply = read_frame(&mut client).unwrap();
+        assert_eq!(reply["result"], json!({}));
+        Open { client, worker }
+    }
+
+    #[test]
+    fn a_macos_guest_ssh_stream_relays_bytes_and_ends_with_its_guard_or_its_port() {
+        let _test_state = crate::test_support::global_state();
+        static BUDGET: Budget = Budget::new(8);
+        let labels: Arc<Mutex<Vec<Option<u16>>>> = Arc::default();
+        // Interactive: bytes reach the guest's SSH port and come back; the guard ends it.
+        let (guest, guest_worker) = echo_guest();
+        let ends = Arc::new(AtomicBool::new(false));
+        let mut interactive = open_tcp(
+            &BUDGET,
+            params("mac-computer", None, None),
+            guest,
+            ends.clone(),
+            labels.clone(),
+        );
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 1);
+        assert!(interactive.echoes());
+        ends.store(true, Ordering::Release);
+        assert!(interactive.closed());
+        guest_worker.join().unwrap();
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        // A published-port forward is registered, labelled for the guest's guard, and the
+        // owner unpublishing the port ends it.
+        let (guest, guest_worker) = echo_guest();
+        let forward = open_tcp(
+            &BUDGET,
+            params("mac-computer", Some("port"), Some(3000)),
+            guest,
+            Arc::new(AtomicBool::new(false)),
+            labels.clone(),
+        );
+        assert_eq!(registered("mac-computer", 3000), 1);
+        revoke_port_streams("mac-computer", 3000);
+        assert!(forward.closed());
+        guest_worker.join().unwrap();
+        assert_eq!(registered("mac-computer", 3000), 0);
+        assert_eq!(*labels.lock().unwrap(), [None, Some(3000)]);
+        // Invalid params never open the guest.
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = None;
+        let opened = AtomicBool::new(false);
+        assert!(serve_guest_tcp(
+            &mut server,
+            &mut permit,
+            &BUDGET,
+            &params("mac-computer", Some("bogus"), None),
+            |_, _| {
+                opened.store(true, Ordering::Release);
+                Err("unreachable".into())
+            },
+            || true,
+        )
+        .is_err());
+        assert!(!opened.load(Ordering::Acquire));
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        client.shutdown(std::net::Shutdown::Both).unwrap();
+    }
+
+    #[test]
+    fn a_computer_that_is_not_in_the_linux_inventory_is_served_as_macos() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(directory.path());
+        let id = "00000000-0000-4000-8000-0000000000c1";
+        crate::runtime::write_metadata(
+            &paths.metadata,
+            &crate::runtime::ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![crate::runtime::ComputerConfiguration {
+                    id: id.into(),
+                    name: "dev".into(),
+                    cpus: 1,
+                    max_cpus: 2,
+                    memory_gib: 2,
+                    max_memory_gib: 4,
+                    workspace_storage_gib: 10,
+                    runtime_storage_gib: 10,
+                    desktop: None,
+                }],
+            },
+        )
+        .unwrap();
+        assert!(is_linux_computer(&paths, &json!({"computerId": id})));
+        for other in [
+            json!({"computerId": "00000000-0000-4000-8000-0000000000c2"}),
+            json!({"computerId": 3}),
+            json!({}),
+        ] {
+            assert!(!is_linux_computer(&paths, &other), "{other}");
+        }
+    }
+
+    #[test]
+    fn a_watch_stream_refuses_before_its_reply_and_otherwise_streams_hints_until_the_controller_leaves(
+    ) {
+        let _test_state = crate::test_support::global_state();
+        static BUDGET: Budget = Budget::new(2);
+        // A refusal (no such computer) is the reply, and takes no permit afterwards.
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = None;
+        let refused = serve_watch_stream(
+            &mut server,
+            &mut permit,
+            &BUDGET,
+            &json!({"computerId": "x", "paths": ["/w"]}),
+            |params| {
+                crate::remote_watch::Watching::start(params, |_, _, _| {
+                    Err("Start this computer to watch it.".into())
+                })
+            },
+            &|| true,
+        );
+        assert_eq!(
+            refused.unwrap_err().message,
+            "Start this computer to watch it."
+        );
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        drop(client);
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let emitter: Arc<Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>> = Arc::default();
+        let slot = emitter.clone();
+        let worker = thread::spawn(move || {
+            let mut permit = None;
+            serve_watch_stream(
+                &mut server,
+                &mut permit,
+                &BUDGET,
+                &json!({"computerId": "x", "paths": ["/w"]}),
+                move |params| {
+                    crate::remote_watch::Watching::start(params, move |_, emit, _| {
+                        *slot.lock().unwrap() = Some(emit);
+                        Ok(())
+                    })
+                },
+                &|| true,
+            )
+        });
+        assert_eq!(read_frame(&mut client).unwrap()["result"], json!({}));
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 1);
+        let emit = emitter.lock().unwrap().clone().unwrap();
+        emit("/w".into());
+        assert_eq!(
+            crate::remote_watch::read_watch_frame(&mut client),
+            Ok(crate::remote_watch::WatchFrame::Changed("/w".into()))
+        );
+        client.shutdown(std::net::Shutdown::Both).unwrap();
+        worker.join().unwrap().unwrap();
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -6154,7 +6482,6 @@ mod dispatch_tests {
                 "computerUse.approval",
                 "ssh.access.connection",
                 "ssh.access.save",
-                "guest.prepare",
                 "guest.exec.start",
                 "guest.exec.input",
                 "network.publish",
@@ -6188,6 +6515,7 @@ mod dispatch_tests {
             [
                 "github.connect.callback",
                 "events.subscribe",
+                "guest.files.watch",
                 "guest.ssh",
                 "macos.display.stream"
             ]
