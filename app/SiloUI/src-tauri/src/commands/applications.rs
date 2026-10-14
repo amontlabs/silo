@@ -6,14 +6,14 @@ use tauri_plugin_dialog::DialogExt;
 use crate::applications::{self, Application, ApplicationCatalog, ApplicationKind};
 
 /// Compatibility adapters for backend callers in other extraction tracks.
-pub(crate) fn open_browser(app: &AppHandle, url: &str) -> Result<(), String> {
+pub(crate) fn open_browser(_app: &AppHandle, url: &str) -> Result<(), String> {
     let url = applications::validated_browser_url(url)?;
-    let settings = crate::settings::current_settings(app)?;
+    let settings = crate::settings::current_settings()?;
     applications::open_browser_with_settings(&settings, &url)
 }
 
-pub(crate) fn selected_terminal(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::settings::current_settings(app)?;
+pub(crate) fn selected_terminal(_app: &AppHandle) -> Result<Application, String> {
+    let settings = crate::settings::current_settings()?;
     applications::selected_terminal_from_settings(&settings)
 }
 
@@ -25,8 +25,8 @@ pub(crate) fn open_terminal(
     applications::open_terminal_with_application(application, command)
 }
 
-pub(crate) fn selected_editor(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::settings::current_settings(app)?;
+pub(crate) fn selected_editor(_app: &AppHandle) -> Result<Application, String> {
+    let settings = crate::settings::current_settings()?;
     applications::selected_editor_from_settings(&settings)
 }
 

@@ -44,7 +44,7 @@ impl StartupServices for TauriStartupServices {
     }
 
     fn current_launch_settings(&self) -> Result<(Map<String, Value>, std::path::PathBuf), String> {
-        let settings = crate::settings::current_settings(&self.app)?;
+        let settings = crate::settings::current_settings()?;
         let paths = runtime::runtime_paths(&self.app)?;
         Ok((settings, paths.metadata))
     }

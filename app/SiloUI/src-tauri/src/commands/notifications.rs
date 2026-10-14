@@ -54,7 +54,7 @@ fn deliver(app: &AppHandle, pending: PendingDelivery) {
             if main_window_focused(app) {
                 return false;
             }
-            let Ok(settings) = crate::settings::current_settings(app) else {
+            let Ok(settings) = crate::settings::current_settings() else {
                 return false;
             };
             notifications::enabled(&settings, notice.category)

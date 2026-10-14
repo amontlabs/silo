@@ -30,6 +30,7 @@ pub(crate) mod runtime_logs;
 pub(crate) mod runtime_migration;
 pub(crate) mod runtime_storage;
 pub(crate) mod secrets;
+pub(crate) mod settings;
 pub(crate) mod ssh_access;
 pub(crate) mod startup;
 pub(crate) mod system_integrations;

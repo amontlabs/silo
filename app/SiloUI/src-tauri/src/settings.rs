@@ -5,10 +5,9 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::{Condvar, Mutex, MutexGuard},
+    sync::{Condvar, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
@@ -26,13 +25,23 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn native_theme(&self) -> Option<tauri::Theme> {
+    pub(crate) fn save_error(&self) -> Option<&str> {
+        self.save_error.as_deref()
+    }
+
+    pub(crate) fn theme(&self) -> Option<Theme> {
         match self.settings.get("theme").and_then(Value::as_str) {
-            Some("light") => Some(tauri::Theme::Light),
-            Some("dark") => Some(tauri::Theme::Dark),
+            Some("light") => Some(Theme::Light),
+            Some("dark") => Some(Theme::Dark),
             _ => None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Theme {
+    Light,
+    Dark,
 }
 
 struct SettingsStore {
@@ -526,15 +535,15 @@ impl SettingsState {
 }
 
 /// How long Quit waits for the webview to acknowledge its settings flush.
-const FRONTEND_FLUSH_FALLBACK: Duration = Duration::from_secs(2);
+pub(crate) const FRONTEND_FLUSH_FALLBACK: Duration = Duration::from_secs(2);
 
-fn session_flush_wait(deadline: Instant, now: Instant) -> Duration {
+pub(crate) fn session_flush_wait(deadline: Instant, now: Instant) -> Duration {
     // Keep at least half the remaining session budget for native shutdown.
     FRONTEND_FLUSH_FALLBACK.min(deadline.saturating_duration_since(now) / 2)
 }
 
 #[derive(Default)]
-struct ShutdownState(Mutex<ShutdownProgress>);
+pub(crate) struct ShutdownState(Mutex<ShutdownProgress>);
 #[derive(Default)]
 struct ShutdownProgress {
     phase: u8,
@@ -554,7 +563,7 @@ impl ShutdownState {
     fn request(&self) -> bool {
         self.request_generation().is_some()
     }
-    fn request_generation(&self) -> Option<u64> {
+    pub(crate) fn request_generation(&self) -> Option<u64> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase != 0 {
             return None;
@@ -570,7 +579,7 @@ impl ShutdownState {
             .unwrap_or_else(|error| error.into_inner())
             .generation
     }
-    fn begin_flush(&self) -> bool {
+    pub(crate) fn begin_flush(&self) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase != Self::REQUESTED {
             return false;
@@ -578,10 +587,10 @@ impl ShutdownState {
         state.phase = Self::FLUSHING;
         true
     }
-    fn claim_exit(&self, frontend_completed: bool) -> bool {
+    pub(crate) fn claim_exit(&self, frontend_completed: bool) -> bool {
         self.claim_exit_for(frontend_completed, None)
     }
-    fn claim_exit_for(&self, frontend_completed: bool, generation: Option<u64>) -> bool {
+    pub(crate) fn claim_exit_for(&self, frontend_completed: bool, generation: Option<u64>) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         // When the session ends, the fallback also cuts off a frontend flush that
         // has not finished in time.
@@ -597,14 +606,14 @@ impl ShutdownState {
         state.phase = Self::FINISHING;
         true
     }
-    fn active(&self) -> bool {
+    pub(crate) fn active(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .phase
             != 0
     }
-    fn approved(&self) -> bool {
+    pub(crate) fn approved(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -615,7 +624,7 @@ impl ShutdownState {
     fn cancel(&self) -> bool {
         self.cancel_with(|| {})
     }
-    fn cancel_with(&self, reopen: impl FnOnce()) -> bool {
+    pub(crate) fn cancel_with(&self, reopen: impl FnOnce()) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.session_deadline.is_some() || state.phase == Self::APPROVED {
             return false;
@@ -625,7 +634,7 @@ impl ShutdownState {
         true
     }
     /// Keep the earliest deadline when the session end is reported twice.
-    fn begin_session_end(&self, deadline: Instant) {
+    pub(crate) fn begin_session_end(&self, deadline: Instant) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         state.session_deadline = Some(
             state
@@ -633,13 +642,13 @@ impl ShutdownState {
                 .map_or(deadline, |current| current.min(deadline)),
         );
     }
-    fn session_deadline(&self) -> Option<Instant> {
+    pub(crate) fn session_deadline(&self) -> Option<Instant> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .session_deadline
     }
-    fn expire_session(&self, now: Instant) -> bool {
+    pub(crate) fn expire_session(&self, now: Instant) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase == Self::APPROVED
             || !state
@@ -651,7 +660,7 @@ impl ShutdownState {
         state.phase = Self::APPROVED;
         true
     }
-    fn allow_exit(&self) -> bool {
+    pub(crate) fn allow_exit(&self) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase == Self::APPROVED {
             return false;
@@ -659,13 +668,13 @@ impl ShutdownState {
         state.phase = Self::APPROVED;
         true
     }
-    fn mark_restart(&self) {
+    pub(crate) fn mark_restart(&self) {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .restarting = true;
     }
-    fn restarting(&self) -> bool {
+    pub(crate) fn restarting(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -675,8 +684,8 @@ impl ShutdownState {
 
 /// How an `ExitRequested` event is handled.
 #[derive(Debug, PartialEq, Eq)]
-enum ExitRequest {
-    /// `AppHandle::restart` (update installation). Tauri ignores `prevent_exit()`
+pub(crate) enum ExitRequest {
+    /// The host restart path. It ignores exit prevention
     /// here, and the installer already stopped computers and saved settings, so
     /// the Quit flow (overlay, flush request, computer shutdown) must not start.
     Restart,
@@ -686,8 +695,8 @@ enum ExitRequest {
     Gated,
 }
 
-fn exit_request(code: Option<i32>, approved: bool) -> ExitRequest {
-    if code == Some(tauri::RESTART_EXIT_CODE) {
+pub(crate) fn exit_request(restarting: bool, approved: bool) -> ExitRequest {
+    if restarting {
         ExitRequest::Restart
     } else if approved {
         ExitRequest::Approved
@@ -696,128 +705,87 @@ fn exit_request(code: Option<i32>, approved: bool) -> ExitRequest {
     }
 }
 
-fn settings_path(app: &AppHandle) -> tauri::Result<Option<PathBuf>> {
-    Ok(Some(app.path().app_config_dir()?.join("settings.json")))
+static SETTINGS: OnceLock<SettingsState> = OnceLock::new();
+static SHUTDOWN: OnceLock<ShutdownState> = OnceLock::new();
+static QUIT_CONFIRMATION: OnceLock<QuitConfirmation> = OnceLock::new();
+
+fn state() -> &'static SettingsState {
+    SETTINGS.get_or_init(SettingsState::default)
 }
 
-pub fn install(app: &AppHandle) {
-    app.manage(SettingsState::default());
-    app.manage(ShutdownState::default());
-    app.manage(QuitConfirmation::default());
+pub(crate) fn shutdown_state() -> &'static ShutdownState {
+    SHUTDOWN.get_or_init(ShutdownState::default)
 }
 
-/// Read validated, persisted preferences from a blocking native worker.
-pub(crate) fn current_settings(app: &AppHandle) -> Result<Map<String, Value>, String> {
-    let state = app.state::<SettingsState>();
-    let snapshot = state.initialize(|| settings_path(app).map_err(|error| error.to_string()))?;
-    // A save failure affects persistence only; the in-memory settings are authoritative.
+pub(crate) fn shutdown_state_if_installed() -> Option<&'static ShutdownState> {
+    SHUTDOWN.get()
+}
+
+pub(crate) fn allow_exit_if_installed() {
+    if let Some(state) = shutdown_state_if_installed() {
+        state.allow_exit();
+    }
+}
+
+pub(crate) fn quit_confirmation() -> &'static QuitConfirmation {
+    QUIT_CONFIRMATION.get_or_init(QuitConfirmation::default)
+}
+
+/// Initialize the process-wide settings and shutdown policy state.
+pub(crate) fn install() {
+    let _ = state();
+    let _ = shutdown_state();
+    let _ = quit_confirmation();
+}
+
+fn configured_path() -> Result<Option<PathBuf>, String> {
+    let context = silo_engine::context::current()
+        .ok_or_else(|| "The engine context is unavailable".to_owned())?;
+    Ok(Some(context.paths().app_config.join("settings.json")))
+}
+
+/// Load validated settings from the host-provided settings path.
+pub(crate) fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
+    state().initialize(|| Ok(path))
+}
+
+/// Read validated, persisted preferences. This also supports native callers that
+/// run before the settings window has requested its initial snapshot.
+pub(crate) fn current_settings() -> Result<Map<String, Value>, String> {
+    let snapshot = state().initialize(configured_path)?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
     }
     Ok(snapshot.settings)
 }
 
-#[tauri::command]
-pub async fn initialize_settings(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Snapshot, String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<SettingsState>();
-        let snapshot =
-            state.initialize(|| settings_path(&app).map_err(|error| error.to_string()))?;
-        publish(&app, &snapshot);
-        Ok(snapshot)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-fn require_main(label: &str) -> Result<(), String> {
-    if label == "main" {
-        Ok(())
-    } else {
-        Err("Only the main window can change settings".into())
+pub(crate) fn read(main: bool) -> Result<Snapshot, String> {
+    let mut snapshot = state().initialized()?.as_ref().unwrap().store.snapshot();
+    if !main {
+        snapshot.onboarding_draft = Value::Null;
     }
+    Ok(snapshot)
 }
 
-fn publish(app: &AppHandle, snapshot: &Snapshot) {
-    if let Some(error) = &snapshot.save_error {
-        eprintln!("Silo settings: {error}");
-    }
-    // Native glass, titlebars, dialogs, and both webviews inherit app appearance.
-    // None clears an explicit appearance so System follows the OS again.
-    app.set_theme(snapshot.native_theme());
-    emit_snapshot(app, snapshot);
-}
-
-fn emit_snapshot<R: tauri::Runtime>(app: &AppHandle<R>, snapshot: &Snapshot) {
-    // Catch-all listeners receive targeted events too; drafts stay in authorized reads.
-    let mut public = snapshot.clone();
-    public.onboarding_draft = Value::Null;
-    crate::status_panel::report(app.emit("settings:changed", public));
-}
-
-async fn change(
-    app: AppHandle,
-    operation: impl FnOnce(&mut SettingsStore) -> Result<Snapshot, String> + Send + 'static,
+fn change(
+    operation: impl FnOnce(&mut SettingsStore) -> Result<Snapshot, String>,
 ) -> Result<Snapshot, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<SettingsState>();
-        let mut initialized = state.initialized()?;
-        let snapshot = operation(&mut initialized.as_mut().unwrap().store)?;
-        crate::computer_use::sync_initial_approval(&snapshot.settings);
-        publish(&app, &snapshot);
-        Ok(snapshot)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let mut initialized = state().initialized()?;
+    let snapshot = operation(&mut initialized.as_mut().unwrap().store)?;
+    crate::computer_use::sync_initial_approval(&snapshot.settings);
+    Ok(snapshot)
 }
 
-#[tauri::command]
-pub async fn read_settings(app: AppHandle, window: WebviewWindow) -> Result<Snapshot, String> {
-    let main = window.label() == "main";
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<SettingsState>();
-        let mut snapshot = state.initialized()?.as_ref().unwrap().store.snapshot();
-        if !main {
-            snapshot.onboarding_draft = Value::Null;
-        }
-        Ok(snapshot)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+pub(crate) fn update(patch: Map<String, Value>) -> Result<Snapshot, String> {
+    change(|store| store.update(patch))
 }
 
-#[tauri::command]
-pub async fn update_settings(
-    app: AppHandle,
-    window: WebviewWindow,
-    patch: Map<String, Value>,
-) -> Result<Snapshot, String> {
-    require_main(window.label())?;
-    change(app, move |store| store.update(patch)).await
+pub(crate) fn update_draft(draft: Value) -> Result<Snapshot, String> {
+    change(|store| store.update_draft(draft))
 }
 
-#[tauri::command]
-pub async fn update_onboarding_draft(
-    app: AppHandle,
-    window: WebviewWindow,
-    draft: Value,
-) -> Result<Snapshot, String> {
-    require_main(window.label())?;
-    change(app, move |store| store.update_draft(draft)).await
-}
-
-#[tauri::command]
-pub async fn import_legacy_theme(
-    app: AppHandle,
-    window: WebviewWindow,
-    theme: String,
-) -> Result<Snapshot, String> {
-    require_main(window.label())?;
-    change(app, move |store| {
+pub(crate) fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
+    change(|store| {
         // Fixture modes never inherit a theme from the production webview origin.
         if store.path.is_none() {
             Ok(store.snapshot())
@@ -825,230 +793,51 @@ pub async fn import_legacy_theme(
             store.import_theme(theme)
         }
     })
-    .await
 }
 
-#[tauri::command]
-pub async fn flush_settings(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    let flushed = std::sync::Arc::new(std::sync::Mutex::new(Ok(())));
-    let result = flushed.clone();
-    change(app, move |store| {
+pub(crate) fn flush() -> Result<(Snapshot, Result<(), String>), String> {
+    let mut saved = Ok(());
+    let snapshot = change(|store| {
         store.snapshot.revision += 1;
-        *result
-            .lock()
-            .map_err(|_| "Settings storage is unavailable.")? = store.flush();
+        saved = store.flush();
         Ok(store.snapshot())
-    })
-    .await?;
-    let result = flushed
-        .lock()
-        .map_err(|_| "Settings storage is unavailable.")?
-        .clone();
-    result
+    })?;
+    Ok((snapshot, saved))
 }
 
-/// Stop local computers, bounded by `deadline` when the session is ending.
-fn stop_local_computers(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
-    let Some(deadline) = deadline else {
-        crate::startup::cancel_and_wait(app);
-        return crate::runtime::shutdown::stop_local_computers(app, None);
-    };
-    let app = app.clone();
-    run_before(deadline, move || {
-        crate::startup::cancel_and_wait(&app);
-        crate::runtime::shutdown::stop_local_computers(&app, Some(deadline))
-    })
-}
-
-/// Run `work` on its own thread and stop waiting at `deadline`. The work keeps
-/// running; the process is about to exit.
-fn run_before<T: Send + 'static>(
-    deadline: Instant,
-    work: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, String> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = sender.send(work());
-    });
-    receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .unwrap_or_else(|_| Err("Local computers did not finish stopping in time.".into()))
-}
-
-fn finish_exit(app: &AppHandle, frontend_completed: bool, generation: Option<u64>) {
-    let state = app.state::<ShutdownState>();
-    if !state.claim_exit_for(frontend_completed, generation) {
-        return;
-    }
-    let stopped = stop_local_computers(app, state.session_deadline());
-    if state.approved() {
-        return;
-    }
-    // Read the session state again: logout can begin while a Quit is stopping computers.
-    let session_end = state.session_deadline().is_some();
-    if let Err(error) = stopped {
-        if !session_end {
-            cancel_exit(app, format!("Silo stayed open because its local computers could not shut down safely.\n\n{error}\n\nCheck the affected computers and choose Quit Silo again. Computers on other devices were not stopped."));
-            return;
-        }
-        eprintln!("Silo is exiting because the session ended: {error}");
-    }
-    // The frontend has drained its invoke queue. Wait for any native write already in progress.
-    let saved = app
-        .state::<SettingsState>()
+pub(crate) fn flush_for_update() -> Result<(), String> {
+    let mut initialized = state()
         .store
         .lock()
-        .map_err(|_| "Settings storage is unavailable.".to_string())
-        .and_then(|mut initialized| match initialized.as_mut() {
-            Some(current) => current.store.flush(),
-            None => Ok(()),
-        });
-    if let Err(error) = saved {
-        if !session_end {
-            cancel_exit(app, format!("Local computers stopped, but Silo could not save its settings.\n\n{error}\n\nResolve the storage issue and choose Quit Silo again."));
-            return;
-        }
-        eprintln!("Silo is exiting because the session ended; settings were not saved: {error}");
+        .map_err(|_| "Settings could not be saved before updating.")?;
+    if let Some(current) = initialized.as_mut() {
+        current.store.flush()?;
     }
-    crate::remote_network::close_all();
-    if state.allow_exit() {
-        crate::system_shutdown::exit(app);
+    Ok(())
+}
+
+pub(crate) fn flush_pending() -> Result<(), String> {
+    let mut initialized = state()
+        .store
+        .lock()
+        .map_err(|_| "Settings storage is unavailable.")?;
+    match initialized.as_mut() {
+        Some(current) => current.store.flush(),
+        None => Ok(()),
     }
 }
 
-fn cancel_exit(app: &AppHandle, message: String) {
-    if !app.state::<ShutdownState>().cancel_with(|| {
-        crate::runtime::shutdown::cancel();
-        crate::system_shutdown::cancel(app);
-        let _ = app.emit("silo://shutdown-state-changed", false);
-    }) {
-        return;
-    }
-    // Startup remains cancelled: a failed Quit must not automatically restart computers
-    // that have already stopped. Manual controls become available again.
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        let _ = crate::system_integrations::show_integration_error(app.clone(), window, message);
-    }
-}
-
-pub fn prevent_exit_until_saved(app: &AppHandle, api: &tauri::ExitRequestApi, code: Option<i32>) {
-    let state = app.state::<ShutdownState>();
-    match exit_request(code, state.approved()) {
-        ExitRequest::Restart => {
-            state.mark_restart();
-            return;
-        }
-        ExitRequest::Approved => return,
-        ExitRequest::Gated => {}
-    }
-    api.prevent_exit();
-    begin_exit(app);
-}
-
-/// Start the graceful exit: stop admission, ask the frontend to save, and fall
-/// back to finishing natively when it never answers.
-fn begin_exit(app: &AppHandle) {
-    let state = app.state::<ShutdownState>();
-    crate::startup::cancel(app);
-    let Some(generation) = state.request_generation() else {
-        return;
-    };
-    crate::runtime::shutdown::begin();
-    let _ = app.emit("silo://shutdown-state-changed", true);
-    if app.get_webview_window("main").is_some() {
-        crate::status_panel::report(app.emit_to("main", "settings:flush-request", ()));
-    }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        // Only a webview that never acknowledges may use the fallback. A responsive
-        // frontend can take as long as it needs to drain its pending changes.
-        std::thread::sleep(FRONTEND_FLUSH_FALLBACK);
-        finish_exit(&app, false, Some(generation));
-    });
-}
-
-/// Startup failed before this process took ownership of local computers: any later exit
-/// request (tray, menu, dialog) exits directly instead of stopping them.
-pub(crate) fn exit_without_shutdown(app: &AppHandle) {
-    if let Some(state) = app.try_state::<ShutdownState>() {
-        state.allow_exit();
-    }
-}
-
-/// Logout, restart, shutdown or SIGTERM (decision 7): no prompt, local computers stop
-/// within `budget`, and a failed stop or save never cancels the exit.
-pub(crate) fn end_session(app: &AppHandle, budget: Duration) {
-    let Some(state) = app.try_state::<ShutdownState>() else {
-        // Setup has not started: Silo owns no computers yet.
-        crate::system_shutdown::exit(app);
-        return;
-    };
-    if state.approved() {
-        crate::system_shutdown::exit(app);
-        return;
-    }
-    state.begin_session_end(Instant::now() + budget);
-    let deadline = state.session_deadline().unwrap();
-    // A user Quit may already be blocked stopping computers or saving settings. Its
-    // worker stays the sole stop owner; session termination cannot wait for it.
-    let deadline_app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-        if deadline_app
-            .state::<ShutdownState>()
-            .expire_session(Instant::now())
-        {
-            eprintln!("Silo is exiting because the session shutdown deadline elapsed.");
-            crate::system_shutdown::exit(&deadline_app);
-        }
-    });
-    // An open Quit prompt no longer applies; its answer is ignored.
-    app.state::<QuitConfirmation>().close();
-    begin_exit(app);
-    // Also bound a Quit whose frontend flush started before the session ended.
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(session_flush_wait(deadline, Instant::now()));
-        finish_exit(&app, false, None);
-    });
-}
-
-/// Whether AppKit should wait for Silo's Quit path instead of terminating now.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn accepts_terminate_request(app: &AppHandle) -> bool {
-    app.try_state::<ShutdownState>()
-        .is_some_and(|state| !state.approved())
-}
-
-/// `RunEvent::Exit` without the graceful path (for example AppKit terminated
-/// Silo without asking): stop local computers within a bound before the process ends.
-pub(crate) fn exit_backstop(app: &AppHandle) {
-    let Some(state) = app.try_state::<ShutdownState>() else {
-        return;
-    };
-    if state.approved() || state.restarting() {
-        return;
-    }
-    crate::startup::cancel(app);
-    crate::runtime::shutdown::begin();
-    let deadline = Instant::now() + crate::system_shutdown::SESSION_END_BUDGET;
-    if let Err(error) = stop_local_computers(app, Some(deadline)) {
-        eprintln!("Silo exited without its Quit path: {error}");
-    }
-}
-
-#[tauri::command]
-pub fn read_shutdown_state(app: AppHandle) -> bool {
-    app.state::<ShutdownState>().active()
+pub(crate) fn public_snapshot(snapshot: &Snapshot) -> Snapshot {
+    // Catch-all listeners receive targeted events too; drafts stay in authorized reads.
+    let mut public = snapshot.clone();
+    public.onboarding_draft = Value::Null;
+    public
 }
 
 /// One confirm-capable Quit path (decision 7). Until the main UI opts in with
 /// `enable_quit_confirmation`, requests exit directly as before.
 #[derive(Default)]
-struct QuitConfirmation(Mutex<QuitRequests>);
+pub(crate) struct QuitConfirmation(Mutex<QuitRequests>);
 #[derive(Default)]
 struct QuitRequests {
     enabled: bool,
@@ -1059,21 +848,27 @@ struct QuitRequests {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct QuitRequest {
-    request_id: u64,
+pub(crate) struct QuitRequest {
+    pub(crate) request_id: u64,
     /// Running local computer names. Empty means their status could not be read.
-    computers: Vec<String>,
+    pub(crate) computers: Vec<String>,
 }
 
 impl QuitConfirmation {
-    fn enabled(&self) -> bool {
+    pub(crate) fn enabled(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .enabled
     }
     /// `None` exits now: nothing runs, or no UI can answer.
-    fn ask(&self, running: Result<Vec<String>, String>) -> Option<QuitRequest> {
+    pub(crate) fn enable(&self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .enabled = true;
+    }
+    pub(crate) fn ask(&self, running: Result<Vec<String>, String>) -> Option<QuitRequest> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if !state.enabled || state.session_ending {
             return None;
@@ -1100,13 +895,13 @@ impl QuitConfirmation {
         })
     }
     /// The session is ending: the open prompt no longer applies.
-    fn close(&self) {
+    pub(crate) fn close(&self) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         state.session_ending = true;
         state.pending = None;
     }
     /// Returns whether Silo should exit.
-    fn answer(&self, request_id: u64, confirmed: bool) -> Result<bool, String> {
+    pub(crate) fn answer(&self, request_id: u64, confirmed: bool) -> Result<bool, String> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending != Some(request_id) {
             return Err("This Quit request is no longer current.".into());
@@ -1114,101 +909,6 @@ impl QuitConfirmation {
         state.pending = None;
         Ok(confirmed)
     }
-}
-
-/// Every user Quit entry point (menus and ⌘Q, tray, status panel, and window close
-/// on Linux without a tray) calls this. When local computers are running it shows
-/// the main window and emits `silo://quit-requested`; the UI answers with
-/// `answer_quit_request`. Otherwise it enters the graceful exit path directly.
-pub(crate) fn request_quit(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let confirmation = app.state::<QuitConfirmation>();
-        let main = app.get_webview_window("main");
-        if !confirmation.enabled() || main.is_none() || app.state::<ShutdownState>().active() {
-            app.exit(0);
-            return;
-        }
-        let running = crate::runtime::update_recovery::running_names(&app);
-        let Some(request) = confirmation.ask(running) else {
-            app.exit(0);
-            return;
-        };
-        if let Some(window) = main {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-        }
-        if app
-            .emit_to("main", "silo://quit-requested", &request)
-            .is_err()
-        {
-            let _ = confirmation.answer(request.request_id, true);
-            app.exit(0);
-        }
-    });
-}
-
-#[tauri::command]
-pub fn enable_quit_confirmation(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    app.state::<QuitConfirmation>()
-        .0
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .enabled = true;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn answer_quit_request(
-    app: AppHandle,
-    window: WebviewWindow,
-    request_id: u64,
-    confirmed: bool,
-) -> Result<(), String> {
-    require_main(window.label())?;
-    if app
-        .state::<QuitConfirmation>()
-        .answer(request_id, confirmed)?
-    {
-        app.exit(0);
-    } else {
-        crate::system_shutdown::cancel(&app);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn begin_settings_flush(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    if app.state::<ShutdownState>().begin_flush() {
-        Ok(())
-    } else {
-        Err("A settings flush is not awaiting acknowledgment".into())
-    }
-}
-
-#[tauri::command]
-pub fn cancel_settings_flush(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    let state = app.state::<ShutdownState>();
-    if state.session_deadline().is_some() {
-        // The session is ending: stop computers and exit without the unsaved changes.
-        let app = app.clone();
-        std::thread::spawn(move || finish_exit(&app, true, None));
-    } else if state.claim_exit(true) {
-        cancel_exit(&app, "Silo stayed open because pending changes could not be saved. Check the reported save error, then choose Quit Silo again. Local computers have not been shut down.".into());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn complete_settings_flush(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || finish_exit(&app, true, None))
-        .await
-        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -1241,26 +941,26 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
         let mut store = SettingsStore::load(Some(path.clone()));
-        assert_eq!(store.snapshot().native_theme(), None);
+        assert_eq!(store.snapshot().theme(), None);
 
         for (preference, native) in [
-            ("dark", Some(tauri::Theme::Dark)),
-            ("light", Some(tauri::Theme::Light)),
+            ("dark", Some(Theme::Dark)),
+            ("light", Some(Theme::Light)),
             ("system", None),
         ] {
             let snapshot = store
                 .update(json!({"theme": preference}).as_object().unwrap().clone())
                 .unwrap();
-            assert_eq!(snapshot.native_theme(), native);
+            assert_eq!(snapshot.theme(), native);
 
             // Reopening the app must use the saved appearance. Updating an
             // unrelated preference must not reset that appearance.
             store = SettingsStore::load(Some(path.clone()));
-            assert_eq!(store.snapshot().native_theme(), native);
+            assert_eq!(store.snapshot().theme(), native);
             let snapshot = store
                 .update(json!({"reduceMotion": true}).as_object().unwrap().clone())
                 .unwrap();
-            assert_eq!(snapshot.native_theme(), native);
+            assert_eq!(snapshot.theme(), native);
         }
     }
 
@@ -1268,16 +968,13 @@ mod tests {
     fn native_theme_uses_legacy_import_without_overwriting_explicit_preference() {
         let mut store = SettingsStore::load(None);
         assert_eq!(
-            store.import_theme("light".into()).unwrap().native_theme(),
-            Some(tauri::Theme::Light),
+            store.import_theme("light".into()).unwrap().theme(),
+            Some(Theme::Light),
         );
         store
             .update(json!({"theme": "system"}).as_object().unwrap().clone())
             .unwrap();
-        assert_eq!(
-            store.import_theme("dark".into()).unwrap().native_theme(),
-            None
-        );
+        assert_eq!(store.import_theme("dark".into()).unwrap().theme(), None);
     }
 
     #[test]
@@ -1584,35 +1281,17 @@ mod tests {
             assert_eq!(store.snapshot().revision, 0);
             assert!(store.snapshot().settings.is_empty());
         }
-        assert!(require_main("main").is_ok());
-        assert!(require_main("status").is_err());
     }
 
     #[test]
-    fn settings_events_never_expose_onboarding_drafts_to_catch_all_listeners() {
-        use tauri::Listener;
-
-        let app = tauri::test::mock_builder()
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .unwrap();
-        let (send, receive) = std::sync::mpsc::channel();
-        app.listen_any("settings:changed", move |event| {
-            send.send(serde_json::from_str::<Value>(event.payload()).unwrap())
-                .unwrap();
-        });
+    fn public_settings_snapshot_never_exposes_onboarding_drafts() {
         let mut store = SettingsStore::load(None);
         store.update_draft(unfinished_draft()).unwrap();
         let snapshot = store.snapshot();
-
-        emit_snapshot(app.handle(), &snapshot);
-
-        let events: Vec<_> = receive.try_iter().collect();
-        assert!(!events.is_empty());
-        for event in events {
-            assert!(event["onboardingDraft"].is_null());
-            assert_eq!(event["revision"], snapshot.revision);
-            assert_eq!(event["settings"], json!(snapshot.settings));
-        }
+        let public = public_snapshot(&snapshot);
+        assert!(public.onboarding_draft.is_null());
+        assert_eq!(public.revision, snapshot.revision);
+        assert_eq!(public.settings, snapshot.settings);
         assert_eq!(snapshot.onboarding_draft, unfinished_draft());
     }
 
@@ -2159,26 +1838,6 @@ mod tests {
     }
 
     #[test]
-    fn bounded_stop_returns_the_result_or_gives_up_at_the_deadline() {
-        let soon = Instant::now() + Duration::from_secs(5);
-        assert_eq!(run_before(soon, || Ok(7)), Ok(7));
-        assert_eq!(
-            run_before(soon, || Err::<(), _>("stop failed".to_string())),
-            Err("stop failed".into())
-        );
-        let started = Instant::now();
-        let late = run_before(Instant::now() + Duration::from_millis(50), || {
-            std::thread::sleep(Duration::from_secs(2));
-            Ok(())
-        });
-        assert_eq!(
-            late,
-            Err("Local computers did not finish stopping in time.".into())
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[test]
     fn session_end_closes_an_open_quit_prompt() {
         let quit = QuitConfirmation::default();
         quit.0.lock().unwrap().enabled = true;
@@ -2229,17 +1888,10 @@ mod tests {
 
     #[test]
     fn update_restart_does_not_start_the_quit_flow() {
-        assert_eq!(
-            exit_request(Some(tauri::RESTART_EXIT_CODE), false),
-            ExitRequest::Restart
-        );
-        assert_eq!(
-            exit_request(Some(tauri::RESTART_EXIT_CODE), true),
-            ExitRequest::Restart
-        );
-        assert_eq!(exit_request(Some(0), true), ExitRequest::Approved);
-        assert_eq!(exit_request(Some(0), false), ExitRequest::Gated);
-        assert_eq!(exit_request(None, false), ExitRequest::Gated);
+        assert_eq!(exit_request(true, false), ExitRequest::Restart);
+        assert_eq!(exit_request(true, true), ExitRequest::Restart);
+        assert_eq!(exit_request(false, true), ExitRequest::Approved);
+        assert_eq!(exit_request(false, false), ExitRequest::Gated);
         let state = ShutdownState::default();
         state.mark_restart();
         assert!(state.restarting());
@@ -2256,18 +1908,4 @@ mod tests {
         state.allow_exit();
         assert!(state.approved());
     }
-}
-
-/// The webview drains its queue before invoking installation. Persist the native
-/// snapshot before replacing the executable, independently of restart callbacks.
-pub(crate) fn flush_for_update(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<SettingsState>();
-    let mut initialized = state
-        .store
-        .lock()
-        .map_err(|_| "Settings could not be saved before updating.")?;
-    if let Some(current) = initialized.as_mut() {
-        current.store.flush()?;
-    }
-    Ok(())
 }

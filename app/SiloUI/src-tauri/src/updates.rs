@@ -721,7 +721,7 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
                 .map_err(|e| e.to_string())?;
             runtime = Some(guard);
             crate::runtime::shutdown::ensure_accepting_operations()?;
-            crate::settings::flush_for_update(app)?;
+            crate::settings::flush_for_update()?;
             let (closed, prepared) = prepare_after_transfers(close_transfers, || {
                 crate::runtime::update_recovery::prepare(app, consent)
             });
@@ -826,7 +826,7 @@ pub(crate) async fn install_update(
         };
         let mut transfers = None;
         let result = installation_preflight(&bytes)
-            .and_then(|_| crate::settings::flush_for_update(&worker))
+            .and_then(|_| crate::settings::flush_for_update())
             .and_then(|_| {
                 let (closed, prepared) = prepare_after_transfers(close_transfers, || {
                     crate::runtime::update_recovery::prepare(&worker, stop_computers)

@@ -159,7 +159,9 @@ mod platform {
                 .into(),
                 ksni::menu::StandardItem {
                     label: format!("Quit {}", crate::channel::current().product_name()),
-                    activate: Box::new(|tray: &mut Self| crate::settings::request_quit(&tray.app)),
+                    activate: Box::new(|tray: &mut Self| {
+                        crate::commands::settings::request_quit(&tray.app)
+                    }),
                     ..Default::default()
                 }
                 .into(),

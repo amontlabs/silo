@@ -371,8 +371,9 @@ mod native {
             viewer_items,
         });
         app.on_menu_event(|app, event| {
-            if super::request_menu_quit(event.id().as_ref(), || crate::settings::request_quit(app))
-            {
+            if super::request_menu_quit(event.id().as_ref(), || {
+                crate::commands::settings::request_quit(app)
+            }) {
                 return;
             }
             let Some(command) = event.id().as_ref().strip_prefix("silo-menu:") else {

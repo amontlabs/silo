@@ -228,7 +228,7 @@ pub(crate) async fn remote_checkpoint_action(
 
 #[tauri::command]
 pub(crate) async fn remote_upsert_computer(
-    app: AppHandle,
+    _app: AppHandle,
     device_id: String,
     configuration: crate::runtime::ComputerConfiguration,
     expected: Option<crate::runtime::ComputerConfiguration>,
@@ -238,9 +238,8 @@ pub(crate) async fn remote_upsert_computer(
     let state = remote::remote_upsert_computer(device_id.clone(), configuration, expected).await?;
     if created {
         // Keep reading the preference after the remote computer was saved, as before.
-        let app_for_settings = app.clone();
         let mode = tokio::task::spawn_blocking(move || {
-            crate::settings::current_settings(&app_for_settings)
+            crate::settings::current_settings()
                 .map(|settings| {
                     crate::computer_use::initial_approval_from(&settings)
                         .as_str()

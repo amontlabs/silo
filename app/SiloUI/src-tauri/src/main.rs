@@ -178,8 +178,8 @@ fn main() {
             status_panel::hide_status,
             status_panel::resize_status,
             status_panel::quit_app,
-            settings::enable_quit_confirmation,
-            settings::answer_quit_request,
+            commands::settings::enable_quit_confirmation,
+            commands::settings::answer_quit_request,
             tray::update_tray,
             commands::host_push::start_repository_push,
             commands::host_push::repository_push_status,
@@ -212,16 +212,16 @@ fn main() {
             commands::github::save_github_configuration,
             commands::github::retry_github_configuration,
             commands::github::refresh_github_repositories,
-            settings::initialize_settings,
-            settings::read_settings,
-            settings::update_settings,
-            settings::update_onboarding_draft,
-            settings::import_legacy_theme,
-            settings::flush_settings,
-            settings::begin_settings_flush,
-            settings::complete_settings_flush,
-            settings::cancel_settings_flush,
-            settings::read_shutdown_state,
+            commands::settings::initialize_settings,
+            commands::settings::read_settings,
+            commands::settings::update_settings,
+            commands::settings::update_onboarding_draft,
+            commands::settings::import_legacy_theme,
+            commands::settings::flush_settings,
+            commands::settings::begin_settings_flush,
+            commands::settings::complete_settings_flush,
+            commands::settings::cancel_settings_flush,
+            commands::settings::read_shutdown_state,
             commands::remote::connections_status,
             commands::remote::authorize_device,
             commands::remote::setup_device_key,
@@ -300,7 +300,7 @@ fn main() {
                 engine_context::install(app)?;
                 commands::creation_inputs::install(app.handle())?;
                 runtime_migration::vocabulary::run()?;
-                settings::install(app.handle());
+                commands::settings::install(app.handle());
                 commands::system_shutdown::install(app.handle());
                 let queue_app = app.handle().clone();
                 runtime::OPERATIONS.set_listener(move || {
@@ -336,7 +336,7 @@ fn main() {
                                 status_panel::report(window.hide());
                             }
                         } else {
-                            settings::request_quit(&handle);
+                            commands::settings::request_quit(&handle);
                         }
                     }
                 });
@@ -369,13 +369,13 @@ fn main() {
     commands::system_shutdown::install_terminate_handler(app.handle());
     app.run(|_app, _event| {
         if let tauri::RunEvent::Exit = &_event {
-            settings::exit_backstop(_app);
+            commands::settings::exit_backstop(_app);
             ssh_access::close_all();
             remote_network::close_all();
             transfer::close_all(std::time::Duration::from_secs(5));
         }
         if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
-            settings::prevent_exit_until_saved(_app, api, *code);
+            commands::settings::prevent_exit_until_saved(_app, api, *code);
         }
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
@@ -395,7 +395,7 @@ fn startup_failed(app: &tauri::AppHandle, error: &str) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     let name = channel::current().product_name();
     eprintln!("{name} could not start: {error}");
-    settings::exit_without_shutdown(app);
+    commands::settings::exit_without_shutdown(app);
     if let Ok(blank) = "about:blank".parse::<tauri::Url>() {
         for window in app.webview_windows().values() {
             let _ = window.navigate(blank.clone());

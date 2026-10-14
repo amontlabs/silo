@@ -55,7 +55,10 @@ fn watch(app: &AppHandle) -> zbus::Result<()> {
         let body = signal.body();
         let starting: bool = body.deserialize()?;
         if starting {
-            crate::settings::end_session(app, crate::system_shutdown::logind_budget(max_delay));
+            crate::commands::settings::end_session(
+                app,
+                crate::system_shutdown::logind_budget(max_delay),
+            );
         }
     }
     Ok(())

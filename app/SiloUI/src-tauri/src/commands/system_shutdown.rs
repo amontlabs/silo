@@ -11,9 +11,9 @@ mod macos;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn route(app: &AppHandle, reason: ShutdownReason) {
     match reason {
-        ShutdownReason::UserQuit => crate::settings::request_quit(app),
+        ShutdownReason::UserQuit => crate::commands::settings::request_quit(app),
         ShutdownReason::Logout | ShutdownReason::Shutdown => {
-            crate::settings::end_session(app, SESSION_END_BUDGET)
+            crate::commands::settings::end_session(app, SESSION_END_BUDGET)
         }
     }
 }
@@ -46,7 +46,7 @@ fn listen_for_sigterm(app: &AppHandle) {
         };
         // Logout and `systemctl stop` send SIGTERM; later signals only repeat it.
         while terminate.recv().await.is_some() {
-            crate::settings::end_session(&app, SESSION_END_BUDGET);
+            crate::commands::settings::end_session(&app, SESSION_END_BUDGET);
         }
     });
 }
