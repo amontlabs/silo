@@ -1426,6 +1426,7 @@ fn run_msb_process(
             .find(|argument| !argument.starts_with('-'))
         {
             crate::ssh_access::close_computer(computer);
+            crate::desktop_viewer_api::close_computer(computer);
         }
     }
     ensure_runtime_files(paths)?;
