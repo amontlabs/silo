@@ -27,12 +27,17 @@ const REQUEST_ID_BUDGET: u64 = 60_000;
 /// How long a command waits for the engine to be reachable before it reports failure.
 const CONNECT_PATIENCE: Duration = Duration::from_secs(20);
 const JOB_POLL: Duration = Duration::from_millis(750);
+/// After a shutdown job, how long a vanished engine is given to come back before it counts as done.
+const EXIT_GRACE: Duration = Duration::from_secs(3);
 
 /// An engine failure in the shape the UI's bridge-error contract parses.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct EngineError {
     pub code: String,
     pub message: String,
+    /// The engine could not be reached at all, as opposed to answering with an error.
+    #[serde(skip)]
+    pub unreachable: bool,
 }
 
 impl EngineError {
@@ -40,6 +45,15 @@ impl EngineError {
         Self {
             code: "internal".to_owned(),
             message: message.into(),
+            unreachable: false,
+        }
+    }
+
+    pub(crate) fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            code: "not_found".to_owned(),
+            message: message.into(),
+            unreachable: false,
         }
     }
 
@@ -47,6 +61,7 @@ impl EngineError {
         Self {
             code: "unsupported_remote_operation".to_owned(),
             message: message.into(),
+            unreachable: false,
         }
     }
 
@@ -80,6 +95,7 @@ impl From<ClientError> for EngineError {
                 Self {
                     code,
                     message: remote.message,
+                    unreachable: false,
                 }
             }
             ClientError::Disconnected => {
@@ -245,8 +261,8 @@ impl EngineClient {
     }
 
     /// A live connection, waiting up to `CONNECT_PATIENCE` for the supervisor to make one.
-    async fn connected(&self) -> Result<Connected, EngineError> {
-        let waited = tokio::time::timeout(CONNECT_PATIENCE, async {
+    async fn connected(&self, patience: Duration) -> Result<Connected, EngineError> {
+        let waited = tokio::time::timeout(patience, async {
             let mut receiver = self.current.subscribe();
             let connection = receiver
                 .wait_for(|connection| {
@@ -261,10 +277,13 @@ impl EngineClient {
         .await;
         match waited {
             Ok(Some(connected)) => Ok(connected),
-            _ => Err(EngineError::internal(match self.status() {
-                Status::Unavailable(message) => message,
-                _ => "Silo's engine is not reachable yet. Retry in a moment.".to_owned(),
-            })),
+            _ => Err(EngineError {
+                unreachable: true,
+                ..EngineError::internal(match self.status() {
+                    Status::Unavailable(message) => message,
+                    _ => "Silo's engine is not reachable yet. Retry in a moment.".to_owned(),
+                })
+            }),
         }
     }
 
@@ -278,7 +297,17 @@ impl EngineClient {
         params: Value,
         options: RequestOptions,
     ) -> Result<Value, EngineError> {
-        let connected = self.connected().await?;
+        self.call_patiently(method, params, options, CONNECT_PATIENCE).await
+    }
+
+    async fn call_patiently(
+        &self,
+        method: &str,
+        params: Value,
+        options: RequestOptions,
+        patience: Duration,
+    ) -> Result<Value, EngineError> {
+        let connected = self.connected(patience).await?;
         if connected.client.requests_sent() >= REQUEST_ID_BUDGET {
             // Start a new session before the engine refuses more ids on this one.
             connected.client.close().await;
@@ -310,10 +339,7 @@ impl EngineClient {
             })
             .and_then(|computer| computer.get("id").and_then(Value::as_str))
             .map(str::to_owned)
-            .ok_or_else(|| EngineError {
-                code: "not_found".to_owned(),
-                message: "This computer no longer exists on this device.".to_owned(),
-            })
+            .ok_or_else(|| EngineError::not_found("This computer no longer exists on this device."))
     }
 
     /// The Linux application state: what `computers.list` calls `linux`.
@@ -346,11 +372,32 @@ impl EngineClient {
     }
 
     pub(crate) async fn wait_job(&self, job_id: &str) -> Result<Value, EngineError> {
+        self.wait_job_with(job_id, false).await
+    }
+
+    /// Like `run_job` for a method after which the engine itself may exit (a shutdown): an
+    /// engine that is gone for good once the job was accepted has finished the job.
+    pub(crate) async fn run_job_until_exit(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, EngineError> {
+        let started = self.call(method, params).await?;
+        let job_id = started
+            .get("jobId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| EngineError::internal("The engine did not accept the job."))?
+            .to_owned();
+        self.wait_job_with(&job_id, true).await
+    }
+
+    async fn wait_job_with(&self, job_id: &str, exit_is_done: bool) -> Result<Value, EngineError> {
         loop {
             let wake = self.finished.notified();
             tokio::pin!(wake);
             wake.as_mut().enable();
-            match self.job_outcome(job_id).await {
+            let patience = if exit_is_done { EXIT_GRACE } else { CONNECT_PATIENCE };
+            match self.job_outcome(job_id, patience).await {
                 Ok(Some(outcome)) => {
                     // The outcome is presented to the caller; the engine may now drop it.
                     let _ = self
@@ -359,8 +406,11 @@ impl EngineClient {
                     return outcome;
                 }
                 Ok(None) => {}
+                // The engine stayed unreachable for the whole patience: for a shutdown that is
+                // the engine having exited after it stopped the computers.
+                Err(error) if error.unreachable && exit_is_done => return Ok(Value::Null),
                 // A lost connection is not a failed job; wait for the next connection.
-                Err(error) if error.message.contains("connection") || error.message.contains("reachable") => {}
+                Err(error) if error.unreachable || error.message.contains("connection") => {}
                 Err(error) => return Err(error),
             }
             tokio::select! {
@@ -374,6 +424,7 @@ impl EngineClient {
     async fn job_outcome(
         &self,
         job_id: &str,
+        patience: Duration,
     ) -> Result<Option<Result<Value, EngineError>>, EngineError> {
         let mut text = String::new();
         let mut offset: Option<u64> = None;
@@ -382,7 +433,9 @@ impl EngineClient {
             if let Some(offset) = offset {
                 params["offsetBytes"] = json!(offset);
             }
-            let reply = self.call("operations.job.get", params).await?;
+            let reply = self
+                .call_patiently("operations.job.get", params, RequestOptions::default(), patience)
+                .await?;
             if reply.get("state").and_then(Value::as_str) != Some("finished") {
                 return Ok(None);
             }
@@ -421,6 +474,7 @@ fn outcome_result(outcome: &Value) -> Result<Value, EngineError> {
                 .and_then(Value::as_str)
                 .unwrap_or("The operation failed.")
                 .to_owned(),
+            unreachable: false,
         });
     }
     Ok(outcome.get("result").cloned().unwrap_or(Value::Null))

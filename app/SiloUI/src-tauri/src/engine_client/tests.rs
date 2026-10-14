@@ -140,3 +140,31 @@ async fn an_unavailable_engine_is_reported_with_the_launcher_message() {
     );
     assert_eq!(sink.connections.lock().unwrap().first(), Some(&false));
 }
+
+#[tokio::test]
+async fn a_shutdown_job_ends_when_the_engine_exits_after_stopping_the_computers() {
+    let polls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let seen = polls.clone();
+    let fake = Arc::new(FakeEngine::start(move |method, _| match method {
+        "engine.shutdown" => ok(json!({"jobId": "job:3"})),
+        "operations.job.get" => {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            ok(json!({"jobId": "job:3", "state": "running"}))
+        }
+        _ => ok(json!({"subscription": "sub"})),
+    }));
+    let (client, _sink) = connected_client(&fake).await;
+    let stopper = fake.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        stopper.stop();
+    });
+    let result = client
+        .run_job_until_exit("engine.shutdown", json!({"stopComputers": true, "reason": "user"}))
+        .await
+        .unwrap();
+    assert_eq!(result, Value::Null);
+    assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    // An ordinary job keeps waiting through a lost connection instead of inventing a result.
+    assert!(fake.calls("operations.job.acknowledge").is_empty());
+}

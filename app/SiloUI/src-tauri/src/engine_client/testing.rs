@@ -35,6 +35,7 @@ pub(crate) struct FakeEngine {
     pub socket: PathBuf,
     _directory: tempfile::TempDir,
     shared: Arc<Shared>,
+    acceptor: tokio::task::JoinHandle<()>,
 }
 
 impl FakeEngine {
@@ -52,7 +53,7 @@ impl FakeEngine {
             connections: Mutex::new(0),
         });
         let accept = shared.clone();
-        tokio::spawn(async move {
+        let acceptor = tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     return;
@@ -65,6 +66,7 @@ impl FakeEngine {
             socket,
             _directory: directory,
             shared,
+            acceptor,
         }
     }
 
@@ -90,6 +92,13 @@ impl FakeEngine {
 
     pub(crate) fn drop_connections(&self) {
         self.shared.kill.notify_waiters();
+    }
+
+    /// The engine exits: connections end and nothing listens any more.
+    pub(crate) fn stop(&self) {
+        self.acceptor.abort();
+        let _ = std::fs::remove_file(&self.socket);
+        self.drop_connections();
     }
 
     pub(crate) fn connections(&self) -> u32 {

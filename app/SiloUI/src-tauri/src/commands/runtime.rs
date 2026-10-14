@@ -181,10 +181,7 @@ pub(crate) async fn cancel_queue_entry(engine: &EngineClient, id: u64) -> Result
         .filter_map(|list| queue.get(list).and_then(Value::as_array))
         .flatten()
         .find(|entry| entry.get("id").and_then(Value::as_u64) == Some(id))
-        .ok_or_else(|| EngineError {
-            code: "not_found".to_owned(),
-            message: "That operation is no longer in the queue.".to_owned(),
-        })?
+        .ok_or_else(|| EngineError::not_found("That operation is no longer in the queue."))?
         .get("jobId")
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::internal("That operation cannot be cancelled."))?

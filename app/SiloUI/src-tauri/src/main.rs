@@ -8,6 +8,7 @@ mod desktop_viewer_bench;
 mod engine_client;
 mod engine_context;
 mod host_launch;
+mod quit;
 #[cfg(test)]
 mod github_build_tests;
 #[cfg(test)]
