@@ -5,8 +5,13 @@ use std::{borrow::Cow, fmt, str::FromStr};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
-/// Stable wire error code. The first eight names are in today's bridge enum;
-/// the remaining variants are the pending A-10 codes in the API spec.
+use crate::methods::{
+    computers::ComputerConfigurationProgress, exports::BackupOperation, files::TransferProgress,
+    operations::OperationKind, push::PushOperation, updates::UpdateProgressData,
+};
+
+/// Stable snake_case wire error code. Existing values are sourced from
+/// `app/SiloUI/src-tauri/src/bridge_error.rs`; pending values are listed in 95 A-10.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -99,7 +104,7 @@ impl JsonSchema for JobId {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         schemars::json_schema!({
             "type": "string",
-            "pattern": "^(setup|transfer|push|exports|inspect):.+|job:[0-9]+$",
+            "pattern": "^((setup|transfer|push|exports|inspect):.+|job:[0-9]+)$",
             "description": "Opaque id in setup:, transfer:, push:, exports:, inspect:, or decimal job: space"
         })
     }
@@ -141,7 +146,147 @@ fn validate_job_id(value: &str) -> Result<(), JobIdError> {
     }
 }
 
-// The remaining job contract types are completed in the domain modules.
+/// The values emitted as the `data` field of `operations.job.progress`.
+///
+/// Payload member names mirror their source serde structs. The macOS contract
+/// uses `computerId` as stated in 05 §4.2 E; the current MacosComputer row uses
+/// `id`, a source/spec discrepancy recorded in the implementation report.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(
+    tag = "source",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum JobProgress {
+    Setup {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: ComputerConfigurationProgress,
+    },
+    Lifecycle {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: LifecycleProgress,
+    },
+    Transfer {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: TransferProgress,
+    },
+    Backup {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: BackupOperation,
+    },
+    Push {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: PushOperation,
+    },
+    Macos {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: MacosJobProgress,
+    },
+    Update {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: UpdateProgressData,
+    },
+}
+
+/// Canonical lifecycle payload at `runtime.rs:3343`; the step values mirror
+/// `app/SiloUI/src-tauri/src/runtime.rs::LifecycleStep` (line 1275).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleProgress {
+    pub computer_id: String,
+    pub action: String,
+    pub step: LifecycleStep,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LifecycleStep {
+    Boot,
+    Network,
+    Account,
+}
+
+/// The macOS progress projection from 05 §4.2 E (`MacosComputer` row fields).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MacosJobProgress {
+    pub computer_id: String,
+    pub state: crate::methods::computers::MacosComputerState,
+    pub progress: Option<f64>,
+    pub detail: Option<String>,
+    pub checkpoint_operation: Option<crate::methods::checkpoints::Operation>,
+}
+
+/// One terminal job event. `result` remains the untagged final JSON value
+/// returned by the method that started the job. The schema's
+/// `x-silo-job-results` catalogue maps methods to their terminal result schemas.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobFinished {
+    pub job_id: JobId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<crate::transport::ErrorObject>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobOutcome {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<crate::transport::ErrorObject>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Waiting,
+    Running,
+    Finished,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobLookupResult {
+    pub job_id: JobId,
+    pub state: JobState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<JobOutcome>,
+}
+
+/// Kept in this module as a re-export for callers that model the shared job
+/// acknowledgement contract directly.
+pub use crate::methods::operations::AcknowledgeJobParams;
 
 #[cfg(test)]
 mod tests {
@@ -172,5 +317,26 @@ mod tests {
         for value in ["x:1", "setup:", "job:abc", "job:-1", "no-colon"] {
             assert!(JobId::new(value).is_err(), "accepted {value}");
         }
+    }
+
+    #[test]
+    fn job_progress_uses_camel_case_for_envelope_and_source_fields() {
+        let progress = JobProgress::Lifecycle {
+            job_id: JobId::new("job:12").unwrap(),
+            kind: Some(OperationKind::Lifecycle),
+            computer_id: Some("computer-1".into()),
+            data: LifecycleProgress {
+                computer_id: "computer-1".into(),
+                action: "start".into(),
+                step: LifecycleStep::Boot,
+            },
+        };
+        let value = serde_json::to_value(progress).unwrap();
+        assert_eq!(value["source"], "lifecycle");
+        assert_eq!(value["jobId"], "job:12");
+        assert_eq!(value["computerId"], "computer-1");
+        assert_eq!(value["data"]["computerId"], "computer-1");
+        assert!(value.get("job_id").is_none());
+        assert!(value["data"].get("computer_id").is_none());
     }
 }

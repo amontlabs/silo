@@ -2,13 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::methods::MethodName;
+
 /// A canonical multiplexed request. `operationId` and `startWithinMs` are
 /// present only for methods that use change admission semantics.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestEnvelope<P> {
     pub id: String,
-    pub method: String,
+    pub method: MethodName,
     pub params: P,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
@@ -27,7 +29,7 @@ pub struct ErrorObject {
 
 /// A response echoes its request id and contains exactly one success or error.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum ResponseEnvelope<T> {
     Success { id: String, result: T },
     Error { id: String, error: ErrorObject },
@@ -67,7 +69,7 @@ pub struct HandshakeResult {
     pub device_id: String,
     pub name: String,
     pub protocol: u32,
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<MethodName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
 }

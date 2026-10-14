@@ -3,7 +3,9 @@
 //! This crate intentionally has no dependency on the Tauri application or the
 //! engine implementation. The engine workspace can add it as a path member.
 
+pub mod events;
 pub mod jobs;
+pub mod methods;
 pub mod transport;
 
 pub use jobs::{ErrorCode, JobId};
