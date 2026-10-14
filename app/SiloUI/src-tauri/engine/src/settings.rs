@@ -976,6 +976,25 @@ mod tests {
     use silo_engine::EngineRuntimeState;
 
     #[test]
+    fn the_automatic_checkpoint_count_accepts_only_whole_numbers_that_fit_a_u32() {
+        let accepted =
+            |value: Value| valid_setting("automaticCheckpointRetentionCount", &value) == Some(true);
+        for value in [json!(0), json!(3), json!(u32::MAX)] {
+            assert!(accepted(value.clone()), "{value}");
+        }
+        for value in [
+            json!(-1),
+            json!(1.5),
+            json!("3"),
+            json!(null),
+            json!(u64::from(u32::MAX) + 1),
+        ] {
+            assert!(!accepted(value.clone()), "{value}");
+        }
+        assert_eq!(DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT, 3);
+    }
+
+    #[test]
     fn settings_shutdown_and_startup_state_belong_to_their_engine_instance() {
         let first_directory = tempfile::tempdir().unwrap();
         let second_directory = tempfile::tempdir().unwrap();
