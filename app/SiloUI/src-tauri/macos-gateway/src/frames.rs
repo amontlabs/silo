@@ -23,6 +23,7 @@ pub struct FrameStats {
     guest_frames_truncated: AtomicU64,
     guest_mac_spoof: AtomicU64,
     guest_ip_spoof: AtomicU64,
+    arp_about_guest_dropped: AtomicU64,
     ipv6_rejected: AtomicU64,
     unsupported_ethertype: AtomicU64,
     engine_frames_queued: AtomicU64,
@@ -46,6 +47,7 @@ pub struct FrameCounters {
     pub guest_frames_truncated: u64,
     pub guest_mac_spoof: u64,
     pub guest_ip_spoof: u64,
+    pub arp_about_guest_dropped: u64,
     pub ipv6_rejected: u64,
     pub unsupported_ethertype: u64,
     pub engine_frames_queued: u64,
@@ -71,6 +73,7 @@ impl FrameStats {
             guest_frames_truncated: self.guest_frames_truncated.load(Ordering::Relaxed),
             guest_mac_spoof: self.guest_mac_spoof.load(Ordering::Relaxed),
             guest_ip_spoof: self.guest_ip_spoof.load(Ordering::Relaxed),
+            arp_about_guest_dropped: self.arp_about_guest_dropped.load(Ordering::Relaxed),
             ipv6_rejected: self.ipv6_rejected.load(Ordering::Relaxed),
             unsupported_ethertype: self.unsupported_ethertype.load(Ordering::Relaxed),
             engine_frames_queued: self.engine_frames_queued.load(Ordering::Relaxed),
@@ -237,6 +240,16 @@ impl<'a> FramePump<'a> {
                 }
             }
 
+            if arp_target(frame) == Some(self.guest_ipv4) {
+                // The guest announces its address, or asks about it, to find out whether another
+                // host holds it. The engine answers any ARP request, so its reply would say that
+                // another host (the gateway) has the guest's own address, and macOS gives the
+                // address up ("address in use").
+                self.stats
+                    .arp_about_guest_dropped
+                    .fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
             if self.backend.write_frame(0, frame).is_err() {
                 self.stats
                     .backend_write_errors
@@ -287,6 +300,13 @@ impl<'a> FramePump<'a> {
                             continue;
                         }
                     }
+                    if arp_sender(frame) == Some(self.guest_ipv4) {
+                        // Nothing but the guest may claim the guest's address.
+                        self.stats
+                            .arp_about_guest_dropped
+                            .fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
                     if self.pending.push(frame.to_vec()).is_err() {
                         self.stats
                             .pending_queue_full
@@ -327,7 +347,14 @@ impl<'a> FramePump<'a> {
                 )
             };
             if sent < 0 {
-                Err(io::Error::last_os_error())
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ENOBUFS) {
+                    // A datagram socket whose receiver has not read for a while (the guest is
+                    // still booting) answers ENOBUFS instead of EAGAIN. The link is lossy
+                    // like any other: the frame is dropped and the senders retry.
+                    return Ok(frame.len());
+                }
+                Err(error)
             } else {
                 Ok(sent as usize)
             }
@@ -406,6 +433,24 @@ pub enum FrameValidationError {
     MalformedIpv4,
     GuestMacSpoof,
     GuestIpSpoof,
+}
+
+/// The target protocol address of an ARP frame.
+fn arp_target(frame: &[u8]) -> Option<Ipv4Addr> {
+    arp_address(frame, 24)
+}
+
+/// The sender protocol address of an ARP frame.
+fn arp_sender(frame: &[u8]) -> Option<Ipv4Addr> {
+    arp_address(frame, 14)
+}
+
+fn arp_address(frame: &[u8], offset: usize) -> Option<Ipv4Addr> {
+    if frame.len() < ETH_HEADER_LEN + 28 || ether_type(frame) != 0x0806 {
+        return None;
+    }
+    let bytes = &frame[ETH_HEADER_LEN + offset..ETH_HEADER_LEN + offset + 4];
+    Some(Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]))
 }
 
 pub fn validate_guest_frame(
@@ -771,6 +816,122 @@ mod tests {
         }
         assert_eq!(delivered, BURST);
         assert!(shared.rx_ring.is_empty());
+    }
+
+    /// macOS gives its address up when something else answers for it, and the engine answers
+    /// every ARP request, so the guest's announcement of its own address must not reach it.
+    #[test]
+    fn nothing_answers_for_the_guests_own_address() {
+        use microsandbox_network::netstack::{backend::SmoltcpBackend, shared::SharedState};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+        use std::sync::Arc;
+
+        let shared = Arc::new(SharedState::new(1024));
+        let (gateway_end, guest_end) = UnixDatagram::pair().unwrap();
+        guest_end.set_nonblocking(true).unwrap();
+        let stats = FrameStats::default();
+        let mut pump = FramePump::new(
+            gateway_end.as_raw_fd(),
+            GUEST_IP,
+            GUEST_MAC,
+            1500,
+            &stats,
+            Box::new(SmoltcpBackend::new(shared.clone())),
+        );
+        let run = |pump: &mut FramePump| {
+            let events = pump.poll_events();
+            let mut pollfds = [events.frame, events.backend];
+            let ready = unsafe { libc::poll(pollfds.as_mut_ptr(), 2, 0) };
+            assert!(ready >= 0);
+            pump.service(pollfds[0].revents, pollfds[1].revents)
+                .unwrap();
+        };
+        let dropped = || {
+            stats
+                .snapshot_with_backend_tx_ring_drops(0)
+                .arp_about_guest_dropped
+        };
+        let mut buffer = [0u8; FRAME_BUFFER_CAP];
+
+        // The guest's announcement (sender and target are its own address) never reaches the engine.
+        let mut announcement = arp_frame(GUEST_MAC, GUEST_IP);
+        announcement[ETH_HEADER_LEN + 24..ETH_HEADER_LEN + 28].copy_from_slice(&GUEST_IP.octets());
+        assert_eq!(arp_target(&announcement), Some(GUEST_IP));
+        guest_end.send(&announcement).unwrap();
+        run(&mut pump);
+        assert_eq!(dropped(), 1);
+        assert_eq!(
+            stats
+                .snapshot_with_backend_tx_ring_drops(0)
+                .guest_to_engine_frames,
+            0
+        );
+
+        // Its question about the gateway does.
+        guest_end.send(&arp_frame(GUEST_MAC, GUEST_IP)).unwrap();
+        run(&mut pump);
+        assert_eq!(
+            stats
+                .snapshot_with_backend_tx_ring_drops(0)
+                .guest_to_engine_frames,
+            1
+        );
+
+        // A reply that claims the guest's address never reaches the guest; the engine's request
+        // for the guest, and a reply for another address, do.
+        let mut claim = arp_frame([0x02, 0, 0, 0, 0, 1], GUEST_IP);
+        claim[ETH_HEADER_LEN + 6..ETH_HEADER_LEN + 8].copy_from_slice(&2u16.to_be_bytes());
+        assert_eq!(arp_sender(&claim), Some(GUEST_IP));
+        shared.rx_ring.push(claim).unwrap();
+        shared.rx_wake.wake();
+        run(&mut pump);
+        assert!(guest_end.recv(&mut buffer).is_err());
+        assert_eq!(dropped(), 2);
+
+        let mut request = arp_frame([0x02, 0, 0, 0, 0, 1], Ipv4Addr::new(172, 16, 0, 1));
+        request[ETH_HEADER_LEN + 24..ETH_HEADER_LEN + 28].copy_from_slice(&GUEST_IP.octets());
+        shared.rx_ring.push(request).unwrap();
+        shared.rx_wake.wake();
+        run(&mut pump);
+        assert!(guest_end.recv(&mut buffer).is_ok());
+        assert_eq!(dropped(), 2);
+    }
+
+    /// While the guest boots nothing reads the frame socket. macOS then answers ENOBUFS, which
+    /// used to stop the gateway ("The computer network gateway is unavailable").
+    #[test]
+    fn a_full_guest_queue_drops_frames_instead_of_stopping_the_gateway() {
+        use microsandbox_network::netstack::{backend::SmoltcpBackend, shared::SharedState};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+        use std::sync::Arc;
+
+        let shared = Arc::new(SharedState::new(1024));
+        let (gateway_end, _guest_end) = UnixDatagram::pair().unwrap();
+        gateway_end.set_nonblocking(true).unwrap();
+        let stats = FrameStats::default();
+        let mut pump = FramePump::new(
+            gateway_end.as_raw_fd(),
+            GUEST_IP,
+            GUEST_MAC,
+            1500,
+            &stats,
+            Box::new(SmoltcpBackend::new(shared)),
+        );
+        // Nothing reads the other end, so the queue fills up.
+        let frame = ipv4_frame(GUEST_MAC, GUEST_IP);
+        let mut filled = false;
+        for _ in 0..100_000 {
+            if gateway_end.send(&frame).is_err() {
+                filled = true;
+                break;
+            }
+        }
+        assert!(filled, "the queue never filled");
+        pump.pending.push(frame).unwrap();
+        pump.flush_pending(1).unwrap();
+        assert!(pump.pending.is_empty());
     }
 
     fn ipv4_frame(source_mac: [u8; 6], source_ip: Ipv4Addr) -> Vec<u8> {
