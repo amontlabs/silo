@@ -106,7 +106,7 @@ fn main() {
             Ok(params) => remote::run_remote_stream(&args[2], "guest.ssh", params),
             Err(error) => Err(error),
         }),
-        Some(editor::TRANSPORT_MODE) => Some(editor::run_transport(&args[2..])),
+        Some(editor::TRANSPORT_MODE) => Some(commands::editor::run_transport(&args[2..])),
         _ => None,
     };
     if let Some(result) = bridge {
@@ -181,37 +181,37 @@ fn main() {
             settings::enable_quit_confirmation,
             settings::answer_quit_request,
             tray::update_tray,
-            host_push_operations::start_repository_push,
-            host_push_operations::repository_push_status,
-            host_push::dismiss_repository_push,
-            files::list_computer_directory,
-            transfer::choose_upload_files,
-            transfer::upload_files,
-            transfer::download_file,
-            transfer::cancel_transfer,
-            network::read_network_state,
-            network::save_network_port,
-            network::remove_network_port,
-            network::open_network_port,
-            ssh_access::read_ssh_access_state,
-            ssh_access::save_ssh_access,
-            ssh_connection::ssh_connection,
-            secrets::read_secrets_state,
-            secrets::save_secret,
-            secrets::remove_secret,
-            secrets::retry_secret,
-            github::read_github_state,
-            github::personal_token::save_github_personal_token,
-            github::personal_token::remove_github_personal_token,
-            github::connect_github,
-            github::cancel_github_connection,
-            github::reopen_github_authorization,
-            github::manage_github_repositories,
-            github::disconnect_github,
-            github::set_github_access_enabled,
-            github::save_github_configuration,
-            github::retry_github_configuration,
-            github::refresh_github_repositories,
+            commands::host_push::start_repository_push,
+            commands::host_push::repository_push_status,
+            commands::host_push::dismiss_repository_push,
+            commands::files::list_computer_directory,
+            commands::transfer::choose_upload_files,
+            commands::transfer::upload_files,
+            commands::transfer::download_file,
+            commands::transfer::cancel_transfer,
+            commands::network::read_network_state,
+            commands::network::save_network_port,
+            commands::network::remove_network_port,
+            commands::network::open_network_port,
+            commands::ssh_access::read_ssh_access_state,
+            commands::ssh_access::save_ssh_access,
+            commands::ssh_access::ssh_connection,
+            commands::secrets::read_secrets_state,
+            commands::secrets::save_secret,
+            commands::secrets::remove_secret,
+            commands::secrets::retry_secret,
+            commands::github::read_github_state,
+            commands::github::save_github_personal_token,
+            commands::github::remove_github_personal_token,
+            commands::github::connect_github,
+            commands::github::cancel_github_connection,
+            commands::github::reopen_github_authorization,
+            commands::github::manage_github_repositories,
+            commands::github::disconnect_github,
+            commands::github::set_github_access_enabled,
+            commands::github::save_github_configuration,
+            commands::github::retry_github_configuration,
+            commands::github::refresh_github_repositories,
             settings::initialize_settings,
             settings::read_settings,
             settings::update_settings,
@@ -222,24 +222,24 @@ fn main() {
             settings::complete_settings_flush,
             settings::cancel_settings_flush,
             settings::read_shutdown_state,
-            remote::connections_status,
-            remote::authorize_device,
-            remote::setup_device_key,
-            remote_network::remote_network_state,
-            remote_ssh_access::remote_ssh_access_state,
-            remote_ssh_access::remote_save_ssh_access,
-            remote_network::remote_save_network_port,
-            remote_network::remote_remove_network_port,
-            remote_network::remote_open_network_port,
-            remote::set_connections_enabled,
-            remote::device_list,
-            remote::connect_device,
-            remote::remove_device,
-            remote::device_snapshot,
-            remote::remote_computer_action,
-            remote::remote_checkpoint_action,
-            remote::remote_upsert_computer,
-            remote::remote_delete_computer,
+            commands::remote::connections_status,
+            commands::remote::authorize_device,
+            commands::remote::setup_device_key,
+            commands::remote::remote_network_state,
+            commands::remote::remote_ssh_access_state,
+            commands::remote::remote_save_ssh_access,
+            commands::remote::remote_save_network_port,
+            commands::remote::remote_remove_network_port,
+            commands::remote::remote_open_network_port,
+            commands::remote::set_connections_enabled,
+            commands::remote::device_list,
+            commands::remote::connect_device,
+            commands::remote::remove_device,
+            commands::remote::device_snapshot,
+            commands::remote::remote_computer_action,
+            commands::remote::remote_checkpoint_action,
+            commands::remote::remote_upsert_computer,
+            commands::remote::remote_delete_computer,
             commands::system_integrations::read_system_integrations,
             commands::system_integrations::set_login_item,
             commands::system_integrations::request_notification_authorization,
@@ -247,7 +247,7 @@ fn main() {
             commands::notifications::clear_computer_notices,
             commands::system_integrations::open_integration_settings,
             commands::system_integrations::show_integration_error,
-            editor::read_editor_include_notice,
+            commands::editor::read_editor_include_notice,
             commands::applications::list_applications,
             commands::applications::choose_application,
             commands::dependencies::read_dependencies,
@@ -309,9 +309,9 @@ fn main() {
                 runtime_migration::install(app.handle())?;
                 computer_use::install(app.handle());
                 pre_upgrade_backup::install();
-                remote::start(app.handle().clone());
-                secrets::install(app.handle())?;
-                github::install(app.handle());
+                commands::remote::start(app.handle());
+                commands::secrets::install(app.handle())?;
+                commands::github::install(app.handle())?;
                 backup_controller::install(app.handle())?;
                 runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
@@ -347,8 +347,8 @@ fn main() {
                 titlebar::install(&window)?;
                 commands::notifications::install(app.handle());
                 updates::install(app.handle())?;
-                ssh_access::start_monitor(app.handle());
-                editor::refresh_transports(app.handle());
+                commands::ssh_access::start_monitor(app.handle());
+                commands::editor::refresh_transports(app.handle());
                 commands::runtime_storage::start_monitor(app.handle());
                 commands::startup::install(app.handle());
                 Ok(())

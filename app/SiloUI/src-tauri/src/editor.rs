@@ -13,7 +13,6 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 /// Serializes SSH key and configuration file writes only. Never hold it across
 /// remote calls, guest commands, probes or editor launches: the desktop viewer
@@ -29,109 +28,7 @@ fn files_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-pub(crate) fn open(app: &AppHandle, name: &str, path: Option<&str>) -> Result<(), String> {
-    if let Some((device, computer)) = crate::remote_access::target(name)? {
-        let path = path.unwrap_or("/workspace");
-        let (alias, _) = prepare_remote(app, &device, &computer, path)?;
-        let application = applications::selected_editor(app)?;
-        let command = applications::editor_command(&application)?;
-        let home = app.path().home_dir().map_err(|_| FAILED)?;
-        return launch_editor(
-            editor_launch(&command, &alias, path, &home)?,
-            EDITOR_EXIT_WINDOW,
-        );
-    }
-    require_openssh("open computer folders in your editor")?;
-    runtime::validate_name(name).map_err(|error| error.to_string())?;
-    let path = path.unwrap_or("/workspace");
-    validate_path(path)?;
-    let application = applications::selected_editor(app)?;
-    let command = applications::editor_command(&application)?;
-    let paths = runtime::runtime_paths(app)?;
-    let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
-    if !metadata
-        .computers
-        .iter()
-        .any(|configuration| configuration.name() == name)
-    {
-        return Err("This computer does not support local editor connections.".into());
-    }
-    crate::terminal::running_computer(&paths, name)?;
-    let user = crate::working_account::USER;
-    // Validate the exact folder inside the guest, as positional data, before handoff.
-    runtime::run_msb(
-        &paths,
-        &[
-            "exec".into(),
-            name.into(),
-            "--no-start".into(),
-            "--user".into(),
-            user.into(),
-            "--env".into(),
-            format!("USER={user}"),
-            "--env".into(),
-            format!("LOGNAME={user}"),
-            "--no-tty".into(),
-            "--quiet".into(),
-            "--timeout".into(),
-            "5s".into(),
-            "--".into(),
-            "test".into(),
-            "-d".into(),
-            path.into(),
-        ],
-        Duration::from_secs(8),
-    )
-    .map_err(|_| "This folder is unavailable inside the computer.")?;
-    let user_home = app.path().home_dir().map_err(|_| FAILED)?;
-    let (alias, config) = prepare(&paths, &user_home, name)?;
-    let mut probe = Command::new("/usr/bin/ssh");
-    probe.args(["-F"]).arg(&config).args([
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=5",
-        &alias,
-        "true",
-    ]);
-    run(&mut probe, Duration::from_secs(10)).map_err(|_| {
-        "Could not connect to this computer over SSH. Retry after checking that it is running."
-    })?;
-    launch_editor(
-        editor_launch(&command, &alias, path, &user_home)?,
-        EDITOR_EXIT_WINDOW,
-    )
-}
-
-/// How long an editor launcher may take to report a failure. Launchers that
-/// are still running then (an editor started without its CLI) are left
-/// running and reaped in the background, never killed (G-06).
-const EDITOR_EXIT_WINDOW: Duration = Duration::from_secs(10);
-
-fn launch_editor(mut launch: Command, window: Duration) -> Result<(), String> {
-    const FAILED_LAUNCH: &str =
-        "The editor could not be opened. Check its installation and Remote SSH support.";
-    let mut child = applications::launch::sanitize_child(&mut launch)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| FAILED_LAUNCH)?;
-    let deadline = Instant::now() + window;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) | Err(_) => return Err(FAILED_LAUNCH.into()),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                std::thread::spawn(move || {
-                    let _ = child.wait();
-                });
-                return Ok(());
-            }
-        }
-    }
-}
+/// Opening an editor uses client-owned application settings and lives in `commands::editor`.
 
 /// Explains a missing system OpenSSH client instead of a generic failure.
 pub(crate) fn require_openssh(purpose: &str) -> Result<(), String> {
@@ -151,7 +48,7 @@ fn require_openssh_at(ssh: &Path, keygen: &Path, purpose: &str) -> Result<(), St
     }
 }
 
-fn validate_path(path: &str) -> Result<(), String> {
+pub(crate) fn validate_path(path: &str) -> Result<(), String> {
     if path.len() > 4096
         || path.bytes().any(|byte| byte.is_ascii_control())
         || !(path == "/workspace"
@@ -184,7 +81,7 @@ const VSCODE_SETTINGS: [(&str, bool); 4] = [
 
 /// The editor command for a computer folder: Zed receives its SSH URI; VS Code
 /// opens the Silo profile with the folder's Silo workspace file.
-fn editor_launch(
+pub(crate) fn editor_launch(
     command: &applications::launch::EditorCommand,
     alias: &str,
     path: &str,
@@ -420,6 +317,124 @@ fn prepare(
     Ok((alias, config))
 }
 
+/// Open an editor connection after the client adapter has resolved the selected editor.
+/// `paths` is absent only for a remote computer, which uses the persisted remote identity.
+pub(crate) fn open(
+    paths: Option<&RuntimePaths>,
+    user_home: &Path,
+    name: &str,
+    requested_path: Option<&str>,
+    command: &applications::launch::EditorCommand,
+) -> Result<(), String> {
+    let path = requested_path.unwrap_or("/workspace");
+    if let Some((device, computer)) = crate::remote_access::target(name)? {
+        let (alias, _) = prepare_remote(&device, &computer, path)?;
+        return launch_prepared(command, &alias, path, user_home);
+    }
+
+    require_openssh("open computer folders in your editor")?;
+    runtime::validate_name(name).map_err(|error| error.to_string())?;
+    validate_path(path)?;
+    let paths = paths.ok_or(FAILED)?;
+    open_local(paths, user_home, name, path, command)
+}
+
+pub(crate) fn open_local(
+    paths: &RuntimePaths,
+    user_home: &Path,
+    name: &str,
+    path: &str,
+    command: &applications::launch::EditorCommand,
+) -> Result<(), String> {
+    let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
+    if !metadata
+        .computers
+        .iter()
+        .any(|configuration| configuration.name() == name)
+    {
+        return Err("This computer does not support local editor connections.".into());
+    }
+    crate::terminal::running_computer(paths, name)?;
+    let user = crate::working_account::USER;
+    runtime::run_msb(
+        paths,
+        &[
+            "exec".into(),
+            name.into(),
+            "--no-start".into(),
+            "--user".into(),
+            user.into(),
+            "--env".into(),
+            format!("USER={user}"),
+            "--env".into(),
+            format!("LOGNAME={user}"),
+            "--no-tty".into(),
+            "--quiet".into(),
+            "--timeout".into(),
+            "5s".into(),
+            "--".into(),
+            "test".into(),
+            "-d".into(),
+            path.into(),
+        ],
+        Duration::from_secs(8),
+    )
+    .map_err(|_| "This folder is unavailable inside the computer.")?;
+    let (alias, config) = prepare(paths, user_home, name)?;
+    let mut probe = Command::new("/usr/bin/ssh");
+    probe.args(["-F"]).arg(&config).args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        &alias,
+        "true",
+    ]);
+    run(&mut probe, Duration::from_secs(10)).map_err(|_| {
+        "Could not connect to this computer over SSH. Retry after checking that it is running."
+    })?;
+    launch_prepared(command, &alias, path, user_home)
+}
+
+pub(crate) fn launch_prepared(
+    command: &applications::launch::EditorCommand,
+    alias: &str,
+    path: &str,
+    user_home: &Path,
+) -> Result<(), String> {
+    launch_editor(
+        editor_launch(command, alias, path, user_home)?,
+        EDITOR_EXIT_WINDOW,
+    )
+}
+
+const EDITOR_EXIT_WINDOW: Duration = Duration::from_secs(10);
+
+fn launch_editor(mut launch: Command, window: Duration) -> Result<(), String> {
+    const FAILED_LAUNCH: &str =
+        "The editor could not be opened. Check its installation and Remote SSH support.";
+    let mut child = applications::launch::sanitize_child(&mut launch)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| FAILED_LAUNCH)?;
+    let deadline = Instant::now() + window;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) | Err(_) => return Err(FAILED_LAUNCH.into()),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return Ok(());
+            }
+        }
+    }
+}
+
 /// The `Include` that makes the entries in `root` visible to the user's `ssh`.
 fn include_line(root: &Path) -> Result<String, String> {
     let mut pattern = String::new();
@@ -538,17 +553,17 @@ pub(crate) fn prepare_private_transport(
 /// per-purpose directory below the runtime's `ssh` folder. Nothing is added to the
 /// user's own SSH configuration.
 pub(crate) fn private_computer_transport(
-    app: &AppHandle,
+    paths: Option<&RuntimePaths>,
     computer: &str,
     purpose: &str,
 ) -> Result<(String, PathBuf), String> {
     if let Some((device, remote)) = crate::remote_access::target(computer)? {
-        return prepare_remote_private(app, &device, &remote, "/workspace");
+        return prepare_remote_private(&device, &remote, "/workspace");
     }
     runtime::validate_name(computer).map_err(|error| error.to_string())?;
-    let paths = runtime::runtime_paths(app)?;
+    let paths = paths.ok_or(FAILED)?;
     let directory = paths.home.join("ssh").join(purpose).join(computer);
-    prepare_private_transport(&paths, computer, &directory)
+    prepare_private_transport(paths, computer, &directory)
 }
 
 fn prepare_configuration(
@@ -730,22 +745,20 @@ pub(crate) fn authorize_remote(
 
 /// Prepare the pinned guest SSH identity without changing the user's SSH configuration.
 pub(crate) fn prepare_remote_private(
-    app: &AppHandle,
     device: &str,
     computer: &str,
     path: &str,
 ) -> Result<(String, PathBuf), String> {
-    prepare_remote_transport(app, device, computer, path, None, false)
+    prepare_remote_transport(device, computer, path, None, false)
         .map(|(alias, config, _)| (alias, config))
 }
 pub(crate) fn prepare_remote_network_private(
-    app: &AppHandle,
     device: &str,
     computer: &str,
     port: u16,
 ) -> Result<(String, PathBuf, std::net::IpAddr), String> {
     let (alias, config, address) =
-        prepare_remote_transport(app, device, computer, "/workspace", Some(port), true)?;
+        prepare_remote_transport(device, computer, "/workspace", Some(port), true)?;
     Ok((
         alias,
         config,
@@ -753,7 +766,6 @@ pub(crate) fn prepare_remote_network_private(
     ))
 }
 fn prepare_remote_transport(
-    app: &AppHandle,
     device: &str,
     computer: &str,
     path: &str,
@@ -763,8 +775,9 @@ fn prepare_remote_transport(
     validate_path(path)?;
     uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
     uuid::Uuid::parse_str(computer).map_err(|_| "Invalid computer identity.")?;
-    let home = app.path().home_dir().map_err(|_| FAILED)?;
-    let state = crate::channel::current().state_dir(&home);
+    let context = silo_engine::context::current().ok_or(FAILED)?;
+    let home = &context.paths().home;
+    let state = crate::channel::current().state_dir(home);
     crate::runtime::prepare_private_directory(&state).map_err(|e| e.to_string())?;
     let root = state.join("desktop-remote/ssh");
     let client = root.join(format!("{device}.key"));
@@ -776,7 +789,7 @@ fn prepare_remote_transport(
     };
     // The remote call can take minutes; keep the file lock free meanwhile.
     let (host_public, user, address) =
-        crate::remote_access::prepare(app, device, computer, &client_public, path, forwarding)?;
+        crate::remote_access::prepare(device, computer, &client_public, path, forwarding)?;
     let _guard = files_lock();
     let alias = format!(
         "{}-{device}-{computer}",
@@ -863,42 +876,15 @@ fn remote_proxy_for(device: &str, computer: &str, port: Option<u16>) -> Result<S
 /// run from an AppImage, whose bundled runtime has no stable path (G-12).
 pub(crate) const TRANSPORT_MODE: &str = "--msb-ssh-serve";
 
-/// Runs the bundled `msb ssh serve` in this AppImage's mount for an editor.
-pub(crate) fn run_transport(args: &[String]) -> Result<(), String> {
-    use std::os::unix::process::CommandExt;
+pub(crate) fn transport_args(args: &[String]) -> Result<(&str, &str), String> {
     let [home, name] = args else {
         return Err("Expected a runtime home and a computer name.".into());
     };
     runtime::validate_name(name).map_err(|error| error.to_string())?;
-    let home = Path::new(home);
-    if !home.is_absolute() {
+    if !Path::new(home).is_absolute() {
         return Err("Expected an absolute runtime home.".into());
     }
-    let executable = std::env::current_exe().map_err(|_| FAILED)?;
-    let bundle = tauri::utils::platform::bundle_type();
-    let appimage = std::env::var_os("APPDIR").map(PathBuf::from);
-    let msb = crate::bundled_tools::resolve(
-        &executable,
-        Path::new(""),
-        bundle.clone(),
-        appimage.as_deref(),
-    )?
-    .join("msb");
-    let library = runtime::bundled_runtime_library(&msb, Path::new(""), bundle);
-    let error = Command::new(&msb)
-        .args([
-            "ssh",
-            "serve",
-            name,
-            "--stdio",
-            "--no-start",
-            "--no-inactivity-timeout",
-        ])
-        .env("MSB_HOME", home)
-        .env("MSB_PATH", &msb)
-        .env("MSB_LIBKRUNFW_PATH", &library)
-        .exec();
-    Err(format!("Could not start the computer connection: {error}"))
+    Ok((home, name))
 }
 
 /// Replaces the value of every `directive` line of a configuration Silo wrote.
@@ -1094,9 +1080,14 @@ fn replace_manual_include(line: Option<String>) -> bool {
 }
 
 /// Tells the application when the line the user has to add changed.
-fn set_manual_include(app: &AppHandle, line: Option<String>) {
+fn set_manual_include(line: Option<String>) {
     if replace_manual_include(line) {
-        let _ = app.emit(MANUAL_INCLUDE_CHANGED, ());
+        if let Some(context) = silo_engine::context::current() {
+            context.publish(
+                silo_engine::context::Event::new(MANUAL_INCLUDE_CHANGED, serde_json::json!(null)),
+                silo_engine::context::Audience::All,
+            );
+        }
     }
 }
 
@@ -1108,22 +1099,12 @@ fn manual_include_needed(user_home: &Path, line: Option<String>) -> Option<Strin
 /// The `Include` line the user must add to their SSH configuration themselves
 /// because Silo can't change it, or `None`. Checked against the file at every
 /// read, so a line added since is no longer reported.
-#[tauri::command]
-pub(crate) async fn read_editor_include_notice(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<String>, String> {
-    if window.label() != "main" {
-        return Err("Only the main window can read the editor connection notice.".into());
-    }
-    let home = app.path().home_dir().map_err(|_| FAILED)?;
+pub(crate) fn read_editor_include_notice(home: &Path) -> Result<Option<String>, String> {
     let line = MANUAL_INCLUDE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    tauri::async_runtime::spawn_blocking(move || manual_include_needed(&home, line))
-        .await
-        .map_err(|_| FAILED.into())
+    Ok(manual_include_needed(home, line))
 }
 
 /// The runtime home the previous generation used, once the storage migration
@@ -1145,91 +1126,64 @@ fn previous_home_after_migration(app_data: &Path, user_home: &Path) -> Option<Pa
 /// AppImage, also points configurations written by an earlier run at the
 /// AppImage file instead of that run's mount (G-12, with C-19). Editors
 /// reconnecting after a restart then find the computer and the transport.
-pub(crate) fn refresh_transports(app: &AppHandle) {
+pub(crate) fn refresh_transports(
+    paths: Option<&RuntimePaths>,
+    app_data: &Path,
+    home: &Path,
+) -> Vec<String> {
     let appimage = applications::launch::tools_are_temporary();
-    let migrated = app
-        .path()
-        .app_data_dir()
-        .ok()
-        .zip(app.path().home_dir().ok())
-        .and_then(|(app_data, home)| {
-            Some((previous_home_after_migration(&app_data, &home)?, home))
-        });
+    let migrated = previous_home_after_migration(app_data, home).map(|previous| (previous, home));
     if !appimage && migrated.is_none() {
-        return;
+        return Vec::new();
     }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        if let (Some((previous_home, home)), Ok(paths)) = (migrated, runtime::runtime_paths(&app)) {
-            match repair_after_migration(&paths, &home, &previous_home) {
-                Repair::Done => set_manual_include(&app, None),
-                Repair::ManualInclude(line) => set_manual_include(&app, Some(line)),
-                Repair::Failed(error) => {
-                    set_manual_include(&app, None);
-                    crate::notifications::notify(
-                        &app,
-                        crate::notifications::failure(
-                            "startup:editor-connections",
-                            "Editor connections need attention",
-                            &format!("Editors that reconnect on their own may still open the computer copies kept from before the upgrade. {error}"),
-                            None,
-                        ),
-                    );
-                }
+    let mut failures = Vec::new();
+    if let (Some(paths), Some((previous_home, home))) = (paths, migrated) {
+        match repair_after_migration(paths, home, &previous_home) {
+            Repair::Done => set_manual_include(None),
+            Repair::ManualInclude(line) => set_manual_include(Some(line)),
+            Repair::Failed(error) => {
+                set_manual_include(None);
+                failures.push(format!("Editors that reconnect on their own may still open the computer copies kept from before the upgrade. {error}"));
             }
         }
-        if !appimage {
-            return;
+    }
+    if !appimage {
+        return failures;
+    }
+    let _guard = files_lock();
+    if let Some(paths) = paths {
+        if let Err(error) = refresh_configs(&paths.home.join("ssh"), &|name| {
+            local_proxy(paths, name).ok()
+        }) {
+            failures.push(error);
         }
-        let _guard = files_lock();
-        let mut failures = Vec::new();
-        if let Ok(paths) = runtime::runtime_paths(&app) {
-            if let Err(error) = refresh_configs(&paths.home.join("ssh"), &|name| {
-                local_proxy(&paths, name).ok()
-            }) {
-                failures.push(error);
-            }
-        }
-        if let Ok(home) = app.path().home_dir() {
-            if let Err(error) = refresh_configs(
-                &crate::channel::current()
-                    .state_dir(&home)
-                    .join("desktop-remote/ssh"),
-                &|stem| {
-                    let (device, computer) = (stem.get(..36)?, stem.get(37..)?);
-                    (stem.as_bytes().get(36) == Some(&b'-')).then_some(())?;
-                    remote_proxy(device, computer).ok()
-                },
-            ) {
-                failures.push(error);
-            }
-        }
-        drop(_guard);
-        if !failures.is_empty() {
-            crate::notifications::notify(
-                &app,
-                crate::notifications::failure(
-                    "startup:editor-connections",
-                    "Editor connections need attention",
-                    &failures.join(" "),
-                    None,
-                ),
-            );
-        }
-    });
+    }
+    if let Err(error) = refresh_configs(
+        &crate::channel::current()
+            .state_dir(home)
+            .join("desktop-remote/ssh"),
+        &|stem| {
+            let (device, computer) = (stem.get(..36)?, stem.get(37..)?);
+            (stem.as_bytes().get(36) == Some(&b'-')).then_some(())?;
+            remote_proxy(device, computer).ok()
+        },
+    ) {
+        failures.push(error);
+    }
+    failures
 }
 
 pub(crate) fn prepare_remote(
-    app: &AppHandle,
     device: &str,
     computer: &str,
     path: &str,
 ) -> Result<(String, PathBuf), String> {
-    let (alias, config) = prepare_remote_private(app, device, computer, path)?;
+    let (alias, config) = prepare_remote_private(device, computer, path)?;
     let root = config.parent().ok_or(FAILED)?;
-    let home = app.path().home_dir().map_err(|_| FAILED)?;
+    let context = silo_engine::context::current().ok_or(FAILED)?;
+    let home = &context.paths().home;
     let _guard = files_lock();
-    install_include(&home, &include_line(root)?)?;
+    install_include(home, &include_line(root)?)?;
     Ok((alias, config))
 }
 
@@ -1560,8 +1514,8 @@ mod tests {
         assert!(remote_proxy_for(device, computer, Some(3000))
             .unwrap()
             .ends_with(&format!("'--remote-guest' '{device}' '{computer}' '3000'")));
-        assert!(run_transport(&["relative".into(), "dev".into()]).is_err());
-        assert!(run_transport(&["/home".into(), "bad;name".into()]).is_err());
+        assert!(transport_args(&["relative".into(), "dev".into()]).is_err());
+        assert!(transport_args(&["/home".into(), "bad;name".into()]).is_err());
     }
 
     fn vscode(program: &str) -> applications::launch::EditorCommand {

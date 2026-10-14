@@ -3,7 +3,6 @@
 use crate::bridge_error::BridgeError;
 use crate::{remote, ssh_access::Settings};
 use serde_json::{json, Value};
-use tauri::AppHandle;
 
 fn project(mut value: Value, device: &str) -> Result<Value, String> {
     uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
@@ -23,57 +22,33 @@ fn project(mut value: Value, device: &str) -> Result<Value, String> {
     }
     Ok(value)
 }
-fn request(
-    app: &AppHandle,
-    device: &str,
-    method: &str,
-    params: Value,
-) -> Result<Value, BridgeError> {
+fn request(device: &str, method: &str, params: Value) -> Result<Value, BridgeError> {
     uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
-    project(
-        remote::call_remote_typed(app, device, method, params)?,
-        device,
-    )
-    .map_err(BridgeError::from)
+    project(remote::call_remote_typed(device, method, params)?, device).map_err(BridgeError::from)
 }
-#[tauri::command]
-pub(crate) async fn remote_ssh_access_state(
-    app: AppHandle,
-    device_id: String,
-) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        request(&app, &device_id, "ssh.access.state", json!({}))
-    })
-    .await
-    .map_err(|_| "Could not read remote SSH access.".to_string())?
+pub(crate) fn remote_ssh_access_state(device_id: &str) -> Result<Value, BridgeError> {
+    request(device_id, "ssh.access.state", json!({}))
 }
-#[tauri::command]
-pub(crate) async fn remote_save_ssh_access(
-    app: AppHandle,
-    device_id: String,
+pub(crate) fn remote_save_ssh_access(
+    device_id: &str,
     computer_id: String,
     enabled: bool,
     port: u16,
     bind_address: String,
     keys: Option<Vec<String>>,
 ) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        uuid::Uuid::parse_str(&computer_id).map_err(|_| "Invalid computer identity.")?;
-        let settings = Settings {
-            enabled,
-            port,
-            bind_address,
-            keys,
-        };
-        request(
-            &app,
-            &device_id,
-            "ssh.access.save",
-            json!({"computerId":computer_id,"settings":settings}),
-        )
-    })
-    .await
-    .map_err(|_| "Could not update remote SSH access.".to_string())?
+    uuid::Uuid::parse_str(&computer_id).map_err(|_| "Invalid computer identity.")?;
+    let settings = Settings {
+        enabled,
+        port,
+        bind_address,
+        keys,
+    };
+    request(
+        device_id,
+        "ssh.access.save",
+        json!({"computerId":computer_id,"settings":settings}),
+    )
 }
 
 #[cfg(test)]

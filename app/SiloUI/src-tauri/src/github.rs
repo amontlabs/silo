@@ -7,6 +7,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use silo_engine::{context, Audience, Event};
 use std::{
     fs,
     io::{Read, Write},
@@ -14,11 +15,54 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Condvar, Mutex, MutexGuard, OnceLock, PoisonError,
+        Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{Emitter, Manager};
+
+/// Runtime operations are supplied by the host adapter until runtime itself moves to the
+/// engine crate. The GitHub domain only sees these plain inputs and outputs.
+pub(crate) trait RuntimeAccess: Send + Sync + 'static {
+    fn scoped_cached_tokens(&self, computer: &str) -> Result<crate::runtime::ScopedTokens, String>;
+    fn github_policy_is_cached(&self, computer: &str, profile: &Value) -> Result<bool, String>;
+    fn apply_github_policy(
+        &self,
+        computer: &str,
+        revision: u64,
+        profile: &Value,
+    ) -> Result<(), String>;
+    fn apply_github_identity(&self, computer: &str, identity: &Value) -> Result<(), String>;
+    fn is_pending_restore(&self, computer: &str) -> bool;
+    fn is_device_removed(&self, computer: &str) -> bool;
+}
+
+static RUNTIME: OnceLock<Arc<dyn RuntimeAccess>> = OnceLock::new();
+
+pub(crate) fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
+    RUNTIME
+        .set(runtime)
+        .map_err(|_| "GitHub runtime access is already installed".to_owned())
+}
+
+fn runtime() -> Result<&'static Arc<dyn RuntimeAccess>, String> {
+    RUNTIME
+        .get()
+        .ok_or_else(|| "GitHub runtime access is unavailable.".to_owned())
+}
+
+fn path() -> Result<PathBuf, String> {
+    let context = context::current().ok_or("Application storage is unavailable.")?;
+    Ok(context.paths().app_data.join("github.json"))
+}
+
+fn publish_changed() {
+    if let Some(context) = context::current() {
+        context.publish(
+            Event::new("silo://application-state-changed", Value::Null),
+            Audience::All,
+        );
+    }
+}
 
 static OPERATION: Mutex<()> = Mutex::new(());
 // Serializes whole OAuth connection flows, including their waits for the browser.
@@ -131,8 +175,8 @@ fn take_restored(name: &str) -> bool {
 fn active() -> &'static Mutex<std::collections::HashMap<String, Vec<RuntimeGrant>>> {
     ACTIVE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
-fn active_key(app: &tauri::AppHandle, computer: &str) -> Result<String, String> {
-    Ok(format!("{}:{computer}", path(app)?.display()))
+fn active_key(computer: &str) -> Result<String, String> {
+    Ok(format!("{}:{computer}", path()?.display()))
 }
 static SESSION: OnceLock<String> = OnceLock::new();
 fn session() -> &'static str {
@@ -254,16 +298,21 @@ impl Drop for IntentTurn<'_> {
     }
 }
 static INTENTS: IntentQueue = IntentQueue::new();
-struct Connecting(tauri::AppHandle, u64);
+pub(crate) struct PendingIntent(IntentTicket<'static>);
+
+pub(crate) fn intent_ticket() -> PendingIntent {
+    PendingIntent(INTENTS.ticket())
+}
+struct Connecting(u64);
 impl Drop for Connecting {
     fn drop(&mut self) {
         if let Ok(mut pending) = AUTHORIZATION.lock() {
-            pending.clear(self.1);
+            pending.clear(self.0);
             if pending.0.is_none() {
                 CONNECTING.store(false, Ordering::SeqCst);
             }
         }
-        let _ = self.0.emit("silo://application-state-changed", ());
+        publish_changed();
     }
 }
 const CLIENT_SECRET: Option<&str> = option_env!("SILO_GITHUB_CLIENT_SECRET");
@@ -429,7 +478,6 @@ fn retry_credential_access() {
 // This observation contains public lifetime/error metadata only, never a token.
 type CredentialObservation = Option<Result<Option<u64>, String>>;
 static CREDENTIAL_OBSERVATION: Mutex<CredentialObservation> = Mutex::new(None);
-static OBSERVATION_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 fn publish_credential_observation(value: Result<Option<u64>, String>) {
     if let Ok(mut observed) = CREDENTIAL_OBSERVATION.lock() {
         if observed.as_ref() == Some(&value) {
@@ -437,9 +485,7 @@ fn publish_credential_observation(value: Result<Option<u64>, String>) {
         }
         *observed = Some(value);
     }
-    if let Some(app) = OBSERVATION_APP.get() {
-        let _ = app.emit("silo://application-state-changed", ());
-    }
+    publish_changed();
 }
 fn observe_credential_read(
     read: impl FnOnce() -> Result<Option<Credential>, String>,
@@ -572,13 +618,9 @@ fn stale_save(d: &Document, computer: &str, base: Option<u64>) -> bool {
 
 /// Copy the source's current GitHub assignment for a stopped checkpoint fork.
 /// The child obtains its own runtime identity and resolves credentials at Start.
-pub(crate) fn fork_assignment(
-    app: &tauri::AppHandle,
-    source: &str,
-    target: &str,
-) -> Result<(), String> {
+pub(crate) fn fork_assignment(source: &str, target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
-    let mut document = load(app)?;
+    let mut document = load()?;
     if let Some(mut assignment) = document
         .computers
         .iter()
@@ -598,18 +640,18 @@ pub(crate) fn fork_assignment(
         if !document.identity_pending.iter().any(|name| name == target) {
             document.identity_pending.push(target.into());
         }
-        save(app, &document)?;
+        save(&document)?;
     }
     Ok(())
 }
 
-pub(crate) fn forget_fork_assignment(app: &tauri::AppHandle, target: &str) -> Result<(), String> {
+pub(crate) fn forget_fork_assignment(target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
-    let mut document = load(app)?;
+    let mut document = load()?;
     forget_computer(&mut document, target);
     document.revision = next_policy_revision(document.revision)?;
     stamp(&mut document, target, None);
-    save(app, &document)
+    save(&document)
 }
 
 /// Remove every saved choice and pending result for a computer. Returns whether any existed.
@@ -663,9 +705,7 @@ pub(crate) fn computer_removed(computer: &str) -> Result<(), String> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .retain(|name| name != computer);
-    if let Some(app) = OBSERVATION_APP.get() {
-        let _ = app.emit("silo://application-state-changed", ());
-    }
+    publish_changed();
     schedule(Duration::ZERO);
     Ok(())
 }
@@ -763,13 +803,6 @@ fn store_entry(entry: &keyring::Entry, c: &Credential) -> Result<(), String> {
         .set_password(&serde_json::to_string(c).map_err(|_| "Cannot encode GitHub credentials.")?)
         .map_err(|_| "Cannot save GitHub credentials in the system credential store.".into())
 }
-fn path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Cannot locate application data.")?
-        .join("github.json"))
-}
 #[cfg(test)]
 thread_local! {
     static TEST_DOCUMENT: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
@@ -779,17 +812,17 @@ thread_local! {
 pub(crate) fn use_test_document(path: Option<PathBuf>) {
     TEST_DOCUMENT.with(|test| *test.borrow_mut() = path);
 }
-/// The GitHub document for entry points without an app handle (the runtime's delete path).
-/// `None` before `install`, when there is no GitHub state to change.
+/// The GitHub document for entry points without a caller-supplied path.
+/// `None` before the host context is installed, when there is no GitHub state to change.
 fn document_path() -> Option<PathBuf> {
     #[cfg(test)]
     if let Some(path) = TEST_DOCUMENT.with(|test| test.borrow().clone()) {
         return Some(path);
     }
-    OBSERVATION_APP.get().and_then(|app| path(app).ok())
+    path().ok()
 }
-fn load(app: &tauri::AppHandle) -> Result<Document, String> {
-    load_at(&path(app)?)
+fn load() -> Result<Document, String> {
+    load_at(&path()?)
 }
 const MAX_CONFIGURATION_BYTES: usize = 16 * 1024 * 1024;
 fn load_at(path: &std::path::Path) -> Result<Document, String> {
@@ -815,9 +848,9 @@ fn read_configuration(reader: impl Read) -> Result<Document, String> {
     }
     Ok(document)
 }
-fn save(app: &tauri::AppHandle, d: &Document) -> Result<(), String> {
-    save_at(&path(app)?, d)?;
-    let _ = app.emit("silo://application-state-changed", ());
+fn save(d: &Document) -> Result<(), String> {
+    save_at(&path()?, d)?;
+    publish_changed();
     Ok(())
 }
 fn save_at(p: &std::path::Path, d: &Document) -> Result<(), String> {
@@ -1132,21 +1165,17 @@ fn catalog_installations(c: &Credential) -> Result<(Vec<Value>, bool), String> {
 /// The device Git identity without waiting for Git: snapshots are taken on every state
 /// refresh and sometimes under GitHub locks, so they never spawn Git themselves.
 fn device_identity() -> Option<crate::device_identity::DeviceIdentity> {
-    crate::device_identity::cached(|| {
-        if let Some(app) = OBSERVATION_APP.get() {
-            let _ = app.emit("silo://application-state-changed", ());
-        }
-    })
+    crate::device_identity::cached(publish_changed)
 }
-pub fn snapshot(app: &tauri::AppHandle) -> Result<Value, String> {
-    let mut value = observed_snapshot(load(app)?, observed_credential(), device_identity());
+pub(crate) fn snapshot() -> Result<Value, String> {
+    let mut value = observed_snapshot(load()?, observed_credential(), device_identity());
     // Saved choices for a computer that has no runtime yet are not a failure; they apply
     // once it starts.
     if let Some(operations) = value["computerOperations"].as_array_mut() {
         operations.retain(|op| {
             !op["computer"]
                 .as_str()
-                .is_some_and(|name| is_pending_restore(app, name))
+                .is_some_and(|name| is_pending_restore(name))
         });
     }
     Ok(value)
@@ -1216,19 +1245,19 @@ fn save_ledger(entry: &keyring::Entry, ledger: &TokenLedger) -> Result<(), Strin
 }
 // Record each successful issuance before making another network request. A
 // later partial failure must not lose the only copy needed for revocation.
-fn remember_token(app: &tauri::AppHandle, computer: &str, token: &str) -> Result<(), String> {
+fn remember_token(computer: &str, token: &str) -> Result<(), String> {
     let entry = ledger_entry()?;
     append_ledger_token(&LEDGER_SECRET, &entry, computer, token)?;
     let _state = serialize(&STATE);
-    let mut document = load(app)?;
+    let mut document = load()?;
     document.grants_issued = true;
-    save(app, &document)
+    save(&document)
 }
 fn profile(grants: &[RuntimeGrant]) -> Value {
     json!({"version":1,"owners":grants.iter().filter(|g| !g.read_token.is_empty()).map(|g|json!({"login":g.owner_login,"repositoryIds":g.repository_ids,"readToken":g.read_token,"writeToken":g.write_token,"expiresAt":g.expires_at})).collect::<Vec<_>>()})
 }
-fn retire_unused(app: &tauri::AppHandle, computer: &str) -> Result<(), String> {
-    let key = active_key(app, computer)?;
+fn retire_unused(computer: &str) -> Result<(), String> {
+    let key = active_key(computer)?;
     let retained: Vec<String> = active()
         .lock()
         .map_err(|_| "GitHub state is unavailable.")?
@@ -1237,9 +1266,9 @@ fn retire_unused(app: &tauri::AppHandle, computer: &str) -> Result<(), String> {
         .flatten()
         .flat_map(|g| std::iter::once(g.read_token.clone()).chain(g.write_token.clone()))
         .collect();
-    let mut live = crate::runtime::scoped_cached_tokens(app, computer)?;
+    let mut live = runtime()?.scoped_cached_tokens(computer)?;
     live.extend(retained);
-    let d = load(app)?;
+    let d = load()?;
     let scopes = d
         .computers
         .iter()
@@ -1410,27 +1439,26 @@ fn worker_due(d: &Document, pending: Option<Instant>, at: u64, instant: Instant)
         None => d.session != session() || at >= d.refresh_at || catalog_refresh_due(d, at),
     }
 }
-fn is_pending_restore(app: &tauri::AppHandle, name: &str) -> bool {
-    crate::runtime::runtime_paths(app)
-        .is_ok_and(|paths| crate::runtime::is_pending_restore(&paths, name))
+fn is_pending_restore(name: &str) -> bool {
+    runtime().is_ok_and(|runtime| runtime.is_pending_restore(name))
 }
 fn apply(
-    app: &tauri::AppHandle,
     _document: &mut Document,
     computer: Option<&str>,
     apply_identity: bool,
 ) -> Result<(), String> {
+    let host = runtime()?.clone();
     let d = {
         let _state = serialize(&STATE);
-        load(app)?
+        load()?
     };
     let narrowing_error = {
         let _state = serialize(&STATE);
-        if load(app)?.revision != d.revision {
+        if load()?.revision != d.revision {
             schedule(Duration::ZERO);
             return Ok(());
         }
-        narrow_each(app, &d)
+        narrow_each(&d)
     };
     let mut refresh_at = if now() < d.refresh_at {
         d.refresh_at
@@ -1444,9 +1472,9 @@ fn apply(
         }
         // A computer pending checkpoint restore has no runtime yet. Its saved choices stay
         // pending and apply when it starts (`computer_restored`); this is not a failure.
-        if is_pending_restore(app, name) {
+        if host.is_pending_restore(name) {
             let _state = serialize(&STATE);
-            let mut current = load(app)?;
+            let mut current = load()?;
             if current.revision == d.revision
                 && current
                     .operations
@@ -1456,7 +1484,7 @@ fn apply(
                 current
                     .operations
                     .retain(|op| op["computer"].as_str() != Some(name));
-                save(app, &current)?;
+                save(&current)?;
             }
             continue;
         }
@@ -1465,15 +1493,15 @@ fn apply(
         if identity_requested {
             let identity = &w["identity"];
             let Some(result) = outside_state(
-                || Ok((load(app)?.revision == d.revision).then_some(())),
-                |()| crate::runtime::apply_github_identity(app, name, identity),
+                || Ok((load()?.revision == d.revision).then_some(())),
+                |()| host.apply_github_identity(name, identity),
             )?
             else {
                 schedule(Duration::from_millis(500));
                 return Ok(());
             };
             let _state = serialize(&STATE);
-            let mut current = load(app)?;
+            let mut current = load()?;
             // Record only the identity that is still requested; a newer edit made during
             // the guest command stays pending and is applied next.
             if identity_is_current(&current, name, identity) {
@@ -1486,12 +1514,12 @@ fn apply(
                         current.identity_errors.insert(name.into(), error);
                     }
                 }
-                save(app, &current)?;
+                save(&current)?;
             } else {
                 schedule(Duration::from_millis(500));
             }
         }
-        let key = active_key(app, name)?;
+        let key = active_key(name)?;
         let previous = active()
             .lock()
             .map_err(|_| "GitHub state is unavailable.")?
@@ -1508,12 +1536,12 @@ fn apply(
             let result = if let Some(error) = narrowing_error.for_computer(name) {
                 Err(error.clone())
             } else if personal_token::selected(w) {
-                personal_token::apply(app, name, d.revision)
+                personal_token::apply(name, d.revision)
             } else {
-                runtime_grants_for(app, &d, w, &previous).and_then(|grants| {
+                runtime_grants_for(&d, w, &previous).and_then(|grants| {
                     outside_state(
                         || {
-                            if load(app)?.revision != d.revision {
+                            if load()?.revision != d.revision {
                                 return Err(
                                     "GitHub access changed. Applying your latest choices.".into()
                                 );
@@ -1525,7 +1553,7 @@ fn apply(
                             // Comparing credentials too avoids reconnecting unchanged sessions.
                             if grants == previous
                                 && d.session == session()
-                                && crate::runtime::github_policy_is_cached(app, name, &attached)?
+                                && host.github_policy_is_cached(name, &attached)?
                             {
                                 return Ok(None);
                             }
@@ -1537,15 +1565,13 @@ fn apply(
                                 .insert(key.clone(), grants.clone());
                             Ok(Some(attached))
                         },
-                        |attached| {
-                            crate::runtime::apply_github_policy(app, name, d.revision, &attached)
-                        },
+                        |attached| host.apply_github_policy(name, d.revision, &attached),
                     )?
                     .unwrap_or(Ok(()))
                 })
             };
-            let retirement = if d.grants_issued || load(app)?.grants_issued {
-                retire_unused(app, name)
+            let retirement = if d.grants_issued || load()?.grants_issued {
+                retire_unused(name)
             } else {
                 Ok(())
             };
@@ -1556,7 +1582,7 @@ fn apply(
                 .map_or(Ok(()), |message| Err(message.clone()))
         };
         let _state = serialize(&STATE);
-        let mut current = load(app)?;
+        let mut current = load()?;
         if current.revision != d.revision {
             schedule(Duration::from_millis(500));
             return Ok(());
@@ -1599,7 +1625,7 @@ fn apply(
         current.operations.push(operation);
         current.session = session().into();
         current.refresh_at = refresh_at;
-        save(app, &current)?;
+        save(&current)?;
     }
     Ok(())
 }
@@ -1809,7 +1835,6 @@ fn write_matches(g: &RuntimeGrant, s: &GrantScope) -> bool {
         && g.write_token.is_some()
 }
 fn runtime_grants_for(
-    app: &tauri::AppHandle,
     d: &Document,
     policy: &Value,
     previous: &[RuntimeGrant],
@@ -1827,7 +1852,6 @@ fn runtime_grants_for(
                 credential = Some(active_credential()?);
             }
             mint(
-                app,
                 policy["computer"]
                     .as_str()
                     .ok_or("Invalid computer policy.")?,
@@ -1836,7 +1860,7 @@ fn runtime_grants_for(
                 write,
             )
         },
-        || load(app).is_ok_and(|current| current.revision == d.revision),
+        || load().is_ok_and(|current| current.revision == d.revision),
     )
 }
 fn reconcile_grants(
@@ -1884,13 +1908,12 @@ fn reconcile_grants(
 }
 
 fn mint(
-    app: &tauri::AppHandle,
     computer: &str,
     c: &Credential,
     s: &GrantScope,
     write: bool,
 ) -> Result<(String, u64), String> {
-    let key = active_key(app, computer)?;
+    let key = active_key(computer)?;
     if let Some(token) = issued()
         .lock()
         .map_err(|_| "GitHub state is unavailable.")?
@@ -1911,7 +1934,7 @@ fn mint(
         .filter(|s| !s.is_empty())
         .ok_or("GitHub returned no restricted credential.")?
         .to_owned();
-    if let Err(error) = remember_token(app, computer, &token) {
+    if let Err(error) = remember_token(computer, &token) {
         let _ = token_operation(Operation::RevokeToken, json!({"accessToken":token}));
         return Err(error);
     }
@@ -2007,32 +2030,30 @@ pub(super) fn each_computer<'a, T: 'a>(
 }
 /// A removed computer has no authority left to detach. Its cache entry is dropped instead of
 /// failing every later narrowing until the app restarts.
-fn is_device_removed(app: &tauri::AppHandle, name: &str) -> bool {
-    crate::runtime::runtime_paths(app).is_ok_and(|paths| {
-        matches!(
-            crate::runtime::resolve_computer_id(&paths, name),
-            Err(crate::runtime::RuntimeError::Invalid(_))
-        )
-    })
+fn is_device_removed(name: &str) -> bool {
+    runtime().is_ok_and(|runtime| runtime.is_device_removed(name))
 }
-pub(super) fn detach_result(
-    app: &tauri::AppHandle,
-    name: &str,
-    result: Result<(), String>,
-) -> Result<(), String> {
+pub(super) fn detach_result(name: &str, result: Result<(), String>) -> Result<(), String> {
     match result {
-        Err(_) if is_device_removed(app, name) => Ok(()),
+        Err(_) if is_device_removed(name) => Ok(()),
         other => other,
     }
 }
-fn narrow_now(app: &tauri::AppHandle, d: &mut Document) -> Result<(), String> {
-    narrow_each(app, d).into_result()
+fn narrow_now(d: &mut Document) -> Result<(), String> {
+    narrow_each(d).into_result()
 }
-fn narrow_each(app: &tauri::AppHandle, d: &Document) -> NarrowErrors {
+fn narrow_each(d: &Document) -> NarrowErrors {
     let mut errors = NarrowErrors::default();
+    let runtime = match runtime() {
+        Ok(runtime) => runtime.clone(),
+        Err(error) => {
+            errors.record_all(error);
+            return errors;
+        }
+    };
     // Token computers and OAuth computers are narrowed independently; neither blocks the other.
-    personal_token::narrow(app, d, &mut errors);
-    let prefix = match path(app) {
+    personal_token::narrow(d, &mut errors);
+    let prefix = match path() {
         Ok(path) => format!("{}:", path.display()),
         Err(error) => {
             errors.record_all(error);
@@ -2042,7 +2063,7 @@ fn narrow_each(app: &tauri::AppHandle, d: &Document) -> NarrowErrors {
     if d.session != session() && d.grants_issued {
         for w in &d.computers {
             if let Some(name) = w["computer"].as_str() {
-                let attached = match active_key(app, name).and_then(|key| {
+                let attached = match active_key(name).and_then(|key| {
                     Ok(active()
                         .lock()
                         .map_err(|_| "GitHub state is unavailable.")?
@@ -2054,12 +2075,9 @@ fn narrow_each(app: &tauri::AppHandle, d: &Document) -> NarrowErrors {
                         continue;
                     }
                 };
-                if !is_pending_restore(app, name) && !attached {
-                    if let Err(error) = detach_result(
-                        app,
-                        name,
-                        crate::runtime::apply_github_policy(app, name, d.revision, &profile(&[])),
-                    ) {
+                if !is_pending_restore(name) && !attached {
+                    let result = runtime.apply_github_policy(name, d.revision, &profile(&[]));
+                    if let Err(error) = detach_result(name, result) {
                         errors.record(name, error);
                     }
                 }
@@ -2089,9 +2107,8 @@ fn narrow_each(app: &tauri::AppHandle, d: &Document) -> NarrowErrors {
             errors.record(name, error);
         }
         if retained != *previous {
-            let result =
-                crate::runtime::apply_github_policy(app, name, d.revision, &profile(&retained));
-            if result.is_err() && is_device_removed(app, name) {
+            let result = runtime.apply_github_policy(name, d.revision, &profile(&retained));
+            if result.is_err() && is_device_removed(name) {
                 if let Ok(mut active) = active().lock() {
                     active.remove(key);
                 }
@@ -2160,7 +2177,7 @@ pub(crate) struct HostPushCredential {
     token: String,
     repository: String,
     expires_at: Option<u64>,
-    retire: Option<(tauri::AppHandle, String)>,
+    retire: Option<String>,
 }
 impl HostPushCredential {
     pub(crate) fn token(&self) -> &str {
@@ -2177,7 +2194,7 @@ impl HostPushCredential {
 }
 impl Drop for HostPushCredential {
     fn drop(&mut self) {
-        if let Some((_app, computer)) = self.retire.take() {
+        if let Some(computer) = self.retire.take() {
             let result = retire_host_push_token(
                 &self.token,
                 |token| {
@@ -2237,14 +2254,13 @@ fn host_push_scope(access_token: &str, owner: u64, repository_id: u64) -> Value 
 
 /// Explicit host Push only: does not grant write access to the guest or modify its policy.
 pub(crate) fn host_push_credential(
-    app: &tauri::AppHandle,
     computer: &str,
     repository: &str,
 ) -> Result<HostPushCredential, String> {
     let _guard = crate::sync::lock_or_recover(&OPERATION, "GitHub operation");
     let d = {
         let _state = serialize(&STATE);
-        load(app)?
+        load()?
     };
     let policy = d
         .computers
@@ -2259,7 +2275,7 @@ pub(crate) fn host_push_credential(
     push_authorized(policy, repository)?;
     let current = || {
         let _state = serialize(&STATE);
-        if load(app)?.revision != d.revision {
+        if load()?.revision != d.revision {
             return Err("GitHub access changed. Retry the push with your latest choices.".into());
         }
         Ok(())
@@ -2311,10 +2327,10 @@ pub(crate) fn host_push_credential(
                 token,
                 repository: name,
                 expires_at: None,
-                retire: Some((app.clone(), computer.into())),
+                retire: Some(computer.into()),
             };
             begin_host_push_token(retirement(), &credential.token, || {
-                remember_token(app, computer, &credential.token)
+                remember_token(computer, &credential.token)
             })?;
             credential.expires_at = Some(token_expiry(&response)?);
             Ok(credential)
@@ -2553,13 +2569,10 @@ fn network_step<T>(step: impl FnOnce() -> Result<T, String>) -> Result<T, String
     let _network = serialize(&OPERATION);
     step()
 }
-fn open_browser(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
-    crate::applications::open_browser(app, url)
-}
 fn open_authorization_browser(
-    app: &tauri::AppHandle,
     generation: u64,
     url: &str,
+    open_browser: &dyn Fn(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     {
         let mut pending = AUTHORIZATION
@@ -2570,10 +2583,15 @@ fn open_authorization_browser(
         }
         pending.0 = Some((generation, url.to_owned()));
     }
-    open_browser(app, url)
+    open_browser(url)
 }
 
-fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
+pub(crate) fn connect(
+    generation: u64,
+    open_browser: impl Fn(&str) -> Result<(), String>,
+) -> Result<Value, String> {
+    // One connection flow at a time; operation locking stays scoped to each network step.
+    let _flow = serialize(&CONNECTION_FLOW);
     {
         let _state = serialize(&STATE);
         if CANCELLATION.load(Ordering::SeqCst) != generation {
@@ -2581,8 +2599,8 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         }
         CONNECTING.store(true, Ordering::SeqCst);
     }
-    let _connecting = Connecting(app.clone(), generation);
-    let _ = app.emit("silo://application-state-changed", ());
+    let _connecting = Connecting(generation);
+    publish_changed();
     let configuration = token_configuration()?;
     let client_id = &configuration.client_id;
     entry()?;
@@ -2616,7 +2634,7 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256");
-    open_authorization_browser(app, generation, url.as_str())?;
+    open_authorization_browser(generation, url.as_str(), &open_browser)?;
     let deadline = Instant::now() + Duration::from_secs(300);
     let code = loop {
         if CANCELLATION.load(Ordering::SeqCst) != generation {
@@ -2660,7 +2678,7 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
     // Only the exchange and the store steps hold the GitHub network lock and the update
     // guard. The browser and App-installation waits (up to 5 minutes each) must not block
     // token renewal, repository refresh, host push or app updates.
-    let previous_account = load(app).ok().and_then(|d| d.account);
+    let previous_account = load().ok().and_then(|d| d.account);
     let (c, mut unstored, account, mut repos, installed) = network_step(|| {
         let c = from_response(token_operation(
             Operation::Exchange,
@@ -2684,9 +2702,9 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
             return Err("GitHub App identifier is invalid.".into());
         }
         open_authorization_browser(
-            app,
             generation,
             &format!("https://github.com/apps/{slug}/installations/new"),
+            &open_browser,
         )?;
         let deadline = Instant::now() + Duration::from_secs(300);
         loop {
@@ -2714,7 +2732,7 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         if CANCELLATION.load(Ordering::SeqCst) != generation {
             return Err("GitHub connection cancelled.".into());
         }
-        let mut d = load(app)?;
+        let mut d = load()?;
         let revision = next_policy_revision(d.revision)?;
         // A failed explicit replacement must leave the previous account and its access intact.
         replace_connection_credential(
@@ -2726,7 +2744,7 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         unstored.kept();
         // Reconnecting creates a new account authorization. Never reuse old
         // grants, even if the account name and repository choices are identical.
-        let prefix = format!("{}:", path(app)?.display());
+        let prefix = format!("{}:", path()?.display());
         // Best effort per computer: a stale policy (removed computer, computer needing recreation) must not
         // drop the new credential. Failing computers get a per-computer error and are re-applied
         // with the new grants by the worker, which replaces the old profile.
@@ -2740,9 +2758,8 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
             &mut detach_errors,
             |name, ()| {
                 detach_result(
-                    app,
                     name,
-                    crate::runtime::apply_github_policy(app, name, revision, &profile(&[])),
+                    runtime()?.apply_github_policy(name, revision, &profile(&[])),
                 )
             },
         );
@@ -2761,7 +2778,7 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         for (name, error) in detach_errors.computers {
             d.access_errors.insert(name, error);
         }
-        save(app, &d)?;
+        save(&d)?;
         Ok(replaced
             .filter(|old| old.access_token != c.access_token)
             .map(|old| (old, same)))
@@ -2772,12 +2789,8 @@ fn connect(app: &tauri::AppHandle, generation: u64) -> Result<Value, String> {
         revoke_replaced(&old, same);
     }
     schedule(Duration::from_millis(500));
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
     drop(_connecting);
-    snapshot(app)
+    snapshot()
 }
 
 fn record_connection(
@@ -2828,14 +2841,12 @@ fn sweep_retirement(
 }
 
 /// Re-establish host-only grants after relaunch and renew them before expiry.
-pub fn install(app: &tauri::AppHandle) {
-    let _ = OBSERVATION_APP.set(app.clone());
+pub(crate) fn install() -> Result<(), String> {
     // Start the first device identity read now so the first GitHub view already has it.
     device_identity();
-    if let Ok(document) = load(app) {
+    if let Ok(document) = load() {
         crate::github_http::restore_retry_floors(&document.rate_retry);
     }
-    let app = app.clone();
     std::thread::spawn(move || loop {
         let pending_deadline = PENDING
             .get_or_init(|| Mutex::new(None))
@@ -2843,14 +2854,14 @@ pub fn install(app: &tauri::AppHandle) {
             .ok()
             .and_then(|p| *p);
         let pending_due = pending_deadline.is_some_and(|time| Instant::now() >= time);
-        personal_token::check(&app);
+        personal_token::check();
         flush_account_credential();
         // Another GitHub operation holds the network lock: look again shortly.
         let mut wait = Duration::from_secs(1);
         if let Some(_network) = try_serialize(&OPERATION) {
             let observed = {
                 let _state = serialize(&STATE);
-                load(&app)
+                load()
             };
             if let Ok(mut d) = observed {
                 let due = worker_due(&d, pending_deadline, now(), Instant::now());
@@ -2869,9 +2880,9 @@ pub fn install(app: &tauri::AppHandle) {
                         if let Err(message) = active_credential() {
                             {
                                 let _state = serialize(&STATE);
-                                if let Ok(mut current) = load(&app) {
+                                if let Ok(mut current) = load() {
                                     current.catalog_error = Some(message);
-                                    let _ = save(&app, &current);
+                                    let _ = save(&current);
                                 }
                             }
                         }
@@ -2880,7 +2891,7 @@ pub fn install(app: &tauri::AppHandle) {
                         let result = active_credential().and_then(|c| catalog(&c));
                         {
                             let _state = serialize(&STATE);
-                            if let Ok(mut current) = load(&app) {
+                            if let Ok(mut current) = load() {
                                 match result {
                                     Ok(repos) => {
                                         if current.repositories != repos {
@@ -2903,10 +2914,10 @@ pub fn install(app: &tauri::AppHandle) {
                                     }
                                 }
                                 // A catalog can remove authority too; narrow before doing network work.
-                                if let Err(message) = narrow_now(&app, &mut current) {
+                                if let Err(message) = narrow_now(&mut current) {
                                     current.catalog_error = Some(message);
                                 }
-                                let _ = save(&app, &current);
+                                let _ = save(&current);
                                 d = current;
                             }
                         }
@@ -2929,7 +2940,7 @@ pub fn install(app: &tauri::AppHandle) {
                         let result = result.and_then(|()| delete_account_credential());
                         {
                             let _state = serialize(&STATE);
-                            if let Ok(mut current) = load(&app) {
+                            if let Ok(mut current) = load() {
                                 match result {
                                     Ok(()) => {
                                         current.disconnect_pending = false;
@@ -2941,16 +2952,16 @@ pub fn install(app: &tauri::AppHandle) {
                                         current.catalog_error = Some(message);
                                     }
                                 }
-                                let _ = save(&app, &current);
+                                let _ = save(&current);
                                 d = current;
                             }
                         }
                     }
-                    let _ = apply(&app, &mut d, None, false);
+                    let _ = apply(&mut d, None, false);
                     let account_credential = credential();
                     {
                         let _state = serialize(&STATE);
-                        if let Ok(mut current) = load(&app) {
+                        if let Ok(mut current) = load() {
                             current.session = session().into();
                             if current.computers.is_empty() {
                                 current.refresh_at = now() + 3600;
@@ -2971,7 +2982,7 @@ pub fn install(app: &tauri::AppHandle) {
                                     .refresh_at
                                     .min(c.expires_at.saturating_sub(120).max(now() + 30));
                             }
-                            let _ = save(&app, &current);
+                            let _ = save(&current);
                         }
                     }
                     // Re-evaluate promptly against the document this pass saved.
@@ -2991,7 +3002,7 @@ pub fn install(app: &tauri::AppHandle) {
                     })
                 },
                 || LEDGER_SECRET.read(|| ledger_entry().and_then(|entry| read_ledger(&entry))),
-                |name| retire_unused(&app, name),
+                |name| retire_unused(name),
             );
         }
         // Sleep until the next deadline (not a 100 ms poll that re-read the whole
@@ -3006,195 +3017,148 @@ pub fn install(app: &tauri::AppHandle) {
                 .max(WORKER_MIN_SLEEP),
         );
     });
+    Ok(())
 }
 
-fn require_main(label: &str) -> Result<(), String> {
-    if label == "main" {
-        Ok(())
-    } else {
-        Err("Only the main window can manage GitHub access.".into())
+pub(crate) fn prepare_connect() -> u64 {
+    retry_credential_access();
+    CANCELLATION.load(Ordering::SeqCst)
+}
+
+pub(crate) fn cancel_connection() -> Result<Value, String> {
+    // Serialize with credential publication, not with the browser/network wait.
+    let _state = serialize(&STATE);
+    let mut pending = AUTHORIZATION
+        .lock()
+        .map_err(|_| "GitHub connection is unavailable.")?;
+    CANCELLATION.fetch_add(1, Ordering::SeqCst);
+    pending.0 = None;
+    CONNECTING.store(false, Ordering::SeqCst);
+    let result = snapshot();
+    publish_changed();
+    result
+}
+
+pub(crate) fn authorization_url() -> Result<String, String> {
+    AUTHORIZATION
+        .lock()
+        .map_err(|_| "GitHub connection is unavailable.")?
+        .url(CANCELLATION.load(Ordering::SeqCst))
+}
+
+pub(crate) fn repository_authorization_url() -> Result<String, String> {
+    let slug = APP_SLUG.ok_or("GitHub App is not configured in this build.")?;
+    if !slug.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err("Invalid GitHub App slug.".into());
     }
+    Ok(format!("https://github.com/apps/{slug}/installations/new"))
 }
 
-async fn run(
-    app: tauri::AppHandle,
-    f: fn(&tauri::AppHandle) -> Result<Value, String>,
-) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let _guard = serialize(&OPERATION);
-        f(&app)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
+pub(crate) fn run_operation<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let _guard = serialize(&OPERATION);
+    work()
 }
-#[tauri::command]
-pub async fn read_github_state(app: tauri::AppHandle) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || snapshot(&app))
-        .await
-        .map_err(|_| "GitHub state could not be read.")?
-}
-#[tauri::command]
-pub async fn connect_github(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<Value, String> {
-    require_main(window.label())?;
+
+pub(crate) fn prepare_refresh() {
     retry_credential_access();
-    let generation = CANCELLATION.load(Ordering::SeqCst);
-    tauri::async_runtime::spawn_blocking(move || {
-        // One connection flow at a time; it takes OPERATION only for its network steps.
-        let _flow = serialize(&CONNECTION_FLOW);
-        connect(&app, generation)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
-}
-#[tauri::command]
-pub async fn cancel_github_connection(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<Value, String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        // Serialize with credential publication, not with the browser/network wait.
-        let _state = serialize(&STATE);
-        let mut pending = AUTHORIZATION
-            .lock()
-            .map_err(|_| "GitHub connection is unavailable.")?;
-        CANCELLATION.fetch_add(1, Ordering::SeqCst);
-        pending.0 = None;
-        CONNECTING.store(false, Ordering::SeqCst);
-        let result = snapshot(&app);
-        let _ = app.emit("silo://application-state-changed", ());
-        result
-    })
-    .await
-    .map_err(|_| "GitHub cancellation failed.")?
 }
 
-#[tauri::command]
-pub async fn reopen_github_authorization(window: tauri::WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let url = AUTHORIZATION
-            .lock()
-            .map_err(|_| "GitHub connection is unavailable.")?
-            .url(CANCELLATION.load(Ordering::SeqCst))?;
-        open_browser(window.app_handle(), &url)
-    })
-    .await
-    .map_err(|_| "Cannot reopen GitHub authorization.")?
-}
-
-#[tauri::command]
-pub async fn manage_github_repositories(window: tauri::WebviewWindow) -> Result<(), String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let slug = APP_SLUG.ok_or("GitHub App is not configured in this build.")?;
-        if !slug.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-            return Err("Invalid GitHub App slug.".into());
-        }
-        open_browser(
-            window.app_handle(),
-            &format!("https://github.com/apps/{slug}/installations/new"),
-        )
-    })
-    .await
-    .map_err(|_| "Cannot open GitHub repository access.")?
-}
-
-#[tauri::command]
-pub async fn refresh_github_repositories(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<Value, String> {
-    require_main(window.label())?;
-    retry_credential_access();
-    run(app, |app| {
-        let result = active_credential().and_then(|c| catalog_with_retry(&c, catalog));
-        let _state = serialize(&STATE);
-        let mut d = load(app)?;
-        match result {
-            Ok(repos) => {
-                if d.repositories != repos {
-                    mark_pending(&mut d);
-                }
-                d.repositories = repos;
-                d.catalog_error = None;
-                d.catalog_refresh_at = now() + 300;
+pub(crate) fn refresh_repositories() -> Result<Value, String> {
+    let result = active_credential().and_then(|c| catalog_with_retry(&c, catalog));
+    let _state = serialize(&STATE);
+    let mut d = load()?;
+    match result {
+        Ok(repos) => {
+            if d.repositories != repos {
+                mark_pending(&mut d);
             }
-            Err(message) => {
-                d.catalog_error = Some(message);
-            }
+            d.repositories = repos;
+            d.catalog_error = None;
+            d.catalog_refresh_at = now() + 300;
         }
-        if let Err(message) = narrow_now(app, &mut d) {
+        Err(message) => {
             d.catalog_error = Some(message);
         }
-        save(app, &d)?;
-        schedule(Duration::from_millis(500));
-        snapshot(app)
-    })
-    .await
+    }
+    if let Err(message) = narrow_now(&mut d) {
+        d.catalog_error = Some(message);
+    }
+    save(&d)?;
+    schedule(Duration::from_millis(500));
+    snapshot()
 }
-#[tauri::command]
-pub async fn disconnect_github(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<Value, String> {
-    require_main(window.label())?;
+
+pub(crate) fn prepare_disconnect() -> PendingIntent {
     retry_credential_access();
-    let ticket = INTENTS.ticket();
+    let ticket = intent_ticket();
     CANCELLATION.fetch_add(1, Ordering::SeqCst);
-    tauri::async_runtime::spawn_blocking(move || {
-        let _turn = ticket.wait()?;
-        let _update = crate::updates::operation_guard()?;
-        let _state = serialize(&STATE);
-        let mut d = load(&app)?;
-        d.revision = next_policy_revision(d.revision)?;
-        d.access_enabled = false;
-        d.disconnect_pending = true;
-        mark_pending(&mut d);
-        save(&app, &d)?;
-        let result = narrow_now(&app, &mut d);
-        schedule(Duration::ZERO);
-        result?;
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
+    ticket
 }
-#[tauri::command]
-pub async fn set_github_access_enabled(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    enabled: bool,
+
+pub(crate) fn disconnect<G>(
+    ticket: PendingIntent,
+    update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Value, String> {
-    require_main(window.label())?;
-    let ticket = INTENTS.ticket();
+    let _turn = ticket.0.wait()?;
+    let _update = update_guard()?;
+    let _state = serialize(&STATE);
+    let mut d = load()?;
+    d.revision = next_policy_revision(d.revision)?;
+    d.access_enabled = false;
+    d.disconnect_pending = true;
+    mark_pending(&mut d);
+    save(&d)?;
+    let result = narrow_now(&mut d);
+    schedule(Duration::ZERO);
+    result?;
+    snapshot()
+}
+
+pub(crate) fn set_access_enabled<G>(
+    enabled: bool,
+    ticket: PendingIntent,
+    update_guard: impl FnOnce() -> Result<G, String>,
+) -> Result<Value, String> {
+    let _turn = ticket.0.wait()?;
+    let _update = update_guard()?;
+    let _state = serialize(&STATE);
+    let mut d = load()?;
+    if d.access_enabled == enabled {
+        return snapshot();
+    }
+    d.revision = next_policy_revision(d.revision)?;
+    d.access_enabled = enabled;
+    mark_pending(&mut d);
+    save(&d)?;
+    let result = narrow_now(&mut d);
+    schedule(Duration::from_millis(500));
+    result?;
+    snapshot()
+}
+
+pub(crate) fn prepare_access_change(enabled: bool) -> PendingIntent {
+    let ticket = intent_ticket();
     if !enabled {
         CANCELLATION.fetch_add(1, Ordering::SeqCst);
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let _turn = ticket.wait()?;
-        let _update = crate::updates::operation_guard()?;
-        let _state = serialize(&STATE);
-        let mut d = load(&app)?;
-        if d.access_enabled == enabled {
-            return snapshot(&app);
-        }
-        d.revision = next_policy_revision(d.revision)?;
-        d.access_enabled = enabled;
-        mark_pending(&mut d);
-        save(&app, &d)?;
-        let result = narrow_now(&app, &mut d);
-        schedule(Duration::from_millis(500));
-        result?;
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
+    ticket
 }
+
+pub(crate) fn validate_configuration(configuration: &Value) -> Result<(), String> {
+    let policies = configuration["computers"]
+        .as_array()
+        .ok_or("Missing computer policies.")?;
+    validate(policies)?;
+    if let Value::Number(revision) = &configuration["baseRevision"] {
+        revision
+            .as_u64()
+            .ok_or("Invalid GitHub settings revision.")?;
+    } else if !configuration["baseRevision"].is_null() {
+        return Err("Invalid GitHub settings revision.".into());
+    }
+    Ok(())
+}
+
 fn validate_method_change(
     previous: Option<&Value>,
     policy: &Value,
@@ -3324,64 +3288,55 @@ fn apply_patches(
 /// `baseRevision` the `policyRevision` its view was based on. Access on/off is never
 /// changed here (a stale save must not undo Disable access); use
 /// `set_github_access_enabled`. An `accessEnabled` field is ignored.
-#[tauri::command]
-pub async fn save_github_configuration(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
+pub(crate) fn save_configuration<G>(
     configuration: Value,
+    ticket: PendingIntent,
+    update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Value, String> {
-    require_main(window.label())?;
+    validate_configuration(&configuration)?;
     let ws = configuration["computers"]
         .as_array()
         .ok_or("Missing computer policies.")?;
-    validate(ws)?;
     let base = match &configuration["baseRevision"] {
         Value::Null => None,
         value => Some(value.as_u64().ok_or("Invalid GitHub settings revision.")?),
     };
-    let ticket = INTENTS.ticket();
-    tauri::async_runtime::spawn_blocking(move || {
-        let ws = configuration["computers"]
-            .as_array()
-            .ok_or("Missing computer policies.")?;
-        let _turn = ticket.wait()?;
-        let _update = crate::updates::operation_guard()?;
-        let _state = serialize(&STATE);
-        let mut d = load(&app)?;
-        let oauth_connected = observed_credential()
-            .is_some_and(|v| v.is_ok_and(|expiry| expiry.is_some_and(|at| at > now())));
-        let Some(changed) = apply_patches(
-            &mut d,
-            ws,
-            base,
-            oauth_connected,
-            personal_token::connected(),
-        )?
-        else {
-            return snapshot(&app);
-        };
-        CANCELLATION.fetch_add(1, Ordering::SeqCst);
-        // Persist first so a worker completing concurrently cannot publish old choices.
-        save(&app, &d)?;
-        let result = narrow_now(&app, &mut d);
-        schedule(Duration::from_millis(500));
-        if let Err(message) = result {
-            for op in d.operations.iter_mut().filter(|op| {
-                op["computer"]
-                    .as_str()
-                    .is_some_and(|name| changed.iter().any(|changed| changed == name))
-            }) {
-                op["status"] = json!("failed");
-                op["message"] = json!(&message);
-                op["canRetry"] = json!(true);
-            }
-            save(&app, &d)?;
+    let _turn = ticket.0.wait()?;
+    let _update = update_guard()?;
+    let _state = serialize(&STATE);
+    let mut d = load()?;
+    let oauth_connected = observed_credential()
+        .is_some_and(|v| v.is_ok_and(|expiry| expiry.is_some_and(|at| at > now())));
+    let Some(changed) = apply_patches(
+        &mut d,
+        ws,
+        base,
+        oauth_connected,
+        personal_token::connected(),
+    )?
+    else {
+        return snapshot();
+    };
+    CANCELLATION.fetch_add(1, Ordering::SeqCst);
+    // Persist first so a worker completing concurrently cannot publish old choices.
+    save(&d)?;
+    let result = narrow_now(&mut d);
+    schedule(Duration::from_millis(500));
+    if let Err(message) = result {
+        for op in d.operations.iter_mut().filter(|op| {
+            op["computer"]
+                .as_str()
+                .is_some_and(|name| changed.iter().any(|changed| changed == name))
+        }) {
+            op["status"] = json!("failed");
+            op["message"] = json!(&message);
+            op["canRetry"] = json!(true);
         }
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
+        save(&d)?;
+    }
+    snapshot()
 }
+
 fn prepare_retry(d: &mut Document, computer: Option<&str>) {
     let names: Vec<String> = d
         .computers
@@ -3401,32 +3356,29 @@ fn prepare_retry(d: &mut Document, computer: Option<&str>) {
     mark_pending_for(d, &names);
 }
 
-#[tauri::command]
-pub async fn retry_github_configuration(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    computer: Option<String>,
-) -> Result<Value, String> {
-    require_main(window.label())?;
+pub(crate) fn prepare_retry_configuration() -> PendingIntent {
     retry_credential_access();
-    let ticket = INTENTS.ticket();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _turn = ticket.wait()?;
-        let _update = crate::updates::operation_guard()?;
-        let _state = serialize(&STATE);
-        let mut d = load(&app)?;
-        if let Some(computer) = computer.as_deref() {
-            crate::github_http::reset_computer_retries(computer);
-        } else {
-            crate::github_http::reset_retries();
-        }
-        prepare_retry(&mut d, computer.as_deref());
-        save(&app, &d)?;
-        schedule(Duration::ZERO);
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "GitHub operation failed.")?
+    intent_ticket()
+}
+
+pub(crate) fn retry_configuration<G>(
+    computer: Option<String>,
+    ticket: PendingIntent,
+    update_guard: impl FnOnce() -> Result<G, String>,
+) -> Result<Value, String> {
+    let _turn = ticket.0.wait()?;
+    let _update = update_guard()?;
+    let _state = serialize(&STATE);
+    let mut d = load()?;
+    if let Some(computer) = computer.as_deref() {
+        crate::github_http::reset_computer_retries(computer);
+    } else {
+        crate::github_http::reset_retries();
+    }
+    prepare_retry(&mut d, computer.as_deref());
+    save(&d)?;
+    schedule(Duration::ZERO);
+    snapshot()
 }
 
 #[cfg(test)]
@@ -5103,14 +5055,6 @@ mod tests {
         .unwrap();
         assert_eq!(result.access_token, "new-account");
         assert!(pending.is_none());
-    }
-    #[test]
-    fn only_main_window_can_manage_github() {
-        let _test_state = crate::test_support::global_state();
-        assert!(require_main("main").is_ok());
-        for label in ["status", "other", ""] {
-            assert!(require_main(label).is_err());
-        }
     }
     #[test]
     fn authorization_reopens_same_attempt_and_tracks_installation_page() {

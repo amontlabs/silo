@@ -31,8 +31,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, DragDropEvent, Emitter, Window};
-use tauri_plugin_dialog::DialogExt;
 
 pub(crate) const PROGRESS_EVENT: &str = "silo://transfer-progress";
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -946,12 +944,11 @@ fn publish_beside_existing(
     ))
 }
 
-fn download(
+fn inspect_download(
     sftp: &Sftp,
     control: &Control,
     remote: &str,
-    choose: &dyn Fn(&str) -> Option<PathBuf>,
-) -> Result<DownloadOutcome, String> {
+) -> Result<(Folder, String, u64), String> {
     if !within_any(remote, control.roots) {
         return Err(
             "Silo can only download files from the workspace or the Downloads folder.".into(),
@@ -980,9 +977,30 @@ fn download(
         return Err("This file is larger than 4 GB, the limit for one file.".into());
     }
     let size = entry.size;
-    let Some(destination) = choose(name) else {
+    Ok((folder, name.to_owned(), size))
+}
+
+fn download(
+    sftp: &Sftp,
+    control: &Control,
+    remote: &str,
+    choose: &dyn Fn(&str) -> Option<PathBuf>,
+) -> Result<DownloadOutcome, String> {
+    let (folder, name, size) = inspect_download(sftp, control, remote)?;
+    let Some(destination) = choose(&name) else {
         return Ok(DownloadOutcome::Cancelled);
     };
+    download_to(sftp, control, &folder, &name, size, destination)
+}
+
+fn download_to(
+    sftp: &Sftp,
+    control: &Control,
+    folder: &Folder,
+    name: &str,
+    size: u64,
+    destination: PathBuf,
+) -> Result<DownloadOutcome, String> {
     let destination_parent = destination
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -1276,51 +1294,69 @@ fn restore_selection(token: &str, owner: &str, paths: Vec<String>) {
     });
 }
 
-/// A native file drag over a desktop viewer, on its shell window or on the computer's
-/// display. Only the operating system produces these, and only the shell window hears
-/// about them: it receives a token for the dropped files, never their paths.
-pub(crate) fn native_drop(app: &AppHandle, shell: &str, event: &DragDropEvent) {
+/// A native file drag over a desktop viewer. The Tauri adapter turns OS events into
+/// this small value before the engine issues a private selection token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NativeDropEvent {
+    Enter,
+    Leave,
+    Drop(Vec<String>),
+    Other,
+}
+
+pub(crate) fn native_drop(shell: &str, event: NativeDropEvent) {
     if !crate::desktop_viewer::is_viewer_label(shell) {
         return;
     }
+    let publish_to_shell = |name, payload| {
+        if let Some(context) = silo_engine::context::current() {
+            context.publish(
+                silo_engine::context::Event::new(name, payload),
+                silo_engine::context::Audience::Client(silo_engine::context::ClientId::new(shell)),
+            );
+        }
+    };
     match event {
-        DragDropEvent::Enter { .. } => {
-            let _ = app.emit_to(shell, DRAG_EVENT, true);
-        }
-        DragDropEvent::Leave => {
-            let _ = app.emit_to(shell, DRAG_EVENT, false);
-        }
-        DragDropEvent::Drop { paths, .. } => {
-            let _ = app.emit_to(shell, DRAG_EVENT, false);
-            let paths: Vec<String> = paths
-                .iter()
-                .filter_map(|path| path.to_str().map(str::to_owned))
-                .collect();
+        NativeDropEvent::Enter => publish_to_shell(DRAG_EVENT, serde_json::json!(true)),
+        NativeDropEvent::Leave => publish_to_shell(DRAG_EVENT, serde_json::json!(false)),
+        NativeDropEvent::Drop(paths) => {
+            publish_to_shell(DRAG_EVENT, serde_json::json!(false));
             if !paths.is_empty() {
-                let _ = app.emit_to(shell, DROP_EVENT, issue_selection(shell, paths));
+                let selection = issue_selection(shell, paths);
+                publish_to_shell(DROP_EVENT, serde_json::json!(selection));
             }
         }
-        _ => {}
+        NativeDropEvent::Other => {}
     }
 }
 
-fn require_main(window: &Window) -> Result<(), String> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err("Open the main Silo window to transfer files.".into())
+fn publish_event(name: &str, payload: serde_json::Value) {
+    if let Some(context) = silo_engine::context::current() {
+        // window-targeted events use Audience::All until client ids replace labels.
+        context.publish(
+            silo_engine::context::Event::new(name, payload),
+            silo_engine::context::Audience::All,
+        );
     }
+}
+
+pub(crate) fn issue_upload_selection(owner: &str, paths: Vec<String>) -> UploadSelection {
+    issue_selection(owner, paths)
+}
+
+fn publish_progress(progress: &Progress) {
+    publish_event(PROGRESS_EVENT, serde_json::json!(progress));
 }
 
 /// Resolves the private SSH transport for a computer that is ready for transfers.
-fn connect(app: &AppHandle, computer: &str) -> Result<Sftp, String> {
+fn connect(paths: Option<&crate::runtime::RuntimePaths>, computer: &str) -> Result<Sftp, String> {
     if !crate::applications::launch::executable_file(Path::new(SFTP)) {
         return Err(MISSING_SFTP.into());
     }
     crate::editor::require_openssh("transfer files")?;
     if crate::remote_access::target(computer)?.is_none() {
-        let paths = crate::runtime::runtime_paths(app)?;
-        crate::terminal::running_computer(&paths, computer).map_err(|message| {
+        let paths = paths.ok_or(UNREACHABLE)?;
+        crate::terminal::running_computer(paths, computer).map_err(|message| {
             if message == crate::terminal::start_first(computer) {
                 NOT_RUNNING.to_owned()
             } else {
@@ -1328,7 +1364,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<Sftp, String> {
             }
         })?;
     }
-    let (alias, config) = crate::editor::private_computer_transport(app, computer, "transfer")?;
+    let (alias, config) = crate::editor::private_computer_transport(paths, computer, "transfer")?;
     if !alias
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
@@ -1338,40 +1374,9 @@ fn connect(app: &AppHandle, computer: &str) -> Result<Sftp, String> {
     Sftp::new(config, alias)
 }
 
-#[tauri::command]
-pub(crate) async fn choose_upload_files(
-    app: AppHandle,
-    window: Window,
-) -> Result<Option<UploadSelection>, String> {
-    require_main(&window)?;
-    let owner = window.label().to_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        let picked = app
-            .dialog()
-            .file()
-            .set_parent(&window)
-            .set_title("Upload files")
-            .blocking_pick_files()
-            .unwrap_or_default();
-        let paths = picked
-            .into_iter()
-            .map(|file| {
-                file.into_path()
-                    .ok()
-                    .and_then(|path| path.to_str().map(str::to_owned))
-                    .ok_or_else(|| "A selected file is unavailable.".to_owned())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((!paths.is_empty()).then(|| issue_selection(&owner, paths)))
-    })
-    .await
-    .map_err(|_| "The file picker failed.".to_owned())?
-}
-
-#[tauri::command]
-pub(crate) async fn upload_files(
-    app: AppHandle,
-    window: Window,
+pub(crate) fn upload_files(
+    paths: Option<&crate::runtime::RuntimePaths>,
+    owner: String,
     transfer_id: String,
     computer: String,
     directory: String,
@@ -1379,62 +1384,63 @@ pub(crate) async fn upload_files(
     conflict: ConflictPolicy,
 ) -> Result<UploadOutcome, String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
-    crate::desktop_viewer::require_computer(&window, &computer)?;
     let roots = default_roots();
     if !within_any(&directory, &roots) {
         return Err("Silo can only upload to the workspace or the Downloads folder.".into());
     }
     // A desktop window only drops into the Downloads folder.
-    if window.label() != "main" && directory != downloads_root() {
+    if owner != "main" && directory != downloads_root() {
         return Err("This window can only upload to the Downloads folder.".into());
     }
     let slot = Slot::take(&transfer_id)?;
-    let owner = window.label().to_owned();
-    let paths = take_selection(&selection, &owner)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let sources = prepare_sources(&paths)?;
-        let sftp = connect(&app, &computer)?;
-        let emit = |progress: &Progress| {
-            let _ = app.emit(PROGRESS_EVENT, progress);
-        };
-        let control = Control {
-            id: &slot.id,
-            computer: &computer,
-            cancel: &slot.cancel,
-            emit: &emit,
-            roots: &roots,
-            upload_poll: Some(UPLOAD_POLL),
-            free_space: &host_free_space,
-        };
-        let outcome = upload(
-            &sftp,
-            &control,
-            &directory,
-            &sources,
-            conflict,
-            directory == downloads_root(),
-        );
-        match &outcome {
-            Ok(UploadOutcome::Cancelled) => control.report("upload", "cancelled", "", 0, 0, 0, 0),
-            Ok(UploadOutcome::Conflict { .. }) => restore_selection(&selection, &owner, paths),
-            Err(_) => control.report("upload", "failed", "", 0, 0, 0, 0),
-            _ => {}
+    let paths_to_upload = take_selection(&selection, &owner)?;
+    let sources = prepare_sources(&paths_to_upload)?;
+    let sftp = connect(paths, &computer)?;
+    let emit = publish_progress;
+    let control = Control {
+        id: &slot.id,
+        computer: &computer,
+        cancel: &slot.cancel,
+        emit: &emit,
+        roots: &roots,
+        upload_poll: Some(UPLOAD_POLL),
+        free_space: &host_free_space,
+    };
+    let outcome = upload(
+        &sftp,
+        &control,
+        &directory,
+        &sources,
+        conflict,
+        directory == downloads_root(),
+    );
+    match &outcome {
+        Ok(UploadOutcome::Cancelled) => control.report("upload", "cancelled", "", 0, 0, 0, 0),
+        Ok(UploadOutcome::Conflict { .. }) => {
+            restore_selection(&selection, &owner, paths_to_upload)
         }
-        outcome
-    })
-    .await
-    .map_err(|_| "The upload failed.".to_owned())?
+        Err(_) => control.report("upload", "failed", "", 0, 0, 0, 0),
+        _ => {}
+    }
+    outcome
 }
 
-#[tauri::command]
-pub(crate) async fn download_file(
-    app: AppHandle,
-    window: Window,
+pub(crate) struct DownloadSession {
+    slot: Slot,
+    sftp: Sftp,
+    computer: String,
+    roots: Vec<String>,
+    folder: Folder,
+    name: String,
+    size: u64,
+}
+
+pub(crate) fn prepare_download(
+    paths: Option<&crate::runtime::RuntimePaths>,
     transfer_id: String,
     computer: String,
     path: String,
-) -> Result<DownloadOutcome, String> {
-    require_main(&window)?;
+) -> Result<(DownloadSession, String), String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let roots = default_roots();
     if !within_any(&path, &roots) {
@@ -1443,52 +1449,92 @@ pub(crate) async fn download_file(
         );
     }
     let slot = Slot::take(&transfer_id)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let sftp = connect(&app, &computer)?;
-        let emit = |progress: &Progress| {
-            let _ = app.emit(PROGRESS_EVENT, progress);
-        };
-        let control = Control {
-            id: &slot.id,
-            computer: &computer,
-            cancel: &slot.cancel,
-            emit: &emit,
-            roots: &roots,
-            upload_poll: None,
-            free_space: &host_free_space,
-        };
-        let outcome = download(&sftp, &control, &path, &|suggested| {
-            app.dialog()
-                .file()
-                .set_parent(&window)
-                .set_title("Save file")
-                .set_file_name(suggested)
-                .blocking_save_file()
-                .and_then(|selected| selected.into_path().ok())
-        });
-        match &outcome {
-            Ok(DownloadOutcome::Cancelled) => {
-                control.report("download", "cancelled", "", 0, 0, 0, 0)
-            }
-            Err(_) => control.report("download", "failed", "", 0, 0, 0, 0),
-            _ => {}
+    let sftp = connect(paths, &computer)?;
+    let emit = |_progress: &Progress| {};
+    let control = Control {
+        id: &slot.id,
+        computer: &computer,
+        cancel: &slot.cancel,
+        emit: &emit,
+        roots: &roots,
+        upload_poll: None,
+        free_space: &host_free_space,
+    };
+    let (folder, name, size) = match inspect_download(&sftp, &control, &path) {
+        Ok(entry) => entry,
+        Err(error) => {
+            publish_progress(&Progress {
+                id: slot.id.clone(),
+                computer: computer.clone(),
+                direction: "download",
+                state: "failed",
+                name: String::new(),
+                file_index: 0,
+                file_count: 0,
+                bytes_done: 0,
+                bytes_total: 0,
+            });
+            return Err(error);
         }
-        outcome
-    })
-    .await
-    .map_err(|_| "The download failed.".to_owned())?
+    };
+    Ok((
+        DownloadSession {
+            slot,
+            sftp,
+            computer,
+            roots,
+            folder,
+            name: name.clone(),
+            size,
+        },
+        name,
+    ))
 }
 
-#[tauri::command]
-pub(crate) fn cancel_transfer(window: Window, transfer_id: String) -> Result<(), String> {
-    if window.label() != "main" && !window.label().starts_with("desktop-shell-") {
+pub(crate) fn download_prepared(
+    session: DownloadSession,
+    destination: Option<PathBuf>,
+) -> Result<DownloadOutcome, String> {
+    let DownloadSession {
+        slot,
+        sftp,
+        computer,
+        roots,
+        folder,
+        name,
+        size,
+    } = session;
+    let emit = publish_progress;
+    let control = Control {
+        id: &slot.id,
+        computer: &computer,
+        cancel: &slot.cancel,
+        emit: &emit,
+        roots: &roots,
+        upload_poll: None,
+        free_space: &host_free_space,
+    };
+    let outcome = match destination {
+        Some(destination) => download_to(&sftp, &control, &folder, &name, size, destination),
+        None => Ok(DownloadOutcome::Cancelled),
+    };
+    match &outcome {
+        Ok(DownloadOutcome::Cancelled) => control.report("download", "cancelled", "", 0, 0, 0, 0),
+        Err(_) => control.report("download", "failed", "", 0, 0, 0, 0),
+        _ => {}
+    }
+    outcome
+}
+
+pub(crate) fn cancel_transfer(owner: &str, transfer_id: &str) -> Result<(), String> {
+    if owner != "main" && !owner.starts_with("desktop-shell-") {
         return Err("This window cannot cancel transfers.".into());
     }
     let active = ACTIVE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some((id, cancel)) = active.as_ref() {
-        if *id == transfer_id {
+        if id == transfer_id {
             cancel.store(true, Ordering::Release);
         }
     }

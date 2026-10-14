@@ -4,6 +4,7 @@ use crate::{
     runtime::{self, ProcessRunner, RuntimePaths},
 };
 use serde::{Deserialize, Serialize};
+use silo_engine::{Audience, Event};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader},
@@ -13,7 +14,6 @@ use std::{
     sync::{Mutex, OnceLock},
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
 
 const FAILED: &str = "Could not read SSH access settings.";
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -516,31 +516,25 @@ pub(crate) fn close_all() {
 /// observation paths (`state`, `read_ssh_access_state`) must never call this
 /// inline. Callers already holding a gate guard (the computer lifecycle in `run_msb`,
 /// backups, checkpoints, and the write commands) call `reconcile` directly.
-fn reconcile_if_idle(app: &AppHandle) {
+fn reconcile_if_idle(paths: &RuntimePaths) {
     // Background listener reconcile touches shared SSH state; skip when busy.
     if let Ok(_guard) = runtime::OPERATIONS.try_device_hidden("Reconciling SSH access") {
         if runtime::shutdown::ensure_accepting_operations().is_ok() {
-            if let Ok(paths) = runtime::runtime_paths(app) {
-                reconcile(&paths);
-            }
+            reconcile(paths);
         }
     }
 }
 /// Schedule a one-off listener reconcile off the calling thread. The read path
 /// uses this so it can return observed state immediately while any needed repair
 /// converges in the background.
-fn schedule_reconcile(app: &AppHandle) {
+fn schedule_reconcile(paths: RuntimePaths) {
     // Reads can arrive in bursts; one repair pass at a time is enough.
     static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let Ok(paths) = runtime::runtime_paths(app) else {
-        return;
-    };
     if !needs_reconcile(&paths) || RUNNING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         return;
     }
-    let app = app.clone();
     std::thread::spawn(move || {
-        reconcile_if_idle(&app);
+        reconcile_if_idle(&paths);
         RUNNING.store(false, std::sync::atomic::Ordering::Release);
     });
 }
@@ -558,14 +552,10 @@ fn needs_reconcile(paths: &RuntimePaths) -> bool {
         !owned.listeners.is_empty() || !owned.errors.is_empty()
     }
 }
-pub(crate) fn start_monitor(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || loop {
-        if runtime::runtime_paths(&app).is_ok_and(|paths| needs_reconcile(&paths)) {
-            reconcile_if_idle(&app);
-        }
-        std::thread::sleep(MONITOR_INTERVAL);
-    });
+pub(crate) fn monitor(paths: &RuntimePaths) {
+    if needs_reconcile(paths) {
+        reconcile_if_idle(paths);
+    }
 }
 fn state(paths: &RuntimePaths) -> Result<State, String> {
     let configs = read(paths)?;
@@ -623,52 +613,49 @@ fn state(paths: &RuntimePaths) -> Result<State, String> {
             .collect(),
     })
 }
-#[tauri::command]
-pub(crate) async fn read_ssh_access_state(app: AppHandle) -> Result<State, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        // Observation only: report the currently owned listeners without taking the
-        // gate or mutating anything, so a status read never waits behind a long
-        // operation. Any needed listener repair is scheduled in the background.
-        let paths = runtime::runtime_paths(&app)?;
-        let state = state(&paths);
-        schedule_reconcile(&app);
-        state
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+pub(crate) fn read_state(paths: &RuntimePaths) -> Result<State, String> {
+    // Observation only: report the currently owned listeners without taking the
+    // gate or mutating anything, so a status read never waits behind a long
+    // operation. Any needed listener repair is scheduled in the background.
+    let result = state(paths);
+    schedule_reconcile(paths.clone());
+    result
 }
-#[tauri::command]
-pub(crate) async fn save_ssh_access(
-    app: AppHandle,
+pub(crate) fn save(
+    paths: &RuntimePaths,
     computer: String,
     enabled: bool,
     port: u16,
     bind_address: String,
     keys: Option<Vec<String>>,
 ) -> Result<State, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let _operation = crate::updates::operation_guard()?;
-        // Saving SSH access reconciles the shared listeners/port map; device scope.
-        let _guard = runtime::OPERATIONS
-            .device("Saving SSH access")
-            .map_err(|_| FAILED)?;
-        runtime::shutdown::ensure_accepting_operations()?;
-        let paths = runtime::runtime_paths(&app)?;
-        let result = save_with(
-            &paths,
-            Target::Name(&computer),
-            Settings {
-                enabled,
-                port,
-                bind_address,
-                keys,
-            },
+    let _operation = crate::updates::operation_guard()?;
+    // Saving SSH access reconciles the shared listeners/port map; device scope.
+    let _guard = runtime::OPERATIONS
+        .device("Saving SSH access")
+        .map_err(|_| FAILED)?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    let result = save_with(
+        paths,
+        Target::Name(&computer),
+        Settings {
+            enabled,
+            port,
+            bind_address,
+            keys,
+        },
+    );
+    publish_network_state_changed();
+    result
+}
+
+fn publish_network_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            Event::new("silo://network-state-changed", serde_json::Value::Null),
+            Audience::All,
         );
-        let _ = app.emit("silo://network-state-changed", ());
-        result
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -937,19 +924,18 @@ struct RemoteSave {
 
 // Executed by the owning Silo app, never by its short-lived SSH bridge.
 pub(crate) fn remote_dispatch(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     method: &str,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     crate::remote::ensure_connections_enabled()?;
-    let paths = runtime::runtime_paths(app)?;
     if method == "ssh.access.state" {
         // Observation only: report the currently owned listeners without taking the
         // gate or mutating anything, so a remote status read never waits behind a long
         // operation. Any needed listener repair is scheduled in the background, matching
         // the local `read_ssh_access_state` path.
-        let result = serde_json::to_value(state(&paths)?).map_err(|_| FAILED.to_string());
-        schedule_reconcile(app);
+        let result = serde_json::to_value(state(paths)?).map_err(|_| FAILED.to_string());
+        schedule_reconcile(paths.clone());
         return result;
     }
     let _operation = crate::updates::operation_guard()?;
@@ -958,9 +944,9 @@ pub(crate) fn remote_dispatch(
         .device("Applying remote SSH change")
         .map_err(|e| e.to_string())?;
     runtime::shutdown::ensure_accepting_operations()?;
-    let result = remote_with(&paths, method, params);
+    let result = remote_with(paths, method, params);
     if method == "ssh.access.save" {
-        let _ = app.emit("silo://network-state-changed", ());
+        publish_network_state_changed();
     }
     result
 }
@@ -1338,12 +1324,18 @@ sys.stdin.buffer.read()
         );
         for _ in 0..2 {
             let observed = inspect_running(&p, &c);
-            assert_eq!(observed.as_ref().unwrap_err(), "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo.");
+            assert_eq!(
+                observed.as_ref().unwrap_err(),
+                "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo."
+            );
             reconcile_one(&mut owned, &c, observed, &["127.0.0.1".into()], || {
                 panic!("unsafe runtime must not bind a listener")
             });
             assert!(!owned.listeners.contains_key(&c.computer));
-            assert_eq!(owned.errors[&c.computer], "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo.");
+            assert_eq!(
+                owned.errors[&c.computer],
+                "The bundled runtime cannot open this computer's Linux account. Relaunch Silo to rerun system checks, then repair or update Silo."
+            );
         }
     }
 

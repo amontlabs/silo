@@ -11,12 +11,11 @@ use std::{
     process::{Command, Stdio},
     time::Duration,
 };
-use tauri::AppHandle;
 
 pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
-fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
+pub(crate) fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     let user = crate::working_account::USER;
     runtime::validate_name(name).map_err(|e| e.to_string())?;
     let home = paths.home.to_str().ok_or("Invalid runtime home path.")?;
@@ -72,35 +71,7 @@ pub(crate) fn running_computer_with(
 pub(crate) fn start_first(name: &str) -> String {
     format!("Start {name} first.")
 }
-pub(crate) fn open(app: &AppHandle, name: &str) -> Result<(), String> {
-    if let Some((device, computer)) = crate::remote_access::target(name)? {
-        // ssh gets `-F`, so the user's ~/.ssh/config needs no Include (G-11).
-        let (alias, config) =
-            crate::editor::prepare_remote_private(app, &device, &computer, "/workspace")?;
-        let application = applications::selected_terminal(app)?;
-        let command = [
-            "/usr/bin/ssh",
-            "-F",
-            config.to_str().ok_or("Invalid SSH configuration path.")?,
-            "-t",
-            &alias,
-        ]
-        .iter()
-        .map(|arg| quote(arg))
-        .collect::<Vec<_>>()
-        .join(" ");
-        return applications::open_terminal(app, &application, &command);
-    }
-    runtime::validate_name(name).map_err(|e| e.to_string())?;
-    let application = applications::selected_terminal(app)?;
-    let paths = runtime::runtime_paths(app)?;
-    let metadata = runtime::read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
-    if !metadata.computers.iter().any(|m| m.name() == name) {
-        return Err("Choose a local Silo computer.".into());
-    }
-    running_computer(&paths, name)?;
-    applications::open_terminal(app, &application, &command(&paths, name)?)
-}
+/// Opening a selected terminal is client-owned and lives in `commands::terminal`.
 
 pub(crate) fn command_file(command: &str) -> Result<std::path::PathBuf, String> {
     let mut file = tempfile::Builder::new()

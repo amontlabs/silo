@@ -13,7 +13,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Emitter, Manager};
 
 /// Repository discovery per computer: the last finished read (with its start time)
 /// and whether a background read is in flight.
@@ -66,31 +65,26 @@ fn dismiss_result(entries: &mut HashMap<String, (Value, Instant)>, key: &str) {
     }
 }
 
-#[tauri::command]
-pub async fn dismiss_repository_push(
-    app: tauri::AppHandle,
-    computer: String,
-    repository_path: String,
+pub(crate) fn dismiss_repository_push(
+    paths: &RuntimePaths,
+    computer: &str,
+    repository_path: &str,
 ) -> Result<(), String> {
-    if let Some((device, computer)) = crate::remote_access::target(&computer)? {
-        return tauri::async_runtime::spawn_blocking(move || {
-            crate::remote::call_remote(
-                &app,
-                &device,
-                "repository.dismiss",
-                json!({"computerId":computer,"path":repository_path}),
-            )
-            .map(|_| ())
-        })
-        .await
-        .map_err(|_| "Remote repository request failed.".to_string())?;
-    }
-    crate::host_push_operations::dismiss(&app, &computer, &repository_path)?;
+    crate::host_push_operations::dismiss(paths, computer, repository_path)?;
     let mut entries = results().lock().map_err(|_| "Push state unavailable.")?;
     dismiss_result(&mut entries, &format!("{computer}\0{repository_path}"));
     drop(entries);
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed();
     Ok(())
+}
+
+fn publish_application_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            silo_engine::context::Event::new("silo://application-state-changed", json!(null)),
+            silo_engine::context::Audience::All,
+        );
+    }
 }
 
 fn guest(paths: &RuntimePaths, name: &str, script: &str, args: &[&str]) -> Result<String, String> {
@@ -741,7 +735,7 @@ fn validate_running(inspected: &runtime::InspectedSandbox, computer: &str) -> Re
     Ok(())
 }
 fn perform(
-    app: &tauri::AppHandle,
+    paths: &RuntimePaths,
     computer: &str,
     path: &str,
     target: &PushTarget,
@@ -752,7 +746,6 @@ fn perform(
     }
     target.validate()?;
     runtime::validate_name(computer).map_err(|e| e.to_string())?;
-    let paths = runtime::runtime_paths(app)?;
     let metadata = runtime::read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
     let computer_id = metadata
         .computers
@@ -782,7 +775,7 @@ fn perform(
         return Err(TARGET_CHANGED.into());
     }
     // Revoked when this function returns, whatever the outcome.
-    let credential = crate::github::host_push_credential(app, computer, &target.repository)?;
+    let credential = crate::github::host_push_credential(computer, &target.repository)?;
     let guard = runtime::OPERATIONS
         .kind(runtime::operation_gate::OperationKind::Push)
         .computer(&computer_id, computer, &format!("Pushing from {computer}"))
@@ -792,11 +785,15 @@ fn perform(
     let result = (|| {
         runtime::shutdown::ensure_accepting_operations()?;
         require_running(&paths, computer)?;
-        let executable = crate::bundled_tools::directory(app)?.join("git");
-        let support = app
-            .path()
-            .resource_dir()
-            .map_err(|_| "Cannot locate Git support.")?
+        let executable = paths
+            .executable
+            .parent()
+            .ok_or("Cannot locate Git support.")?
+            .join("git");
+        let support = silo_engine::context::current()
+            .ok_or("Cannot locate Git support.")?
+            .paths()
+            .resources
             .join("git-support");
         push_target(
             &paths,
@@ -1194,17 +1191,17 @@ printf '%s\n%s\n%s\n' "$commit" "$tracking" "$origin"
 /// Push a local computer repository. Remote devices run this through their
 /// own push journal (`repository.push.start`).
 pub(crate) async fn push_repository(
-    app: tauri::AppHandle,
+    paths: RuntimePaths,
     computer: String,
     repository_path: String,
     target: PushTarget,
 ) -> Result<Value, String> {
     let key = format!("{computer}\0{repository_path}");
     let planned_count = {
-        let (app, computer, repository_path) =
-            (app.clone(), computer.clone(), repository_path.clone());
+        let (paths, computer, repository_path) =
+            (paths.clone(), computer.clone(), repository_path.clone());
         runtime::operation_gate::spawn_blocking(move || {
-            planned_count(&app, &computer, &repository_path)
+            planned_count(&paths, &computer, &repository_path)
         })
         .await
         .map_err(|_| "Host push task failed.".to_string())?
@@ -1216,16 +1213,16 @@ pub(crate) async fn push_repository(
         }
         r.insert(key.clone(),(json!({"computer":computer,"repositoryPath":repository_path,"commitCount":planned_count,"status":"pushing","target":target}),Instant::now()));
     }
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed();
     let task = {
-        let (app, computer, repository_path, target) = (
-            app.clone(),
+        let (paths, computer, repository_path, target) = (
+            paths.clone(),
             computer.clone(),
             repository_path.clone(),
             target.clone(),
         );
         runtime::operation_gate::spawn_blocking(move || {
-            perform(&app, &computer, &repository_path, &target)
+            perform(&paths, &computer, &repository_path, &target)
         })
     };
     // A panicked task must still resolve the entry, or it would stay
@@ -1238,36 +1235,34 @@ pub(crate) async fn push_repository(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(key, (value.clone(), Instant::now()));
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed();
     Ok(value)
 }
 /// The commit count last shown for this repository, so an active push reports
 /// the planned number instead of zero.
-pub(crate) fn planned_count(app: &tauri::AppHandle, computer: &str, repository_path: &str) -> u64 {
-    runtime::runtime_paths(app)
-        .ok()
-        .and_then(|paths| {
-            let metadata = runtime::read_metadata(&paths.metadata).ok()?;
-            let computer_id = metadata
-                .computers
-                .iter()
-                .find(|configuration| configuration.name() == computer)?
-                .id();
-            discoveries()
-                .0
-                .lock()
-                .ok()?
-                .get(&format!("{}:{computer_id}", paths.home.display()))?
-                .last
-                .as_ref()?
-                .1
-                .as_ref()
-                .ok()?
-                .iter()
-                .find(|repo| repo["path"] == repository_path)?["ahead"]
-                .as_u64()
-        })
-        .unwrap_or(0)
+pub(crate) fn planned_count(paths: &RuntimePaths, computer: &str, repository_path: &str) -> u64 {
+    (|| {
+        let metadata = runtime::read_metadata(&paths.metadata).ok()?;
+        let computer_id = metadata
+            .computers
+            .iter()
+            .find(|configuration| configuration.name() == computer)?
+            .id();
+        discoveries()
+            .0
+            .lock()
+            .ok()?
+            .get(&format!("{}:{computer_id}", paths.home.display()))?
+            .last
+            .as_ref()?
+            .1
+            .as_ref()
+            .ok()?
+            .iter()
+            .find(|repo| repo["path"] == repository_path)?["ahead"]
+            .as_u64()
+    })()
+    .unwrap_or(0)
 }
 fn finished_result(
     computer: &str,

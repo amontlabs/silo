@@ -102,13 +102,13 @@ fn applied() -> &'static Mutex<HashMap<String, String>> {
     APPLIED.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub(super) fn apply(app: &tauri::AppHandle, name: &str, revision: u64) -> Result<(), String> {
+pub(super) fn apply(name: &str, revision: u64) -> Result<(), String> {
     // The credential store can wait on a permission prompt; never read it under STATE.
     let token = value();
-    let key = active_key(app, name)?;
+    let key = active_key(name)?;
     outside_state(
         || {
-            let d = load(app)?;
+            let d = load()?;
             if d.revision != revision {
                 return Err("GitHub access changed. Applying your latest choices.".into());
             }
@@ -121,7 +121,7 @@ pub(super) fn apply(app: &tauri::AppHandle, name: &str, revision: u64) -> Result
             let mut applied = applied()
                 .lock()
                 .map_err(|_| "GitHub token state is unavailable.")?;
-            if crate::runtime::github_policy_is_cached(app, name, &profile)?
+            if runtime()?.github_policy_is_cached(name, &profile)?
                 && applied.get(&key) == Some(&fingerprint(&token))
             {
                 return Ok(None);
@@ -135,7 +135,7 @@ pub(super) fn apply(app: &tauri::AppHandle, name: &str, revision: u64) -> Result
                 .remove(&key);
             Ok(Some(profile))
         },
-        |profile| crate::runtime::apply_github_policy(app, name, revision, &profile),
+        |profile| runtime()?.apply_github_policy(name, revision, &profile),
     )?
     .unwrap_or(Ok(()))
 }
@@ -151,8 +151,8 @@ fn keeps_token(d: &Document, name: &str, current: Option<&String>, attached: &St
 /// Remove token authority before a method switch, removal, failed validation or replacement.
 /// OAuth reconciliation never substitutes its own credential for a disconnected personal token.
 /// Every computer is detached even when another fails; failures are reported per computer.
-pub(super) fn narrow(app: &tauri::AppHandle, d: &Document, errors: &mut NarrowErrors) {
-    let prefix = match path(app) {
+pub(super) fn narrow(d: &Document, errors: &mut NarrowErrors) {
+    let prefix = match path() {
         Ok(path) => format!("{}:", path.display()),
         Err(error) => return errors.record_all(error),
     };
@@ -165,9 +165,8 @@ pub(super) fn narrow(app: &tauri::AppHandle, d: &Document, errors: &mut NarrowEr
     let current = current_fingerprint();
     let detach = |name: &str, key: &str| -> Result<(), String> {
         detach_result(
-            app,
             name,
-            crate::runtime::apply_github_policy(app, name, d.revision, &profile(&[])),
+            runtime()?.apply_github_policy(name, d.revision, &profile(&[])),
         )?;
         applied()
             .lock()
@@ -199,7 +198,7 @@ pub(super) fn narrow(app: &tauri::AppHandle, d: &Document, errors: &mut NarrowEr
                 errors.record_all("Invalid computer policy.".into());
                 continue;
             };
-            match active_key(app, name) {
+            match active_key(name) {
                 Ok(key) => restored.push((name.to_owned(), key)),
                 Err(error) => errors.record(name, error),
             }
@@ -220,9 +219,9 @@ pub(super) fn narrow(app: &tauri::AppHandle, d: &Document, errors: &mut NarrowEr
         );
     }
 }
-fn changed(app: &tauri::AppHandle, removing: Option<bool>) -> Result<(), String> {
+fn changed(removing: Option<bool>) -> Result<(), String> {
     let _state = serialize(&STATE);
-    let mut d = load(app)?;
+    let mut d = load()?;
     d.revision = next_policy_revision(d.revision)?;
     if let Some(removing) = removing {
         d.personal_token_removing = removing;
@@ -239,12 +238,12 @@ fn changed(app: &tauri::AppHandle, removing: Option<bool>) -> Result<(), String>
         }
     }
     mark_pending_for(&mut d, &names);
-    save(app, &d)?;
+    save(&d)?;
     let mut errors = NarrowErrors::default();
-    narrow(app, &d, &mut errors);
+    narrow(&d, &mut errors);
     let result = errors.into_result();
     schedule(Duration::ZERO);
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_changed();
     result
 }
 
@@ -260,7 +259,7 @@ pub(super) fn next_check() -> Duration {
     Duration::from_secs(CHECK_AT.load(Ordering::SeqCst).saturating_sub(now()))
 }
 /// Called by the existing serialized worker. Snapshot reads never touch secure storage.
-pub(super) fn check(app: &tauri::AppHandle) {
+pub(super) fn check() {
     let Some(_operation) = try_serialize(&TOKEN_OPERATION) else {
         return;
     };
@@ -268,7 +267,7 @@ pub(super) fn check(app: &tauri::AppHandle) {
         return;
     }
     CHECK_AT.store(now() + 300, Ordering::SeqCst);
-    let removing = load(app).map(|d| d.personal_token_removing).unwrap_or(true);
+    let removing = load().map(|d| d.personal_token_removing).unwrap_or(true);
     let next = if removing {
         json!({"state":"disconnected","saved":true,"message":"Token removal is pending. Retry Remove token."})
     } else {
@@ -285,10 +284,10 @@ pub(super) fn check(app: &tauri::AppHandle) {
         }
     };
     if publish(next) {
-        if let Err(message) = changed(app, None) {
+        if let Err(message) = changed(None) {
             // Keep the failed detachment visible and retry it through the normal worker.
             let _state = serialize(&STATE);
-            if let Ok(mut d) = load(app) {
+            if let Ok(mut d) = load() {
                 for name in d
                     .computers
                     .iter()
@@ -297,7 +296,7 @@ pub(super) fn check(app: &tauri::AppHandle) {
                 {
                     d.access_errors.insert(name.into(), message.clone());
                 }
-                let _ = save(app, &d);
+                let _ = save(&d);
             }
         }
     }
@@ -313,67 +312,46 @@ fn save_validated_token(
     connected(&token)
 }
 
-#[tauri::command]
-pub async fn save_github_personal_token(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-    token: String,
-) -> Result<Value, String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let _network = serialize(&TOKEN_OPERATION);
-        // Saving a token is an explicit retry; never leave validation blocked by earlier failures.
-        crate::github_http::reset_bearer_retries(token.trim());
-        let token = validated(token.trim())?;
-        SECRET.retry();
-        save_validated_token(
-            &SECRET,
-            token.clone(),
-            || {
-                entry()?
-                    .set_password(
-                        &serde_json::to_string(&token)
-                            .map_err(|_| "Cannot encode GitHub token.")?,
-                    )
-                    .map_err(|_| "Cannot save GitHub token in the system credential store.".into())
-            },
-            |token| {
-                publish(json!({"state":"connected","saved":true,"account":token.account}));
-                CHECK_AT.store(now() + 300, Ordering::SeqCst);
-                changed(&app, Some(false))
-            },
-        )?;
+pub(crate) fn save_github_personal_token(token: String) -> Result<Value, String> {
+    let _network = serialize(&TOKEN_OPERATION);
+    // Saving a token is an explicit retry; never leave validation blocked by earlier failures.
+    crate::github_http::reset_bearer_retries(token.trim());
+    let token = validated(token.trim())?;
+    SECRET.retry();
+    save_validated_token(
+        &SECRET,
+        token.clone(),
+        || {
+            entry()?
+                .set_password(
+                    &serde_json::to_string(&token).map_err(|_| "Cannot encode GitHub token.")?,
+                )
+                .map_err(|_| "Cannot save GitHub token in the system credential store.".into())
+        },
+        |token| {
+            publish(json!({"state":"connected","saved":true,"account":token.account}));
+            CHECK_AT.store(now() + 300, Ordering::SeqCst);
+            changed(Some(false))
+        },
+    )?;
 
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "Could not save GitHub token.")?
+    snapshot()
 }
-#[tauri::command]
-pub async fn remove_github_personal_token(
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<Value, String> {
-    require_main(window.label())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let _network = serialize(&TOKEN_OPERATION);
-        // Detach before deletion so a storage failure cannot leave guest access silently enabled.
-        publish(json!({"state":"disconnected","saved":true,"message":"Removing personal token."}));
-        changed(&app, Some(true))?;
-        SECRET.retry();
-        SECRET.write(None, || match entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("Cannot remove GitHub token from the system credential store.".into()),
-        })?;
-        publish(json!({"state":"disconnected","saved":false}));
-        CHECK_AT.store(now() + 300, Ordering::SeqCst);
-        changed(&app, Some(false))?;
-        snapshot(&app)
-    })
-    .await
-    .map_err(|_| "Could not remove GitHub token.")?
+
+pub(crate) fn remove_github_personal_token() -> Result<Value, String> {
+    let _network = serialize(&TOKEN_OPERATION);
+    // Detach before deletion so a storage failure cannot leave guest access silently enabled.
+    publish(json!({"state":"disconnected","saved":true,"message":"Removing personal token."}));
+    changed(Some(true))?;
+    SECRET.retry();
+    SECRET.write(None, || match entry()?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(_) => Err("Cannot remove GitHub token from the system credential store.".into()),
+    })?;
+    publish(json!({"state":"disconnected","saved":false}));
+    CHECK_AT.store(now() + 300, Ordering::SeqCst);
+    changed(Some(false))?;
+    snapshot()
 }
 
 #[cfg(test)]

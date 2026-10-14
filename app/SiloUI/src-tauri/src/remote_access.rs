@@ -3,7 +3,6 @@
 use crate::{remote, runtime};
 use serde_json::{json, Value};
 use std::process::{Child, Command, Stdio};
-use tauri::AppHandle;
 
 pub(crate) fn target(value: &str) -> Result<Option<(String, String)>, String> {
     let Some(rest) = value.strip_prefix("silo-remote:") else {
@@ -23,38 +22,47 @@ fn string<'a>(params: &'a Value, key: &str) -> Result<&'a str, String> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("Missing {key}."))
 }
-fn computer_name(app: &AppHandle, params: &Value) -> Result<String, String> {
-    runtime::remote_ops::local_computer_name(app, string(params, "computerId")?)
+fn computer_name(paths: &runtime::RuntimePaths, params: &Value) -> Result<String, String> {
+    runtime::remote_ops::local_computer_name_in(paths, string(params, "computerId")?)
 }
 
-pub(crate) fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, String> {
+pub(crate) type CheckpointHandler = dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync;
+
+pub(crate) fn dispatch(
+    paths: &runtime::RuntimePaths,
+    method: &str,
+    params: &Value,
+    checkpoints: &CheckpointHandler,
+) -> Result<Value, String> {
     match method {
         "desktop.connect" => crate::desktop_viewer::local_connection(
-            app,
-            &computer_name(app, params)?,
+            paths,
+            &computer_name(paths, params)?,
             Some(string(params, "computerId")?),
         ),
         "desktop.status" => {
-            let mut state = crate::desktop::dispatch(app, method, params)?;
-            state["name"] = Value::String(computer_name(app, params)?);
+            let mut state = crate::desktop::dispatch(paths, method, params)?;
+            state["name"] = Value::String(computer_name(paths, params)?);
             Ok(state)
         }
-        "desktop.action" | "computerUse.approval" => crate::desktop::dispatch(app, method, params),
-        "chatgpt.status" => serde_json::to_value(crate::chatgpt_app::local_status(app)?)
+        "desktop.action" | "computerUse.approval" => {
+            crate::desktop::dispatch(paths, method, params)
+        }
+        "chatgpt.status" => serde_json::to_value(crate::chatgpt_app::local_status()?)
             .map_err(|_| "Could not encode the ChatGPT app status.".to_owned()),
-        "chatgpt.retry" => serde_json::to_value(crate::chatgpt_app::retry_now(app)?)
+        "chatgpt.retry" => serde_json::to_value(crate::chatgpt_app::retry_now()?)
             .map_err(|_| "Could not encode the ChatGPT app status.".to_owned()),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {
-            crate::ssh_access::remote_dispatch(app, method, params)
+            crate::ssh_access::remote_dispatch(paths, method, params)
         }
         "files.list" => {
             // A file listing observes one computer's guest without starting or changing it
             // (`--no-start`), so it takes no gate and stays available during operations.
-            let name = computer_name(app, params)?;
+            let name = computer_name(paths, params)?;
             let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0);
             let offset = usize::try_from(offset).map_err(|_| "Invalid folder offset.")?;
-            let page = tauri::async_runtime::block_on(crate::files::list_computer_directory(
-                app.clone(),
+            let page = crate::files::list_computer_directory(
+                paths,
                 name,
                 string(params, "path")?.into(),
                 offset,
@@ -62,120 +70,75 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<
                     .get("snapshotId")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
-            ))?;
+            )?;
             serde_json::to_value(page).map_err(|_| "Could not encode folder listing.".into())
         }
         "guest.prepare" => {
             // Authorizes a remote key inside one computer's guest; wait its turn per computer.
-            let paths = runtime::runtime_paths(app)?;
             let (_guard, name) =
-                prepare_guest_target(&runtime::OPERATIONS, &paths, string(params, "computerId")?)?;
-            let user = crate::working_account::inspect_user(&paths, &name)?;
+                prepare_guest_target(&runtime::OPERATIONS, paths, string(params, "computerId")?)?;
+            let user = crate::working_account::inspect_user(paths, &name)?;
             crate::working_account::require_client_protocol(params)?;
             let public = crate::editor::authorize_remote(
-                &paths,
+                paths,
                 &name,
                 string(params, "publicKey")?,
                 string(params, "path")?,
             )?;
             let guest_address = if params["forwarding"].as_bool() == Some(true) {
-                Some(guest_forwarding_address(&paths, &name)?)
+                Some(guest_forwarding_address(paths, &name)?)
             } else {
                 None
             };
             Ok(json!({"hostPublicKey": public, "user":user, "guestAddress":guest_address}))
         }
-        "network.state" => crate::remote_network::device_state(app),
+        "network.state" => crate::remote_network::device_state(paths),
         "network.publish" => {
             // `save_network_port` takes this computer's operation gate and shutdown check;
             // taking a device gate here too would deadlock against that computer guard.
-            let name = computer_name(app, params)?;
+            let name = computer_name(paths, params)?;
             let port = params["port"]
                 .as_u64()
                 .and_then(|p| u16::try_from(p).ok())
                 .filter(|p| *p != 0)
                 .ok_or("Invalid port.")?;
             let scheme = params["scheme"].as_str().map(str::to_owned);
-            tauri::async_runtime::block_on(crate::network::save_network_port(
-                app.clone(),
-                name,
-                port,
-                None,
-                scheme,
-            ))?;
-            crate::remote_network::fresh_device_state(app)
+            crate::network::save_network_port(paths, name, port, None, scheme)?;
+            crate::remote_network::fresh_device_state(paths)
         }
         "network.unpublish" => {
             // The owner's mapping is shared by every controller; removing it from one
             // removes it here too, like removing the port on this device.
-            let name = computer_name(app, params)?;
+            let name = computer_name(paths, params)?;
             let port = params["port"]
                 .as_u64()
                 .and_then(|p| u16::try_from(p).ok())
                 .filter(|p| *p != 0)
                 .ok_or("Invalid port.")?;
-            tauri::async_runtime::block_on(crate::network::remove_network_port(
-                app.clone(),
-                name,
-                port,
-            ))?;
-            crate::remote_network::fresh_device_state(app)
+            crate::network::remove_network_port(paths, name, port)?;
+            crate::remote_network::fresh_device_state(paths)
         }
         // Pushes are bound to the repository, branch and commit the user confirmed;
         // the older unbound "repository.push" method is no longer served.
         "repository.push.start" => {
-            crate::host_push_operations::start_remote(app, computer_name(app, params)?, params)
+            crate::host_push_operations::start_remote(paths, computer_name(paths, params)?, params)
         }
         "repository.push.status" => crate::host_push_operations::status(
-            app,
-            &computer_name(app, params)?,
+            paths,
+            &computer_name(paths, params)?,
             string(params, "path")?,
             string(params, "operationId")?,
         ),
         "repository.dismiss" => {
-            let name = computer_name(app, params)?;
-            tauri::async_runtime::block_on(crate::host_push::dismiss_repository_push(
-                app.clone(),
-                name,
-                string(params, "path")?.into(),
-            ))?;
+            let name = computer_name(paths, params)?;
+            crate::host_push::dismiss_repository_push(paths, &name, string(params, "path")?)?;
             Ok(Value::Null)
         }
         "checkpoint.create" | "checkpoint.fork" | "checkpoint.restore" => {
             // Resolve the computer through this device's saved identity before
             // forwarding checkpoint state changes to the owning runtime.
-            let computer_id = string(params, "computerId")?.to_owned();
-            let _ = computer_name(app, params)?;
-            let result = match method {
-                "checkpoint.create" => {
-                    tauri::async_runtime::block_on(runtime::checkpoints::create_checkpoint(
-                        app.clone(),
-                        computer_id,
-                        string(params, "name")?.to_owned(),
-                    ))?
-                }
-                "checkpoint.fork" => {
-                    tauri::async_runtime::block_on(runtime::checkpoints::fork_checkpoint(
-                        app.clone(),
-                        computer_id,
-                        params
-                            .get("checkpointId")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
-                        string(params, "newName")?.to_owned(),
-                    ))?
-                }
-                "checkpoint.restore" => {
-                    tauri::async_runtime::block_on(runtime::checkpoints::restore_checkpoint(
-                        app.clone(),
-                        computer_id,
-                        string(params, "checkpointId")?.to_owned(),
-                    ))?
-                }
-                _ => unreachable!(),
-            };
-            serde_json::to_value(result)
-                .map_err(|_| "Could not encode the remote checkpoint result.".into())
+            let _ = computer_name(paths, params)?;
+            checkpoints(method, params)
         }
         _ => Err("This Silo version does not support that remote operation.".into()),
     }
@@ -194,18 +157,21 @@ fn prepare_guest_target<'a>(
     Ok((guard, name))
 }
 
-pub(crate) fn spawn_stream(app: &AppHandle, method: &str, params: &Value) -> Result<Child, String> {
+pub(crate) fn spawn_stream(
+    paths: &runtime::RuntimePaths,
+    method: &str,
+    params: &Value,
+) -> Result<Child, String> {
     if method != "guest.ssh" {
         return Err("Unsupported guest connection.".into());
     }
     // Interactive sessions stay outside the operation queue: this only inspects that
     // the computer is Running and spawns an `msb ssh serve` session, so it takes no gate
     // and a long operation never blocks opening a connection.
-    let name = computer_name(app, params)?;
+    let name = computer_name(paths, params)?;
     runtime::shutdown::ensure_accepting_operations()?;
-    let paths = runtime::runtime_paths(app)?;
-    crate::terminal::running_computer(&paths, &name)?;
-    crate::working_account::require_runtime(&paths)?;
+    crate::terminal::running_computer(paths, &name)?;
+    crate::working_account::require_runtime(paths)?;
     Command::new(&paths.executable)
         .env("MSB_HOME", &paths.home)
         .env("MSB_PATH", &paths.executable)
@@ -263,7 +229,6 @@ fn guest_forwarding_address(
 }
 
 pub(crate) fn prepare(
-    app: &AppHandle,
     device: &str,
     computer: &str,
     public: &str,
@@ -271,7 +236,6 @@ pub(crate) fn prepare(
     forwarding: bool,
 ) -> Result<(String, &'static str, Option<std::net::IpAddr>), String> {
     let result = remote::call_remote(
-        app,
         device,
         "guest.prepare",
         json!({"computerId":computer,"publicKey":public,"path":path,"accountProtocol":1,"forwarding":forwarding}),
