@@ -523,6 +523,29 @@ pub(crate) fn run_cancellable(
     )
 }
 
+/// Like `run_cancellable`, with a script sent through SSH's stdin. This keeps guest installers
+/// out of shell command arguments while preserving the same cancellation and timeout behavior.
+pub(crate) fn run_cancellable_with_input(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    stdin: &[u8],
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+) -> Result<CommandOutput, String> {
+    let account = account(layout)?;
+    let address = guest_address(&record.mac_address)?;
+    exec_until(
+        SSH,
+        &ssh_args(layout, record, &account, address, command, Auth::Key),
+        Some(stdin),
+        timeout,
+        &environment(layout, Auth::Key)?,
+        None,
+        Some(cancel),
+    )
+}
+
 fn run_as(
     layout: &Layout,
     record: &Record,

@@ -52,6 +52,10 @@ pub trait StartupServices: Send + Sync + 'static {
     fn recover_lifecycle(&self) -> Result<RecoveredActions, String>;
     fn recover_update(&self) -> Result<bool, String>;
     fn current_launch_settings(&self) -> Result<(Map<String, Value>, PathBuf), String>;
+    /// Local macOS computers share the startup ID preference with Linux computers.
+    fn macos_computer_ids(&self) -> Vec<String> {
+        Vec::new()
+    }
     fn start_at_launch(&self, id: &str) -> Result<(), String>;
     fn update_recovery_failed(&self, message: String);
     fn notify_failure(&self, key: &str, title: &str, body: &str);
@@ -89,8 +93,17 @@ fn preserve_recovered_stops(settings: &mut Map<String, Value>, stopped: &HashSet
 }
 
 fn settings_for_launch(
+    settings: Map<String, Value>,
+    metadata: &Path,
+    stopped: &HashSet<String>,
+) -> Result<Map<String, Value>, String> {
+    settings_for_launch_with_macos_ids(settings, metadata, &[], stopped)
+}
+
+fn settings_for_launch_with_macos_ids(
     mut settings: Map<String, Value>,
     metadata: &Path,
+    macos_ids: &[String],
     stopped: &HashSet<String>,
 ) -> Result<Map<String, Value>, String> {
     if settings.get("onboardingComplete").and_then(Value::as_bool) != Some(true)
@@ -118,12 +131,12 @@ fn settings_for_launch(
             .clone()
             .find(|configuration| configuration.name() == "dev")
             .or_else(|| local.next());
+        let initial_id = initial
+            .map(|configuration| configuration.id().to_owned())
+            .or_else(|| macos_ids.first().cloned());
         settings.insert(
             "startupComputerIds".into(),
-            serde_json::json!(initial
-                .map(|configuration| configuration.id())
-                .into_iter()
-                .collect::<Vec<_>>()),
+            serde_json::json!(initial_id.into_iter().collect::<Vec<_>>()),
         );
     }
     preserve_recovered_stops(&mut settings, stopped);
@@ -134,12 +147,13 @@ fn settings_for_launch(
         .and_then(Value::as_array_mut)
     {
         if !ids.is_empty() {
-            let available: HashSet<_> = crate::runtime::read_metadata(metadata)
+            let mut available: HashSet<_> = crate::runtime::read_metadata(metadata)
                 .map_err(|error| error.to_string())?
                 .computers
                 .into_iter()
                 .map(|configuration| configuration.id().to_owned())
                 .collect();
+            available.extend(macos_ids.iter().cloned());
             ids.retain(|id| id.as_str().is_some_and(|id| available.contains(id)));
         }
     }
@@ -244,7 +258,13 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
     let result = services
         .current_launch_settings()
         .and_then(|(settings, metadata)| {
-            let settings = settings_for_launch(settings, &metadata, &recovered_stops)?;
+            let macos_ids = services.macos_computer_ids();
+            let settings = settings_for_launch_with_macos_ids(
+                settings,
+                &metadata,
+                &macos_ids,
+                &recovered_stops,
+            )?;
             Ok(start_selected(&settings, &state.cancelled, |id| {
                 let result = services.start_at_launch(id);
                 if let Some(context) = silo_engine::context::current() {
@@ -354,6 +374,48 @@ mod tests {
                     .unwrap();
             assert!(selected_computers(&resolved).is_empty());
         }
+    }
+
+    #[test]
+    fn startup_selection_keeps_local_macos_ids_and_uses_them_when_no_linux_computer_exists() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata = directory.path().join("computers.json");
+        let mac_first = "00000000-0000-4000-8000-000000000011".to_string();
+        let mac_second = "00000000-0000-4000-8000-000000000012".to_string();
+        let linux = "00000000-0000-4000-8000-000000000013";
+        std::fs::write(
+            &metadata,
+            json!({"schemaVersion":1,"computers":[computer(linux, "dev")]}).to_string(),
+        )
+        .unwrap();
+        let settings = json!({
+            "onboardingComplete":true,
+            "startComputersAtLaunch":true,
+            "startupComputerIds":[mac_second, "missing", linux, mac_first]
+        });
+        let resolved = settings_for_launch_with_macos_ids(
+            settings.as_object().unwrap().clone(),
+            &metadata,
+            &[mac_first.clone(), mac_second.clone()],
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            selected_computers(&resolved),
+            vec![mac_second.clone(), linux.to_string(), mac_first.clone()]
+        );
+
+        std::fs::write(&metadata, json!({"schemaVersion":1,"computers":[]}).to_string())
+            .unwrap();
+        let defaults = json!({"onboardingComplete":true,"startComputersAtLaunch":true});
+        let resolved = settings_for_launch_with_macos_ids(
+            defaults.as_object().unwrap().clone(),
+            &metadata,
+            &[mac_first.clone(), mac_second],
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert_eq!(selected_computers(&resolved), vec![mac_first]);
     }
 
     #[test]

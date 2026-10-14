@@ -349,6 +349,14 @@ pub(crate) fn names(app: &AppHandle) -> Vec<String> {
     new_context(app).map_or_else(|_| Vec::new(), |context| engine::names(&context))
 }
 
+pub(crate) fn computer_ids(app: &AppHandle) -> Vec<String> {
+    new_context(app).map_or_else(|_| Vec::new(), |context| engine::computer_ids(&context))
+}
+
+pub(crate) fn start_at_launch(app: &AppHandle, id: &str) -> Result<bool, String> {
+    engine::start_at_launch(&new_context(app)?, id)
+}
+
 pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, PathBuf)> {
     engine::log_target(&new_context(app).ok()?, id)
 }

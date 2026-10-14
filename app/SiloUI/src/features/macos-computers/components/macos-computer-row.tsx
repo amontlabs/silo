@@ -4,6 +4,7 @@ import { History, Monitor, Play, Square } from "lucide-react"
 import { ActionsMenu, type MenuAction } from "@/components/actions-menu"
 import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { ComputerAction, ComputerListItem, ComputerListRow, type ComputerRowTone } from "@/features/computers/components/computer-list"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
@@ -37,7 +38,11 @@ const tones: Record<MacosComputer["state"], ComputerRowTone> = {
   failed: "error",
 }
 
-const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete", setup: "set up" }
+const actionVerbs: Record<Exclude<MacosComputerAction, object>, string> = { start: "start", stop: "stop", "force-stop": "force stop", delete: "delete", setup: "set up" }
+
+function actionVerb(action: MacosComputerAction) {
+  return typeof action === "string" ? actionVerbs[action] : "change CPU and memory for"
+}
 
 /**
  * A macOS computer in the computers list. It has no detail page, terminal, editor or reorder handle;
@@ -50,13 +55,17 @@ const actionVerbs: Record<MacosComputerAction, string> = { start: "start", stop:
 export function MacosComputerRow({ computer, store, takenNames = [], device }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[]; device?: ComputerDevice }) {
   const [pending, setPending] = useState(false)
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
+  const [cpus, setCpus] = useState(String(computer.cpus))
+  const [memoryGiB, setMemoryGiB] = useState(String(computer.memoryGiB))
+  const [expectedResources, setExpectedResources] = useState({ cpus: computer.cpus, memoryGiB: computer.memoryGiB })
+  const [resourceError, setResourceError] = useState<string | null>(null)
   const unavailable = Boolean(device && (!device.connected || device.busy))
   const checkpointsAvailable = !device && (canCheckpointMacos(computer) || (computer.checkpoints?.length ?? 0) > 0)
   const operating = computer.checkpointOperation?.status === "running"
 
   async function run(action: MacosComputerAction) {
     setPending(true)
-    try { await store.action(computer.id, action) } catch (error) { showActionFailure(`Could not ${actionVerbs[action]} ${computer.name}`, error, undefined, { native: false }) } finally { setPending(false) }
+    try { await store.action(computer.id, action); return true } catch (error) { showActionFailure(`Could not ${actionVerb(action)} ${computer.name}`, error, undefined, { native: false }); return false } finally { setPending(false) }
   }
 
   async function showScreen() {
@@ -77,6 +86,19 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
   const settled = computer.state === "stopped" || computer.state === "failed"
   const label = macosStateLabel(computer)
   const items: MenuAction[] = []
+  if (computer.state === "stopped") items.push({
+    label: "Edit CPU & memory",
+    accessibleLabel: `Edit CPU and memory for ${computer.name}`,
+    popover: "resources",
+    disabled: unavailable || Boolean(computer.pendingRestore?.memory),
+    tooltip: computer.pendingRestore?.memory ? "Finish restoring saved memory before changing CPU or memory." : undefined,
+    onSelect: () => {
+      setCpus(String(computer.cpus))
+      setMemoryGiB(String(computer.memoryGiB))
+      setExpectedResources({ cpus: computer.cpus, memoryGiB: computer.memoryGiB })
+      setResourceError(null)
+    },
+  })
   // Clipboard transfers go over the guest account that setup creates.
   if (!device && computer.state === "running" && computer.setupComplete) items.push(
     { label: "Paste into computer", accessibleLabel: `Paste into ${computer.name}`, onSelect: () => void transferClipboard("paste-into") },
@@ -117,7 +139,7 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
           description="The setup stops and the computer is removed."
           confirmLabel="Cancel setup"
           cancelLabel="Keep setting up"
-          onConfirm={() => run("delete")}
+          onConfirm={async () => { await run("delete") }}
         >
           <Button type="button" variant="ghost" size="xs" aria-label={`Cancel setting up ${computer.name}`} disabled={pending || unavailable}>Cancel</Button>
         </ConfirmPopover>}
@@ -128,18 +150,47 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
           description={computer.state === "copying" ? "The copy stops and the computer is removed." : "The download and installation stop and the computer is removed."}
           confirmLabel="Cancel creation"
           cancelLabel="Keep creating"
-          onConfirm={() => run("delete")}
+          onConfirm={async () => { await run("delete") }}
         >
           <Button type="button" variant="ghost" size="xs" aria-label={`Cancel creating ${computer.name}`} disabled={pending || unavailable}>Cancel</Button>
         </ConfirmPopover>}
         {items.length > 0 && <ActionsMenu label={`More actions for ${computer.name}`} items={items} popovers={{
+          resources: close => <form className="grid gap-3" onSubmit={event => {
+            event.preventDefault()
+            const parsedCpus = Number(cpus)
+            const parsedMemory = Number(memoryGiB)
+            if (!Number.isSafeInteger(parsedCpus) || parsedCpus < 2 || !Number.isSafeInteger(parsedMemory) || parsedMemory < 4) {
+              setResourceError("Enter at least 2 CPUs and 4 GiB of memory.")
+              return
+            }
+            void run({ "change-resources": {
+              cpus: parsedCpus,
+              memoryGiB: parsedMemory,
+              expected: expectedResources,
+            } }).then(saved => { if (saved) close() })
+          }}>
+            <div className="grid gap-1.5">
+              <label htmlFor={`macos-cpus-${computer.id}`} className="font-medium">CPUs</label>
+              <Input id={`macos-cpus-${computer.id}`} type="number" min={2} step={1} required value={cpus} onChange={event => setCpus(event.target.value)} />
+            </div>
+            <div className="grid gap-1.5">
+              <label htmlFor={`macos-memory-${computer.id}`} className="font-medium">Memory (GiB)</label>
+              <Input id={`macos-memory-${computer.id}`} type="number" min={4} step={1} required value={memoryGiB} onChange={event => setMemoryGiB(event.target.value)} />
+            </div>
+            <p className="text-muted-foreground">Changes apply the next time this computer starts.</p>
+            {resourceError && <p role="alert" className="text-destructive">{resourceError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={close}>Cancel</Button>
+              <Button type="submit" size="sm" disabled={pending}>Save</Button>
+            </div>
+          </form>,
           delete: close => <ConfirmBody
             title={`Delete ${computer.name} permanently?`}
             description="Its files will be deleted. This can't be undone."
             confirmLabel="Delete permanently"
             tone="destructive"
             onClose={close}
-            onConfirm={() => run("delete")}
+            onConfirm={async () => { await run("delete") }}
           />,
         }} />}
       </>}
@@ -147,4 +198,3 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
     {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} onStart={() => void run("start")} /></div>}
   </ComputerListItem>
 }
-

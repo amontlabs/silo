@@ -10,6 +10,8 @@ import { createFixtureSystemIntegrationStore } from "@/fixtures/system-integrati
 import { PreUpgradeBackupProvider } from "@/features/storage/pre-upgrade-backup"
 import { createFixturePreUpgradeBackup } from "@/fixtures/pre-upgrade-backup"
 import { Toaster } from "@/components/ui/sonner"
+import { MacosComputersContext } from "@/features/macos-computers/model/macos-computers"
+import { createFixtureMacosComputersStore } from "@/fixtures/macos-computers"
 
 it.each(["default", "empty"] as const)("persists the %s startup selection when enabled without editing the selection", async (selection) => {
   const user = userEvent.setup()
@@ -76,6 +78,49 @@ it("searches a long startup computer list and preserves selections when startup 
   expect(screen.queryByRole("button", { name: "Remove computer-1" })).not.toBeInTheDocument()
   await user.click(screen.getByRole("button", { name: "Clear" }))
   expect(screen.queryByRole("button", { name: "Remove computer-64" })).not.toBeInTheDocument()
+})
+
+it("offers local macOS computers in the startup selection", async () => {
+  const user = userEvent.setup()
+  const source = applicationSourceForScenario("running")
+  const settings = createMemorySettingsStore({
+    ...source.preferences,
+    startComputersAtLaunch: true,
+    startupComputerIds: [],
+  })
+  const macos = createFixtureMacosComputersStore()
+  render(
+    <SettingsProvider store={settings}>
+      <MacosComputersContext.Provider value={macos}>
+        <SystemIntegrationProvider store={createFixtureSystemIntegrationStore(settings)}>
+          <GeneralPage source={source} applicationPreferences={source.preferences} onApplicationPreferencesChange={vi.fn()} reduceMotion={false} onReduceMotionChange={vi.fn()} />
+        </SystemIntegrationProvider>
+      </MacosComputersContext.Provider>
+    </SettingsProvider>,
+  )
+  const input = screen.getByRole("combobox", { name: "Add computer at startup" })
+  await user.type(input, "xcode-build")
+  await user.click(await screen.findByRole("option", { name: "xcode-build" }))
+  await waitFor(() => expect(settings.getSnapshot().settings.startupComputerIds).toEqual(["mac-stopped"]))
+  expect(screen.getByRole("button", { name: "Remove xcode-build" })).toBeVisible()
+})
+
+it("defaults startup to the first local macOS computer when there is no Linux computer", async () => {
+  const source = applicationSourceForScenario("running")
+  source.computers = []
+  source.preferences = { ...source.preferences, startComputersAtLaunch: false, startupComputerIds: undefined }
+  const settings = createMemorySettingsStore(source.preferences)
+  const macos = createFixtureMacosComputersStore()
+  render(
+    <SettingsProvider store={settings}>
+      <MacosComputersContext.Provider value={macos}>
+        <SystemIntegrationProvider store={createFixtureSystemIntegrationStore(settings)}>
+          <GeneralPage source={source} applicationPreferences={source.preferences} onApplicationPreferencesChange={vi.fn()} reduceMotion={false} onReduceMotionChange={vi.fn()} />
+        </SystemIntegrationProvider>
+      </MacosComputersContext.Provider>
+    </SettingsProvider>,
+  )
+  await waitFor(() => expect(settings.getSnapshot().settings.startupComputerIds).toEqual(["mac-stopped"]))
 })
 
 function renderGeneralPage(backup?: ReturnType<typeof createFixturePreUpgradeBackup>) {

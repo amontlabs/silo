@@ -20,6 +20,8 @@ mod engine;
 mod engine;
 #[path = "macos_computers/guest_access.rs"]
 mod guest_access;
+#[path = "macos_computers/developer_tools.rs"]
+mod developer_tools;
 #[path = "macos_computers/guest_clipboard.rs"]
 mod guest_clipboard;
 #[path = "macos_computers/guest_computer_use.rs"]
@@ -197,6 +199,8 @@ struct Entry {
     attempt: u64,
     /// A checkpoint operation owns the computer: it can't be started, stopped or deleted.
     operation: Option<checkpoints::Operation>,
+    /// A Retry setup request has been accepted and is waiting for its queue turn or running.
+    setup_pending: bool,
     since: Instant,
     progress_emitted: Option<Instant>,
 }
@@ -214,6 +218,7 @@ impl Entry {
             checkpoints: Vec::new(),
             attempt: 0,
             operation: None,
+            setup_pending: false,
             since: Instant::now(),
             progress_emitted: None,
         }
@@ -444,7 +449,18 @@ impl Registry {
         };
         let flag = entry.cancel.load(Ordering::SeqCst);
         if flag == CANCEL_AND_REMOVE {
+            entry.setup_pending = false;
             return Finish::Remove;
+        }
+        entry.setup_pending = false;
+        // A queued Retry Setup has not taken ownership until it publishes SettingUp.
+        // Keep a later state transition such as Start's Running state when this waiter
+        // is cancelled or revalidation rejects it.
+        if entry.record.installed && entry.state != State::SettingUp {
+            if let Err(Stop::Failed(message)) = result {
+                entry.detail = Some(message);
+            }
+            return Finish::Kept;
         }
         let (state, detail) = match classify(result, flag) {
             Ok(()) => (State::Stopped, None),
@@ -851,6 +867,10 @@ pub async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
     blocking(move || {
         require_supported()?;
         ensure_loaded(&app)?;
+        let _guard = runtime::OPERATIONS
+            .kind(runtime::operation_gate::OperationKind::ComputerConfiguration)
+            .device("Deleting the macOS template")
+            .map_err(|error| error.to_string())?;
         templates::remove_all(&app_data(&app)?, &protected_templates)?;
         refresh_template(&app);
         emit(&app);
@@ -872,7 +892,7 @@ pub async fn macos_computer_action(
     id: String,
     action: Action,
 ) -> Result<(), String> {
-    if matches!(action, Action::Start | Action::Setup) {
+    if matches!(action, Action::Start | Action::Setup | Action::ChangeResources { .. }) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
     blocking(move || perform(&app, &id, action)).await
@@ -890,7 +910,16 @@ pub async fn create_macos_checkpoint(
     name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || create_checkpoint(&app, &id, &name)).await
+    blocking(move || {
+        with_macos_computer_operation(
+            &app,
+            &id,
+            runtime::operation_gate::OperationKind::CheckpointCapture,
+            "Creating checkpoint",
+            || create_checkpoint(&app, &id, &name),
+        )
+    })
+    .await
 }
 
 /// Rewinds a computer to a checkpoint. The computer stays stopped.
@@ -900,7 +929,16 @@ pub async fn restore_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || restore_checkpoint(&app, &id, &checkpoint_id)).await
+    blocking(move || {
+        with_macos_computer_operation(
+            &app,
+            &id,
+            runtime::operation_gate::OperationKind::CheckpointRestore,
+            "Restoring checkpoint",
+            || restore_checkpoint(&app, &id, &checkpoint_id),
+        )
+    })
+    .await
 }
 
 /// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
@@ -911,7 +949,16 @@ pub async fn fork_macos_checkpoint(
     new_name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
+    blocking(move || {
+        with_macos_computer_operation(
+            &app,
+            &id,
+            runtime::operation_gate::OperationKind::CheckpointFork,
+            "Forking checkpoint",
+            || fork_checkpoint(&app, &id, &checkpoint_id, &new_name),
+        )
+    })
+    .await
 }
 
 pub async fn delete_macos_checkpoint(
@@ -920,7 +967,16 @@ pub async fn delete_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || delete_checkpoint(&app, &id, &checkpoint_id)).await
+    blocking(move || {
+        with_macos_computer_operation(
+            &app,
+            &id,
+            runtime::operation_gate::OperationKind::CheckpointDelete,
+            "Deleting checkpoint",
+            || delete_checkpoint(&app, &id, &checkpoint_id),
+        )
+    })
+    .await
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
@@ -931,7 +987,16 @@ pub async fn macos_computer_clipboard(
     direction: guest_clipboard::Direction,
 ) -> Result<crate::viewer_clipboard::Report, String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || guest_clipboard::run(&app, &id, direction)).await
+    blocking(move || {
+        with_macos_computer_operation(
+            &app,
+            &id,
+            runtime::operation_gate::OperationKind::Other,
+            "Transferring clipboard",
+            || guest_clipboard::run(&app, &id, direction),
+        )
+    })
+    .await
 }
 
 // MARK: For other devices
@@ -961,7 +1026,10 @@ pub(crate) fn action_for_remote(
     id: &str,
     action: Action,
 ) -> Result<(), String> {
-    if matches!(action, Action::Start | Action::Setup) {
+    if matches!(
+        action,
+        Action::Start | Action::Setup | Action::ChangeResources { .. }
+    ) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
     perform(app, id, action)
@@ -1063,6 +1131,29 @@ impl From<engine::InstallError> for Stop {
 fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, cancel: &AtomicU8) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
+    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
+    let _guard = match acquire_workflow_operation(
+        &runtime::OPERATIONS,
+        &id,
+        &record.name,
+        &format!("Creating {}", record.name),
+        &keep_waiting,
+    ) {
+        Ok(guard) => guard,
+        Err(runtime::operation_gate::GateError::Cancelled) => {
+            cancel.store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
+            return;
+        }
+        Err(runtime::operation_gate::GateError::Abandoned) => {
+            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
+            return;
+        }
+        Err(error) => {
+            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
+            return;
+        }
+    };
     let result = run_creation(app, data, record, &layout, cancel);
     end_workflow(app, &id, &layout, result);
 }
@@ -1071,13 +1162,47 @@ fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, c
 fn setup_workflow(
     app: &MacosContext,
     data: &std::path::Path,
-    mut record: Record,
+    id: String,
+    name: String,
     cancel: &AtomicU8,
 ) {
-    let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let result = run_setup(app, &layout, &mut record, cancel, None);
-    end_workflow(app, &id, &layout, result);
+    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
+    match acquire_workflow_operation(
+        &runtime::OPERATIONS,
+        &id,
+        &name,
+        &format!("Setting up {name}"),
+        &keep_waiting,
+    ) {
+        Ok(_guard) => {
+            let record = (|| {
+                let _admitted = admission()?;
+                let mut registry = registry();
+                let entry = registry
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.record.id == id)
+                    .ok_or("This computer no longer exists.")?;
+                admit_queued_setup(entry)
+            })();
+            let result = match record {
+                Ok(mut record) => {
+                    emit(app);
+                    run_setup(app, &layout, &mut record, cancel, None)
+                }
+                Err(message) => Err(Stop::Failed(message)),
+            };
+            end_workflow(app, &id, &layout, result);
+        }
+        Err(runtime::operation_gate::GateError::Cancelled)
+        | Err(runtime::operation_gate::GateError::Abandoned) => {
+            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
+        }
+        Err(error) => {
+            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
+        }
+    }
 }
 
 fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<(), Stop>) {
@@ -1112,7 +1237,9 @@ fn run_creation(
     cancel: &AtomicU8,
 ) -> Result<(), Stop> {
     let id = record.id.clone();
-    let cancelled = || cancel.load(Ordering::SeqCst) != RUN;
+    let cancelled = || {
+        cancel.load(Ordering::SeqCst) != RUN || runtime::OPERATIONS.removal_queued(&id)
+    };
     let check = || {
         if cancelled() {
             Err(Stop::Cancelled)
@@ -1235,6 +1362,7 @@ fn copy_template(
     record.pristine = false;
     record.template = Some(template.name.clone());
     record.setup_version = Some(template.meta.setup_version.clone());
+    record.developer_tools_version = Some(developer_tools::version());
     // What the template's guest has; a stale part is updated during this copy's setup.
     record.computer_use_version = Some(template.meta.computer_use_version.clone());
     record.computer_use_approval = Some(crate::computer_use::initial_approval());
@@ -1255,6 +1383,7 @@ fn copy_template(
     record.setup = store::SetupProgress {
         account: true,
         sip: true,
+        developer_tools: true,
         computer_use: true,
         clipboard: true,
         needs_personalizing: true,
@@ -1354,15 +1483,152 @@ static DOWNLOAD_TURN: Mutex<()> = Mutex::new(());
 
 // MARK: Actions
 
+fn acquire_computer_operation<'a>(
+    gate: &'a runtime::operation_gate::OperationGate,
+    id: &str,
+    name: &str,
+    kind: runtime::operation_gate::OperationKind,
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'a>, String> {
+    gate.kind(kind)
+        .computer(id, name, label)
+        .map_err(|error| error.to_string())
+}
+
+fn acquire_workflow_operation<'a>(
+    gate: &'a runtime::operation_gate::OperationGate,
+    id: &str,
+    name: &str,
+    label: &str,
+    keep_waiting: &dyn Fn() -> bool,
+) -> Result<runtime::operation_gate::OperationGuard<'a>, runtime::operation_gate::GateError> {
+    gate.kind(runtime::operation_gate::OperationKind::ComputerConfiguration)
+        .acquire_while(
+            runtime::operation_gate::Scope::Computer { id: id.into() },
+            Some(name.into()),
+            label,
+            keep_waiting,
+        )
+}
+
+fn with_computer_operation<T>(
+    id: &str,
+    name: &str,
+    kind: runtime::operation_gate::OperationKind,
+    label: &str,
+    work: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = acquire_computer_operation(&runtime::OPERATIONS, id, name, kind, label)?;
+    work()
+}
+
+fn with_macos_computer_operation<T>(
+    app: &MacosContext,
+    id: &str,
+    kind: runtime::operation_gate::OperationKind,
+    label: &str,
+    work: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    ensure_loaded(app)?;
+    let (record, _) = computer(id)?;
+    with_computer_operation(id, &record.name, kind, label, work)
+}
+
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
     ensure_loaded(app)?;
+    let (record, _) = computer(id)?;
     match action {
-        Action::Start => start(app, id),
-        Action::Stop => stop(app, id),
-        Action::ForceStop => force_stop(app, id),
-        Action::Delete => delete(app, id),
+        Action::Start => with_computer_operation(
+            id,
+            &record.name,
+            runtime::operation_gate::OperationKind::Lifecycle,
+            &format!("Starting {}", record.name),
+            || start(app, id),
+        ),
+        Action::Stop => with_computer_operation(
+            id,
+            &record.name,
+            runtime::operation_gate::OperationKind::Lifecycle,
+            &format!("Stopping {}", record.name),
+            || stop(app, id),
+        ),
+        Action::ForceStop => with_computer_operation(
+            id,
+            &record.name,
+            runtime::operation_gate::OperationKind::Lifecycle,
+            &format!("Force stopping {}", record.name),
+            || force_stop(app, id),
+        ),
+        Action::Delete => {
+            let _guard = runtime::OPERATIONS
+                .removing(&[id.to_owned()], &format!("Deleting {}", record.name))
+                .map_err(|error| error.to_string())?;
+            delete(app, id)
+        }
         Action::Setup => begin_setup(app, id),
+        Action::ChangeResources {
+            cpus,
+            memory_gib,
+            expected,
+        } => with_computer_operation(
+            id,
+            &record.name,
+            runtime::operation_gate::OperationKind::ComputerConfiguration,
+            &format!("Saving settings for {}", record.name),
+            || change_resource_configuration(app, id, cpus, memory_gib, expected),
+        ),
     }
+}
+
+fn change_resource_configuration(
+    app: &MacosContext,
+    id: &str,
+    cpus: u64,
+    memory_gib: u64,
+    expected: store::ExpectedResources,
+) -> Result<(), String> {
+    require_supported()?;
+    let data = app_data(app)?;
+    let (record, state) = computer(id)?;
+    let restore_unfinished = checkpoints::restore_unfinished(&Layout::new(&data, id));
+    let others: Vec<Record> = registry()
+        .entries
+        .iter()
+        .filter(|entry| entry.record.id != id)
+        .map(|entry| entry.record.clone())
+        .collect();
+    let updated = store::change_resources(
+        &record,
+        state,
+        restore_unfinished,
+        cpus,
+        memory_gib,
+        expected,
+        engine::host_limits(),
+        &others,
+    )?;
+    store::save(&Layout::new(&data, id), &updated)?;
+    update(app, id, |entry| entry.record = updated);
+    emit(app);
+    Ok(())
+}
+
+/// Starts a local macOS computer for the launch coordinator. Returns false when `id` belongs
+/// to another runtime, so the caller can fall through to the Linux start path.
+pub fn start_at_launch(app: &MacosContext, id: &str) -> Result<bool, String> {
+    ensure_loaded(app)?;
+    if !registry().entries.iter().any(|entry| entry.record.id == id) {
+        return Ok(false);
+    }
+    perform(app, id, Action::Start)?;
+    Ok(true)
+}
+
+/// The stored macOS computer IDs available to the launch settings.
+pub fn computer_ids(app: &MacosContext) -> Vec<String> {
+    app_data(app)
+        .map(|data| store::load_all(&data).into_iter().map(|record| record.id).collect())
+        .unwrap_or_default()
 }
 
 /// The name and retained-log folder of the macOS computer `id`, for the Logs page.
@@ -1577,7 +1843,7 @@ fn start_machine(
 fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
     let data = app_data(app)?;
-    let (record, cancel) = {
+    let (name, cancel) = {
         let _admitted = admission()?;
         let mut registry = registry();
         let entry = registry
@@ -1585,21 +1851,42 @@ fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
             .iter_mut()
             .find(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
-        if entry.deleting {
-            return Err("This computer is being deleted.".into());
-        }
-        store::setup_allowed(entry.state, &entry.record)?;
-        entry.cancel.store(RUN, Ordering::SeqCst);
-        entry.state = State::SettingUp;
-        entry.detail = None;
-        entry.progress = None;
-        entry.since = Instant::now();
-        (entry.record.clone(), entry.cancel.clone())
+        reserve_setup(entry)?
     };
-    emit(app);
     let app = app.clone();
-    std::thread::spawn(move || setup_workflow(&app, &data, record, &cancel));
+    let id = id.to_owned();
+    std::thread::spawn(move || setup_workflow(&app, &data, id, name, &cancel));
     Ok(())
+}
+
+/// Reserves a Retry request without publishing `SettingUp` before the operation queue admits it.
+fn reserve_setup(entry: &mut Entry) -> Result<(String, Arc<AtomicU8>), String> {
+    if entry.deleting {
+        return Err("This computer is being deleted.".into());
+    }
+    store::setup_allowed(entry.state, &entry.record)?;
+    if entry.setup_pending {
+        return Err("This computer is already waiting for setup.".into());
+    }
+    entry.setup_pending = true;
+    entry.cancel.store(RUN, Ordering::SeqCst);
+    Ok((entry.record.name.clone(), entry.cancel.clone()))
+}
+
+/// Reads the latest saved record after queue admission, then publishes `SettingUp`.
+fn admit_queued_setup(entry: &mut Entry) -> Result<Record, String> {
+    if entry.deleting {
+        return Err("This computer is being deleted.".into());
+    }
+    if !entry.setup_pending {
+        return Err("The setup request is no longer waiting.".into());
+    }
+    store::setup_allowed(entry.state, &entry.record)?;
+    entry.state = State::SettingUp;
+    entry.detail = None;
+    entry.progress = None;
+    entry.since = Instant::now();
+    Ok(entry.record.clone())
 }
 
 /// What the guest shows when Stop reaches it through the framework: macOS asks its user to
@@ -2195,6 +2482,7 @@ fn copy_for_fork(
     record.setup = store::SetupProgress {
         account: true,
         sip: true,
+        developer_tools: false,
         computer_use: true,
         clipboard: true,
         needs_personalizing: true,
@@ -2219,8 +2507,26 @@ fn fork_workflow(
 ) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let result = run_setup(app, &layout, &mut record, cancel, Some(space));
-    end_workflow(app, &id, &layout, result);
+    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
+    match acquire_workflow_operation(
+        &runtime::OPERATIONS,
+        &id,
+        &record.name,
+        &format!("Setting up {}", record.name),
+        &keep_waiting,
+    ) {
+        Ok(_guard) => {
+            let result = run_setup(app, &layout, &mut record, cancel, Some(space));
+            end_workflow(app, &id, &layout, result);
+        }
+        Err(runtime::operation_gate::GateError::Cancelled)
+        | Err(runtime::operation_gate::GateError::Abandoned) => {
+            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
+        }
+        Err(error) => {
+            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
+        }
+    }
 }
 
 // MARK: Display
@@ -2662,6 +2968,7 @@ mod tests {
         done.record.setup = store::SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
@@ -2689,6 +2996,46 @@ mod tests {
         );
         assert_eq!(state["minDiskGiB"], 64);
         assert!(state["computers"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn macos_operations_wait_in_the_shared_queue_and_a_waiter_can_be_cancelled() {
+        let gate: &'static runtime::operation_gate::OperationGate =
+            Box::leak(Box::new(runtime::operation_gate::OperationGate::new()));
+        let id = "macos-computer";
+        let _running = acquire_computer_operation(
+            gate,
+            id,
+            "builder",
+            runtime::operation_gate::OperationKind::Lifecycle,
+            "Starting builder",
+        )
+        .unwrap();
+        let worker = std::thread::spawn(move || {
+            acquire_computer_operation(
+                gate,
+                id,
+                "builder",
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                "Setting up builder",
+            )
+            .map(drop)
+        });
+        let waiting = (0..100).find_map(|_| {
+            let waiting = gate.snapshot().waiting;
+            if waiting.iter().any(|entry| entry.computer_id.as_deref() == Some(id)) {
+                Some(waiting)
+            } else {
+                std::thread::sleep(Duration::from_millis(5));
+                None
+            }
+        }).expect("the macOS operation should be visible while waiting");
+        let queued = waiting.iter().find(|entry| entry.computer_id.as_deref() == Some(id)).unwrap();
+        assert_eq!(queued.computer_name.as_deref(), Some("builder"));
+        assert_eq!(queued.label, "Setting up builder");
+        assert_eq!(queued.kind, runtime::operation_gate::OperationKind::ComputerConfiguration);
+        gate.cancel(queued.id).unwrap();
+        assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
     }
 
     #[test]
@@ -3104,6 +3451,28 @@ mod tests {
         assert!(registry.creation_continues(&id));
     }
 
+    #[test]
+    fn retry_setup_stays_stopped_until_queue_admission_and_uses_the_current_record() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        registry.entries[0].record.installed = true;
+        let entry = &mut registry.entries[0];
+
+        let (_, cancel) = reserve_setup(entry).unwrap();
+        assert_eq!(entry.state, State::Stopped);
+        assert!(entry.setup_pending);
+        assert_eq!(cancel.load(Ordering::SeqCst), RUN);
+
+        // A setup request can wait behind work that updates the saved record.
+        entry.record.cpus = 8;
+        entry.record.memory_gib = 16;
+        let admitted = admit_queued_setup(entry).unwrap();
+
+        assert_eq!(entry.state, State::SettingUp);
+        assert_eq!(admitted.cpus, 8);
+        assert_eq!(admitted.memory_gib, 16);
+        assert!(reserve_setup(entry).is_err());
+    }
+
     fn finish(
         state: State,
         flag: u8,
@@ -3161,6 +3530,41 @@ mod tests {
             registry.entries[0].detail.as_deref(),
             Some(store::INTERRUPTED_INSTALL)
         );
+    }
+
+    #[test]
+    fn a_queued_setup_failure_does_not_overwrite_a_prior_start_state() {
+        let (mut registry, id) = registry_with(State::Stopped);
+        registry.entries[0].record.installed = true;
+        reserve_setup(&mut registry.entries[0]).unwrap();
+
+        // A Start ahead of Retry Setup in the operation queue runs first.
+        registry.entries[0].state = State::Running;
+        let _ = registry.finish_workflow(
+            &id,
+            Err(Stop::Failed("Stop the computer before setting it up.".into())),
+        );
+
+        assert_eq!(registry.entries[0].state, State::Running);
+        assert!(!registry.entries[0].setup_pending);
+        assert_eq!(
+            registry.entries[0].detail.as_deref(),
+            Some("Stop the computer before setting it up.")
+        );
+    }
+
+    #[test]
+    fn cancelling_a_queued_setup_does_not_stop_a_prior_start() {
+        let (mut registry, id) = registry_with(State::Stopped);
+        registry.entries[0].record.installed = true;
+        reserve_setup(&mut registry.entries[0]).unwrap();
+
+        // The queued Start has marked itself Starting before Retry Setup is cancelled.
+        registry.entries[0].state = State::Starting;
+        let _ = registry.finish_workflow(&id, Err(Stop::Cancelled));
+
+        assert_eq!(registry.entries[0].state, State::Starting);
+        assert!(!registry.entries[0].setup_pending);
     }
 
     #[test]
@@ -3234,6 +3638,7 @@ mod tests {
         record.setup = store::SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: true,

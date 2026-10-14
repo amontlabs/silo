@@ -35,7 +35,8 @@ export function createFixtureMacosComputersBackend(initial: readonly MacosComput
       return created
     },
     action: async (id, action) => {
-      if (action === "delete") change(state.computers.filter(computer => computer.id !== id))
+      if (typeof action === "object") update(id, { cpus: action["change-resources"].cpus, memoryGiB: action["change-resources"].memoryGiB })
+      else if (action === "delete") change(state.computers.filter(computer => computer.id !== id))
       else if (action === "setup") update(id, { state: "setting-up", detail: "Creating the account" })
       else update(id, { state: action === "start" ? "running" : "stopped", displayOpen: false, installed: true, setupComplete: true })
     },
@@ -93,7 +94,8 @@ export function createFixtureMacosRemoteBackend(devices: Record<string, MacosCom
     },
     action: async (deviceId, computerId, action) => {
       const computers = stateOf(deviceId).computers
-      if (action === "delete") change(deviceId, computers.filter(({ id }) => id !== computerId))
+      if (typeof action === "object") change(deviceId, computers.map(computer => computer.id === computerId ? { ...computer, cpus: action["change-resources"].cpus, memoryGiB: action["change-resources"].memoryGiB } : computer))
+      else if (action === "delete") change(deviceId, computers.filter(({ id }) => id !== computerId))
       else if (action === "setup") change(deviceId, computers.map(computer => computer.id === computerId ? { ...computer, state: "setting-up" } : computer))
       else change(deviceId, computers.map(computer => computer.id === computerId ? { ...computer, state: action === "start" ? "running" : "stopped" } : computer))
     },

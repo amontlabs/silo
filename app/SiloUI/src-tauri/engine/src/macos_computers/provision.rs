@@ -8,7 +8,7 @@
 use super::setup_log::SetupLog;
 use super::MacosContext;
 use super::{
-    app_data, checkpoints, engine, guest_access, guest_clipboard, guest_computer_use,
+    app_data, checkpoints, developer_tools, engine, guest_access, guest_clipboard, guest_computer_use,
     layout_and_record, offline_setup, personalize, recovery, set_detail,
     store::{self, Layout, Record, SetupProgress},
     templates, Stop, RUN,
@@ -40,6 +40,10 @@ const MACHINE_POLL: Duration = Duration::from_millis(500);
 
 const INHERITED_ACCESS_GONE: &str =
     "This fork has lost the access it was copied with. Delete it and fork the checkpoint again.";
+
+fn developer_tools_outdated(record: &Record, version: &str) -> bool {
+    record.developer_tools_version.as_deref() != Some(version)
+}
 
 /// Runs every unfinished step for `record`, saving progress after each.
 pub(super) fn run(
@@ -84,6 +88,7 @@ struct Provision<'a> {
 impl Provision<'_> {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst) != RUN
+            || crate::runtime::OPERATIONS.removal_queued(&self.id)
     }
 
     fn log(&self, message: &str) {
@@ -132,6 +137,7 @@ impl Provision<'_> {
     }
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
+        let developer_tools_version = developer_tools::version();
         if record.setup.needs_personalizing {
             self.personalize(record)?;
         }
@@ -166,6 +172,8 @@ impl Provision<'_> {
             self.check()?;
         }
         if record.setup.sip
+            && record.setup.developer_tools
+            && !developer_tools_outdated(record, &developer_tools_version)
             && record.setup.computer_use
             && record.setup.clipboard
             && !record.computer_use_stale()
@@ -178,6 +186,24 @@ impl Provision<'_> {
             self.say("Checking System Integrity Protection")?;
             self.verify_sip_disabled()?;
             self.mark(record, |setup| setup.sip = true)?;
+        }
+        if !record.setup.developer_tools
+            || developer_tools_outdated(record, &developer_tools_version)
+        {
+            self.say("Installing developer tools")?;
+            developer_tools::install(self.app, &self.id, &|| self.cancelled()).map_err(
+                |message| {
+                    if self.cancelled() || message == guest_access::CANCELLED {
+                        Stop::Cancelled
+                    } else {
+                        Stop::Failed(message)
+                    }
+                },
+            )?;
+            self.check()?;
+            record.developer_tools_version = Some(developer_tools_version);
+            record.setup_version = Some(templates::setup_version());
+            self.mark(record, |setup| setup.developer_tools = true)?;
         }
         if !record.setup.computer_use {
             self.say("Installing computer use")?;
@@ -599,6 +625,7 @@ fn setup_summary(setup: &SetupProgress) -> String {
     let done: Vec<&str> = [
         (setup.account, "account"),
         (setup.sip, "sip"),
+        (setup.developer_tools, "developer tools"),
         (setup.computer_use, "computer use"),
         (setup.clipboard, "clipboard"),
         (!setup.needs_personalizing, "personalized"),
@@ -721,6 +748,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retry_setup_does_not_skip_a_missing_or_old_developer_tools_fingerprint() {
+        let mut record = store::new_record(
+            &store::CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        record.setup.developer_tools = true;
+        let current = developer_tools::version();
+        assert!(developer_tools_outdated(&record, &current));
+        record.developer_tools_version = Some(current.clone());
+        assert!(!developer_tools_outdated(&record, &current));
+    }
+
+    #[test]
     fn the_setup_log_names_the_finished_steps() {
         let mut setup = SetupProgress {
             needs_personalizing: true,
@@ -729,7 +774,8 @@ mod tests {
         assert_eq!(setup_summary(&setup), "nothing done yet");
         setup.account = true;
         setup.sip = true;
-        assert_eq!(setup_summary(&setup), "account, sip done");
+        setup.developer_tools = true;
+        assert_eq!(setup_summary(&setup), "account, sip, developer tools done");
     }
 
     #[test]

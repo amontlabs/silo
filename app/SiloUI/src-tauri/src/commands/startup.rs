@@ -51,8 +51,16 @@ impl StartupServices for TauriStartupServices {
         Ok((settings, paths.metadata))
     }
 
+    fn macos_computer_ids(&self) -> Vec<String> {
+        crate::commands::macos_computers::computer_ids(&self.app)
+    }
+
     fn start_at_launch(&self, id: &str) -> Result<(), String> {
-        runtime::start_at_launch(&crate::commands::runtime::host(&self.app), id)
+        if crate::commands::macos_computers::start_at_launch(&self.app, id)? {
+            Ok(())
+        } else {
+            runtime::start_at_launch(&crate::commands::runtime::host(&self.app), id)
+        }
     }
 
     fn update_recovery_failed(&self, message: String) {

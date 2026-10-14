@@ -18,7 +18,8 @@
 #      and team are checked, then the app is moved in and its quarantine attribute cleared;
 #   3. install LCU's runtime against that app (`scripts/install.sh --runtime-only --yes`);
 #   4. grant Accessibility and Screen Recording to the app and its Computer Use helper in the
-#      system TCC database, and pre-write the Screen Recording reminder ledger;
+#      system TCC database, install the guest ScreenCaptureKit recorder as its own Aqua
+#      LaunchAgent, and pre-write the Screen Recording reminder ledger;
 #   5. turn on Screen Sharing (the guest's built-in VNC server, which Silo reaches through a
 #      bridge from the controlling device) and grant its two clients Screen Recording,
 #      Accessibility and Post Event, as the "Allow" dialogs would;
@@ -52,6 +53,15 @@ TCC_DB=${SILO_CU_TCC_DB:-/Library/Application Support/com.apple.TCC/TCC.db}
 SUDO=${SILO_CU_SUDO-sudo -n}
 AGENT_LABEL=org.silo.computer-use-reconcile
 AGENT_PLIST=$HOME/Library/LaunchAgents/$AGENT_LABEL.plist
+RECORDER_ID=org.silo.guest-recorder
+RECORDER_APP=$HOME/Applications/SiloGuestRecorder.app
+RECORDER_BINARY=$RECORDER_APP/Contents/MacOS/SiloGuestRecorder
+RECORDER_AGENT_LABEL=org.silo.guest-recorder
+RECORDER_AGENT_PLIST=$HOME/Library/LaunchAgents/$RECORDER_AGENT_LABEL.plist
+RECORDER_OUTPUT=$HOME/Library/Application\ Support/Silo/Recordings/guest-screen.mov
+RECORDER_SOURCE=$STAGE/SiloGuestRecorder.swift
+RECORDER_INFO=$STAGE/SiloGuestRecorder-Info.plist
+RECORDER_AGENT=$STAGE/SiloGuestRecorder-LaunchAgent.plist
 LEDGER=$HOME/Library/Group\ Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist
 SERVICES=(kTCCServiceAccessibility kTCCServiceScreenCapture)
 SHARING_SERVICES=(kTCCServiceScreenCapture kTCCServiceAccessibility kTCCServicePostEvent)
@@ -260,6 +270,31 @@ grant_clients() {
   done
 }
 
+install_recorder() {
+  [[ -f $RECORDER_SOURCE && -f $RECORDER_INFO ]] || fail "the guest recorder source was not copied to the computer"
+  say "Building the guest ScreenCaptureKit recorder"
+  local build=$WORK/SiloGuestRecorder.app
+  rm -rf "$build" "$RECORDER_APP"
+  mkdir -p "$build/Contents/MacOS" "${RECORDER_APP:h}" || fail "could not prepare the guest recorder bundle"
+  logged /usr/bin/swiftc -parse-as-library -O \
+    -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Foundation -framework ScreenCaptureKit \
+    "$RECORDER_SOURCE" -o "$build/Contents/MacOS/SiloGuestRecorder" || fail "could not build the guest ScreenCaptureKit recorder"
+  cp "$RECORDER_INFO" "$build/Contents/Info.plist" || fail "could not prepare the guest recorder metadata"
+  logged /usr/bin/codesign --force --sign - --identifier "$RECORDER_ID" --timestamp=none "$build" ||
+    fail "could not sign the guest recorder bundle"
+  logged /usr/bin/codesign --verify --deep --strict "$build" || fail "the guest recorder signature did not verify"
+  /usr/bin/ditto "$build" "$RECORDER_APP" || fail "could not install the guest recorder bundle"
+  [[ $(app_info "$RECORDER_APP" CFBundleIdentifier) == "$RECORDER_ID" ]] || fail "the guest recorder bundle identifier is wrong"
+}
+
+grant_recorder() {
+  local client
+  client=$(app_info "$RECORDER_APP" CFBundleIdentifier)
+  [[ $client == "$RECORDER_ID" ]] || fail "the guest recorder is not $RECORDER_ID"
+  grant kTCCServiceScreenCapture "$client" "$RECORDER_APP" || fail "could not write the Screen Recording grant for the guest recorder"
+  granted kTCCServiceScreenCapture "$client" || fail "the guest recorder's Screen Recording grant did not read back"
+}
+
 # Screen Sharing's agent and daemon need the rows an MDM's remote desktop command writes, or a
 # viewer gets a black screen and no input. Type 2 (VNC password) authentication is not switched
 # on: viewers sign in with the computer's account.
@@ -283,12 +318,25 @@ grant_sharing() {
 
 # Enables and loads Screen Sharing; running it again changes nothing.
 enable_sharing() {
+  local state greeting
   [[ -f $SHARING_PLIST ]] || fail "this macOS has no Screen Sharing service"
   logged ${=SUDO} launchctl enable $SHARING_JOB || fail "could not enable Screen Sharing"
   if ! ${=SUDO} launchctl print $SHARING_JOB >/dev/null 2>&1; then
     logged ${=SUDO} launchctl bootstrap system "$SHARING_PLIST" || fail "could not load Screen Sharing"
   fi
-  ${=SUDO} launchctl print $SHARING_JOB >/dev/null 2>&1 || fail "Screen Sharing did not load"
+  for _ in {1..30}; do
+    # launchd socket-activates this job. Its loaded state can be `not running`
+    # between connections; opening TCP starts screensharingd and returns its RFB greeting.
+    if state=$(${=SUDO} launchctl print $SHARING_JOB 2>/dev/null | sed -n 's/^[[:space:]]*state = //p' | head -n 1); then
+      greeting=$(/usr/bin/nc -w 1 127.0.0.1 5900 </dev/null 2>/dev/null | /usr/bin/head -c 11 || true)
+      if [[ $greeting =~ '^RFB 003\.[0-9]{3}$' ]]; then
+        say "Screen Sharing is loaded and its RFB server greeted on TCP port 5900 (launchd state: $state)"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  fail "Screen Sharing did not return an RFB greeting on TCP port 5900"
 }
 
 # Screen Recording on macOS 15 and later asks again after a while; a far-future date in the
@@ -301,7 +349,7 @@ write_ledger() {
   (( major >= 15 )) || return 0
   future=$(date -u -v+100y '+%Y-%m-%d %H:%M:%S +0000')
   mkdir -p "${LEDGER:h}" || return 1
-  for code in "$APP" "$APP/$HELPER_REL"; do
+  for code in "$APP" "$APP/$HELPER_REL" "$RECORDER_APP"; do
     if (( major > 15 || minor >= 1 )); then
       client=$(app_info "$code" CFBundleIdentifier)
       defaults write "$LEDGER" "$client" -dict \
@@ -316,6 +364,26 @@ write_ledger() {
   done
   killall -u "$USER" cfprefsd >/dev/null 2>&1
   return 0
+}
+
+install_recorder_agent() {
+  [[ -f $RECORDER_AGENT ]] || fail "the guest recorder LaunchAgent was not copied to the computer"
+  mkdir -p "${RECORDER_AGENT_PLIST:h}" || fail "could not prepare the guest recorder LaunchAgents folder"
+  sed \
+    -e "s|@@RECORDER_BINARY@@|$RECORDER_BINARY|g" \
+    -e "s|@@RECORDER_OUTPUT@@|$RECORDER_OUTPUT|g" \
+    -e "s|@@HOME@@|$HOME|g" \
+    "$RECORDER_AGENT" >"$RECORDER_AGENT_PLIST" || fail "could not write the guest recorder LaunchAgent"
+  plutil -lint "$RECORDER_AGENT_PLIST" >>"$LOG" 2>&1 || fail "the guest recorder LaunchAgent is not a valid property list"
+  # SSH can finish setup before the console account has an Aqua launchd domain.
+  # Keeping the plist in LaunchAgents lets launchd load it at that account's next login.
+  if ! launchctl print "gui/$(id -u)" >/dev/null 2>&1; then
+    log "the guest recorder loads at the next Aqua login"
+    return 0
+  fi
+  launchctl bootout "gui/$(id -u)/$RECORDER_AGENT_LABEL" >/dev/null 2>&1
+  launchctl bootstrap "gui/$(id -u)" "$RECORDER_AGENT_PLIST" >>"$LOG" 2>&1 || fail "could not load the guest recorder Aqua LaunchAgent"
+  launchctl print "gui/$(id -u)/$RECORDER_AGENT_LABEL" >/dev/null 2>&1 || fail "the guest recorder Aqua LaunchAgent did not load"
 }
 
 app_executable() { print -r -- "$1/Contents/MacOS/$(app_info "$1" CFBundleExecutable)"; }
@@ -364,13 +432,17 @@ apply() {
   sip_disabled || fail "System Integrity Protection is on, so the privacy grants cannot be written"
   install_app
   install_lcu
+  install_recorder
   say "Granting Accessibility and Screen Recording"
   grant_clients
+  say "Granting Screen Recording to the guest recorder"
+  grant_recorder
   write_ledger || fail "could not write the Screen Recording approvals"
   say "Turning on Screen Sharing"
   grant_sharing
-  enable_sharing
   restart_tccd
+  enable_sharing
+  install_recorder_agent
   register
   logged "$LCU" doctor || fail "lcu doctor reported a problem"
   rm -rf "$WORK"

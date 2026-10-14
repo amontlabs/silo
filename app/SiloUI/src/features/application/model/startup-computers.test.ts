@@ -13,3 +13,10 @@ it("never picks a computer on another device as the default startup computer", (
   expect(defaultStartupComputerIds([remoteDev])).toEqual([])
   expect(startupComputerCandidates([remoteDev, playgrounds]).map(({ configuration }) => configuration.id)).toEqual([playgrounds.configuration.id])
 })
+
+it("uses the first installed local macOS computer when there is no local Linux computer", () => {
+  expect(defaultStartupComputerIds([], [
+    { id: "preparing", installed: false, state: "downloading" },
+    { id: "ready", installed: true, state: "stopped" },
+  ])).toEqual(["ready"])
+})
