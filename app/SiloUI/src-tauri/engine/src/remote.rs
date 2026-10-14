@@ -2804,7 +2804,6 @@ fn execute(
         _ => {
             let paths = paths().map_err(BridgeError::from)?;
             crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
-                .map_err(BridgeError::from)
         }
     }
 }

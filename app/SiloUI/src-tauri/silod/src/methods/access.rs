@@ -353,13 +353,13 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         silo_engine::chatgpt_app::to_value(status)
     }
 
-    fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, String> {
+    fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
             "operations.job.get" | "operations.cancel" | "operations.job.acknowledge" => {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
-            _ => run_local(self.0.context.as_ref(), method, params),
+            _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
         }
     }
 
@@ -485,7 +485,7 @@ fn failure(message: impl Into<String>) -> DispatchError {
     let message = message.into();
     let code = if message.starts_with("Silo is installing an update") {
         ErrorCode::UpdateInProgress
-    } else if message.to_ascii_lowercase().contains("cancelled") {
+    } else if message == silo_engine::github::CONNECTION_CANCELLED {
         ErrorCode::Cancelled
     } else {
         ErrorCode::Internal
@@ -1198,34 +1198,61 @@ fn finish_connect(ctx: &SilodContext, job_id: JobId, result: Result<Value, Strin
     }
 }
 
+/// The wire error a controller receives for a failure this engine reports locally: the
+/// canonical code survives the trip, so a controller sees `not_found` and `busy` as such.
+fn bridge_error(error: DispatchError) -> BridgeError {
+    use silo_engine::bridge_error::ErrorCode as Code;
+    let code = match error.code {
+        ErrorCode::UpdateInProgress => Code::UpdateInProgress,
+        ErrorCode::UnsupportedRemoteOperation => Code::UnsupportedRemoteOperation,
+        ErrorCode::Cancelled => Code::Cancelled,
+        ErrorCode::AlreadyQueued => Code::AlreadyQueued,
+        ErrorCode::Busy => Code::Busy,
+        ErrorCode::NotFound => Code::NotFound,
+        ErrorCode::IncompatibleVersion => Code::IncompatibleVersion,
+        _ => Code::Internal,
+    };
+    BridgeError::new(code, error.message)
+}
+
 /// Owner side of a controller's job follow-up: reads, cancels or acknowledges a job in
-/// this engine's own registry. Jobs keep the owner's `jobId`; a job this engine does not
-/// know reads as `null`.
-fn owner_job_operation(ctx: &SilodContext, method: &str, params: &Value) -> Result<Value, String> {
+/// this engine's own registry, with the same results and error codes as `operations.*`
+/// on `engine.sock`. Jobs keep the owner's `jobId`.
+fn owner_job_operation(
+    ctx: &SilodContext,
+    method: &str,
+    params: &Value,
+) -> Result<Value, BridgeError> {
     let job_id = params["jobId"]
         .as_str()
-        .ok_or_else(|| "Missing job identity.".to_owned())
-        .and_then(|id| JobId::new(id.to_owned()).map_err(|_| "Invalid job identity.".to_owned()))?;
+        .ok_or_else(|| BridgeError::from("Missing job identity."))
+        .and_then(|id| {
+            JobId::new(id.to_owned()).map_err(|_| BridgeError::from("Invalid job identity."))
+        })?;
+    let registry_error = |error| bridge_error(HandlerContext::map_registry_error(error));
     match method {
         "operations.job.get" => {
             let offset = params.get("offsetBytes").and_then(Value::as_u64);
-            match silo_engine::jobs::get_at(ctx, &job_id, offset)
-                .map_err(|error| error.to_string())?
-            {
-                Some(found) => serde_json::to_value(found).map_err(|error| error.to_string()),
-                None => Ok(Value::Null),
-            }
+            let found = silo_engine::jobs::get_at(ctx, &job_id, offset)
+                .map_err(registry_error)?
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        silo_engine::bridge_error::ErrorCode::NotFound,
+                        "The job was not found.",
+                    )
+                })?;
+            serde_json::to_value(found).map_err(|error| BridgeError::from(error.to_string()))
         }
         "operations.cancel" => {
             ctx.job_registry()?
                 .cancel(&job_id)
-                .map_err(|error| error.to_string())?;
+                .map_err(registry_error)?;
             Ok(Value::Null)
         }
         _ => {
             ctx.job_registry()?
                 .acknowledge(&job_id)
-                .map_err(|error| error.to_string())?;
+                .map_err(registry_error)?;
             ctx.job_queue_changed();
             Ok(Value::Null)
         }
@@ -1235,8 +1262,8 @@ fn owner_job_operation(ctx: &SilodContext, method: &str, params: &Value) -> Resu
 /// Owner side of a controller's `github.connect`: starts the job and, once its browser
 /// link exists, answers with the job and the link so the controller can reserve the
 /// callback port before it shows the link to anyone.
-fn start_owner_connect(ctx: &SilodContext) -> Result<Value, String> {
-    let job_id = start_local_connect(ctx).map_err(|error| error.message)?;
+fn start_owner_connect(ctx: &SilodContext) -> Result<Value, BridgeError> {
+    let job_id = start_local_connect(ctx).map_err(bridge_error)?;
     let deadline = Instant::now() + LINK_READY_TIMEOUT;
     let url = loop {
         if let Ok(url) = silo_engine::github::authorization_url() {
@@ -1577,7 +1604,7 @@ fn mirror_owner_connect(
     let outcome = loop {
         thread::sleep(OWNER_POLL);
         match call_owner(device, "operations.job.get", json!({ "jobId": owner_job })) {
-            Ok(Value::Null) => {
+            Err(error) if error.code == silo_engine::bridge_error::ErrorCode::NotFound => {
                 break Err((
                     ErrorCode::Internal,
                     "The other Mac no longer has this sign-in. Connect again.".to_owned(),
@@ -1731,8 +1758,15 @@ async fn push_start(
         blocking_bridge(move || {
             let reply = call_owner(&device, "repository.push.start", request)?;
             let job_id = push_job_name(&reply)?;
-            let job = call_owner(&device, "operations.job.get", json!({ "jobId": job_id }))?;
-            Ok((reply, !job.is_null()))
+            let accepted =
+                match call_owner(&device, "operations.job.get", json!({ "jobId": job_id })) {
+                    Ok(_) => true,
+                    Err(error) if error.code == silo_engine::bridge_error::ErrorCode::NotFound => {
+                        false
+                    }
+                    Err(error) => return Err(error),
+                };
+            Ok((reply, accepted))
         })
         .await?
     } else {
@@ -2937,6 +2971,13 @@ mod tests {
         assert_eq!(outcome.error.unwrap().code, ErrorCode::Internal);
     }
 
+    fn owner_not_found() -> BridgeError {
+        BridgeError::new(
+            silo_engine::bridge_error::ErrorCode::NotFound,
+            "The job was not found.",
+        )
+    }
+
     fn finished_owner_job(owner_job: &str) -> Value {
         json!({
             "jobId": owner_job,
@@ -3290,11 +3331,10 @@ mod tests {
                     "commitCount": 0,
                 })),
                 // Only the push that is already running has a job on the owner.
-                "operations.job.get" => Ok(if params["jobId"] == format!("push:{running}") {
-                    json!({"state": "waiting"})
-                } else {
-                    Value::Null
-                }),
+                "operations.job.get" if params["jobId"] == format!("push:{running}") => {
+                    Ok(json!({"state": "waiting"}))
+                }
+                "operations.job.get" => Err(owner_not_found()),
                 other => panic!("unexpected owner request {other}"),
             }
         });
@@ -3309,7 +3349,7 @@ mod tests {
                 "operationId": "66666666-6666-4666-8666-66666666666c",
                 "status": "failed", "message": "Invalid commit for this push.",
             })),
-            _ => Ok(Value::Null),
+            _ => Err(owner_not_found()),
         });
         let error = expect_error(MethodName::PushStart, params).await;
         assert_eq!(error.message, "Invalid commit for this push.");
@@ -3588,19 +3628,34 @@ mod tests {
 
     #[tokio::test]
     async fn an_owner_serves_its_own_jobs_to_a_controller() {
+        use silo_engine::bridge_error::ErrorCode as Code;
         let engine = fixture().context.clone();
         let unknown = json!({"jobId": "job:424242"});
+        // The codes are the ones `operations.*` answers on `engine.sock`, not text.
+        for method in ["operations.job.get", "operations.cancel"] {
+            let error = owner_job_operation(engine.as_ref(), method, &unknown).unwrap_err();
+            assert_eq!(error.code, Code::NotFound, "{method}: {}", error.message);
+        }
+        // Acknowledging a job that is already gone is a successful retry.
         assert_eq!(
-            owner_job_operation(engine.as_ref(), "operations.job.get", &unknown).unwrap(),
+            owner_job_operation(engine.as_ref(), "operations.job.acknowledge", &unknown).unwrap(),
             Value::Null
         );
-        assert!(owner_job_operation(engine.as_ref(), "operations.cancel", &unknown).is_err());
-        assert!(owner_job_operation(engine.as_ref(), "operations.job.get", &json!({})).is_err());
+        assert_eq!(
+            owner_job_operation(engine.as_ref(), "operations.job.get", &json!({}))
+                .unwrap_err()
+                .code,
+            Code::Internal
+        );
         let accepted = silo_engine::jobs::allocate(engine.as_ref(), "github.connect").unwrap();
         let params = json!({"jobId": accepted.job_id.as_str()});
         let found = owner_job_operation(engine.as_ref(), "operations.job.get", &params).unwrap();
         assert_eq!(found["jobId"], accepted.job_id.as_str());
         assert_ne!(found["state"], "finished");
+        // A running job cannot be acknowledged yet.
+        let running = owner_job_operation(engine.as_ref(), "operations.job.acknowledge", &params)
+            .unwrap_err();
+        assert_eq!(running.code, Code::Busy, "{}", running.message);
         silo_engine::jobs::finish_with_error(
             engine.as_ref(),
             accepted.job_id.clone(),
@@ -3615,6 +3670,39 @@ mod tests {
         assert_eq!(
             owner_job_operation(engine.as_ref(), "operations.job.acknowledge", &params).unwrap(),
             Value::Null
+        );
+    }
+
+    #[tokio::test]
+    async fn the_owners_codes_survive_the_local_access_adapter() {
+        use silo_engine::{bridge_error::ErrorCode as Code, remote_access::LocalAccess};
+        let _flow = CONNECT_LOCK.lock().await;
+        fixture();
+        let adapter = SilodLocalAccess(runtime_host().unwrap().clone());
+        let unknown = json!({"jobId": "job:424243"});
+        let error = adapter
+            .access_dispatch("operations.cancel", &unknown)
+            .unwrap_err();
+        assert_eq!(error.code, Code::NotFound);
+        // A sign-in already running on the owner is refused as busy, not as `internal`.
+        let admission = ConnectAdmission::admit().unwrap();
+        let error = adapter
+            .access_dispatch("github.connect", &json!({}))
+            .unwrap_err();
+        assert_eq!(error.code, Code::Busy, "{}", error.message);
+        drop(admission);
+    }
+
+    #[test]
+    fn only_the_sign_in_the_engine_reports_as_cancelled_is_classified_as_cancelled() {
+        assert_eq!(
+            failure(silo_engine::github::CONNECTION_CANCELLED).code,
+            ErrorCode::Cancelled
+        );
+        // Text that merely mentions cancellation is not a discriminator.
+        assert_eq!(
+            failure("The sign-in was not cancelled by anyone.").code,
+            ErrorCode::Internal
         );
     }
 

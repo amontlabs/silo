@@ -182,6 +182,8 @@ static SESSION: OnceLock<String> = OnceLock::new();
 fn session() -> &'static str {
     SESSION.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
+/// The error a sign-in ends with when it was cancelled; callers compare it exactly.
+pub const CONNECTION_CANCELLED: &str = "GitHub connection cancelled.";
 static CONNECTING: AtomicBool = AtomicBool::new(false);
 static CANCELLATION: AtomicU64 = AtomicU64::new(0);
 // Browser URLs contain OAuth state. Keep them in memory and never return them to the UI.
@@ -2627,7 +2629,7 @@ fn open_authorization_browser(
             .lock()
             .map_err(|_| "GitHub connection is unavailable.")?;
         if CANCELLATION.load(Ordering::SeqCst) != generation {
-            return Err("GitHub connection cancelled.".into());
+            return Err(CONNECTION_CANCELLED.into());
         }
         pending.0 = Some((generation, url.to_owned()));
     }
@@ -2643,7 +2645,7 @@ pub fn connect(
     {
         let _state = serialize(&STATE);
         if CANCELLATION.load(Ordering::SeqCst) != generation {
-            return Err("GitHub connection cancelled.".into());
+            return Err(CONNECTION_CANCELLED.into());
         }
         CONNECTING.store(true, Ordering::SeqCst);
     }
@@ -2686,7 +2688,7 @@ pub fn connect(
     let deadline = Instant::now() + Duration::from_secs(300);
     let code = loop {
         if CANCELLATION.load(Ordering::SeqCst) != generation {
-            return Err("GitHub connection cancelled.".into());
+            return Err(CONNECTION_CANCELLED.into());
         }
         if Instant::now() > deadline {
             return Err("GitHub connection timed out. Try again.".into());
@@ -2721,7 +2723,7 @@ pub fn connect(
         .map_err(|_| "GitHub connection is unavailable.")?
         .clear(generation);
     if CANCELLATION.load(Ordering::SeqCst) != generation {
-        return Err("GitHub connection cancelled.".into());
+        return Err(CONNECTION_CANCELLED.into());
     }
     // Only the exchange and the store steps hold the GitHub network lock and the update
     // guard. The browser and App-installation waits (up to 5 minutes each) must not block
@@ -2757,7 +2759,7 @@ pub fn connect(
         let deadline = Instant::now() + Duration::from_secs(300);
         loop {
             if CANCELLATION.load(Ordering::SeqCst) != generation {
-                return Err("GitHub connection cancelled.".into());
+                return Err(CONNECTION_CANCELLED.into());
             }
             if Instant::now() >= deadline {
                 return Err("GitHub repository authorization timed out. Connect again after authorizing the App.".into());
@@ -2771,14 +2773,14 @@ pub fn connect(
         }
     }
     if CANCELLATION.load(Ordering::SeqCst) != generation {
-        return Err("GitHub connection cancelled.".into());
+        return Err(CONNECTION_CANCELLED.into());
     }
     let replaced = network_step(|| {
         // The credential this connection replaces, read before taking STATE.
         let replaced = revocation_credential().ok().flatten();
         let _state = serialize(&STATE);
         if CANCELLATION.load(Ordering::SeqCst) != generation {
-            return Err("GitHub connection cancelled.".into());
+            return Err(CONNECTION_CANCELLED.into());
         }
         let mut d = load()?;
         let revision = next_policy_revision(d.revision)?;
