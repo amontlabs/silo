@@ -13482,6 +13482,13 @@ pub(crate) fn validate_secret_material_for_tests(
     secrets_runtime::validate_material(&material.to_vec())
 }
 
+/// Validate material before passing it to any host runtime adapter.
+pub(crate) fn validate_secret_material(
+    material: &[(String, String, Vec<String>)],
+) -> Result<(), String> {
+    secrets_runtime::validate_material(&material.to_vec())
+}
+
 pub fn validate_secret_computers(
     host: &dyn RuntimeHost,
     computers: &[String],

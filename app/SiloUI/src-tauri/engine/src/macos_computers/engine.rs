@@ -23,7 +23,8 @@ use objc2_app_kit::{
     NSToolbarDelegate, NSToolbarDisplayMode, NSToolbarItem, NSView, NSWindow,
 };
 use objc2_foundation::{
-    NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSOperationQueue, NSString, NSURL,
+    NSArray, NSData, NSError, NSFileHandle, NSObject, NSObjectProtocol, NSOperationQueue, NSString,
+    NSURL,
 };
 use objc2_virtualization::*;
 use std::{
@@ -56,6 +57,14 @@ struct Slot {
     /// Whether the framework can save and restore this machine's memory, as asked when it
     /// was configured.
     save_restore: Result<(), String>,
+    /// A private proxy-bootstrap boot must not complete the user's Start projection.
+    lifecycle_managed: bool,
+    /// Ready guests own a per-VM helper; install and Recovery retain Apple NAT.
+    gateway: Option<super::proxy::PreparedGateway>,
+    _network_file_handle: Option<Retained<NSFileHandle>>,
+    _network_attachment: Option<Retained<VZFileHandleNetworkDeviceAttachment>>,
+    record: Record,
+    layout: Layout,
 }
 
 thread_local! {
@@ -71,6 +80,7 @@ struct DelegateState {
     id: String,
     /// The generation of the machine the delegate belongs to (0 for a toolbar).
     generation: u64,
+    lifecycle_managed: bool,
 }
 
 static NEXT_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -88,11 +98,12 @@ define_class!(
         #[unsafe(method(guestDidStopVirtualMachine:))]
         fn guest_did_stop(&self, _machine: &VZVirtualMachine) {
             let state = self.ivars();
-            super::machine_stopped(
+            super::machine_stopped_with_lifecycle(
                 &state.app.clone(),
                 &state.id.clone(),
                 state.generation,
                 None,
+                state.lifecycle_managed,
             );
         }
 
@@ -100,11 +111,12 @@ define_class!(
         fn did_stop_with_error(&self, _machine: &VZVirtualMachine, error: &NSError) {
             let state = self.ivars();
             let detail = format!("The computer stopped unexpectedly. {}", describe(error));
-            super::machine_stopped(
+            super::machine_stopped_with_lifecycle(
                 &state.app.clone(),
                 &state.id.clone(),
                 state.generation,
                 Some(detail),
+                state.lifecycle_managed,
             );
         }
     }
@@ -116,11 +128,13 @@ impl MachineDelegate {
         app: MacosContext,
         id: String,
         generation: u64,
+        lifecycle_managed: bool,
     ) -> Retained<Self> {
         let allocated = mtm.alloc::<Self>().set_ivars(DelegateState {
             app,
             id,
             generation,
+            lifecycle_managed,
         });
         // SAFETY: NSObject's init has the declared signature and initializes our subclass.
         unsafe { msg_send![super(allocated), init] }
@@ -507,6 +521,7 @@ fn configuration(
     hardware_model: &[u8],
     auxiliary_storage: &VZMacAuxiliaryStorage,
     machine_identifier: &VZMacMachineIdentifier,
+    network_attachment: Option<&VZFileHandleNetworkDeviceAttachment>,
 ) -> Result<Retained<VZVirtualMachineConfiguration>, String> {
     // SAFETY: Every call below uses framework classes with valid arguments; arrays
     // contain only the declared element classes.
@@ -555,7 +570,12 @@ fn configuration(
         configuration.setStorageDevices(&NSArray::from_retained_slice(&[disk.into_super()]));
 
         let network = VZVirtioNetworkDeviceConfiguration::new();
-        network.setAttachment(Some(&VZNATNetworkDeviceAttachment::new()));
+        if let Some(attachment) = network_attachment {
+            let attachment: &VZNetworkDeviceAttachment = attachment;
+            network.setAttachment(Some(attachment));
+        } else {
+            network.setAttachment(Some(&VZNATNetworkDeviceAttachment::new()));
+        }
         let address = VZMACAddress::initWithString(
             VZMACAddress::alloc(),
             &NSString::from_str(&record.mac_address),
@@ -664,7 +684,7 @@ pub(super) fn validate_archive_configuration(
                 &nsurl(&layout.auxiliary_storage()),
             )
         };
-        configuration(&record, &layout, &model, &auxiliary, &identifier)?;
+        configuration(&record, &layout, &model, &auxiliary, &identifier, None)?;
         Ok(())
     })?
 }
@@ -675,13 +695,24 @@ fn register(
     app: &MacosContext,
     record: &Record,
     configuration: &VZVirtualMachineConfiguration,
+    generation: u64,
+    lifecycle_managed: bool,
     installer_image: Option<&Path>,
+    gateway: Option<super::proxy::PreparedGateway>,
+    network_file_handle: Option<Retained<NSFileHandle>>,
+    network_attachment: Option<Retained<VZFileHandleNetworkDeviceAttachment>>,
+    layout: &Layout,
 ) -> Slot {
     // SAFETY: Called on the main thread; the machine binds to the main queue.
     unsafe {
         let vm = VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), configuration);
-        let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let delegate = MachineDelegate::new(mtm, app.clone(), record.id.clone(), generation);
+        let delegate = MachineDelegate::new(
+            mtm,
+            app.clone(),
+            record.id.clone(),
+            generation,
+            lifecycle_managed,
+        );
         vm.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         let installer = installer_image.map(|image| {
             VZMacOSInstaller::initWithVirtualMachine_restoreImageURL(
@@ -699,6 +730,12 @@ fn register(
             save_restore: configuration
                 .validateSaveRestoreSupportWithError()
                 .map_err(|error| describe(&error)),
+            lifecycle_managed,
+            gateway,
+            _network_file_handle: network_file_handle,
+            _network_attachment: network_attachment,
+            record: record.clone(),
+            layout: layout.clone(),
         }
     }
 }
@@ -781,8 +818,21 @@ pub(super) fn install(
                 )
                 .map_err(|error| store::io_error("save the computer's identity", &error))?;
                 let configuration =
-                    configuration(&record, &layout, &model, &auxiliary, &identifier)?;
-                let slot = register(mtm, &app, &record, &configuration, Some(&image));
+                    configuration(&record, &layout, &model, &auxiliary, &identifier, None)?;
+                let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let slot = register(
+                    mtm,
+                    &app,
+                    &record,
+                    &configuration,
+                    generation,
+                    true,
+                    Some(&image),
+                    None,
+                    None,
+                    None,
+                    &layout,
+                );
                 let installer = slot.installer.clone().ok_or("No installer.")?;
                 let handler = RcBlock::new(move |error: *mut NSError| {
                     let _ = send.send(match error.as_ref() {
@@ -861,6 +911,13 @@ fn discard(app: &MacosContext, id: &str) {
 
 fn release(id: &str) {
     if let Some(slot) = SLOTS.with(|slots| slots.borrow_mut().remove(id)) {
+        if let Some(gateway) = &slot.gateway {
+            gateway.deactivate(id, slot.generation);
+            let computer_name = slot.record.name.clone();
+            std::thread::spawn(move || {
+                let _ = crate::secrets::computer_stopped(&computer_name);
+            });
+        }
         if let Some(view) = &slot.view {
             // SAFETY: Main thread.
             unsafe { view.setVirtualMachine(None) };
@@ -897,7 +954,30 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 // MARK: Running
 
 pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Result<(), String> {
-    start_machine(app, record, layout, &Boot::Normal)
+    if !record.setup.complete() || record.setup.needs_personalizing {
+        return start_machine(app, record, layout, &Boot::BootstrapNat);
+    }
+    super::proxy::require_guest_bootstrap(record, layout)?;
+    let boot_started = time::OffsetDateTime::now_utc();
+    start_machine(app, record, layout, &Boot::Normal)?;
+    let policy = reconcile_start_policy(record)?;
+    super::proxy::sync_guest_placeholders(app, layout, record)?;
+    super::proxy::verify_guest_ready(layout, record, boot_started, true)?;
+    if policy.pending_secrets.is_empty() {
+        crate::secrets::computer_started(&record.name, &policy.revision)?;
+    }
+    crate::github::computer_restored(&record.name);
+    Ok(())
+}
+
+/// Temporary Apple NAT boot used only while staging the guest's persistent bootstrap.
+#[allow(dead_code)] // Launch migration is integrated by the runtime-migration owner.
+pub(super) fn start_bootstrap_nat(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<u64, String> {
+    start_machine_once(app, record, layout, &Boot::ProxyBootstrapNat).map_err(BootFailure::message)
 }
 
 /// Starts the computer in macOS Recovery instead of its installed system.
@@ -912,6 +992,9 @@ pub(super) fn start_in_recovery(
 /// How a machine begins running.
 enum Boot {
     Normal,
+    BootstrapNat,
+    #[allow(dead_code)] // Used only by the launch-migration staging path.
+    ProxyBootstrapNat,
     Recovery,
     /// Restores the memory saved in this file, then resumes.
     State(std::path::PathBuf),
@@ -1021,6 +1104,28 @@ fn start_machine_once(
 ) -> Result<u64, BootFailure> {
     let model = read_hardware_model(&layout.hardware_model()).map_err(BootFailure::Setup)?;
     let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
+    let gateway = match boot {
+        Boot::Normal | Boot::State(_) => {
+            Some(prepare_gateway(app, record, layout).map_err(BootFailure::Setup)?)
+        }
+        Boot::BootstrapNat | Boot::ProxyBootstrapNat | Boot::Recovery => None,
+    };
+    let vm_gateway = gateway.clone();
+    let activation_id = record.id.clone();
+    let generation = NEXT_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if let Some(gateway) = &gateway {
+        if let Err(error) = super::proxy::with_policy_lock(&record.id, || {
+            gateway.activate(&record.id, generation)?;
+            Ok(())
+        }) {
+            gateway.deactivate(&record.id, generation);
+            return Err(BootFailure::Setup(error));
+        }
+        if let Err(error) = reconcile_start_policy(record) {
+            gateway.deactivate(&record.id, generation);
+            return Err(BootFailure::Setup(error));
+        }
+    }
     let (send, receive) = mpsc::channel::<Result<(), String>>();
     let (app_handle, record, layout) = (app.clone(), record.clone(), layout.clone());
     let state = match boot {
@@ -1028,9 +1133,10 @@ fn start_machine_once(
         _ => None,
     };
     let recovery = matches!(boot, Boot::Recovery);
+    let lifecycle_managed = !matches!(boot, Boot::ProxyBootstrapNat);
     let made = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let made_here = made.clone();
-    on_main(app, move |mtm| -> Result<(), BootFailure> {
+    let setup = on_main(app, move |mtm| -> Result<(), BootFailure> {
         if SLOTS.with(|slots| slots.borrow().contains_key(&record.id)) {
             return Err(BootFailure::Setup(
                 "This computer is already running.".into(),
@@ -1044,9 +1150,49 @@ fn start_machine_once(
                 &nsurl(&layout.auxiliary_storage()),
             )
         };
-        let configuration = configuration(&record, &layout, &model, &auxiliary, &identifier)
-            .map_err(BootFailure::Setup)?;
-        let slot = register(mtm, &app_handle, &record, &configuration, None);
+        let mut network_file_handle = None;
+        let mut network_attachment = None;
+        if let Some(gateway) = &vm_gateway {
+            let fd = gateway.frame_fd().map_err(BootFailure::Setup)?;
+            let file_handle = NSFileHandle::initWithFileDescriptor_closeOnDealloc(
+                NSFileHandle::alloc(),
+                fd,
+                false,
+            );
+            // SAFETY: `fd` is the connected datagram socket retained by `gateway`; the
+            // VZ attachment only borrows the file handle, which the slot retains.
+            let attachment = unsafe {
+                VZFileHandleNetworkDeviceAttachment::initWithFileHandle(
+                    VZFileHandleNetworkDeviceAttachment::alloc(),
+                    &file_handle,
+                )
+            };
+            unsafe { attachment.setMaximumTransmissionUnit(1500) };
+            network_file_handle = Some(file_handle);
+            network_attachment = Some(attachment);
+        }
+        let configuration = configuration(
+            &record,
+            &layout,
+            &model,
+            &auxiliary,
+            &identifier,
+            network_attachment.as_deref(),
+        )
+        .map_err(BootFailure::Setup)?;
+        let slot = register(
+            mtm,
+            &app_handle,
+            &record,
+            &configuration,
+            generation,
+            lifecycle_managed,
+            None,
+            vm_gateway,
+            network_file_handle,
+            network_attachment,
+            &layout,
+        );
         if let (Some(_), Err(why)) = (&state, &slot.save_restore) {
             return Err(BootFailure::Machine(why.clone(), 0));
         }
@@ -1092,17 +1238,97 @@ fn start_machine_once(
             }
         }
         Ok(())
-    })
-    .map_err(BootFailure::Setup)??;
+    });
+    let setup = match setup {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => {
+            if let Some(gateway) = &gateway {
+                gateway.deactivate(&activation_id, generation);
+            }
+            Err(error)
+        }
+        Err(error) => {
+            if let Some(gateway) = &gateway {
+                gateway.deactivate(&activation_id, generation);
+            }
+            Err(BootFailure::Setup(error))
+        }
+    };
+    setup?;
     // The framework always answers a start. Giving up earlier would leave a machine
     // that may still come up without anything tracking it as started.
-    receive
+    let generation = receive
         .recv()
         .map_err(|_| BootFailure::Setup("The computer did not start.".to_string()))?
         .map(|()| made.load(std::sync::atomic::Ordering::SeqCst))
         .map_err(|message| {
             BootFailure::Machine(message, made.load(std::sync::atomic::Ordering::SeqCst))
-        })
+        })?;
+    Ok(generation)
+}
+
+struct StartPolicy {
+    revision: String,
+    pending_secrets: Vec<String>,
+}
+
+/// Reconcile against one stable desired-secret snapshot after the child is addressable.
+/// The gateway is admitted before the VM boots, so removals cannot miss a not-yet-active child.
+fn reconcile_start_policy(record: &Record) -> Result<StartPolicy, String> {
+    for _ in 0..3 {
+        let before = crate::secrets::computer_revision(&record.name)?;
+        let mut material = crate::secrets::runtime_material(&record.name)?;
+        let revision = crate::secrets::computer_revision(&record.name)?;
+        if before != revision {
+            for (_, value, _) in &mut material {
+                zeroize::Zeroize::zeroize(value);
+            }
+            continue;
+        }
+        let (github_revision, profile) = crate::github::macos_proxy_policy(&record.name)?;
+        let applied = super::proxy::with_policy_lock(&record.id, || {
+            if crate::secrets::computer_revision(&record.name)? != revision {
+                for (_, value, _) in &mut material {
+                    zeroize::Zeroize::zeroize(value);
+                }
+                return Ok(None);
+            }
+            let pending_secrets = super::proxy::apply_secrets(&record.id, material)?;
+            super::proxy::apply_github_profile_state(
+                &record.id,
+                github_revision,
+                profile.as_ref(),
+            )?;
+            Ok(Some(StartPolicy {
+                revision: revision.clone(),
+                pending_secrets,
+            }))
+        })?;
+        if let Some(policy) = applied {
+            if crate::secrets::computer_revision(&record.name)? == revision {
+                return Ok(policy);
+            }
+        }
+    }
+    Err("Secret settings changed repeatedly while the computer was starting. Retry Start.".into())
+}
+
+fn prepare_gateway(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<super::proxy::PreparedGateway, String> {
+    let host_routes = super::proxy_address::host_ipv4_routes()?;
+    let address = super::proxy_address::load_existing(layout, &host_routes)?;
+    let ca = super::proxy_ca::get_existing(&record.id)?
+        .ok_or_else(|| "The macOS proxy CA is missing. Retry computer setup.".to_owned())?;
+    let material = crate::secrets::runtime_material(&record.name)?;
+    let (github_revision, profile) = crate::github::macos_proxy_policy(&record.name)?;
+    let profile = profile
+        .map(|profile| serde_json::to_string(&profile))
+        .transpose()
+        .map_err(|_| "Could not encode the computer's GitHub policy.".to_owned())?;
+    super::proxy::prepare(app, record, address, ca, material, github_revision, profile)
 }
 
 /// Raised by `resume_if` when the guard no longer holds.
@@ -1117,9 +1343,12 @@ pub(super) fn resume_if(
     generation: u64,
     guard: impl Fn() -> bool + Send + 'static,
 ) -> Result<(), String> {
+    let resumed_at = time::OffsetDateTime::now_utc();
     let key = id.to_string();
+    let resume_key = key.clone();
     on_machine(app, id, true, move |machine, send| {
-        let current = SLOTS.with(|slots| slots.borrow().get(&key).map(|slot| slot.generation));
+        let current =
+            SLOTS.with(|slots| slots.borrow().get(&resume_key).map(|slot| slot.generation));
         // SAFETY: Main thread.
         unsafe {
             if !super::slot_is_current(current, generation) || !guard() {
@@ -1130,7 +1359,26 @@ pub(super) fn resume_if(
                 let _ = send.send(Err("The computer is not paused.".into()));
             }
         }
-    })
+    })?;
+    let ready = on_main(app, move |_| {
+        SLOTS.with(|slots| {
+            slots.borrow().get(&key).and_then(|slot| {
+                slot.gateway
+                    .as_ref()
+                    .map(|_| (slot.record.clone(), slot.layout.clone()))
+            })
+        })
+    })?;
+    if let Some((record, layout)) = ready {
+        let policy = reconcile_start_policy(&record)?;
+        super::proxy::sync_guest_placeholders(app, &layout, &record)?;
+        super::proxy::verify_guest_ready(&layout, &record, resumed_at, false)?;
+        if policy.pending_secrets.is_empty() {
+            crate::secrets::computer_started(&record.name, &policy.revision)?;
+        }
+        crate::github::computer_restored(&record.name);
+    }
+    Ok(())
 }
 
 // MARK: Memory
@@ -1371,14 +1619,37 @@ fn force_stop_machine(
             vm.stopWithCompletionHandler(&RcBlock::new(move |error: *mut NSError| {
                 // A stop the host requested ends without a delegate callback.
                 match error.as_ref() {
-                    None => super::machine_stopped(&handle, &finished, generation, None),
+                    None => super::machine_stopped_with_lifecycle(
+                        &handle,
+                        &finished,
+                        generation,
+                        None,
+                        SLOTS.with(|slots| {
+                            slots
+                                .borrow()
+                                .get(&finished)
+                                .is_some_and(|slot| slot.lifecycle_managed)
+                        }),
+                    ),
                     Some(error) => {
                         let message = describe(error);
                         let state = machine.state();
                         if state == VZVirtualMachineState::Stopped
                             || state == VZVirtualMachineState::Error
                         {
-                            super::machine_stopped(&handle, &finished, generation, Some(message));
+                            let lifecycle_managed = SLOTS.with(|slots| {
+                                slots
+                                    .borrow()
+                                    .get(&finished)
+                                    .is_some_and(|slot| slot.lifecycle_managed)
+                            });
+                            super::machine_stopped_with_lifecycle(
+                                &handle,
+                                &finished,
+                                generation,
+                                Some(message),
+                                lifecycle_managed,
+                            );
                         } else {
                             // A failure of an earlier machine's stop says nothing about the
                             // machine the computer has now.
@@ -1420,6 +1691,7 @@ pub(super) struct Sample {
     pub id: String,
     pub state: MachineState,
     pub generation: u64,
+    pub lifecycle_managed: bool,
 }
 
 /// The machines Silo holds, with the generation each one is, so that what is done about a
@@ -1448,6 +1720,7 @@ pub(super) fn machine_samples(app: &MacosContext) -> Result<Vec<Sample>, String>
                         id: id.clone(),
                         state,
                         generation: slot.generation,
+                        lifecycle_managed: slot.lifecycle_managed,
                     }
                 })
                 .collect()
@@ -1549,6 +1822,7 @@ fn install_toolbar(mtm: MainThreadMarker, app: &MacosContext, id: &str, native: 
         generation: 0,
         app: app.clone(),
         id: id.to_string(),
+        lifecycle_managed: true,
     });
     // SAFETY: A plain NSObject subclass initialised through its superclass.
     let delegate: Retained<ToolbarDelegate> = unsafe { msg_send![super(delegate), init] };

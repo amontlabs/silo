@@ -26,6 +26,7 @@ pub enum Channel {
 pub enum Keychain {
     Github,
     Secrets,
+    ProxyCa,
 }
 
 static CURRENT: OnceLock<Channel> = OnceLock::new();
@@ -84,8 +85,10 @@ impl Channel {
         match (self, collection) {
             (Self::Production, Keychain::Github) => "org.silo.Silo.github",
             (Self::Production, Keychain::Secrets) => "org.silo.Silo.secrets",
+            (Self::Production, Keychain::ProxyCa) => "org.silo.Silo.proxy-ca",
             (Self::Development, Keychain::Github) => "org.silo.dev.github",
             (Self::Development, Keychain::Secrets) => "org.silo.dev.secrets",
+            (Self::Development, Keychain::ProxyCa) => "org.silo.dev.proxy-ca",
         }
     }
 
@@ -157,6 +160,10 @@ mod tests {
             production.keychain_service(Keychain::Secrets),
             "org.silo.Silo.secrets"
         );
+        assert_eq!(
+            production.keychain_service(Keychain::ProxyCa),
+            "org.silo.Silo.proxy-ca"
+        );
         assert_eq!(production.remote_bridge_name(), "silo-remote");
         assert_eq!(
             production.remote_bridge_command(),
@@ -188,6 +195,10 @@ mod tests {
             (
                 p.keychain_service(Keychain::Secrets),
                 d.keychain_service(Keychain::Secrets),
+            ),
+            (
+                p.keychain_service(Keychain::ProxyCa),
+                d.keychain_service(Keychain::ProxyCa),
             ),
             (p.remote_bridge_name(), d.remote_bridge_name()),
             (p.remote_key_comment(), d.remote_key_comment()),

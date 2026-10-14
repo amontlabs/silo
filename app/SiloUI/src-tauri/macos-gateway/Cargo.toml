@@ -1,0 +1,27 @@
+[package]
+name = "silo-macos-gateway"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Source template only. The runtime build copies `src/` and this local reserved-name
+# policy into the pinned, patched MicroSandbox checkout, where sibling crate paths
+# resolve. Do not add this package as a direct Git dependency of Silo production.
+
+[[bin]]
+name = "silo-macos-gateway"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+microsandbox-network = { path = "../crates/network", package = "microsandbox-network", features = ["engine"] }
+microsandbox-types = { path = "../packages/microsandbox-types/rust", package = "microsandbox-types" }
+msb_krun = { version = "=0.1.39", features = ["net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+tempfile = "3.27"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
+zeroize = "1"
+
+[workspace]

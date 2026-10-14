@@ -259,6 +259,11 @@ impl Provision<'_> {
             record.computer_use_approval = Some(approval);
             self.mark(record, |_| {})?;
         }
+        if setup_steps_complete(record.setup) {
+            self.say("Setting up network and trust")?;
+            super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
+                .map_err(Stop::Failed)?;
+        }
         self.shut_down()?;
         if record.imported {
             record.imported = false;
@@ -410,6 +415,15 @@ impl Provision<'_> {
         self.boot(Login::Key)?;
         self.verify_sip_disabled()?;
         self.verify_personalized()?;
+        // A fully provisioned copy will use FileHandle networking as soon as
+        // personalization completes. Stage its first-boot route and System keychain
+        // trust before that transition. Incomplete copies stay on NAT until the final
+        // provisioning step stages the bootstrap below.
+        if setup_steps_complete(record.setup) {
+            self.say("Setting up network and trust")?;
+            super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
+                .map_err(Stop::Failed)?;
+        }
         self.shut_down()?;
         // Only a verified computer records the size it really has.
         if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
@@ -702,6 +716,15 @@ fn setup_summary(setup: &SetupProgress) -> String {
     }
 }
 
+fn setup_steps_complete(setup: SetupProgress) -> bool {
+    setup.account
+        && setup.sip
+        && setup.developer_tools
+        && setup.computer_use
+        && setup.clipboard
+        && setup.roots
+}
+
 /// Which key a copy of a template answers to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LoginKey {
@@ -873,6 +896,28 @@ mod tests {
         assert!(developer_tools_outdated(&record, &current));
         record.developer_tools_version = Some(current.clone());
         assert!(!developer_tools_outdated(&record, &current));
+    }
+
+    #[test]
+    fn proxy_bootstrap_is_staged_only_after_all_guest_setup_steps_are_ready() {
+        let complete = SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: true,
+        };
+        assert!(setup_steps_complete(complete));
+        assert!(!setup_steps_complete(SetupProgress {
+            developer_tools: false,
+            ..complete
+        }));
+        assert!(!setup_steps_complete(SetupProgress {
+            roots: false,
+            ..complete
+        }));
     }
 
     #[test]
