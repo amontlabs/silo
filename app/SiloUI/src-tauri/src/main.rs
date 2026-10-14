@@ -294,7 +294,6 @@ fn main() {
                 titlebar::install(&window)?;
                 commands::notifications::install(app.handle());
                 commands::updates::install(app.handle())?;
-                commands::ssh_access::start_monitor(app.handle());
                 commands::editor::refresh_transports(app.handle());
                 commands::runtime_storage::start_monitor(app.handle());
                 commands::startup::install(app.handle());
