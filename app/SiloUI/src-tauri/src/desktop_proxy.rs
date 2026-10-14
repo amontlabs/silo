@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) struct Proxy {
+pub struct Proxy {
     pub port: u16,
     pub cookie_name: String,
     pub token: String,

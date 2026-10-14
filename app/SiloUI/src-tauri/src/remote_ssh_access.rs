@@ -26,10 +26,10 @@ fn request(device: &str, method: &str, params: Value) -> Result<Value, BridgeErr
     uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
     project(remote::call_remote_typed(device, method, params)?, device).map_err(BridgeError::from)
 }
-pub(crate) fn remote_ssh_access_state(device_id: &str) -> Result<Value, BridgeError> {
+pub fn remote_ssh_access_state(device_id: &str) -> Result<Value, BridgeError> {
     request(device_id, "ssh.access.state", json!({}))
 }
-pub(crate) fn remote_save_ssh_access(
+pub fn remote_save_ssh_access(
     device_id: &str,
     computer_id: String,
     enabled: bool,

@@ -547,7 +547,7 @@ fn open_help_window(app: &AppHandle, path: &std::path::Path) -> Result<(), Strin
             HelpNavigation::Browser => {
                 let (app, url) = (browser.clone(), url.to_string());
                 std::thread::spawn(move || {
-                    if let Err(error) = crate::applications::open_browser(&app, &url) {
+                    if let Err(error) = crate::commands::applications::open_browser(&app, &url) {
                         eprintln!("Silo Help: {error}");
                     }
                 });

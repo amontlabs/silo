@@ -10,6 +10,9 @@ pub trait EngineContext: Send + Sync + 'static {
     fn publish(&self, event: Event, audience: Audience);
     fn main_thread(&self) -> Option<&dyn MainThread>;
     fn process(&self) -> &dyn ProcessControl;
+
+    /// Ends client-owned remote display sessions. `None` closes all sessions.
+    fn close_remote_displays(&self, _device: Option<&str>) {}
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

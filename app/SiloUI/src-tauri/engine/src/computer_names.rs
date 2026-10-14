@@ -20,7 +20,7 @@ pub(crate) struct Reservation(Vec<String>);
 
 /// Reserves `names` unless one is reserved already or `taken` (read while holding the
 /// lock, so a commit that finished meanwhile is seen) lists it. Names compare in lowercase.
-pub(crate) fn reserve(
+pub fn reserve(
     names: &[String],
     taken: &dyn Fn() -> Vec<String>,
 ) -> Result<Reservation, String> {

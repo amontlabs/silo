@@ -575,7 +575,7 @@ fn run_computer(f: &Fixture, issue_id: &str, profile: Value) -> Check<()> {
     let executable = std::env::current_exe()
         .map_err(|_| "Cannot locate authenticated guest regression executable.")?;
     let mut command = guest_regression_command(&executable);
-    command.current_dir(env!("CARGO_MANIFEST_DIR")).env_clear();
+    command.current_dir(crate::test_support::manifest_root()).env_clear();
     for key in [
         "PATH",
         "HOME",

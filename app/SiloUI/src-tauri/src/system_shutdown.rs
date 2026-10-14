@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 /// Upper bound for stopping computers when the session ends without a logind limit.
-pub(crate) const SESSION_END_BUDGET: Duration = Duration::from_secs(20);
+pub const SESSION_END_BUDGET: Duration = Duration::from_secs(20);
 /// logind's default `InhibitDelayMaxSec`, used when the property is unreadable.
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
 const LOGIND_DEFAULT_DELAY: Duration = Duration::from_secs(5);
@@ -21,7 +21,7 @@ const LOGIND_DEFAULT_DELAY: Duration = Duration::from_secs(5);
 const LOGIND_MARGIN: Duration = Duration::from_millis(750);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ShutdownReason {
+pub enum ShutdownReason {
     /// The user asked Silo to quit: confirm when computers run.
     UserQuit,
     Logout,
@@ -32,7 +32,7 @@ pub(crate) enum ShutdownReason {
 /// The Apple event `kAEQuitReason` ('why?') values that end the session. A quit
 /// without a reason (Dock Quit, `osascript`) is a user Quit.
 #[cfg(any(test, target_os = "macos"))]
-pub(crate) fn quit_reason(code: Option<u32>) -> ShutdownReason {
+pub fn quit_reason(code: Option<u32>) -> ShutdownReason {
     match code.map(u32::to_be_bytes).as_ref() {
         // kAELogOut, kAEReallyLogOut
         Some(b"logo" | b"rlgo") => ShutdownReason::Logout,
@@ -50,7 +50,7 @@ pub(crate) fn logind_budget(max_delay: Option<Duration>) -> Duration {
     max_delay.saturating_sub(margin).min(SESSION_END_BUDGET)
 }
 
-/// Compatibility seam for settings callers that still pass host state.
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) use crate::commands::system_shutdown::{cancel, exit};
 
 #[cfg(test)]

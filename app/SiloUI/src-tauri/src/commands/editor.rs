@@ -7,7 +7,7 @@ pub(crate) fn open(app: &AppHandle, name: &str, path: Option<&str>) -> Result<()
     let path = path.unwrap_or("/workspace");
     if let Some((device, computer)) = remote_access::target(name)? {
         let (alias, _) = editor::prepare_remote(&device, &computer, path)?;
-        let application = applications::selected_editor(app)?;
+        let application = crate::commands::applications::selected_editor(app)?;
         let command = applications::editor_command(&application)?;
         let home = app
             .path()
@@ -19,9 +19,9 @@ pub(crate) fn open(app: &AppHandle, name: &str, path: Option<&str>) -> Result<()
     editor::require_openssh("open computer folders in your editor")?;
     runtime::validate_name(name).map_err(|error| error.to_string())?;
     editor::validate_path(path)?;
-    let application = applications::selected_editor(app)?;
+    let application = crate::commands::applications::selected_editor(app)?;
     let command = applications::editor_command(&application)?;
-    let paths = runtime::runtime_paths(app)?;
+    let paths = runtime::runtime_paths(&crate::commands::runtime::host(app))?;
     let home = app
         .path()
         .home_dir()
@@ -41,11 +41,15 @@ pub(crate) fn run_transport(args: &[String]) -> Result<(), String> {
     let msb = crate::bundled_tools::resolve(
         &executable,
         Path::new(""),
-        bundle.clone(),
+        crate::commands::bundled_tools::bundle_kind(bundle.clone()),
         appimage.as_deref(),
     )?
     .join("msb");
-    let library = runtime::bundled_runtime_library(&msb, Path::new(""), bundle);
+    let library = runtime::bundled_runtime_library(
+        &msb,
+        Path::new(""),
+        crate::commands::runtime::package_kind(bundle),
+    );
     let error = std::process::Command::new(&msb)
         .args([
             "ssh",
@@ -88,10 +92,10 @@ pub(crate) fn refresh_transports(app: &AppHandle) {
             return;
         };
         let app_data = path.app_data_dir().unwrap_or_default();
-        let paths = runtime::runtime_paths(&app).ok();
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app)).ok();
         let failures = editor::refresh_transports(paths.as_ref(), &app_data, &home);
         if !failures.is_empty() {
-            crate::notifications::notify(
+            crate::commands::notifications::notify(
                 &app,
                 crate::notifications::failure(
                     "startup:editor-connections",

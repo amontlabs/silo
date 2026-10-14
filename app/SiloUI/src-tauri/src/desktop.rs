@@ -410,8 +410,8 @@ fn ensure_computer_identity(
 }
 
 /// The desktop state a live regression polls (production code path, real runtime).
-#[cfg(test)]
-pub(crate) fn test_status(
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_status(
     paths: &RuntimePaths,
     configuration: &ComputerConfiguration,
 ) -> Result<Value, String> {
@@ -665,7 +665,7 @@ fn safe_lcu_runtime_version(value: Option<&str>) -> Option<&str> {
     })
 }
 
-pub(crate) fn dispatch(
+pub fn dispatch(
     paths: &RuntimePaths,
     method: &str,
     params: &Value,
@@ -747,7 +747,7 @@ fn publish_application_state_changed() {
     }
 }
 
-pub(crate) fn local(
+pub fn local(
     paths: &RuntimePaths,
     computer: &str,
     action: Option<&str>,
@@ -838,7 +838,7 @@ pub(crate) fn local(
 
 /// Stores a computer's computer-use approval mode and, when it runs, starts applying it in the
 /// background: the answer is the desktop state at once, with the apply `pending`.
-pub(crate) fn local_approval(
+pub fn local_approval(
     paths: &RuntimePaths,
     computer: &str,
     mode: &str,

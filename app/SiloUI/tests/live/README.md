@@ -21,7 +21,7 @@ Repository names use `owner/name`. IDs are the GitHub numeric repository IDs. Th
 From the repository root:
 
 ```sh
-cargo test --manifest-path app/SiloUI/src-tauri/Cargo.toml --offline \
+cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --offline \
   github_authenticated_native_workflow -- --ignored --test-threads=1
 ```
 

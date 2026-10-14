@@ -72,7 +72,7 @@ const MAX_SELECTIONS: usize = 16;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum ConflictPolicy {
+pub enum ConflictPolicy {
     Ask,
     Replace,
     KeepBoth,
@@ -80,7 +80,7 @@ pub(crate) enum ConflictPolicy {
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
-pub(crate) enum UploadOutcome {
+pub enum UploadOutcome {
     /// Nothing was sent: these names already exist and the caller must choose a policy.
     Conflict {
         names: Vec<String>,
@@ -93,7 +93,7 @@ pub(crate) enum UploadOutcome {
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
-pub(crate) enum DownloadOutcome {
+pub enum DownloadOutcome {
     Done { path: String },
     Cancelled,
 }
@@ -1169,7 +1169,7 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 /// Refuses new transfers while it lives. An update holds it from before it stops
 /// computers, and dropping it reopens admission.
 #[derive(Debug)]
-pub(crate) struct Pause(());
+pub struct Pause(());
 
 impl Drop for Pause {
     fn drop(&mut self) {
@@ -1182,7 +1182,7 @@ impl Drop for Pause {
 
 /// Refuses new transfers, cancels the running one and waits up to `budget` for it to
 /// remove its partial files, which needs its connection to the computer.
-pub(crate) fn pause(budget: Duration) -> Pause {
+pub fn pause(budget: Duration) -> Pause {
     {
         let _active = ACTIVE
             .lock()
@@ -1194,7 +1194,7 @@ pub(crate) fn pause(budget: Duration) -> Pause {
 }
 
 /// Cancels the running transfer and waits up to `budget` for it to clean up.
-pub(crate) fn close_all(budget: Duration) {
+pub fn close_all(budget: Duration) {
     cancel_all();
     let deadline = Instant::now() + budget;
     while Instant::now() < deadline
@@ -1231,7 +1231,7 @@ static SELECTIONS: Mutex<Vec<Selection>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UploadSelection {
+pub struct UploadSelection {
     token: String,
     names: Vec<String>,
 }
@@ -1297,14 +1297,14 @@ fn restore_selection(token: &str, owner: &str, paths: Vec<String>) {
 /// A native file drag over a desktop viewer. The Tauri adapter turns OS events into
 /// this small value before the engine issues a private selection token.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum NativeDropEvent {
+pub enum NativeDropEvent {
     Enter,
     Leave,
     Drop(Vec<String>),
     Other,
 }
 
-pub(crate) fn native_drop(shell: &str, event: NativeDropEvent) {
+pub fn native_drop(shell: &str, event: NativeDropEvent) {
     if !crate::desktop_viewer::is_viewer_label(shell) {
         return;
     }
@@ -1340,7 +1340,7 @@ fn publish_event(name: &str, payload: serde_json::Value) {
     }
 }
 
-pub(crate) fn issue_upload_selection(owner: &str, paths: Vec<String>) -> UploadSelection {
+pub fn issue_upload_selection(owner: &str, paths: Vec<String>) -> UploadSelection {
     issue_selection(owner, paths)
 }
 
@@ -1374,7 +1374,7 @@ fn connect(paths: Option<&crate::runtime::RuntimePaths>, computer: &str) -> Resu
     Sftp::new(config, alias)
 }
 
-pub(crate) fn upload_files(
+pub fn upload_files(
     paths: Option<&crate::runtime::RuntimePaths>,
     owner: String,
     transfer_id: String,
@@ -1425,7 +1425,7 @@ pub(crate) fn upload_files(
     outcome
 }
 
-pub(crate) struct DownloadSession {
+pub struct DownloadSession {
     slot: Slot,
     sftp: Sftp,
     computer: String,
@@ -1435,7 +1435,7 @@ pub(crate) struct DownloadSession {
     size: u64,
 }
 
-pub(crate) fn prepare_download(
+pub fn prepare_download(
     paths: Option<&crate::runtime::RuntimePaths>,
     transfer_id: String,
     computer: String,
@@ -1491,7 +1491,7 @@ pub(crate) fn prepare_download(
     ))
 }
 
-pub(crate) fn download_prepared(
+pub fn download_prepared(
     session: DownloadSession,
     destination: Option<PathBuf>,
 ) -> Result<DownloadOutcome, String> {
@@ -1526,7 +1526,7 @@ pub(crate) fn download_prepared(
     outcome
 }
 
-pub(crate) fn cancel_transfer(owner: &str, transfer_id: &str) -> Result<(), String> {
+pub fn cancel_transfer(owner: &str, transfer_id: &str) -> Result<(), String> {
     if owner != "main" && !owner.starts_with("desktop-shell-") {
         return Err("This window cannot cancel transfers.".into());
     }

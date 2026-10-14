@@ -234,7 +234,7 @@ impl Drop for CommandLock {
     }
 }
 
-pub(crate) fn command_lock(
+pub fn command_lock(
     paths: &RuntimePaths,
     timeout: Duration,
 ) -> Result<CommandLock, RuntimeError> {
@@ -603,7 +603,7 @@ fn publish_application_state_changed(context: &dyn silo_engine::context::EngineC
     );
 }
 
-pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<(), String> {
+pub fn recover(host: &dyn RuntimeHost) -> Result<(), String> {
     let context = host.engine_context();
     let result = {
         let _attempt = attempt();
@@ -969,7 +969,7 @@ mod tests {
             .any(|pair| pair == ["--user", "root"]));
         let script = commands[0].last().unwrap();
         // The account is set up by the boot of this exec, not by the script.
-        assert_eq!(script, include_str!("../../guest/verify-tools.sh"));
+        assert_eq!(script, include_str!("../../../guest/verify-tools.sh"));
         drop(calls);
         // Metadata adoption makes a subsequent retry read-only.
         runner.calls.lock().unwrap().clear();

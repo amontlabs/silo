@@ -34,7 +34,7 @@ const BUFFERED_CHUNKS: usize = 32;
 
 /// An upstream byte stream and whatever must be dropped when the connection ends (a child
 /// process, for a bridge stream).
-pub(crate) struct Upstream {
+pub struct Upstream {
     pub reader: Box<dyn Read + Send>,
     pub writer: Box<dyn Write + Send>,
     pub keep: Box<dyn Send>,
@@ -42,9 +42,9 @@ pub(crate) struct Upstream {
 
 /// Opens the upstream of one WebSocket connection. The argument turns true when the
 /// connection is no longer wanted (replaced, or the gateway stopped), so opening can end early.
-pub(crate) type Open = Arc<dyn Fn(&dyn Fn() -> bool) -> Result<Upstream, String> + Send + Sync>;
+pub type Open = Arc<dyn Fn(&dyn Fn() -> bool) -> Result<Upstream, String> + Send + Sync>;
 
-pub(crate) struct Gateway {
+pub struct Gateway {
     port: u16,
     token: String,
     stopped: Arc<AtomicBool>,
@@ -102,7 +102,7 @@ impl Policy {
 
 impl Gateway {
     /// Starts listening on a free loopback port. `origins` are the web origins that may connect.
-    pub(crate) fn start(open: Open, origins: Vec<String>) -> Result<Self, String> {
+    pub fn start(open: Open, origins: Vec<String>) -> Result<Self, String> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|_| "Silo could not open the screen connection.".to_string())?;
         listener
@@ -158,11 +158,11 @@ impl Gateway {
     }
 
     /// The URL the viewer connects to; the token is the only secret in it.
-    pub(crate) fn url(&self) -> String {
+    pub fn url(&self) -> String {
         format!("ws://127.0.0.1:{}/{}", self.port, self.token)
     }
 
-    pub(crate) fn running(&self) -> bool {
+    pub fn running(&self) -> bool {
         !self.stopped.load(Ordering::Acquire)
     }
 }
@@ -303,7 +303,7 @@ fn splice(
 
 /// The origins a window of this app loads from: the production scheme on each platform, and
 /// the dev server in debug builds.
-pub(crate) fn app_origins(dev_url: Option<&str>) -> Vec<String> {
+pub fn app_origins(dev_url: Option<&str>) -> Vec<String> {
     let mut origins = vec![
         "tauri://localhost".to_string(),
         "http://tauri.localhost".to_string(),

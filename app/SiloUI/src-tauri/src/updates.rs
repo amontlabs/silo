@@ -1,4 +1,8 @@
 //! Update policy and durable preferences. This module does not depend on Tauri.
+#[cfg(feature = "engine-sources")]
+#[path = "updates/schedule.rs"]
+mod schedule;
+#[cfg(not(feature = "engine-sources"))]
 mod schedule;
 
 use schedule::Schedule;
@@ -21,7 +25,7 @@ static ADMISSION: RwLock<()> = RwLock::new(());
 /// Admitted operations, so readiness can be probed without taking any lock.
 static ADMITTED: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) struct AdmissionGuard(#[allow(dead_code)] RwLockReadGuard<'static, ()>);
+pub struct AdmissionGuard(#[allow(dead_code)] RwLockReadGuard<'static, ()>);
 
 impl Drop for AdmissionGuard {
     fn drop(&mut self) {
@@ -29,7 +33,7 @@ impl Drop for AdmissionGuard {
     }
 }
 
-pub(crate) fn operation_guard() -> Result<AdmissionGuard, String> {
+pub fn operation_guard() -> Result<AdmissionGuard, String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let guard = ADMISSION
         .try_read()
@@ -38,63 +42,63 @@ pub(crate) fn operation_guard() -> Result<AdmissionGuard, String> {
     Ok(AdmissionGuard(guard))
 }
 
-pub(crate) fn installation_guard() -> Result<RwLockWriteGuard<'static, ()>, String> {
+pub fn installation_guard() -> Result<RwLockWriteGuard<'static, ()>, String> {
     ADMISSION
         .try_write()
         .map_err(|_| "Wait for active operations to finish before updating.".to_owned())
 }
 
-pub(crate) fn readiness(checks: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+pub fn readiness(checks: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
     if ADMITTED.load(Ordering::SeqCst) > 0 {
         return Err("Wait for active operations to finish before updating.".into());
     }
     checks()
 }
 
-pub(crate) const RELEASE_URL: &str = "https://github.com/amontlabs/silo/releases/latest";
-pub(crate) const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(5);
+pub const RELEASE_URL: &str = "https://github.com/amontlabs/silo/releases/latest";
+pub const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_PREFERENCE_BYTES: u64 = 1024 * 1024;
 pub(crate) const PREFERENCE_READ_ERROR: &str =
     "Update preferences could not be read. Save your preference again.";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Snapshot {
-    pub(crate) phase: String,
-    pub(crate) last_checked: Option<String>,
-    pub(crate) retry_action: Option<String>,
-    pub(crate) current_version: String,
-    pub(crate) available_version: Option<String>,
-    pub(crate) release_notes: Option<String>,
-    pub(crate) downloaded_bytes: u64,
-    pub(crate) total_bytes: Option<u64>,
-    pub(crate) automatic_checks: bool,
-    pub(crate) package_kind: String,
-    pub(crate) release_url: String,
-    pub(crate) error: Option<String>,
-    pub(crate) error_details: Option<String>,
-    pub(crate) running_computers: Vec<String>,
-    pub(crate) can_install: bool,
-    pub(crate) install_block_reason: Option<String>,
-    pub(crate) install_status: Option<String>,
+pub struct Snapshot {
+    pub phase: String,
+    pub last_checked: Option<String>,
+    pub retry_action: Option<String>,
+    pub current_version: String,
+    pub available_version: Option<String>,
+    pub release_notes: Option<String>,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub automatic_checks: bool,
+    pub package_kind: String,
+    pub release_url: String,
+    pub error: Option<String>,
+    pub error_details: Option<String>,
+    pub running_computers: Vec<String>,
+    pub can_install: bool,
+    pub install_block_reason: Option<String>,
+    pub install_status: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UpdateInfo {
-    pub(crate) version: String,
-    pub(crate) body: Option<String>,
+pub struct UpdateInfo {
+    pub version: String,
+    pub body: Option<String>,
 }
 
-pub(crate) struct State {
+pub struct State {
     schedule: Schedule,
-    pub(crate) snapshot: Snapshot,
-    pub(crate) update: Option<UpdateInfo>,
+    pub snapshot: Snapshot,
+    pub update: Option<UpdateInfo>,
     pub(crate) bytes: Option<Vec<u8>>,
 }
 
 impl State {
-    pub(crate) fn new(snapshot: Snapshot, now: SystemTime) -> Self {
+    pub fn new(snapshot: Snapshot, now: SystemTime) -> Self {
         Self {
             schedule: Schedule::new(now),
             snapshot,
@@ -111,7 +115,7 @@ struct Preferences {
     extra: serde_json::Map<String, serde_json::Value>,
 }
 
-pub(crate) fn read_preferences(path: &Path) -> Result<bool, String> {
+pub fn read_preferences(path: &Path) -> Result<bool, String> {
     Ok(read_saved_preferences(path)?
         .map(|preferences| preferences.automatic_checks)
         .unwrap_or(true))
@@ -135,7 +139,7 @@ fn read_saved_preferences(path: &Path) -> Result<Option<Preferences>, String> {
         .map_err(|_| PREFERENCE_READ_ERROR.into())
 }
 
-pub(crate) fn save_preferences(path: &Path, enabled: bool) -> Result<(), String> {
+pub fn save_preferences(path: &Path, enabled: bool) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or("Update preference storage is unavailable.")?;
@@ -171,12 +175,12 @@ pub(crate) fn save_preferences(path: &Path, enabled: bool) -> Result<(), String>
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BundleKind {
+pub enum BundleKind {
     AppImage,
     Debian,
 }
 
-pub(crate) fn package_kind(
+pub fn package_kind(
     executable: &Path,
     appimage: Option<&Path>,
     bundle: Option<BundleKind>,
@@ -206,11 +210,11 @@ pub(crate) fn busy(phase: &str) -> bool {
     matches!(phase, "checking" | "downloading" | "installing")
 }
 
-pub(crate) fn focused(state: &mut State, now: SystemTime) {
+pub fn focused(state: &mut State, now: SystemTime) {
     state.schedule.focus(now);
 }
 
-pub(crate) fn automatic_check_due(state: &State, now: SystemTime) -> bool {
+pub fn automatic_check_due(state: &State, now: SystemTime) -> bool {
     state.schedule.due(
         now,
         state.snapshot.automatic_checks,
@@ -224,7 +228,7 @@ pub(crate) fn automatic_check_due(state: &State, now: SystemTime) -> bool {
     )
 }
 
-pub(crate) fn begin_check(state: &mut State) -> Result<String, String> {
+pub fn begin_check(state: &mut State) -> Result<String, String> {
     if busy(&state.snapshot.phase) {
         return Err("An update operation is already running.".into());
     }
@@ -234,11 +238,11 @@ pub(crate) fn begin_check(state: &mut State) -> Result<String, String> {
     Ok(previous)
 }
 
-pub(crate) fn complete_check(state: &mut State, now: SystemTime, success: bool) {
+pub fn complete_check(state: &mut State, now: SystemTime, success: bool) {
     state.schedule.completed(now, success);
 }
 
-pub(crate) fn check_failed(
+pub fn check_failed(
     state: &mut State,
     now: SystemTime,
     previous_phase: &str,
@@ -257,14 +261,14 @@ pub(crate) fn check_failed(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CheckErrorKind {
+pub enum CheckErrorKind {
     ReleaseUnavailable,
     InvalidRelease,
     NoPlatformRelease,
     Other,
 }
 
-pub(crate) fn check_error_message(kind: CheckErrorKind) -> &'static str {
+pub fn check_error_message(kind: CheckErrorKind) -> &'static str {
     match kind {
         CheckErrorKind::ReleaseUnavailable => "The update service is unavailable. Try again later.",
         CheckErrorKind::InvalidRelease => {
@@ -277,13 +281,13 @@ pub(crate) fn check_error_message(kind: CheckErrorKind) -> &'static str {
     }
 }
 
-pub(crate) fn no_feed_available(state: &mut State) {
+pub fn no_feed_available(state: &mut State) {
     state.snapshot.phase = "idle".into();
     state.snapshot.error = None;
     state.snapshot.error_details = None;
 }
 
-pub(crate) fn record_failure(state: &mut State, message: &str, details: impl ToString) -> Snapshot {
+pub fn record_failure(state: &mut State, message: &str, details: impl ToString) -> Snapshot {
     state.snapshot.phase = "error".into();
     state.snapshot.error = Some(message.into());
     state.snapshot.error_details = Some(details.to_string());
@@ -302,7 +306,7 @@ pub(crate) fn record_failure(state: &mut State, message: &str, details: impl ToS
     state.snapshot.clone()
 }
 
-pub(crate) fn begin_download(state: &mut State) -> Result<(), String> {
+pub fn begin_download(state: &mut State) -> Result<(), String> {
     if busy(&state.snapshot.phase) {
         return Err("An update operation is already running.".into());
     }
@@ -321,19 +325,19 @@ pub(crate) fn begin_download(state: &mut State) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn download_progress(state: &mut State, received: u64, total: Option<u64>) {
+pub fn download_progress(state: &mut State, received: u64, total: Option<u64>) {
     state.snapshot.downloaded_bytes = received;
     state.snapshot.total_bytes = total;
 }
 
-pub(crate) fn download_ready(state: &mut State, bytes: Vec<u8>) {
+pub fn download_ready(state: &mut State, bytes: Vec<u8>) {
     state.snapshot.phase = "ready".into();
     state.snapshot.downloaded_bytes = bytes.len() as u64;
     state.snapshot.total_bytes = Some(bytes.len() as u64);
     state.bytes = Some(bytes);
 }
 
-pub(crate) fn begin_install(
+pub fn begin_install(
     state: &mut State,
     has_updater: bool,
 ) -> Result<(Vec<u8>, bool), String> {
@@ -362,11 +366,11 @@ pub(crate) fn begin_install(
     Ok((bytes, is_debian))
 }
 
-pub(crate) fn restore_install_bytes(state: &mut State, bytes: Vec<u8>) {
+pub fn restore_install_bytes(state: &mut State, bytes: Vec<u8>) {
     state.bytes = Some(bytes);
 }
 
-pub(crate) fn update_automatic_checks(
+pub fn update_automatic_checks(
     state: &mut State,
     preferences: &Path,
     enabled: bool,
@@ -399,7 +403,7 @@ pub(crate) fn blocks_automatic_check(
 
 /// Apply a successful check. A verified download of the same version survives the
 /// check; returns true when the pending update (and its bytes) should be kept.
-pub(crate) fn settle_check(state: &mut State, found: Option<UpdateInfo>) -> bool {
+pub fn settle_check(state: &mut State, found: Option<UpdateInfo>) -> bool {
     let keep = state.bytes.is_some()
         && found.as_ref().is_some_and(|update| {
             state
@@ -421,7 +425,7 @@ pub(crate) fn settle_check(state: &mut State, found: Option<UpdateInfo>) -> bool
     keep
 }
 
-pub(crate) fn validate_download_size(size: u64) -> Result<(), String> {
+pub fn validate_download_size(size: u64) -> Result<(), String> {
     if size > MAX_DOWNLOAD_BYTES {
         Err("The update exceeds the supported download size.".into())
     } else {
@@ -456,7 +460,7 @@ pub(crate) fn unpacked_size(bytes: &[u8], macos: bool) -> Result<u64, String> {
     Ok(total)
 }
 
-pub(crate) fn preflight_destination(
+pub fn preflight_destination(
     destination: &Path,
     bytes: &[u8],
     macos: bool,
@@ -481,7 +485,7 @@ pub(crate) fn preflight_destination(
     Ok(())
 }
 
-pub(crate) fn available_install_space(parent: &Path) -> Result<u64, String> {
+pub fn available_install_space(parent: &Path) -> Result<u64, String> {
     use std::os::unix::ffi::OsStrExt;
     let encoded = std::ffi::CString::new(parent.as_os_str().as_bytes())
         .map_err(|_| "The installation folder is invalid.")?;

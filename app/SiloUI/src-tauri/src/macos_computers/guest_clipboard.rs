@@ -106,7 +106,7 @@ const WRITE_OUTPUT: usize = 4096;
 
 /// Which way a transfer goes, as the frontend names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-pub(crate) enum Direction {
+pub enum Direction {
     #[serde(rename = "paste-into")]
     PasteInto,
     #[serde(rename = "copy-from")]

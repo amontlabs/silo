@@ -1,3 +1,7 @@
+#[cfg(feature = "engine-sources")]
+#[path = "backup_controller/recovery.rs"]
+mod recovery;
+#[cfg(not(feature = "engine-sources"))]
 mod recovery;
 
 use crate::runtime::RuntimeHost;
@@ -85,7 +89,7 @@ enum Operation {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct BackupState {
+pub struct BackupState {
     snapshot_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation_id: Option<String>,
@@ -106,7 +110,7 @@ pub(crate) struct BackupState {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ArchiveInspectionResult {
+pub struct ArchiveInspectionResult {
     archive: Archive,
     valid: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,7 +183,7 @@ fn write_history(path: &Path, history: &BackupHistory) -> Result<(), String> {
 
 /// Use `destination` as the export folder. Saving it for the next launch is
 /// best effort: a failure never blocks this export.
-pub(crate) fn remember_destination(controller: &Controller, destination: PathBuf) {
+pub fn remember_destination(controller: &Controller, destination: PathBuf) {
     let saved = write_history(
         &controller.history_path,
         &BackupHistory {
@@ -201,7 +205,7 @@ pub(crate) fn remember_destination(controller: &Controller, destination: PathBuf
         .destination = Some(destination);
 }
 
-pub(crate) fn destination(controller: &Controller) -> Result<Option<PathBuf>, String> {
+pub fn destination(controller: &Controller) -> Result<Option<PathBuf>, String> {
     controller
         .view
         .lock()
@@ -255,7 +259,7 @@ struct ViewState {
     inspection: Option<(String, backup::Cancellation)>,
 }
 
-pub(crate) struct Controller {
+pub struct Controller {
     host: Option<Arc<dyn RuntimeHost>>,
     history_path: PathBuf,
     journal: Mutex<Option<recovery::Journal>>,
@@ -272,7 +276,7 @@ impl Controller {
     }
 }
 
-pub(crate) fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
+pub fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
     let context = host.engine_context();
     let paths = context.paths();
     let scratch = paths.app_cache.join("backup-work");
@@ -330,7 +334,7 @@ pub(crate) fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, Str
 /// import. An interrupted export's recovery only checks its own files, so
 /// startup does not wait for it (E-31).
 /// Waits for the startup-recovery work that must settle before automatic starts.
-pub(crate) fn wait_for_recovery(
+pub fn wait_for_recovery(
     controller: &Controller,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
@@ -338,7 +342,7 @@ pub(crate) fn wait_for_recovery(
 }
 
 /// Migration also waits for exports because it quarantines the previous generation's journal.
-pub(crate) fn wait_for_migration_recovery(controller: &Controller) -> Result<(), String> {
+pub fn wait_for_migration_recovery(controller: &Controller) -> Result<(), String> {
     wait_for_controller_recovery(controller, true, &|| false)
 }
 
@@ -408,7 +412,7 @@ fn wait_for_controller_recovery(
     }
 }
 
-pub(crate) fn publish(controller: &Controller) {
+pub fn publish(controller: &Controller) {
     controller.revision.fetch_add(1, Ordering::Relaxed);
     if let Ok(host) = controller.runtime_host() {
         host.engine_context().publish(
@@ -451,7 +455,7 @@ fn archive_from(path: &Path, inspected: &backup::ArchiveInspection) -> Archive {
     }
 }
 
-pub(crate) fn backup_state(controller: &Controller) -> Result<BackupState, String> {
+pub fn backup_state(controller: &Controller) -> Result<BackupState, String> {
     let view = controller.view.lock().map_err(|_| {
         "Export and import status could not be read. Relaunch Silo and retry.".to_string()
     })?;
@@ -489,7 +493,7 @@ pub(crate) fn backup_state(controller: &Controller) -> Result<BackupState, Strin
     })
 }
 
-pub(crate) fn selected_path_text(path: &Path) -> Result<String, String> {
+pub fn selected_path_text(path: &Path) -> Result<String, String> {
     path.to_str().map(str::to_owned).ok_or_else(|| {
         "Silo cannot use paths containing non-UTF-8 names. Rename the affected file or folder, then choose it again.".into()
     })
@@ -499,7 +503,7 @@ pub(crate) fn selected_path_text(path: &Path) -> Result<String, String> {
 /// for a large file, so it is registered under the caller's request id and
 /// `cancel_backup_inspection` stops it when the review closes. It changes no
 /// state and publishes nothing (E-27).
-pub(crate) fn inspection_worker(
+pub fn inspection_worker(
     controller: Arc<Controller>,
     path: PathBuf,
     request_id: String,
@@ -567,7 +571,7 @@ fn finish_inspection(controller: &Controller, request_id: &str) {
     }
 }
 
-pub(crate) fn cancel_inspection(controller: &Controller, request_id: &str) -> bool {
+pub fn cancel_inspection(controller: &Controller, request_id: &str) -> bool {
     let mut view = controller
         .view
         .lock()
@@ -607,7 +611,7 @@ fn authorize_reveal(operation: Option<&Operation>, requested: &str) -> Result<Pa
     Ok(path)
 }
 
-pub(crate) fn authorize_reveal_archive(
+pub fn authorize_reveal_archive(
     controller: &Controller,
     requested: &str,
 ) -> Result<PathBuf, String> {
@@ -666,7 +670,7 @@ fn finish(controller: &Controller) {
     controller.busy.store(false, Ordering::Release);
 }
 
-pub(crate) fn begin_export(
+pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
     computers: Vec<String>,
@@ -1457,7 +1461,7 @@ fn computer_identity(
         })
 }
 
-pub(crate) fn begin_import(
+pub fn begin_import(
     controller: Arc<Controller>,
     archive_path: String,
     new_name: String,
@@ -1852,7 +1856,7 @@ fn save_import_metadata(
     Ok(())
 }
 
-pub(crate) fn cancel_operation(controller: &Controller) -> Result<(), String> {
+pub fn cancel_operation(controller: &Controller) -> Result<(), String> {
     let operation_id = {
         let view = controller.view.lock().map_err(|_| {
             "Export and import status could not be read. Relaunch Silo and retry.".to_string()
@@ -1882,7 +1886,7 @@ pub(crate) fn cancel_operation(controller: &Controller) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn acknowledge_result(
+pub fn acknowledge_result(
     controller: &Controller,
     expected_operation_id: &str,
 ) -> Result<bool, String> {
@@ -1910,7 +1914,7 @@ fn enter_commit(
     Ok(())
 }
 
-pub(crate) fn dismiss_finished_operation(
+pub fn dismiss_finished_operation(
     controller: &Controller,
     expected: Option<&Value>,
     expected_id: Option<&str>,
@@ -3962,7 +3966,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path")),
             library: PathBuf::from(
@@ -4133,7 +4137,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
@@ -4359,7 +4363,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
@@ -4460,7 +4464,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let guest_image =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/guest-image");
+            crate::test_support::manifest_root().join("runtime/guest-image");
         let executable = PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path"));
         let library =
             PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").expect("packaged library path"));
@@ -4691,7 +4695,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let cold = runtime::RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap()),
             library: PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").unwrap()),
@@ -5424,20 +5428,20 @@ mod tests {
     }
 }
 
-pub(crate) struct UpdateGuard(Arc<Controller>);
+pub struct UpdateGuard(Arc<Controller>);
 impl Drop for UpdateGuard {
     fn drop(&mut self) {
         self.0.busy.store(false, Ordering::Release);
     }
 }
-pub(crate) fn update_ready(controller: &Controller) -> Result<(), String> {
+pub fn update_ready(controller: &Controller) -> Result<(), String> {
     if controller.busy.load(Ordering::Acquire) || recovery::unresolved(controller)? {
         Err("Wait for the export or import to finish before updating.".into())
     } else {
         Ok(())
     }
 }
-pub(crate) fn update_guard(controller: Arc<Controller>) -> Result<UpdateGuard, String> {
+pub fn update_guard(controller: Arc<Controller>) -> Result<UpdateGuard, String> {
     update_guard_for(controller)
 }
 fn update_guard_for(controller: Arc<Controller>) -> Result<UpdateGuard, String> {

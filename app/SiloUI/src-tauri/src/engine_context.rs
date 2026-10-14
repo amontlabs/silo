@@ -76,6 +76,13 @@ impl EngineContext for TauriEngineContext {
     fn process(&self) -> &dyn ProcessControl {
         self
     }
+
+    fn close_remote_displays(&self, device: Option<&str>) {
+        match device {
+            Some(device) => crate::commands::macos_remote_viewer::close_device(device),
+            None => crate::commands::macos_remote_viewer::close_all(),
+        }
+    }
 }
 
 impl MainThread for TauriEngineContext {

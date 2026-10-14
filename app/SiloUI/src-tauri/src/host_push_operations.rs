@@ -287,7 +287,7 @@ fn record_completion_locked(
         }
     }
 }
-pub(crate) fn status(
+pub fn status(
     paths: &RuntimePaths,
     computer: &str,
     path: &str,
@@ -303,7 +303,7 @@ pub(crate) fn status(
     }
     Ok(operation(job))
 }
-pub(crate) fn merge(paths: &RuntimePaths, legacy: Vec<Value>) -> Result<Vec<Value>, String> {
+pub fn merge(paths: &RuntimePaths, legacy: Vec<Value>) -> Result<Vec<Value>, String> {
     let journal = paths.home.join("repository-push-operations.json");
     Ok(merge_journal(&journal, legacy))
 }
@@ -382,7 +382,7 @@ pub(crate) fn dismiss(paths: &RuntimePaths, computer: &str, path: &str) -> Resul
 }
 // Preparation failures are authoritative: no detached job was dispatched.
 // Return them as results so a caller can distinguish them from a lost SSH reply.
-pub(crate) fn start_result(
+pub fn start_result(
     paths: &RuntimePaths,
     computer: String,
     path: String,

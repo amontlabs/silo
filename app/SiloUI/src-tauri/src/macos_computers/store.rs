@@ -37,7 +37,7 @@ pub(super) enum State {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum Action {
+pub enum Action {
     Start,
     Stop,
     ForceStop,
@@ -135,7 +135,7 @@ impl Record {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CreateRequest {
+pub struct CreateRequest {
     pub name: String,
     pub cpus: u64,
     #[serde(rename = "memoryGiB")]

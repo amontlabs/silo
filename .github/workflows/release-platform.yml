@@ -155,7 +155,7 @@ jobs:
           artifact-name: ${{ needs.runtime.outputs.artifact-name }}
           artifact-sha256: ${{ needs.runtime.outputs.archive-sha256 }}
       - name: Test build configuration and native behavior
-        run: python3 scripts/measure-command.py native-tests -- cargo test --manifest-path src-tauri/Cargo.toml --locked --timings -- --test-threads=1
+        run: python3 scripts/measure-command.py native-tests -- cargo test --manifest-path Cargo.toml --workspace --locked --timings -- --test-threads=1
       - name: Test updater transport and interrupted installation
         run: python3 scripts/measure-command.py updater-tests -- cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib -- --test-threads=1
       - name: Upload timing metrics only
@@ -266,7 +266,7 @@ jobs:
           SILO_GITHUB_APP_SLUG: ${{ secrets.SILO_GITHUB_APP_SLUG }}
           SILO_GITHUB_CLIENT_ID: ${{ secrets.SILO_GITHUB_CLIENT_ID }}
           SILO_GITHUB_CLIENT_SECRET: ${{ secrets.SILO_GITHUB_CLIENT_SECRET }}
-        run: python3 scripts/measure-command.py native-tests -- cargo test --manifest-path src-tauri/Cargo.toml --locked --timings -- --test-threads=1
+        run: python3 scripts/measure-command.py native-tests -- cargo test --manifest-path Cargo.toml --workspace --locked --timings -- --test-threads=1
       - name: Test updater transport and interrupted installation
         if: inputs.benchmark-schedule == 'sequential'
         run: python3 scripts/measure-command.py updater-tests -- cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib -- --test-threads=1

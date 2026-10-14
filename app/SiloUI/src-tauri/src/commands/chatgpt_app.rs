@@ -23,7 +23,8 @@ fn status_publisher(app: AppHandle) -> chatgpt_app::StatusPublisher {
 
 fn idle_check(app: AppHandle) -> chatgpt_app::IdleCheck {
     Arc::new(move || {
-        runtime::update_recovery::running_names(&app).is_ok_and(|names| names.is_empty())
+        runtime::update_recovery::running_names(&crate::commands::runtime::host(&app))
+            .is_ok_and(|names| names.is_empty())
     })
 }
 
@@ -35,7 +36,7 @@ fn ready_hook(app: &AppHandle, root: PathBuf) -> chatgpt_app::ReadyHook {
     let app = app.clone();
     Arc::new(move || {
         // Running built-in computers set computer use up now instead of at their next boot.
-        computer_use::app_ready(&app);
+        crate::commands::computer_use::app_ready(&app);
         collect_unused(&app, root.clone());
     })
 }
@@ -76,7 +77,7 @@ pub(crate) fn start_automatic(app: &AppHandle) {
     collect_unused(app, root.clone());
     if matches!(status, chatgpt_app::Status::Ready { .. }) {
         // Finish approval changes saved but never launched before the last quit.
-        computer_use::reconcile(app);
+        crate::commands::computer_use::reconcile(app);
         return;
     }
     // Let the app finish starting first; this is not urgent.

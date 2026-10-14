@@ -11,7 +11,7 @@ static QUITTING: AtomicBool = AtomicBool::new(false);
 static QUIT_GENERATION: AtomicU64 = AtomicU64::new(0);
 static MAINTENANCE_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
 
-pub(crate) fn begin() {
+pub fn begin() {
     if let Ok(mut deadline) = MAINTENANCE_DEADLINE.lock() {
         *deadline = Some(Instant::now() + storage::TRIM_BUDGET);
     }
@@ -22,10 +22,10 @@ pub(crate) fn begin() {
 
 /// The current shutdown generation. A retry sequence captures it before its first
 /// attempt and stops once it changes (D-30).
-pub(crate) fn generation() -> u64 {
+pub fn generation() -> u64 {
     QUIT_GENERATION.load(Ordering::SeqCst)
 }
-pub(crate) fn cancel() {
+pub fn cancel() {
     QUITTING.store(false, Ordering::SeqCst);
     crate::macos_computers::reopen_after_quit();
     if let Ok(mut deadline) = MAINTENANCE_DEADLINE.lock() {
@@ -48,7 +48,7 @@ pub(super) fn maintenance_budget() -> Duration {
 /// call this once its turn arrives, so admission cannot race Quit. Callers may also
 /// call it earlier to fail fast (for example before queueing), which is why it does
 /// not assert `operation_gate::held()` (D-43).
-pub(crate) fn ensure_accepting_operations() -> Result<(), String> {
+pub fn ensure_accepting_operations() -> Result<(), String> {
     if QUITTING.load(Ordering::SeqCst) {
         Err(
             "Silo is quitting and stopping its local computers. Wait for shutdown to finish."
@@ -60,7 +60,7 @@ pub(crate) fn ensure_accepting_operations() -> Result<(), String> {
 }
 
 /// The longest Quit waits for a cancelled file transfer to remove its partial files.
-pub(crate) const TRANSFER_DRAIN: Duration = Duration::from_secs(5);
+pub const TRANSFER_DRAIN: Duration = Duration::from_secs(5);
 /// Time the drain leaves for closing connections, stopping computers and saving state.
 const STOP_RESERVE: Duration = Duration::from_secs(3);
 
@@ -94,7 +94,7 @@ fn drain_then<T>(drain: impl FnOnce(), stop: impl FnOnce() -> T) -> T {
     stop()
 }
 
-pub(crate) fn stop_local_computers(
+pub fn stop_local_computers(
     host: &dyn RuntimeHost,
     deadline: Option<Instant>,
 ) -> Result<(), String> {
@@ -106,7 +106,9 @@ pub(crate) fn stop_local_computers(
                 // cannot restore listeners while local computer shutdown is in progress.
                 crate::ssh_access::close_all();
                 crate::desktop_viewer::close_all();
-                crate::macos_remote_viewer::close_all();
+                if let Some(context) = silo_engine::context::current() {
+                    context.close_remote_displays(None);
+                }
                 // macOS computers live in this process. Quit runs on a worker thread, so the
                 // main thread stays free for the framework's callbacks while they stop.
                 let macos = host.stop_macos_computers(deadline);

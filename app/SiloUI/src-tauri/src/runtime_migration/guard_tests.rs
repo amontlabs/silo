@@ -349,7 +349,7 @@ fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
 
 #[test]
 fn only_the_gate_can_name_a_runtime_and_only_the_migration_names_the_previous_one() {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let source = crate::test_support::manifest_root().join("src");
     let mut files = Vec::new();
     source_files(&source, &mut files);
     assert!(files.len() > 50, "the scan must see the whole source tree");

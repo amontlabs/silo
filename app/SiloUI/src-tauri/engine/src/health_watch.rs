@@ -35,7 +35,7 @@ pub(crate) struct ComputerReading {
     pub settled: bool,
 }
 
-pub(crate) enum Reading {
+pub enum Reading {
     /// The reading overlapped a metadata change; it says nothing.
     Discarded,
     /// The runtime could not be inspected.
@@ -239,7 +239,7 @@ impl ExitWaiters {
 }
 
 /// Runtime and client adapters provide inspection, exit waits and notice delivery.
-pub(crate) trait HealthWatchServices: Send + Sync + 'static {
+pub trait HealthWatchServices: Send + Sync + 'static {
     fn observe(&self) -> Reading;
     fn wait_for_computer_exit(&self, name: &str) -> bool;
     fn notify(&self, notice: Notice);
@@ -247,11 +247,11 @@ pub(crate) trait HealthWatchServices: Send + Sync + 'static {
 
 /// Produces the host adapter used by the health watch. Implementations live in
 /// `commands/health_watch.rs` so existing setup owners do not carry UI types here.
-pub(crate) trait HealthWatchHost: Send + Sync {
+pub trait HealthWatchHost: Send + Sync {
     fn services(&self) -> Arc<dyn HealthWatchServices>;
 }
 
-pub(crate) fn install<H: HealthWatchHost>(host: &H) {
+pub fn install<H: HealthWatchHost>(host: &H) {
     install_services(host.services());
 }
 

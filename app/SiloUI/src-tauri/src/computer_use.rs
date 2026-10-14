@@ -47,14 +47,14 @@ const APPLY_GRACE: Duration = Duration::from_secs(60);
 /// Whether an agent's computer-use actions in a computer ask for approval first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Approval {
+pub enum Approval {
     #[default]
     Ask,
     Auto,
 }
 
 impl Approval {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Ask => "ask",
             Self::Auto => "auto",
@@ -193,7 +193,7 @@ const MAX_SETTINGS_BYTES: u64 = 1024 * 1024;
 static NEW_COMPUTER_AUTO: AtomicBool = AtomicBool::new(false);
 
 /// The initial mode named by the app settings; anything but `true` means ask.
-pub(crate) fn initial_approval_from(settings: &serde_json::Map<String, Value>) -> Approval {
+pub fn initial_approval_from(settings: &serde_json::Map<String, Value>) -> Approval {
     match settings.get("computerUseAutoApproval") {
         Some(Value::Bool(true)) => Approval::Auto,
         _ => Approval::Ask,
@@ -596,7 +596,7 @@ static PUBLISHED: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// The ChatGPT storage root, remembered so the published folder can be prepared again
 /// whenever it is missing (see `register_published`).
 static STORAGE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_PUBLISHED: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
@@ -611,7 +611,7 @@ fn set_published_dir(dir: PathBuf) {
 /// again, and `mount_args` does it when no folder is registered, so a start-up that
 /// failed (disk space, permissions) never leaves new computers without the mount for the rest of
 /// the session once the cause is gone.
-pub(crate) fn register_published(root: &Path) -> Result<PathBuf, chatgpt_app::Error> {
+pub fn register_published(root: &Path) -> Result<PathBuf, chatgpt_app::Error> {
     *STORAGE_ROOT.lock().unwrap_or_else(|p| p.into_inner()) = Some(root.to_path_buf());
     let dir = chatgpt_app::ensure_published_dir(root)?;
     set_published_dir(dir.clone());
@@ -638,20 +638,20 @@ fn reset_published_for_test() {
 
 /// The canonical `<app data>/chatgpt/published` folder, once Silo prepared it.
 pub(crate) fn published_dir() -> Option<PathBuf> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(dir) = TEST_PUBLISHED.with(|dir| dir.borrow().clone()) {
         return Some(dir);
     }
     PUBLISHED.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
-#[cfg(test)]
-pub(crate) fn set_test_published_dir(dir: Option<PathBuf>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_test_published_dir(dir: Option<PathBuf>) {
     TEST_PUBLISHED.with(|slot| *slot.borrow_mut() = dir);
 }
 
 /// Whether the computer was created with the built-in desktop (v4 image) and so with the mount.
-pub(crate) fn is_built_in(configuration: &ComputerConfiguration) -> bool {
+pub fn is_built_in(configuration: &ComputerConfiguration) -> bool {
     desktop::configuration(configuration).is_some_and(|configuration| configuration.built_in)
 }
 
@@ -1002,7 +1002,7 @@ fn built_in_computer(paths: &RuntimePaths, name: &str) -> Option<ComputerConfigu
 }
 
 /// A runner the background apply can own.
-pub(crate) type SharedRunner = Arc<dyn RuntimeRunner + Send + Sync>;
+pub type SharedRunner = Arc<dyn RuntimeRunner + Send + Sync>;
 
 /// A running computer's identity: the runtime instance that is running now and the Silo computer id
 /// its runtime computer carries. `None` unless the computer runs, is labelled with `id` and
@@ -1127,7 +1127,7 @@ enum Trigger {
 /// After a computer boots (start or restore): installs and configures computer use in the
 /// background. Returns at once, never fails the boot, and never waits for the guest:
 /// running the helper happens on a host thread (returned for tests).
-pub(crate) fn after_boot(
+pub fn after_boot(
     runner: SharedRunner,
     paths: &RuntimePaths,
     name: &str,
@@ -1296,7 +1296,7 @@ fn apply_once(
 /// LCU is not the pinned one up to date. The host never reads the guest to decide:
 /// its own record of the last attempt is enough. Returns the threads started, one per
 /// Computer that needs it (for tests).
-pub(crate) fn reconcile_in(
+pub fn reconcile_in(
     gate: &'static runtime::operation_gate::OperationGate,
     runner: &SharedRunner,
     paths: &RuntimePaths,
@@ -1328,9 +1328,7 @@ fn pin_is_stale(known: Option<&Known>) -> bool {
 }
 
 /// `reconcile_in` for every running computer of this device. Returns at once.
-pub(crate) use crate::commands::computer_use::{app_ready, install, reconcile};
-
-pub(crate) fn publish_application_state_changed() {
+pub fn publish_application_state_changed() {
     if let Some(context) = silo_engine::context::current() {
         context.publish(
             Event::new("silo://application-state-changed", Value::Null),
@@ -1340,6 +1338,9 @@ pub(crate) fn publish_application_state_changed() {
 }
 
 // ------------------------------------------------------- reported state
+
+#[cfg(not(feature = "engine-sources"))]
+pub(crate) use crate::commands::computer_use::{app_ready, install, reconcile};
 
 fn reason_text(code: &str) -> &'static str {
     match code {
@@ -1661,7 +1662,7 @@ pub(crate) fn setup_with(
 /// Stores the computer's approval mode and, when it runs, applies it on a background thread
 /// (returned for tests): the change returns at once and the state says `pending` until
 /// the apply ends. A stopped computer picks it up at its next boot.
-pub(crate) fn apply_approval_with(
+pub fn apply_approval_with(
     runner: SharedRunner,
     paths: &RuntimePaths,
     configuration: &ComputerConfiguration,
@@ -1701,5 +1702,8 @@ fn apply_approval_in(
 
 /// Prepares the shared folder and the status cache at app start, then downloads the
 /// pinned ChatGPT app in the background when it is not published yet.
-#[cfg(test)]
+#[cfg(all(test, feature = "engine-sources"))]
+#[path = "computer_use/tests.rs"]
+mod tests;
+#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;

@@ -25,7 +25,7 @@ pub(crate) struct Entry {
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DirectoryPage {
+pub struct DirectoryPage {
     entries: Vec<Entry>,
     next_offset: Option<usize>,
     snapshot_id: String,
@@ -135,7 +135,7 @@ fn page(entries: &[Entry], offset: usize, snapshot_id: &str) -> Result<Directory
         snapshot_id: snapshot_id.into(),
     })
 }
-pub(crate) fn list_computer_directory(
+pub fn list_computer_directory(
     paths: &RuntimePaths,
     computer: String,
     path: String,

@@ -5,7 +5,7 @@ use crate::notifications::{self, Notice, PendingDelivery};
 
 pub(crate) fn install(app: &AppHandle) {
     crate::system_integrations::install_notifications(app);
-    crate::health_watch::install(app);
+    crate::commands::health_watch::install(app);
 }
 
 /// A notice with no other UI owner: in-app toast and, when unfocused, a system notification.

@@ -26,7 +26,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
     let connection = if let Some((device, computer)) = &remote_target {
         remote::call_remote(device, "desktop.connect", json!({"computerId":computer}))?
     } else {
-        let paths = runtime::runtime_paths(app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(app))?;
         engine::local_connection(&paths, computer, None)?
     };
     let guest = connection["port"]
@@ -37,7 +37,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
     let (alias, config) = if let Some((device, computer)) = remote_target {
         editor::prepare_remote_private(&device, &computer, "/workspace")?
     } else {
-        let paths = runtime::runtime_paths(app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(app))?;
         let directory = paths.home.join("ssh/desktop-viewer").join(computer);
         editor::prepare_private_transport(&paths, computer, &directory)?
     };
@@ -88,8 +88,9 @@ pub(crate) fn with_bridge<R>(
     if !engine::ticket_is_current_for(label, &ticket) {
         return Err("The desktop reconnected.".into());
     }
+    let page = crate::commands::desktop_bridge::TauriPage(&view);
     f(&Bridge {
-        page: &view,
+        page: &page,
         inbox: &ticket.inbox,
     })
 }
@@ -121,7 +122,7 @@ pub(crate) async fn open_desktop(
             )
         } else {
             runtime::validate_name(&computer).map_err(|e| e.to_string())?;
-            let paths = runtime::runtime_paths(&app)?;
+            let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
             let metadata = runtime::read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
             let configuration = metadata
                 .computers

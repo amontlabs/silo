@@ -81,7 +81,7 @@ const MAX_RECORD_BYTES: u64 = 4096;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Lock {
+pub struct Lock {
     schema_version: u32,
     pub(crate) package: String,
     pub(crate) version: String,
@@ -100,13 +100,13 @@ pub(crate) struct Asset {
 
 /// Debian architecture names, which equal the guest architecture on this device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DebArch {
+pub enum DebArch {
     Arm64,
     Amd64,
 }
 
 impl DebArch {
-    pub(crate) fn host() -> Result<Self, Error> {
+    pub fn host() -> Result<Self, Error> {
         match std::env::consts::ARCH {
             "aarch64" => Ok(Self::Arm64),
             "x86_64" => Ok(Self::Amd64),
@@ -142,7 +142,7 @@ fn valid_version(value: &str) -> bool {
 
 impl Lock {
     /// The lock compiled into this build, validated.
-    pub(crate) fn bundled() -> Result<Self, Error> {
+    pub fn bundled() -> Result<Self, Error> {
         let lock: Self = serde_json::from_str(LOCK_JSON)
             .map_err(|_| Error::fatal("Silo's ChatGPT app information is invalid."))?;
         lock.validate()?;
@@ -176,7 +176,7 @@ impl Lock {
     }
 
     /// `<version>-<debarch>`: the published folder name.
-    pub(crate) fn directory_name(&self, arch: DebArch) -> String {
+    pub fn directory_name(&self, arch: DebArch) -> String {
         format!("{}-{}", self.version, arch.name())
     }
 }
@@ -186,7 +186,7 @@ impl Lock {
 /// What the UI shows. `Ready` carries the canonical folder to mount.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub(crate) enum Status {
+pub enum Status {
     /// Nothing present and nothing running: a download is waiting to start.
     Idle,
     #[serde(rename_all = "camelCase")]
@@ -209,8 +209,8 @@ pub(crate) enum Status {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Error {
-    pub(crate) message: String,
+pub struct Error {
+    pub message: String,
     pub(crate) retryable: bool,
 }
 
@@ -1777,7 +1777,7 @@ fn is_version_dir(name: &str) -> bool {
 
 /// Creates the storage root and `published/` (empty is fine), migrates trees from
 /// the old layout and returns the canonical folder to mount into computers.
-pub(crate) fn ensure_published_dir(root: &Path) -> Result<PathBuf, Error> {
+pub fn ensure_published_dir(root: &Path) -> Result<PathBuf, Error> {
     let failed = || Error::retry("Silo could not prepare its ChatGPT app folder.");
     Dir::open_root(root, true).map_err(|_| failed())?;
     let _lock = RootLock::take(root)?;
@@ -1924,11 +1924,11 @@ fn collect_garbage_locked(
 // --------------------------------------------------------- host services
 
 /// A status publisher supplied by the application boundary.
-pub(crate) type StatusPublisher = Arc<dyn Fn(Status) + Send + Sync>;
+pub type StatusPublisher = Arc<dyn Fn(Status) + Send + Sync>;
 /// Work to run after the pinned app becomes ready.
-pub(crate) type ReadyHook = Arc<dyn Fn() + Send + Sync>;
+pub type ReadyHook = Arc<dyn Fn() + Send + Sync>;
 /// Checks whether any computer is running before removing old published versions.
-pub(crate) type IdleCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+pub type IdleCheck = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// The last status this process settled on or reported. Status reads that must stay
 /// cheap (every desktop state read) use this; verifying the app tree the first time
@@ -1942,20 +1942,20 @@ fn set_cache(status: &Status) {
     *CACHE.lock().unwrap_or_else(|p| p.into_inner()) = Some(status.clone());
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_CACHE: std::cell::RefCell<Option<Status>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Pins the status `cached_status` reports on this thread (tests of status mapping).
-#[cfg(test)]
-pub(crate) fn set_test_cache(status: Option<Status>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_test_cache(status: Option<Status>) {
     TEST_CACHE.with(|slot| *slot.borrow_mut() = status);
 }
 
 /// The cached status, or `None` before the first check.
-pub(crate) fn cached_status() -> Option<Status> {
-    #[cfg(test)]
+pub fn cached_status() -> Option<Status> {
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(status) = TEST_CACHE.with(|slot| slot.borrow().clone()) {
         return Some(status);
     }
@@ -1965,7 +1965,7 @@ pub(crate) fn cached_status() -> Option<Status> {
 /// The `chatgpt-app-status` payload: the status plus the `device` it describes, `null`
 /// for this device or the owning device's id. Listeners that predate the field
 /// ignore it.
-pub(crate) fn event_payload(status: serde_json::Value, device: Option<&str>) -> serde_json::Value {
+pub fn event_payload(status: serde_json::Value, device: Option<&str>) -> serde_json::Value {
     let mut payload = status;
     if let Some(object) = payload.as_object_mut() {
         object.insert(
@@ -2008,7 +2008,7 @@ fn compute_status(root: &Path) -> Result<Status, String> {
 }
 
 /// Recomputes and reports the status (blocking; startup and after changes).
-pub(crate) fn refresh_status_blocking(root: &Path, publisher: &StatusPublisher) -> Status {
+pub fn refresh_status_blocking(root: &Path, publisher: &StatusPublisher) -> Status {
     let status = compute_status(root).unwrap_or(Status::Idle);
     publisher(status.clone());
     status
@@ -2028,7 +2028,7 @@ pub(crate) fn refresh_status_blocking(root: &Path, publisher: &StatusPublisher) 
 ///
 /// A skipped collection (an operation or computer running, or the storage busy) stays
 /// pending and is retried every `COLLECTION_RETRY` until it ran.
-pub(crate) fn collect_unused(root: PathBuf, idle_check: IdleCheck) {
+pub fn collect_unused(root: PathBuf, idle_check: IdleCheck) {
     if COLLECTION.note(collect_unused_once(&root, idle_check.as_ref())) {
         let retry_root = root.clone();
         let retry_idle_check = idle_check.clone();
@@ -2157,7 +2157,7 @@ fn run_prepare(root: &Path, publisher: &StatusPublisher) -> Result<Status, Strin
 /// anything: starts the worker, or wakes it when it waits to retry. Returns whether a
 /// worker was started. Never needs the user: the app is downloaded on every device
 /// that runs Silo.
-pub(crate) fn ensure_in_background(
+pub fn ensure_in_background(
     root: PathBuf,
     publisher: StatusPublisher,
     on_ready: ReadyHook,
@@ -2187,14 +2187,14 @@ pub(crate) fn ensure_in_background(
     spawned
 }
 
-pub(crate) fn local_status(root: &Path) -> Result<Status, String> {
+pub fn local_status(root: &Path) -> Result<Status, String> {
     compute_status(root)
 }
 
 /// "Retry" (also what a remote controller asks for): wakes a waiting worker or starts a
 /// new one after a failure that is not retried by itself. Returns the status at once;
 /// progress arrives as `chatgpt-app-status` events.
-pub(crate) fn retry_now(
+pub fn retry_now(
     root: &Path,
     publisher: StatusPublisher,
     on_ready: ReadyHook,
@@ -2207,7 +2207,7 @@ pub(crate) fn retry_now(
 }
 
 /// The remote device a command addresses: `None` for this device, else its device id.
-pub(crate) fn remote_device(device: Option<&str>) -> Result<Option<String>, String> {
+pub fn remote_device(device: Option<&str>) -> Result<Option<String>, String> {
     match device {
         None | Some("") => Ok(None),
         Some(device) if uuid::Uuid::parse_str(device).is_ok() => Ok(Some(device.to_owned())),
@@ -2217,7 +2217,7 @@ pub(crate) fn remote_device(device: Option<&str>) -> Result<Option<String>, Stri
 
 /// Calls the device that owns the computer. An older Silo there does not serve these
 /// methods: say so instead of the generic remote error.
-pub(crate) fn call_owner(
+pub fn call_owner(
     device: &str,
     method: &str,
     params: serde_json::Value,
@@ -2228,7 +2228,7 @@ pub(crate) fn call_owner(
 const UPDATE_OWNER: &str = "Update Silo on that device to use computer use.";
 
 /// The message for a failed call to the owning device.
-pub(crate) fn owner_error(error: crate::bridge_error::BridgeError) -> String {
+pub fn owner_error(error: crate::bridge_error::BridgeError) -> String {
     if error.code == crate::bridge_error::ErrorCode::UnsupportedRemoteOperation {
         UPDATE_OWNER.to_owned()
     } else {
@@ -2236,7 +2236,7 @@ pub(crate) fn owner_error(error: crate::bridge_error::BridgeError) -> String {
     }
 }
 
-pub(crate) fn to_value(status: Status) -> Result<serde_json::Value, String> {
+pub fn to_value(status: Status) -> Result<serde_json::Value, String> {
     serde_json::to_value(status).map_err(|_| "Could not encode the ChatGPT app status.".into())
 }
 
@@ -2250,7 +2250,7 @@ fn owner_is_current(capabilities: &[String]) -> bool {
 
 /// A remote owner's status: `unknown` for an owner that is not current, else what it
 /// reports. Capabilities that cannot be read are a real failure (offline, disconnected).
-pub(crate) fn owner_status(
+pub fn owner_status(
     capabilities: Result<Vec<String>, String>,
     status: impl FnOnce() -> Result<serde_json::Value, String>,
 ) -> Result<serde_json::Value, String> {
@@ -2274,6 +2274,13 @@ pub(crate) fn remote_status(
 
 // ---------------------------------------------------------------- tests
 
+#[cfg(feature = "engine-sources")]
+#[path = "chatgpt_app/auto.rs"]
+pub mod auto;
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) mod auto;
-#[cfg(test)]
+#[cfg(all(test, feature = "engine-sources"))]
+#[path = "chatgpt_app/tests.rs"]
+mod tests;
+#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;

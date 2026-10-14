@@ -18,7 +18,7 @@ pub(crate) async fn dismiss_repository_push(
             .map(|_| ())
             .map_err(|_| "Remote repository request failed.".to_owned());
         }
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         host_push::dismiss_repository_push(&paths, &computer, &repository_path)
     })
     .await
@@ -45,7 +45,7 @@ pub(crate) async fn start_repository_push(
                 result => result,
             };
         }
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         Ok(host_push_operations::start_result(
             &paths,
             computer,
@@ -73,7 +73,7 @@ pub(crate) async fn repository_push_status(
                 json!({"computerId": computer, "path": repository_path, "operationId": operation_id}),
             );
         }
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         host_push_operations::status(&paths, &computer, &repository_path, &operation_id)
     })
     .await

@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BundleKind {
+pub enum BundleKind {
     App,
     AppImage,
     Deb,
@@ -11,34 +11,23 @@ pub(crate) enum BundleKind {
     Other,
 }
 
-/// Keeps package-framework types at the UI boundary while allowing existing call sites
-/// to pass their package kind until their owning tracks move to EngineIdentity.
-pub(crate) trait BundleKindSource {
-    fn bundle_kind(self) -> Option<BundleKind>;
-}
-
-impl BundleKindSource for Option<BundleKind> {
-    fn bundle_kind(self) -> Option<BundleKind> {
-        self
-    }
-}
-
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) use crate::commands::bundled_tools::directory;
 
-pub(crate) fn is_packaged_linux(bundle: impl BundleKindSource) -> bool {
+pub(crate) fn is_packaged_linux(bundle: Option<BundleKind>) -> bool {
     matches!(
-        bundle.bundle_kind(),
+        bundle,
         Some(BundleKind::AppImage | BundleKind::Deb | BundleKind::Rpm)
     )
 }
 
-pub(crate) fn resolve(
+pub fn resolve(
     executable: &Path,
     _resources: &Path,
-    bundle: impl BundleKindSource,
+    bundle: Option<BundleKind>,
     appimage_root: Option<&Path>,
 ) -> Result<PathBuf, String> {
-    match bundle.bundle_kind() {
+    match bundle {
         Some(BundleKind::AppImage) => appimage_root
             .map(|root| root.join("usr/libexec/silo/tools"))
             .ok_or_else(|| "Silo could not locate its AppImage tools directory.".into()),

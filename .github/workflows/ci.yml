@@ -115,7 +115,7 @@ jobs:
       - name: Check relative links in documentation
         run: >-
           "$LYCHEE" --offline --no-progress
-          README.md AGENTS.md 'docs/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/tests/**/*.md'
+          README.md AGENTS.md 'docs/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
           'app/SiloUI/docs/**/*.html' 'app/SiloUI/src/**/*.md'
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/.changeset/*.md'
           'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
@@ -187,6 +187,6 @@ jobs:
       # Process-wide state is isolated inside the suite; use default test threads.
       - name: Run Rust tests
         timeout-minutes: 30
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+        run: cargo test --manifest-path Cargo.toml --workspace --locked
       - name: Test patched updater transport and atomic installation
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib

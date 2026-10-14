@@ -17,7 +17,7 @@ use std::{
 
 /// Runtime operations are provided by the host adapter until the runtime module is extracted.
 /// Secrets logic only passes computer names and opaque revocation records across this seam.
-pub(crate) trait RuntimeAccess: Send + Sync + 'static {
+pub trait RuntimeAccess: Send + Sync + 'static {
     fn apply_secrets(&self, computer: &str) -> Result<Vec<String>, String>;
     fn validate_computers(&self, computers: &[String]) -> Result<(), String>;
     fn revoke_secret(&self, record: &PendingRevocation) -> Result<bool, String>;
@@ -25,7 +25,7 @@ pub(crate) trait RuntimeAccess: Send + Sync + 'static {
 
 static RUNTIME: OnceLock<Arc<dyn RuntimeAccess>> = OnceLock::new();
 
-pub(crate) fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
+pub fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
     RUNTIME
         .set(runtime)
         .map_err(|_| "Secrets runtime access is already installed".to_owned())
@@ -108,7 +108,7 @@ struct Secret {
 /// A removed generation's possible access in one guest. Never stores a value.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct PendingRevocation {
+pub struct PendingRevocation {
     secret_id: String,
     generation: String,
     pub(crate) name: String,
@@ -319,7 +319,7 @@ pub(crate) fn runtime_material(
 }
 
 /// Copy assignment references only. Values remain in the host credential store.
-pub(crate) fn fork_assignments(source: &str, target: &str) -> Result<(), String> {
+pub fn fork_assignments(source: &str, target: &str) -> Result<(), String> {
     let _operation = try_lock_unit(&OPERATION)
         .ok_or_else(|| "Secret settings are busy. Retry the fork.".to_string())?;
     update(|document| {
@@ -409,7 +409,7 @@ pub(crate) fn computer_stopped(computer: &str) -> Result<(), String> {
     })
 }
 
-pub(crate) fn computer_removed(computer: &str) -> Result<(), String> {
+pub fn computer_removed(computer: &str) -> Result<(), String> {
     if store_path().is_none() {
         return Ok(());
     }
@@ -782,7 +782,7 @@ fn retry_revocations_with(
 static REVOCATIONS_RUNNING: AtomicBool = AtomicBool::new(false);
 /// One pass per state refresh, off the read/Remove path; busy guests are skipped.
 /// Remote snapshots invoke the same owner-side read and retry path.
-pub(crate) fn schedule_revocations() {
+pub fn schedule_revocations() {
     if pending_revocations().is_ok_and(|records| records.is_empty())
         || REVOCATIONS_RUNNING.swap(true, Ordering::AcqRel)
     {
@@ -805,14 +805,14 @@ pub(crate) fn schedule_revocations() {
     });
 }
 
-pub(crate) async fn read_secrets_state() -> Result<Vec<Value>, String> {
+pub async fn read_secrets_state() -> Result<Vec<Value>, String> {
     let path = store_path();
     tokio::task::spawn_blocking(move || snapshot_from(path))
         .await
         .map_err(|_| "Secret settings could not be read.".to_string())?
 }
 
-pub(crate) fn save_secret<G>(
+pub fn save_secret<G>(
     request: Request,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
@@ -867,7 +867,7 @@ pub(crate) fn save_secret<G>(
     snapshot()
 }
 
-pub(crate) fn remove_secret<G>(
+pub fn remove_secret<G>(
     id: String,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
@@ -880,7 +880,7 @@ pub(crate) fn remove_secret<G>(
     snapshot()
 }
 
-pub(crate) fn retry_secret<G>(
+pub fn retry_secret<G>(
     id: String,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
@@ -901,7 +901,7 @@ pub(crate) fn retry_secret<G>(
     snapshot()
 }
 
-pub(crate) fn install() -> Result<(), String> {
+pub fn install() -> Result<(), String> {
     let context = context::current().ok_or("Secret storage is unavailable.")?;
     let _ = PATH.set(context.paths().app_data.join("secrets.json"));
     std::thread::spawn(move || {
@@ -1754,7 +1754,7 @@ mod tests {
     }
 }
 
-pub(crate) fn update_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+pub fn update_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     try_lock_unit(&OPERATION)
         .ok_or_else(|| "Wait for the secret operation to finish before updating.".into())
 }

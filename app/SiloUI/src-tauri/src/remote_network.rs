@@ -649,10 +649,10 @@ fn finish_save(
     Ok(())
 }
 
-pub(crate) fn remote_network_state(device_id: &str) -> Result<Value, BridgeError> {
+pub fn remote_network_state(device_id: &str) -> Result<Value, BridgeError> {
     read(device_id)
 }
-pub(crate) fn remote_save_network_port(
+pub fn remote_save_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
@@ -700,7 +700,7 @@ fn forget_port(key: &Key) {
 }
 
 /// Stops publishing the port on the owning device, then closes this device's tunnel.
-pub(crate) fn remote_remove_network_port(
+pub fn remote_remove_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
@@ -713,7 +713,7 @@ pub(crate) fn remote_remove_network_port(
     forget_port(&(device_id.clone(), computer_id, port));
     read(&device_id)
 }
-pub(crate) fn remote_open_network_port(
+pub fn remote_open_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
@@ -752,7 +752,7 @@ fn row_host<'a>(state: &'a Value, target: &str) -> Option<&'a str> {
         .as_str()
 }
 /// Closes every tunnel (quit).
-pub(crate) fn close_all() {
+pub fn close_all() {
     let closed: Vec<Tunnel> = {
         let mut tunnels = tunnels();
         tunnels.saves.clear();

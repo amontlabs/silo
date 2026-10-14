@@ -85,7 +85,10 @@ fn retry_runtime_migration_blocking(app: AppHandle) -> Result<MigrationState, St
 }
 
 fn convert(app: &AppHandle, migration: &Controller) -> Result<(), String> {
-    let paths = crate::runtime::migration_runtime_paths(app, &migration.staged_storage())?;
+    let paths = crate::runtime::migration_runtime_paths(
+        &crate::commands::runtime::host(app),
+        &migration.staged_storage(),
+    )?;
     if migration.needs_recovery()? {
         crate::commands::backup_controller::wait_for_migration_recovery(app)?;
     }

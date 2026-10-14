@@ -220,6 +220,7 @@ static LCU: Job = Job::new();
 static PATHS: OnceLock<RuntimePaths> = OnceLock::new();
 static LCU_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) use crate::commands::preparation::start;
 
 pub fn snapshot() -> PreparationStatus {
@@ -240,7 +241,7 @@ fn emit() {
 
 /// Called once after the runtime paths are known. Returns at once; the image import and
 /// the LCU download run on their own threads.
-pub(crate) fn start_with_paths(paths: RuntimePaths) {
+pub fn start_with_paths(paths: RuntimePaths) {
     let Some(context) = silo_engine::context::current() else {
         return;
     };
@@ -357,7 +358,7 @@ pub fn ensure_lcu(report: &dyn Fn(Option<u8>)) -> Result<PathBuf, String> {
 }
 
 /// Starts again whatever failed. Resolves at once; progress follows as events.
-pub(crate) fn retry() -> PreparationStatus {
+pub fn retry() -> PreparationStatus {
     kick();
     snapshot()
 }
@@ -600,5 +601,8 @@ fn remove_other_partials(downloads: &Path, keep: &str) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "engine-sources"))]
+#[path = "preparation/tests.rs"]
+mod tests;
+#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;

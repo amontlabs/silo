@@ -31,7 +31,7 @@ fn files_lock() -> std::sync::MutexGuard<'static, ()> {
 /// Opening an editor uses client-owned application settings and lives in `commands::editor`.
 
 /// Explains a missing system OpenSSH client instead of a generic failure.
-pub(crate) fn require_openssh(purpose: &str) -> Result<(), String> {
+pub fn require_openssh(purpose: &str) -> Result<(), String> {
     require_openssh_at(
         Path::new("/usr/bin/ssh"),
         Path::new("/usr/bin/ssh-keygen"),
@@ -48,7 +48,7 @@ fn require_openssh_at(ssh: &Path, keygen: &Path, purpose: &str) -> Result<(), St
     }
 }
 
-pub(crate) fn validate_path(path: &str) -> Result<(), String> {
+pub fn validate_path(path: &str) -> Result<(), String> {
     if path.len() > 4096
         || path.bytes().any(|byte| byte.is_ascii_control())
         || !(path == "/workspace"
@@ -198,7 +198,7 @@ pub(crate) fn private_directory(path: &Path) -> Result<(), String> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|_| FAILED.into())
 }
 
-pub(crate) fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
+pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     match fs::symlink_metadata(path) {
         Ok(metadata)
             if metadata.is_file()
@@ -215,7 +215,7 @@ pub(crate) fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     }
 }
 
-pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     read_regular(path)?;
     let parent = path.parent().ok_or(FAILED)?;
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| FAILED)?;
@@ -339,7 +339,7 @@ pub(crate) fn open(
     open_local(paths, user_home, name, path, command)
 }
 
-pub(crate) fn open_local(
+pub fn open_local(
     paths: &RuntimePaths,
     user_home: &Path,
     name: &str,
@@ -396,7 +396,7 @@ pub(crate) fn open_local(
     launch_prepared(command, &alias, path, user_home)
 }
 
-pub(crate) fn launch_prepared(
+pub fn launch_prepared(
     command: &applications::launch::EditorCommand,
     alias: &str,
     path: &str,
@@ -536,7 +536,7 @@ fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Private connections share the editor's host-only identity, without installing
 /// an Include in the user's SSH configuration or changing editor connection files.
-pub(crate) fn prepare_private_transport(
+pub fn prepare_private_transport(
     paths: &RuntimePaths,
     name: &str,
     directory: &Path,
@@ -744,7 +744,7 @@ pub(crate) fn authorize_remote(
 }
 
 /// Prepare the pinned guest SSH identity without changing the user's SSH configuration.
-pub(crate) fn prepare_remote_private(
+pub fn prepare_remote_private(
     device: &str,
     computer: &str,
     path: &str,
@@ -874,9 +874,9 @@ fn remote_proxy_for(device: &str, computer: &str, port: Option<u16>) -> Result<S
 
 /// `silo --msb-ssh-serve <runtime home> <computer>`: the local editor transport
 /// run from an AppImage, whose bundled runtime has no stable path (G-12).
-pub(crate) const TRANSPORT_MODE: &str = "--msb-ssh-serve";
+pub const TRANSPORT_MODE: &str = "--msb-ssh-serve";
 
-pub(crate) fn transport_args(args: &[String]) -> Result<(&str, &str), String> {
+pub fn transport_args(args: &[String]) -> Result<(&str, &str), String> {
     let [home, name] = args else {
         return Err("Expected a runtime home and a computer name.".into());
     };
@@ -1099,7 +1099,7 @@ fn manual_include_needed(user_home: &Path, line: Option<String>) -> Option<Strin
 /// The `Include` line the user must add to their SSH configuration themselves
 /// because Silo can't change it, or `None`. Checked against the file at every
 /// read, so a line added since is no longer reported.
-pub(crate) fn read_editor_include_notice(home: &Path) -> Result<Option<String>, String> {
+pub fn read_editor_include_notice(home: &Path) -> Result<Option<String>, String> {
     let line = MANUAL_INCLUDE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1126,7 +1126,7 @@ fn previous_home_after_migration(app_data: &Path, user_home: &Path) -> Option<Pa
 /// AppImage, also points configurations written by an earlier run at the
 /// AppImage file instead of that run's mount (G-12, with C-19). Editors
 /// reconnecting after a restart then find the computer and the transport.
-pub(crate) fn refresh_transports(
+pub fn refresh_transports(
     paths: Option<&RuntimePaths>,
     app_data: &Path,
     home: &Path,
@@ -1173,7 +1173,7 @@ pub(crate) fn refresh_transports(
     failures
 }
 
-pub(crate) fn prepare_remote(
+pub fn prepare_remote(
     device: &str,
     computer: &str,
     path: &str,
@@ -1814,7 +1814,7 @@ mod tests {
             b"# personal settings\nServerAliveInterval 37\nHost personal\n  User example\n";
         fs::write(home.join(".ssh/config"), existing).unwrap();
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: directory.path().join("msb"),
             home: directory.path().join("runtime"),
@@ -2554,7 +2554,7 @@ mod tests {
             std::env::var("SILO_EDITOR_RUNTIME_HOME").expect("explicit runtime home"),
         );
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: PathBuf::from(
                 std::env::var("SILO_EDITOR_MSB").expect("explicit bundled runtime"),

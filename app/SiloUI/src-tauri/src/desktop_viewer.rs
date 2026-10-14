@@ -45,7 +45,7 @@ impl Viewer {
     }
 }
 /// What `desktop_viewer_attach` must do once the registry lock is released.
-pub(crate) enum AttachPlan {
+pub enum AttachPlan {
     /// The display is connected; only its bounds change.
     Resize,
     /// Connect a new display and install it only if `generation` still matches.
@@ -110,7 +110,7 @@ fn abort_attach(entries: &mut HashMap<String, Viewer>, label: &str, generation: 
         entry.connecting = false;
     }
 }
-pub(crate) enum ViewerClaim {
+pub enum ViewerClaim {
     /// A viewer for this computer exists or is being created.
     Existing(String),
     /// The caller reserved this label and must create its window.
@@ -133,12 +133,12 @@ fn claim_viewer(
     Ok(ViewerClaim::New(label))
 }
 
-pub(crate) fn claim(computer: &str) -> Result<ViewerClaim, String> {
+pub fn claim(computer: &str) -> Result<ViewerClaim, String> {
     let mut entries = viewers().lock().map_err(|_| "Desktop unavailable.")?;
     claim_viewer(&mut entries, computer)
 }
 
-pub(crate) fn begin_attach_viewer(
+pub fn begin_attach_viewer(
     label: &str,
     computer: &str,
     has_view: bool,
@@ -147,7 +147,7 @@ pub(crate) fn begin_attach_viewer(
     begin_attach(&mut entries, label, computer, has_view)
 }
 
-pub(crate) fn finish_attach_viewer(
+pub fn finish_attach_viewer(
     label: &str,
     generation: u64,
     proxy: Option<Proxy>,
@@ -159,13 +159,13 @@ pub(crate) fn finish_attach_viewer(
     finish_attach(&mut entries, label, generation, proxy, tunnel)
 }
 
-pub(crate) fn abort_attach_viewer(label: &str, generation: u64) {
+pub fn abort_attach_viewer(label: &str, generation: u64) {
     if let Ok(mut entries) = viewers().lock() {
         abort_attach(&mut entries, label, generation);
     }
 }
 
-pub(crate) fn disconnect_viewer(label: &str) -> Result<(), String> {
+pub fn disconnect_viewer(label: &str) -> Result<(), String> {
     let stale = viewers()
         .lock()
         .map_err(|_| "Desktop unavailable.")?
@@ -176,7 +176,7 @@ pub(crate) fn disconnect_viewer(label: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn remove_viewer(label: &str) {
+pub fn remove_viewer(label: &str) {
     let removed = viewers()
         .lock()
         .ok()
@@ -189,7 +189,7 @@ fn viewers() -> &'static Mutex<HashMap<String, Viewer>> {
 }
 /// Labels of the viewer windows with a live connection.
 #[cfg(debug_assertions)]
-pub(crate) fn viewer_labels() -> Vec<String> {
+pub fn viewer_labels() -> Vec<String> {
     viewers()
         .lock()
         .map(|entries| {
@@ -201,7 +201,7 @@ pub(crate) fn viewer_labels() -> Vec<String> {
         })
         .unwrap_or_default()
 }
-pub(crate) fn allows_window(label: &str, computer: &str) -> Result<(), String> {
+pub fn allows_window(label: &str, computer: &str) -> Result<(), String> {
     if label == "main" {
         return Ok(());
     }
@@ -216,7 +216,7 @@ pub(crate) fn allows_window(label: &str, computer: &str) -> Result<(), String> {
         Err("This window cannot access that desktop.".into())
     }
 }
-pub(crate) fn local_connection(
+pub fn local_connection(
     paths: &runtime::RuntimePaths,
     computer: &str,
     expected_id: Option<&str>,
@@ -234,7 +234,7 @@ const SOCKET_PATH_MAX: usize = 103;
 /// port, the socket sits in a private directory: no other local process can
 /// connect to the guest through it or bind it first to receive the viewer's
 /// credentials.
-pub(crate) fn forward_command(
+pub fn forward_command(
     config: &Path,
     alias: &str,
     socket: &Path,
@@ -273,7 +273,7 @@ pub(crate) fn forward_command(
 
 /// A fresh 0700 directory inside Silo's private `~/.silo`, short enough for
 /// `sun_path` whatever the computer or device identifiers are.
-pub(crate) fn socket_directory(root: &Path) -> Result<tempfile::TempDir, String> {
+pub fn socket_directory(root: &Path) -> Result<tempfile::TempDir, String> {
     use std::os::unix::fs::PermissionsExt;
     runtime::prepare_private_directory(root).map_err(|error| error.to_string())?;
     tempfile::Builder::new()
@@ -285,7 +285,7 @@ pub(crate) fn socket_directory(root: &Path) -> Result<tempfile::TempDir, String>
 
 /// True once the tunnel's socket accepts connections. Anything at that path
 /// other than a socket owned by this account is refused, never connected to.
-pub(crate) fn socket_ready(path: &Path, uid: u32) -> Result<bool, String> {
+pub fn socket_ready(path: &Path, uid: u32) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(_) => Err("Could not check the desktop connection.".into()),
@@ -296,19 +296,19 @@ pub(crate) fn socket_ready(path: &Path, uid: u32) -> Result<bool, String> {
     }
 }
 
-pub(crate) fn viewer_title(name: &str, channel: crate::channel::Channel) -> String {
+pub fn viewer_title(name: &str, channel: crate::channel::Channel) -> String {
     format!("{name} — {}", channel.product_name())
 }
 
 /// Selkies takes its connection token from the URL and its client settings from localStorage.
-pub(crate) fn viewer_url(origin: &str) -> String {
+pub fn viewer_url(origin: &str) -> String {
     format!("{origin}/")
 }
 
 /// WKWebView can inset its CSS viewport below the titlebar while its native
 /// frame (and Tao's content frame) still includes that area. Measure that gap.
 #[cfg(any(target_os = "macos", test))]
-pub(crate) fn viewport_inset(
+pub fn viewport_inset(
     shell_height: u32,
     scale: f64,
     viewport_height: f64,
@@ -321,7 +321,7 @@ pub(crate) fn viewport_inset(
 
 /// CSS bounds originate in the shell webview, while native children use the
 /// window's coordinate system. Convert the native content offset exactly once.
-pub(crate) fn desktop_position(
+pub fn desktop_position(
     shell_x: i32,
     shell_y: i32,
     scale: f64,
@@ -341,16 +341,16 @@ pub(crate) fn desktop_position(
 /// client settings and installs the page half of the host bridge; behaviour is
 /// covered by `desktop/linux-desktop-guest-guard.test.ts` and
 /// `desktop/linux-desktop-bridge.test.ts`.
-pub(crate) fn is_viewer_label(label: &str) -> bool {
+pub fn is_viewer_label(label: &str) -> bool {
     label.starts_with("desktop-shell-")
 }
 
 /// The connection a bridge call was started against.
-pub(crate) struct BridgeTicket {
-    pub(crate) generation: u64,
-    pub(crate) inbox: std::sync::Arc<crate::desktop_bridge::Inbox>,
+pub struct BridgeTicket {
+    pub generation: u64,
+    pub inbox: std::sync::Arc<crate::desktop_bridge::Inbox>,
 }
-pub(crate) fn bridge_ticket_for(label: &str) -> Option<BridgeTicket> {
+pub fn bridge_ticket_for(label: &str) -> Option<BridgeTicket> {
     let entries = viewers().lock().ok()?;
     bridge_ticket(&entries, label)
 }
@@ -362,7 +362,7 @@ fn bridge_ticket(entries: &HashMap<String, Viewer>, label: &str) -> Option<Bridg
         inbox: proxy.inbox.clone(),
     })
 }
-pub(crate) fn ticket_is_current_for(label: &str, ticket: &BridgeTicket) -> bool {
+pub fn ticket_is_current_for(label: &str, ticket: &BridgeTicket) -> bool {
     let Ok(entries) = viewers().lock() else {
         return false;
     };
@@ -384,7 +384,7 @@ fn ticket_is_current(
 
 /// Whether the clipboard menu items stay enabled after `closing` is destroyed:
 /// only if another viewer window has focus.
-pub(crate) fn viewer_focused_besides(
+pub fn viewer_focused_besides(
     closing: &str,
     windows: impl IntoIterator<Item = (String, bool)>,
 ) -> bool {
@@ -404,7 +404,7 @@ fn disconnect_matching(matches: impl Fn(&Viewer) -> bool) {
     };
     drop(stale);
 }
-pub(crate) fn close_all() {
+pub fn close_all() {
     disconnect_matching(|_| true);
 }
 pub(crate) fn close_computer(computer: &str) {

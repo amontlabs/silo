@@ -21,7 +21,11 @@ pub async fn reclaim_workspace_storage(
 
 async fn command(app: AppHandle, id: String, reclaim: bool) -> Result<StorageState, String> {
     tokio::task::spawn_blocking(move || {
-        crate::runtime::storage::workspace_storage(&app, &id, reclaim)
+        crate::runtime::storage::workspace_storage(
+            &crate::commands::runtime::host(&app),
+            &id,
+            reclaim,
+        )
     })
     .await
     .map_err(|_| {
@@ -32,6 +36,6 @@ async fn command(app: AppHandle, id: String, reclaim: bool) -> Result<StorageSta
 
 /// Starts the engine-owned monitor with the host's runtime capabilities.
 pub(crate) fn start_monitor(app: &AppHandle) {
-    let host: Arc<dyn RuntimeHost> = Arc::new(app.clone());
+    let host: Arc<dyn RuntimeHost> = Arc::new(crate::commands::runtime::host(app));
     crate::runtime::storage::start_monitor(host);
 }

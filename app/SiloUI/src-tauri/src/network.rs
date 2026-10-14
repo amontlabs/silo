@@ -117,7 +117,7 @@ pub(crate) fn website_url(scheme: &str, host: Option<&str>, port: u16) -> String
     format!("{scheme}://{}:{port}", host.unwrap_or("127.0.0.1"))
 }
 #[derive(Serialize)]
-pub(crate) struct State {
+pub struct State {
     computers: Vec<Computer>,
 }
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -823,7 +823,7 @@ fn apply_saved(paths: &RuntimePaths, computer: &str) -> Result<State, String> {
     result
 }
 
-pub(crate) fn read_network_state(paths: &RuntimePaths) -> Result<State, String> {
+pub fn read_network_state(paths: &RuntimePaths) -> Result<State, String> {
     // Observation only: never take the operation gate and never publish or
     // remove a forward, so a read cannot wait behind a long operation. Any
     // forward that drifted from its saved intent is repaired in the background.
@@ -832,7 +832,7 @@ pub(crate) fn read_network_state(paths: &RuntimePaths) -> Result<State, String> 
     schedule_network_reconcile(paths.clone(), &config);
     state
 }
-pub(crate) fn save_network_port(
+pub fn save_network_port(
     paths: &RuntimePaths,
     computer: String,
     port: u16,
@@ -884,7 +884,7 @@ pub(crate) fn save_network_port(
     }
     apply_saved(paths, &computer)
 }
-pub(crate) fn remove_network_port(
+pub fn remove_network_port(
     paths: &RuntimePaths,
     computer: String,
     port: u16,
@@ -921,7 +921,7 @@ pub(crate) fn remove_network_port(
     crate::remote::revoke_port_streams(&computer_id, port);
     apply_saved(paths, &computer)
 }
-pub(crate) fn network_port_url(
+pub fn network_port_url(
     paths: &RuntimePaths,
     computer: String,
     port: u16,
@@ -1132,7 +1132,7 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let temp = tempfile::tempdir().unwrap();
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: temp.path().join("msb"),
             home: temp.path().into(),
@@ -1161,7 +1161,7 @@ mod tests {
         use std::time::Instant;
         let temp = tempfile::tempdir().unwrap();
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             // A nonexistent executable makes computer inspection fail fast, so the read
             // never blocks on a live runtime and never mutates anything.

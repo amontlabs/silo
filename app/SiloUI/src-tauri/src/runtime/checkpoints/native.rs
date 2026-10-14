@@ -12,11 +12,11 @@ use std::collections::{HashMap, HashSet};
 
 /// A native member as `msb snapshot list --format json` reports it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub(crate) struct Member {
+pub struct Member {
     #[serde(default)]
-    pub(crate) snapshot_id: String,
+    pub snapshot_id: String,
     #[serde(default)]
-    pub(crate) name: Option<String>,
+    pub name: Option<String>,
     #[serde(default)]
     pub(crate) group: Option<String>,
     /// The parent's snapshot id (the index keeps the historical column name).
@@ -29,7 +29,7 @@ pub(crate) struct Member {
 }
 
 impl Member {
-    pub(crate) fn key(&self) -> Option<Key> {
+    pub fn key(&self) -> Option<Key> {
         Some((self.group.clone()?, self.name.clone()?))
     }
 }
@@ -224,12 +224,12 @@ pub(crate) enum Blocker {
 
 /// Removal order for `candidates`: leaves first, so each removal passes MicroSandbox's
 /// children guard. Members something depends on are kept with the reason.
-pub(crate) struct Plan {
-    pub(crate) remove: Vec<Member>,
-    pub(crate) kept: Vec<(Member, Blocker)>,
+pub struct Plan {
+    pub remove: Vec<Member>,
+    pub kept: Vec<(Member, Blocker)>,
 }
 
-pub(crate) fn plan(
+pub fn plan(
     inventory: &[Member],
     candidates: &HashSet<Key>,
     uses: &HashMap<Key, Vec<Use>>,

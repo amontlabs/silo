@@ -18,7 +18,7 @@ use std::{
 const COPY_WAIT: Duration = Duration::from_millis(1000);
 
 /// Event the shell window listens to for the outcome of a shortcut-started transfer.
-pub(crate) const EVENT: &str = "desktop-clipboard";
+pub const EVENT: &str = "desktop-clipboard";
 
 const LIMITS: ImageLimits = ImageLimits {
     max_encoded_bytes: MAX_IMAGE_BYTES,
@@ -27,14 +27,14 @@ const LIMITS: ImageLimits = ImageLimits {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum Action {
+pub enum Action {
     Paste,
     Copy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum Status {
+pub enum Status {
     Pasted,
     Copied,
     /// Paste found nothing on the device clipboard.
@@ -51,13 +51,13 @@ pub(crate) enum Status {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum Content {
+pub enum Content {
     Text,
     Image,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(crate) struct Report {
+pub struct Report {
     pub action: Action,
     pub status: Status,
     pub content: Option<Content>,
@@ -65,7 +65,7 @@ pub(crate) struct Report {
 }
 
 impl Report {
-    pub(crate) fn new(action: Action, status: Status, content: Option<Content>) -> Self {
+    pub fn new(action: Action, status: Status, content: Option<Content>) -> Self {
         Self {
             action,
             status,
@@ -74,20 +74,20 @@ impl Report {
         }
     }
 
-    pub(crate) fn failed(action: Action, message: impl Into<String>) -> Self {
+    pub fn failed(action: Action, message: impl Into<String>) -> Self {
         Self {
             message: Some(message.into()),
             ..Self::new(action, Status::Failed, None)
         }
     }
 
-    fn too_large(action: Action, content: Content) -> Self {
+    pub fn too_large(action: Action, content: Content) -> Self {
         Self::new(action, Status::TooLarge, Some(content))
     }
 }
 
 /// The computer's side of a transfer.
-pub(crate) trait Guest {
+pub trait Guest {
     /// Whether the computer's desktop takes part in clipboard transfer in this direction.
     fn clipboard_support(&self, writing: bool) -> Result<ClipboardSupport, String>;
     fn send_text(&self, text: &str) -> Result<(), String>;
@@ -151,7 +151,7 @@ fn refuse_unsupported(guest: &dyn Guest, action: Action) -> Option<Report> {
 
 /// Paste into Computer: text if the device clipboard holds any, otherwise an image, then Ctrl+V
 /// in the computer.
-pub(crate) fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
+pub fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
     let action = Action::Paste;
     if let Some(refusal) = refuse_unsupported(guest, action) {
         return refusal;
@@ -177,7 +177,7 @@ pub(crate) fn paste(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
 
 /// Copy from Computer: press Ctrl+C there, wait for the new selection, then write it to the
 /// device clipboard. An empty answer leaves the device clipboard unchanged.
-pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
+pub fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
     let action = Action::Copy;
     if let Some(refusal) = refuse_unsupported(guest, action) {
         return refusal;
@@ -211,9 +211,9 @@ pub(crate) fn copy(guest: &dyn Guest, device: &dyn DeviceClipboard) -> Report {
 /// Viewers with a transfer in progress; a second request for the same viewer is refused.
 static ACTIVE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-pub(crate) struct ActiveGuard(String);
+pub struct ActiveGuard(String);
 impl ActiveGuard {
-    pub(crate) fn acquire(label: &str) -> Option<Self> {
+    pub fn acquire(label: &str) -> Option<Self> {
         let mut active = ACTIVE.get_or_init(Default::default).lock().ok()?;
         active
             .insert(label.to_string())

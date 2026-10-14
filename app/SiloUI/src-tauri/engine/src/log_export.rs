@@ -13,27 +13,27 @@ use std::{
 static EXPORT_LOCK: Mutex<()> = Mutex::new(());
 static CANCELLATION: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) fn cancellation_check() -> impl Fn() -> bool {
+pub fn cancellation_check() -> impl Fn() -> bool {
     let generation = CANCELLATION.load(Ordering::Acquire);
     move || CANCELLATION.load(Ordering::Acquire) != generation
 }
 
-pub(crate) fn cancel() {
+pub fn cancel() {
     CANCELLATION.fetch_add(1, Ordering::Release);
 }
 
-pub(crate) struct ExportPermit {
+pub struct ExportPermit {
     _guard: MutexGuard<'static, ()>,
 }
 
 /// Serializes the complete export flow, including the destination picker.
-pub(crate) fn begin_export() -> Result<ExportPermit, String> {
+pub fn begin_export() -> Result<ExportPermit, String> {
     let guard = crate::sync::try_lock_or_recover(&EXPORT_LOCK, "log export")
         .ok_or("A log export is already in progress.")?;
     Ok(ExportPermit { _guard: guard })
 }
 
-pub(crate) fn validate_requests(requests: &[Query]) -> Result<(), String> {
+pub fn validate_requests(requests: &[Query]) -> Result<(), String> {
     if requests.is_empty() || requests.len() > 100 {
         return Err("Select between one and 100 computers to export logs.".into());
     }
@@ -78,7 +78,7 @@ fn save_atomically(
     Ok(true)
 }
 
-pub(crate) fn export_to(
+pub fn export_to(
     _permit: ExportPermit,
     requests: Vec<Query>,
     destination: PathBuf,

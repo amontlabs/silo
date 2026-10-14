@@ -46,7 +46,7 @@ pub(crate) struct Computer {
     user: &'static str,
 }
 #[derive(Serialize)]
-pub(crate) struct State {
+pub struct State {
     computers: Vec<Computer>,
 }
 struct Listener {
@@ -501,7 +501,7 @@ pub(crate) fn close_computer(name: &str) {
     drop(owned);
     drop(listener);
 }
-pub(crate) fn close_all() {
+pub fn close_all() {
     let mut owned = owned();
     owned.generation += 1;
     owned.all_closed = owned.generation;
@@ -552,7 +552,7 @@ fn needs_reconcile(paths: &RuntimePaths) -> bool {
         !owned.listeners.is_empty() || !owned.errors.is_empty()
     }
 }
-pub(crate) fn monitor(paths: &RuntimePaths) {
+pub fn monitor(paths: &RuntimePaths) {
     if needs_reconcile(paths) {
         reconcile_if_idle(paths);
     }
@@ -613,7 +613,7 @@ fn state(paths: &RuntimePaths) -> Result<State, String> {
             .collect(),
     })
 }
-pub(crate) fn read_state(paths: &RuntimePaths) -> Result<State, String> {
+pub fn read_state(paths: &RuntimePaths) -> Result<State, String> {
     // Observation only: report the currently owned listeners without taking the
     // gate or mutating anything, so a status read never waits behind a long
     // operation. Any needed listener repair is scheduled in the background.
@@ -621,7 +621,7 @@ pub(crate) fn read_state(paths: &RuntimePaths) -> Result<State, String> {
     schedule_reconcile(paths.clone());
     result
 }
-pub(crate) fn save(
+pub fn save(
     paths: &RuntimePaths,
     computer: String,
     enabled: bool,

@@ -5,10 +5,11 @@ use crate::{commands::chatgpt_app, computer_use, runtime};
 
 /// Reconcile every running computer after the published app or LCU changes.
 pub(crate) fn reconcile(app: &AppHandle) {
-    let Ok(paths) = runtime::runtime_paths(app) else {
+    let Ok(paths) = runtime::runtime_paths(&crate::commands::runtime::host(&app)) else {
         return;
     };
-    let Ok(running) = runtime::update_recovery::running_names(app) else {
+    let Ok(running) = runtime::update_recovery::running_names(&crate::commands::runtime::host(app))
+    else {
         return;
     };
     let runner: computer_use::SharedRunner = Arc::new(runtime::ProcessRunner);
@@ -29,10 +30,12 @@ pub(crate) fn reconcile(app: &AppHandle) {
 pub(crate) fn app_ready(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let Ok(paths) = runtime::runtime_paths(&app) else {
+        let Ok(paths) = runtime::runtime_paths(&crate::commands::runtime::host(&app)) else {
             return;
         };
-        let Ok(running) = runtime::update_recovery::running_names(&app) else {
+        let Ok(running) =
+            runtime::update_recovery::running_names(&crate::commands::runtime::host(&app))
+        else {
             return;
         };
         for name in running {

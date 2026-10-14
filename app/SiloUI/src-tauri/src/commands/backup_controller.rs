@@ -12,7 +12,7 @@ fn require_main(window: &WebviewWindow) -> Result<(), String> {
 }
 
 pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    let host: Arc<dyn runtime::RuntimeHost> = Arc::new(app.clone());
+    let host: Arc<dyn runtime::RuntimeHost> = Arc::new(crate::commands::runtime::host(app));
     let controller = engine::install(host)?;
     app.manage(controller);
     Ok(())

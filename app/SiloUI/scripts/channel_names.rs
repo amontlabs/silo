@@ -1,6 +1,6 @@
 //! Export the native channel names for development and packaging scripts.
 #[allow(dead_code)]
-#[path = "../src-tauri/src/channel.rs"]
+#[path = "../src-tauri/engine/src/channel.rs"]
 mod channel;
 
 use channel::{Channel, Keychain};

@@ -44,7 +44,7 @@ const KEYSYM_V: u32 = b'v' as u32;
 
 /// Operations the page may answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Op {
+pub enum Op {
     Clipboard,
     Capabilities,
     /// The page's acknowledgement that it sent (or could not send) frames.
@@ -97,7 +97,7 @@ const MAX_PENDING: usize = 16;
 /// What the page posted: a short content kind (a MIME type, `none` or
 /// `application/json`) and the raw body.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Reply {
+pub struct Reply {
     pub kind: String,
     pub body: Vec<u8>,
 }
@@ -118,20 +118,20 @@ struct Pending {
 
 /// Pending single-use nonces for one viewer connection.
 #[derive(Default)]
-pub(crate) struct Inbox {
+pub struct Inbox {
     pending: Mutex<HashMap<Op, Vec<Pending>>>,
     rejected: AtomicU64,
 }
 
 /// The caller's side of an issued nonce.
-pub(crate) struct Expectation {
+pub struct Expectation {
     pub nonce: String,
     receiver: mpsc::Receiver<Reply>,
 }
 impl Expectation {
     /// Waits for the page's answer. `Err` means the page never answered with the
     /// nonce, or its answer was refused.
-    pub(crate) fn wait(self, timeout: Duration) -> Result<Reply, String> {
+    pub fn wait(self, timeout: Duration) -> Result<Reply, String> {
         self.receiver
             .recv_timeout(timeout)
             .map_err(|error| match error {
@@ -158,7 +158,7 @@ impl Claim {
 impl Inbox {
     /// Issues a nonce for `op`, valid for `ttl`. A newer request for the same
     /// operation supersedes an older one.
-    pub(crate) fn expect(&self, op: Op, ttl: Duration) -> Expectation {
+    pub fn expect(&self, op: Op, ttl: Duration) -> Expectation {
         let nonce = uuid::Uuid::new_v4().simple().to_string();
         let (sender, receiver) = mpsc::sync_channel(1);
         if let Ok(mut pending) = self.pending.lock() {
@@ -419,7 +419,7 @@ pub(crate) fn serve_route(
 }
 
 /// Anything that can run script in the guest page.
-pub(crate) trait Page {
+pub trait Page {
     fn eval(&self, script: &str) -> Result<(), String>;
 }
 
@@ -516,7 +516,7 @@ impl ClipboardPolicy {
 }
 
 /// Silo's operations on one viewer's guest page.
-pub(crate) struct Bridge<'a> {
+pub struct Bridge<'a> {
     pub page: &'a dyn Page,
     pub inbox: &'a Inbox,
 }

@@ -6,7 +6,7 @@ use std::os::unix::fs::MetadataExt;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Query {
+pub struct Query {
     pub computer_id: String,
     pub device_id: Option<String>,
     pub query: Option<String>,
@@ -39,7 +39,7 @@ pub(crate) struct Entry {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Page {
+pub struct Page {
     pub entries: Vec<Entry>,
     pub next_cursor: Option<String>,
     pub oldest_available_timestamp: Option<String>,
@@ -594,7 +594,7 @@ pub(super) fn is_stopped(status: &str) -> bool {
 }
 /// A device running an older Silo rejects `runtime.logs` as an unknown request. That is
 /// an expected, structured outcome (an empty page marked unsupported), not a failure.
-pub(crate) fn remote_page(outcome: Result<Value, BridgeError>) -> Result<Page, BridgeError> {
+pub fn remote_page(outcome: Result<Value, BridgeError>) -> Result<Page, BridgeError> {
     match outcome {
         Ok(value) => serde_json::from_value(value).map_err(|_| {
             "The remote device returned invalid logs. Update Silo on both devices.".into()
@@ -642,7 +642,7 @@ pub(super) fn query_for_remote(
 ) -> Result<Page, String> {
     query_local(paths, request, device_id, device_name)
 }
-pub(crate) fn query_local(
+pub fn query_local(
     paths: &RuntimePaths,
     request: Query,
     device_id: &str,
@@ -683,7 +683,7 @@ pub(crate) fn query_local(
 }
 /// Queries retained logs in an already-resolved directory. The host supplies
 /// macOS setup-log locations; all scanning, filtering and pagination stay here.
-pub(crate) fn query_directory(
+pub fn query_directory(
     directory: &Path,
     request: Query,
     computer_name: &str,

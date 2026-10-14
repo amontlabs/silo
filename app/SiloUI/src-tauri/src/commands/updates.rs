@@ -47,7 +47,7 @@ pub(crate) fn recovery_failed(app: &AppHandle, message: String) {
         "Some computers could not resume after updating. Relaunch Silo to retry.",
         &message,
     );
-    crate::notifications::notify(
+    crate::commands::notifications::notify(
         app,
         crate::notifications::failure(
             "update:resume",
@@ -143,10 +143,11 @@ pub(crate) async fn get_update_state(app: AppHandle) -> Result<Snapshot, String>
         };
         // Do not compete with an active runtime mutation just to refresh a settings card.
         let running = readiness.and_then(|_| {
-            crate::runtime::update_recovery::running_names(&app).map_err(|_| {
-                "Silo could not verify computer status. Check Computers before updating."
-                    .to_string()
-            })
+            crate::runtime::update_recovery::running_names(&crate::commands::runtime::host(&app))
+                .map_err(|_| {
+                    "Silo could not verify computer status. Check Computers before updating."
+                        .to_string()
+                })
         });
         modify(&app, |s| {
             s.snapshot.can_install = running.is_ok();
@@ -405,7 +406,10 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
             crate::runtime::shutdown::ensure_accepting_operations()?;
             crate::settings::flush_for_update()?;
             let (closed, prepared) = prepare_after_transfers(close_transfers, || {
-                crate::runtime::update_recovery::prepare(app, consent)
+                crate::runtime::update_recovery::prepare(
+                    &crate::commands::runtime::host(app),
+                    consent,
+                )
             });
             transfers = Some(closed);
             prepared
@@ -414,7 +418,9 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
     if let Err(error) = result {
         // Computers can only have stopped once the install stage took the gate.
         if runtime.is_some() {
-            if let Err(resume) = crate::runtime::update_recovery::restore_locked(app) {
+            if let Err(resume) = crate::runtime::update_recovery::restore_locked(
+                &crate::commands::runtime::host(app),
+            ) {
                 return Err(InstallError::Failed(format!(
                     "{error}\nComputers could not resume: {resume}. Relaunch Silo to retry."
                 )));
@@ -493,7 +499,7 @@ pub(crate) async fn install_update(
             .and_then(|_| crate::settings::flush_for_update())
             .and_then(|_| {
                 let (closed, prepared) = prepare_after_transfers(close_transfers, || {
-                    crate::runtime::update_recovery::prepare(&worker, stop_computers)
+                    crate::runtime::update_recovery::prepare(&crate::commands::runtime::host(&worker), stop_computers)
                 });
                 transfers = Some(closed);
                 prepared
@@ -501,7 +507,7 @@ pub(crate) async fn install_update(
             .and_then(|_| update.install(&bytes).map_err(|e| e.to_string()));
         if let Err(error) = result {
             crate::macos_computers::reopen_after_update();
-            let restore = crate::runtime::update_recovery::restore_locked(&worker);
+            let restore = crate::runtime::update_recovery::restore_locked(&crate::commands::runtime::host(&worker));
             drop(transfers);
             let _ = modify(&worker, |s| engine::restore_install_bytes(s, bytes));
             return Err(match restore { Ok(()) => error, Err(resume) => format!("{error}\nComputers could not resume: {resume}. Relaunch Silo to retry.") }.into());
@@ -532,7 +538,7 @@ pub(crate) async fn open_update_release(app: tauri::AppHandle) -> Result<(), Str
     // The shared browser opener honours the browser setting and leaves no
     // unreaped child process (F-25).
     tauri::async_runtime::spawn_blocking(move || {
-        crate::applications::open_browser(&app, RELEASE_URL)
+        crate::commands::applications::open_browser(&app, RELEASE_URL)
     })
     .await
     .map_err(|_| "The browser could not be opened.".to_string())?

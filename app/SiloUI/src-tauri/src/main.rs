@@ -1,88 +1,40 @@
 mod app_menu;
-mod applications;
-mod backup;
-mod backup_controller;
-mod bridge_error;
-mod bundled_tools;
+mod commands;
+pub(crate) use silo_engine::{
+    applications, backup, backup_controller, bridge_error, bundled_tools, chatgpt_app, clipboard,
+    computer_names, computer_use, creation_inputs, dependencies, desktop, desktop_bridge,
+    desktop_proxy, desktop_viewer, desktop_viewer_media, device_identity, editor, files, github,
+    github_http, github_tokens, health_watch, host_push, host_push_cache, host_push_operations,
+    host_push_transport, log_export, log_retention, macos_computers_engine, macos_display_gateway,
+    macos_remote_engine, network, notifications, owned_tunnel, pre_upgrade_backup, preparation,
+    remote, remote_access, remote_network, remote_ssh_access, runtime, runtime_migration, secrets,
+    settings, ssh_access, ssh_connection, startup, sync, system_shutdown, terminal, transfer,
+    updates, viewer_clipboard, working_account,
+};
 mod channel;
-mod chatgpt_app;
-mod clipboard;
 #[cfg(test)]
 mod command_permissions_tests;
-mod commands;
-mod computer_names;
-mod computer_use;
-mod creation_inputs;
-mod dependencies;
-mod desktop;
-mod desktop_bridge;
-mod desktop_proxy;
-mod desktop_viewer;
 #[cfg(debug_assertions)]
 mod desktop_viewer_bench;
-mod desktop_viewer_media;
-mod device_identity;
-mod editor;
 mod engine_context;
-mod files;
-mod github;
 #[cfg(test)]
 mod github_build_tests;
-mod github_http;
-#[cfg(test)]
-mod github_live_tests;
 #[cfg(test)]
 mod github_permissions_tests;
-mod github_tokens;
-mod health_watch;
-mod host_push;
-mod host_push_cache;
-mod host_push_operations;
-mod host_push_transport;
-mod log_export;
-mod log_retention;
-#[path = "macos_computers.rs"]
-mod macos_computers_engine;
-mod macos_display_gateway;
-#[path = "macos_remote.rs"]
-mod macos_remote_engine;
 pub(crate) use commands::macos_computers;
 pub(crate) use commands::macos_remote;
 pub(crate) use commands::macos_remote_viewer;
-mod network;
-mod notifications;
-mod owned_tunnel;
-mod pre_upgrade_backup;
-mod preparation;
-mod remote;
-mod remote_access;
-mod remote_network;
-mod remote_ssh_access;
-mod runtime;
-mod runtime_migration;
-mod secrets;
-mod settings;
 mod single_instance;
-mod ssh_access;
-mod ssh_connection;
-mod startup;
 mod status_panel;
-mod sync;
 mod system_integrations;
-mod system_shutdown;
-mod terminal;
 #[cfg(test)]
 mod test_support;
 #[cfg(target_os = "macos")]
 mod titlebar;
-mod transfer;
 mod tray;
-mod updates;
-mod viewer_clipboard;
 mod viewer_shortcuts;
 #[cfg(target_os = "macos")]
 mod window_material;
-mod working_account;
 
 use tauri::{Emitter, Manager, WindowEvent};
 
@@ -307,7 +259,7 @@ fn main() {
                     let _ = queue_app.emit("silo://operation-queue-changed", ());
                 });
                 commands::runtime_migration::install(app.handle())?;
-                computer_use::install(app.handle());
+                commands::computer_use::install(app.handle());
                 pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;
                 commands::secrets::install(app.handle())?;

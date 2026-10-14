@@ -12,7 +12,7 @@ impl Fixture {
         let root = tempfile::tempdir().unwrap();
         let tools = root.path().join("tools");
         fs::create_dir(&tools).unwrap();
-        let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/git");
+        let runtime = crate::test_support::manifest_root().join("runtime/git");
         assert!(
             runtime.join("bin/git").is_file(),
             "prepare the bundled Git runtime before testing"

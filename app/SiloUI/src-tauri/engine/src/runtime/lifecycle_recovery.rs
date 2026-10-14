@@ -432,15 +432,15 @@ pub(crate) fn retire_except(
 
 /// The outcome of launch recovery. Per-action failures never hide the rest (D-23).
 #[derive(Debug, Default, PartialEq)]
-pub(crate) struct Recovered {
+pub struct Recovered {
     /// Computers that launch auto-start must leave stopped: explicit stops that were
     /// resumed or could not be settled, and computers whose saved action is unreadable.
-    pub(crate) keep_stopped: HashSet<String>,
+    pub keep_stopped: HashSet<String>,
     /// One line per saved action that could not be resumed; each was preserved.
-    pub(crate) failures: Vec<String>,
+    pub failures: Vec<String>,
 }
 
-pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<Recovered, String> {
+pub fn recover(host: &dyn RuntimeHost) -> Result<Recovered, String> {
     let paths = runtime_paths(host)?;
     let _guard = OPERATIONS
         .device("Resuming computer actions")
@@ -1206,7 +1206,7 @@ mod tests {
             ),
             home: root.join("msb"),
             storage_home: None,
-            guest_image: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             metadata: root.join("computers.json"),
             volumes: root.join("volumes"),
         }

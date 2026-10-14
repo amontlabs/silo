@@ -1,3 +1,4 @@
+use crate::notifications::NotificationDelivery;
 use serde::Serialize;
 
 pub(crate) const ROUTE_KEY: &str = "route";
@@ -71,12 +72,6 @@ pub(crate) fn open_settings(integration: &str) -> Result<(), String> {
 pub(crate) use crate::commands::system_integrations::{
     install_notifications, show_integration_error,
 };
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum NotificationDelivery {
-    Delivered,
-    Skipped,
-}
 
 /// Delivery never requests authorization or opens a permission prompt. A newer notice
 /// with the same key replaces the older one.

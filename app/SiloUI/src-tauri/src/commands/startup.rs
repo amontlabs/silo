@@ -19,38 +19,40 @@ impl StartupServices for TauriStartupServices {
     }
 
     fn prepare_runtime(&self) {
-        if let Ok(paths) = runtime::runtime_paths(&self.app) {
+        if let Ok(paths) = runtime::runtime_paths(&crate::commands::runtime::host(&self.app)) {
             let storage = paths.storage_home.as_deref().unwrap_or(&paths.home);
             if let Err(message) = runtime::image_cache::repair(&storage.join("cache")) {
                 eprintln!("Image cache repair: {message}");
             }
-            crate::preparation::start(&self.app, paths);
+            crate::commands::preparation::start(&self.app, paths);
         }
     }
 
     fn recover_configuration(&self) -> Result<(), String> {
-        runtime::configuration_recovery::recover(&self.app)
+        runtime::configuration_recovery::recover(&crate::commands::runtime::host(&self.app))
     }
 
     fn recover_lifecycle(&self) -> Result<RecoveredActions, String> {
-        runtime::lifecycle_recovery::recover(&self.app).map(|recovered| RecoveredActions {
-            keep_stopped: recovered.keep_stopped,
-            failures: recovered.failures,
-        })
+        runtime::lifecycle_recovery::recover(&crate::commands::runtime::host(&self.app)).map(
+            |recovered| RecoveredActions {
+                keep_stopped: recovered.keep_stopped,
+                failures: recovered.failures,
+            },
+        )
     }
 
     fn recover_update(&self) -> Result<bool, String> {
-        runtime::update_recovery::recover(&self.app)
+        runtime::update_recovery::recover(&crate::commands::runtime::host(&self.app))
     }
 
     fn current_launch_settings(&self) -> Result<(Map<String, Value>, std::path::PathBuf), String> {
         let settings = crate::settings::current_settings()?;
-        let paths = runtime::runtime_paths(&self.app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&self.app))?;
         Ok((settings, paths.metadata))
     }
 
     fn start_at_launch(&self, id: &str) -> Result<(), String> {
-        runtime::start_at_launch(&self.app, id)
+        runtime::start_at_launch(&crate::commands::runtime::host(&self.app), id)
     }
 
     fn update_recovery_failed(&self, message: String) {
@@ -58,7 +60,7 @@ impl StartupServices for TauriStartupServices {
     }
 
     fn notify_failure(&self, key: &str, title: &str, body: &str) {
-        crate::notifications::notify(
+        crate::commands::notifications::notify(
             &self.app,
             crate::notifications::failure(key, title, body, None),
         );

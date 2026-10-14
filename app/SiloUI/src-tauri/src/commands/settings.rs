@@ -126,12 +126,18 @@ pub(crate) async fn flush_settings(app: AppHandle, window: WebviewWindow) -> Res
 fn stop_local_computers(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     let Some(deadline) = deadline else {
         crate::startup::cancel_and_wait(app);
-        return crate::runtime::shutdown::stop_local_computers(app, None);
+        return crate::runtime::shutdown::stop_local_computers(
+            &crate::commands::runtime::host(app),
+            None,
+        );
     };
     let app = app.clone();
     run_before(deadline, move || {
         crate::startup::cancel_and_wait(&app);
-        crate::runtime::shutdown::stop_local_computers(&app, Some(deadline))
+        crate::runtime::shutdown::stop_local_computers(
+            &crate::commands::runtime::host(&app),
+            Some(deadline),
+        )
     })
 }
 
@@ -178,14 +184,14 @@ fn finish_exit(app: &AppHandle, frontend_completed: bool, generation: Option<u64
     }
     crate::remote_network::close_all();
     if state.allow_exit() {
-        crate::system_shutdown::exit(app);
+        crate::commands::system_shutdown::exit(app);
     }
 }
 
 fn cancel_exit(app: &AppHandle, message: String) {
     if !settings::shutdown_state().cancel_with(|| {
         crate::runtime::shutdown::cancel();
-        crate::system_shutdown::cancel(app);
+        crate::commands::system_shutdown::cancel(app);
         let _ = app.emit("silo://shutdown-state-changed", false);
     }) {
         return;
@@ -249,11 +255,11 @@ pub(crate) fn exit_without_shutdown(_app: &AppHandle) {
 /// `budget`, and a failed stop or save never cancels the exit.
 pub(crate) fn end_session(app: &AppHandle, budget: Duration) {
     let Some(state) = settings::shutdown_state_if_installed() else {
-        crate::system_shutdown::exit(app);
+        crate::commands::system_shutdown::exit(app);
         return;
     };
     if state.approved() {
-        crate::system_shutdown::exit(app);
+        crate::commands::system_shutdown::exit(app);
         return;
     }
     state.begin_session_end(Instant::now() + budget);
@@ -265,7 +271,7 @@ pub(crate) fn end_session(app: &AppHandle, budget: Duration) {
         std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
         if settings::shutdown_state().expire_session(Instant::now()) {
             eprintln!("Silo is exiting because the session shutdown deadline elapsed.");
-            crate::system_shutdown::exit(&deadline_app);
+            crate::commands::system_shutdown::exit(&deadline_app);
         }
     });
     // An open Quit prompt no longer applies; its answer is ignored.
@@ -317,7 +323,8 @@ pub(crate) fn request_quit(app: &AppHandle) {
             app.exit(0);
             return;
         }
-        let running = crate::runtime::update_recovery::running_names(&app);
+        let running =
+            crate::runtime::update_recovery::running_names(&crate::commands::runtime::host(&app));
         let Some(request) = confirmation.ask(running) else {
             app.exit(0);
             return;
@@ -358,7 +365,7 @@ pub(crate) fn answer_quit_request(
     if settings::quit_confirmation().answer(request_id, confirmed)? {
         app.exit(0);
     } else {
-        crate::system_shutdown::cancel(&app);
+        crate::commands::system_shutdown::cancel(&app);
     }
     Ok(())
 }

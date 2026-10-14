@@ -173,7 +173,7 @@ fn running(
     }
     Ok(result)
 }
-pub(crate) fn running_names(host: &dyn RuntimeHost) -> Result<Vec<String>, String> {
+pub fn running_names(host: &dyn RuntimeHost) -> Result<Vec<String>, String> {
     // An unfinished storage migration holds the runtime back: nothing is running, and
     // it must not stop an update from installing.
     let Some(paths) = runtime_paths_if_in_use(host)? else {
@@ -183,7 +183,7 @@ pub(crate) fn running_names(host: &dyn RuntimeHost) -> Result<Vec<String>, Strin
 }
 /// Caller holds the operation gate (device scope) for the whole installation,
 /// including every stop.
-pub(crate) fn prepare(host: &dyn RuntimeHost, consent: bool) -> Result<(), String> {
+pub fn prepare(host: &dyn RuntimeHost, consent: bool) -> Result<(), String> {
     debug_assert!(
         operation_gate::held(),
         "update preparation requires the operation gate"
@@ -229,7 +229,7 @@ fn stop_selected(
 }
 
 /// Caller holds the operation gate. Each success is persisted, making replay idempotent.
-pub(crate) fn restore_locked(host: &dyn RuntimeHost) -> Result<(), String> {
+pub fn restore_locked(host: &dyn RuntimeHost) -> Result<(), String> {
     debug_assert!(
         operation_gate::held(),
         "update restore requires the operation gate"
@@ -297,7 +297,7 @@ fn restore_pending(
         .map_err(|_| "Completed update recovery could not be synced.".into())
 }
 
-pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<bool, String> {
+pub fn recover(host: &dyn RuntimeHost) -> Result<bool, String> {
     let _guard = OPERATIONS
         .device("Resuming computers after update")
         .map_err(|_| "Computer operations are unavailable.")?;

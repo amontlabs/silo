@@ -10,7 +10,7 @@ use crate::runtime::{self, RuntimeError, RuntimePaths, RuntimeRunner};
 use serde_json::Value;
 use std::time::Duration;
 
-pub(crate) const USER: &str = "silo";
+pub const USER: &str = "silo";
 
 /// Prints `ready`, `missing` or, for a record this Silo does not know, `unknown`.
 const CHECK: &str = r#"record=/var/lib/silo/working-account.json
@@ -18,9 +18,9 @@ if [ ! -e "$record" ]; then echo missing
 elif [ "$(tr -d ' \n' < "$record")" = '{"schemaVersion":1,"user":"silo","home":"/home/silo"}' ]; then echo ready
 else echo unknown
 fi"#;
-const SET_UP: &str = include_str!("../guest/working-account.sh");
-const ACCOUNT: &str = include_str!("../guest/working-account.py");
-const DESKTOP_SERVICE: &str = include_str!("../guest/desktop-service.py");
+const SET_UP: &str = include_str!("../../guest/working-account.sh");
+const ACCOUNT: &str = include_str!("../../guest/working-account.py");
+const DESKTOP_SERVICE: &str = include_str!("../../guest/desktop-service.py");
 /// Moving an older computer copies its home folders and takes ownership of `/workspace`.
 const SET_UP_LIMIT: &str = "30m";
 const SET_UP_TIMEOUT: Duration = Duration::from_secs(31 * 60);
@@ -117,7 +117,7 @@ fn reason(detail: &str) -> Option<&str> {
 
 /// The account to open `name`'s guest as, once Silo manages it and the bundled runtime
 /// supports the account.
-pub(crate) fn inspect_user(paths: &RuntimePaths, name: &str) -> Result<&'static str, String> {
+pub fn inspect_user(paths: &RuntimePaths, name: &str) -> Result<&'static str, String> {
     let inspected = runtime::inspect_computer(&runtime::ProcessRunner, paths, name)
         .map_err(|e| e.to_string())?;
     runtime::ensure_managed(&inspected).map_err(|e| e.to_string())?;
@@ -125,7 +125,7 @@ pub(crate) fn inspect_user(paths: &RuntimePaths, name: &str) -> Result<&'static 
     Ok(USER)
 }
 
-pub(crate) fn require_runtime(paths: &RuntimePaths) -> Result<(), String> {
+pub fn require_runtime(paths: &RuntimePaths) -> Result<(), String> {
     let output = runtime::run_msb(
         paths,
         &["--silo-working-account-protocol".into()],
@@ -142,14 +142,14 @@ pub(crate) fn require_runtime(paths: &RuntimePaths) -> Result<(), String> {
 
 /// The account another device's Silo reports for its computer. Versions before the
 /// silo account report root, or nothing.
-pub(crate) fn response_user(response: &Value) -> Result<&'static str, String> {
+pub fn response_user(response: &Value) -> Result<&'static str, String> {
     match response.get("user") {
         Some(Value::String(user)) if user == USER => Ok(USER),
         _ => Err("The other device opens this computer with an account this Silo does not support. Update Silo on both devices.".into()),
     }
 }
 
-pub(crate) fn require_client_protocol(request: &Value) -> Result<(), String> {
+pub fn require_client_protocol(request: &Value) -> Result<(), String> {
     if request.get("accountProtocol").and_then(Value::as_u64) != Some(1) {
         return Err(
             "Update Silo on the connecting device to access this computer's Linux account.".into(),

@@ -55,7 +55,8 @@ class ReleaseDiscoveryTests(unittest.TestCase):
 
 class CargoCoverageTests(unittest.TestCase):
     def test_ci_selects_local_patched_packages_with_unit_tests(self):
-        manifest = tomllib.loads((APP / 'src-tauri/Cargo.toml').read_text())
+        manifest = tomllib.loads((APP / 'Cargo.toml').read_text())
+        package_manifest = tomllib.loads((APP / 'src-tauri/Cargo.toml').read_text())
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         selected = set()
         for command in re.findall(r'(?m)^ +(?:- )?run: (cargo test .+)$', workflow):
@@ -64,10 +65,10 @@ class CargoCoverageTests(unittest.TestCase):
             if '-p' in arguments:
                 selected.add(arguments[arguments.index('-p') + 1])
             else:
-                selected.add(manifest['package']['name'])
-        self.assertIn(manifest['package']['name'], selected)
+                selected.add(package_manifest['package']['name'])
+        self.assertIn(package_manifest['package']['name'], selected)
         for name, patch in manifest['patch']['crates-io'].items():
-            directory = APP / 'src-tauri' / patch['path']
+            directory = APP / patch['path']
             if any('#[test]' in source.read_text() for source in directory.rglob('*.rs')):
                 with self.subTest(package=name):
                     self.assertIn(name, selected, 'dependency unit tests are not run by root cargo test')

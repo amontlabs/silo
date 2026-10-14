@@ -312,7 +312,7 @@ fn save_validated_token(
     connected(&token)
 }
 
-pub(crate) fn save_github_personal_token(token: String) -> Result<Value, String> {
+pub fn save_github_personal_token(token: String) -> Result<Value, String> {
     let _network = serialize(&TOKEN_OPERATION);
     // Saving a token is an explicit retry; never leave validation blocked by earlier failures.
     crate::github_http::reset_bearer_retries(token.trim());
@@ -338,7 +338,7 @@ pub(crate) fn save_github_personal_token(token: String) -> Result<Value, String>
     snapshot()
 }
 
-pub(crate) fn remove_github_personal_token() -> Result<Value, String> {
+pub fn remove_github_personal_token() -> Result<Value, String> {
     let _network = serialize(&TOKEN_OPERATION);
     // Detach before deletion so a storage failure cannot leave guest access silently enabled.
     publish(json!({"state":"disconnected","saved":true,"message":"Removing personal token."}));

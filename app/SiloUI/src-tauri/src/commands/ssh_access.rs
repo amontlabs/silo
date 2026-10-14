@@ -12,7 +12,7 @@ const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
 pub(crate) fn start_monitor(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || loop {
-        if let Ok(paths) = runtime::runtime_paths(&app) {
+        if let Ok(paths) = runtime::runtime_paths(&crate::commands::runtime::host(&app)) {
             let _ = ssh_access::monitor(&paths);
         }
         std::thread::sleep(MONITOR_INTERVAL);
@@ -22,7 +22,7 @@ pub(crate) fn start_monitor(app: &AppHandle) {
 #[tauri::command]
 pub(crate) async fn read_ssh_access_state(app: AppHandle) -> Result<ssh_access::State, String> {
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         ssh_access::read_state(&paths)
     })
     .await
@@ -39,7 +39,7 @@ pub(crate) async fn save_ssh_access(
     keys: Option<Vec<String>>,
 ) -> Result<ssh_access::State, String> {
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         ssh_access::save(&paths, computer, enabled, port, bind_address, keys)
     })
     .await
@@ -61,7 +61,7 @@ pub(crate) async fn ssh_connection(
     }
 
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         match ssh_connection::prepare(&paths, computer, device_id, computer_id, download, network)?
         {
             ssh_connection::ConnectionResult::Command(command) => Ok(Some(command)),

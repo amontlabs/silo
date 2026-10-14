@@ -14,7 +14,7 @@ fn local_paths(app: &AppHandle, computer: &str) -> Result<Option<runtime::Runtim
     if remote_access::target(computer)?.is_some() {
         Ok(None)
     } else {
-        runtime::runtime_paths(app).map(Some)
+        runtime::runtime_paths(&crate::commands::runtime::host(app)).map(Some)
     }
 }
 

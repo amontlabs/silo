@@ -1,6 +1,6 @@
 //! Host-only GitHub account and durable desired policy. No credential is exposed by a command.
 #[path = "github_personal_token.rs"]
-pub(crate) mod personal_token;
+pub mod personal_token;
 
 use crate::github_tokens::{Configuration, Operation};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -22,7 +22,7 @@ use std::{
 
 /// Runtime operations are supplied by the host adapter until runtime itself moves to the
 /// engine crate. The GitHub domain only sees these plain inputs and outputs.
-pub(crate) trait RuntimeAccess: Send + Sync + 'static {
+pub trait RuntimeAccess: Send + Sync + 'static {
     fn scoped_cached_tokens(&self, computer: &str) -> Result<crate::runtime::ScopedTokens, String>;
     fn github_policy_is_cached(&self, computer: &str, profile: &Value) -> Result<bool, String>;
     fn apply_github_policy(
@@ -38,7 +38,7 @@ pub(crate) trait RuntimeAccess: Send + Sync + 'static {
 
 static RUNTIME: OnceLock<Arc<dyn RuntimeAccess>> = OnceLock::new();
 
-pub(crate) fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
+pub fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
     RUNTIME
         .set(runtime)
         .map_err(|_| "GitHub runtime access is already installed".to_owned())
@@ -298,9 +298,9 @@ impl Drop for IntentTurn<'_> {
     }
 }
 static INTENTS: IntentQueue = IntentQueue::new();
-pub(crate) struct PendingIntent(IntentTicket<'static>);
+pub struct PendingIntent(IntentTicket<'static>);
 
-pub(crate) fn intent_ticket() -> PendingIntent {
+pub fn intent_ticket() -> PendingIntent {
     PendingIntent(INTENTS.ticket())
 }
 struct Connecting(u64);
@@ -618,7 +618,7 @@ fn stale_save(d: &Document, computer: &str, base: Option<u64>) -> bool {
 
 /// Copy the source's current GitHub assignment for a stopped checkpoint fork.
 /// The child obtains its own runtime identity and resolves credentials at Start.
-pub(crate) fn fork_assignment(source: &str, target: &str) -> Result<(), String> {
+pub fn fork_assignment(source: &str, target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
     let mut document = load()?;
     if let Some(mut assignment) = document
@@ -645,7 +645,7 @@ pub(crate) fn fork_assignment(source: &str, target: &str) -> Result<(), String> 
     Ok(())
 }
 
-pub(crate) fn forget_fork_assignment(target: &str) -> Result<(), String> {
+pub fn forget_fork_assignment(target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
     let mut document = load()?;
     forget_computer(&mut document, target);
@@ -1167,7 +1167,7 @@ fn catalog_installations(c: &Credential) -> Result<(Vec<Value>, bool), String> {
 fn device_identity() -> Option<crate::device_identity::DeviceIdentity> {
     crate::device_identity::cached(publish_changed)
 }
-pub(crate) fn snapshot() -> Result<Value, String> {
+pub fn snapshot() -> Result<Value, String> {
     let mut value = observed_snapshot(load()?, observed_credential(), device_identity());
     // Saved choices for a computer that has no runtime yet are not a failure; they apply
     // once it starts.
@@ -2586,7 +2586,7 @@ fn open_authorization_browser(
     open_browser(url)
 }
 
-pub(crate) fn connect(
+pub fn connect(
     generation: u64,
     open_browser: impl Fn(&str) -> Result<(), String>,
 ) -> Result<Value, String> {
@@ -2841,7 +2841,7 @@ fn sweep_retirement(
 }
 
 /// Re-establish host-only grants after relaunch and renew them before expiry.
-pub(crate) fn install() -> Result<(), String> {
+pub fn install() -> Result<(), String> {
     // Start the first device identity read now so the first GitHub view already has it.
     device_identity();
     if let Ok(document) = load() {
@@ -3020,12 +3020,12 @@ pub(crate) fn install() -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn prepare_connect() -> u64 {
+pub fn prepare_connect() -> u64 {
     retry_credential_access();
     CANCELLATION.load(Ordering::SeqCst)
 }
 
-pub(crate) fn cancel_connection() -> Result<Value, String> {
+pub fn cancel_connection() -> Result<Value, String> {
     // Serialize with credential publication, not with the browser/network wait.
     let _state = serialize(&STATE);
     let mut pending = AUTHORIZATION
@@ -3039,14 +3039,14 @@ pub(crate) fn cancel_connection() -> Result<Value, String> {
     result
 }
 
-pub(crate) fn authorization_url() -> Result<String, String> {
+pub fn authorization_url() -> Result<String, String> {
     AUTHORIZATION
         .lock()
         .map_err(|_| "GitHub connection is unavailable.")?
         .url(CANCELLATION.load(Ordering::SeqCst))
 }
 
-pub(crate) fn repository_authorization_url() -> Result<String, String> {
+pub fn repository_authorization_url() -> Result<String, String> {
     let slug = APP_SLUG.ok_or("GitHub App is not configured in this build.")?;
     if !slug.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return Err("Invalid GitHub App slug.".into());
@@ -3054,16 +3054,16 @@ pub(crate) fn repository_authorization_url() -> Result<String, String> {
     Ok(format!("https://github.com/apps/{slug}/installations/new"))
 }
 
-pub(crate) fn run_operation<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+pub fn run_operation<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let _guard = serialize(&OPERATION);
     work()
 }
 
-pub(crate) fn prepare_refresh() {
+pub fn prepare_refresh() {
     retry_credential_access();
 }
 
-pub(crate) fn refresh_repositories() -> Result<Value, String> {
+pub fn refresh_repositories() -> Result<Value, String> {
     let result = active_credential().and_then(|c| catalog_with_retry(&c, catalog));
     let _state = serialize(&STATE);
     let mut d = load()?;
@@ -3088,14 +3088,14 @@ pub(crate) fn refresh_repositories() -> Result<Value, String> {
     snapshot()
 }
 
-pub(crate) fn prepare_disconnect() -> PendingIntent {
+pub fn prepare_disconnect() -> PendingIntent {
     retry_credential_access();
     let ticket = intent_ticket();
     CANCELLATION.fetch_add(1, Ordering::SeqCst);
     ticket
 }
 
-pub(crate) fn disconnect<G>(
+pub fn disconnect<G>(
     ticket: PendingIntent,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Value, String> {
@@ -3114,7 +3114,7 @@ pub(crate) fn disconnect<G>(
     snapshot()
 }
 
-pub(crate) fn set_access_enabled<G>(
+pub fn set_access_enabled<G>(
     enabled: bool,
     ticket: PendingIntent,
     update_guard: impl FnOnce() -> Result<G, String>,
@@ -3136,7 +3136,7 @@ pub(crate) fn set_access_enabled<G>(
     snapshot()
 }
 
-pub(crate) fn prepare_access_change(enabled: bool) -> PendingIntent {
+pub fn prepare_access_change(enabled: bool) -> PendingIntent {
     let ticket = intent_ticket();
     if !enabled {
         CANCELLATION.fetch_add(1, Ordering::SeqCst);
@@ -3144,7 +3144,7 @@ pub(crate) fn prepare_access_change(enabled: bool) -> PendingIntent {
     ticket
 }
 
-pub(crate) fn validate_configuration(configuration: &Value) -> Result<(), String> {
+pub fn validate_configuration(configuration: &Value) -> Result<(), String> {
     let policies = configuration["computers"]
         .as_array()
         .ok_or("Missing computer policies.")?;
@@ -3288,7 +3288,7 @@ fn apply_patches(
 /// `baseRevision` the `policyRevision` its view was based on. Access on/off is never
 /// changed here (a stale save must not undo Disable access); use
 /// `set_github_access_enabled`. An `accessEnabled` field is ignored.
-pub(crate) fn save_configuration<G>(
+pub fn save_configuration<G>(
     configuration: Value,
     ticket: PendingIntent,
     update_guard: impl FnOnce() -> Result<G, String>,
@@ -3356,12 +3356,12 @@ fn prepare_retry(d: &mut Document, computer: Option<&str>) {
     mark_pending_for(d, &names);
 }
 
-pub(crate) fn prepare_retry_configuration() -> PendingIntent {
+pub fn prepare_retry_configuration() -> PendingIntent {
     retry_credential_access();
     intent_ticket()
 }
 
-pub(crate) fn retry_configuration<G>(
+pub fn retry_configuration<G>(
     computer: Option<String>,
     ticket: PendingIntent,
     update_guard: impl FnOnce() -> Result<G, String>,
@@ -5394,7 +5394,7 @@ mod tests {
     }
 }
 
-pub(crate) fn update_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
+pub fn update_guard() -> Result<std::sync::MutexGuard<'static, ()>, String> {
     try_serialize(&OPERATION)
         .ok_or_else(|| "Wait for the GitHub operation to finish before updating.".into())
 }

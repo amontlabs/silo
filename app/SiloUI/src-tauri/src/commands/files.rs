@@ -24,7 +24,8 @@ pub(crate) async fn list_computer_directory(
             return serde_json::from_value(value)
                 .map_err(|_| "The remote device returned an invalid folder listing.".into());
         }
-        let paths = runtime::runtime_paths(&app).map_err(|_| "Could not load this folder.")?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))
+            .map_err(|_| "Could not load this folder.")?;
         files::list_computer_directory(&paths, computer, path, offset, snapshot_id)
     })
     .await

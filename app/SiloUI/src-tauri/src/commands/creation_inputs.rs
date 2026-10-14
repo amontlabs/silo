@@ -31,25 +31,6 @@ struct Live {
     request_id: String,
 }
 
-impl From<Option<Status>> for ChatGpt {
-    fn from(status: Option<Status>) -> Self {
-        match status {
-            None | Some(Status::Idle) => Self::Pending,
-            Some(Status::Downloading {
-                received_bytes,
-                total_bytes,
-            }) => Self::Downloading {
-                received: received_bytes,
-                total: total_bytes,
-            },
-            Some(Status::Verifying) => Self::Verifying,
-            Some(Status::Extracting) => Self::Extracting,
-            Some(Status::Ready { .. }) => Self::Ready,
-            Some(Status::Failed { reason, .. }) => Self::Failed { reason },
-        }
-    }
-}
-
 impl Inputs for Live {
     fn ensure_image(&self) -> Result<(), String> {
         crate::preparation::ensure_image(&self.paths, &|_| {})

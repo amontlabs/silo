@@ -49,7 +49,7 @@ mod store;
 mod templates;
 
 use crate::runtime;
-pub(crate) use guest_clipboard::Direction as ClipboardDirection;
+pub use guest_clipboard::Direction as ClipboardDirection;
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
 use silo_engine::{Audience, EngineContext, Event};
@@ -61,7 +61,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-pub(crate) use store::{Action, CreateRequest};
+pub use store::{Action, CreateRequest};
 use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
@@ -78,7 +78,7 @@ const MIN_QUIT_SHUTDOWN: Duration = Duration::from_secs(2);
 const FORCED_QUIT: Duration = Duration::from_secs(8);
 
 /// Host services that remain outside the macOS computer engine.
-pub(crate) trait MacosHost: Send + Sync {
+pub trait MacosHost: Send + Sync {
     fn show_display(
         &self,
         context: &MacosContext,
@@ -92,13 +92,13 @@ pub(crate) trait MacosHost: Send + Sync {
 
 /// Context for macOS computer work: engine capabilities plus its host's display-window adapter.
 #[derive(Clone)]
-pub(crate) struct MacosContext {
+pub struct MacosContext {
     engine: Arc<dyn EngineContext>,
     host: Arc<dyn MacosHost>,
 }
 
 impl MacosContext {
-    pub(crate) fn new(engine: Arc<dyn EngineContext>, host: Arc<dyn MacosHost>) -> Self {
+    pub fn new(engine: Arc<dyn EngineContext>, host: Arc<dyn MacosHost>) -> Self {
         Self { engine, host }
     }
 
@@ -134,7 +134,7 @@ const ABORT_AND_KEEP: u8 = 2;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct MacosComputer {
+pub struct MacosComputer {
     id: String,
     name: String,
     cpus: u64,
@@ -170,7 +170,7 @@ pub(crate) struct TemplateSummary {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct MacosComputersState {
+pub struct MacosComputersState {
     supported: bool,
     unsupported_reason: Option<String>,
     computers: Vec<MacosComputer>,
@@ -560,17 +560,17 @@ fn admission() -> Result<std::sync::MutexGuard<'static, Closed>, String> {
 }
 
 /// Admits macOS computers again after a Quit was cancelled.
-pub(crate) fn reopen_after_quit() {
+pub fn reopen_after_quit() {
     closed().quit = false;
 }
 
 /// Admits macOS computers again after an update did not go ahead.
-pub(crate) fn reopen_after_update() {
+pub fn reopen_after_update() {
     closed().update = false;
 }
 
 /// Closes admission for an update unless a macOS computer is busy.
-pub(crate) fn close_for_update() -> Result<(), String> {
+pub fn close_for_update() -> Result<(), String> {
     let mut closed = closed();
     let busy = registry().any_busy();
     closed.close_for_update(busy)
@@ -815,7 +815,7 @@ fn state_of(id: &str) -> Option<State> {
         .map(|entry| entry.state)
 }
 
-pub(crate) fn display_label(id: &str) -> String {
+pub fn display_label(id: &str) -> String {
     format!("macos-display-{id}")
 }
 
@@ -835,7 +835,7 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| "The macOS computer operation failed unexpectedly.".to_string())?
 }
 
-pub(crate) async fn read_macos_computers(app: MacosContext) -> Result<MacosComputersState, String> {
+pub async fn read_macos_computers(app: MacosContext) -> Result<MacosComputersState, String> {
     blocking(move || {
         ensure_loaded(&app)?;
         refresh_template(&app);
@@ -846,7 +846,7 @@ pub(crate) async fn read_macos_computers(app: MacosContext) -> Result<MacosCompu
 }
 
 /// Removes the template new computers are copied from. Computers made from it keep working.
-pub(crate) async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
+pub async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || {
         require_supported()?;
@@ -859,7 +859,7 @@ pub(crate) async fn delete_macos_template(app: MacosContext) -> Result<(), Strin
     .await
 }
 
-pub(crate) async fn create_macos_computer(
+pub async fn create_macos_computer(
     app: MacosContext,
     request: CreateRequest,
 ) -> Result<MacosComputer, String> {
@@ -867,7 +867,7 @@ pub(crate) async fn create_macos_computer(
     blocking(move || create(&app, request)).await
 }
 
-pub(crate) async fn macos_computer_action(
+pub async fn macos_computer_action(
     app: MacosContext,
     id: String,
     action: Action,
@@ -878,13 +878,13 @@ pub(crate) async fn macos_computer_action(
     blocking(move || perform(&app, &id, action)).await
 }
 
-pub(crate) async fn open_macos_display(app: MacosContext, id: String) -> Result<(), String> {
+pub async fn open_macos_display(app: MacosContext, id: String) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
 }
 
 /// Saves a checkpoint of a computer: its memory too when it runs.
-pub(crate) async fn create_macos_checkpoint(
+pub async fn create_macos_checkpoint(
     app: MacosContext,
     id: String,
     name: String,
@@ -894,7 +894,7 @@ pub(crate) async fn create_macos_checkpoint(
 }
 
 /// Rewinds a computer to a checkpoint. The computer stays stopped.
-pub(crate) async fn restore_macos_checkpoint(
+pub async fn restore_macos_checkpoint(
     app: MacosContext,
     id: String,
     checkpoint_id: String,
@@ -904,7 +904,7 @@ pub(crate) async fn restore_macos_checkpoint(
 }
 
 /// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
-pub(crate) async fn fork_macos_checkpoint(
+pub async fn fork_macos_checkpoint(
     app: MacosContext,
     id: String,
     checkpoint_id: String,
@@ -914,7 +914,7 @@ pub(crate) async fn fork_macos_checkpoint(
     blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
 }
 
-pub(crate) async fn delete_macos_checkpoint(
+pub async fn delete_macos_checkpoint(
     app: MacosContext,
     id: String,
     checkpoint_id: String,
@@ -925,7 +925,7 @@ pub(crate) async fn delete_macos_checkpoint(
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
 /// clipboard to this Mac. Only the main window can start it.
-pub(crate) async fn macos_computer_clipboard(
+pub async fn macos_computer_clipboard(
     app: MacosContext,
     id: String,
     direction: guest_clipboard::Direction,
@@ -996,7 +996,7 @@ pub(crate) fn resize_display(
 // MARK: Create
 
 /// The lowercased names of the macOS computers on this device, loaded or not.
-pub(crate) fn names(app: &MacosContext) -> Vec<String> {
+pub fn names(app: &MacosContext) -> Vec<String> {
     app_data(app)
         .map(|data| store::names(&data))
         .unwrap_or_default()
@@ -1366,7 +1366,7 @@ fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
 }
 
 /// The name and retained-log folder of the macOS computer `id`, for the Logs page.
-pub(crate) fn log_target(app: &MacosContext, id: &str) -> Option<(String, std::path::PathBuf)> {
+pub fn log_target(app: &MacosContext, id: &str) -> Option<(String, std::path::PathBuf)> {
     let (record, _) = computer(id).ok()?;
     Some((record.name, setup_log::directory(app, id)?))
 }
@@ -2249,7 +2249,7 @@ fn close_display(app: &MacosContext, id: &str) {
 }
 
 /// Attaches the VM view to a native window supplied by the host's UI adapter.
-pub(crate) fn attach_display(
+pub fn attach_display(
     context: &MacosContext,
     id: &str,
     native_window: usize,
@@ -2259,7 +2259,7 @@ pub(crate) fn attach_display(
 }
 
 /// Called by the host when its display window closes.
-pub(crate) fn display_window_closed(context: &MacosContext, id: &str) {
+pub fn display_window_closed(context: &MacosContext, id: &str) {
     engine::detach_display(context, id);
     update(context, id, |entry| entry.display_open = false);
 }
@@ -2436,7 +2436,7 @@ fn is_busy(state: State) -> bool {
 /// Stops every macOS computer for Quit: a graceful request first, then a forced
 /// stop. Runs on a worker thread; the main thread must stay free to run the
 /// framework's callbacks.
-pub(crate) fn stop_all(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
+pub fn stop_all(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
     let stopped = stop_busy(app, deadline);
     // A host-attached disk image outlives Silo; none may be left behind.
     let detached = release_disks(app);

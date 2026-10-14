@@ -63,7 +63,7 @@ impl MacosHost for TauriMacosHost {
     }
 
     fn linux_computer_names(&self) -> Vec<String> {
-        runtime::computer_names(&self.app)
+        runtime::computer_names(&crate::commands::runtime::host(&self.app))
     }
 }
 

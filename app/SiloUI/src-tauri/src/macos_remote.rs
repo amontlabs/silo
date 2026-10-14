@@ -19,7 +19,7 @@ use crate::macos_computers_engine::{self as macos_computers, Action, CreateReque
 use serde_json::{json, Value};
 
 /// The stream method that relays a computer's Screen Sharing connection.
-pub(crate) const DISPLAY_STREAM: &str = "macos.display.stream";
+pub const DISPLAY_STREAM: &str = "macos.display.stream";
 
 fn invalid(what: &str) -> String {
     format!("Invalid macOS computer request: {what}.")
@@ -33,12 +33,12 @@ pub(crate) fn computer_id(params: &Value) -> Result<&str, String> {
         .ok_or_else(|| invalid("missing computer identity"))
 }
 
-pub(crate) fn parse_create(params: &Value) -> Result<CreateRequest, String> {
+pub fn parse_create(params: &Value) -> Result<CreateRequest, String> {
     serde_json::from_value(params["request"].clone())
         .map_err(|_| invalid("the computer details are not valid"))
 }
 
-pub(crate) fn parse_action(params: &Value) -> Result<(&str, Action), String> {
+pub fn parse_action(params: &Value) -> Result<(&str, Action), String> {
     let id = computer_id(params)?;
     let action = serde_json::from_value(params["action"].clone())
         .map_err(|_| invalid("unsupported action"))?;

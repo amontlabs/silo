@@ -65,7 +65,7 @@ fn dismiss_result(entries: &mut HashMap<String, (Value, Instant)>, key: &str) {
     }
 }
 
-pub(crate) fn dismiss_repository_push(
+pub fn dismiss_repository_push(
     paths: &RuntimePaths,
     computer: &str,
     repository_path: &str,
@@ -176,13 +176,13 @@ fn valid_commit(commit: &str) -> bool {
 /// exactly this commit to this branch of this repository, or nothing
 /// (owner decision 1).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-pub(crate) struct PushTarget {
+pub struct PushTarget {
     pub(crate) repository: String,
     pub(crate) branch: String,
     pub(crate) commit: String,
 }
 impl PushTarget {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if !valid_repository_name(&self.repository) {
             return Err("Invalid GitHub repository for this push.".into());
         }

@@ -172,5 +172,7 @@ impl Drop for Fixture {
     }
 }
 
+#[path = "computer_use_live/approval.rs"]
 mod approval;
+#[path = "computer_use_live/lcu.rs"]
 mod lcu;

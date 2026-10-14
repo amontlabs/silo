@@ -15,6 +15,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(feature = "engine-sources")]
+#[path = "remote/operations.rs"]
+mod operations;
+#[cfg(not(feature = "engine-sources"))]
 mod operations;
 /// Appends the key read from input to `authorized_keys` once. sshd runs this with the
 /// account's login shell, so the POSIX script is handed to `sh` in single quotes, which
@@ -46,7 +50,7 @@ fn config_lock() -> std::sync::MutexGuard<'static, ()> {
     crate::sync::lock_or_recover(&CONFIG_LOCK, "remote settings")
 }
 static REMOTE_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub(crate) type RuntimePathsResolver =
+pub type RuntimePathsResolver =
     dyn Fn() -> Result<crate::runtime::RuntimePaths, String> + Send + Sync + 'static;
 
 struct RemoteRuntime {
@@ -456,7 +460,7 @@ pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus,
 pub async fn device_list() -> Result<Vec<Device>, String> {
     settings_io(saved_devices).await
 }
-pub(crate) fn saved_devices() -> Result<Vec<Device>, String> {
+pub fn saved_devices() -> Result<Vec<Device>, String> {
     let _guard = config_lock();
     Ok(read_config()?.devices)
 }
@@ -477,7 +481,9 @@ pub async fn remove_device(device_id: String) -> Result<(), String> {
         poll_succeeded(&device_id);
         crate::remote_network::close_device(&device_id);
         crate::desktop_viewer::close_device(&device_id);
-        crate::macos_remote_viewer::close_device(&device_id);
+        if let Some(context) = silo_engine::context::current() {
+            context.close_remote_displays(Some(&device_id));
+        }
         Ok(())
     })
     .await
@@ -527,7 +533,7 @@ fn validate_address(address: &str) -> Result<(), String> {
     }
     Ok(())
 }
-pub(crate) fn authorization_command(address: &str) -> Result<String, String> {
+pub fn authorization_command(address: &str) -> Result<String, String> {
     authorize_command(address.trim())
 }
 /// The terminal command that lets the user trust the host key and unlock their SSH key.
@@ -822,13 +828,13 @@ fn tunnel_commands(
     (command, check)
 }
 
-pub(crate) fn prepare_device_key_setup(address: &str) -> Result<(String, String), String> {
+pub fn prepare_device_key_setup(address: &str) -> Result<(String, String), String> {
     let address = address.trim().to_owned();
     let command = key_setup_command(&directory()?, &address)?;
     Ok((address, command))
 }
 
-pub(crate) fn remember_device_key_setup(address: &str) {
+pub fn remember_device_key_setup(address: &str) {
     // Offer Silo's key alone again once it is installed there.
     remember_identity(address, Identity::SiloOnly);
 }
@@ -1208,13 +1214,13 @@ fn run_exchange(
     decode_reply(&response)
 }
 /// Legacy adapter for callers whose command error contract has not migrated yet.
-pub(crate) fn call_remote(device_id: &str, method: &str, params: Value) -> Result<Value, String> {
+pub fn call_remote(device_id: &str, method: &str, params: Value) -> Result<Value, String> {
     call_remote_typed(device_id, method, params).map_err(|error| error.message)
 }
 /// The methods the connected device `device_id` serves (its handshake), remembered for a
 /// minute so frequent callers (status polling) do not add a round trip each time.
 /// Failures are not remembered.
-pub(crate) fn device_capabilities(device_id: &str) -> Result<Vec<String>, BridgeError> {
+pub fn device_capabilities(device_id: &str) -> Result<Vec<String>, BridgeError> {
     static KNOWN: Mutex<Vec<(String, Instant, Vec<String>)>> = Mutex::new(Vec::new());
     const FRESH: Duration = Duration::from_secs(60);
     if let Some((_, _, known)) = crate::sync::lock_or_recover(&KNOWN, "remote capabilities")
@@ -1254,7 +1260,7 @@ fn name_version_mismatch(error: BridgeError, device: &str) -> BridgeError {
     BridgeError { message, ..error }
 }
 
-pub(crate) fn call_remote_typed(
+pub fn call_remote_typed(
     device_id: &str,
     method: &str,
     params: Value,
@@ -1563,12 +1569,16 @@ pub(crate) fn close_after_failed_poll(device: &str, error: &BridgeError) {
         PollFailure::Disconnected => {
             crate::remote_network::disconnect_device(device);
             crate::desktop_viewer::close_device(device);
-            crate::macos_remote_viewer::close_device(device);
+            if let Some(context) = silo_engine::context::current() {
+                context.close_remote_displays(Some(device));
+            }
         }
         PollFailure::Revoked => {
             crate::remote_network::close_device(device);
             crate::desktop_viewer::close_device(device);
-            crate::macos_remote_viewer::close_device(device);
+            if let Some(context) = silo_engine::context::current() {
+                context.close_remote_displays(Some(device));
+            }
         }
     }
 }
@@ -1589,7 +1599,7 @@ pub async fn remote_computer_action(
     result
 }
 
-pub(crate) fn remote_notice_computer(
+pub fn remote_notice_computer(
     device_id: &str,
     computer_id: &str,
     name: &str,
@@ -1631,7 +1641,7 @@ mod notice_tests {
 }
 
 /// Display name of one computer in a remote application snapshot.
-pub(crate) fn computer_name(state: &Value, computer_id: &str) -> Option<String> {
+pub fn computer_name(state: &Value, computer_id: &str) -> Option<String> {
     state["computers"]
         .as_array()?
         .iter()
@@ -1687,7 +1697,7 @@ pub async fn remote_delete_computer(
     result
 }
 /// Called before constructing the host app. A bridge never launches the GUI or runtime.
-pub(crate) fn run_bridge() -> Result<(), String> {
+pub fn run_bridge() -> Result<(), String> {
     let mut socket = UnixStream::connect(existing_directory()?.join("control.sock"))
         .map_err(|_| "Silo is not running on this device.".to_string())?;
     let request = read_frame(std::io::stdin().lock())?;
@@ -1743,7 +1753,7 @@ fn watch_controller(mut input: impl Read + Send + 'static, owner: UnixStream) {
 }
 /// The `guest.ssh` params for `--remote-guest HOST computer [PORT]`: a trailing guest port marks
 /// a published-port forward.
-pub(crate) fn guest_stream_params(args: &[String]) -> Result<Value, String> {
+pub fn guest_stream_params(args: &[String]) -> Result<Value, String> {
     match args {
         [_, computer] => Ok(json!({"computerId": computer})),
         [_, computer, port] => {
@@ -1757,7 +1767,7 @@ pub(crate) fn guest_stream_params(args: &[String]) -> Result<Value, String> {
         _ => Err("Expected a device and computer identity.".into()),
     }
 }
-pub(crate) fn run_remote_stream(
+pub fn run_remote_stream(
     device_id: &str,
     method: &str,
     params: Value,
@@ -1802,13 +1812,13 @@ pub(crate) fn run_remote_stream(
 }
 /// An open stream method on another device: the ssh child that runs its bridge, past the reply.
 /// Bytes written to `input` reach the stream and `output` yields what it sends.
-pub(crate) struct BridgeStream {
+pub struct BridgeStream {
     pub child: ChildGuard,
     pub input: std::process::ChildStdin,
     pub output: std::io::BufReader<std::process::ChildStdout>,
 }
 /// Ends and reaps its child process when dropped.
-pub(crate) struct ChildGuard(Child);
+pub struct ChildGuard(Child);
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -1861,7 +1871,7 @@ const OPEN_TIMED_OUT: &str =
 /// device has accepted it, so a refusal (computer not running, no capacity) comes back as its
 /// own message rather than as a dropped connection. Opening ends, and its ssh process is
 /// stopped, when `cancelled` turns true or the device does not answer within a minute.
-pub(crate) fn open_bridge_stream(
+pub fn open_bridge_stream(
     device_id: &str,
     method: &str,
     params: Value,
@@ -1993,7 +2003,7 @@ fn bind_control_socket(dir: &Path) -> Result<UnixListener, String> {
 /// Serves Connections for the app's lifetime. A failure never stops Silo from
 /// opening: it is kept for the settings page (`error`) and retried when the user turns
 /// Connections on again.
-pub(crate) fn start(
+pub fn start(
     paths: Arc<RuntimePathsResolver>,
     checkpoints: Arc<crate::remote_access::CheckpointHandler>,
     runtime_host: Arc<dyn crate::runtime::RuntimeHost>,
@@ -4873,7 +4883,7 @@ mod dispatch_tests {
         let served: std::collections::BTreeSet<String> =
             method_literals(include_str!("remote_access.rs"))
                 .into_iter()
-                .chain(method_literals(include_str!("runtime/remote_ops.rs")))
+                .chain(method_literals(include_str!("../engine/src/runtime/remote_ops.rs")))
                 .chain(method_literals(include_str!("macos_remote.rs")))
                 .collect();
         for method in &served {
@@ -5433,7 +5443,7 @@ mod ssh_connection_admission_tests {
     }
 }
 
-pub(crate) fn log_identity() -> Result<(String, String), String> {
+pub fn log_identity() -> Result<(String, String), String> {
     let _guard = config_lock();
     Ok((read_config()?.device_id, name()))
 }
@@ -5649,5 +5659,8 @@ mod config_io_limit_tests {
         assert_eq!(fs::read(&path).unwrap(), previous);
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "engine-sources"))]
+#[path = "remote/display_stream_tests.rs"]
+mod display_stream_tests;
+#[cfg(all(test, not(feature = "engine-sources")))]
 mod display_stream_tests;

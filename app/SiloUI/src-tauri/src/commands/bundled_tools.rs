@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use tauri::Manager;
 
-use crate::bundled_tools::{BundleKind, BundleKindSource};
+use crate::bundled_tools::BundleKind;
 
 pub(crate) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let executable = std::env::current_exe()
@@ -14,21 +14,19 @@ pub(crate) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     crate::bundled_tools::resolve(
         &executable,
         &resources,
-        tauri::utils::platform::bundle_type(),
+        bundle_kind(tauri::utils::platform::bundle_type()),
         appimage_root.as_deref(),
     )
 }
 
-impl BundleKindSource for Option<tauri::utils::config::BundleType> {
-    fn bundle_kind(self) -> Option<BundleKind> {
-        use tauri::utils::config::BundleType;
+pub(crate) fn bundle_kind(bundle: Option<tauri::utils::config::BundleType>) -> Option<BundleKind> {
+    use tauri::utils::config::BundleType;
 
-        self.map(|bundle| match bundle {
-            BundleType::App => BundleKind::App,
-            BundleType::AppImage => BundleKind::AppImage,
-            BundleType::Deb => BundleKind::Deb,
-            BundleType::Rpm => BundleKind::Rpm,
-            _ => BundleKind::Other,
-        })
-    }
+    bundle.map(|bundle| match bundle {
+        BundleType::App => BundleKind::App,
+        BundleType::AppImage => BundleKind::AppImage,
+        BundleType::Deb => BundleKind::Deb,
+        BundleType::Rpm => BundleKind::Rpm,
+        _ => BundleKind::Other,
+    })
 }

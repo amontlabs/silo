@@ -34,6 +34,6 @@ test("installers do not bundle the guest image and runtime preparation does not 
 })
 
 test("the app embeds the lock it downloads the image from", async () => {
-  const source = await read("src-tauri/src/guest_image.rs")
-  assert.match(source, /include_str!\("\.\.\/\.\.\/guest-image\/image-lock\.json"\)/)
+  const source = await read("src-tauri/engine/src/guest_image.rs")
+  assert.match(source, /include_str!\("\.\.\/\.\.\/\.\.\/guest-image\/image-lock\.json"\)/)
 })

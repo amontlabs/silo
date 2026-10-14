@@ -1,4 +1,7 @@
-use crate::github::{self, RuntimeAccess};
+use crate::{
+    github::{self, RuntimeAccess},
+    runtime,
+};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -9,11 +12,15 @@ struct TauriGitHubRuntime {
 
 impl RuntimeAccess for TauriGitHubRuntime {
     fn scoped_cached_tokens(&self, computer: &str) -> Result<crate::runtime::ScopedTokens, String> {
-        crate::runtime::scoped_cached_tokens(&self.app, computer)
+        crate::runtime::scoped_cached_tokens(&crate::commands::runtime::host(&self.app), computer)
     }
 
     fn github_policy_is_cached(&self, computer: &str, profile: &Value) -> Result<bool, String> {
-        crate::runtime::github_policy_is_cached(&self.app, computer, profile)
+        crate::runtime::github_policy_is_cached(
+            &crate::commands::runtime::host(&self.app),
+            computer,
+            profile,
+        )
     }
 
     fn apply_github_policy(
@@ -22,20 +29,29 @@ impl RuntimeAccess for TauriGitHubRuntime {
         revision: u64,
         profile: &Value,
     ) -> Result<(), String> {
-        crate::runtime::apply_github_policy(&self.app, computer, revision, profile)
+        crate::runtime::apply_github_policy(
+            &crate::commands::runtime::host(&self.app),
+            computer,
+            revision,
+            profile,
+        )
     }
 
     fn apply_github_identity(&self, computer: &str, identity: &Value) -> Result<(), String> {
-        crate::runtime::apply_github_identity(&self.app, computer, identity)
+        crate::runtime::apply_github_identity(
+            &crate::commands::runtime::host(&self.app),
+            computer,
+            identity,
+        )
     }
 
     fn is_pending_restore(&self, computer: &str) -> bool {
-        crate::runtime::runtime_paths(&self.app)
+        runtime::runtime_paths(&crate::commands::runtime::host(&self.app))
             .is_ok_and(|paths| crate::runtime::is_pending_restore(&paths, computer))
     }
 
     fn is_device_removed(&self, computer: &str) -> bool {
-        crate::runtime::runtime_paths(&self.app).is_ok_and(|paths| {
+        runtime::runtime_paths(&crate::commands::runtime::host(&self.app)).is_ok_and(|paths| {
             matches!(
                 crate::runtime::resolve_computer_id(&paths, computer),
                 Err(crate::runtime::RuntimeError::Invalid(_))
@@ -95,7 +111,7 @@ pub async fn connect_github(window: WebviewWindow) -> Result<Value, String> {
     let app = window.app_handle().clone();
     blocking("GitHub operation failed.", move || {
         let result = github::connect(generation, |url| {
-            crate::applications::open_browser(&app, url)
+            crate::commands::applications::open_browser(&app, url)
         });
         if result.is_ok() {
             if let Some(main) = app.get_webview_window("main") {
@@ -120,7 +136,7 @@ pub async fn reopen_github_authorization(window: WebviewWindow) -> Result<(), St
     let app = window.app_handle().clone();
     blocking("Cannot reopen GitHub authorization.", move || {
         let url = github::authorization_url()?;
-        crate::applications::open_browser(&app, &url)
+        crate::commands::applications::open_browser(&app, &url)
     })
     .await
 }
@@ -131,7 +147,7 @@ pub async fn manage_github_repositories(window: WebviewWindow) -> Result<(), Str
     let app = window.app_handle().clone();
     blocking("Cannot open GitHub repository access.", move || {
         let url = github::repository_authorization_url()?;
-        crate::applications::open_browser(&app, &url)
+        crate::commands::applications::open_browser(&app, &url)
     })
     .await
 }

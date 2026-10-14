@@ -23,14 +23,14 @@ fn state() -> &'static StartupState {
 
 /// The result of resuming saved lifecycle actions, reduced to the values startup needs.
 #[derive(Default)]
-pub(crate) struct RecoveredActions {
-    pub(crate) keep_stopped: HashSet<String>,
-    pub(crate) failures: Vec<String>,
+pub struct RecoveredActions {
+    pub keep_stopped: HashSet<String>,
+    pub failures: Vec<String>,
 }
 
 /// Host services used by the startup coordinator. Runtime and client adapters provide these
 /// operations so this module owns the startup policy without owning a UI framework handle.
-pub(crate) trait StartupServices: Send + Sync + 'static {
+pub trait StartupServices: Send + Sync + 'static {
     fn blocks_runtime_operations(&self) -> bool;
     fn wait_for_recovery(&self) -> Result<(), String>;
     fn prepare_runtime(&self);
@@ -179,7 +179,7 @@ fn startup_failure_title(count: usize) -> String {
 }
 
 // Called once by native app setup, never by a webview mount, refresh or reopen.
-pub(crate) fn install(services: Arc<dyn StartupServices>) {
+pub fn install(services: Arc<dyn StartupServices>) {
     let state = state();
     let Ok(_active) = state.active.lock() else {
         return;
@@ -255,15 +255,15 @@ pub(crate) fn install(services: Arc<dyn StartupServices>) {
     }
 }
 
-pub(crate) fn is_cancelled<T>(_host: T) -> bool {
+pub fn is_cancelled<T>(_host: T) -> bool {
     state().cancelled.load(Ordering::SeqCst)
 }
 
-pub(crate) fn cancel<T>(_host: T) {
+pub fn cancel<T>(_host: T) {
     state().cancelled.store(true, Ordering::SeqCst);
 }
 
-pub(crate) fn cancel_and_wait<T>(_host: T) {
+pub fn cancel_and_wait<T>(_host: T) {
     let state = state();
     state.cancelled.store(true, Ordering::SeqCst);
     // Finish the current bounded start; do not launch the remaining selections.

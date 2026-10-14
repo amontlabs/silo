@@ -45,7 +45,7 @@ exit "$?"
 "#;
 
 /// The ssh forward and the private directory holding its Unix socket.
-pub(crate) struct Tunnel {
+pub struct Tunnel {
     /// The watchdog shell, leader of the tunnel's process group.
     child: Child,
     /// Silo's end of the watchdog pipe; closing it ends the tunnel.
@@ -120,7 +120,7 @@ impl Tunnel {
         unsafe { libc::killpg(self.child.id() as i32, libc::SIGKILL) };
     }
 
-    pub(crate) fn spawn(
+    pub fn spawn(
         command: &Command,
         directory: Option<tempfile::TempDir>,
     ) -> std::io::Result<Self> {
@@ -155,7 +155,7 @@ impl Tunnel {
         self.child.id() as i32
     }
 
-    pub(crate) fn running(&mut self) -> bool {
+    pub fn running(&mut self) -> bool {
         if !self.exited && !matches!(self.child.try_wait(), Ok(None)) {
             self.exited = true;
         }

@@ -21,14 +21,18 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::system_integrations::NotificationDelivery;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotificationDelivery {
+    Delivered,
+    Skipped,
+}
 
 /// In-app toast event for backend-originated notices. Payload: `Notice`.
-pub(crate) const NOTICE_EVENT: &str = "silo://notice";
+pub const NOTICE_EVENT: &str = "silo://notice";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) enum Category {
+pub enum Category {
     /// Something the user started, or background work, failed.
     Failures,
     /// A computer changed state without a Silo operation causing it.
@@ -43,7 +47,7 @@ pub(crate) const LONG_OPERATION: std::time::Duration = std::time::Duration::from
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct NoticeComputer {
+pub struct NoticeComputer {
     /// Stable computer id, qualified by device when remote. Routes, groups and clears notices.
     pub id: String,
     /// Display name, shown in notification text.
@@ -52,7 +56,7 @@ pub(crate) struct NoticeComputer {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Notice {
+pub struct Notice {
     pub category: Category,
     /// Stable identity. A newer notice with the same key replaces the older one, both
     /// as a system notification and as an in-app toast.
@@ -76,7 +80,7 @@ impl Category {
 impl Notice {
     /// Where a click on the system notification opens the app. Same shape as
     /// `desktop/use-main-route.ts`.
-    pub(crate) fn route(&self) -> Value {
+    pub fn route(&self) -> Value {
         match &self.computer {
             Some(computer) => serde_json::json!({"tab": "computers", "computer": computer.id}),
             None => serde_json::json!({"tab": "computers"}),
@@ -84,7 +88,7 @@ impl Notice {
     }
 
     /// Notifications with the same thread collapse together in Notification Center.
-    pub(crate) fn thread(&self) -> &str {
+    pub fn thread(&self) -> &str {
         self.computer
             .as_ref()
             .map_or(self.category.as_str(), |computer| computer.id.as_str())
@@ -101,7 +105,7 @@ fn flag(settings: &Map<String, Value>, key: &str, legacy: &[&str]) -> bool {
         .all(|key| settings.get(*key).and_then(Value::as_bool).unwrap_or(true))
 }
 
-pub(crate) fn enabled(settings: &Map<String, Value>, category: Category) -> bool {
+pub fn enabled(settings: &Map<String, Value>, category: Category) -> bool {
     // Match the persisted settings defaults. OS authorization is checked separately.
     flag(settings, "notificationsEnabled", &[])
         && match category {
@@ -147,7 +151,7 @@ struct NoticeGate {
     cleared_through: AtomicU64,
 }
 
-pub(crate) struct PendingDelivery {
+pub struct PendingDelivery {
     notice: Notice,
     gate: Arc<NoticeGate>,
     revision: u64,
@@ -197,7 +201,7 @@ impl PendingDelivery {
         self.revision <= self.gate.cleared_through.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn deliver(
+    pub fn deliver(
         self,
         allowed: impl FnOnce(&Notice) -> bool,
         send: impl FnOnce(&Notice) -> Result<NotificationDelivery, String>,
@@ -234,26 +238,26 @@ impl PendingDelivery {
 
 static DELIVERED: LazyLock<Mutex<DeliveredIndex>> = LazyLock::new(Default::default);
 
-pub(crate) fn prepare_delivery(notice: Notice) -> PendingDelivery {
+pub fn prepare_delivery(notice: Notice) -> PendingDelivery {
     DELIVERED
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .prepare(notice)
 }
 
-pub(crate) fn withdraw_computer(computer_id: &str) -> PendingWithdrawal {
+pub fn withdraw_computer(computer_id: &str) -> PendingWithdrawal {
     DELIVERED
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .withdraw(computer_id)
 }
 
-pub(crate) struct PendingWithdrawal {
+pub struct PendingWithdrawal {
     notices: Vec<(String, Arc<NoticeGate>, u64)>,
 }
 
 impl PendingWithdrawal {
-    pub(crate) fn clear(self, mut clear: impl FnMut(&[String])) {
+    pub fn clear(self, mut clear: impl FnMut(&[String])) {
         for (key, gate, revision) in self.notices {
             let submitted = gate
                 .submitted
@@ -267,6 +271,7 @@ impl PendingWithdrawal {
     }
 }
 
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) use crate::commands::notifications::{clear_computer, notify, notify_native};
 
 /// Longest body shown in a system notification. Full detail stays in the app.
@@ -286,7 +291,7 @@ pub(crate) fn bounded_body(text: &str) -> String {
 
 /// What a lifecycle (start/stop/restart) operation ended as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Outcome<'a> {
+pub enum Outcome<'a> {
     Succeeded,
     /// The user cancelled. An expected result, never a notice.
     Cancelled,
@@ -301,7 +306,7 @@ fn seconds(elapsed: Duration) -> String {
 
 /// Notice for a computer start, stop or restart, local or remote. Failures always notify;
 /// successes only when the operation was long enough that the user likely looked away.
-pub(crate) fn lifecycle_notice(
+pub fn lifecycle_notice(
     action: &str,
     name: &str,
     computer: Option<NoticeComputer>,
@@ -379,7 +384,7 @@ pub(crate) fn transfer_notice(
 }
 
 /// A failure notice with a bounded body.
-pub(crate) fn failure(
+pub fn failure(
     key: &str,
     title: &str,
     message: &str,

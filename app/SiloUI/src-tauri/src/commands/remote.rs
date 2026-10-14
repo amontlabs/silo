@@ -7,12 +7,12 @@ struct TauriLocalAccess(AppHandle);
 
 impl remote_access::LocalAccess for TauriLocalAccess {
     fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String> {
-        let paths = runtime::runtime_paths(&self.0)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&self.0))?;
         crate::desktop_viewer::local_connection(&paths, computer, Some(computer_id))
     }
 
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String> {
-        let paths = runtime::runtime_paths(&self.0)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&self.0))?;
         crate::desktop::dispatch(&paths, method, params)
     }
 
@@ -31,9 +31,9 @@ impl remote_access::LocalAccess for TauriLocalAccess {
 pub(crate) fn start(app: &AppHandle) -> Result<(), String> {
     let resolver_app = app.clone();
     let paths: Arc<remote::RuntimePathsResolver> =
-        Arc::new(move || runtime::runtime_paths(&resolver_app));
+        Arc::new(move || runtime::runtime_paths(&crate::commands::runtime::host(&resolver_app)));
     let checkpoints = checkpoint_handler(app.clone());
-    let runtime_host: Arc<dyn runtime::RuntimeHost> = Arc::new(app.clone());
+    let runtime_host: Arc<dyn runtime::RuntimeHost> = Arc::new(crate::commands::runtime::host(app));
     let macos = Arc::new(crate::commands::macos_computers::new_context(app)?);
     let local_access = Arc::new(TauriLocalAccess(app.clone()));
     remote::start(paths, checkpoints, runtime_host, macos, local_access);
@@ -126,8 +126,8 @@ pub(crate) async fn remove_device(device_id: String) -> Result<(), String> {
 pub(crate) async fn authorize_device(app: AppHandle, address: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let command = remote::authorization_command(&address)?;
-        let application = crate::applications::selected_terminal(&app)?;
-        crate::applications::open_terminal(&app, &application, &command)
+        let application = crate::commands::applications::selected_terminal(&app)?;
+        crate::commands::applications::open_terminal(&app, &application, &command)
     })
     .await
     .map_err(|_| "Could not open the terminal.".to_owned())?
@@ -137,8 +137,8 @@ pub(crate) async fn authorize_device(app: AppHandle, address: String) -> Result<
 pub(crate) async fn setup_device_key(app: AppHandle, address: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let (address, command) = remote::prepare_device_key_setup(&address)?;
-        let application = crate::applications::selected_terminal(&app)?;
-        crate::applications::open_terminal(&app, &application, &command)?;
+        let application = crate::commands::applications::selected_terminal(&app)?;
+        crate::commands::applications::open_terminal(&app, &application, &command)?;
         remote::remember_device_key_setup(&address);
         Ok(())
     })
@@ -201,7 +201,7 @@ pub(crate) async fn remote_computer_action(
         started.elapsed(),
         outcome,
     ) {
-        crate::notifications::notify_native(&app, notice);
+        crate::commands::notifications::notify_native(&app, notice);
     }
     result
 }
@@ -267,7 +267,7 @@ pub(crate) async fn remote_delete_computer(
     let deleted = format!("silo-remote:{device_id}:{computer_id}");
     let result = remote::remote_delete_computer(device_id, computer_id, expected).await;
     if result.is_ok() {
-        crate::notifications::clear_computer(&app, &deleted);
+        crate::commands::notifications::clear_computer(&app, &deleted);
     }
     result
 }
@@ -321,7 +321,7 @@ pub(crate) async fn remote_open_network_port(
     })
     .await
     .map_err(|error| error.to_string())??;
-    crate::applications::open_browser(&app, &url)
+    crate::commands::applications::open_browser(&app, &url)
 }
 
 #[tauri::command]

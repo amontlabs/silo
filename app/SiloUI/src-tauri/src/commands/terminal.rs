@@ -6,7 +6,7 @@ pub(crate) fn open(app: &AppHandle, name: &str) -> Result<(), String> {
     if let Some((device, computer)) = remote_access::target(name)? {
         // ssh gets `-F`, so the user's ~/.ssh/config needs no Include (G-11).
         let (alias, config) = editor::prepare_remote_private(&device, &computer, "/workspace")?;
-        let application = applications::selected_terminal(app)?;
+        let application = crate::commands::applications::selected_terminal(app)?;
         let command = [
             "/usr/bin/ssh",
             "-F",
@@ -18,12 +18,12 @@ pub(crate) fn open(app: &AppHandle, name: &str) -> Result<(), String> {
         .map(|argument| terminal::quote(argument))
         .collect::<Vec<_>>()
         .join(" ");
-        return applications::open_terminal(app, &application, &command);
+        return crate::commands::applications::open_terminal(app, &application, &command);
     }
 
     runtime::validate_name(name).map_err(|error| error.to_string())?;
-    let application = applications::selected_terminal(app)?;
-    let paths = runtime::runtime_paths(app)?;
+    let application = crate::commands::applications::selected_terminal(app)?;
+    let paths = runtime::runtime_paths(&crate::commands::runtime::host(app))?;
     let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
     if !metadata
         .computers
@@ -33,5 +33,9 @@ pub(crate) fn open(app: &AppHandle, name: &str) -> Result<(), String> {
         return Err("Choose a local Silo computer.".into());
     }
     terminal::running_computer(&paths, name)?;
-    applications::open_terminal(app, &application, &terminal::command(&paths, name)?)
+    crate::commands::applications::open_terminal(
+        app,
+        &application,
+        &terminal::command(&paths, name)?,
+    )
 }

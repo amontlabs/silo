@@ -16,9 +16,9 @@ use std::{
 static IMPORT_LOCK: Mutex<()> = Mutex::new(());
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-const LOCK: &str = include_str!("../../guest-image/image-lock.json");
+const LOCK: &str = include_str!("../../../guest-image/image-lock.json");
 /// The file name of the published archive inside `<root>/<version>/`.
-pub(crate) const ARCHIVE_FILE: &str = "image.tar.gz";
+pub const ARCHIVE_FILE: &str = "image.tar.gz";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,14 +35,14 @@ pub(crate) struct GuestImageManifest {
 
 /// The image this build pins for the device's architecture and where its archive is published.
 #[derive(Clone, Debug)]
-pub(crate) struct PinnedImage {
-    pub(crate) manifest: GuestImageManifest,
-    pub(crate) url: String,
+pub struct PinnedImage {
+    pub manifest: GuestImageManifest,
+    pub url: String,
 }
 
 impl PinnedImage {
     /// The image pinned in `guest-image/image-lock.json` for this device.
-    pub(crate) fn host() -> Result<Self, String> {
+    pub fn host() -> Result<Self, String> {
         let key = match std::env::consts::ARCH {
             "aarch64" => "arm64",
             "x86_64" => "amd64",
@@ -113,14 +113,14 @@ pub(crate) fn pinned_version() -> Option<String> {
         .map(|pinned| pinned.manifest.version)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_VERSION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The image version tests run against on this thread: v3 unless pinned.
-#[cfg(test)]
-pub(crate) fn test_version() -> Option<String> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_version() -> Option<String> {
     Some(TEST_VERSION.with(|slot| {
         slot.borrow()
             .clone()
@@ -129,18 +129,18 @@ pub(crate) fn test_version() -> Option<String> {
 }
 
 /// Pins the image version for the current test thread until the guard drops.
-#[cfg(test)]
-pub(crate) fn pin_test_version(version: &str) -> TestVersionGuard {
+#[cfg(any(test, feature = "test-support"))]
+pub fn pin_test_version(version: &str) -> TestVersionGuard {
     let previous = TEST_VERSION.with(|slot| slot.replace(Some(version.into())));
     TestVersionGuard { previous }
 }
 
-#[cfg(test)]
-pub(crate) struct TestVersionGuard {
+#[cfg(any(test, feature = "test-support"))]
+pub struct TestVersionGuard {
     previous: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for TestVersionGuard {
     fn drop(&mut self) {
         TEST_VERSION.with(|slot| *slot.borrow_mut() = self.previous.take());
@@ -225,7 +225,7 @@ fn cached(cache: &GlobalCache, manifest: &GuestImageManifest) -> bool {
         && cache.all_layers_materialized(&layers)
 }
 
-pub(crate) fn check_space(directory: &Path, required: u64) -> Result<(), String> {
+pub fn check_space(directory: &Path, required: u64) -> Result<(), String> {
     let path = std::ffi::CString::new(directory.as_os_str().as_encoded_bytes())
         .map_err(|_| "Invalid VM image storage location.")?;
     let mut statistics = std::mem::MaybeUninit::<libc::statvfs>::uninit();
@@ -265,7 +265,7 @@ pub(crate) fn is_imported(paths: &RuntimePaths) -> bool {
     PinnedImage::host().is_ok_and(|pinned| is_imported_as(paths, &pinned.manifest))
 }
 
-pub(crate) fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bool {
+pub fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bool {
     // A read-only check must not create the runtime home: before the alias is prepared,
     // creating `cache` beneath it would make the alias a real directory.
     let directory = paths.home.join("cache");
@@ -281,7 +281,7 @@ pub(crate) fn prepare<R: RuntimeRunner + ?Sized>(
     prepare_as(runner, paths, &pinned.manifest)
 }
 
-pub(crate) fn prepare_as<R: RuntimeRunner + ?Sized>(
+pub fn prepare_as<R: RuntimeRunner + ?Sized>(
     runner: &R,
     paths: &RuntimePaths,
     manifest: &GuestImageManifest,

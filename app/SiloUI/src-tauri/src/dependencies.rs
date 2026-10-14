@@ -225,10 +225,10 @@ struct GitExecutableHashes {
     git_remote_https: String,
 }
 
-pub(crate) struct ProbePaths {
-    pub(crate) executable_dir: PathBuf,
-    pub(crate) resource_dir: PathBuf,
-    pub(crate) frameworks_dir: Option<PathBuf>,
+pub struct ProbePaths {
+    pub executable_dir: PathBuf,
+    pub resource_dir: PathBuf,
+    pub frameworks_dir: Option<PathBuf>,
     #[cfg(target_os = "linux")]
     pub(crate) runtime_library: Option<PathBuf>,
 }
@@ -1256,7 +1256,7 @@ fn collect(request_id: String, paths: ProbePaths) -> DependencyReport {
     )
 }
 
-pub(crate) fn validate_request_id(request_id: &str) -> Result<(), String> {
+pub fn validate_request_id(request_id: &str) -> Result<(), String> {
     if request_id.trim().is_empty() || request_id.len() > 128 {
         Err("Invalid dependency-check request ID".into())
     } else {
@@ -1264,7 +1264,7 @@ pub(crate) fn validate_request_id(request_id: &str) -> Result<(), String> {
     }
 }
 
-pub(crate) fn read_report(request_id: String, paths: ProbePaths) -> DependencyReport {
+pub fn read_report(request_id: String, paths: ProbePaths) -> DependencyReport {
     let report = collect(request_id, paths);
     eprintln!("dependency check response: {}", report.checks.len());
     report
@@ -1432,7 +1432,7 @@ mod tests {
         // runtime-inputs.json is the single list of pinned patches. Every listed
         // patch must match its checked-in bytes, and every checked-in patch must
         // be listed, so adding a patch cannot silently skip this check.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let root = crate::test_support::manifest_root().join("..");
         let mut listed = std::collections::BTreeSet::new();
         for input in &RUNTIME_INPUTS.patches {
             assert!(

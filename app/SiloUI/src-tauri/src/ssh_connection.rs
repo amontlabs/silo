@@ -114,12 +114,12 @@ pub(crate) fn forget_device(home: &Path, device: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) enum ConnectionResult {
+pub enum ConnectionResult {
     Command(String),
     KeyExport { source: PathBuf, filename: String },
 }
 
-pub(crate) fn prepare(
+pub fn prepare(
     paths: &runtime::RuntimePaths,
     computer: Option<String>,
     device_id: Option<String>,

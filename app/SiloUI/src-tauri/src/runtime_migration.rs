@@ -78,22 +78,22 @@ pub(crate) fn selected_runtime_storage(app_data: &Path) -> Result<PathBuf, Strin
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct MigrationState {
+pub struct MigrationState {
     version: u32,
-    pub(crate) status: String,
-    pub(crate) stage: String,
-    pub(crate) logs: Vec<String>,
-    pub(crate) migrated_count: usize,
-    pub(crate) failed_count: usize,
-    pub(crate) total_count: usize,
-    pub(crate) can_continue: bool,
+    pub status: String,
+    pub stage: String,
+    pub logs: Vec<String>,
+    pub migrated_count: usize,
+    pub failed_count: usize,
+    pub total_count: usize,
+    pub can_continue: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) log_path: Option<String>,
+    pub log_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) error: Option<String>,
+    pub error: Option<String>,
 }
 
-pub(crate) struct Controller {
+pub struct Controller {
     app_data: PathBuf,
     path: PathBuf,
     state: Mutex<MigrationState>,
@@ -101,7 +101,7 @@ pub(crate) struct Controller {
 }
 
 impl Controller {
-    pub(crate) fn new(app_data: PathBuf) -> Self {
+    pub fn new(app_data: PathBuf) -> Self {
         let path = app_data.join(FILE);
         let (state, writable) = match initial(&path, &app_data) {
             Ok(state) => (state, true),
@@ -120,36 +120,36 @@ impl Controller {
         }
     }
 
-    pub(crate) fn snapshot(&self) -> Result<MigrationState, String> {
+    pub fn snapshot(&self) -> Result<MigrationState, String> {
         self.state
             .lock()
             .map(|state| state.clone())
             .map_err(|_| "Migration state is unavailable.".to_string())
     }
 
-    pub(crate) fn ensure_ready(&self) -> Result<(), String> {
+    pub fn ensure_ready(&self) -> Result<(), String> {
         let state = self.snapshot()?;
         self.ensure_ready_for(&state)
     }
 
-    pub(crate) fn ensure_ready_for(&self, state: &MigrationState) -> Result<(), String> {
+    pub fn ensure_ready_for(&self, state: &MigrationState) -> Result<(), String> {
         check_ready(self.writable, &state.status)
     }
 
-    pub(crate) fn runtime_storage(&self) -> Result<PathBuf, String> {
+    pub fn runtime_storage(&self) -> Result<PathBuf, String> {
         let state = self.snapshot()?;
         usable_storage(&self.app_data, self.writable, &state.status)
     }
 
-    pub(crate) fn blocks_operations(&self) -> bool {
+    pub fn blocks_operations(&self) -> bool {
         self.ensure_ready().is_err()
     }
 
-    pub(crate) fn needs_recovery(&self) -> Result<bool, String> {
+    pub fn needs_recovery(&self) -> Result<bool, String> {
         Ok(generation(&self.app_data)?.is_none())
     }
 
-    pub(crate) fn staged_storage(&self) -> PathBuf {
+    pub fn staged_storage(&self) -> PathBuf {
         self.app_data.join(CONVERTED)
     }
 
@@ -171,15 +171,15 @@ impl Controller {
         Ok(next)
     }
 
-    pub(crate) fn record_failure(&self, error: String) -> Result<(), String> {
+    pub fn record_failure(&self, error: String) -> Result<(), String> {
         record_failure(&self.state, &self.path, error)
     }
 
-    pub(crate) fn prepare_retry(&self) -> Result<MigrationState, String> {
+    pub fn prepare_retry(&self) -> Result<MigrationState, String> {
         self.update(|state| prepare_retry(state, &self.app_data))
     }
 
-    pub(crate) fn continue_after_failure(&self) -> Result<MigrationState, String> {
+    pub fn continue_after_failure(&self) -> Result<MigrationState, String> {
         if !self.writable {
             return Err("Saved migration data needs manual repair. The file was preserved.".into());
         }
@@ -207,7 +207,7 @@ impl Controller {
         })
     }
 
-    pub(crate) fn convert_with_progress(
+    pub fn convert_with_progress(
         &self,
         runner: &dyn runtime::RuntimeRunner,
         paths: &runtime::RuntimePaths,
@@ -953,7 +953,7 @@ fn usable_storage(app_data: &Path, writable: bool, status: &str) -> Result<PathB
 /// Record a failed migration in memory even when saving it fails (a full disk
 /// is the likely cause of the failed copy), so Retry and Continue stay
 /// available for this session. The persistence error is returned.
-pub(crate) async fn migration_snapshot(
+pub async fn migration_snapshot(
     controller: Arc<Controller>,
 ) -> Result<MigrationState, String> {
     tokio::task::spawn_blocking(move || {
@@ -1039,11 +1039,18 @@ impl BackupLocations {
 }
 
 #[cfg(test)]
+#[cfg_attr(feature = "engine-sources", path = "runtime_migration/guard_tests.rs")]
 mod guard_tests;
 #[cfg(test)]
+#[cfg_attr(feature = "engine-sources", path = "runtime_migration/interrupted_tests.rs")]
 mod interrupted_tests;
+#[cfg(feature = "engine-sources")]
+#[path = "runtime_migration/vocabulary.rs"]
+pub mod vocabulary;
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) mod vocabulary;
 #[cfg(test)]
+#[cfg_attr(feature = "engine-sources", path = "runtime_migration/vocabulary_tests.rs")]
 pub(crate) mod vocabulary_tests;
 
 #[cfg(test)]

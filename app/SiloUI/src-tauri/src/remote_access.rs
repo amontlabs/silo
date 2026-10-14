@@ -4,7 +4,7 @@ use crate::{remote, runtime};
 use serde_json::{json, Value};
 use std::process::{Child, Command, Stdio};
 
-pub(crate) fn target(value: &str) -> Result<Option<(String, String)>, String> {
+pub fn target(value: &str) -> Result<Option<(String, String)>, String> {
     let Some(rest) = value.strip_prefix("silo-remote:") else {
         return Ok(None);
     };
@@ -26,11 +26,11 @@ fn computer_name(paths: &runtime::RuntimePaths, params: &Value) -> Result<String
     runtime::remote_ops::local_computer_name_in(paths, string(params, "computerId")?)
 }
 
-pub(crate) type CheckpointHandler = dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync;
+pub type CheckpointHandler = dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync;
 
 /// Client services used by the local Connections adapter while their domains finish
 /// moving behind engine paths. The bridge passes only plain values through this seam.
-pub(crate) trait LocalAccess: Send + Sync {
+pub trait LocalAccess: Send + Sync {
     fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String>;
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String>;
     fn chatgpt_status(&self) -> Result<Value, String>;

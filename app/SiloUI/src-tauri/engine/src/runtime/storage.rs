@@ -721,7 +721,7 @@ fn maintenance_tick(
     periodic(runner, paths, &recovery.unresolved)
 }
 
-pub(crate) fn start_monitor(host: Arc<dyn RuntimeHost>) {
+pub fn start_monitor(host: Arc<dyn RuntimeHost>) {
     thread::spawn(move || {
         loop {
             // Periodic background work skips whenever any operation is active or waiting.
@@ -741,7 +741,7 @@ pub(crate) fn start_monitor(host: Arc<dyn RuntimeHost>) {
     });
 }
 
-pub(crate) fn workspace_storage(
+pub fn workspace_storage(
     host: &dyn RuntimeHost,
     id: &str,
     reclaim: bool,

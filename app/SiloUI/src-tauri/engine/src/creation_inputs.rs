@@ -27,7 +27,7 @@ impl Needs {
 
 /// The ChatGPT app as seen by a waiting creation.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ChatGpt {
+pub enum ChatGpt {
     Pending,
     Downloading { received: u64, total: u64 },
     Verifying,
@@ -36,15 +36,36 @@ pub(crate) enum ChatGpt {
     Failed { reason: String },
 }
 
+impl From<Option<crate::chatgpt_app::Status>> for ChatGpt {
+    fn from(status: Option<crate::chatgpt_app::Status>) -> Self {
+        use crate::chatgpt_app::Status;
+
+        match status {
+            None | Some(Status::Idle) => Self::Pending,
+            Some(Status::Downloading {
+                received_bytes,
+                total_bytes,
+            }) => Self::Downloading {
+                received: received_bytes,
+                total: total_bytes,
+            },
+            Some(Status::Verifying) => Self::Verifying,
+            Some(Status::Extracting) => Self::Extracting,
+            Some(Status::Ready { .. }) => Self::Ready,
+            Some(Status::Failed { reason, .. }) => Self::Failed { reason },
+        }
+    }
+}
+
 /// One step shown while waiting.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Step {
+pub enum Step {
     Image,
     ChatGpt(ChatGpt),
 }
 
 /// The outside world of a wait, replaceable in tests.
-pub(crate) trait Inputs: Send + Sync {
+pub trait Inputs: Send + Sync {
     /// Blocks until the VM image is imported.
     fn ensure_image(&self) -> Result<(), String>;
     fn chatgpt(&self) -> ChatGpt;
@@ -58,15 +79,15 @@ pub(crate) trait Inputs: Send + Sync {
 }
 
 /// Builds the host-side inputs for one creation wait. The UI adapter installs this once at
-/// startup; the wait itself and its state stay independent of Tauri.
-pub(crate) trait InputsProvider: Send + Sync + 'static {
+/// startup; the wait itself and its state stay independent of the desktop host.
+pub trait InputsProvider: Send + Sync + 'static {
     fn create(&self, paths: &RuntimePaths, request_id: &str) -> Arc<dyn Inputs>;
 }
 
 static INPUTS_PROVIDER: OnceLock<Arc<dyn InputsProvider>> = OnceLock::new();
 
 /// Installs the host adapter once at app startup.
-pub(crate) fn install_provider(provider: Arc<dyn InputsProvider>) -> Result<(), String> {
+pub fn install_provider(provider: Arc<dyn InputsProvider>) -> Result<(), String> {
     INPUTS_PROVIDER
         .set(provider)
         .map_err(|_| "Creation inputs are already installed".to_owned())
@@ -169,7 +190,7 @@ pub(crate) fn skip(request_id: &str) {
 }
 
 /// Whether the user asked this creation to finish without computer use.
-pub(crate) fn was_skipped(request_id: &str) -> bool {
+pub fn was_skipped(request_id: &str) -> bool {
     with_set(&SKIPPED_REQUESTS, |set| set.contains(request_id))
 }
 

@@ -109,7 +109,7 @@ fn github_guest_bootstrap_and_live_identity() {
         .tempdir_in(crate::test_support::live::temp_root())
         .unwrap();
     let paths = RuntimePaths {
-        guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        guest_image: crate::test_support::manifest_root()
             .join("runtime/guest-image"),
         executable,
         library,
@@ -435,7 +435,7 @@ fn github_authenticated_guest_workflow() {
         .tempdir_in(crate::test_support::live::temp_root())
         .unwrap();
     let paths = RuntimePaths {
-        guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        guest_image: crate::test_support::manifest_root()
             .join("runtime/guest-image"),
         executable: PathBuf::from(required("SILO_TEST_MSB")),
         library: PathBuf::from(required("SILO_TEST_LIBKRUNFW")),

@@ -12,10 +12,10 @@ use std::{
     time::Duration,
 };
 
-pub(crate) fn quote(value: &str) -> String {
+pub fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
-pub(crate) fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
+pub fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     let user = crate::working_account::USER;
     runtime::validate_name(name).map_err(|e| e.to_string())?;
     let home = paths.home.to_str().ok_or("Invalid runtime home path.")?;
@@ -46,7 +46,7 @@ pub(crate) fn command(paths: &RuntimePaths, name: &str) -> Result<String, String
     Ok(args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" "))
 }
 /// The inspected computer, or "Start <name> first." when it is stopped or has no runtime computer yet.
-pub(crate) fn running_computer(
+pub fn running_computer(
     paths: &RuntimePaths,
     name: &str,
 ) -> Result<runtime::InspectedSandbox, String> {
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn opens_in_computer_without_starting_a_stopped_computer() {
         let paths = RuntimePaths {
-            guest_image: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            guest_image: crate::test_support::manifest_root()
                 .join("runtime/guest-image"),
             executable: "/tmp/Silo app/msb".into(),
             home: "/tmp/runtime home".into(),

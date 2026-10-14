@@ -48,7 +48,7 @@ npm --prefix app/SiloUI run typecheck
 npm --prefix app/SiloUI run lint
 npm --prefix app/SiloUI test
 cargo +1.94.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
-cargo test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked
+cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --locked
 npm --prefix app/SiloUI run test:release
 ```
 

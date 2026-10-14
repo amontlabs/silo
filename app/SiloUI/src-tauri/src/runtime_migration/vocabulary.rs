@@ -90,8 +90,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(feature = "engine-sources")]
+#[path = "vocabulary/convert.rs"]
+mod convert;
+#[cfg(not(feature = "engine-sources"))]
 mod convert;
 #[cfg(test)]
+#[cfg_attr(feature = "engine-sources", path = "vocabulary/convert_tests.rs")]
 mod convert_tests;
 
 use convert::computers_metadata;
@@ -169,7 +174,7 @@ impl Target {
 
 /// Converts the saved data of this channel unless a previous launch already did, and
 /// returns a message for the user when it could not. Call before anything reads the files.
-pub(crate) fn run() -> Result<(), String> {
+pub fn run() -> Result<(), String> {
     let context = silo_engine::context::current().ok_or_else(|| FAILED.to_string())?;
     let paths = context.paths();
     let locations = Locations {

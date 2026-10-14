@@ -1,5 +1,6 @@
 use crate::{
     bridge_error::BridgeError,
+    runtime,
     runtime::runtime_logs::{self, Page, Query},
 };
 use tauri::AppHandle;
@@ -36,6 +37,7 @@ pub(crate) fn query(app: &AppHandle, request: Query) -> Result<Page, BridgeError
             .map_err(BridgeError::from);
     }
 
-    let paths = crate::runtime::runtime_paths(app).map_err(BridgeError::from)?;
+    let paths =
+        runtime::runtime_paths(&crate::commands::runtime::host(app)).map_err(BridgeError::from)?;
     runtime_logs::query_local(&paths, request, &device_id, &device_name).map_err(BridgeError::from)
 }

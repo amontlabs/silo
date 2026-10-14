@@ -36,8 +36,8 @@ fn refreshed_state(
     app: &AppHandle,
     paths: &runtime::RuntimePaths,
 ) -> Result<runtime::ApplicationSource, String> {
-    let state =
-        runtime::application_state_response(app, paths).map_err(|error| error.to_string())?;
+    let state = runtime::application_state_response(&crate::commands::runtime::host(app), paths)
+        .map_err(|error| error.to_string())?;
     publish_application_state_changed();
     Ok(state)
 }
@@ -51,7 +51,7 @@ pub(crate) async fn create_checkpoint(
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&worker_app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::create(&paths, &computer_id, &name)?;
         refreshed_state(&worker_app, &paths)
     })
@@ -72,7 +72,7 @@ pub(crate) async fn fork_checkpoint(
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&worker_app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::fork(
             &paths,
             &AppForkAssignments,
@@ -99,7 +99,7 @@ pub(crate) async fn restore_checkpoint(
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&worker_app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::restore(&paths, &computer_id, &checkpoint_id)?;
         refreshed_state(&worker_app, &paths)
     })
@@ -118,7 +118,7 @@ pub(crate) async fn abandon_restore(
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&worker_app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::abandon_restore(&paths, &computer_id)?;
         refreshed_state(&worker_app, &paths)
     })
@@ -138,7 +138,7 @@ pub(crate) async fn delete_checkpoint(
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&worker_app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::delete(&paths, &computer_id, &checkpoint_id)?;
         refreshed_state(&worker_app, &paths)
     })
@@ -155,7 +155,7 @@ pub(crate) async fn read_checkpoint_usage(
     computer_id: String,
 ) -> Result<checkpoints::CheckpointUsage, String> {
     tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
         checkpoints::read_usage(&paths, &computer_id)
     })
     .await

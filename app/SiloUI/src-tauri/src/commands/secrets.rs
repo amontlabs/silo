@@ -8,15 +8,18 @@ struct TauriSecretsRuntime {
 
 impl RuntimeAccess for TauriSecretsRuntime {
     fn apply_secrets(&self, computer: &str) -> Result<Vec<String>, String> {
-        crate::runtime::apply_secrets(&self.app, computer)
+        crate::runtime::apply_secrets(&crate::commands::runtime::host(&self.app), computer)
     }
 
     fn validate_computers(&self, computers: &[String]) -> Result<(), String> {
-        crate::runtime::validate_secret_computers(&self.app, computers)
+        crate::runtime::validate_secret_computers(
+            &crate::commands::runtime::host(&self.app),
+            computers,
+        )
     }
 
     fn revoke_secret(&self, record: &PendingRevocation) -> Result<bool, String> {
-        crate::runtime::revoke_secret(&self.app, record)
+        crate::runtime::revoke_secret(&crate::commands::runtime::host(&self.app), record)
     }
 }
 

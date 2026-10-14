@@ -10,7 +10,7 @@ use std::{
 
 /// An editor command that accepts a computer folder.
 #[derive(Debug, PartialEq)]
-pub(crate) struct EditorCommand {
+pub struct EditorCommand {
     pub program: PathBuf,
     /// Arguments before Silo's own (for example `run <app id>` for Flatpak).
     pub args: Vec<OsString>,
@@ -272,7 +272,7 @@ pub(crate) fn child_environment() -> Vec<(OsString, Option<OsString>)> {
 }
 
 /// Gives a child the system environment instead of the AppImage's (G-24).
-pub(crate) fn sanitize_child(command: &mut Command) -> &mut Command {
+pub fn sanitize_child(command: &mut Command) -> &mut Command {
     for (name, value) in child_environment() {
         match value {
             Some(value) => command.env(name, value),

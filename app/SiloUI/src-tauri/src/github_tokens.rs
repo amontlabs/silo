@@ -3,12 +3,12 @@ use crate::github_http::{self, Authentication, Request};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 
-pub(crate) struct Configuration {
+pub struct Configuration {
     pub client_id: String,
     pub client_secret: String,
 }
 #[derive(Clone, Copy)]
-pub(crate) enum Operation {
+pub enum Operation {
     Exchange,
     Refresh,
     Scope,
@@ -121,7 +121,7 @@ fn session(value: Value) -> Result<Value, String> {
         "expiresIn":id(&value["expires_in"])?, "refreshTokenExpiresIn":id(&value["refresh_token_expires_in"])?}),
     )
 }
-pub(crate) fn execute(
+pub fn execute(
     config: &Configuration,
     operation: Operation,
     body: Value,

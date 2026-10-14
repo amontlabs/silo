@@ -19,18 +19,18 @@ pub(crate) const RESET_HEIGHT: u32 = 900;
 const PROBE_WAIT: Duration = Duration::from_secs(2);
 /// The transport opens shortly after the page loads; probing stops after this
 /// many attempts spaced by `PROBE_PAUSE`.
-pub(crate) const PROBE_ATTEMPTS: u32 = 20;
-pub(crate) const PROBE_PAUSE: Duration = Duration::from_millis(500);
+pub const PROBE_ATTEMPTS: u32 = 20;
+pub const PROBE_PAUSE: Duration = Duration::from_millis(500);
 
 /// The longest one viewer's sound check keeps probing, however many times the page
 /// reloads and restarts it.
-pub(crate) const PROBE_DEADLINE: Duration = Duration::from_secs(60);
+pub const PROBE_DEADLINE: Duration = Duration::from_secs(60);
 
-pub(crate) const SUPERSEDED: &str = "The desktop sound check was cancelled.";
+pub const SUPERSEDED: &str = "The desktop sound check was cancelled.";
 const NOT_READY: &str = "The desktop display is not ready.";
 
 /// The operations on a viewer's page that sound and resizing need.
-pub(crate) trait Media {
+pub trait Media {
     fn capabilities(&self, timeout: Duration) -> Result<Capabilities, String>;
     fn set_audio_muted(&self, muted: bool) -> Result<(), String>;
     fn set_audio_active(&self, active: bool) -> Result<(), String>;
@@ -55,7 +55,7 @@ impl Media for Bridge<'_> {
 /// One probe: `None` while the page's transport is not open yet, otherwise
 /// whether this web engine can play the computer's sound. When it cannot, the
 /// computer is told to stop encoding audio.
-pub(crate) fn probe_step(media: &dyn Media) -> Result<Option<bool>, String> {
+pub fn probe_step(media: &dyn Media) -> Result<Option<bool>, String> {
     let capabilities = media.capabilities(PROBE_WAIT)?;
     if !capabilities.transport {
         return Ok(None);
@@ -70,7 +70,7 @@ pub(crate) fn probe_step(media: &dyn Media) -> Result<Option<bool>, String> {
 /// Repeats `step` until it answers, treating errors (no connection or page
 /// yet) like an unopened transport, for at most `attempts` tries. It stops as
 /// soon as `obsolete` reports that nobody wants the answer any more.
-pub(crate) fn probe(
+pub fn probe(
     mut step: impl FnMut() -> Result<Option<bool>, String>,
     attempts: u32,
     pause: Duration,
@@ -103,7 +103,7 @@ pub(crate) fn apply_audio(media: &dyn Media, muted: bool, active: bool) -> Resul
 /// Applies `revision` unless a newer one already ran, so updates that reach
 /// the worker pool out of order cannot leave an older state applied last. The
 /// lock serializes updates to one page.
-pub(crate) fn apply_audio_ordered(
+pub fn apply_audio_ordered(
     latest: &Mutex<u64>,
     revision: u64,
     media: &dyn Media,
@@ -134,14 +134,14 @@ struct ProbeSlot {
 /// at most one waiter. A cancellation drops the waiter and ends the probe at its
 /// next step. A worker that ends removes its viewer's slot.
 #[derive(Default)]
-pub(crate) struct Probes {
+pub struct Probes {
     slots: Mutex<HashMap<String, ProbeSlot>>,
 }
 
 impl Probes {
     /// Registers a waiter for the viewer's next answer. The flag says the
     /// caller must run [`Probes::work`] because no worker is running.
-    pub(crate) fn enlist(
+    pub fn enlist(
         &self,
         label: &str,
     ) -> Result<(tokio::sync::oneshot::Receiver<Outcome>, bool), String> {
@@ -166,7 +166,7 @@ impl Probes {
     }
 
     /// Abandons the viewer's waiting requests and any probe in progress.
-    pub(crate) fn cancel(&self, label: &str) {
+    pub fn cancel(&self, label: &str) {
         if let Ok(mut slots) = self.slots.lock() {
             if let Some(slot) = slots.get_mut(label) {
                 slot.epoch += 1;
@@ -190,7 +190,7 @@ impl Probes {
     /// of a probe that no later request or cancellation overtook. Restarts stop
     /// after `deadline` in total, which fails the waiter. `run` receives the
     /// check for an obsolete probe.
-    pub(crate) fn work(
+    pub fn work(
         &self,
         label: &str,
         deadline: Duration,
@@ -255,14 +255,14 @@ impl Probes {
 
 static PROBES: OnceLock<Probes> = OnceLock::new();
 
-pub(crate) fn probes() -> &'static Probes {
+pub fn probes() -> &'static Probes {
     PROBES.get_or_init(Default::default)
 }
 
 /// The newest sound revision applied for each viewer window.
 static SOUND_REVISIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<u64>>>>> = OnceLock::new();
 
-pub(crate) fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
+pub fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
     let mut slots = SOUND_REVISIONS
         .get_or_init(Default::default)
         .lock()
@@ -271,7 +271,7 @@ pub(crate) fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
 }
 
 /// Drops the ordering state of a closed viewer window.
-pub(crate) fn forget_viewer(label: &str) {
+pub fn forget_viewer(label: &str) {
     probes().forget(label);
     if let Some(slots) = SOUND_REVISIONS.get() {
         if let Ok(mut slots) = slots.lock() {
@@ -280,13 +280,13 @@ pub(crate) fn forget_viewer(label: &str) {
     }
 }
 
-pub(crate) fn reset_screen(media: &dyn Media) -> Result<(), String> {
+pub fn reset_screen(media: &dyn Media) -> Result<(), String> {
     media.reset_resolution(RESET_WIDTH, RESET_HEIGHT)
 }
 
 #[derive(Serialize)]
-pub(crate) struct SoundSupport {
-    pub(crate) sound: bool,
+pub struct SoundSupport {
+    pub sound: bool,
 }
 
 #[cfg(test)]

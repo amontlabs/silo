@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 
-pub(crate) mod launch;
+#[path = "applications/launch.rs"]
+pub mod launch;
 #[cfg(target_os = "linux")]
+#[cfg_attr(feature = "engine-sources", path = "applications/linux.rs")]
 mod linux;
 #[cfg(target_os = "macos")]
+#[cfg_attr(feature = "engine-sources", path = "applications/macos.rs")]
 mod macos;
 #[cfg(target_os = "linux")]
 use linux as platform;
@@ -35,16 +38,17 @@ pub enum ApplicationKind {
     Browser,
 }
 
+#[cfg(not(feature = "engine-sources"))]
 pub(crate) use crate::commands::applications::{
     open_browser, open_terminal, selected_editor, selected_terminal,
 };
 
 /// Open a web address using the selected browser path. Call from a worker.
-pub(crate) fn validated_browser_url(value: &str) -> Result<String, String> {
+pub fn validated_browser_url(value: &str) -> Result<String, String> {
     browser_url(value)
 }
 
-pub(crate) fn open_browser_with_settings(
+pub fn open_browser_with_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
     url: &str,
 ) -> Result<(), String> {
@@ -103,7 +107,7 @@ fn validate_browser_path(path: &Path, desktop_entry_required: bool) -> Result<()
     browser_path(path, desktop_entry_required).map(|_| ())
 }
 
-pub(crate) fn selected_terminal_from_settings(
+pub fn selected_terminal_from_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<Application, String> {
     let path = if settings
@@ -122,14 +126,14 @@ pub(crate) fn selected_terminal_from_settings(
     platform::application_at(Path::new(&path))
         .ok_or_else(|| "The selected terminal is unavailable. Choose another in Settings.".into())
 }
-pub(crate) fn open_terminal_with_application(
+pub fn open_terminal_with_application(
     application: &Application,
     command: &str,
 ) -> Result<(), String> {
     platform::open_terminal(application, command)
 }
 
-pub(crate) fn selected_editor_from_settings(
+pub fn selected_editor_from_settings(
     settings: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<Application, String> {
     let path = if settings
@@ -149,7 +153,7 @@ pub(crate) fn selected_editor_from_settings(
         .ok_or_else(|| "The selected editor is unavailable. Choose another in Settings.".into())
 }
 
-pub(crate) fn editor_command(application: &Application) -> Result<launch::EditorCommand, String> {
+pub fn editor_command(application: &Application) -> Result<launch::EditorCommand, String> {
     platform::editor_command(application)
 }
 
@@ -195,7 +199,7 @@ fn include_selections(
     }
 }
 
-pub(crate) fn discover_with_selections(
+pub fn discover_with_selections(
     selections: BTreeMap<String, String>,
 ) -> Result<ApplicationCatalog, String> {
     let mut catalog = platform::discover()?;
@@ -212,7 +216,7 @@ pub(crate) fn application_at(path: &Path) -> Option<Application> {
     platform::application_at(path)
 }
 
-pub(crate) fn chosen_application(
+pub fn chosen_application(
     path: &Path,
     kind: ApplicationKind,
 ) -> Result<Application, String> {

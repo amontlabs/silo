@@ -10,7 +10,7 @@ pub(crate) async fn read_dependencies(
     eprintln!("dependency check request: {request_id}");
     dependencies::validate_request_id(&request_id)?;
 
-    let executable_dir = crate::bundled_tools::directory(&app)?;
+    let executable_dir = crate::commands::bundled_tools::directory(&app)?;
     let resource_dir = app
         .path()
         .resource_dir()

@@ -49,7 +49,7 @@ const RETENTION: time::Duration = time::Duration::days(14);
 const CHECK_EVERY: Duration = Duration::from_secs(60 * 60);
 const CHANGED: &str = "silo://pre-upgrade-backup-changed";
 
-pub(crate) fn publish_changed() {
+pub fn publish_changed() {
     if let Some(context) = silo_engine::context::current() {
         context.publish(Event::new(CHANGED, serde_json::Value::Null), Audience::All);
     }
@@ -237,7 +237,7 @@ fn ensure_started(
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Status {
+pub struct Status {
     /// RFC 3339 instant after which Silo deletes the backup by itself. `None` when the saved
     /// date cannot be read: the backup is then never deleted automatically.
     delete_at: Option<String>,
@@ -441,7 +441,7 @@ fn delete_if_due(
 
 /// Checks at launch and then every hour while Silo runs. A backup that came due while Silo
 /// was closed is therefore deleted at the next launch.
-pub(crate) fn install() {
+pub fn install() {
     let Some(context) = silo_engine::context::current() else {
         return;
     };
@@ -466,20 +466,20 @@ pub(crate) fn install() {
 }
 
 /// Whether a pre-upgrade backup exists and when it is deleted. Cheap: it measures nothing.
-pub(crate) fn read_status(app_data: &Path) -> Result<Option<Status>, String> {
+pub fn read_status(app_data: &Path) -> Result<Option<Status>, String> {
     status(app_data, OffsetDateTime::now_utc())
 }
 
 /// Allocated bytes of the backup, or `None` once it is gone. Walks the folder.
-pub(crate) fn measure_backup(app_data: &Path) -> Result<Option<u64>, String> {
+pub fn measure_backup(app_data: &Path) -> Result<Option<u64>, String> {
     measure(app_data)
 }
 
-pub(crate) fn delete_backup_for_user(app_data: &Path, user_home: &Path) -> Result<bool, String> {
+pub fn delete_backup_for_user(app_data: &Path, user_home: &Path) -> Result<bool, String> {
     delete_backup(app_data, Some(user_home))
 }
 
-pub(crate) fn reveal_path(app_data: &Path) -> Result<PathBuf, String> {
+pub fn reveal_path(app_data: &Path) -> Result<PathBuf, String> {
     match inspect(app_data) {
         Backup::Present(previous) => Ok(previous),
         Backup::Gone => Err("The pre-upgrade backup has already been deleted.".into()),
@@ -489,7 +489,7 @@ pub(crate) fn reveal_path(app_data: &Path) -> Result<PathBuf, String> {
 }
 
 /// The migration screen told the user about the backup.
-pub(crate) fn acknowledge_notice(app_data: &Path) -> Result<(), String> {
+pub fn acknowledge_notice(app_data: &Path) -> Result<(), String> {
     acknowledge(app_data, OffsetDateTime::now_utc())
 }
 

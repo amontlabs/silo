@@ -25,11 +25,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub(crate) fn save_error(&self) -> Option<&str> {
+    pub fn save_error(&self) -> Option<&str> {
         self.save_error.as_deref()
     }
 
-    pub(crate) fn theme(&self) -> Option<Theme> {
+    pub fn theme(&self) -> Option<Theme> {
         match self.settings.get("theme").and_then(Value::as_str) {
             Some("light") => Some(Theme::Light),
             Some("dark") => Some(Theme::Dark),
@@ -39,7 +39,7 @@ impl Snapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Theme {
+pub enum Theme {
     Light,
     Dark,
 }
@@ -535,15 +535,15 @@ impl SettingsState {
 }
 
 /// How long Quit waits for the webview to acknowledge its settings flush.
-pub(crate) const FRONTEND_FLUSH_FALLBACK: Duration = Duration::from_secs(2);
+pub const FRONTEND_FLUSH_FALLBACK: Duration = Duration::from_secs(2);
 
-pub(crate) fn session_flush_wait(deadline: Instant, now: Instant) -> Duration {
+pub fn session_flush_wait(deadline: Instant, now: Instant) -> Duration {
     // Keep at least half the remaining session budget for native shutdown.
     FRONTEND_FLUSH_FALLBACK.min(deadline.saturating_duration_since(now) / 2)
 }
 
 #[derive(Default)]
-pub(crate) struct ShutdownState(Mutex<ShutdownProgress>);
+pub struct ShutdownState(Mutex<ShutdownProgress>);
 #[derive(Default)]
 struct ShutdownProgress {
     phase: u8,
@@ -563,7 +563,7 @@ impl ShutdownState {
     fn request(&self) -> bool {
         self.request_generation().is_some()
     }
-    pub(crate) fn request_generation(&self) -> Option<u64> {
+    pub fn request_generation(&self) -> Option<u64> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase != 0 {
             return None;
@@ -579,7 +579,7 @@ impl ShutdownState {
             .unwrap_or_else(|error| error.into_inner())
             .generation
     }
-    pub(crate) fn begin_flush(&self) -> bool {
+    pub fn begin_flush(&self) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase != Self::REQUESTED {
             return false;
@@ -587,10 +587,10 @@ impl ShutdownState {
         state.phase = Self::FLUSHING;
         true
     }
-    pub(crate) fn claim_exit(&self, frontend_completed: bool) -> bool {
+    pub fn claim_exit(&self, frontend_completed: bool) -> bool {
         self.claim_exit_for(frontend_completed, None)
     }
-    pub(crate) fn claim_exit_for(&self, frontend_completed: bool, generation: Option<u64>) -> bool {
+    pub fn claim_exit_for(&self, frontend_completed: bool, generation: Option<u64>) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         // When the session ends, the fallback also cuts off a frontend flush that
         // has not finished in time.
@@ -606,14 +606,14 @@ impl ShutdownState {
         state.phase = Self::FINISHING;
         true
     }
-    pub(crate) fn active(&self) -> bool {
+    pub fn active(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .phase
             != 0
     }
-    pub(crate) fn approved(&self) -> bool {
+    pub fn approved(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -624,7 +624,7 @@ impl ShutdownState {
     fn cancel(&self) -> bool {
         self.cancel_with(|| {})
     }
-    pub(crate) fn cancel_with(&self, reopen: impl FnOnce()) -> bool {
+    pub fn cancel_with(&self, reopen: impl FnOnce()) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.session_deadline.is_some() || state.phase == Self::APPROVED {
             return false;
@@ -634,7 +634,7 @@ impl ShutdownState {
         true
     }
     /// Keep the earliest deadline when the session end is reported twice.
-    pub(crate) fn begin_session_end(&self, deadline: Instant) {
+    pub fn begin_session_end(&self, deadline: Instant) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         state.session_deadline = Some(
             state
@@ -642,13 +642,13 @@ impl ShutdownState {
                 .map_or(deadline, |current| current.min(deadline)),
         );
     }
-    pub(crate) fn session_deadline(&self) -> Option<Instant> {
+    pub fn session_deadline(&self) -> Option<Instant> {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .session_deadline
     }
-    pub(crate) fn expire_session(&self, now: Instant) -> bool {
+    pub fn expire_session(&self, now: Instant) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase == Self::APPROVED
             || !state
@@ -660,7 +660,7 @@ impl ShutdownState {
         state.phase = Self::APPROVED;
         true
     }
-    pub(crate) fn allow_exit(&self) -> bool {
+    pub fn allow_exit(&self) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.phase == Self::APPROVED {
             return false;
@@ -668,13 +668,13 @@ impl ShutdownState {
         state.phase = Self::APPROVED;
         true
     }
-    pub(crate) fn mark_restart(&self) {
+    pub fn mark_restart(&self) {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .restarting = true;
     }
-    pub(crate) fn restarting(&self) -> bool {
+    pub fn restarting(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -684,7 +684,7 @@ impl ShutdownState {
 
 /// How an `ExitRequested` event is handled.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ExitRequest {
+pub enum ExitRequest {
     /// The host restart path. It ignores exit prevention
     /// here, and the installer already stopped computers and saved settings, so
     /// the Quit flow (overlay, flush request, computer shutdown) must not start.
@@ -695,7 +695,7 @@ pub(crate) enum ExitRequest {
     Gated,
 }
 
-pub(crate) fn exit_request(restarting: bool, approved: bool) -> ExitRequest {
+pub fn exit_request(restarting: bool, approved: bool) -> ExitRequest {
     if restarting {
         ExitRequest::Restart
     } else if approved {
@@ -713,26 +713,26 @@ fn state() -> &'static SettingsState {
     SETTINGS.get_or_init(SettingsState::default)
 }
 
-pub(crate) fn shutdown_state() -> &'static ShutdownState {
+pub fn shutdown_state() -> &'static ShutdownState {
     SHUTDOWN.get_or_init(ShutdownState::default)
 }
 
-pub(crate) fn shutdown_state_if_installed() -> Option<&'static ShutdownState> {
+pub fn shutdown_state_if_installed() -> Option<&'static ShutdownState> {
     SHUTDOWN.get()
 }
 
-pub(crate) fn allow_exit_if_installed() {
+pub fn allow_exit_if_installed() {
     if let Some(state) = shutdown_state_if_installed() {
         state.allow_exit();
     }
 }
 
-pub(crate) fn quit_confirmation() -> &'static QuitConfirmation {
+pub fn quit_confirmation() -> &'static QuitConfirmation {
     QUIT_CONFIRMATION.get_or_init(QuitConfirmation::default)
 }
 
 /// Initialize the process-wide settings and shutdown policy state.
-pub(crate) fn install() {
+pub fn install() {
     let _ = state();
     let _ = shutdown_state();
     let _ = quit_confirmation();
@@ -745,13 +745,13 @@ fn configured_path() -> Result<Option<PathBuf>, String> {
 }
 
 /// Load validated settings from the host-provided settings path.
-pub(crate) fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
+pub fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
     state().initialize(|| Ok(path))
 }
 
 /// Read validated, persisted preferences. This also supports native callers that
 /// run before the settings window has requested its initial snapshot.
-pub(crate) fn current_settings() -> Result<Map<String, Value>, String> {
+pub fn current_settings() -> Result<Map<String, Value>, String> {
     let snapshot = state().initialize(configured_path)?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
@@ -759,7 +759,7 @@ pub(crate) fn current_settings() -> Result<Map<String, Value>, String> {
     Ok(snapshot.settings)
 }
 
-pub(crate) fn read(main: bool) -> Result<Snapshot, String> {
+pub fn read(main: bool) -> Result<Snapshot, String> {
     let mut snapshot = state().initialized()?.as_ref().unwrap().store.snapshot();
     if !main {
         snapshot.onboarding_draft = Value::Null;
@@ -776,15 +776,15 @@ fn change(
     Ok(snapshot)
 }
 
-pub(crate) fn update(patch: Map<String, Value>) -> Result<Snapshot, String> {
+pub fn update(patch: Map<String, Value>) -> Result<Snapshot, String> {
     change(|store| store.update(patch))
 }
 
-pub(crate) fn update_draft(draft: Value) -> Result<Snapshot, String> {
+pub fn update_draft(draft: Value) -> Result<Snapshot, String> {
     change(|store| store.update_draft(draft))
 }
 
-pub(crate) fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
+pub fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
     change(|store| {
         // Fixture modes never inherit a theme from the production webview origin.
         if store.path.is_none() {
@@ -795,7 +795,7 @@ pub(crate) fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
     })
 }
 
-pub(crate) fn flush() -> Result<(Snapshot, Result<(), String>), String> {
+pub fn flush() -> Result<(Snapshot, Result<(), String>), String> {
     let mut saved = Ok(());
     let snapshot = change(|store| {
         store.snapshot.revision += 1;
@@ -805,7 +805,7 @@ pub(crate) fn flush() -> Result<(Snapshot, Result<(), String>), String> {
     Ok((snapshot, saved))
 }
 
-pub(crate) fn flush_for_update() -> Result<(), String> {
+pub fn flush_for_update() -> Result<(), String> {
     let mut initialized = state()
         .store
         .lock()
@@ -816,7 +816,7 @@ pub(crate) fn flush_for_update() -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn flush_pending() -> Result<(), String> {
+pub fn flush_pending() -> Result<(), String> {
     let mut initialized = state()
         .store
         .lock()
@@ -827,7 +827,7 @@ pub(crate) fn flush_pending() -> Result<(), String> {
     }
 }
 
-pub(crate) fn public_snapshot(snapshot: &Snapshot) -> Snapshot {
+pub fn public_snapshot(snapshot: &Snapshot) -> Snapshot {
     // Catch-all listeners receive targeted events too; drafts stay in authorized reads.
     let mut public = snapshot.clone();
     public.onboarding_draft = Value::Null;
@@ -837,7 +837,7 @@ pub(crate) fn public_snapshot(snapshot: &Snapshot) -> Snapshot {
 /// One confirm-capable Quit path (decision 7). Until the main UI opts in with
 /// `enable_quit_confirmation`, requests exit directly as before.
 #[derive(Default)]
-pub(crate) struct QuitConfirmation(Mutex<QuitRequests>);
+pub struct QuitConfirmation(Mutex<QuitRequests>);
 #[derive(Default)]
 struct QuitRequests {
     enabled: bool,
@@ -848,27 +848,27 @@ struct QuitRequests {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QuitRequest {
-    pub(crate) request_id: u64,
+pub struct QuitRequest {
+    pub request_id: u64,
     /// Running local computer names. Empty means their status could not be read.
-    pub(crate) computers: Vec<String>,
+    pub computers: Vec<String>,
 }
 
 impl QuitConfirmation {
-    pub(crate) fn enabled(&self) -> bool {
+    pub fn enabled(&self) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .enabled
     }
     /// `None` exits now: nothing runs, or no UI can answer.
-    pub(crate) fn enable(&self) {
+    pub fn enable(&self) {
         self.0
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .enabled = true;
     }
-    pub(crate) fn ask(&self, running: Result<Vec<String>, String>) -> Option<QuitRequest> {
+    pub fn ask(&self, running: Result<Vec<String>, String>) -> Option<QuitRequest> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if !state.enabled || state.session_ending {
             return None;
@@ -895,13 +895,13 @@ impl QuitConfirmation {
         })
     }
     /// The session is ending: the open prompt no longer applies.
-    pub(crate) fn close(&self) {
+    pub fn close(&self) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         state.session_ending = true;
         state.pending = None;
     }
     /// Returns whether Silo should exit.
-    pub(crate) fn answer(&self, request_id: u64, confirmed: bool) -> Result<bool, String> {
+    pub fn answer(&self, request_id: u64, confirmed: bool) -> Result<bool, String> {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
         if state.pending != Some(request_id) {
             return Err("This Quit request is no longer current.".into());

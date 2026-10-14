@@ -125,9 +125,9 @@ int main(int argc, char **argv) {
         for name in ('build_desktop.py', 'macos_release_signing.py', 'channel_names.py', 'channel_names.rs'):
             shutil.copy2(SCRIPT.with_name(name), scripts / name)
         shutil.copy2(SCRIPT.parent.parent / 'package.json', self.case / 'package.json')
-        (self.case / 'src-tauri/src').mkdir(parents=True)
-        shutil.copy2(SCRIPT.parent.parent / 'src-tauri/src/channel.rs',
-                     self.case / 'src-tauri/src/channel.rs')
+        (self.case / 'src-tauri/engine/src').mkdir(parents=True)
+        shutil.copy2(SCRIPT.parent.parent / 'src-tauri/engine/src/channel.rs',
+                     self.case / 'src-tauri/engine/src/channel.rs')
         shutil.copy2(SCRIPT.parent.parent / 'src-tauri/Entitlements.plist',
                      self.case / 'src-tauri/Entitlements.plist')
         cli = self.case / 'node_modules/@tauri-apps/cli/tauri.js'

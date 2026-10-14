@@ -901,15 +901,14 @@ mod tests {
     mod script {
         use std::process::Command;
 
-        const SCRIPT_PATH: &str = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/guest/macos/silo-computer-use.zsh"
-        );
+        fn script_path() -> std::path::PathBuf {
+            crate::test_support::manifest_root().join("guest/macos/silo-computer-use.zsh")
+        }
 
         #[test]
         fn the_script_parses() {
             let output = Command::new("/bin/zsh")
-                .args(["-n", SCRIPT_PATH])
+                .args(["-n", script_path().to_str().unwrap()])
                 .output()
                 .unwrap();
             assert!(output.status.success(), "{:?}", output.stderr);
@@ -931,7 +930,7 @@ mod tests {
             args: &[&str],
         ) -> std::process::Output {
             Command::new("/bin/zsh")
-                .arg(SCRIPT_PATH)
+                .arg(script_path())
                 .args(args)
                 .env("HOME", home)
                 .env("SILO_CU_TCC_DB", db)
@@ -1021,7 +1020,7 @@ mod tests {
         fn zsh(args: &[&str], stdin: &str, home: &std::path::Path) -> std::process::Output {
             use std::io::Write;
             let mut child = Command::new("/bin/zsh")
-                .arg(SCRIPT_PATH)
+                .arg(script_path())
                 .args(args)
                 .env("HOME", home)
                 .env("SILO_CU_WORK", home.join("work"))

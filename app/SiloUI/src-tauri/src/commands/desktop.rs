@@ -19,7 +19,7 @@ pub(crate) async fn set_computer_use_approval(
                 json!({"computerId":computer,"mode":mode}),
             )
         } else {
-            let paths = runtime::runtime_paths(&app)?;
+            let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
             desktop::local_approval(&paths, &computer, &mode, None)
         }
     })
@@ -53,7 +53,7 @@ async fn execute(
                 }
             })
         } else {
-            let paths = runtime::runtime_paths(&app)?;
+            let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
             desktop::local(&paths, &computer, action.as_deref(), None)
         }
     })

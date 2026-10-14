@@ -2,7 +2,7 @@
 use super::*;
 use silo_engine::context::{Audience, Event};
 
-pub(crate) fn dispatch(
+pub fn dispatch(
     host: &dyn RuntimeHost,
     method: &str,
     params: Value,
@@ -572,7 +572,7 @@ pub(crate) fn local_computer_name(host: &dyn RuntimeHost, id: &str) -> Result<St
     local_computer_name_in(&runtime_paths(host)?, id)
 }
 
-pub(crate) fn local_computer_name_in(paths: &RuntimePaths, id: &str) -> Result<String, String> {
+pub fn local_computer_name_in(paths: &RuntimePaths, id: &str) -> Result<String, String> {
     read_metadata(&paths.metadata)
         .map_err(|e| e.to_string())?
         .computers
