@@ -5234,8 +5234,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
         let app = macos_context(context.clone());
-        let accepted = crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create")
-            .unwrap();
+        let accepted =
+            crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create").unwrap();
         context
             .job_registry()
             .unwrap()
