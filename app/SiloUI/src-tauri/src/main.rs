@@ -144,7 +144,7 @@ fn main() {
             desktop_viewer_media::desktop_viewer_sound_cancel,
             desktop_viewer_media::desktop_viewer_set_audio,
             desktop_viewer_media::desktop_viewer_reset_screen,
-            desktop_viewer::desktop_viewer_clipboard,
+            commands::viewer_clipboard::desktop_viewer_clipboard,
             macos_computers::read_macos_computers,
             macos_computers::create_macos_computer,
             macos_computers::macos_computer_action,

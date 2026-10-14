@@ -5,7 +5,7 @@
 //! the page sees the key: an `NSEvent` local monitor on macOS, a GTK key handler
 //! on the viewer window on Linux, and the Edit menu on macOS. All three call
 //! the same handlers below, which reach the computer only through the bridge.
-use crate::viewer_clipboard;
+use crate::viewer_clipboard::Action;
 use tauri::AppHandle;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,10 +124,10 @@ impl HeldKeys {
 /// page and must never block the main thread.
 pub(crate) fn run(app: &AppHandle, label: &str, shortcut: Shortcut) {
     let action = match shortcut {
-        Shortcut::PasteIntoComputer => viewer_clipboard::Action::Paste,
-        Shortcut::CopyFromComputer => viewer_clipboard::Action::Copy,
+        Shortcut::PasteIntoComputer => Action::Paste,
+        Shortcut::CopyFromComputer => Action::Copy,
     };
-    viewer_clipboard::spawn(app, label, action);
+    crate::commands::viewer_clipboard::spawn(app, label, action);
 }
 
 /// Runs a shortcut for the viewer window that has focus, if any.

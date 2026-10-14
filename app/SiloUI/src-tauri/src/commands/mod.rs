@@ -5,3 +5,4 @@ pub(crate) mod desktop_bridge;
 pub(crate) mod desktop_viewer_bench;
 pub(crate) mod preparation;
 pub(crate) mod system_integrations;
+pub(crate) mod viewer_clipboard;
