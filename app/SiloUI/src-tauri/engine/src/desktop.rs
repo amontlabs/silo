@@ -235,6 +235,12 @@ fn installer_script(action: &str) -> String {
             "SILO_SELKIES_DISPLAY_PATCH_EOF",
         ),
         (
+            "SILO_SELKIES_MULTICLIENT_PATCH_SOURCE",
+            "patch-selkies-multiclient.py",
+            include_str!("../../guest/patch-selkies-multiclient.py"),
+            "SILO_SELKIES_MULTICLIENT_PATCH_EOF",
+        ),
+        (
             "SILO_DESKTOP_PACKAGES_SOURCE",
             "desktop-packages.txt",
             include_str!("../../guest/desktop-packages.txt"),
@@ -1395,8 +1401,24 @@ mod tests {
         assert!(script.contains("patch-selkies-web-client.py"));
         assert!(script.contains("SILO_SELKIES_DISPLAY_PATCH_SOURCE"));
         assert!(script.contains("patch-selkies-display-scaling.py"));
+        assert!(script.contains("SILO_SELKIES_MULTICLIENT_PATCH_SOURCE"));
+        assert!(script.contains("patch-selkies-multiclient.py"));
         assert!(script.contains("set -- install\n"));
         assert!(script.ends_with("/usr/local/bin/silo-desktop autostart false\n"));
+    }
+
+    #[test]
+    fn the_installer_script_fits_in_one_guest_argument() {
+        let _test_state = crate::test_support::global_state();
+        // The script runs as the single argument of `sh -c`, and Linux refuses one
+        // argument of 128 KiB or more. Keep room for the lines configuration appends.
+        for action in ["install", "update-streamer"] {
+            let length = installer_script(action).len();
+            assert!(
+                length < 128 * 1024 - 4096,
+                "{action} script is {length} bytes"
+            );
+        }
     }
 
     #[test]
@@ -1409,6 +1431,7 @@ mod tests {
         let update = action_script("update-streamer");
         assert!(update.contains("SILO_DESKTOP_STREAMER_LOCK_SOURCE"));
         assert!(update.contains("SILO_SELKIES_WEB_CLIENT_PATCH_SOURCE"));
+        assert!(update.contains("SILO_SELKIES_MULTICLIENT_PATCH_SOURCE"));
         assert!(update.contains("set -- update-streamer\n"));
         assert_eq!(action_timeout("update-streamer"), Duration::from_secs(1800));
         assert_eq!(
