@@ -461,6 +461,11 @@ impl Layout {
         }
     }
 
+    /// The computer's id, which names its folder.
+    pub(super) fn id(&self) -> Option<&str> {
+        self.dir.file_name().and_then(|name| name.to_str())
+    }
+
     pub(super) fn with_access(mut self, access: PathBuf) -> Self {
         self.access = Some(access);
         self

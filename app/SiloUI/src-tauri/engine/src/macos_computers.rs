@@ -2143,7 +2143,24 @@ fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<()
 
 /// Deletes a computer's files, after making sure this Mac no longer holds its disk image.
 fn remove_computer(layout: &Layout) -> Result<(), String> {
-    offline_setup::ensure_detached(&layout.disk())?;
+    remove_computer_with(layout, &offline_setup::ensure_detached, &|id| {
+        proxy_ca::retire(id)
+    })
+}
+
+/// Detaches the disk, retires the computer's proxy CA, then deletes its folder, checkpoints
+/// included. The CA goes before the files so a failure of either step leaves the computer
+/// listed and the whole deletion can be repeated: the folder is the record of what remains to
+/// clean, and retiring an absent CA is not an error.
+fn remove_computer_with(
+    layout: &Layout,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+    retire_ca: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    detach(&layout.disk())?;
+    if let Some(id) = layout.id() {
+        retire_ca(id)?;
+    }
     store::remove(layout)
 }
 
@@ -7209,6 +7226,61 @@ mod tests {
                     Ok(LaunchMigration::Skip)
                 );
             }
+        }
+    }
+
+    mod deletion {
+        use super::*;
+        use std::cell::RefCell;
+
+        #[test]
+        fn deleting_a_computer_retires_its_ca_before_removing_its_files() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(layout.dir.join("checkpoints")).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+            let retired = RefCell::new(Vec::new());
+
+            remove_computer_with(&layout, &|_| Ok(()), &|id| {
+                // The folder still exists while the CA is retired.
+                assert!(layout.dir.exists());
+                retired.borrow_mut().push(id.to_owned());
+                Ok(())
+            })
+            .unwrap();
+
+            assert_eq!(retired.into_inner(), ["computer-a"]);
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_ca_retirement_keeps_the_computer_so_the_deletion_can_be_repeated() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+
+            let failed = remove_computer_with(&layout, &|_| Ok(()), &|_| Err("denied".into()));
+            assert_eq!(failed, Err("denied".into()));
+            assert!(layout.record().exists(), "nothing was deleted");
+
+            remove_computer_with(&layout, &|_| Ok(()), &|_| Ok(())).unwrap();
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_detach_retires_nothing() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            let retired = RefCell::new(0);
+            let failed = remove_computer_with(&layout, &|_| Err("attached".into()), &|_| {
+                *retired.borrow_mut() += 1;
+                Ok(())
+            });
+            assert!(failed.is_err());
+            assert_eq!(retired.into_inner(), 0);
+            assert!(layout.dir.exists());
         }
     }
 }
