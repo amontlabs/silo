@@ -1524,6 +1524,58 @@ pub(super) fn save_running(
     }
 }
 
+/// Pauses the running machine, saves its memory to `state` and calls `copy` while it is paused,
+/// then leaves it paused and returns its generation: an engine update holds the saved machine
+/// until the engine is replaced. Whatever failed, the machine is resumed before the error
+/// returns; one that could not be paused is left as it was.
+pub(super) fn save_and_hold(
+    app: &MacosContext,
+    id: &str,
+    state: &Path,
+    copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<u64, String> {
+    on_machine(app, id, false, |machine, send| {
+        // SAFETY: Main thread; the machine is a framework object in a slot.
+        unsafe {
+            if machine.canPause() {
+                machine.pauseWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("This computer can't be paused right now.".into()));
+            }
+        }
+    })?;
+    let url = state.to_path_buf();
+    let saved = on_machine(app, id, false, move |machine, send| {
+        // SAFETY: Main thread; the machine is paused and the URL names a new file.
+        unsafe {
+            machine.saveMachineStateToURL_completionHandler(&nsurl(&url), &completion(send));
+        }
+    })
+    .and_then(|()| copy());
+    let held = saved.and_then(|()| {
+        let key = id.to_string();
+        on_main(app, move |_| {
+            SLOTS.with(|slots| {
+                let slots = slots.borrow();
+                let slot = slots.get(&key)?;
+                // SAFETY: Main thread.
+                (unsafe { slot.vm.state() } == VZVirtualMachineState::Paused)
+                    .then_some(slot.generation)
+            })
+        })?
+        .ok_or_else(|| "The computer did not stay paused.".to_string())
+    });
+    match held {
+        Ok(generation) => Ok(generation),
+        Err(message) => match resume_paused(app, id) {
+            Ok(()) => Err(message),
+            Err(why) => Err(format!(
+                "{message} The computer could not be resumed ({why}). Use Force stop."
+            )),
+        },
+    }
+}
+
 pub(super) fn request_stop(app: &MacosContext, id: &str) -> Result<(), String> {
     let id = id.to_string();
     on_main(app, move |_| {

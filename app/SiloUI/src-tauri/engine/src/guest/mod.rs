@@ -161,6 +161,7 @@ case "$1" in
     printf '1\n'; exit 0 ;;
   exec)
     shift
+    __EXEC_PRELUDE__
     printf '%s\n' "$*" >> "$(dirname "$0")/msb.log"
     # There is no /workspace on this machine; the guest has one.
     case " $* " in *" test -d /workspace "*|*" test -d /workspace/project "*) exit 0 ;; esac
@@ -176,8 +177,16 @@ exit 2
 
     /// Runtime paths whose `msb` is the fake above, with `COMPUTER_NAME` in the inventory.
     pub fn runtime(directory: &Path) -> RuntimePaths {
+        runtime_with_exec_prelude(directory, "")
+    }
+
+    /// Like `runtime`, with shell lines that run first on every `exec` (they may `exit`).
+    pub fn runtime_with_exec_prelude(directory: &Path, prelude: &str) -> RuntimePaths {
         let paths = crate::test_support::paths(directory);
-        crate::test_support::write_shell_script(&paths.executable, FAKE_MSB);
+        crate::test_support::write_shell_script(
+            &paths.executable,
+            &FAKE_MSB.replace("__EXEC_PRELUDE__", prelude),
+        );
         std::fs::create_dir_all(&paths.home).unwrap();
         std::fs::write(&paths.library, b"").unwrap();
         let inventory = serde_json::json!({

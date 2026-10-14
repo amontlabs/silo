@@ -49,7 +49,8 @@ pub struct ExecOutput {
 }
 
 /// Checks a request before any effect: a non-empty argv without NUL, an absolute working
-/// directory, and environment names that are non-empty, free of `=` and NUL, and unique.
+/// directory, and environment names that are portable identifiers (letters, digits and
+/// underscores, not starting with a digit) and unique.
 pub fn validate_request(
     argv: &[String],
     cwd: Option<&str>,
@@ -69,8 +70,13 @@ pub fn validate_request(
     }
     let mut names = HashSet::new();
     for (name, value) in env {
-        if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
-            return invalid("environment names must be non-empty and free of '=' and NUL.");
+        let identifier = name.bytes().enumerate().all(|(index, byte)| {
+            byte == b'_' || byte.is_ascii_alphabetic() || (index > 0 && byte.is_ascii_digit())
+        });
+        if name.is_empty() || !identifier || value.contains('\0') {
+            return invalid(
+                "environment names must be letters, digits and underscores, not starting with a digit.",
+            );
         }
         if !names.insert(name.as_str()) {
             return invalid("environment names must be unique.");
@@ -147,22 +153,58 @@ pub(crate) fn signal_of(target: &Target, root: bool, token: &str) -> Option<Stri
     }
 }
 
+/// The exit code the guest supervisor saved for run `token`. It saves only 255, the one code
+/// SSH also uses for its own failures, so a recorded exit proves the command really ran.
+pub(crate) fn recorded_exit(target: &Target, root: bool, token: &str) -> Option<i32> {
+    match control(target, root, &["exit", token], CONTROL_TIMEOUT) {
+        Ok((0, text)) => text.parse().ok(),
+        _ => None,
+    }
+}
+
 /// Classifies an exit status from the channel into `(exit code, signal)`.
 ///
 /// The supervisor reports a signal death as 128+N and records the signal name; only then is
-/// the guest asked for it.
+/// the guest asked for it. Over SSH, status 255 is also the transport's own failure: it is a
+/// guest exit only when the supervisor recorded it, and a channel failure otherwise.
 pub(crate) fn settle_exit(
     target: &Target,
     root: bool,
     token: &str,
     code: i32,
-) -> (Option<i32>, Option<String>) {
+    stderr: &str,
+) -> Result<(Option<i32>, Option<String>), GuestError> {
+    settle_exit_with(
+        target,
+        code,
+        stderr,
+        &|| recorded_exit(target, root, token),
+        &|| signal_of(target, root, token),
+    )
+}
+
+/// `settle_exit` with the guest lookups supplied.
+pub(crate) fn settle_exit_with(
+    target: &Target,
+    code: i32,
+    stderr: &str,
+    recorded: &dyn Fn() -> Option<i32>,
+    signal: &dyn Fn() -> Option<String>,
+) -> Result<(Option<i32>, Option<String>), GuestError> {
+    if target.is_macos() && code == 255 {
+        return match recorded() {
+            Some(code) => Ok((Some(code), None)),
+            None => Err(target
+                .channel_error(code, stderr)
+                .unwrap_or_else(|| GuestError::internal("The connection to the computer failed."))),
+        };
+    }
     if (129..=192).contains(&code) {
-        if let Some(signal) = signal_of(target, root, token) {
-            return (None, Some(signal));
+        if let Some(signal) = signal() {
+            return Ok((None, Some(signal)));
         }
     }
-    (Some(code), None)
+    Ok((Some(code), None))
 }
 
 /// Runs a request to completion within its deadline and stdout allowance.
@@ -216,15 +258,12 @@ pub(crate) fn run_bounded_cancellable(
                 GuestError::internal("The connection to the computer ended unexpectedly.")
             })?;
             let stderr_text = String::from_utf8_lossy(&collected.stderr).into_owned();
-            if let Some(error) = target.channel_error(code, &stderr_text) {
-                return Err(error);
-            }
             if collected.stderr_len as usize > MAX_RESPONSE_RAW_BYTES {
                 return Err(GuestError::internal(
                     "The command printed more error output than one response can carry.",
                 ));
             }
-            let (exit_code, signal) = settle_exit(target, root, &token, code);
+            let (exit_code, signal) = settle_exit(target, root, &token, code, &stderr_text)?;
             Ok(ExecOutput {
                 exit_code,
                 signal,
@@ -267,10 +306,89 @@ mod tests {
         let pair = |name: &str, value: &str| (name.to_owned(), value.to_owned());
         assert!(validate_request(&words(&["ls"]), None, &[pair("", "x")]).is_err());
         assert!(validate_request(&words(&["ls"]), None, &[pair("A=B", "x")]).is_err());
+        for name in [
+            "-S /usr/bin/printf injected #",
+            "-i",
+            "A B",
+            "1A",
+            "A-B",
+            "é",
+            "A\n",
+        ] {
+            assert!(
+                validate_request(&words(&["ls"]), None, &[pair(name, "x")]).is_err(),
+                "{name:?} must be refused"
+            );
+        }
+        assert!(validate_request(&words(&["ls"]), None, &[pair("_a1", "x")]).is_ok());
         assert!(
             validate_request(&words(&["ls"]), None, &[pair("A", "x"), pair("A", "y")]).is_err()
         );
         assert!(validate_request(&words(&["ls"]), None, &[pair("A", "x"), pair("B", "y")]).is_ok());
+    }
+
+    #[test]
+    fn exit_255_is_a_guest_exit_only_when_the_supervisor_recorded_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let mac = test_support::macos_target(directory.path());
+        let never = || -> Option<String> { panic!("no signal lookup for 255") };
+        // A recorded 255: the program ran and exited with 255.
+        assert_eq!(
+            settle_exit_with(&mac, 255, "", &|| Some(255), &never).unwrap(),
+            (Some(255), None)
+        );
+        // Nothing recorded: SSH itself failed.
+        let error =
+            settle_exit_with(&mac, 255, "Connection refused", &|| None, &never).unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotRunning);
+        assert!(error.message.contains("Connection refused"));
+        // Other codes never ask for a record.
+        let unused = || -> Option<i32> { panic!("no exit lookup below 255") };
+        assert_eq!(
+            settle_exit_with(&mac, 7, "", &unused, &never).unwrap(),
+            (Some(7), None)
+        );
+        assert_eq!(
+            settle_exit_with(&mac, 137, "", &unused, &|| Some("KILL".into())).unwrap(),
+            (None, Some("KILL".into()))
+        );
+        // Linux has no such ambiguity: 255 is just a code.
+        let linux = test_support::target(directory.path());
+        assert_eq!(
+            settle_exit_with(&linux, 255, "", &unused, &never).unwrap(),
+            (Some(255), None)
+        );
+    }
+
+    #[test]
+    fn the_supervisor_records_exit_255_and_a_signal_death_leaves_its_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let token = "exit255token";
+        let argv = supervised(token, None, &["sh".into(), "-c".into(), "exit 255".into()]);
+        let plan = target.plan(&argv, &[], false, false).unwrap();
+        let collected = process::run_collect(
+            &plan,
+            None,
+            Duration::from_secs(20),
+            1024,
+            1024,
+            None,
+            &|| {},
+        )
+        .unwrap()
+        .ok()
+        .unwrap();
+        assert_eq!(collected.status.code(), Some(255));
+        assert_eq!(recorded_exit(&target, false, token), Some(255));
+        assert_eq!(
+            recorded_exit(&target, false, token),
+            None,
+            "reading the record clears it"
+        );
+        // Through the whole bounded run, a program that exits 255 is a plain exit on Linux.
+        let output = run_bounded(&target, &request(&["sh", "-c", "exit 255"])).unwrap();
+        assert_eq!(output.exit_code, Some(255));
     }
 
     #[test]
