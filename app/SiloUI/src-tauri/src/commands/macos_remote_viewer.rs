@@ -1,20 +1,15 @@
 //! The window that shows a macOS computer running on another device. It is a `desktop-shell`
-//! window that runs the noVNC viewer; the pixels arrive over a loopback WebSocket
-//! (`macos_display_gateway`) that is spliced to the owner's `macos.display.stream`.
+//! window that runs the noVNC viewer. The window is UI-only and lives here; the screen's
+//! loopback gateway and the sign-in belong to the engine (`macos.display.session`), and the
+//! resize is `macos.display.resize`.
 //!
 //! The window learns the computer from this registry, not from its page: the commands below
 //! work on the computer the window was opened for and nothing else.
-use crate::{
-    bridge_error::BridgeError,
-    macos_display_gateway::{self as gateway, Gateway, Upstream},
-    macos_remote::DISPLAY_STREAM,
-    remote,
-};
-use serde::Serialize;
+use crate::engine_client::{Engine, EngineClient, EngineError};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Mutex, MutexGuard},
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Window};
 
@@ -24,13 +19,12 @@ const NOT_A_VIEWER: &str = "This window cannot show a computer's screen.";
 struct Viewer {
     device: String,
     computer: String,
-    gateway: Option<Gateway>,
 }
 
 static VIEWERS: Mutex<Option<HashMap<String, Viewer>>> = Mutex::new(None);
 
 fn with_viewers<R>(work: impl FnOnce(&mut HashMap<String, Viewer>) -> R) -> R {
-    let mut guard = VIEWERS
+    let mut guard: MutexGuard<'_, Option<HashMap<String, Viewer>>> = VIEWERS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     work(guard.get_or_insert_with(HashMap::new))
@@ -58,10 +52,6 @@ fn viewer_route(device: &str, computer: &str, name: &str) -> String {
     format!("index.html?{}", route.query().unwrap_or_default())
 }
 
-pub(crate) fn is_macos_viewer_label(label: &str) -> bool {
-    label.starts_with("desktop-shell-macos-")
-}
-
 /// Registers the viewer for a label, or reports that it exists. `Err` is a full registry.
 fn claim(
     viewers: &mut HashMap<String, Viewer>,
@@ -80,7 +70,6 @@ fn claim(
         Viewer {
             device: device.to_string(),
             computer: computer.to_string(),
-            gateway: None,
         },
     );
     Ok(true)
@@ -95,71 +84,7 @@ fn target_of(window: &Window) -> Result<(String, String), String> {
     .ok_or_else(|| NOT_A_VIEWER.to_string())
 }
 
-/// Opens the window for a running macOS computer on a connected device, or brings it forward.
-#[tauri::command]
-pub(crate) async fn open_macos_remote_display(
-    app: AppHandle,
-    window: Window,
-    device_id: String,
-    computer_id: String,
-) -> Result<(), BridgeError> {
-    if window.label() != "main" {
-        return Err("Open screens from the main Silo window.".to_string().into());
-    }
-    tokio::task::spawn_blocking(move || open(&app, &device_id, &computer_id))
-        .await
-        .map_err(|_| BridgeError::from("Silo could not open the screen."))?
-}
-
-fn open(app: &AppHandle, device_id: &str, computer_id: &str) -> Result<(), BridgeError> {
-    crate::runtime::shutdown::ensure_accepting_operations()?;
-    let device = remote::saved_devices()?
-        .into_iter()
-        .find(|saved| saved.id == device_id)
-        .ok_or("This device is no longer connected.")?;
-    // The owner confirms the computer, its state and that it can host macOS before a window opens.
-    let state = remote::call_remote_typed(device_id, "macos.snapshot", json!({}))?;
-    let name = running_computer_name(&state, computer_id)?;
-    let label = viewer_label(device_id, computer_id);
-    let claimed = with_viewers(|viewers| claim(viewers, &label, device_id, computer_id))?;
-    if !claimed {
-        // Without a window yet, another call is still creating it.
-        if let Some(existing) = app.get_webview_window(&label) {
-            let _ = existing.show();
-            let _ = existing.set_focus();
-        }
-        return Ok(());
-    }
-    let title = crate::desktop_viewer::viewer_title(
-        &format!("{name} · {}", device.name),
-        crate::channel::current(),
-    );
-    let route = viewer_route(device_id, computer_id, &format!("{name} · {}", device.name));
-    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(route.into()))
-        .title(title)
-        .inner_size(1200., 820.)
-        .min_inner_size(672., 480.)
-        .build();
-    match built {
-        Ok(window) => {
-            window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Destroyed) {
-                    // Dropping the entry stops its gateway.
-                    let removed = with_viewers(|viewers| viewers.remove(&label));
-                    drop(removed);
-                }
-            });
-            Ok(())
-        }
-        Err(_) => {
-            let removed = with_viewers(|viewers| viewers.remove(&label));
-            drop(removed);
-            Err("Silo could not open the screen window.".to_string().into())
-        }
-    }
-}
-
-/// The name of a running computer in the owner's snapshot, or why it has no screen to show.
+/// The name of a running computer in the owner's computer list, or why it has no screen to show.
 fn running_computer_name(state: &Value, computer_id: &str) -> Result<String, String> {
     if state["supported"] != true {
         return Err(state["unsupportedReason"]
@@ -181,195 +106,183 @@ fn running_computer_name(state: &Value, computer_id: &str) -> Result<String, Str
     Ok(computer["name"].as_str().unwrap_or("macOS").to_string())
 }
 
-/// What the viewer needs to connect: the endpoint, the account and the framebuffer size.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Session {
-    url: String,
-    username: String,
-    password: String,
-    width: u64,
-    height: u64,
+fn bad_request(message: impl Into<String>) -> EngineError {
+    EngineError::not_found(message)
 }
 
-/// Signs in for the window's computer. The owner checks it runs and has finished setup, so a
+/// The window's title name: the computer and the device it runs on. The owner confirms the
+/// computer, its state and that it can host macOS before a window opens.
+async fn display_name(
+    engine: &EngineClient,
+    device_id: &str,
+    computer_id: &str,
+) -> Result<String, EngineError> {
+    let listed = engine
+        .call("computers.list", json!({"deviceId": device_id}))
+        .await?;
+    let name = running_computer_name(&listed["macos"], computer_id).map_err(bad_request)?;
+    let devices = engine.call("connections.devices.list", json!({})).await?;
+    let device_name = devices
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|saved| saved.get("id").and_then(Value::as_str) == Some(device_id))
+        .and_then(|saved| saved.get("name").and_then(Value::as_str))
+        .ok_or_else(|| bad_request("This device is no longer connected."))?;
+    Ok(format!("{name} · {device_name}"))
+}
+
+/// Opens the window for a running macOS computer on a connected device, or brings it forward.
+#[tauri::command]
+pub(crate) async fn open_macos_remote_display(
+    app: AppHandle,
+    engine: Engine<'_>,
+    window: Window,
+    device_id: String,
+    computer_id: String,
+) -> Result<(), EngineError> {
+    if window.label() != "main" {
+        return Err(EngineError::internal(
+            "Open screens from the main Silo window.",
+        ));
+    }
+    let name = display_name(&engine, &device_id, &computer_id).await?;
+    tokio::task::spawn_blocking(move || open(&app, &device_id, &computer_id, &name))
+        .await
+        .map_err(|_| EngineError::internal("Silo could not open the screen."))?
+}
+
+fn open(
+    app: &AppHandle,
+    device_id: &str,
+    computer_id: &str,
+    name: &str,
+) -> Result<(), EngineError> {
+    let label = viewer_label(device_id, computer_id);
+    let claimed = with_viewers(|viewers| claim(viewers, &label, device_id, computer_id))
+        .map_err(EngineError::internal)?;
+    if !claimed {
+        // Without a window yet, another call is still creating it.
+        if let Some(existing) = app.get_webview_window(&label) {
+            let _ = existing.show();
+            let _ = existing.set_focus();
+        }
+        return Ok(());
+    }
+    let product = silo_client::channel::current().product_name();
+    let built = WebviewWindowBuilder::new(
+        app,
+        &label,
+        WebviewUrl::App(viewer_route(device_id, computer_id, name).into()),
+    )
+    .title(format!("{name} — {product}"))
+    .inner_size(1200., 820.)
+    .min_inner_size(672., 480.)
+    .build();
+    match built {
+        Ok(window) => {
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    with_viewers(|viewers| viewers.remove(&label));
+                }
+            });
+            Ok(())
+        }
+        Err(_) => {
+            with_viewers(|viewers| viewers.remove(&label));
+            Err(EngineError::internal(
+                "Silo could not open the screen window.",
+            ))
+        }
+    }
+}
+
+/// What the viewer needs to connect: the endpoint, the account and the framebuffer size.
+async fn display_session(
+    engine: &EngineClient,
+    device: &str,
+    computer: &str,
+) -> Result<Value, EngineError> {
+    let session = engine
+        .call(
+            "macos.display.session",
+            json!({"deviceId": device, "computerId": computer}),
+        )
+        .await?;
+    let text = |name: &str| session.get(name).and_then(Value::as_str);
+    let (Some(url), Some(username), Some(password)) =
+        (text("url"), text("username"), text("password"))
+    else {
+        return Err(EngineError::internal(
+            "The computer returned no sign-in for its screen.",
+        ));
+    };
+    Ok(json!({
+        "url": url,
+        "username": username,
+        "password": password,
+        "width": session.get("width").and_then(Value::as_u64).unwrap_or(0),
+        "height": session.get("height").and_then(Value::as_u64).unwrap_or(0),
+    }))
+}
+
+/// Signs in for the window's computer. The engine checks it runs and has finished setup, so a
 /// refusal comes back as a message the viewer shows. The password is returned to the window
 /// that asked and is never logged or kept here.
 #[tauri::command]
 pub(crate) async fn macos_display_session(
-    app: AppHandle,
+    engine: Engine<'_>,
     window: Window,
-) -> Result<Session, String> {
+) -> Result<Value, String> {
     let (device, computer) = target_of(&window)?;
-    let label = window.label().to_string();
-    tokio::task::spawn_blocking(move || {
-        session(&app, &label, &device, &computer).map_err(|error| error.message)
-    })
-    .await
-    .map_err(|_| "Silo could not connect to the screen.".to_string())?
+    display_session(&engine, &device, &computer)
+        .await
+        .map_err(String::from)
 }
 
-fn session(
-    app: &AppHandle,
-    label: &str,
-    device: &str,
+async fn display_resize(
+    engine: &EngineClient,
     computer: &str,
-) -> Result<Session, BridgeError> {
-    let connect = remote::call_remote_typed(
-        device,
-        "macos.display.connect",
-        json!({"computerId": computer}),
-    )?;
-    let field = |name: &str| connect[name].as_str().map(str::to_string);
-    let (Some(username), Some(password)) = (field("username"), field("password")) else {
-        return Err("The computer returned no sign-in for its screen."
-            .to_string()
-            .into());
-    };
-    let url = endpoint(app, label, device, computer)?;
-    Ok(Session {
-        url,
-        username,
-        password,
-        width: connect["width"].as_u64().unwrap_or(0),
-        height: connect["height"].as_u64().unwrap_or(0),
-    })
-}
-
-/// The window's WebSocket endpoint, started on first use and again if it stopped.
-fn endpoint(app: &AppHandle, label: &str, device: &str, computer: &str) -> Result<String, String> {
-    let current = with_viewers(|viewers| {
-        viewers
-            .get(label)
-            .and_then(|viewer| viewer.gateway.as_ref())
-            .filter(|gateway| gateway.running())
-            .map(Gateway::url)
-    });
-    if let Some(url) = current {
-        return Ok(url);
-    }
-    let (device_id, computer_id) = (device.to_string(), computer.to_string());
-    let open: gateway::Open = Arc::new(move |unwanted| {
-        let stream = remote::open_bridge_stream(
-            &device_id,
-            DISPLAY_STREAM,
-            json!({"computerId": computer_id}),
-            unwanted,
+    width_px: u64,
+    height_px: u64,
+) -> Result<Value, EngineError> {
+    engine
+        .call(
+            "macos.display.resize",
+            json!({"computerId": computer, "widthPx": width_px, "heightPx": height_px}),
         )
-        .map_err(|error| error.message)?;
-        Ok(Upstream {
-            reader: Box::new(stream.output),
-            writer: Box::new(stream.input),
-            keep: Box::new(stream.child),
-        })
-    });
-    let dev_url = app.config().build.dev_url.as_ref().map(ToString::to_string);
-    let started = Gateway::start(open, app_origins(dev_url.as_deref()))?;
-    let url = started.url();
-    let kept = with_viewers(|viewers| {
-        viewers.get_mut(label).map(|viewer| {
-            viewer.gateway = Some(started);
-        })
-    });
-    kept.map(|()| url).ok_or_else(|| NOT_A_VIEWER.to_string())
+        .await
 }
 
-/// Origins accepted by the loopback gateway for this app's webview and debug server.
-fn app_origins(dev_url: Option<&str>) -> Vec<String> {
-    let mut origins = vec![
-        "tauri://localhost".to_string(),
-        "http://tauri.localhost".to_string(),
-        "https://tauri.localhost".to_string(),
-    ];
-    if cfg!(debug_assertions) {
-        if let Some(origin) = dev_url.and_then(origin_of) {
-            origins.push(origin);
-        }
-    }
-    origins
-}
-
-fn origin_of(url: &str) -> Option<String> {
-    let parsed = tauri::Url::parse(url).ok()?;
-    let mut authority = parsed.host_str()?.to_string();
-    if let Some(port) = parsed.port() {
-        authority.push(':');
-        authority.push_str(&port.to_string());
-    }
-    Some(format!("{}://{authority}", parsed.scheme()))
-}
-
-/// Resizes the window's computer to the pixel size of the window. The owner clamps it and
+/// Resizes the window's computer to the pixel size of the window. The engine clamps it and
 /// the size it applied is returned.
 #[tauri::command]
 pub(crate) async fn macos_display_resize(
+    engine: Engine<'_>,
     window: Window,
     width_px: u64,
     height_px: u64,
 ) -> Result<Value, String> {
-    let (device, computer) = target_of(&window)?;
-    tokio::task::spawn_blocking(move || {
-        remote::call_remote_typed(
-            &device,
-            "macos.display.resize",
-            json!({"computerId": computer, "widthPx": width_px, "heightPx": height_px}),
-        )
-        .map_err(|error| error.message)
-    })
-    .await
-    .map_err(|_| "Silo could not resize the screen.".to_string())?
-}
-
-/// Ends the screen connections of every window, as the app quits or updates.
-pub(crate) fn close_all() {
-    let stopped: Vec<_> = with_viewers(|viewers| {
-        viewers
-            .values_mut()
-            .filter_map(|viewer| viewer.gateway.take())
-            .collect()
-    });
-    drop(stopped);
-}
-
-/// Ends the screen connections of the windows for computers on a device that is no longer used.
-pub(crate) fn close_device(device: &str) {
-    let stopped: Vec<_> = with_viewers(|viewers| {
-        viewers
-            .values_mut()
-            .filter(|viewer| viewer.device == device)
-            .filter_map(|viewer| viewer.gateway.take())
-            .collect()
-    });
-    drop(stopped);
+    let (_, computer) = target_of(&window)?;
+    display_resize(&engine, &computer, width_px, height_px)
+        .await
+        .map_err(String::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
 
     const DEVICE: &str = "22222222-2222-4222-8222-222222222222";
     const COMPUTER: &str = "11111111-1111-4111-8111-111111111111";
-
-    #[test]
-    fn app_origins_include_the_app_schemes_and_in_debug_the_dev_server() {
-        let origins = app_origins(Some("http://localhost:1420"));
-        assert!(origins.contains(&"tauri://localhost".to_string()));
-        assert!(origins.contains(&"http://tauri.localhost".to_string()));
-        assert_eq!(
-            origins.contains(&"http://localhost:1420".to_string()),
-            cfg!(debug_assertions)
-        );
-        assert!(!app_origins(None).iter().any(|o| o.contains("1420")));
-    }
 
     #[test]
     fn a_computer_has_one_stable_viewer_label_that_is_a_desktop_shell() {
         let label = viewer_label(DEVICE, COMPUTER);
         assert_eq!(label, viewer_label(DEVICE, COMPUTER));
         assert_ne!(label, viewer_label(COMPUTER, DEVICE));
-        assert!(crate::desktop_viewer::is_viewer_label(&label));
-        assert!(is_macos_viewer_label(&label));
-        assert!(!is_macos_viewer_label("desktop-shell-abc"));
+        assert!(label.starts_with("desktop-shell-macos-"));
     }
 
     #[test]
@@ -420,41 +333,89 @@ mod tests {
             .contains("Apple silicon"));
     }
 
-    #[test]
-    fn closing_a_device_ends_only_its_gateways() {
-        let gateway = |tag: &str| {
-            let open: gateway::Open = Arc::new(|_| Err("closed".to_string()));
-            let started = Gateway::start(open, Vec::new()).unwrap();
-            (tag.to_string(), started)
-        };
-        let (_, first) = gateway("one");
-        let (_, second) = gateway("two");
-        let first_url = first.url();
-        with_viewers(|viewers| {
-            viewers.clear();
-            viewers.insert(
-                "w1".into(),
-                Viewer {
-                    device: DEVICE.into(),
-                    computer: COMPUTER.into(),
-                    gateway: Some(first),
-                },
-            );
-            viewers.insert(
-                "w2".into(),
-                Viewer {
-                    device: "other".into(),
-                    computer: COMPUTER.into(),
-                    gateway: Some(second),
-                },
-            );
+    #[tokio::test]
+    async fn the_window_name_comes_from_the_owners_list_and_the_device() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "computers.list" => Ok(json!({"linux": {"computers": []}, "macos": {
+                "supported": true,
+                "computers": [{"id": COMPUTER, "name": "mac", "state": "running"}]}})),
+            "connections.devices.list" => {
+                Ok(json!([{"id": DEVICE, "name": "Studio", "address": "x"}]))
+            }
+            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            _ => Err(("internal", "unexpected".into())),
         });
-        close_device(DEVICE);
-        with_viewers(|viewers| {
-            assert!(viewers["w1"].gateway.is_none());
-            assert!(viewers["w2"].gateway.as_ref().is_some_and(Gateway::running));
-            viewers.clear();
+        let (client, _) = connected_client(&fake).await;
+        assert_eq!(
+            display_name(&client, DEVICE, COMPUTER).await.unwrap(),
+            "mac · Studio"
+        );
+        assert_eq!(fake.calls("computers.list"), [json!({"deviceId": DEVICE})]);
+    }
+
+    #[tokio::test]
+    async fn a_remote_device_the_engine_cannot_serve_passes_its_typed_error_through() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            _ => Err((
+                "unsupported_remote_operation",
+                "computers.list on a remote device".into(),
+            )),
         });
-        assert!(first_url.starts_with("ws://127.0.0.1:"));
+        let (client, _) = connected_client(&fake).await;
+        let error = display_name(&client, DEVICE, COMPUTER).await.unwrap_err();
+        assert!(error.is("unsupported_remote_operation"));
+    }
+
+    #[tokio::test]
+    async fn the_session_is_forwarded_and_translated_to_the_viewers_shape() {
+        let fake = FakeEngine::start(|_, _| {
+            Ok(
+                json!({"url": "ws://127.0.0.1:5900", "username": "u", "password": "p",
+                      "width": 1280, "height": 800}),
+            )
+        });
+        let (client, _) = connected_client(&fake).await;
+        let session = display_session(&client, DEVICE, COMPUTER).await.unwrap();
+        assert_eq!(
+            session,
+            json!({"url": "ws://127.0.0.1:5900", "username": "u", "password": "p",
+                   "width": 1280, "height": 800})
+        );
+        assert_eq!(
+            fake.calls("macos.display.session"),
+            [json!({"deviceId": DEVICE, "computerId": COMPUTER})]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_without_sign_in_and_a_refusal_are_errors() {
+        let fake = FakeEngine::start(|_, _| Ok(json!({"url": "ws://x"})));
+        let (client, _) = connected_client(&fake).await;
+        assert!(display_session(&client, DEVICE, COMPUTER).await.is_err());
+        let refusing = FakeEngine::start(|method, _| match method {
+            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            _ => Err((
+                "unsupported_remote_operation",
+                "macos.display.session on a remote device".into(),
+            )),
+        });
+        let (client, _) = connected_client(&refusing).await;
+        let error = display_session(&client, DEVICE, COMPUTER)
+            .await
+            .unwrap_err();
+        assert!(error.is("unsupported_remote_operation"));
+    }
+
+    #[tokio::test]
+    async fn the_resize_sends_pixels_and_returns_the_applied_size() {
+        let fake = FakeEngine::start(|_, _| Ok(json!({"widthPx": 1280, "heightPx": 800})));
+        let (client, _) = connected_client(&fake).await;
+        let applied = display_resize(&client, COMPUTER, 1300, 900).await.unwrap();
+        assert_eq!(applied, json!({"widthPx": 1280, "heightPx": 800}));
+        assert_eq!(
+            fake.calls("macos.display.resize"),
+            [json!({"computerId": COMPUTER, "widthPx": 1300, "heightPx": 900})]
+        );
     }
 }

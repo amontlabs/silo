@@ -84,37 +84,13 @@ describe("native settings transport", () => {
     expect(settings.getSnapshot().onboardingDraft).toEqual(draft)
   })
 
-  it("imports a saved legacy theme only when absent, keeping its original storage key", async () => {
+  it("does not import a theme from the old browser storage key", async () => {
     localStorage.setItem("silo-theme", "dark")
-    native.invoke.mockImplementation(async (command: string) => command === "import_legacy_theme"
-      ? snapshot(1, { theme: "dark" }) : snapshot())
+    native.invoke.mockResolvedValue(snapshot())
     const settings = store()
     await settings.initialize()
-    expect(settings.getSnapshot().settings.theme).toBe("dark")
-    expect(native.invoke).toHaveBeenCalledWith("import_legacy_theme", { theme: "dark" })
-    expect(localStorage.getItem("silo-theme")).toBe("dark")
-    await settings.refresh()
-    expect(native.invoke.mock.calls.filter(([command]) => command === "import_legacy_theme")).toHaveLength(1)
-  })
-
-  it("retries legacy theme delivery after a transport failure without requiring another launch", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {})
-    localStorage.setItem("silo-theme", "dark")
-    let attempts = 0
-    native.invoke.mockImplementation(async (command: string) => {
-      if (command === "import_legacy_theme") {
-        if (++attempts === 1) throw new Error("Theme delivery unavailable")
-        return snapshot(1, { theme: "dark" })
-      }
-      return snapshot()
-    })
-    const settings = store()
-    await settings.initialize()
-    expect(settings.getSnapshot().saveError).toBe("Theme delivery unavailable")
-    await settings.refresh()
-    expect(attempts).toBe(2)
-    expect(settings.getSnapshot().settings.theme).toBe("dark")
-    expect(settings.getSnapshot().saveError).toBeNull()
+    expect(native.invoke).toHaveBeenCalledExactlyOnceWith("read_settings")
+    expect(settings.getSnapshot().settings.theme).not.toBe("dark")
     expect(localStorage.getItem("silo-theme")).toBe("dark")
   })
 
@@ -387,8 +363,8 @@ describe("native settings transport", () => {
 describe("quit confirmation", () => {
   it("opts in, asks once per request, and answers with the user's choice", async () => {
     native.invoke.mockResolvedValue(undefined)
-    let answer!: (confirmed: boolean) => void
-    const ask = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve }))
+    let answer!: (choice: "cancel" | "keep" | "stop") => void
+    const ask = vi.fn(() => new Promise<"cancel" | "keep" | "stop">((resolve) => { answer = resolve }))
     cleanups.push(await connectQuitConfirmation(ask))
     expect(native.invoke).toHaveBeenCalledWith("enable_quit_confirmation")
     const request = { requestId: 3, computers: ["dev", "api"] }
@@ -396,7 +372,7 @@ describe("quit confirmation", () => {
     native.handlers.get("silo://quit-requested")?.({ payload: request })
     expect(ask).toHaveBeenCalledTimes(1)
     expect(ask).toHaveBeenCalledWith(request)
-    answer(false)
-    await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("answer_quit_request", { requestId: 3, confirmed: false }))
+    answer("keep")
+    await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("answer_quit_request", { requestId: 3, choice: "keep" }))
   })
 })

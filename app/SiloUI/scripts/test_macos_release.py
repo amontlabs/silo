@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
         # also fails if package.json is ever changed back to plain tauri build.
         scripts = self.case / 'scripts'
         scripts.mkdir()
-        for name in ('build_desktop.py', 'macos_release_signing.py', 'channel_names.py', 'channel_names.rs'):
+        for name in ('build_desktop.py', 'macos_release_signing.py', 'channel_names.py', 'channel_names.rs', 'embed_engine.py'):
             shutil.copy2(SCRIPT.with_name(name), scripts / name)
         shutil.copy2(SCRIPT.parent.parent / 'package.json', self.case / 'package.json')
         (self.case / 'src-tauri/engine/src').mkdir(parents=True)
@@ -151,7 +151,15 @@ int main(int argc, char **argv) {
         tools.mkdir()
         cargo = tools / 'cargo'
         metadata = json.dumps({'target_directory': str(self.case / 'target')})
-        cargo.write_text(f'#!{sys.executable}\nprint({metadata!r})\n')
+        # `cargo build` of the engine leaves a (real, signable) silod where Cargo would.
+        silod = self.case / 'target/release/silod'
+        engine_inputs = self.case / 'src-tauri/silod'
+        shutil.copytree(SCRIPT.parent.parent / 'src-tauri/silod/macos', engine_inputs / 'macos')
+        cargo.write_text(f'#!{sys.executable}\nimport shutil, sys, pathlib\n'
+                         f'if "build" in sys.argv:\n'
+                         f'    pathlib.Path({str(silod)!r}).parent.mkdir(parents=True, exist_ok=True)\n'
+                         f'    shutil.copy({str(self.root / "executable")!r}, {str(silod)!r})\n'
+                         f'else:\n    print({metadata!r})\n')
         cargo.chmod(0o755)
         result = subprocess.run(['npm', 'run', 'desktop:build'], cwd=self.case,
                                 env=dict(os.environ, PATH=f'{tools}{os.pathsep}{os.environ["PATH"]}'),

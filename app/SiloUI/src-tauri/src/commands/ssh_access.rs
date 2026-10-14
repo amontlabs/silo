@@ -1,53 +1,116 @@
-use crate::{runtime, ssh_access, ssh_connection};
-use std::time::Duration;
+//! SSH access settings of the computers, through `sshAccess.*`. The save dialog for an
+//! exported key stays on this device: it picks the path, the engine writes the key there.
+
+use serde_json::{json, Value};
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-const FAILED: &str = "Could not read SSH access settings.";
-const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
+use crate::engine_client::{Engine, EngineClient, EngineError};
 
-/// Keep the periodic safety pass at the Tauri boundary, where each pass can
-/// resolve the current runtime paths without making the SSH engine depend on an
-/// application handle.
-pub(crate) fn start_monitor(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || loop {
-        if let Ok(paths) = runtime::runtime_paths(&crate::commands::runtime::host(&app)) {
-            let _ = ssh_access::monitor(&paths);
-        }
-        std::thread::sleep(MONITOR_INTERVAL);
+pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
+    engine.call("sshAccess.state", json!({})).await
+}
+
+pub(crate) async fn save(
+    engine: &EngineClient,
+    computer: &str,
+    enabled: bool,
+    port: u16,
+    bind_address: String,
+    keys: Option<Vec<String>>,
+) -> Result<Value, EngineError> {
+    let mut params = json!({
+        "computerId": engine.computer_id(computer).await?,
+        "enabled": enabled,
+        "port": port,
+        "bindAddress": bind_address,
     });
+    if let Some(keys) = keys {
+        params["keys"] = json!(keys);
+    }
+    engine.call("sshAccess.save", params).await
+}
+
+/// Which computer a connection export is for: a name on this device, or a computer of a
+/// connected device.
+pub(crate) struct ConnectionTarget {
+    pub computer: Option<String>,
+    pub device_id: Option<String>,
+    pub computer_id: Option<String>,
+}
+
+impl ConnectionTarget {
+    /// The name the exported key file suggests.
+    fn key_filename(&self) -> String {
+        let name = self
+            .computer
+            .as_deref()
+            .or(self.computer_id.as_deref())
+            .unwrap_or("connection");
+        let safe: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        format!("silo-{safe}.key")
+    }
+}
+
+/// The SSH command (`download` false) or the key written to `destination` (`download` true).
+pub(crate) async fn connection(
+    engine: &EngineClient,
+    target: &ConnectionTarget,
+    download: bool,
+    network: Option<bool>,
+    destination: Option<String>,
+) -> Result<Option<String>, EngineError> {
+    let computer_id = match (&target.device_id, &target.computer_id, &target.computer) {
+        (Some(_), Some(id), _) => id.clone(),
+        (Some(_), None, _) => return Err(EngineError::internal("Missing computer identity.")),
+        (None, _, Some(name)) => engine.computer_id(name).await?,
+        (None, _, None) => return Err(EngineError::internal("Missing computer name.")),
+    };
+    let mut params = json!({"computerId": computer_id, "download": download});
+    if let Some(device_id) = &target.device_id {
+        params["deviceId"] = Value::String(device_id.clone());
+    }
+    if let Some(network) = network {
+        params["network"] = Value::Bool(network);
+    }
+    if download {
+        params["destination"] = Value::String(
+            destination.ok_or_else(|| EngineError::internal("Choose where to save the key."))?,
+        );
+    }
+    let reply = engine.call("sshAccess.connection", params).await?;
+    Ok(reply.as_str().filter(|_| !download).map(str::to_owned))
 }
 
 #[tauri::command]
-pub(crate) async fn read_ssh_access_state(app: AppHandle) -> Result<ssh_access::State, String> {
-    tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
-        ssh_access::read_state(&paths)
-    })
-    .await
-    .map_err(|_| FAILED.to_owned())?
+pub(crate) async fn read_ssh_access_state(engine: Engine<'_>) -> Result<Value, EngineError> {
+    state(&engine).await
 }
 
 #[tauri::command]
 pub(crate) async fn save_ssh_access(
-    app: AppHandle,
+    engine: Engine<'_>,
     computer: String,
     enabled: bool,
     port: u16,
     bind_address: String,
     keys: Option<Vec<String>>,
-) -> Result<ssh_access::State, String> {
-    tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
-        ssh_access::save(&paths, computer, enabled, port, bind_address, keys)
-    })
-    .await
-    .map_err(|_| FAILED.to_owned())?
+) -> Result<Value, EngineError> {
+    save(&engine, &computer, enabled, port, bind_address, keys).await
 }
 
 #[tauri::command]
 pub(crate) async fn ssh_connection(
+    engine: Engine<'_>,
     app: AppHandle,
     window: WebviewWindow,
     computer: Option<String>,
@@ -55,34 +118,154 @@ pub(crate) async fn ssh_connection(
     computer_id: Option<String>,
     download: bool,
     network: Option<bool>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, EngineError> {
     if window.label() != "main" {
-        return Err("SSH keys can only be exported from the main window.".into());
+        return Err(EngineError::internal(
+            "SSH keys can only be exported from the main window.",
+        ));
+    }
+    let target = ConnectionTarget {
+        computer,
+        device_id,
+        computer_id,
+    };
+    let destination = if download {
+        let filename = target.key_filename();
+        let dialog_window = window.clone();
+        let chosen = tokio::task::spawn_blocking(move || {
+            app.dialog()
+                .file()
+                .set_parent(&dialog_window)
+                .set_title("Save SSH connection key")
+                .set_file_name(filename)
+                .blocking_save_file()
+        })
+        .await
+        .map_err(|_| EngineError::internal("Could not prepare SSH connection."))?;
+        let Some(chosen) = chosen else {
+            return Ok(None);
+        };
+        let path = chosen
+            .into_path()
+            .map_err(|_| EngineError::internal("Choose a local file."))?;
+        Some(
+            path.to_str()
+                .ok_or_else(|| EngineError::internal("Choose a local file."))?
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+    connection(&engine, &target, download, network, destination).await
+}
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
+
+    const DEV: &str = "00000000-0000-4000-8000-00000000000d";
+    const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
+
+    fn replies(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+        match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "computers.list" => Ok(json!({
+                "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
+                "macos": {"computers": []}
+            })),
+            "sshAccess.state" | "sshAccess.save" => Ok(json!({"computers": []})),
+            "sshAccess.connection" if params["download"] == true => Ok(Value::Null),
+            "sshAccess.connection" => Ok(json!("ssh -p 2222 user@127.0.0.1")),
+            _ => Ok(Value::Null),
+        }
     }
 
-    tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
-        match ssh_connection::prepare(&paths, computer, device_id, computer_id, download, network)?
-        {
-            ssh_connection::ConnectionResult::Command(command) => Ok(Some(command)),
-            ssh_connection::ConnectionResult::KeyExport { source, filename } => {
-                let Some(selected) = app
-                    .dialog()
-                    .file()
-                    .set_parent(&window)
-                    .set_title("Save SSH connection key")
-                    .set_file_name(filename)
-                    .blocking_save_file()
-                else {
-                    return Ok(None);
-                };
-                let destination = selected.into_path().map_err(|_| "Choose a local file.")?;
-                let private = crate::editor::read_regular(&source)?;
-                crate::editor::write_private(&destination, &private)?;
-                Ok(None)
-            }
-        }
-    })
-    .await
-    .map_err(|_| "Could not prepare SSH connection.".to_owned())?
+    #[tokio::test]
+    async fn access_is_read_and_saved_by_computer_id() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        state(&engine).await.unwrap();
+        save(
+            &engine,
+            "dev",
+            true,
+            2222,
+            "127.0.0.1".into(),
+            Some(vec!["k".into()]),
+        )
+        .await
+        .unwrap();
+        save(&engine, "dev", false, 2222, "127.0.0.1".into(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.calls("sshAccess.save"),
+            vec![
+                json!({"computerId": DEV, "enabled": true, "port": 2222, "bindAddress": "127.0.0.1", "keys": ["k"]}),
+                json!({"computerId": DEV, "enabled": false, "port": 2222, "bindAddress": "127.0.0.1"}),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_connection_returns_the_command_and_a_download_returns_nothing() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        let local = ConnectionTarget {
+            computer: Some("dev".into()),
+            device_id: None,
+            computer_id: None,
+        };
+        assert_eq!(
+            connection(&engine, &local, false, Some(true), None)
+                .await
+                .unwrap(),
+            Some("ssh -p 2222 user@127.0.0.1".to_owned())
+        );
+        let remote = ConnectionTarget {
+            computer: None,
+            device_id: Some(DEVICE.into()),
+            computer_id: Some(DEV.into()),
+        };
+        assert_eq!(
+            connection(&engine, &remote, true, None, Some("/tmp/k.key".into()))
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            fake.calls("sshAccess.connection"),
+            vec![
+                json!({"computerId": DEV, "download": false, "network": true}),
+                json!({"computerId": DEV, "deviceId": DEVICE, "download": true, "destination": "/tmp/k.key"}),
+            ]
+        );
+        // A download needs the path the dialog chose.
+        assert!(connection(&engine, &remote, true, None, None)
+            .await
+            .is_err());
+        assert_eq!(remote.key_filename(), format!("silo-{DEV}.key"));
+    }
+
+    #[tokio::test]
+    async fn unsupported_remote_access_is_the_typed_unavailable_state() {
+        let fake = FakeEngine::start(|method, params| match method {
+            "sshAccess.connection" => Err((
+                "unsupported_remote_operation",
+                "Not available for that device yet.".into(),
+            )),
+            _ => replies(method, params),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        let remote = ConnectionTarget {
+            computer: None,
+            device_id: Some(DEVICE.into()),
+            computer_id: Some(DEV.into()),
+        };
+        let error = connection(&engine, &remote, false, None, None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "unsupported_remote_operation");
+    }
 }

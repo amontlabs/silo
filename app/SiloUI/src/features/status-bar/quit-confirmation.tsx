@@ -4,7 +4,7 @@ import { InlineConfirmation } from "@/components/inline-confirmation"
 import { Button } from "@/components/ui/button"
 import { quitConfirmationDetail } from "./quit-confirmation-model"
 
-export function QuitConfirmation({ names, onCancel, onQuit }: { names: string[]; onCancel: () => void; onQuit: () => void }) {
+export function QuitConfirmation({ names, onCancel, onKeepRunning, onStop }: { names: string[]; onCancel: () => void; onKeepRunning: () => void; onStop: () => void }) {
   const titleId = useId()
   const detailId = useId()
   return (
@@ -14,7 +14,8 @@ export function QuitConfirmation({ names, onCancel, onQuit }: { names: string[];
         <p id={detailId} className="text-muted-foreground">{quitConfirmationDetail(names)}</p>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button type="button" variant="destructive" size="sm" autoFocus onClick={onQuit}>Quit and stop</Button>
+          <Button type="button" variant="outline" size="sm" autoFocus onClick={onKeepRunning}>Keep running</Button>
+          <Button type="button" variant="destructive" size="sm" onClick={onStop}>Stop and quit</Button>
         </div>
       </div>
     </InlineConfirmation>

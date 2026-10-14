@@ -274,7 +274,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t px-2 py-2">
         {quitPending && stoppedByQuit.length
-          ? <QuitConfirmation names={stoppedByQuit} onCancel={() => { setQuitPending(false); focusContent() }} onQuit={() => { setQuitPending(false); actions.quit() }} />
+          ? <QuitConfirmation names={stoppedByQuit} onCancel={() => { setQuitPending(false); focusContent() }} onKeepRunning={() => { setQuitPending(false); actions.quit("keep") }} onStop={() => { setQuitPending(false); actions.quit("stop") }} />
           : <>
             <Button variant="ghost" size="sm" className="gap-2" onClick={() => actions.openSilo()}><SiloMark data-icon="inline-start" /><span>Open Silo</span></Button>
             <ComputerAction label="Quit Silo" onClick={requestQuit}><Power /></ComputerAction>

@@ -72,7 +72,7 @@ extern "C-unwind" fn should_terminate(_: &AnyObject, _: Sel, _: *mut AnyObject) 
         let Some(app) = APP.get() else {
             return TERMINATE_NOW;
         };
-        if !crate::commands::settings::accepts_terminate_request() {
+        if !crate::commands::settings::accepts_terminate_request(app) {
             return TERMINATE_NOW;
         }
         begin_terminate(&PENDING, quit_reason(current_quit_reason()), |reason| {

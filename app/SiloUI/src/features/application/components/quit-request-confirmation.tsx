@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState } from "react"
 import { AlertDialog } from "radix-ui"
 
-import type { QuitRequest } from "@/desktop/settings"
+import type { QuitAnswer, QuitRequest } from "@/desktop/settings"
 import { Button } from "@/components/ui/button"
 import { restoreFocus } from "@/lib/focus"
 import { quitConfirmationDetail } from "@/features/status-bar/quit-confirmation-model"
 
 /** `connectQuitConfirmation` from `desktop/settings`: opts the window in and routes each Quit request to `ask`. */
-export type ConnectQuitConfirmation = (ask: (request: QuitRequest) => Promise<boolean>) => Promise<() => void>
+export type ConnectQuitConfirmation = (ask: (request: QuitRequest) => Promise<QuitAnswer>) => Promise<() => void>
 
 interface PendingQuit {
   names: string[]
-  answer: (confirmed: boolean) => void
+  answer: (answer: QuitAnswer) => void
 }
 
 /**
  * The main window's Quit confirmation (decision 7). ⌘Q, the app and Dock menus, and the
  * backend's own Quit requests arrive here while local computers run; the tray asks inline
- * with the same words. "Quit and stop" lets Silo stop them and exit; Cancel, Escape, or this
- * UI going away keeps Silo open.
+ * with the same words. "Keep running" quits Silo and leaves them running in the engine,
+ * "Stop and quit" stops them first; Cancel, Escape, or this UI going away keeps Silo open.
  */
 export function QuitRequestConfirmation({ connect }: { connect?: ConnectQuitConfirmation }) {
   const [pending, setPending] = useState<PendingQuit | null>(null)
@@ -29,13 +29,13 @@ export function QuitRequestConfirmation({ connect }: { connect?: ConnectQuitConf
     if (!connect) return
     let disposed = false
     let stop: (() => void) | undefined
-    const unanswered = new Set<(confirmed: boolean) => void>()
-    const ask = (request: QuitRequest) => new Promise<boolean>((resolve) => {
-      if (disposed) { resolve(false); return }
-      const answer = (confirmed: boolean) => {
+    const unanswered = new Set<(answer: QuitAnswer) => void>()
+    const ask = (request: QuitRequest) => new Promise<QuitAnswer>((resolve) => {
+      if (disposed) { resolve("cancel"); return }
+      const answer = (choice: QuitAnswer) => {
         if (!unanswered.delete(answer)) return
         setPending((current) => current?.answer === answer ? null : current)
-        resolve(confirmed)
+        resolve(choice)
       }
       unanswered.add(answer)
       setPending({ names: request.computers, answer })
@@ -46,18 +46,18 @@ export function QuitRequestConfirmation({ connect }: { connect?: ConnectQuitConf
     return () => {
       disposed = true
       stop?.()
-      for (const answer of [...unanswered]) answer(false)
+      for (const answer of [...unanswered]) answer("cancel")
     }
   }, [connect])
 
   const detail = pending?.names.length
     ? quitConfirmationDetail(pending.names)
-    : "Silo could not check which computers are running. Quitting stops any computers running on this device."
+    : "Silo could not check which computers are running. Keep running leaves any computers running in the background; Stop and quit stops them first."
 
-  return <AlertDialog.Root open={pending !== null} onOpenChange={(open) => { if (!open) pending?.answer(false) }}>
+  return <AlertDialog.Root open={pending !== null} onOpenChange={(open) => { if (!open) pending?.answer("cancel") }}>
     <AlertDialog.Portal>
       <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
-      {/* Like the tray's inline confirmation, Return confirms. */}
+      {/* Like the tray's inline confirmation, Return keeps the computers running. */}
       <AlertDialog.Content onOpenAutoFocus={(event) => {
         previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
         event.preventDefault()
@@ -70,7 +70,8 @@ export function QuitRequestConfirmation({ connect }: { connect?: ConnectQuitConf
         <AlertDialog.Description className="text-muted-foreground">{detail}</AlertDialog.Description>
         <div className="mt-1 flex justify-end gap-2">
           <AlertDialog.Cancel asChild><Button type="button" variant="ghost" size="sm">Cancel</Button></AlertDialog.Cancel>
-          <AlertDialog.Action asChild><Button ref={quitButton} type="button" variant="destructive" size="sm" onClick={() => pending?.answer(true)}>Quit and stop</Button></AlertDialog.Action>
+          <AlertDialog.Action asChild><Button ref={quitButton} type="button" variant="outline" size="sm" onClick={() => pending?.answer("keep")}>Keep running</Button></AlertDialog.Action>
+          <AlertDialog.Action asChild><Button type="button" variant="destructive" size="sm" onClick={() => pending?.answer("stop")}>Stop and quit</Button></AlertDialog.Action>
         </div>
       </AlertDialog.Content>
     </AlertDialog.Portal>

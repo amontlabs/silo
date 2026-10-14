@@ -20,20 +20,9 @@ const nativeSnapshotSchema = z.object({
 })
 
 export function createDesktopSettingsStore(initialSettings: SettingsPatch, main: boolean) {
-  let firstRead = true
   const backend: SettingsBackend = {
     async read() {
-      let snapshot = nativeSnapshotSchema.parse(await invoke("read_settings"))
-      if (firstRead && main) {
-        // Import an actual saved choice only. Retain its old key if migration fails.
-        let theme: string | null = null
-        try { theme = localStorage.getItem("silo-theme") } catch { /* Browser storage can be unavailable. */ }
-        if (!snapshot.saveError && !("theme" in snapshot.settings) && (theme === "system" || theme === "dark" || theme === "light")) {
-          snapshot = nativeSnapshotSchema.parse(await invoke("import_legacy_theme", { theme }))
-        }
-        firstRead = false
-      }
-      return snapshot
+      return nativeSnapshotSchema.parse(await invoke("read_settings"))
     },
     subscribe: (receive) => listen("settings:changed", ({ payload }) => {
       const parsed = nativeSnapshotSchema.safeParse(payload)
@@ -125,12 +114,15 @@ const quitRequestSchema = z.object({
 })
 export type QuitRequest = z.infer<typeof quitRequestSchema>
 
+/** The answer to the Quit prompt (95 A-2): leave Silo open, quit and keep computers running, or stop them and quit. */
+export type QuitAnswer = "cancel" | "keep" | "stop"
+
 /**
  * Opt the main window in to confirming Quit while local computers run (decision 7).
- * `ask` resolves true for "Quit and stop" and false for "Cancel". A repeated Quit
- * while the prompt is open re-sends the same request and is ignored here.
+ * `ask` resolves with the user's choice. A repeated Quit while the prompt is open
+ * re-sends the same request and is ignored here.
  */
-export async function connectQuitConfirmation(ask: (request: QuitRequest) => Promise<boolean>) {
+export async function connectQuitConfirmation(ask: (request: QuitRequest) => Promise<QuitAnswer>) {
   let active: number | null = null
   const stop = await listen("silo://quit-requested", (event) => {
     const parsed = quitRequestSchema.safeParse(event.payload)
@@ -139,8 +131,8 @@ export async function connectQuitConfirmation(ask: (request: QuitRequest) => Pro
     if (active === requestId) return
     active = requestId
     void ask(parsed.data)
-      .catch((error: unknown) => { console.error("Silo quit confirmation:", error); return false })
-      .then((confirmed) => invoke("answer_quit_request", { requestId, confirmed }))
+      .catch((error: unknown): QuitAnswer => { console.error("Silo quit confirmation:", error); return "cancel" })
+      .then((choice) => invoke("answer_quit_request", { requestId, choice }))
       .catch((error: unknown) => console.error("Silo quit answer:", error))
       .finally(() => { if (active === requestId) active = null })
   })
