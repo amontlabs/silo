@@ -18,13 +18,14 @@ pub struct RequestEnvelope<P> {
     pub start_within_ms: Option<u64>,
 }
 
-/// A method error. The canonical multiplexed envelope carries only a stable
-/// code and message; version diagnostics belong to the handshake contract.
+/// A method error with optional structured version diagnostics for handshake refusal.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorObject {
     pub code: crate::jobs::ErrorCode,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<IncompatibleVersionDiagnostics>,
 }
 
 /// A response echoes its request id and contains exactly one success or error.
@@ -41,6 +42,21 @@ pub struct ProtocolRange {
     pub min: u32,
     pub max: u32,
 }
+
+/// Engine and client versions reported when handshake protocol negotiation fails.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IncompatibleVersionDiagnostics {
+    pub engine_protocol_range: ProtocolRange,
+    pub client_protocol_range: ProtocolRange,
+    pub engine_app_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_app_version: Option<String>,
+}
+
+/// The first canonical multiplexed engine protocol. Legacy bridge protocol v5
+/// is retired and is not accepted by `engine.sock`.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Client information is diagnostic metadata, not an authorization identity.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]

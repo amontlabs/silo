@@ -287,6 +287,36 @@ mod tests {
     }
 
     #[test]
+    fn incompatible_version_diagnostics_have_canonical_field_names() {
+        let error = ErrorObject {
+            code: ErrorCode::IncompatibleVersion,
+            message: "No common protocol version".to_owned(),
+            diagnostics: Some(crate::transport::IncompatibleVersionDiagnostics {
+                engine_protocol_range: crate::transport::ProtocolRange { min: 6, max: 6 },
+                client_protocol_range: crate::transport::ProtocolRange { min: 5, max: 5 },
+                engine_app_version: "0.1.0".to_owned(),
+                client_app_version: Some("9.8.7".to_owned()),
+            }),
+        };
+        let value = serde_json::to_value(&error).unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "code": "incompatible_version",
+                "message": "No common protocol version",
+                "diagnostics": {
+                    "engineProtocolRange": { "min": 6, "max": 6 },
+                    "clientProtocolRange": { "min": 5, "max": 5 },
+                    "engineAppVersion": "0.1.0",
+                    "clientAppVersion": "9.8.7"
+                }
+            })
+        );
+        assert_eq!(serde_json::from_value::<ErrorObject>(value).unwrap(), error);
+    }
+
+    #[test]
     fn error_codes_use_the_complete_snake_case_wire_set() {
         use crate::jobs::ErrorCode::*;
 

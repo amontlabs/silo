@@ -1,0 +1,33 @@
+[package]
+name = "silod"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "silod"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+objc2 = "0.6"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+silo-api = { path = "../../api" }
+silo-engine = { path = "../engine" }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+objc2-app-kit = { version = "0.3", features = ["block2", "NSEvent", "NSGraphicsContext"] }
+objc2-foundation = "0.3"
+objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
+security-framework = "3.7"
+
+[dev-dependencies]
+tempfile = "3.27"

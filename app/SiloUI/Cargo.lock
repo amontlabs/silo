@@ -4768,6 +4768,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "silod"
+version = "0.1.0"
+dependencies = [
+ "core-foundation 0.10.1",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-service-management",
+ "security-framework 3.7.0",
+ "semver",
+ "serde",
+ "serde_json",
+ "silo-api",
+ "silo-engine",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

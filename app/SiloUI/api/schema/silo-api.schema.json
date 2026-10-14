@@ -2566,10 +2566,20 @@
       "type": "object"
     },
     "ErrorObject": {
-      "description": "A method error. The canonical multiplexed envelope carries only a stable\ncode and message; version diagnostics belong to the handshake contract.",
+      "description": "A method error with optional structured version diagnostics for handshake refusal.",
       "properties": {
         "code": {
           "$ref": "#/$defs/ErrorCode"
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncompatibleVersionDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "message": {
           "type": "string"
@@ -5165,6 +5175,32 @@
         "name",
         "protocol",
         "capabilities"
+      ],
+      "type": "object"
+    },
+    "IncompatibleVersionDiagnostics": {
+      "description": "Engine and client versions reported when handshake protocol negotiation fails.",
+      "properties": {
+        "clientAppVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientProtocolRange": {
+          "$ref": "#/$defs/ProtocolRange"
+        },
+        "engineAppVersion": {
+          "type": "string"
+        },
+        "engineProtocolRange": {
+          "$ref": "#/$defs/ProtocolRange"
+        }
+      },
+      "required": [
+        "engineProtocolRange",
+        "clientProtocolRange",
+        "engineAppVersion"
       ],
       "type": "object"
     },
