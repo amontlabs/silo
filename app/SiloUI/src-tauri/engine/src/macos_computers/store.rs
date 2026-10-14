@@ -77,6 +77,8 @@ pub(super) struct SetupProgress {
     pub developer_tools: bool,
     pub computer_use: bool,
     pub clipboard: bool,
+    /// `/Users/silo/workspace` and `/Users/silo/Downloads` were created for Files/SFTP.
+    pub roots: bool,
     /// A copy of a template still has the template's password, keys and identity.
     pub needs_personalizing: bool,
 }
@@ -88,6 +90,7 @@ impl SetupProgress {
             && self.developer_tools
             && self.computer_use
             && self.clipboard
+            && self.roots
             && !self.needs_personalizing
     }
 }
@@ -131,6 +134,10 @@ pub(super) struct Record {
     /// The approval mode computer use was last set up with; an update keeps it.
     #[serde(default)]
     pub computer_use_approval: Option<crate::computer_use::Approval>,
+    /// The approval mode the owner wants. It is separate from the mode last applied to the
+    /// guest so a change can be retried after a guest or engine failure.
+    #[serde(default)]
+    pub computer_use_desired_approval: Option<crate::computer_use::Approval>,
     /// Set by a Restore: what the next Start does before it hands the computer over.
     #[serde(default)]
     pub pending_restore: Option<super::checkpoints::PendingRestore>,
@@ -138,6 +145,10 @@ pub(super) struct Record {
     /// are in `inherited-access/` until its personalization has replaced them.
     #[serde(default)]
     pub inherited_access: bool,
+    /// An archive import has rekeyed the account offline and still needs its
+    /// first password-authenticated personalization boot.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 impl Record {
@@ -145,7 +156,8 @@ impl Record {
     /// known to match: the update runs again.
     pub(super) fn computer_use_stale(&self) -> bool {
         let approval = self
-            .computer_use_approval
+            .computer_use_desired_approval
+            .or(self.computer_use_approval)
             .unwrap_or_else(crate::computer_use::initial_approval);
         self.computer_use_version.as_deref()
             != Some(super::templates::computer_use_version_for(approval).as_str())
@@ -157,7 +169,7 @@ impl Record {
 
     /// Readiness shown to the user and used by operations that require a current setup.
     pub(super) fn setup_complete(&self) -> bool {
-        self.setup.complete() && !self.developer_tools_stale()
+        self.setup.complete() && !self.developer_tools_stale() && !self.imported
     }
 
     pub(super) fn os_version(&self) -> Option<String> {
@@ -294,8 +306,10 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         setup_version: None,
         computer_use_version: None,
         computer_use_approval: None,
+        computer_use_desired_approval: None,
         pending_restore: None,
         inherited_access: false,
+        imported: false,
     }
 }
 
@@ -334,7 +348,7 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
         return Err(INTERRUPTED_INSTALL.into());
     }
     // Until then it still has its template's password and keys.
-    if record.setup.needs_personalizing {
+    if record.setup.needs_personalizing || record.imported {
         return Err(NEEDS_PERSONALIZING.into());
     }
     match state {
@@ -423,6 +437,20 @@ pub(super) fn computer_ids(app_data: &Path) -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+/// The `(id, name)` of every macOS computer folder on disk, in the case the record keeps,
+/// without needing the registry or a valid record.
+pub(super) fn identities(app_data: &Path) -> Vec<(String, String)> {
+    computer_ids(app_data)
+        .into_iter()
+        .filter_map(|id| {
+            let bytes = fs::read(root(app_data).join(&id).join("computer.json")).ok()?;
+            let record = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
+            let name = record.get("name")?.as_str()?.to_owned();
+            Some((id, name))
+        })
+        .collect()
 }
 
 /// The name of every macOS computer folder on disk, lowercased, without needing
@@ -835,6 +863,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         record
@@ -952,10 +981,13 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: false,
             needs_personalizing: true,
         };
         assert!(!setup.complete());
         setup.needs_personalizing = false;
+        assert!(!setup.complete());
+        setup.roots = true;
         assert!(setup.complete());
     }
 
@@ -999,6 +1031,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         let layout = Layout::new(app_data.path(), &original.id);
@@ -1111,6 +1144,24 @@ mod tests {
     }
 
     #[test]
+    fn an_archive_import_stays_unavailable_until_retry_setup_finishes() {
+        let mut imported = finished();
+        imported.imported = true;
+        assert!(!imported.setup_complete());
+        assert_eq!(
+            start_allowed(State::Stopped, &imported),
+            Err(NEEDS_PERSONALIZING.into())
+        );
+        assert_eq!(setup_allowed(State::Stopped, &imported), Ok(()));
+        imported.imported = false;
+        assert!(imported.setup_complete());
+        assert_eq!(
+            setup_allowed(State::Stopped, &imported),
+            Err("This computer is already set up.".into())
+        );
+    }
+
+    #[test]
     fn setup_runs_on_an_idle_installed_computer_with_steps_left() {
         let mut computer = record(&request());
         assert!(setup_allowed(State::Stopped, &computer).is_err());
@@ -1127,6 +1178,7 @@ mod tests {
         computer.setup.clipboard = true;
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.developer_tools = true;
+        computer.setup.roots = true;
         computer.developer_tools_version = Some(super::super::developer_tools::version());
         assert!(setup_allowed(State::Stopped, &computer).is_err());
         assert!(start_allowed(State::SettingUp, &computer).is_err());
@@ -1147,7 +1199,7 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "needsPersonalizing": false})
+            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "roots": false, "needsPersonalizing": false})
         );
 
         let mut old_setup = json.clone();
@@ -1155,10 +1207,12 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("developerTools");
+        old_setup["setup"].as_object_mut().unwrap().remove("roots");
         fs::write(layout.record(), serde_json::to_vec(&old_setup).unwrap()).unwrap();
         let old_with_setup: Record =
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert!(!old_with_setup.setup.developer_tools);
+        assert!(!old_with_setup.setup.roots);
 
         let mut old = json;
         old.as_object_mut().unwrap().remove("setup");

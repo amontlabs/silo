@@ -234,6 +234,69 @@ impl Guest for MacGuest {
     }
 }
 
+/// Reads the computer's clipboard for an API client instead of the engine host's pasteboard.
+pub(super) fn read_explicit(
+    app: &MacosContext,
+    id: &str,
+) -> Result<silo_api::methods::clipboard::ClipboardContent, String> {
+    let Some(_guard) = ActiveGuard::acquire(&format!("macos-computer-{id}")) else {
+        return Err("A clipboard transfer is already running.".into());
+    };
+    let (record, state) = super::computer(id)?;
+    if state != State::Running {
+        return Err("Start the computer to use its clipboard.".into());
+    }
+    let guest = MacGuest {
+        layout: Layout::new(&app_data(app)?, id),
+        record,
+    };
+    Ok(match guest.request_clipboard(IMAGE_TIMEOUT)? {
+        GuestClipboard::Empty => silo_api::methods::clipboard::ClipboardContent::Empty,
+        GuestClipboard::TooLarge => silo_api::methods::clipboard::ClipboardContent::TooLarge,
+        GuestClipboard::Text(text) => silo_api::methods::clipboard::ClipboardContent::Text { text },
+        GuestClipboard::Image { mime, bytes } => {
+            silo_api::methods::clipboard::ClipboardContent::Image { mime, bytes }
+        }
+    })
+}
+
+/// Writes a payload supplied by an API client to the computer's clipboard.
+pub(super) fn write_explicit(
+    app: &MacosContext,
+    id: &str,
+    content: silo_api::methods::clipboard::ClipboardWritableContent,
+) -> Result<(), String> {
+    let Some(_guard) = ActiveGuard::acquire(&format!("macos-computer-{id}")) else {
+        return Err("A clipboard transfer is already running.".into());
+    };
+    let (record, state) = super::computer(id)?;
+    if state != State::Running {
+        return Err("Start the computer to use its clipboard.".into());
+    }
+    let guest = MacGuest {
+        layout: Layout::new(&app_data(app)?, id),
+        record,
+    };
+    match content {
+        silo_api::methods::clipboard::ClipboardWritableContent::Text { text } => {
+            if text.len() > MAX_TEXT_BYTES {
+                return Err("The clipboard text is too large to send.".into());
+            }
+            guest.send_text(&text)?;
+        }
+        silo_api::methods::clipboard::ClipboardWritableContent::Image { mime, bytes } => {
+            if mime != "image/png" || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err("Only PNG clipboard images are supported.".into());
+            }
+            if bytes.len() > MAX_IMAGE_BYTES {
+                return Err("The clipboard image is too large to send.".into());
+            }
+            guest.send_image(&mime, &bytes)?;
+        }
+    }
+    Ok(())
+}
+
 /// Runs one transfer in the running computer `id`. Blocks, so call it from a worker thread.
 pub(super) fn run(app: &MacosContext, id: &str, direction: Direction) -> Result<Report, String> {
     let action = direction.action();

@@ -457,7 +457,7 @@ struct Finished {
     overflow: bool,
 }
 
-struct Sftp {
+pub(crate) struct Sftp {
     program: PathBuf,
     ssh: PathBuf,
     config: PathBuf,
@@ -465,7 +465,7 @@ struct Sftp {
 }
 
 impl Sftp {
-    fn new(config: PathBuf, alias: String) -> Result<Self, String> {
+    pub(crate) fn new(config: PathBuf, alias: String) -> Result<Self, String> {
         if !crate::applications::launch::executable_file(Path::new(SFTP)) {
             return Err(MISSING_SFTP.into());
         }
@@ -1541,17 +1541,86 @@ fn upload_files_inner(
 ) -> Result<UploadOutcome, String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let roots = default_roots();
+    let sftp = connect(paths, &computer)?;
+    upload_files_over_sftp(
+        sftp,
+        roots,
+        owner,
+        transfer_id,
+        computer,
+        directory,
+        selection,
+        conflict,
+        cancel,
+        None,
+    )
+}
+
+/// macOS guest transfers use the same bounded SFTP transaction and cancellation path as
+/// MicroSandbox transfers, with their own roots and computer-ID SSH configuration.
+pub(crate) fn upload_files_with_transport(
+    config: PathBuf,
+    alias: String,
+    roots: Vec<String>,
+    owner: String,
+    transfer_id: String,
+    computer: String,
+    directory: String,
+    selection: String,
+    conflict: ConflictPolicy,
+    operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+) -> Result<UploadOutcome, String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.upload")?;
+    let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
+    let outcome = crate::runtime::shutdown::ensure_accepting_operations()
+        .and_then(|()| Sftp::new(config, alias))
+        .and_then(|sftp| {
+            upload_files_over_sftp(
+                sftp,
+                roots,
+                owner,
+                transfer_id.clone(),
+                computer,
+                directory,
+                selection,
+                conflict,
+                cancel,
+                operation,
+            )
+        });
+    if let Some((context, job_id, cancel)) = tracked {
+        clear_transfer_reservation(&transfer_id, &cancel);
+        finish_transfer_job(context.as_ref(), job_id, &outcome)?;
+    }
+    outcome
+}
+
+fn upload_files_over_sftp(
+    sftp: Sftp,
+    roots: Vec<String>,
+    owner: String,
+    transfer_id: String,
+    computer: String,
+    directory: String,
+    selection: String,
+    conflict: ConflictPolicy,
+    cancel: Option<Arc<AtomicBool>>,
+    mut operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+) -> Result<UploadOutcome, String> {
     if !within_any(&directory, &roots) {
         return Err("Silo can only upload to the workspace or the Downloads folder.".into());
     }
+    let downloads = roots.get(1).map(String::as_str).unwrap_or_default();
     // A desktop window only drops into the Downloads folder.
-    if owner != "main" && directory != downloads_root() {
+    if owner != "main" && directory != downloads {
         return Err("This window can only upload to the Downloads folder.".into());
     }
     let slot = Slot::take_with_cancel(&transfer_id, cancel)?;
+    if let Some(operation) = operation.as_mut() {
+        bind_operation_to_transfer(operation, slot.cancel.clone());
+    }
     let paths_to_upload = take_selection(&selection, &owner)?;
     let sources = prepare_sources(&paths_to_upload)?;
-    let sftp = connect(paths, &computer)?;
     let emit = publish_progress;
     let control = Control {
         id: &slot.id,
@@ -1568,7 +1637,7 @@ fn upload_files_inner(
         &directory,
         &sources,
         conflict,
-        directory == downloads_root(),
+        directory == downloads,
     );
     match &outcome {
         Ok(UploadOutcome::Cancelled) => control.report("upload", "cancelled", "", 0, 0, 0, 0),
@@ -1589,6 +1658,7 @@ pub struct DownloadSession {
     folder: Folder,
     name: String,
     size: u64,
+    _operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
 }
 
 pub fn prepare_download(
@@ -1616,13 +1686,59 @@ fn prepare_download_inner(
 ) -> Result<(DownloadSession, String), String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let roots = default_roots();
+    let sftp = connect(paths, &computer)?;
+    prepare_download_over_sftp(sftp, roots, transfer_id, computer, path, cancel, None)
+}
+
+pub(crate) fn prepare_download_with_transport(
+    config: PathBuf,
+    alias: String,
+    roots: Vec<String>,
+    transfer_id: String,
+    computer: String,
+    path: String,
+    operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+) -> Result<(DownloadSession, String), String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.download")?;
+    let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
+    let result = crate::runtime::shutdown::ensure_accepting_operations()
+        .and_then(|()| Sftp::new(config, alias))
+        .and_then(|sftp| {
+            prepare_download_over_sftp(
+                sftp,
+                roots,
+                transfer_id.clone(),
+                computer,
+                path,
+                cancel,
+                operation,
+            )
+        });
+    if let (Some((context, job_id, cancel)), Err(message)) = (tracked, &result) {
+        clear_transfer_reservation(&transfer_id, &cancel);
+        finish_transfer_job::<serde_json::Value>(context.as_ref(), job_id, &Err(message.clone()))?;
+    }
+    result
+}
+
+fn prepare_download_over_sftp(
+    sftp: Sftp,
+    roots: Vec<String>,
+    transfer_id: String,
+    computer: String,
+    path: String,
+    cancel: Option<Arc<AtomicBool>>,
+    mut operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+) -> Result<(DownloadSession, String), String> {
     if !within_any(&path, &roots) {
         return Err(
             "Silo can only download files from the workspace or the Downloads folder.".into(),
         );
     }
     let slot = Slot::take_with_cancel(&transfer_id, cancel)?;
-    let sftp = connect(paths, &computer)?;
+    if let Some(operation) = operation.as_mut() {
+        bind_operation_to_transfer(operation, slot.cancel.clone());
+    }
     let emit = |_progress: &Progress| {};
     let control = Control {
         id: &slot.id,
@@ -1659,6 +1775,7 @@ fn prepare_download_inner(
             folder,
             name: name.clone(),
             size,
+            _operation: operation,
         },
         name,
     ))
@@ -1676,6 +1793,7 @@ pub fn download_prepared(
         folder,
         name,
         size,
+        _operation,
     } = session;
     let emit = publish_progress;
     let control = Control {
@@ -1704,6 +1822,14 @@ pub fn download_prepared(
     outcome
 }
 
+fn bind_operation_to_transfer(
+    operation: &mut crate::runtime::operation_gate::OperationGuard<'_>,
+    cancel: Arc<AtomicBool>,
+) {
+    operation.allow_cancel();
+    operation.adopt_cancel_token(cancel);
+}
+
 pub fn cancel_transfer(owner: &str, transfer_id: &str) -> Result<(), String> {
     if owner != "main" && !owner.starts_with("desktop-shell-") {
         return Err("This window cannot cancel transfers.".into());
@@ -1723,6 +1849,34 @@ pub fn cancel_transfer(owner: &str, transfer_id: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::{cell::RefCell, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn operation_queue_cancellation_reaches_the_active_transfer_token() {
+        use crate::runtime::operation_gate::{OperationGate, OperationKind};
+
+        let gate = OperationGate::new();
+        let mut operation = gate
+            .kind(OperationKind::Other)
+            .computer("computer-id", "dev", "Transferring files for dev")
+            .unwrap();
+        operation.allow_cancel();
+        let transfer_cancel = Arc::new(AtomicBool::new(false));
+        bind_operation_to_transfer(&mut operation, transfer_cancel.clone());
+
+        gate.cancel(operation.request_id()).unwrap();
+
+        assert!(transfer_cancel.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn shared_sftp_transactions_accept_mac_roots_and_reject_other_home_paths() {
+        let roots = crate::macos_computers::files::transfer_roots();
+        assert!(within_any("/Users/silo/workspace/project/file.txt", &roots));
+        assert!(within_any("/Users/silo/Downloads/file.txt", &roots));
+        assert!(!within_any("/Users/silo/.ssh/id_ed25519", &roots));
+        assert!(!within_any("/Users/silo/workspace/../Library", &roots));
+        assert!(!within_any("/Users/silo/workspace2/file.txt", &roots));
+    }
 
     fn server() -> Option<&'static str> {
         [

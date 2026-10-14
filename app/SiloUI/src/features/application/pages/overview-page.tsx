@@ -655,6 +655,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
               getDeviceId={getComputerDeviceId}
               onConnectDevice={actions.connectDevice ? () => setConnecting(true) : undefined}
               onImportComputer={importComputer}
+              onExportMacosComputer={exportComputer}
               importPopover={importComputer ? importPopover : undefined}
               onCommitComputer={commitComputer}
               onDeleteComputer={deleteComputer}

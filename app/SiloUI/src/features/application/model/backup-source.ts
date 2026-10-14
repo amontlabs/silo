@@ -84,8 +84,8 @@ export interface BackupActions {
    * Picks an export file and checks it. Aborting `signal` stops the check (a large file
    * can take minutes); the caller must then ignore the result.
    */
-  chooseArchive: (onSelected?: (archivePath: string) => void, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string } | null>
-  inspectArchive: (selection: BackupArchive, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string }>
+  chooseArchive: (onSelected?: (archivePath: string) => void, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string; warnings?: string[] } | null>
+  inspectArchive: (selection: BackupArchive, signal?: AbortSignal) => Promise<{ archive: BackupArchive; valid: boolean; reason?: string; warnings?: string[] }>
   /** Starts an export and returns immediately; the result appears in `BackupState.operation`. */
   startBackup: (destination: string, computers: string[], checkpointId?: string) => void
   /**

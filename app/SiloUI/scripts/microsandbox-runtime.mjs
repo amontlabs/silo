@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 
 import { readFileSync } from "node:fs"
@@ -87,6 +87,7 @@ export function applyRuntimePatch(sourceRoot, patchPath) {
 }
 
 export async function buildPatchedExecutable({
+  appRoot,
   targetTriple,
   hostTriple,
   sourceArchive,
@@ -104,6 +105,12 @@ export async function buildPatchedExecutable({
     `CARGO_TARGET_${targetEnvironment}_RUSTFLAGS`,
     ...Object.keys(process.env).filter(name => name.startsWith("CARGO_PROFILE_RELEASE_")).sort(),
   ].map(name => [name, process.env[name] ?? null]))
+  const gatewayInputs = targetTriple === "aarch64-apple-darwin" && appRoot
+    ? await readMacosGatewayInputs(appRoot)
+    : null
+  const gatewaySourceDigest = gatewayInputs
+    ? sha256(Buffer.concat(gatewayInputs.flatMap(([name, bytes]) => [Buffer.from(`${name}\0`), bytes])))
+    : ""
   const cacheKey = sha256(Buffer.from([
     MICROSANDBOX_SOURCE_SHA256,
     ...MICROSANDBOX_PATCHES.map(({ sha256: digest }) => digest),
@@ -111,20 +118,31 @@ export async function buildPatchedExecutable({
     rustcVersion,
     targetTriple,
     MICROSANDBOX_BUILD_FEATURES,
+    gatewaySourceDigest,
     sha256(await readFile(new URL(import.meta.url))),
     JSON.stringify(compilerFlags),
   ].join("\n")))
   const buildRoot = join(cacheRoot, "patched-builds", cacheKey)
   const cachedExecutable = join(buildRoot, "msb")
   const cachedDigest = join(buildRoot, "msb.sha256")
-  if (await isVerifiedFile(cachedExecutable, (await readFile(cachedDigest, "utf8").catch(() => "")).trim(), "Compiled MicroSandbox")) {
+  const cachedGateway = join(buildRoot, "silo-macos-gateway")
+  const cachedGatewayDigest = join(buildRoot, "silo-macos-gateway.sha256")
+  const cachedGatewayValid = !gatewayInputs || await isVerifiedFile(
+    cachedGateway,
+    (await readFile(cachedGatewayDigest, "utf8").catch(() => "")).trim(),
+    "Compiled Silo macOS gateway",
+  )
+  if (cachedGatewayValid && await isVerifiedFile(cachedExecutable, (await readFile(cachedDigest, "utf8").catch(() => "")).trim(), "Compiled MicroSandbox")) {
     try {
       const version = runBuildTool(cachedExecutable, ["--version"]).trim()
       const createHelp = runBuildTool(cachedExecutable, ["create", "--help"])
       const execHelp = runBuildTool(cachedExecutable, ["exec", "--help"])
       const sshHelp = runBuildTool(cachedExecutable, ["ssh", "serve", "--help"])
       if (runBuildTool(cachedExecutable, ["snapshot", "load", "--help"]).includes("--stage-id") && sshHelp.includes("--no-start") && sshHelp.includes("--authorized-keys") && sshHelp.includes("--exit-on-stdin-close") && sshHelp.includes("--expected-machine-id") && execHelp.includes("--no-start") && execHelp.includes("--no-stdin") && hasSiloProtocolProbes(cachedExecutable) && version === `msb ${MICRO_SANDBOX_VERSION}` && createHelp.includes("--mount-owned") && createHelp.includes("--no-start") && createHelp.includes("--progress-json") && ["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => runBuildTool(cachedExecutable, ["snapshot", "create", "--help"]).includes(flag)) && ["--cow-mem", "--name"].every(flag => runBuildTool(cachedExecutable, ["restore", "--help"]).includes(flag))) {
-        return readFile(cachedExecutable)
+        const executable = await readFile(cachedExecutable)
+        return gatewayInputs
+          ? { executable, macosGateway: await readFile(cachedGateway) }
+          : executable
       }
     } catch {
       // A verified cache file can still be unusable; rebuild from pinned inputs.
@@ -143,6 +161,10 @@ export async function buildPatchedExecutable({
       const patchPath = join(workRoot, `patch-${index}.patch`)
       await writeFile(patchPath, patches[index])
       applyRuntimePatch(source[0], patchPath)
+    }
+    if (gatewayInputs) {
+      const gatewaySource = join(source[0], "macos-gateway")
+      await cp(resolve(appRoot, "src-tauri/macos-gateway"), gatewaySource, { recursive: true })
     }
     runBuildTool("cargo", [`+${MICROSANDBOX_BUILD_TOOLCHAIN}`, "fetch", "--locked", "--target", targetTriple], { cwd: source[0] })
     const agentdPath = join(source[0], "build", "agentd")
@@ -174,14 +196,52 @@ export async function buildPatchedExecutable({
       throw new Error("The built MicroSandbox is missing operation-owned snapshot staging")
     }
     const bytes = await readFile(built)
+    let gatewayBytes
+    if (gatewayInputs) {
+      runBuildTool("cargo", [
+        `+${MICROSANDBOX_BUILD_TOOLCHAIN}`,
+        "build",
+        "--locked",
+        "--release",
+        "--target",
+        targetTriple,
+        "--manifest-path",
+        join(source[0], "macos-gateway/Cargo.toml"),
+        "--bin",
+        "silo-macos-gateway",
+      ], { cwd: source[0], env: { ...process.env, CARGO_TARGET_DIR: cargoTarget } })
+      gatewayBytes = await readFile(join(cargoTarget, targetTriple, "release/silo-macos-gateway"))
+    }
     await mkdir(buildRoot, { recursive: true })
     await writeFile(`${cachedExecutable}.tmp-${process.pid}`, bytes, { mode: 0o755 })
     await rename(`${cachedExecutable}.tmp-${process.pid}`, cachedExecutable)
     await writeFile(cachedDigest, `${sha256(bytes)}\n`)
+    if (gatewayBytes) {
+      const gatewayTemporary = `${cachedGateway}.tmp-${process.pid}`
+      await writeFile(gatewayTemporary, gatewayBytes, { mode: 0o755 })
+      await chmod(gatewayTemporary, 0o755)
+      await rename(gatewayTemporary, cachedGateway)
+      await writeFile(cachedGatewayDigest, `${sha256(gatewayBytes)}\n`)
+      return { executable: bytes, macosGateway: gatewayBytes }
+    }
     return bytes
   } finally {
     await rm(workRoot, { recursive: true, force: true })
   }
+}
+
+async function readMacosGatewayInputs(appRoot) {
+  const directory = resolve(appRoot, "src-tauri/macos-gateway")
+  const names = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "reserved-secret-names.json",
+    "src/control.rs",
+    "src/frames.rs",
+    "src/main.rs",
+    "src/network.rs",
+  ]
+  return Promise.all(names.map(async name => [name, await readFile(join(directory, name))]))
 }
 
 export async function stageRuntime({
@@ -202,12 +262,14 @@ export async function stageRuntime({
   const stagedRoot = join(runtimeRoot, `.staging-${process.pid}`)
   const bundledRoot = join(runtimeRoot, "microsandbox")
   const executablePath = join(binariesRoot, `msb-${targetTriple}`)
+  const macosGatewayPath = join(binariesRoot, `silo-macos-gateway-${targetTriple}`)
   const libraryPath = join(stagedRoot, targetTriple, "lib", selected.libraryName)
   for (const path of [binariesRoot, runtimeRoot, cacheRoot, stagedRoot, bundledRoot, executablePath, libraryPath]) {
     assertInside(tauriRoot, path)
   }
 
   const executableTemporary = `${executablePath}.tmp-${process.pid}`
+  const gatewayTemporary = `${macosGatewayPath}.tmp-${process.pid}`
   await rm(stagedRoot, { recursive: true, force: true })
   try {
     await mkdir(dirname(libraryPath), { recursive: true })
@@ -241,7 +303,7 @@ export async function stageRuntime({
       verifySha256(patch, patchInput.sha256, `Silo runtime patch ${index + 1}`)
       patches.push(patch)
     }
-    const executable = Buffer.from(await buildExecutable({
+    const buildOutput = await buildExecutable({
       appRoot,
       targetTriple,
       hostTriple,
@@ -249,7 +311,15 @@ export async function stageRuntime({
       patches,
       agentd: await readFile(agentdPath),
       cacheRoot,
-    }))
+    })
+    const outputs = buildOutput && !ArrayBuffer.isView(buildOutput)
+      ? buildOutput
+      : { executable: buildOutput }
+    const executable = Buffer.from(outputs.executable)
+    const macosGateway = outputs.macosGateway ? Buffer.from(outputs.macosGateway) : null
+    if (targetTriple === "aarch64-apple-darwin" && buildExecutable === buildPatchedExecutable && !macosGateway) {
+      throw new Error("Patched MicroSandbox preparation did not build the Silo macOS gateway")
+    }
     const library = await fetchVerifiedFile(
       fetchStream,
       `${RELEASE_BASE_URL}/${selected.libraryAsset}`,
@@ -261,6 +331,10 @@ export async function stageRuntime({
     await mkdir(binariesRoot, { recursive: true })
     await writeFile(executableTemporary, executable, { mode: 0o755 })
     await chmod(executableTemporary, 0o755)
+    if (macosGateway) {
+      await writeFile(gatewayTemporary, macosGateway, { mode: 0o755 })
+      await chmod(gatewayTemporary, 0o755)
+    }
     if (verifyExecutable) {
       const isolatedHome = join(stagedRoot, "verify-home")
       await mkdir(isolatedHome, { recursive: true })
@@ -327,18 +401,21 @@ export async function stageRuntime({
     }
     await writeFile(join(stagedRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
     await rename(executableTemporary, executablePath)
+    if (macosGateway) await rename(gatewayTemporary, macosGatewayPath)
     await rm(bundledRoot, { recursive: true, force: true })
     await rename(stagedRoot, bundledRoot)
 
     return {
       targetTriple,
       executablePath,
+      gatewayPath: macosGateway ? macosGatewayPath : null,
       libraryPath: join(bundledRoot, targetTriple, "lib", selected.libraryName),
       manifestPath: join(bundledRoot, "manifest.json"),
     }
   } finally {
     await Promise.all([
       rm(executableTemporary, { force: true }),
+      rm(gatewayTemporary, { force: true }),
       rm(stagedRoot, { recursive: true, force: true }),
     ])
   }

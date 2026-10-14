@@ -54,6 +54,11 @@ use std::{
 /// capability interface and the installed `EngineContext`.
 pub trait RuntimeHost: Send + Sync {
     fn engine_context(&self) -> Arc<dyn EngineContext>;
+    /// The native macOS computer adapter when this process can manage VZ guests.
+    /// Backup/import uses it to capture or publish native disk generations.
+    fn macos_context(&self) -> Option<crate::macos_computers::MacosContext> {
+        None
+    }
     fn runtime_storage(&self) -> Result<PathBuf, String>;
     fn blocks_operations(&self) -> bool;
     fn bundled_tools_directory(&self) -> Result<PathBuf, String>;
@@ -1427,6 +1432,7 @@ fn run_msb_process(
             .find(|argument| !argument.starts_with('-'))
         {
             crate::ssh_access::close_computer(computer);
+            crate::desktop_viewer_api::close_computer(computer);
         }
     }
     ensure_runtime_files(paths)?;
@@ -4421,6 +4427,26 @@ fn finish_setup_job(
     .map_err(|error| error.to_string())
 }
 
+/// Publishes the canonical `computers.changed` event for a change that was made outside
+/// the lifecycle and setup paths (a desktop action or a computer-use approval), which
+/// otherwise announce only `silo://application-state-changed`. The state is read after the
+/// change, so subscribers see what the change did. A read that fails publishes nothing
+/// more: the earlier event still tells the host to refresh.
+pub fn publish_computers_changed(host: &dyn RuntimeHost, paths: &RuntimePaths) {
+    publish_computers_changed_with(host.engine_context().as_ref(), || {
+        application_state_response(host, paths)
+    });
+}
+
+fn publish_computers_changed_with(
+    context: &dyn silo_engine::context::EngineContext,
+    read: impl FnOnce() -> Result<ApplicationSource, RuntimeError>,
+) {
+    if let Ok(state) = read() {
+        publish_linux_computers_changed(context, &state);
+    }
+}
+
 fn publish_linux_computers_changed(
     context: &dyn silo_engine::context::EngineContext,
     state: &ApplicationSource,
@@ -6698,6 +6724,33 @@ mod tests {
             "silo://computer-configuration-progress"
         );
         assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
+    }
+
+    #[test]
+    fn a_change_outside_lifecycle_publishes_the_canonical_computers_event() {
+        use silo_engine::context::{test_support::RecordingContext, Audience};
+
+        let context = RecordingContext::default();
+        let state = ApplicationSource {
+            runtime_repair: None,
+            computers: Vec::new(),
+            activities: Vec::new(),
+            computer_configuration_operation: None,
+            repository_push_operations: Vec::new(),
+            github: Value::Null,
+            secrets: Vec::new(),
+            device_capacity: None,
+        };
+        publish_computers_changed_with(&context, || Ok(state));
+        let published = context.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0.name, "computers.changed");
+        assert_eq!(published[0].1, Audience::All);
+        assert!(published[0].0.payload["linux"]["computers"].is_array());
+        // A read that fails leaves the earlier refresh event as the only signal.
+        let failed = RecordingContext::default();
+        publish_computers_changed_with(&failed, || Err(RuntimeError::Unavailable("no".into())));
+        assert!(failed.published().is_empty());
     }
 
     #[test]
@@ -13473,6 +13526,13 @@ fn revoke_secret_with(
 
 #[cfg(test)]
 pub(crate) fn validate_secret_material_for_tests(
+    material: &[(String, String, Vec<String>)],
+) -> Result<(), String> {
+    secrets_runtime::validate_material(&material.to_vec())
+}
+
+/// Validate material before passing it to any host runtime adapter.
+pub(crate) fn validate_secret_material(
     material: &[(String, String, Vec<String>)],
 ) -> Result<(), String> {
     secrets_runtime::validate_material(&material.to_vec())

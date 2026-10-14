@@ -32,6 +32,10 @@ impl StartupServices for TauriStartupServices {
         runtime::configuration_recovery::recover(&crate::commands::runtime::host(&self.app))
     }
 
+    fn migrate_macos_proxy_bootstraps(&self) -> Result<(), String> {
+        crate::commands::runtime_migration::migrate_macos_proxy_bootstraps(&self.app)
+    }
+
     fn recover_lifecycle(&self) -> Result<RecoveredActions, String> {
         runtime::lifecycle_recovery::recover(&crate::commands::runtime::host(&self.app)).map(
             |recovered| RecoveredActions {

@@ -6,11 +6,17 @@ import shutil
 import subprocess
 import tempfile
 
-TOOLS = ('silo-ui', 'msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
+TOOLS = (
+    'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
+    'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+)
 # macOS computers run Virtualization.framework inside the app process itself.
 APP_REQUIRED_ENTITLEMENTS = ('com.apple.security.virtualization',)
 RUNTIME_ENTITLEMENTS = {
     'com.apple.security.hypervisor': True,
+    'com.apple.security.cs.disable-library-validation': True,
+}
+GATEWAY_ENTITLEMENTS = {
     'com.apple.security.cs.disable-library-validation': True,
 }
 
@@ -30,7 +36,7 @@ def code_hash(path):
 def policy_files(app, directory):
     library = app / 'Contents/Frameworks/libkrunfw.5.dylib'
     command('codesign', '--verify', '--strict', library)
-    for binary in (library, app / 'Contents/MacOS/msb'):
+    for binary in (library, app / 'Contents/MacOS/msb', app / 'Contents/MacOS/silo-macos-gateway'):
         if command('lipo', '-archs', binary).stdout.strip() != b'arm64':
             raise RuntimeError('This signing policy requires thin Apple Silicon binaries.')
     entitlements = directory / 'msb.plist'
@@ -49,7 +55,17 @@ def sign_helper(helper, entitlements, constraint):
 def sign_runtime(app):
     with tempfile.TemporaryDirectory(prefix='silo-sign-') as temporary:
         entitlements, constraint = policy_files(app, Path(temporary))
+        gateway_entitlements = Path(temporary) / 'gateway.plist'
+        gateway_entitlements.write_bytes(plistlib.dumps(GATEWAY_ENTITLEMENTS))
         sign_helper(app / 'Contents/MacOS/msb', entitlements, constraint)
+        sign_helper(
+            app / 'Contents/MacOS/silo-macos-gateway',
+            gateway_entitlements,
+            constraint,
+        )
+        command('codesign', '--force', '--sign', '-', '--options', 'runtime',
+                '--preserve-metadata=identifier,runtime',
+                app / 'Contents/MacOS/silo-network-bootstrap')
     # Re-seal the outer bundle without re-signing its nested executables.
     command('codesign', '--force', '--sign', '-', '--options', 'runtime',
             '--entitlements', Path(__file__).resolve().parent.parent / 'src-tauri/Entitlements.plist', app)
@@ -67,6 +83,12 @@ def verify_bundle(app):
         if name == 'msb':
             if entitlements != RUNTIME_ENTITLEMENTS:
                 raise RuntimeError('The VM helper has unexpected runtime entitlements.')
+        elif name == 'silo-macos-gateway':
+            if entitlements != GATEWAY_ENTITLEMENTS:
+                raise RuntimeError('The network gateway has unexpected runtime entitlements.')
+        elif name == 'silo-network-bootstrap':
+            if entitlements:
+                raise RuntimeError('The guest network bootstrap must not carry host entitlements.')
         elif entitlements.get('com.apple.security.cs.disable-library-validation'):
             raise RuntimeError('Only the constrained VM helper may have the library-loading exception.')
         if name == 'silo-ui':
@@ -77,11 +99,17 @@ def verify_bundle(app):
         directory = Path(temporary)
         entitlements, constraint = policy_files(app, directory)
         helper = app / 'Contents/MacOS/msb'
-        expected = directory / 'msb'
-        shutil.copy2(helper, expected)
-        # Apple's signer reconstructs the exact expected signature on a copy.
-        # Equal CodeDirectory hashes bind the full constraint and entitlements;
-        # finding an allowed hash inside a possibly broader rule is insufficient.
-        sign_helper(expected, entitlements, constraint)
-        if code_hash(expected) != code_hash(helper):
-            raise RuntimeError('The embedded VM library constraint is missing or differs from the exact bundled engine policy.')
+        gateway_entitlements = directory / 'gateway.plist'
+        gateway_entitlements.write_bytes(plistlib.dumps(GATEWAY_ENTITLEMENTS))
+        # Apple's signer reconstructs each constrained helper's signature on a copy.
+        # Equal CodeDirectory hashes bind its complete entitlement and library policy.
+        for name, allowed in (
+            ('msb', entitlements),
+            ('silo-macos-gateway', gateway_entitlements),
+        ):
+            helper = app / 'Contents/MacOS' / name
+            expected = directory / name
+            shutil.copy2(helper, expected)
+            sign_helper(expected, allowed, constraint)
+            if code_hash(expected) != code_hash(helper):
+                raise RuntimeError(f'{name} is missing the exact bundled-engine library constraint.')

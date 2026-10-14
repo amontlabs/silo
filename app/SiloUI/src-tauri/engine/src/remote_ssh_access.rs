@@ -13,11 +13,16 @@ fn project(mut value: Value, device: &str) -> Result<Value, String> {
     for row in rows {
         let id = row["computerId"]
             .as_str()
-            .ok_or("Missing remote computer identity. Update Silo on both devices.")?;
+            .ok_or("Missing remote computer identity. Update Silo on both devices.")?
+            .to_owned();
+        let id = id.as_str();
         uuid::Uuid::parse_str(id).map_err(|_| "Invalid remote computer identity.")?;
         if !seen.insert(id.to_owned()) {
             return Err("Duplicate remote computer identity.".into());
         }
+        // The owner's own name, kept so the canonical API can show it; the target string
+        // below is the historical Tauri reference, never an engine input.
+        row["computerName"] = row["computer"].clone();
         row["computer"] = json!(format!("silo-remote:{device}:{id}"));
     }
     Ok(value)

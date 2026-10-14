@@ -1169,6 +1169,10 @@ fn device_identity() -> Option<crate::device_identity::DeviceIdentity> {
 }
 pub fn snapshot() -> Result<Value, String> {
     let mut value = observed_snapshot(load()?, observed_credential(), device_identity());
+    value["pendingAuthorizationUrl"] = authorization_url()
+        .ok()
+        .map(Value::String)
+        .unwrap_or(Value::Null);
     // Saved choices for a computer that has no runtime yet are not a failure; they apply
     // once it starts.
     if let Some(operations) = value["computerOperations"].as_array_mut() {
@@ -1256,6 +1260,50 @@ fn remember_token(computer: &str, token: &str) -> Result<(), String> {
 fn profile(grants: &[RuntimeGrant]) -> Value {
     json!({"version":1,"owners":grants.iter().filter(|g| !g.read_token.is_empty()).map(|g|json!({"login":g.owner_login,"repositoryIds":g.repository_ids,"readToken":g.read_token,"writeToken":g.write_token,"expiresAt":g.expires_at})).collect::<Vec<_>>()})
 }
+
+/// Current in-memory GitHub authority for one macOS computer. This is sent only over that
+/// computer's private gateway control descriptor; durable settings and public snapshots never
+/// contain the token values.
+/// The current GitHub authority and its domain revision for one macOS computer.
+/// The revision prevents an older background attach from restoring stale grants.
+pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>), String> {
+    let _state = serialize(&STATE);
+    let document = load()?;
+    let revision = document.revision;
+    if !document.access_enabled {
+        return Ok((revision, None));
+    }
+    let Some(policy) = document
+        .computers
+        .iter()
+        .find(|policy| policy["computer"].as_str() == Some(computer))
+    else {
+        return Ok((revision, None));
+    };
+    if personal_token::selected(policy) {
+        let token = personal_token::value()?;
+        return Ok((
+            revision,
+            Some(json!({"version":2,"owners":[],"personalToken":token})),
+        ));
+    }
+    let key = active_key(computer)?;
+    let grants = active()
+        .lock()
+        .map_err(|_| "GitHub state is unavailable.")?
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|grant| grant.expires_at > now() + 120)
+        .collect::<Vec<_>>();
+    if grants.is_empty() {
+        Ok((revision, None))
+    } else {
+        Ok((revision, Some(profile(&grants))))
+    }
+}
+
 fn retire_unused(computer: &str) -> Result<(), String> {
     let key = active_key(computer)?;
     let retained: Vec<String> = active()
@@ -3034,6 +3082,7 @@ pub fn cancel_connection() -> Result<Value, String> {
     CANCELLATION.fetch_add(1, Ordering::SeqCst);
     pending.0 = None;
     CONNECTING.store(false, Ordering::SeqCst);
+    drop(pending);
     let result = snapshot();
     publish_changed();
     result
@@ -3044,6 +3093,28 @@ pub fn authorization_url() -> Result<String, String> {
         .lock()
         .map_err(|_| "GitHub connection is unavailable.")?
         .url(CANCELLATION.load(Ordering::SeqCst))
+}
+
+/// The loopback port that `url`'s `redirect_uri` names, or `None` for a page without a
+/// callback (the App installation page). Any redirect other than
+/// `http://127.0.0.1:<port>/github/callback` is refused, so a callback route can only
+/// ever carry this flow's own listener.
+pub fn callback_port(url: &str) -> Result<Option<u16>, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "Invalid GitHub authorization link.")?;
+    let Some((_, redirect)) = parsed.query_pairs().find(|(key, _)| key == "redirect_uri") else {
+        return Ok(None);
+    };
+    let redirect =
+        reqwest::Url::parse(&redirect).map_err(|_| "Invalid GitHub callback address.")?;
+    let loopback = redirect.scheme() == "http"
+        && redirect.host_str() == Some("127.0.0.1")
+        && redirect.path() == "/github/callback"
+        && redirect.query().is_none()
+        && redirect.username().is_empty();
+    match (loopback, redirect.port()) {
+        (true, Some(port)) if port != 0 => Ok(Some(port)),
+        _ => Err("GitHub returned an unexpected callback address.".into()),
+    }
 }
 
 pub fn repository_authorization_url() -> Result<String, String> {
@@ -5078,6 +5149,36 @@ mod tests {
         );
         pending.clear(7);
         assert!(pending.url(7).is_err());
+    }
+
+    #[test]
+    fn callback_port_accepts_only_the_loopback_callback_redirect() {
+        let authorize = |redirect: &str| {
+            let mut url = reqwest::Url::parse("https://github.com/login/oauth/authorize").unwrap();
+            url.query_pairs_mut().append_pair("redirect_uri", redirect);
+            url.to_string()
+        };
+        assert_eq!(
+            callback_port(&authorize("http://127.0.0.1:43111/github/callback")).unwrap(),
+            Some(43111)
+        );
+        assert_eq!(
+            callback_port("https://github.com/apps/example/installations/new").unwrap(),
+            None
+        );
+        for redirect in [
+            "http://127.0.0.1/github/callback",
+            "http://127.0.0.1:0/github/callback",
+            "http://localhost:43111/github/callback",
+            "http://127.0.0.1:43111/other",
+            "https://127.0.0.1:43111/github/callback",
+            "http://127.0.0.1:43111/github/callback?next=1",
+            "http://evil@127.0.0.1:43111/github/callback",
+            "http://192.168.1.4:43111/github/callback",
+        ] {
+            assert!(callback_port(&authorize(redirect)).is_err(), "{redirect}");
+        }
+        assert!(callback_port("not a url").is_err());
     }
 
     #[test]
