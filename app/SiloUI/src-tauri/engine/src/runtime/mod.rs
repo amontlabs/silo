@@ -4591,6 +4591,26 @@ fn finish_setup_job(
     finished
 }
 
+/// Publishes the canonical `computers.changed` event for a change that was made outside
+/// the lifecycle and setup paths (a desktop action or a computer-use approval), which
+/// otherwise announce only `silo://application-state-changed`. The state is read after the
+/// change, so subscribers see what the change did. A read that fails publishes nothing
+/// more: the earlier event still tells the host to refresh.
+pub fn publish_computers_changed(host: &dyn RuntimeHost, paths: &RuntimePaths) {
+    publish_computers_changed_with(host.engine_context().as_ref(), || {
+        application_state_response(host, paths)
+    });
+}
+
+fn publish_computers_changed_with(
+    context: &dyn silo_engine::context::EngineContext,
+    read: impl FnOnce() -> Result<ApplicationSource, RuntimeError>,
+) {
+    if let Ok(state) = read() {
+        publish_linux_computers_changed(context, &state);
+    }
+}
+
 fn publish_linux_computers_changed(
     context: &dyn silo_engine::context::EngineContext,
     state: &ApplicationSource,
@@ -6934,6 +6954,33 @@ mod tests {
             setup_progress_audience(&request),
             Audience::Client(ClientId::new("main"))
         );
+    }
+
+    #[test]
+    fn a_change_outside_lifecycle_publishes_the_canonical_computers_event() {
+        use silo_engine::context::{test_support::RecordingContext, Audience};
+
+        let context = RecordingContext::default();
+        let state = ApplicationSource {
+            runtime_repair: None,
+            computers: Vec::new(),
+            activities: Vec::new(),
+            computer_configuration_operation: None,
+            repository_push_operations: Vec::new(),
+            github: Value::Null,
+            secrets: Vec::new(),
+            device_capacity: None,
+        };
+        publish_computers_changed_with(&context, || Ok(state));
+        let published = context.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0.name, "computers.changed");
+        assert_eq!(published[0].1, Audience::All);
+        assert!(published[0].0.payload["linux"]["computers"].is_array());
+        // A read that fails leaves the earlier refresh event as the only signal.
+        let failed = RecordingContext::default();
+        publish_computers_changed_with(&failed, || Err(RuntimeError::Unavailable("no".into())));
+        assert!(failed.published().is_empty());
     }
 
     #[test]

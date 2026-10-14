@@ -341,6 +341,24 @@ async fn two_clients_keep_separate_viewers_and_a_disconnect_closes_only_its_own(
     .await
     .expect("the disconnected client's viewer is closed");
     assert!(ensure_owned(&first.id, &viewer_a.connection_id).is_ok());
+    // An open that was still reading credentials when the client left reaches its claim
+    // after the disconnect: it gets no connection, so no proxy or tunnel outlives the client.
+    assert!(claim(&second_id, "fixture-device", &computer, "Fixture", true).is_err());
+
+    // A connection id cannot be used for a clipboard transfer to another computer.
+    let other_computer = uuid::Uuid::new_v4().to_string();
+    let refused = first
+        .request(
+            "clipboard-target",
+            "clipboard.transfer",
+            json!({
+                "computerId": other_computer,
+                "action": "copy",
+                "connectionId": viewer_a.connection_id,
+            }),
+        )
+        .await;
+    assert_eq!(refused["error"]["code"], "not_found", "{refused}");
 
     // Closing one's own connection works once; afterwards it is unknown.
     let closed = first
