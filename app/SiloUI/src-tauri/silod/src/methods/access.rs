@@ -2035,32 +2035,21 @@ async fn connections_devices_connect(
     to_output(device)
 }
 
-/// Removes a connected Mac: the owner first drops this Mac's management key (95 A-36),
-/// then this engine forgets the device and closes everything it holds for it. An owner
-/// that cannot be reached, or a key that cannot be removed, leaves the device saved so
-/// the removal can be retried; the key is never reinstalled to make a retry succeed.
+/// Removes a connected Mac (95 A-36). The engine records the removal, has the owner drop
+/// every key this Mac may have installed there (including one whose private half was
+/// deleted or rotated), records the owner's confirmation, and only then forgets the device
+/// and closes everything it holds for it. An owner that cannot confirm leaves the device
+/// saved and the removal pending; the key is never reinstalled to make a retry succeed.
 async fn connections_devices_remove(
     params: &Value,
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let typed = context.decode_params::<connections::DeviceIdParams>(params)?;
     let device = typed.device_id;
-    let key = silo_engine::remote::connections_public_key().map_err(failure)?;
-    if let Some(public_key) = key {
-        let owner = device.clone();
-        blocking_bridge(move || {
-            silo_engine::remote::call_remote_typed(
-                &owner,
-                "connections.keys.revoke",
-                json!({ "publicKey": public_key }),
-            )
-        })
-        .await?;
-    }
-    close_callback_route(&device);
-    silo_engine::remote::remove_device(device)
+    silo_engine::remote::remove_device(device.clone())
         .await
-        .map_err(failure)?;
+        .map_err(HandlerContext::map_engine_error)?;
+    close_callback_route(&device);
     Ok(output(Value::Null))
 }
 
@@ -2969,6 +2958,52 @@ mod tests {
         );
         assert!(saved_device_ids().iter().any(|id| id == device));
         expect_invalid_params(MethodName::ConnectionsDevicesRemove, json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn removing_a_device_after_its_private_key_was_deleted_still_needs_the_owner() {
+        let _key = KEY_LOCK.lock().await;
+        let device = "99999999-9999-4999-8999-999999999999";
+        // The owner holds the public key recorded for this device; the private key is gone.
+        save_device(device, "not an address").await;
+        let path = connections_config_path();
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        config["controllerKeys"] =
+            json!({device: ["ssh-ed25519 AAAAdeleted Silo remote management"]});
+        std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        let directory = path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_file(directory.join("id_ed25519"));
+        let _ = std::fs::remove_file(directory.join("id_ed25519.pub"));
+        assert_eq!(silo_engine::remote::connections_public_key().unwrap(), None);
+        let error = expect_error(
+            MethodName::ConnectionsDevicesRemove,
+            json!({"deviceId": device}),
+        )
+        .await;
+        assert!(
+            error.message.contains("Enter an SSH alias"),
+            "{}",
+            error.message
+        );
+        // The owner could not confirm: the device stays saved, with the removal pending.
+        assert!(saved_device_ids().iter().any(|id| id == device));
+        let config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(config["removals"][0]["deviceId"], device);
+        assert_eq!(config["removals"][0]["phase"], "revoke_pending");
+        // Clean up for the other tests that share this engine home.
+        config_without_device(device);
+    }
+
+    fn config_without_device(device: &str) {
+        let path = connections_config_path();
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        config["devices"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|saved| saved["id"] != device);
+        config["removals"] = json!([]);
+        config["controllerKeys"] = json!({});
+        std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
     }
 
     #[tokio::test]

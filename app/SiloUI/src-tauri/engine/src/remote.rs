@@ -79,8 +79,37 @@ struct Config {
     device_id: String,
     enabled: bool,
     devices: Vec<Device>,
+    /// Public keys of this Mac's Connections identity that each saved device may hold in
+    /// its `authorized_keys`, so a removal revokes the key that was installed even after
+    /// the private key was deleted, reset or rotated (A-36). Public material only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    controller_keys: std::collections::BTreeMap<String, Vec<String>>,
+    /// Device removals that are not finished; they survive a restart.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    removals: Vec<RemovalIntent>,
     #[serde(flatten)]
     extra: serde_json::Map<String, Value>,
+}
+/// How far a device removal got. The owner's key is revoked first and the device is
+/// forgotten only after the owner confirmed it, so a lost reply never loses the intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RemovalPhase {
+    /// The owner has not confirmed that it dropped the keys.
+    RevokePending,
+    /// The owner confirmed; only local cleanup remains and needs no authentication.
+    OwnerConfirmed,
+    /// Local cleanup began and may have stopped halfway.
+    LocalCleanupPending,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemovalIntent {
+    device_id: String,
+    saved_address: String,
+    /// Public keys to revoke on the owner, the one it authenticates this Mac with last.
+    keys: Vec<String>,
+    phase: RemovalPhase,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,6 +203,8 @@ fn read_config_in(dir: &Path) -> Result<Config, String> {
         enabled: false,
         devices: vec![],
         extra: serde_json::Map::new(),
+        controller_keys: Default::default(),
+        removals: Default::default(),
     };
     save_config_in(dir, &config)?;
     Ok(config)
@@ -482,30 +513,234 @@ pub fn saved_devices() -> Result<Vec<Device>, String> {
     let _guard = config_lock();
     Ok(read_config()?.devices)
 }
-pub async fn remove_device(device_id: String) -> Result<(), String> {
-    // Closing tunnels and viewers waits for their processes; keep it off the main thread.
+/// Removes a connected Mac in phases that survive a crash (95 A-36): the removal is
+/// recorded, the owner drops every key this Mac may have installed there, the owner's
+/// confirmation is recorded, and only then is the device forgotten locally. An owner
+/// that cannot confirm leaves the device saved and the removal pending; a removal whose
+/// owner confirmed is finished locally without contacting the owner again, here or at
+/// the next launch.
+pub async fn remove_device(device_id: String) -> Result<(), BridgeError> {
     tokio::task::spawn_blocking(move || {
-        let _guard = config_lock();
-        let mut config = read_config()?;
-        // Keep the device available for retry if its local key cleanup fails.
-        if let Ok(runtime) = remote_runtime() {
-            if let Ok(paths) = (runtime.paths)() {
-                crate::ssh_connection::forget_device(&paths.home, &device_id)?;
-            }
-        }
-        config.devices.retain(|h| h.id != device_id);
-        save_config(&config)?;
-        drop(_guard);
-        clear_device_health(&device_id);
-        crate::remote_network::close_device(&device_id);
-        crate::desktop_viewer::close_device(&device_id);
-        if let Some(context) = silo_engine::context::current() {
-            context.close_remote_displays(Some(&device_id));
-        }
-        Ok(())
+        let dir = directory()?;
+        let home = remote_runtime()
+            .ok()
+            .and_then(|runtime| (runtime.paths)().ok())
+            .map(|paths| paths.home);
+        remove_device_in(
+            &dir,
+            home.as_deref(),
+            &device_id,
+            silo_public_key_in(&dir),
+            &|device, key| {
+                call_remote_typed(
+                    device,
+                    "connections.keys.revoke",
+                    json!({ "publicKey": key }),
+                )
+                .map(|_| ())
+            },
+        )
     })
     .await
-    .map_err(|_| "Could not remove the device.".to_string())?
+    .map_err(|_| BridgeError::from("Could not remove the device."))?
+}
+
+/// Devices whose removal runs in this process, so two requests never interleave.
+static REMOVING: Mutex<std::collections::BTreeSet<String>> =
+    Mutex::new(std::collections::BTreeSet::new());
+struct RemovalFlight(String);
+impl RemovalFlight {
+    fn claim(device: &str) -> Result<Self, BridgeError> {
+        let mut flights = crate::sync::lock_or_recover(&REMOVING, "device removals");
+        if !flights.insert(device.to_owned()) {
+            return Err(BridgeError::new(
+                ErrorCode::Busy,
+                "This device is already being removed.",
+            ));
+        }
+        Ok(Self(device.to_owned()))
+    }
+}
+impl Drop for RemovalFlight {
+    fn drop(&mut self) {
+        crate::sync::lock_or_recover(&REMOVING, "device removals").remove(&self.0);
+    }
+}
+
+fn remove_device_in(
+    dir: &Path,
+    home: Option<&Path>,
+    device_id: &str,
+    own_key: Option<String>,
+    revoke: &dyn Fn(&str, &str) -> Result<(), BridgeError>,
+) -> Result<(), BridgeError> {
+    let _flight = RemovalFlight::claim(device_id)?;
+    // No lock is held across the owner calls below.
+    let Some(intent) = begin_removal_in(dir, device_id, own_key)? else {
+        return Ok(());
+    };
+    if intent.phase == RemovalPhase::RevokePending {
+        for key in &intent.keys {
+            revoke(device_id, key)?;
+        }
+        set_removal_phase_in(dir, device_id, RemovalPhase::OwnerConfirmed)?;
+    }
+    finish_removal_in(dir, home, device_id)?;
+    after_removal(device_id);
+    Ok(())
+}
+
+/// Records the removal before the first effect on the owner and returns it, or the one
+/// already recorded for a retry. `None` when the device is not saved and nothing is pending.
+fn begin_removal_in(
+    dir: &Path,
+    device_id: &str,
+    own_key: Option<String>,
+) -> Result<Option<RemovalIntent>, String> {
+    let _guard = config_lock();
+    let mut config = read_config_in(dir)?;
+    if let Some(intent) = config.removals.iter().find(|r| r.device_id == device_id) {
+        return Ok(Some(intent.clone()));
+    }
+    let Some(device) = config.devices.iter().find(|d| d.id == device_id) else {
+        return Ok(None);
+    };
+    let mut keys = config
+        .controller_keys
+        .get(device_id)
+        .cloned()
+        .unwrap_or_default();
+    // The key that authenticates this Mac goes last, so a revoked older key never
+    // cuts off the session that is revoking the rest.
+    if let Some(own) = own_key {
+        keys.retain(|key| *key != own);
+        keys.push(own);
+    }
+    let intent = RemovalIntent {
+        device_id: device_id.to_owned(),
+        saved_address: device.address.clone(),
+        phase: if keys.is_empty() {
+            RemovalPhase::OwnerConfirmed
+        } else {
+            RemovalPhase::RevokePending
+        },
+        keys,
+    };
+    config.removals.push(intent.clone());
+    save_config_in(dir, &config)?;
+    Ok(Some(intent))
+}
+
+fn set_removal_phase_in(dir: &Path, device_id: &str, phase: RemovalPhase) -> Result<(), String> {
+    let _guard = config_lock();
+    let mut config = read_config_in(dir)?;
+    let intent = config
+        .removals
+        .iter_mut()
+        .find(|r| r.device_id == device_id)
+        .ok_or("The device removal is no longer recorded.")?;
+    intent.phase = phase;
+    save_config_in(dir, &config)
+}
+
+/// Forgets the device on this Mac. It needs no owner, so it can be repeated after any stop.
+fn finish_removal_in(dir: &Path, home: Option<&Path>, device_id: &str) -> Result<(), String> {
+    set_removal_phase_in(dir, device_id, RemovalPhase::LocalCleanupPending)?;
+    let _guard = config_lock();
+    let mut config = read_config_in(dir)?;
+    // Keep the device (and the intent) for retry if its local key cleanup fails.
+    if let Some(home) = home {
+        crate::ssh_connection::forget_device(home, device_id)?;
+    }
+    config.devices.retain(|device| device.id != device_id);
+    config.controller_keys.remove(device_id);
+    config.removals.retain(|r| r.device_id != device_id);
+    save_config_in(dir, &config)
+}
+
+fn after_removal(device_id: &str) {
+    crate::sync::lock_or_recover(&NOTED_KEYS, "remote controller keys")
+        .retain(|(device, _)| device != device_id);
+    clear_device_health(device_id);
+    crate::remote_network::close_device(device_id);
+    crate::desktop_viewer::close_device(device_id);
+    if let Some(context) = silo_engine::context::current() {
+        context.close_remote_displays(Some(device_id));
+    }
+}
+
+/// Finishes the removals whose owner already confirmed, after a crash or a failed
+/// local cleanup. A removal still waiting for the owner stays for the user to retry.
+pub fn resume_device_removals() {
+    let Ok(dir) = directory() else { return };
+    let home = remote_runtime()
+        .ok()
+        .and_then(|runtime| (runtime.paths)().ok())
+        .map(|paths| paths.home);
+    resume_removals_in(&dir, home.as_deref());
+}
+fn resume_removals_in(dir: &Path, home: Option<&Path>) -> Vec<String> {
+    let confirmed: Vec<String> = {
+        let _guard = config_lock();
+        read_config_in(dir)
+            .map(|config| {
+                config
+                    .removals
+                    .into_iter()
+                    .filter(|r| r.phase != RemovalPhase::RevokePending)
+                    .map(|r| r.device_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut finished = Vec::new();
+    for device_id in confirmed {
+        let Ok(_flight) = RemovalFlight::claim(&device_id) else {
+            continue;
+        };
+        if finish_removal_in(dir, home, &device_id).is_ok() {
+            after_removal(&device_id);
+            finished.push(device_id);
+        }
+    }
+    finished
+}
+
+/// Controller keys already recorded in this process, so a busy device is not rewritten.
+static NOTED_KEYS: Mutex<std::collections::BTreeSet<(String, String)>> =
+    Mutex::new(std::collections::BTreeSet::new());
+/// Remembers that this Mac's current key may now be installed on `device_id`: an owner
+/// answered a request made with it. Best effort; connecting records it durably.
+fn note_controller_key(device_id: &str) {
+    let Ok(dir) = directory() else { return };
+    let Some(key) = silo_public_key_in(&dir) else {
+        return;
+    };
+    let entry = (device_id.to_owned(), key.clone());
+    if crate::sync::lock_or_recover(&NOTED_KEYS, "remote controller keys").contains(&entry) {
+        return;
+    }
+    if record_controller_key_in(&dir, device_id, &key).is_ok() {
+        crate::sync::lock_or_recover(&NOTED_KEYS, "remote controller keys").insert(entry);
+    }
+}
+fn record_controller_key_in(dir: &Path, device_id: &str, key: &str) -> Result<(), String> {
+    let _guard = config_lock();
+    let mut config = read_config_in(dir)?;
+    if !config.devices.iter().any(|device| device.id == device_id)
+        || config.removals.iter().any(|r| r.device_id == device_id)
+    {
+        return Ok(());
+    }
+    let keys = config
+        .controller_keys
+        .entry(device_id.to_owned())
+        .or_default();
+    if keys.iter().any(|known| known == key) {
+        return Ok(());
+    }
+    keys.push(key.to_owned());
+    save_config_in(dir, &config)
 }
 
 /// Public part of this channel's Connections identity for owner-side key revocation.
@@ -1332,6 +1567,7 @@ pub fn call_remote_typed(
     if result.is_ok() {
         // A reply from the owner is an observation of it, whatever the method was.
         poll_succeeded(device_id);
+        note_controller_key(device_id);
     }
     result
 }
@@ -1496,8 +1732,15 @@ pub async fn connect_device(address: String, replace: Option<bool>) -> Result<De
             name: name.into(),
             address,
         };
+        let key = silo_public_key();
         let _guard = config_lock();
-        save_connected_device(&directory()?, device, &self::name(), replace.unwrap_or(false))
+        save_connected_device_with_key(
+            &directory()?,
+            device,
+            &self::name(),
+            replace.unwrap_or(false),
+            key,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1514,7 +1757,24 @@ fn save_connected_device(
     local_name: &str,
     replace: bool,
 ) -> Result<Device, String> {
+    save_connected_device_with_key(dir, device, local_name, replace, None)
+}
+/// `key` is this Mac's Connections public key as offered to that device, kept so a later
+/// removal can revoke it from the owner whatever happens to the private key.
+fn save_connected_device_with_key(
+    dir: &Path,
+    device: Device,
+    local_name: &str,
+    replace: bool,
+    key: Option<String>,
+) -> Result<Device, String> {
     let mut config = read_config_in(dir)?;
+    if config.removals.iter().any(|r| r.device_id == device.id) {
+        return Err(format!(
+            "{} is being removed. Finish removing it before connecting it again.",
+            device.name
+        ));
+    }
     if config.device_id == device.id {
         return Err(if device.name == local_name {
             "This address points to this device. Its computers are already available locally."
@@ -1542,6 +1802,12 @@ fn save_connected_device(
     }
     config.devices.retain(|saved| saved.id != device.id);
     config.devices.push(device.clone());
+    if let Some(key) = key {
+        let keys = config.controller_keys.entry(device.id.clone()).or_default();
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
     save_config_in(dir, &config)?;
     Ok(device)
 }
@@ -2313,6 +2579,7 @@ pub fn start(
         Err(error) => return record_start_error(Some(error)),
     };
     REMOTE_ENABLED.store(enabled, std::sync::atomic::Ordering::Release);
+    thread::spawn(resume_device_removals);
     // Re-point the bridge link every launch: an AppImage mount or a moved app leaves it stale.
     let linked = if enabled {
         link_bridge_for_this_account()
@@ -4753,6 +5020,8 @@ mod bridge_link_tests {
             enabled: true,
             devices: vec![],
             extra: serde_json::Map::new(),
+            controller_keys: Default::default(),
+            removals: Default::default(),
         };
         record_start_error(Some("Another Silo instance owns Connections.".into()));
         assert_eq!(
@@ -5863,6 +6132,8 @@ mod ssh_authorization_tests {
             enabled: true,
             devices: vec![],
             extra: serde_json::Map::new(),
+            controller_keys: Default::default(),
+            removals: Default::default(),
         };
         for method in [
             "ssh.access.state",
@@ -5921,6 +6192,8 @@ mod ssh_connection_admission_tests {
             enabled: true,
             devices: Vec::new(),
             extra: serde_json::Map::new(),
+            controller_keys: Default::default(),
+            removals: Default::default(),
         };
         save_config_in(directory.path(), &config).unwrap();
         let request = json!({
@@ -6162,6 +6435,8 @@ mod config_io_limit_tests {
             enabled: false,
             devices: vec![],
             extra: serde_json::Map::new(),
+            controller_keys: Default::default(),
+            removals: Default::default(),
         };
         fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o300)).unwrap();
         let result = save_config_in(directory.path(), &config);
@@ -6206,6 +6481,8 @@ mod config_io_limit_tests {
             enabled: true,
             devices: vec![],
             extra: serde_json::Map::new(),
+            controller_keys: Default::default(),
+            removals: Default::default(),
         };
         save_config_in(directory.path(), &config).unwrap();
         let previous = fs::read(&path).unwrap();
@@ -6342,5 +6619,244 @@ mod key_revocation_tests {
         let (connected, busy, failures, _, kept) = snapshot();
         assert!(!connected && !busy && failures == 1);
         assert_eq!(kept, Some(seen));
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    const OWNER: &str = "11111111-1111-4111-8111-111111111111";
+    const OLD_KEY: &str = "ssh-ed25519 AAAAOLD Silo remote management";
+    const NEW_KEY: &str = "ssh-ed25519 AAAANEW Silo remote management";
+
+    fn connected(dir: &Path, key: Option<&str>) {
+        let device = Device {
+            id: OWNER.into(),
+            name: "Studio".into(),
+            address: "studio.local".into(),
+        };
+        save_connected_device_with_key(dir, device, "Laptop", false, key.map(str::to_owned))
+            .unwrap();
+    }
+
+    fn stored(dir: &Path) -> Config {
+        read_stored_config_in(dir).unwrap().unwrap()
+    }
+
+    fn remove(
+        dir: &Path,
+        home: Option<&Path>,
+        own_key: Option<&str>,
+        revoke: &dyn Fn(&str, &str) -> Result<(), BridgeError>,
+    ) -> Result<(), BridgeError> {
+        remove_device_in(dir, home, OWNER, own_key.map(str::to_owned), revoke)
+    }
+
+    #[test]
+    fn a_deleted_private_key_still_revokes_the_key_installed_on_the_owner() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        let calls = RefCell::new(Vec::new());
+        // The controller's private key is gone: there is no current key to offer.
+        remove(dir.path(), None, None, &|device, key| {
+            calls.borrow_mut().push((device.to_owned(), key.to_owned()));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            calls.into_inner(),
+            vec![(OWNER.to_owned(), OLD_KEY.to_owned())]
+        );
+        let config = stored(dir.path());
+        assert!(config.devices.is_empty());
+        assert!(config.controller_keys.is_empty());
+        assert!(config.removals.is_empty());
+    }
+
+    #[test]
+    fn an_unconfirmed_revocation_keeps_the_device_and_the_pending_removal() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        let error = remove(dir.path(), None, None, &|_, _| {
+            Err(BridgeError::from(AUTHENTICATION_FAILED))
+        })
+        .unwrap_err();
+        assert_eq!(error.message, AUTHENTICATION_FAILED);
+        let config = stored(dir.path());
+        assert_eq!(config.devices.len(), 1);
+        assert_eq!(config.removals.len(), 1);
+        assert_eq!(config.removals[0].phase, RemovalPhase::RevokePending);
+        assert_eq!(config.removals[0].keys, vec![OLD_KEY.to_owned()]);
+        // A retry that reaches the owner revokes and finishes.
+        remove(dir.path(), None, None, &|_, _| Ok(())).unwrap();
+        assert!(stored(dir.path()).devices.is_empty());
+    }
+
+    #[test]
+    fn every_known_key_is_revoked_and_the_authenticating_one_goes_last() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        // The key rotated: the new one is the current key of this Mac.
+        let calls = RefCell::new(Vec::new());
+        remove(dir.path(), None, Some(NEW_KEY), &|_, key| {
+            calls.borrow_mut().push(key.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(calls.into_inner(), vec![OLD_KEY, NEW_KEY]);
+    }
+
+    #[test]
+    fn a_device_that_never_had_a_key_is_forgotten_without_asking_the_owner() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), None);
+        remove(dir.path(), None, None, &|_, _| {
+            panic!("there is no key to revoke")
+        })
+        .unwrap();
+        assert!(stored(dir.path()).devices.is_empty());
+    }
+
+    #[test]
+    fn a_lost_acknowledgement_leaves_the_removal_unconfirmed() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        // The owner may have removed the key, but the reply never arrived.
+        let lost = remove(dir.path(), None, None, &|_, _| {
+            Err(BridgeError::from("The SSH connection timed out."))
+        });
+        assert!(lost.is_err());
+        let after_loss = stored(dir.path());
+        assert_eq!(after_loss.removals[0].phase, RemovalPhase::RevokePending);
+        // The revoked key can no longer authenticate the retry: still unconfirmed.
+        let retry = remove(dir.path(), None, None, &|_, _| {
+            Err(BridgeError::from(AUTHENTICATION_FAILED))
+        });
+        assert!(retry.is_err());
+        assert_eq!(stored(dir.path()).devices.len(), 1);
+        assert_eq!(
+            stored(dir.path()).removals[0].phase,
+            RemovalPhase::RevokePending
+        );
+    }
+
+    #[test]
+    fn a_confirmed_removal_survives_a_cleanup_failure_and_resumes_without_the_owner() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        // Local key cleanup fails: the SSH key directory is not readable as a directory.
+        fs::create_dir_all(home.path().join("ssh")).unwrap();
+        fs::write(home.path().join("ssh/remote-clients"), b"not a directory").unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        let revoked = RefCell::new(0);
+        let error = remove(dir.path(), Some(home.path()), None, &|_, _| {
+            *revoked.borrow_mut() += 1;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.message.contains("SSH connection keys"), "{error:?}");
+        assert_eq!(*revoked.borrow(), 1);
+        let config = stored(dir.path());
+        assert_eq!(config.devices.len(), 1);
+        assert_eq!(config.removals[0].phase, RemovalPhase::LocalCleanupPending);
+
+        // After a restart the owner is not asked again and the key may not authenticate.
+        assert!(resume_removals_in(dir.path(), Some(home.path())).is_empty());
+        fs::remove_file(home.path().join("ssh/remote-clients")).unwrap();
+        assert_eq!(
+            resume_removals_in(dir.path(), Some(home.path())),
+            vec![OWNER.to_owned()]
+        );
+        let config = stored(dir.path());
+        assert!(config.devices.is_empty() && config.removals.is_empty());
+        assert_eq!(*revoked.borrow(), 1);
+    }
+
+    #[test]
+    fn a_retry_after_confirmation_never_contacts_the_owner() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir_all(home.path().join("ssh")).unwrap();
+        fs::write(home.path().join("ssh/remote-clients"), b"x").unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        assert!(remove(dir.path(), Some(home.path()), None, &|_, _| Ok(())).is_err());
+        fs::remove_file(home.path().join("ssh/remote-clients")).unwrap();
+        remove(dir.path(), Some(home.path()), None, &|_, _| {
+            Err(BridgeError::from(AUTHENTICATION_FAILED))
+        })
+        .unwrap();
+        assert!(stored(dir.path()).devices.is_empty());
+    }
+
+    #[test]
+    fn resuming_leaves_a_removal_still_waiting_for_the_owner() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        assert!(remove(dir.path(), None, None, &|_, _| Err("offline".into())).is_err());
+        assert!(resume_removals_in(dir.path(), None).is_empty());
+        assert_eq!(stored(dir.path()).devices.len(), 1);
+    }
+
+    #[test]
+    fn a_device_being_removed_cannot_be_connected_again() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        assert!(remove(dir.path(), None, None, &|_, _| Err("offline".into())).is_err());
+        let device = Device {
+            id: OWNER.into(),
+            name: "Studio".into(),
+            address: "elsewhere.local".into(),
+        };
+        let error = save_connected_device(dir.path(), device, "Laptop", true).unwrap_err();
+        assert!(error.contains("being removed"), "{error}");
+        assert_eq!(stored(dir.path()).devices[0].address, "studio.local");
+    }
+
+    #[test]
+    fn two_removals_of_one_device_do_not_interleave() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        let second = RefCell::new(None);
+        remove(dir.path(), None, None, &|_, _| {
+            // A second request arrives while the first waits on the owner.
+            *second.borrow_mut() = Some(remove(dir.path(), None, None, &|_, _| Ok(())));
+            Ok(())
+        })
+        .unwrap();
+        let busy = second.into_inner().unwrap().unwrap_err();
+        assert_eq!(busy.code, ErrorCode::Busy);
+    }
+
+    #[test]
+    fn the_stored_document_keeps_public_keys_only_and_loads_without_them() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        connected(dir.path(), Some(OLD_KEY));
+        let text = fs::read_to_string(dir.path().join("config.json")).unwrap();
+        assert!(text.contains("AAAAOLD") && !text.contains("PRIVATE"));
+        let plain = Config {
+            device_id: "d".into(),
+            enabled: false,
+            devices: vec![],
+            controller_keys: Default::default(),
+            removals: Default::default(),
+            extra: serde_json::Map::new(),
+        };
+        let encoded = serde_json::to_string(&plain).unwrap();
+        assert!(!encoded.contains("controllerKeys") && !encoded.contains("removals"));
+        let decoded: Config = serde_json::from_str(&encoded).unwrap();
+        assert!(decoded.controller_keys.is_empty());
     }
 }
