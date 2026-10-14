@@ -44,6 +44,7 @@ pub enum CancelRoute {
     Github,
     UpdateDownload,
     MacosGate,
+    GuestExec,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -945,6 +946,7 @@ fn route_matches(space: JobSpace, route: CancelRoute) -> bool {
             | (JobSpace::Job, CancelRoute::Github)
             | (JobSpace::Job, CancelRoute::UpdateDownload)
             | (JobSpace::Job, CancelRoute::MacosGate)
+            | (JobSpace::Job, CancelRoute::GuestExec)
     )
 }
 

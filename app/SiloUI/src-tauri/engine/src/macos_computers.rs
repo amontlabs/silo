@@ -26,6 +26,8 @@ mod guest_access;
 mod guest_clipboard;
 #[path = "macos_computers/guest_computer_use.rs"]
 mod guest_computer_use;
+#[path = "macos_computers/guest_exec.rs"]
+mod guest_exec;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "macos_computers/guest_screen.rs"]
 mod guest_screen;
@@ -52,6 +54,7 @@ mod templates;
 
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
+pub use guest_exec::{lookup as guest_ssh, GuestSsh};
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
 use silo_engine::{Audience, EngineContext, Event};
