@@ -8,7 +8,7 @@ repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 
 [workspace]
-members = ["engine"]
+members = ["engine", "silod"]
 default-members = [".", "engine"]
 resolver = "2"
 

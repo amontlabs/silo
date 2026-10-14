@@ -1,0 +1,11 @@
+[package]
+name = "silo-api"
+version = "0.1.0"
+description = "Canonical serde wire contract for the Silo engine"
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+schemars = "1.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
