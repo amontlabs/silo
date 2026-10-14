@@ -2735,6 +2735,71 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn network_calls_for_a_macos_computer_go_to_the_macos_store() {
+        const MACOS: &str = "66666666-6666-4666-8666-666666666666";
+        let fixture = fixture();
+        let folder = fixture
+            .context
+            .paths()
+            .app_data
+            .join("macos-computers")
+            .join(MACOS);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("computer.json"),
+            json!({
+                "schemaVersion": 1, "id": MACOS, "name": "Mac Net", "cpus": 4, "memoryGiB": 8,
+                "diskGiB": 64, "createdAt": "2026-01-01T00:00:00Z",
+                "macAddress": "02:00:00:00:00:02", "restoreImage": null, "installed": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(macos_proxy::owning_context(MACOS).is_some());
+
+        // Before the fix these answered "This computer no longer exists." (the Linux lookup).
+        let published = call(
+            MethodName::NetworkPublish,
+            json!({"computerId": MACOS, "port": 8765}),
+        )
+        .await
+        .unwrap();
+        let row = |state: &Value| {
+            state["computers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["computerId"] == MACOS)
+                .cloned()
+        };
+        let row_after_publish = row(&published).expect("the macOS computer has a row");
+        assert_eq!(row_after_publish["ports"][0]["port"], 8765);
+
+        let state = call(MethodName::NetworkState, json!({})).await.unwrap();
+        assert!(row(&state).is_some(), "network.state merges the macOS rows");
+        // The Linux computer is still listed beside it.
+        assert!(state["computers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["computerId"] == COMPUTER));
+
+        let removed = call(
+            MethodName::NetworkUnpublish,
+            json!({"computerId": MACOS, "port": 8765}),
+        )
+        .await
+        .unwrap();
+        let ports = row(&removed).map(|row| row["ports"].clone());
+        assert!(
+            ports.is_none_or(|ports| ports.as_array().is_none_or(|ports| ports
+                .iter()
+                .all(|port| port["port"] != 8765 || port["published"] != true))),
+            "{removed}"
+        );
+    }
+
+    #[tokio::test]
     async fn projections_replace_computer_names_with_identities() {
         fixture();
         let paths = local_paths().unwrap();
