@@ -258,7 +258,7 @@ struct ViewState {
     journal_error: Option<String>,
     destination: Option<PathBuf>,
     operation: Option<Operation>,
-    /// The operation whose cancellation token is stored beside it in this view state.
+    /// The identity paired with `operation` for job publication and cancellation.
     operation_id: Option<String>,
     cancellation: Option<backup::Cancellation>,
     /// The export file check behind the import review, by request id (E-27).
@@ -333,6 +333,11 @@ pub fn install(
     // Settle an interrupted operation before automatic runtime migration starts.
     // Recovery removes only the output journaled for this export or import.
     if let Some(journal) = journal {
+        controller
+            .view
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .operation_id = Some(journal.identity().to_owned());
         recovery::resume(controller.clone(), journal, &runtime)?;
     }
     Ok(controller)
@@ -507,24 +512,23 @@ fn publish_backup_state(controller: &Controller, context: &dyn EngineContext) {
 /// The Tauri application-state event remains the UI's refresh signal until its
 /// client migrates to `operations.job.progress` and `operations.job.finished`.
 fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
-    let operation = controller
-        .view
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .operation
-        .clone();
+    // Capture the view and its identity under one lock. The saved journal can
+    // already belong to a successor by the time a completed result is
+    // published, so it cannot supply the result's job id.
+    let (operation, operation_id) = {
+        let view = controller
+            .view
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (view.operation.clone(), view.operation_id.clone())
+    };
     let Some(operation) = operation else {
         return;
     };
-    let journal = match recovery::snapshot(controller) {
-        Ok(Some(journal)) => journal,
-        Ok(None) => return,
-        Err(error) => {
-            eprintln!("Silo could not read the backup job identity: {error}");
-            return;
-        }
+    let Some(operation_id) = operation_id else {
+        return;
     };
-    let job_id = match JobId::new(format!("exports:{}", journal.identity())) {
+    let job_id = match JobId::new(format!("exports:{operation_id}")) {
         Ok(job_id) => job_id,
         Err(error) => {
             eprintln!("Silo could not form the backup job identity: {error}");
@@ -567,7 +571,7 @@ fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
             }
         }
         Operation::Result { .. } => {
-            if let Err(error) = jobs::reconcile_finished(
+            if let Err(error) = jobs::publish_finished(
                 context,
                 silo_api::jobs::JobFinished {
                     job_id,
@@ -1008,7 +1012,6 @@ fn set_operation(controller: &Controller, operation: Operation) -> Result<(), St
 fn finish(controller: &Controller) {
     if let Ok(mut view) = controller.view.lock() {
         view.cancellation = None;
-        view.operation_id = None;
     }
     controller.busy.store(false, Ordering::Release);
 }
@@ -1240,7 +1243,6 @@ fn contain_worker_panic(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     view.operation = Some(failure);
     view.cancellation = None;
-    view.operation_id = None;
     drop(view);
     controller.busy.store(false, Ordering::Release);
     true
@@ -2408,6 +2410,25 @@ mod tests {
         fn restart(&self) -> ! {
             panic!("startup test must not restart the process")
         }
+    }
+
+    fn startup_job_context(directory: &Path) -> Arc<StartupTestContext> {
+        Arc::new(StartupTestContext {
+            paths: EnginePaths {
+                app_data: directory.join("app-data"),
+                app_config: directory.join("config"),
+                app_cache: directory.join("cache"),
+                app_log: directory.join("logs"),
+                resources: directory.join("resources"),
+                home: directory.join("home"),
+            },
+            identity: EngineIdentity {
+                channel: Channel::Development,
+                version: "0.1.0".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        })
     }
 
     struct StartupTestHost(Arc<StartupTestContext>);
@@ -3910,6 +3931,142 @@ mod tests {
             recovery::token(&controller).unwrap().as_deref(),
             Some(claimed.operation_id.as_str())
         );
+    }
+
+    #[test]
+    fn backup_completion_storage_failure_suspends_admission_until_retry() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = startup_job_context(directory.path());
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        recovery::begin(
+            &controller,
+            recovery::Journal::backup(completed_archive(), vec!["dev".into()], None),
+        )
+        .unwrap();
+        let operation_id = recovery::token(&controller).unwrap().unwrap();
+        let job_id = JobId::new(format!("exports:{operation_id}")).unwrap();
+        let registry = context.job_registry().unwrap();
+        registry.accept(job_id.clone(), "exports.create").unwrap();
+        let operation = Operation::Result {
+            operation: "backup",
+            archive: completed_archive(),
+            running_names: Vec::new(),
+            target_name: None,
+            outcome: "success",
+            title: "Export complete".into(),
+            message: "Computer exported.".into(),
+            detail: None,
+        };
+        let expected_result = serde_json::to_value(&operation).unwrap();
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation = Some(operation);
+            view.operation_id = Some(operation_id.clone());
+        }
+        let connection = rusqlite::Connection::open(registry.path()).unwrap();
+        connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER fail_backup_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = '{}' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(ABORT, 'simulated backup outcome write failure'); END;",
+                job_id.as_str()
+            ))
+            .unwrap();
+
+        publish_job_state(&controller, context.as_ref());
+
+        let admission_error = registry
+            .accept(
+                JobId::new("exports:after-failed-backup").unwrap(),
+                "exports.create",
+            )
+            .unwrap_err();
+        assert_eq!(
+            admission_error.kind(),
+            crate::jobs::RegistryErrorKind::Storage,
+            "a failed backup result write must suspend new job admission"
+        );
+        connection
+            .execute_batch("DROP TRIGGER fail_backup_finish;")
+            .unwrap();
+        jobs::retry_pending_outcomes(context.as_ref(), registry.as_ref()).unwrap();
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            retained.outcome.unwrap().result,
+            Some(expected_result),
+            "the retained retry must commit the backup result"
+        );
+        assert!(
+            registry
+                .accept(
+                    JobId::new("exports:after-backup-retry").unwrap(),
+                    "exports.create"
+                )
+                .unwrap()
+                .created
+        );
+    }
+
+    #[test]
+    fn completed_backup_result_stays_bound_to_its_captured_journal_identity() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = startup_job_context(directory.path());
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        let registry = context.job_registry().unwrap();
+        let completed_id = JobId::new("exports:previous-export").unwrap();
+        registry
+            .accept(completed_id.clone(), "exports.create")
+            .unwrap();
+
+        // This is the deterministic state at the race seam: the view still
+        // holds the previous operation and its identity, while recovery has
+        // already installed the successor's journal.
+        recovery::begin(
+            &controller,
+            recovery::Journal::backup(completed_archive(), vec!["next".into()], None),
+        )
+        .unwrap();
+        let successor_id = JobId::new(format!(
+            "exports:{}",
+            recovery::token(&controller).unwrap().unwrap()
+        ))
+        .unwrap();
+        registry
+            .accept(successor_id.clone(), "exports.create")
+            .unwrap();
+        let operation = Operation::Result {
+            operation: "backup",
+            archive: completed_archive(),
+            running_names: Vec::new(),
+            target_name: None,
+            outcome: "success",
+            title: "Export complete".into(),
+            message: "Previous computer exported.".into(),
+            detail: None,
+        };
+        let expected_result = serde_json::to_value(&operation).unwrap();
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation = Some(operation);
+            view.operation_id = Some("previous-export".into());
+        }
+
+        publish_job_state(&controller, context.as_ref());
+
+        let completed = registry.get(&completed_id).unwrap().unwrap();
+        assert_eq!(completed.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            completed.outcome.unwrap().result,
+            Some(expected_result),
+            "the result must finish the job identity captured with its view"
+        );
+        let successor = registry.get(&successor_id).unwrap().unwrap();
+        assert_eq!(successor.state, silo_api::jobs::JobState::Waiting);
+        assert!(successor.outcome.is_none());
     }
 
     fn import_paths(directory: &Path) -> runtime::RuntimePaths {
