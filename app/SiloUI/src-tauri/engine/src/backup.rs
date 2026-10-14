@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     os::fd::AsRawFd,
@@ -14,6 +14,13 @@ use std::{
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+mod macos_archive;
+pub(crate) use macos_archive::{
+    memory_configuration_digest, ArchiveRuntimeKind, MacosArchiveComponentInput,
+    MacosArchiveConfig, MacosArchiveConfiguration, MacosArchiveMemory, MacosArchiveSource,
+    MacosArchiveSourceKind, MacosCheckpointKind, MacosComponentRole, MAX_HARDWARE_MODEL_BYTES,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
@@ -38,6 +45,9 @@ const MAX_STATE_EXPORT_CAPTURES: usize = 128;
 /// Free space left untouched on a volume an export or import writes to.
 const FREE_SPACE_RESERVE: u64 = 1024 * 1024 * 1024;
 const DEFAULT_MAX_ARCHIVE_BYTES: u64 = 8 * 1024 * 1024 * 1024 * 1024;
+const MIXED_RUNTIME_NAME: &str = "silo-computers";
+const MIXED_RUNTIME_VERSION: &str = "1";
+const MIXED_SNAPSHOT_FORMAT: &str = "silo-computer-components-v1";
 
 #[derive(Clone, Default)]
 pub(crate) struct Cancellation(Arc<AtomicBool>);
@@ -484,6 +494,27 @@ struct RuntimeManifest {
     version: String,
     snapshot_format: String,
     guest_architecture: String,
+}
+
+/// Per-row native configuration in a mixed format-4 archive. Its top-level
+/// runtime is `silo-computers` version 1 / `silo-computer-components-v1` on
+/// aarch64. Each row must use exactly one strict `platform` tag. Linux rows
+/// keep the exact MicroSandbox runtime metadata that a global runtime
+/// manifest cannot represent alongside Apple Virtualization rows.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "platform", rename_all_fields = "camelCase", deny_unknown_fields)]
+enum MixedRuntimeConfig {
+    #[serde(rename = "microsandbox")]
+    MicroSandbox {
+        runtime_version: String,
+        snapshot_format: String,
+        guest_architecture: String,
+        configuration: Value,
+    },
+    #[serde(rename = "apple-virtualization")]
+    AppleVirtualization {
+        configuration: MacosArchiveConfiguration,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -945,6 +976,265 @@ impl<R: MsbRunner> BackupService<R> {
         Ok(path)
     }
 
+    /// Combine homogeneous Linux and Apple Virtualization archives into one
+    /// format-4 archive while preserving each row's native payload and metadata.
+    pub(crate) fn create_mixed_archive_from_archives(
+        &self,
+        destination: &Path,
+        source_archives: &[PathBuf],
+        source_order: &[String],
+        cancellation: &Cancellation,
+        token: Option<&str>,
+    ) -> Result<BackupResult, BackupError> {
+        let _operation = self.begin()?;
+        check_cancelled(cancellation)?;
+        if source_archives.len() != 2 || source_order.is_empty() || source_order.len() > 64 {
+            return Err(BackupError::InvalidRequest(
+                "A mixed export needs one Linux and one Apple Virtualization archive.".into(),
+            ));
+        }
+
+        let mut packages = Vec::with_capacity(source_archives.len());
+        let mut all_names = HashSet::new();
+        let mut kinds = HashSet::new();
+        for path in source_archives {
+            let package = read_and_verify_package(
+                path,
+                self.max_archive_bytes,
+                cancellation,
+                PayloadMode::Describe,
+            )?;
+            match package.manifest.runtime.name.as_str() {
+                "microsandbox" => {
+                    kinds.insert(ArchiveRuntimeKind::MicroSandbox);
+                }
+                macos_archive::RUNTIME_NAME => {
+                    kinds.insert(ArchiveRuntimeKind::AppleVirtualization);
+                }
+                _ => {
+                    return Err(BackupError::InvalidRequest(
+                        "Mixed exports can only combine Linux and Apple Virtualization archives."
+                            .into(),
+                    ));
+                }
+            }
+            for computer in &package.manifest.computers {
+                if !all_names.insert(computer.name.clone()) {
+                    return Err(BackupError::InvalidRequest(
+                        "Computer names must be unique in an export.".into(),
+                    ));
+                }
+            }
+            packages.push((path.clone(), package));
+        }
+        if kinds.len() != 2 || source_order.len() != all_names.len() {
+            return Err(BackupError::InvalidRequest(
+                "The mixed export sources do not match the selected computers.".into(),
+            ));
+        }
+        let mut ordered_names = HashSet::new();
+        if source_order
+            .iter()
+            .any(|name| !all_names.contains(name) || !ordered_names.insert(name.clone()))
+        {
+            return Err(BackupError::InvalidRequest(
+                "The selected mixed export order is invalid.".into(),
+            ));
+        }
+
+        let mut manifest = PackageManifest {
+            schema_version: FORMAT_VERSION,
+            created_at_ms: now_ms(),
+            runtime: RuntimeManifest {
+                name: MIXED_RUNTIME_NAME.into(),
+                version: MIXED_RUNTIME_VERSION.into(),
+                snapshot_format: MIXED_SNAPSHOT_FORMAT.into(),
+                guest_architecture: "aarch64".into(),
+            },
+            computers: Vec::with_capacity(source_order.len()),
+        };
+        let mut payloads: Vec<Box<dyn Read>> = Vec::with_capacity(source_order.len());
+        for name in source_order {
+            check_cancelled(cancellation)?;
+            let (path, package, index) = packages
+                .iter()
+                .find_map(|(path, package)| {
+                    package
+                        .manifest
+                        .computers
+                        .iter()
+                        .position(|computer| computer.name.as_str() == name.as_str())
+                        .map(|index| (path, package, index))
+                })
+                .ok_or_else(|| {
+                    BackupError::InvalidRequest(
+                        "A selected computer is missing from the mixed export sources.".into(),
+                    )
+                })?;
+            let computer = &package.manifest.computers[index];
+            let runtime_config = match package.manifest.runtime.name.as_str() {
+                "microsandbox" => serde_json::to_value(MixedRuntimeConfig::MicroSandbox {
+                    runtime_version: package.manifest.runtime.version.clone(),
+                    snapshot_format: package.manifest.runtime.snapshot_format.clone(),
+                    guest_architecture: package.manifest.runtime.guest_architecture.clone(),
+                    configuration: computer.runtime_config.clone(),
+                })?,
+                macos_archive::RUNTIME_NAME => {
+                    let configuration: MacosArchiveConfiguration =
+                        serde_json::from_value(computer.runtime_config.clone()).map_err(|_| {
+                            BackupError::InvalidArchive(
+                                "the Apple Virtualization runtime configuration is malformed"
+                                    .into(),
+                            )
+                        })?;
+                    serde_json::to_value(MixedRuntimeConfig::AppleVirtualization { configuration })?
+                }
+                _ => unreachable!("source archive kinds were checked above"),
+            };
+            let payload_before = package.manifest.computers[..index]
+                .iter()
+                .try_fold(0_u64, |offset, computer| {
+                    offset.checked_add(computer.payload_size)
+                })
+                .ok_or_else(|| BackupError::InvalidArchive("payload sizes overflow".into()))?;
+            let start = package
+                .payload_offset
+                .checked_add(payload_before)
+                .ok_or_else(|| BackupError::InvalidArchive("payload offsets overflow".into()))?;
+            let (mut file, _) = open_regular_file(path).map_err(|error| match error {
+                OpenRegularError::NotRegular => {
+                    BackupError::InvalidArchive("the selected item is not a regular file".into())
+                }
+                OpenRegularError::Io(error) => BackupError::Io(error),
+            })?;
+            file.seek(SeekFrom::Start(start))?;
+            payloads.push(Box::new(LimitedPayloadReader {
+                file,
+                remaining: computer.payload_size,
+            }));
+            manifest.computers.push(PackageComputer {
+                name: computer.name.clone(),
+                runtime_config,
+                computer_configuration: computer.computer_configuration.clone(),
+                payload_size: computer.payload_size,
+                payload_sha256: pending_digest(),
+                volumes: computer.volumes.clone(),
+            });
+        }
+
+        let size_bytes = write_immutable_package_from_readers(
+            destination,
+            &mut manifest,
+            payloads,
+            cancellation,
+            token,
+            self.free_space,
+        )?;
+        Ok(BackupResult {
+            created_at_ms: manifest.created_at_ms,
+            destination: destination.to_path_buf(),
+            size_bytes,
+            computers: source_order.to_vec(),
+        })
+    }
+
+    /// Return the runtime adapter required by one selected row. A mixed
+    /// package's global discriminant cannot decide which restore path to use.
+    pub(crate) fn archive_computer_kind(
+        &self,
+        archive: &Path,
+        source_name: &str,
+        cancellation: &Cancellation,
+    ) -> Result<ArchiveRuntimeKind, BackupError> {
+        let package = read_and_verify_package(
+            archive,
+            self.max_archive_bytes,
+            cancellation,
+            PayloadMode::Describe,
+        )?;
+        match package.manifest.runtime.name.as_str() {
+            "microsandbox" => Ok(ArchiveRuntimeKind::MicroSandbox),
+            macos_archive::RUNTIME_NAME => Ok(ArchiveRuntimeKind::AppleVirtualization),
+            MIXED_RUNTIME_NAME => {
+                let index = select_restore_source(&package.manifest, Some(source_name))?;
+                match mixed_platform(&package.manifest.computers[index])? {
+                    MixedPlatform::MicroSandbox => Ok(ArchiveRuntimeKind::MicroSandbox),
+                    MixedPlatform::AppleVirtualization => {
+                        Ok(ArchiveRuntimeKind::AppleVirtualization)
+                    }
+                }
+            }
+            _ => Err(BackupError::UnsupportedArchive(
+                "This export uses an unsupported computer runtime.".into(),
+            )),
+        }
+    }
+
+    /// Verify an archive once and return both its inspection and the Apple rows
+    /// needed for compatibility warnings. Mixed archives include only their
+    /// Apple Virtualization rows in the second result.
+    pub(crate) fn inspect_archive_with_macos_rows(
+        &self,
+        archive: &Path,
+        cancellation: &Cancellation,
+    ) -> Result<
+        (
+            ArchiveInspection,
+            Vec<(String, MacosArchiveConfiguration, Value)>,
+        ),
+        BackupError,
+    > {
+        let package = read_and_verify_package(
+            archive,
+            self.max_archive_bytes,
+            cancellation,
+            PayloadMode::VerifyAll,
+        )?;
+        let inspection = ArchiveInspection {
+            created_at_ms: package.manifest.created_at_ms,
+            size_bytes: package.size_bytes,
+            computers: package
+                .manifest
+                .computers
+                .iter()
+                .map(|computer| computer.name.clone())
+                .collect(),
+        };
+        let mut macos_rows = Vec::new();
+        match package.manifest.runtime.name.as_str() {
+            macos_archive::RUNTIME_NAME => {
+                for computer in package.manifest.computers {
+                    let config = serde_json::from_value(computer.runtime_config).map_err(|_| {
+                        BackupError::InvalidArchive(
+                            "the macOS runtime configuration is malformed".into(),
+                        )
+                    })?;
+                    macos_rows.push((computer.name, config, computer.computer_configuration));
+                }
+            }
+            MIXED_RUNTIME_NAME => {
+                for computer in package.manifest.computers {
+                    if mixed_platform(&computer)? == MixedPlatform::AppleVirtualization {
+                        let native = mixed_native_configuration(&computer)?;
+                        let config = serde_json::from_value(native).map_err(|_| {
+                            BackupError::InvalidArchive(
+                                "the Apple Virtualization runtime configuration is malformed"
+                                    .into(),
+                            )
+                        })?;
+                        macos_rows.push((computer.name, config, computer.computer_configuration));
+                    }
+                }
+            }
+            _ => {
+                return Err(BackupError::InvalidRequest(
+                    "The selected export does not contain Apple Virtualization computers.".into(),
+                ));
+            }
+        }
+        Ok((inspection, macos_rows))
+    }
+
     /// Check the whole archive, hashing every payload (the review before an import).
     pub(crate) fn inspect_archive(
         &self,
@@ -1037,6 +1327,11 @@ impl<R: MsbRunner> BackupService<R> {
         })?;
         let source = &package.manifest.computers[extracted.index];
         let payload_path = &extracted.path;
+        let runtime_config = if package.manifest.runtime.name == MIXED_RUNTIME_NAME {
+            mixed_micro_configuration(source)?.1
+        } else {
+            source.runtime_config.clone()
+        };
         // The pre-scan measured exactly what the runtime will unpack; check
         // again now that the private copy is written.
         let needed = extracted
@@ -1074,14 +1369,14 @@ impl<R: MsbRunner> BackupService<R> {
         match self.load_import_group(
             payload_path,
             import_group,
-            &source.runtime_config,
+            &runtime_config,
             extracted.scan.unpacked_bytes,
             cancellation,
         ) {
             Ok(snapshot_member) => Ok(PreparedRestore {
                 source_name: source.name.clone(),
                 new_name: request.new_name,
-                runtime_config: source.runtime_config.clone(),
+                runtime_config,
                 computer_configuration: source.computer_configuration.clone(),
                 snapshot_group: import_group.into(),
                 snapshot_member,
@@ -1725,13 +2020,21 @@ struct VerifiedPackage {
     manifest: PackageManifest,
     /// The one payload extracted by `PayloadMode::Extract`.
     extracted: Option<ExtractedPayload>,
+    /// The selected macOS components extracted by `PayloadMode::ExtractMacos`.
+    macos_extracted: Option<MacosExtractedPayload>,
     size_bytes: u64,
+    payload_offset: u64,
 }
 
 struct ExtractedPayload {
     index: usize,
     path: PathBuf,
     scan: PayloadScan,
+}
+
+struct MacosExtractedPayload {
+    index: usize,
+    component_paths: BTreeMap<MacosComponentRole, PathBuf>,
 }
 
 /// Free space where an import stages its payload and where the runtime
@@ -1755,6 +2058,14 @@ enum PayloadMode<'a> {
         dir: &'a Path,
         source: Option<&'a str>,
         space: SpaceBudget,
+    },
+    /// Verify every component frame and extract selected roles from one Apple
+    /// Virtualization computer into a private stage.
+    ExtractMacos {
+        dir: &'a Path,
+        source: Option<&'a str>,
+        roles: &'a [MacosComponentRole],
+        stage_free: u64,
     },
 }
 
@@ -1819,17 +2130,79 @@ fn read_and_verify_package(
         ));
     }
 
+    if matches!(&mode, PayloadMode::Describe) {
+        return Ok(VerifiedPackage {
+            manifest,
+            extracted: None,
+            macos_extracted: None,
+            size_bytes: metadata.len(),
+            payload_offset: header_len,
+        });
+    }
+
+    if manifest.runtime.name == MIXED_RUNTIME_NAME {
+        return verify_mixed_payloads(
+            &mut file,
+            manifest,
+            metadata.len(),
+            header_len,
+            mode,
+            cancellation,
+        );
+    }
+
+    if manifest.runtime.name == macos_archive::RUNTIME_NAME {
+        let selection = match &mode {
+            PayloadMode::VerifyAll => None,
+            PayloadMode::ExtractMacos {
+                dir,
+                source,
+                roles,
+                stage_free,
+            } => Some((
+                *dir,
+                select_restore_source(&manifest, *source)?,
+                *roles,
+                *stage_free,
+            )),
+            PayloadMode::Extract { .. } => {
+                return Err(BackupError::InvalidRequest(
+                    "Apple Virtualization exports require component extraction.".into(),
+                ));
+            }
+            PayloadMode::Describe => unreachable!("describe returned above"),
+        };
+        let component_paths = macos_archive::verify_payloads(
+            &mut file,
+            &manifest,
+            selection.map(|(_, index, roles, _)| (index, roles)),
+            selection.map(|(dir, _, _, _)| dir),
+            selection.map(|(_, _, _, stage_free)| stage_free),
+            cancellation,
+        )?;
+        let macos_extracted = selection.map(|(_, index, _, _)| MacosExtractedPayload {
+            index,
+            component_paths: component_paths.unwrap_or_default(),
+        });
+        return Ok(VerifiedPackage {
+            manifest,
+            extracted: None,
+            macos_extracted,
+            size_bytes: metadata.len(),
+            payload_offset: header_len,
+        });
+    }
+
     let extract = match mode {
-        PayloadMode::Describe => {
-            return Ok(VerifiedPackage {
-                manifest,
-                extracted: None,
-                size_bytes: metadata.len(),
-            });
-        }
+        PayloadMode::Describe => unreachable!("describe returned above"),
         PayloadMode::VerifyAll => None,
         PayloadMode::Extract { dir, source, space } => {
             Some((dir, select_restore_source(&manifest, source)?, space))
+        }
+        PayloadMode::ExtractMacos { .. } => {
+            return Err(BackupError::InvalidRequest(
+                "Apple Virtualization component extraction requires an Apple archive.".into(),
+            ));
         }
     };
     let mut extracted = None;
@@ -1902,8 +2275,253 @@ fn read_and_verify_package(
     Ok(VerifiedPackage {
         manifest,
         extracted,
+        macos_extracted: None,
         size_bytes: metadata.len(),
+        payload_offset: header_len,
     })
+}
+
+fn verify_mixed_payloads(
+    archive: &mut File,
+    manifest: PackageManifest,
+    size_bytes: u64,
+    payload_offset: u64,
+    mode: PayloadMode<'_>,
+    cancellation: &Cancellation,
+) -> Result<VerifiedPackage, BackupError> {
+    let selected = match &mode {
+        PayloadMode::VerifyAll => None,
+        PayloadMode::Extract { source, .. } | PayloadMode::ExtractMacos { source, .. } => {
+            Some(select_restore_source(&manifest, *source)?)
+        }
+        PayloadMode::Describe => unreachable!("describe returned above"),
+    };
+    let selected_platform = selected
+        .map(|index| mixed_platform(&manifest.computers[index]))
+        .transpose()?;
+    match (&mode, selected_platform) {
+        (PayloadMode::Extract { .. }, Some(MixedPlatform::AppleVirtualization)) => {
+            return Err(BackupError::InvalidRequest(
+                "The selected Apple Virtualization computer requires component extraction.".into(),
+            ));
+        }
+        (PayloadMode::ExtractMacos { .. }, Some(MixedPlatform::MicroSandbox)) => {
+            return Err(BackupError::InvalidRequest(
+                "The selected MicroSandbox computer requires checkpoint extraction.".into(),
+            ));
+        }
+        _ => {}
+    }
+
+    let mut extracted = None;
+    let mut macos_extracted = None;
+    for (index, computer) in manifest.computers.iter().enumerate() {
+        check_cancelled(cancellation)?;
+        let platform = mixed_platform(computer)?;
+        let is_selected = selected == Some(index);
+        match (&mode, platform) {
+            (PayloadMode::Extract { dir, space, .. }, MixedPlatform::MicroSandbox)
+                if is_selected =>
+            {
+                let staged = computer.payload_size.saturating_add(FREE_SPACE_RESERVE);
+                if space.stage_free < staged {
+                    return Err(BackupError::InsufficientSpace(format!(
+                        "Importing {} needs {} of free space for its private working copy; {} is available.",
+                        computer.name,
+                        format_bytes(staged),
+                        format_bytes(space.stage_free)
+                    )));
+                }
+                let unpack_budget = space
+                    .store_free
+                    .saturating_sub(FREE_SPACE_RESERVE)
+                    .saturating_sub(if space.shared_volume {
+                        computer.payload_size
+                    } else {
+                        0
+                    })
+                    .min(DEFAULT_MAX_ARCHIVE_BYTES);
+                let (path, scan) = extract_scanned_payload(
+                    archive,
+                    computer.payload_size,
+                    &computer.payload_sha256,
+                    dir.join(format!("snapshot-{index}.tar.zst")),
+                    &format!("checkpoint payload for {}", computer.name),
+                    ScanLimits {
+                        max_unpacked_bytes: unpack_budget,
+                        max_entries: MAX_SNAPSHOT_ENTRIES,
+                        max_sparse_bytes: largest_declared_disk(&computer.computer_configuration),
+                    },
+                    cancellation,
+                )
+                .map_err(|error| match error {
+                    BackupError::InsufficientSpace(_) => BackupError::InsufficientSpace(format!(
+                        "Importing {} needs more than the {} of free space available to Silo's runtime storage (keeping {} free).",
+                        computer.name,
+                        format_bytes(unpack_budget),
+                        format_bytes(FREE_SPACE_RESERVE)
+                    )),
+                    error => error,
+                })?;
+                extracted = Some(ExtractedPayload { index, path, scan });
+            }
+            (PayloadMode::Extract { .. }, MixedPlatform::MicroSandbox) => {
+                seek_past_payload(archive, computer.payload_size)?;
+            }
+            (PayloadMode::Extract { .. }, _) if !is_selected => {
+                seek_past_payload(archive, computer.payload_size)?;
+            }
+            (PayloadMode::ExtractMacos { .. }, MixedPlatform::AppleVirtualization)
+            | (PayloadMode::VerifyAll, MixedPlatform::AppleVirtualization) => {
+                let should_extract =
+                    is_selected && matches!(&mode, PayloadMode::ExtractMacos { .. });
+                let roles = match &mode {
+                    PayloadMode::ExtractMacos { roles, .. } if should_extract => Some(*roles),
+                    _ => None,
+                };
+                let stage = match &mode {
+                    PayloadMode::ExtractMacos { dir, .. } if should_extract => Some(*dir),
+                    _ => None,
+                };
+                let stage_free = match &mode {
+                    PayloadMode::ExtractMacos { stage_free, .. } if should_extract => {
+                        Some(*stage_free)
+                    }
+                    _ => None,
+                };
+                let native = mixed_native_configuration(computer)?;
+                let row = PackageComputer {
+                    name: computer.name.clone(),
+                    runtime_config: native,
+                    computer_configuration: computer.computer_configuration.clone(),
+                    payload_size: computer.payload_size,
+                    payload_sha256: computer.payload_sha256.clone(),
+                    volumes: computer.volumes.clone(),
+                };
+                let row_manifest = PackageManifest {
+                    schema_version: manifest.schema_version,
+                    created_at_ms: manifest.created_at_ms,
+                    runtime: RuntimeManifest {
+                        name: macos_archive::RUNTIME_NAME.into(),
+                        version: "1".into(),
+                        snapshot_format: "silo-vz-components-v1".into(),
+                        guest_architecture: "aarch64".into(),
+                    },
+                    computers: vec![row],
+                };
+                let component_paths = macos_archive::verify_payloads(
+                    archive,
+                    &row_manifest,
+                    roles.map(|roles| (0, roles)),
+                    stage,
+                    stage_free,
+                    cancellation,
+                )?;
+                if should_extract {
+                    macos_extracted = Some(MacosExtractedPayload {
+                        index,
+                        component_paths: component_paths.unwrap_or_default(),
+                    });
+                }
+            }
+            (PayloadMode::ExtractMacos { .. }, MixedPlatform::MicroSandbox)
+            | (PayloadMode::VerifyAll, MixedPlatform::MicroSandbox) => {
+                extract_verified_payload(
+                    archive,
+                    computer.payload_size,
+                    &computer.payload_sha256,
+                    None,
+                    &format!("checkpoint payload for {}", computer.name),
+                    cancellation,
+                )?;
+            }
+            (PayloadMode::Extract { .. }, MixedPlatform::AppleVirtualization) => {
+                seek_past_payload(archive, computer.payload_size)?;
+            }
+            (PayloadMode::Describe, _) => unreachable!("describe returned above"),
+        }
+    }
+
+    Ok(VerifiedPackage {
+        manifest,
+        extracted,
+        macos_extracted,
+        size_bytes,
+        payload_offset,
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum MixedPlatform {
+    MicroSandbox,
+    AppleVirtualization,
+}
+
+fn mixed_platform(computer: &PackageComputer) -> Result<MixedPlatform, BackupError> {
+    let config: MixedRuntimeConfig = serde_json::from_value(computer.runtime_config.clone())
+        .map_err(|_| {
+            BackupError::InvalidArchive(
+                "a mixed computer runtime configuration is malformed".into(),
+            )
+        })?;
+    Ok(match config {
+        MixedRuntimeConfig::MicroSandbox { .. } => MixedPlatform::MicroSandbox,
+        MixedRuntimeConfig::AppleVirtualization { .. } => MixedPlatform::AppleVirtualization,
+    })
+}
+
+fn mixed_native_configuration(computer: &PackageComputer) -> Result<Value, BackupError> {
+    let config: MixedRuntimeConfig = serde_json::from_value(computer.runtime_config.clone())
+        .map_err(|_| {
+            BackupError::InvalidArchive(
+                "a mixed computer runtime configuration is malformed".into(),
+            )
+        })?;
+    match config {
+        MixedRuntimeConfig::AppleVirtualization { configuration } => {
+            serde_json::to_value(configuration).map_err(BackupError::from)
+        }
+        MixedRuntimeConfig::MicroSandbox { .. } => Err(BackupError::InvalidArchive(
+            "the mixed computer row is not an Apple Virtualization computer".into(),
+        )),
+    }
+}
+
+fn mixed_micro_configuration(
+    computer: &PackageComputer,
+) -> Result<(RuntimeManifest, Value), BackupError> {
+    let config: MixedRuntimeConfig = serde_json::from_value(computer.runtime_config.clone())
+        .map_err(|_| {
+            BackupError::InvalidArchive(
+                "a mixed computer runtime configuration is malformed".into(),
+            )
+        })?;
+    match config {
+        MixedRuntimeConfig::MicroSandbox {
+            runtime_version,
+            snapshot_format,
+            guest_architecture,
+            configuration,
+        } => Ok((
+            RuntimeManifest {
+                name: "microsandbox".into(),
+                version: runtime_version,
+                snapshot_format,
+                guest_architecture,
+            },
+            configuration,
+        )),
+        MixedRuntimeConfig::AppleVirtualization { .. } => Err(BackupError::InvalidArchive(
+            "the selected mixed computer is not a MicroSandbox computer".into(),
+        )),
+    }
+}
+
+fn seek_past_payload(archive: &mut File, payload_size: u64) -> Result<(), BackupError> {
+    let skip = i64::try_from(payload_size)
+        .map_err(|_| BackupError::InvalidArchive("payload sizes overflow".into()))?;
+    archive.seek(SeekFrom::Current(skip))?;
+    Ok(())
 }
 
 /// Both disks of a computer: an upper bound for the data a capture, check or
@@ -2007,20 +2625,38 @@ fn check_runtime_compatibility(runtime: &RuntimeManifest) -> Result<(), BackupEr
 
 fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
     let architecture = manifest.runtime.guest_architecture.as_str();
-    if !matches!(architecture, "aarch64" | "x86_64") || architecture != std::env::consts::ARCH {
-        return Err(BackupError::InvalidArchive(format!(
-            "This export file requires {architecture}; Silo on this device supports {}. Import it on a device with the required architecture.",
-            std::env::consts::ARCH
-        )));
+    match manifest.runtime.name.as_str() {
+        macos_archive::RUNTIME_NAME => macos_archive::validate_runtime(&manifest.runtime)?,
+        MIXED_RUNTIME_NAME => {
+            if manifest.runtime.version != MIXED_RUNTIME_VERSION
+                || manifest.runtime.snapshot_format != MIXED_SNAPSHOT_FORMAT
+                || architecture != "aarch64"
+            {
+                return Err(BackupError::UnsupportedArchive(
+                    "This mixed export uses an unsupported computer or component version.".into(),
+                ));
+            }
+        }
+        _ => {
+            if !matches!(architecture, "aarch64" | "x86_64")
+                || architecture != std::env::consts::ARCH
+            {
+                return Err(BackupError::InvalidArchive(format!(
+                    "This export file requires {architecture}; Silo on this device supports {}. Import it on a device with the required architecture.",
+                    std::env::consts::ARCH
+                )));
+            }
+            check_runtime_compatibility(&manifest.runtime)?;
+        }
     }
     check_format_version(manifest.schema_version)?;
-    check_runtime_compatibility(&manifest.runtime)?;
     if manifest.computers.is_empty() || manifest.computers.len() > 64 {
         return Err(BackupError::InvalidArchive(
             "the computer count is outside supported limits".into(),
         ));
     }
     let mut names = HashSet::new();
+    let mut mixed_platforms = HashSet::new();
     for computer in &manifest.computers {
         validate_computer_name(&computer.name)
             .map_err(|_| BackupError::InvalidArchive("a computer name is invalid".into()))?;
@@ -2043,14 +2679,87 @@ fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
                 "checkpoint metadata is invalid".into(),
             ));
         }
-        validate_snapshottable_config(&computer.name, &computer.runtime_config)
-            .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
-        validate_computer_configuration(&computer.name, &computer.computer_configuration)
-            .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
-        validate_package_volumes(&computer.volumes)?;
-        validate_volume_contract(&computer.runtime_config, &computer.computer_configuration)?;
+        match manifest.runtime.name.as_str() {
+            macos_archive::RUNTIME_NAME => macos_archive::validate_computer(
+                &computer.name,
+                &computer.runtime_config,
+                &computer.computer_configuration,
+                computer.payload_size,
+                &computer.volumes,
+            )?,
+            MIXED_RUNTIME_NAME => {
+                validate_mixed_computer(computer)?;
+                mixed_platforms.insert(mixed_platform(computer)?);
+            }
+            _ => validate_linux_computer(computer)?,
+        }
+    }
+    if manifest.runtime.name == MIXED_RUNTIME_NAME && mixed_platforms.len() != 2 {
+        return Err(BackupError::InvalidArchive(
+            "a mixed export must contain both MicroSandbox and Apple Virtualization computers"
+                .into(),
+        ));
     }
     Ok(())
+}
+
+fn validate_linux_computer(computer: &PackageComputer) -> Result<(), BackupError> {
+    validate_snapshottable_config(&computer.name, &computer.runtime_config)
+        .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+    validate_computer_configuration(&computer.name, &computer.computer_configuration)
+        .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+    validate_package_volumes(&computer.volumes)?;
+    validate_volume_contract(&computer.runtime_config, &computer.computer_configuration)
+}
+
+fn validate_mixed_computer(computer: &PackageComputer) -> Result<(), BackupError> {
+    let config: MixedRuntimeConfig = serde_json::from_value(computer.runtime_config.clone())
+        .map_err(|_| {
+            BackupError::InvalidArchive(
+                "a mixed computer runtime configuration is malformed".into(),
+            )
+        })?;
+    match config {
+        MixedRuntimeConfig::MicroSandbox {
+            runtime_version,
+            snapshot_format,
+            guest_architecture,
+            configuration,
+        } => {
+            let runtime = RuntimeManifest {
+                name: "microsandbox".into(),
+                version: runtime_version,
+                snapshot_format,
+                guest_architecture,
+            };
+            if runtime.guest_architecture != std::env::consts::ARCH {
+                return Err(BackupError::InvalidArchive(
+                    "the MicroSandbox row requires a different architecture".into(),
+                ));
+            }
+            check_runtime_compatibility(&runtime)?;
+            let row = PackageComputer {
+                name: computer.name.clone(),
+                runtime_config: configuration,
+                computer_configuration: computer.computer_configuration.clone(),
+                payload_size: computer.payload_size,
+                payload_sha256: computer.payload_sha256.clone(),
+                volumes: computer.volumes.clone(),
+            };
+            validate_linux_computer(&row)?;
+            Ok(())
+        }
+        MixedRuntimeConfig::AppleVirtualization { configuration } => {
+            let native = serde_json::to_value(configuration)?;
+            macos_archive::validate_computer(
+                &computer.name,
+                &native,
+                &computer.computer_configuration,
+                computer.payload_size,
+                &computer.volumes,
+            )
+        }
+    }
 }
 
 fn validate_export_configs(
@@ -3216,6 +3925,30 @@ fn pending_digest() -> String {
     format!("sha256:{}", "0".repeat(64))
 }
 
+struct LimitedPayloadReader {
+    file: File,
+    remaining: u64,
+}
+
+impl Read for LimitedPayloadReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.remaining == 0 || buffer.is_empty() {
+            return Ok(0);
+        }
+        let limit =
+            usize::try_from(self.remaining.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        let count = self.file.read(&mut buffer[..limit])?;
+        if count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "the source archive payload changed while being combined",
+            ));
+        }
+        self.remaining -= count as u64;
+        Ok(count)
+    }
+}
+
 /// Writes the archive, hashing each payload while it is copied (one read per
 /// payload), then verifies the whole written file once before publishing it.
 /// `payloads[i]` is the open, already-measured payload of `manifest.computers[i]`.
@@ -3223,6 +3956,27 @@ fn write_immutable_package(
     destination: &Path,
     manifest: &mut PackageManifest,
     payloads: Vec<File>,
+    cancellation: &Cancellation,
+    token: Option<&str>,
+    free_space: fn(&Path) -> io::Result<u64>,
+) -> Result<u64, BackupError> {
+    write_immutable_package_from_readers(
+        destination,
+        manifest,
+        payloads
+            .into_iter()
+            .map(|payload| Box::new(payload) as Box<dyn Read>)
+            .collect(),
+        cancellation,
+        token,
+        free_space,
+    )
+}
+
+fn write_immutable_package_from_readers(
+    destination: &Path,
+    manifest: &mut PackageManifest,
+    payloads: Vec<Box<dyn Read>>,
     cancellation: &Cancellation,
     token: Option<&str>,
     free_space: fn(&Path) -> io::Result<u64>,
@@ -3841,6 +4595,120 @@ mod tests {
             "workspaceStorageGiB": 60,
             "runtimeStorageGiB": 80
         })
+    }
+
+    fn mixed_macos_configuration(name: &str) -> MacosArchiveConfiguration {
+        let hardware_digest = format!("sha256:{:x}", Sha256::digest(b"hardware-model"));
+        MacosArchiveConfiguration {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: "123e4567-e89b-12d3-a456-426614174000".into(),
+            source_name: name.into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 32,
+            guest_version: "15.0".into(),
+            guest_build: "24A123".into(),
+            host_build: "24A123".into(),
+            hardware_model_digest: hardware_digest.clone(),
+            setup_fingerprint: "0123456789abcdef".into(),
+            computer_use_fingerprint: "fedcba9876543210".into(),
+            source: MacosArchiveSourceKind::WholeComputer,
+            memory: MacosArchiveMemory::None,
+            components: vec![
+                macos_archive::MacosArchiveComponent {
+                    role: MacosComponentRole::Disk,
+                    logical_length: 32 * 1024 * 1024 * 1024,
+                    stored_length: 10,
+                    sha256: format!("sha256:{:x}", Sha256::digest(b"disk")),
+                },
+                macos_archive::MacosArchiveComponent {
+                    role: MacosComponentRole::Auxiliary,
+                    logical_length: 8,
+                    stored_length: 10,
+                    sha256: format!("sha256:{:x}", Sha256::digest(b"auxiliary")),
+                },
+                macos_archive::MacosArchiveComponent {
+                    role: MacosComponentRole::HardwareModel,
+                    logical_length: 13,
+                    stored_length: 10,
+                    sha256: hardware_digest,
+                },
+                macos_archive::MacosArchiveComponent {
+                    role: MacosComponentRole::MachineIdentifier,
+                    logical_length: 16,
+                    stored_length: 10,
+                    sha256: format!("sha256:{:x}", Sha256::digest(b"machine-id")),
+                },
+            ],
+        }
+    }
+
+    fn mixed_manifest_fixture() -> (PackageManifest, Vec<Vec<u8>>) {
+        let linux_payload = fake_snapshot_archive();
+        let macos_config = mixed_macos_configuration("mac-box");
+        let macos_payload = vec![0x5a; macos_archive::stream_size(&macos_config).unwrap() as usize];
+        let manifest = PackageManifest {
+            schema_version: FORMAT_VERSION,
+            created_at_ms: 123,
+            runtime: RuntimeManifest {
+                name: MIXED_RUNTIME_NAME.into(),
+                version: MIXED_RUNTIME_VERSION.into(),
+                snapshot_format: MIXED_SNAPSHOT_FORMAT.into(),
+                guest_architecture: "aarch64".into(),
+            },
+            computers: vec![
+                PackageComputer {
+                    name: "linux-box".into(),
+                    runtime_config: serde_json::to_value(MixedRuntimeConfig::MicroSandbox {
+                        runtime_version: bundled_runtime_version().into(),
+                        snapshot_format: snapshot_format_for(bundled_runtime_version()),
+                        guest_architecture: std::env::consts::ARCH.into(),
+                        configuration: managed_config("linux-box"),
+                    })
+                    .unwrap(),
+                    computer_configuration: computer_configuration("linux-box"),
+                    payload_size: linux_payload.len() as u64,
+                    payload_sha256: pending_digest(),
+                    volumes: Vec::new(),
+                },
+                PackageComputer {
+                    name: "mac-box".into(),
+                    runtime_config: serde_json::to_value(MixedRuntimeConfig::AppleVirtualization {
+                        configuration: macos_config,
+                    })
+                    .unwrap(),
+                    computer_configuration: Value::Object(serde_json::Map::new()),
+                    payload_size: macos_payload.len() as u64,
+                    payload_sha256: pending_digest(),
+                    volumes: Vec::new(),
+                },
+            ],
+        };
+        (manifest, vec![linux_payload, macos_payload])
+    }
+
+    fn write_unverified_fixture_archive(
+        path: &Path,
+        mut manifest: PackageManifest,
+        payloads: Vec<Vec<u8>>,
+    ) {
+        assert_eq!(manifest.computers.len(), payloads.len());
+        for (computer, payload) in manifest.computers.iter_mut().zip(&payloads) {
+            computer.payload_size = payload.len() as u64;
+            computer.payload_sha256 = format!("sha256:{:x}", Sha256::digest(payload));
+        }
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let mut archive = File::create(path).unwrap();
+        archive.write_all(MAGIC).unwrap();
+        archive.write_all(&FORMAT_VERSION.to_be_bytes()).unwrap();
+        archive
+            .write_all(&(bytes.len() as u64).to_be_bytes())
+            .unwrap();
+        archive.write_all(&bytes).unwrap();
+        for payload in payloads {
+            archive.write_all(&payload).unwrap();
+        }
     }
 
     fn service(temp: &tempfile::TempDir, runner: FakeRunner) -> BackupService<FakeRunner> {
@@ -5674,6 +6542,191 @@ mod tests {
         assert!(matches!(
             service.describe_archive(&archive, &Cancellation::default()),
             Err(BackupError::InvalidArchive(_))
+        ));
+    }
+
+    #[test]
+    fn mixed_archive_preserves_strict_linux_and_apple_row_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("mixed.silo-backup");
+        let (manifest, payloads) = mixed_manifest_fixture();
+        validate_manifest(&manifest).unwrap();
+        write_unverified_fixture_archive(&archive, manifest, payloads);
+
+        let package = read_and_verify_package(
+            &archive,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::Describe,
+        )
+        .unwrap();
+        assert_eq!(package.manifest.runtime.name, MIXED_RUNTIME_NAME);
+        assert_eq!(
+            package
+                .manifest
+                .computers
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["linux-box", "mac-box"]
+        );
+        let (runtime, configuration) =
+            mixed_micro_configuration(&package.manifest.computers[0]).unwrap();
+        assert_eq!(runtime.version, bundled_runtime_version());
+        assert_eq!(
+            runtime.snapshot_format,
+            snapshot_format_for(bundled_runtime_version())
+        );
+        assert_eq!(configuration["name"], "linux-box");
+        assert_eq!(
+            mixed_platform(&package.manifest.computers[1]).unwrap(),
+            MixedPlatform::AppleVirtualization
+        );
+        assert_eq!(
+            mixed_native_configuration(&package.manifest.computers[1]).unwrap()["payloadVersion"],
+            1
+        );
+        let service = service(&temp, FakeRunner::default());
+        assert_eq!(
+            service
+                .detect_archive_kind(&archive, &Cancellation::default())
+                .unwrap(),
+            ArchiveRuntimeKind::Mixed
+        );
+        assert_eq!(
+            service
+                .archive_computer_kind(&archive, "linux-box", &Cancellation::default())
+                .unwrap(),
+            ArchiveRuntimeKind::MicroSandbox
+        );
+        assert_eq!(
+            service
+                .archive_computer_kind(&archive, "mac-box", &Cancellation::default())
+                .unwrap(),
+            ArchiveRuntimeKind::AppleVirtualization
+        );
+    }
+
+    #[test]
+    fn mixed_archive_rejects_unknown_and_mismatched_row_discriminants() {
+        let (valid, _) = mixed_manifest_fixture();
+        validate_manifest(&valid).unwrap();
+
+        let mut unknown = mixed_manifest_fixture().0;
+        unknown.computers[0].runtime_config["platform"] = Value::String("windows".into());
+        assert!(matches!(
+            validate_manifest(&unknown),
+            Err(BackupError::InvalidArchive(_))
+        ));
+
+        let mut mislabeled_linux = mixed_manifest_fixture().0;
+        mislabeled_linux.computers[0].runtime_config["platform"] =
+            Value::String("apple-virtualization".into());
+        assert!(matches!(
+            validate_manifest(&mislabeled_linux),
+            Err(BackupError::InvalidArchive(_))
+        ));
+
+        let mut mislabeled_apple = mixed_manifest_fixture().0;
+        mislabeled_apple.computers[1].runtime_config["platform"] =
+            Value::String("microsandbox".into());
+        assert!(matches!(
+            validate_manifest(&mislabeled_apple),
+            Err(BackupError::InvalidArchive(_))
+        ));
+    }
+
+    #[test]
+    fn mixed_linux_row_extracts_its_native_checkpoint_payload() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("mixed.silo-backup");
+        let (manifest, payloads) = mixed_manifest_fixture();
+        let linux_payload = payloads[0].clone();
+        write_unverified_fixture_archive(&archive, manifest, payloads);
+        let stage = tempfile::tempdir().unwrap();
+        let package = read_and_verify_package(
+            &archive,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::Extract {
+                dir: stage.path(),
+                source: Some("linux-box"),
+                space: SpaceBudget {
+                    stage_free: u64::MAX,
+                    store_free: u64::MAX,
+                    shared_volume: false,
+                },
+            },
+        )
+        .unwrap();
+        let extracted = package.extracted.unwrap();
+        assert_eq!(extracted.index, 0);
+        assert_eq!(fs::read(extracted.path).unwrap(), linux_payload);
+    }
+
+    #[test]
+    fn mixed_linux_import_skips_other_linux_rows_before_the_selected_payload() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("mixed.silo-backup");
+        let (mut manifest, mut payloads) = mixed_manifest_fixture();
+        let mut second_linux = PackageComputer {
+            name: "other-linux-box".into(),
+            runtime_config: manifest.computers[0].runtime_config.clone(),
+            computer_configuration: computer_configuration("other-linux-box"),
+            payload_size: manifest.computers[0].payload_size,
+            payload_sha256: manifest.computers[0].payload_sha256.clone(),
+            volumes: manifest.computers[0].volumes.clone(),
+        };
+        second_linux.runtime_config["configuration"]["name"] =
+            Value::String(second_linux.name.clone());
+        manifest.computers.insert(1, second_linux);
+        let second_linux_payload = payloads[0].clone();
+        payloads.insert(1, second_linux_payload);
+        write_unverified_fixture_archive(&archive, manifest, payloads);
+
+        let stage = tempfile::tempdir().unwrap();
+        let package = read_and_verify_package(
+            &archive,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::Extract {
+                dir: stage.path(),
+                source: Some("linux-box"),
+                space: SpaceBudget {
+                    stage_free: u64::MAX,
+                    store_free: u64::MAX,
+                    shared_volume: false,
+                },
+            },
+        )
+        .unwrap();
+        let extracted = package.extracted.unwrap();
+        assert_eq!(extracted.index, 0);
+        assert_eq!(fs::read(extracted.path).unwrap(), fake_snapshot_archive());
+    }
+
+    #[test]
+    fn mixed_apple_row_reaches_the_component_stream_verifier() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("mixed.silo-backup");
+        let (manifest, payloads) = mixed_manifest_fixture();
+        write_unverified_fixture_archive(&archive, manifest, payloads);
+        let stage = tempfile::tempdir().unwrap();
+        let result = read_and_verify_package(
+            &archive,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::ExtractMacos {
+                dir: stage.path(),
+                source: Some("mac-box"),
+                roles: &[MacosComponentRole::Disk],
+                stage_free: u64::MAX,
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(BackupError::InvalidArchive(message))
+                if message.contains("component stream header")
         ));
     }
 

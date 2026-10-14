@@ -169,6 +169,13 @@ fn lock() -> Result<Lock, String> {
     Ok(lock)
 }
 
+pub(crate) fn supports_guest_build(build: &str) -> Result<bool, String> {
+    Ok(lock()?
+        .supported_guest_builds
+        .iter()
+        .any(|supported| supported == build))
+}
+
 /// Inputs that make the developer tools step and template fingerprint change together.
 pub(super) fn setup_inputs() -> [&'static str; 3] {
     [SCRIPT, PIN, GITHUB_SETUP]
@@ -487,6 +494,12 @@ mod tests {
         assert_eq!(lock.gh.version, "2.102.0");
         assert_eq!(lock.git_lfs.asset.bytes, 5_550_634);
         assert_eq!(lock.gh.asset.bytes, 14_359_983);
+    }
+
+    #[test]
+    fn supported_guest_build_check_uses_the_validated_lock() {
+        assert!(supports_guest_build("25G83").unwrap());
+        assert!(!supports_guest_build("24A123").unwrap());
     }
 
     #[test]

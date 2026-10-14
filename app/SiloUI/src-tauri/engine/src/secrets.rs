@@ -114,15 +114,16 @@ pub struct PendingRevocation {
     pub(crate) name: String,
     pub(crate) computer: String,
 }
-impl PendingRevocation {
-    /// The computer (by name) whose guest may still hold this removed secret.
-    pub fn computer(&self) -> &str {
-        &self.computer
-    }
 
-    /// The environment-variable name of the removed secret.
+impl PendingRevocation {
+    /// The affected environment variable name; never the credential value.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The computer that may still hold the revoked generation.
+    pub fn computer(&self) -> &str {
+        &self.computer
     }
 }
 #[derive(Default, Serialize, Deserialize)]

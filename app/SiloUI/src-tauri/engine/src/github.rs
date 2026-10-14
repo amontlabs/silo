@@ -1260,6 +1260,50 @@ fn remember_token(computer: &str, token: &str) -> Result<(), String> {
 fn profile(grants: &[RuntimeGrant]) -> Value {
     json!({"version":1,"owners":grants.iter().filter(|g| !g.read_token.is_empty()).map(|g|json!({"login":g.owner_login,"repositoryIds":g.repository_ids,"readToken":g.read_token,"writeToken":g.write_token,"expiresAt":g.expires_at})).collect::<Vec<_>>()})
 }
+
+/// Current in-memory GitHub authority for one macOS computer. This is sent only over that
+/// computer's private gateway control descriptor; durable settings and public snapshots never
+/// contain the token values.
+/// The current GitHub authority and its domain revision for one macOS computer.
+/// The revision prevents an older background attach from restoring stale grants.
+pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>), String> {
+    let _state = serialize(&STATE);
+    let document = load()?;
+    let revision = document.revision;
+    if !document.access_enabled {
+        return Ok((revision, None));
+    }
+    let Some(policy) = document
+        .computers
+        .iter()
+        .find(|policy| policy["computer"].as_str() == Some(computer))
+    else {
+        return Ok((revision, None));
+    };
+    if personal_token::selected(policy) {
+        let token = personal_token::value()?;
+        return Ok((
+            revision,
+            Some(json!({"version":2,"owners":[],"personalToken":token})),
+        ));
+    }
+    let key = active_key(computer)?;
+    let grants = active()
+        .lock()
+        .map_err(|_| "GitHub state is unavailable.")?
+        .get(&key)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|grant| grant.expires_at > now() + 120)
+        .collect::<Vec<_>>();
+    if grants.is_empty() {
+        Ok((revision, None))
+    } else {
+        Ok((revision, Some(profile(&grants))))
+    }
+}
+
 fn retire_unused(computer: &str) -> Result<(), String> {
     let key = active_key(computer)?;
     let retained: Vec<String> = active()

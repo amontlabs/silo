@@ -53,6 +53,11 @@ use std::{
 /// capability interface and the installed `EngineContext`.
 pub trait RuntimeHost: Send + Sync {
     fn engine_context(&self) -> Arc<dyn EngineContext>;
+    /// The native macOS computer adapter when this process can manage VZ guests.
+    /// Backup/import uses it to capture or publish native disk generations.
+    fn macos_context(&self) -> Option<crate::macos_computers::MacosContext> {
+        None
+    }
     fn runtime_storage(&self) -> Result<PathBuf, String>;
     fn blocks_operations(&self) -> bool;
     fn bundled_tools_directory(&self) -> Result<PathBuf, String>;
@@ -1426,6 +1431,7 @@ fn run_msb_process(
             .find(|argument| !argument.starts_with('-'))
         {
             crate::ssh_access::close_computer(computer);
+            crate::desktop_viewer_api::close_computer(computer);
         }
     }
     ensure_runtime_files(paths)?;
@@ -13472,6 +13478,13 @@ fn revoke_secret_with(
 
 #[cfg(test)]
 pub(crate) fn validate_secret_material_for_tests(
+    material: &[(String, String, Vec<String>)],
+) -> Result<(), String> {
+    secrets_runtime::validate_material(&material.to_vec())
+}
+
+/// Validate material before passing it to any host runtime adapter.
+pub(crate) fn validate_secret_material(
     material: &[(String, String, Vec<String>)],
 ) -> Result<(), String> {
     secrets_runtime::validate_material(&material.to_vec())

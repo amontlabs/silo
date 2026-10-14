@@ -21,6 +21,16 @@ describe("import name validation accessibility", () => {
     expect(input).toHaveAccessibleDescription(validateComputerName(newName) ?? `A computer named ${newName} already exists.`)
     expect(screen.getByRole("button", { name: "Import" })).toBeDisabled()
   })
+
+  it("shows portability warnings before the user starts an import", async () => {
+    render(<ImportPopover
+      source={applicationSourceForScenario("running")}
+      review={{ kind: "review", archive: { name: "export", archivePath: "/fixtures/export", completedLabel: "Today", size: "1 GiB", destination: "/fixtures", computers: ["dev"] }, sourceName: "dev", newName: "dev-imported", warnings: ["Saved memory cannot be reused on this Mac; the computer will import from its disk."] }}
+      anchor={<button type="button">Add</button>}
+      onReview={vi.fn()} onImport={vi.fn()} onClose={vi.fn()} onRetry={vi.fn()}
+    />)
+    expect(await screen.findByRole("note")).toHaveTextContent(/Warning: Saved memory cannot be reused/)
+  })
 })
 
 it.each([

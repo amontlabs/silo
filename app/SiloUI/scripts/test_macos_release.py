@@ -14,7 +14,13 @@ import unittest
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name('verify-macos-signing.py')
-TOOLS = ('silo-ui', 'msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
+TOOLS = (
+    'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
+    'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+)
+GATEWAY_ENTITLEMENTS = {
+    'com.apple.security.cs.disable-library-validation': True,
+}
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'Requires macOS codesign and clang')
@@ -69,6 +75,7 @@ int main(int argc, char **argv) {
         output = self.run_command('codesign', '-d', '--verbose=4', self.engine).stderr
         self.digest = bytes.fromhex(re.search(rb'^CDHash=(\w+)$', output, re.M)[1].decode())
         self.sign_helper({'cdhash': self.digest})
+        self.sign_gateway_helper({'cdhash': self.digest})
         self.seal()
 
     def sign(self, target, *, entitlements=None, constraint=None, hardened=True):
@@ -90,6 +97,10 @@ int main(int argc, char **argv) {
             'com.apple.security.hypervisor': True,
             'com.apple.security.cs.disable-library-validation': True,
         }, constraint=constraint)
+
+    def sign_gateway_helper(self, constraint):
+        self.sign(self.binaries / 'silo-macos-gateway',
+                  entitlements=GATEWAY_ENTITLEMENTS, constraint=constraint)
 
     def seal(self, virtualization=True):
         self.sign(self.app, entitlements={

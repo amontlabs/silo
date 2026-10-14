@@ -10,12 +10,13 @@ const forkDescription = "Creates a new stopped macOS computer with a copy of thi
  * computer shaped like a Linux one, so this only translates: the same Create, Restore, Fork
  * and Delete, backed by the macOS checkpoint commands.
  */
-export function MacosCheckpointPanel({ computer, store, takenNames, onStart }: {
+export function MacosCheckpointPanel({ computer, store, takenNames, onStart, onExport }: {
   computer: MacosComputer
   store: MacosComputersStore
   takenNames: readonly string[]
   /** Starts the computer through the row's own path, which reports a refusal or failure. */
   onStart: () => void
+  onExport?: (name: string, checkpoint?: { id: string; name: string }) => void | Promise<unknown>
 }) {
   const subject = useMemo<CheckpointSubject>(() => ({
     configuration: { id: computer.id, name: computer.name },
@@ -46,6 +47,8 @@ export function MacosCheckpointPanel({ computer, store, takenNames, onStart }: {
       actions={actions}
       takenNames={takenNames}
       disabled={!canCheckpointMacos(computer)}
+      onExport={onExport ? checkpoint => { void onExport(computer.name, { id: checkpoint.id, name: checkpoint.name }) } : undefined}
+      exportDisabled={!canCheckpointMacos(computer)}
       forkCopy={{ description: forkDescription, created: name => `${name} is being set up and can be started when that finishes.` }}
       restoredAction={() => startAction}
     />
