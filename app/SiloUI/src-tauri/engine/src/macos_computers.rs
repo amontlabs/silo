@@ -1584,6 +1584,179 @@ pub async fn open_macos_display(app: MacosContext, id: String) -> Result<(), Str
     blocking(move || open_display(&app, &id)).await
 }
 
+/// Closes this computer's engine-owned screen window without stopping its VM.
+pub async fn close_macos_display(app: MacosContext, id: String) -> Result<(), String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        if state == State::SettingUp {
+            return Err("The display cannot close while computer setup is using it.".into());
+        }
+        app.close_display(&id);
+        Ok(())
+    })
+    .await
+}
+
+/// One macOS computer's row as `computers.list` shows it, or `None` when `id` is not one. It
+/// reads the inventory only: unlike [`read_macos_computers`] it never looks for new builds.
+pub async fn read_macos_computer(
+    app: MacosContext,
+    id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let registry = registry();
+        registry
+            .entries
+            .iter()
+            .find(|entry| entry.record.id == id)
+            .map(|entry| serde_json::to_value(entry.row()).map_err(|error| error.to_string()))
+            .transpose()
+    })
+    .await
+}
+
+/// Whether `id` names a macOS computer of this engine.
+pub async fn has_macos_computer(app: MacosContext, id: String) -> Result<bool, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        Ok(computer(&id).is_ok())
+    })
+    .await
+}
+
+/// The computer-use state a record alone can answer: the desired and applied approval and
+/// whether the guest still has to be updated. The receipt fields stay null until the guest
+/// receipt is read.
+fn computer_use_projection(record: &Record) -> serde_json::Value {
+    let desired = record
+        .computer_use_desired_approval
+        .or(record.computer_use_approval)
+        .unwrap_or_else(crate::computer_use::initial_approval);
+    let applied = record
+        .computer_use_approval
+        .filter(|_| !record.computer_use_stale());
+    let updating = guest_computer_use::update_running(&record.id);
+    serde_json::json!({
+        "schemaVersion": null,
+        "state": null,
+        "reason": null,
+        "cause": null,
+        "compatibility": null,
+        "warning": null,
+        "approval": desired.as_str(),
+        "appliedApproval": applied.map_or("unknown", |approval| approval.as_str()),
+        "approvalApply": if applied.is_some() && !updating { "applied" } else { "pending" },
+        "approvalApplyReason": null,
+        "appVersion": null,
+        "chatgptVersion": null,
+        "runtimeVersion": null,
+        "lcuVersion": null,
+        "agents": null,
+        "at": null,
+    })
+}
+
+/// macOS computer-use state that can be projected without entering the guest.
+pub async fn macos_computer_use_state(
+    app: MacosContext,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (record, _) = computer(&id)?;
+        Ok(computer_use_projection(&record))
+    })
+    .await
+}
+
+/// Stores desired computer-use approval and schedules the existing guest updater when running.
+/// It returns at once; the guest update runs in the background and a stopped computer applies
+/// the change at its next Start.
+pub async fn set_macos_computer_use_approval(
+    app: MacosContext,
+    id: String,
+    approval: crate::computer_use::Approval,
+) -> Result<serde_json::Value, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let data = app_data(&app)?;
+        let (mut record, state) = computer(&id)?;
+        record.computer_use_desired_approval = Some(approval);
+        store::save(&Layout::new(&data, &id), &record)?;
+        let (attempt, projection) = {
+            let mut registry = registry();
+            let entry = registry
+                .entry(&id)
+                .ok_or("This computer no longer exists.")?;
+            entry.record = record;
+            (entry.attempt, computer_use_projection(&entry.record))
+        };
+        emit(&app);
+        if state == State::Running {
+            guest_computer_use::update_in_background(&app, &id, attempt);
+        }
+        Ok(projection)
+    })
+    .await
+}
+
+/// The state of a computer added by [`install_test_computer`].
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TestComputerState {
+    Stopped,
+    Running,
+    SettingUp,
+}
+
+/// Adds a finished computer to the shared inventory, for tests of the layers above the engine.
+/// Its record is saved under `app_data`, and the inventory counts as loaded.
+#[cfg(any(test, feature = "test-support"))]
+pub fn install_test_computer(
+    app_data: &std::path::Path,
+    name: &str,
+    state: TestComputerState,
+    approval: crate::computer_use::Approval,
+) -> String {
+    let mut record = store::new_record(
+        &CreateRequest {
+            name: name.into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+        },
+        engine::random_mac(),
+    );
+    record.installed = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: true,
+        computer_use: true,
+        clipboard: true,
+        needs_personalizing: false,
+    };
+    record.computer_use_approval = Some(approval);
+    record.computer_use_desired_approval = Some(approval);
+    record.computer_use_version = Some(templates::computer_use_version_for(approval));
+    store::save(&Layout::new(app_data, &record.id), &record).unwrap();
+    let id = record.id.clone();
+    let state = match state {
+        TestComputerState::Stopped => State::Stopped,
+        TestComputerState::Running => State::Running,
+        TestComputerState::SettingUp => State::SettingUp,
+    };
+    let mut computers = registry();
+    let mut entry = Entry::new(record, state, None);
+    entry.attempt = 1;
+    computers.entries.push(entry);
+    computers.loaded = true;
+    id
+}
+
 /// Saves a checkpoint of a computer: its memory too when it runs.
 pub async fn create_macos_checkpoint(
     app: MacosContext,
@@ -1732,6 +1905,23 @@ pub async fn macos_computer_clipboard(
         )
     })
     .await
+}
+
+/// Reads explicit clipboard content from a running macOS computer for a remote API client.
+pub async fn macos_clipboard_read(
+    app: MacosContext,
+    id: String,
+) -> Result<silo_api::methods::clipboard::ClipboardContent, String> {
+    blocking(move || guest_clipboard::read_explicit(&app, &id)).await
+}
+
+/// Writes explicit clipboard content to a running macOS computer.
+pub async fn macos_clipboard_write(
+    app: MacosContext,
+    id: String,
+    content: silo_api::methods::clipboard::ClipboardWritableContent,
+) -> Result<(), String> {
+    blocking(move || guest_clipboard::write_explicit(&app, &id, content)).await
 }
 
 // MARK: For other devices
@@ -4810,6 +5000,7 @@ fn fork_checkpoint_with_workflow(
         record.setup_version = held.record.setup_version.clone();
         record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
+        record.computer_use_desired_approval = held.record.computer_use_desired_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -8519,6 +8710,135 @@ mod tests {
         let mut open = Closed::default();
         assert!(open.close_for_update(true).is_err());
         assert!(open.check().is_ok());
+    }
+
+    /// Replaces the shared computer inventory with one finished computer in `state`.
+    fn install_computer(
+        directory: &std::path::Path,
+        state: State,
+        approval: crate::computer_use::Approval,
+    ) -> String {
+        registry().entries.clear();
+        let id = install_test_computer(
+            directory,
+            "mac-approval",
+            TestComputerState::Stopped,
+            approval,
+        );
+        registry().entries[0].state = state;
+        id
+    }
+
+    #[test]
+    fn computer_use_state_reports_desired_and_applied_approval() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(macos_computer_use_state(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(state["approval"], "ask");
+        assert_eq!(state["appliedApproval"], "ask");
+        assert_eq!(state["approvalApply"], "applied");
+        assert!(state["state"].is_null() && state["lcuVersion"].is_null());
+        assert!(runtime
+            .block_on(has_macos_computer(app.clone(), id))
+            .unwrap());
+        assert!(!runtime
+            .block_on(has_macos_computer(app, "missing".into()))
+            .unwrap());
+    }
+
+    #[test]
+    fn setting_the_approval_of_a_stopped_computer_waits_for_its_next_start() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(
+                app.clone(),
+                id.clone(),
+                Approval::Auto,
+            ))
+            .unwrap();
+        assert_eq!(state["approval"], "auto");
+        assert_eq!(state["appliedApproval"], "unknown");
+        assert_eq!(state["approvalApply"], "pending");
+        let (record, _) = computer(&id).unwrap();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Auto));
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(record.computer_use_stale());
+        let saved = store::load_all(directory.path());
+        assert_eq!(saved[0].computer_use_desired_approval, Some(Approval::Auto));
+        assert!(!guest_computer_use::update_running(&id));
+        // Putting the applied mode back is already applied.
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(app, id, Approval::Ask))
+            .unwrap();
+        assert_eq!(state["approvalApply"], "applied");
+    }
+
+    #[test]
+    fn setting_the_approval_of_an_unknown_computer_fails() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(set_macos_computer_use_approval(
+                app,
+                "missing".into(),
+                Approval::Auto,
+            ))
+            .unwrap_err();
+        assert_eq!(error, "This computer no longer exists.");
+    }
+
+    #[test]
+    fn closing_a_display_is_refused_during_setup_and_leaves_the_computer_running() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::SettingUp, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let refused = runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap_err();
+        assert!(refused.contains("setup"), "{refused}");
+        registry().entries[0].state = State::Running;
+        runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(computer(&id).unwrap().1, State::Running);
+        let missing = runtime
+            .block_on(close_macos_display(app, "missing".into()))
+            .unwrap_err();
+        assert_eq!(missing, "This computer no longer exists.");
     }
 
     #[test]

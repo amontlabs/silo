@@ -222,6 +222,7 @@ impl Provision<'_> {
             record.setup_version = Some(templates::setup_version());
             record.computer_use_version = Some(templates::computer_use_version_for(approval));
             record.computer_use_approval = Some(approval);
+            record.computer_use_desired_approval = Some(approval);
             self.mark(record, |setup| setup.computer_use = true)?;
         }
         if !record.setup.clipboard {
@@ -257,6 +258,7 @@ impl Provision<'_> {
             guest_computer_use::install(self.app, &self.id, approval)?;
             record.computer_use_version = Some(templates::computer_use_version_for(approval));
             record.computer_use_approval = Some(approval);
+            record.computer_use_desired_approval = Some(approval);
             self.mark(record, |_| {})?;
         }
         if setup_steps_complete(record.setup) {
