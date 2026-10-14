@@ -24,7 +24,6 @@ pub(crate) fn query(app: &AppHandle, request: Query) -> Result<Page, BridgeError
     {
         let params = serde_json::to_value(&request).map_err(|error| error.to_string())?;
         return runtime_logs::remote_page(crate::remote::call_remote_typed(
-            app,
             owner,
             "runtime.logs",
             params,

@@ -890,7 +890,6 @@ pub async fn set_computer_use_approval(
     tauri::async_runtime::spawn_blocking(move || {
         if let Some((device, computer)) = crate::remote_access::target(&computer)? {
             crate::chatgpt_app::call_owner(
-                &app,
                 &device,
                 "computerUse.approval",
                 json!({"computerId":computer,"mode":mode}),
@@ -912,7 +911,6 @@ async fn execute(
         if let Some((device, computer)) = crate::remote_access::target(&computer)? {
             let setup = action.as_deref() == Some("setup-computer-use");
             crate::remote::call_remote(
-                &app,
                 &device,
                 if action.is_some() {
                     "desktop.action"

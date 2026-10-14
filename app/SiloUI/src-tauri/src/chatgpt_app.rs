@@ -2249,12 +2249,11 @@ fn remote_device(device: Option<&str>) -> Result<Option<String>, String> {
 /// Calls the device that owns the computer. An older Silo there does not serve these
 /// methods: say so instead of the generic remote error.
 pub(crate) fn call_owner(
-    app: &tauri::AppHandle,
     device: &str,
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    crate::remote::call_remote_typed(app, device, method, params).map_err(owner_error)
+    crate::remote::call_remote_typed(device, method, params).map_err(owner_error)
 }
 
 const UPDATE_OWNER: &str = "Update Silo on that device to use computer use.";
@@ -2321,8 +2320,8 @@ pub(crate) async fn chatgpt_app_status(
 ) -> Result<serde_json::Value, String> {
     blocking(move || match remote_device(device.as_deref())? {
         Some(device) => owner_status(
-            crate::remote::device_capabilities(&app, &device).map_err(owner_error),
-            || call_owner(&app, &device, "chatgpt.status", serde_json::json!({})),
+            crate::remote::device_capabilities(&device).map_err(owner_error),
+            || call_owner(&device, "chatgpt.status", serde_json::json!({})),
         ),
         None => to_value(local_status(&app)?),
     })
@@ -2337,7 +2336,7 @@ pub(crate) async fn chatgpt_app_retry(
     device: Option<String>,
 ) -> Result<serde_json::Value, String> {
     blocking(move || match remote_device(device.as_deref())? {
-        Some(device) => call_owner(&app, &device, "chatgpt.retry", serde_json::json!({})),
+        Some(device) => call_owner(&device, "chatgpt.retry", serde_json::json!({})),
         None => to_value(retry_now(&app)?),
     })
     .await

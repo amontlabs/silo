@@ -257,7 +257,6 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
     let remote_target = remote_access::target(computer)?;
     let connection = if let Some((device, computer)) = &remote_target {
         remote::call_remote(
-            app,
             device,
             "desktop.connect",
             json!({"computerId":computer}),
@@ -271,7 +270,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
         .filter(|p| *p != 0)
         .ok_or("Invalid desktop endpoint.")?;
     let (alias, config) = if let Some((device, computer)) = remote_target {
-        editor::prepare_remote_private(app, &device, &computer, "/workspace")?
+        editor::prepare_remote_private(&device, &computer, "/workspace")?
     } else {
         let paths = runtime::runtime_paths(app)?;
         let directory = paths.home.join("ssh/desktop-viewer").join(computer);
@@ -328,7 +327,6 @@ pub(crate) async fn open_desktop(
         let name = if let Some((device, computer)) = remote_access::target(&computer)? {
             // Verify the remote identity before creating a shell.
             let state = remote::call_remote(
-                &app,
                 &device,
                 "desktop.status",
                 json!({"computerId":computer}),
@@ -414,7 +412,7 @@ pub(crate) async fn open_desktop(
                 crate::app_menu::set_viewer_focus(&menu_app, *focused);
             }
             tauri::WindowEvent::DragDrop(drag) => {
-                crate::transfer::native_drop(&menu_app, &shortcut_label, drag);
+                crate::commands::transfer::native_drop(&shortcut_label, drag);
             }
             _ => {}
         });
@@ -652,10 +650,10 @@ pub(crate) async fn desktop_viewer_attach(
         let view = window
             .add_child(builder, position, LogicalSize::new(width, height))
             .map_err(|_| abort("Could not create desktop display."))?;
-        let (drop_app, shell_label) = (app.clone(), window.label().to_owned());
+        let shell_label = window.label().to_owned();
         view.on_webview_event(move |event| {
             if let tauri::WebviewEvent::DragDrop(drag) = event {
-                crate::transfer::native_drop(&drop_app, &shell_label, drag);
+                crate::commands::transfer::native_drop(&shell_label, drag);
             }
         });
         let cookie =

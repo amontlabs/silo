@@ -118,7 +118,7 @@ fn open(app: &AppHandle, device_id: &str, computer_id: &str) -> Result<(), Bridg
         .find(|saved| saved.id == device_id)
         .ok_or("This device is no longer connected.")?;
     // The owner confirms the computer, its state and that it can host macOS before a window opens.
-    let state = remote::call_remote_typed(app, device_id, "macos.snapshot", json!({}))?;
+    let state = remote::call_remote_typed(device_id, "macos.snapshot", json!({}))?;
     let name = running_computer_name(&state, computer_id)?;
     let label = viewer_label(device_id, computer_id);
     let claimed = with_viewers(|viewers| claim(viewers, &label, device_id, computer_id))?;
@@ -216,7 +216,6 @@ fn session(
     computer: &str,
 ) -> Result<Session, BridgeError> {
     let connect = remote::call_remote_typed(
-        app,
         device,
         "macos.display.connect",
         json!({"computerId": computer}),
@@ -279,7 +278,6 @@ fn endpoint(app: &AppHandle, label: &str, device: &str, computer: &str) -> Resul
 /// the size it applied is returned.
 #[tauri::command]
 pub(crate) async fn macos_display_resize(
-    app: AppHandle,
     window: Window,
     width_px: u64,
     height_px: u64,
@@ -287,7 +285,6 @@ pub(crate) async fn macos_display_resize(
     let (device, computer) = target_of(&window)?;
     tokio::task::spawn_blocking(move || {
         remote::call_remote_typed(
-            &app,
             &device,
             "macos.display.resize",
             json!({"computerId": computer, "widthPx": width_px, "heightPx": height_px}),
