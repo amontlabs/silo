@@ -870,11 +870,7 @@ pub(super) fn complete_marked(
     }
     operation
 }
-pub(super) fn resume(
-    app: AppHandle,
-    controller: Arc<Controller>,
-    journal: Journal,
-) -> Result<(), String> {
+pub(super) fn resume(controller: Arc<Controller>, journal: Journal) -> Result<(), String> {
     set_operation(&controller, journal.operation())?;
     if journal.terminal.is_some() {
         return Ok(());
@@ -887,12 +883,14 @@ pub(super) fn resume(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .cancellation = Some(cancellation.clone());
     let (kind, archive, target) = (journal.kind(), journal.archive.clone(), journal.target());
-    let (outer_app, outer_controller) = (app.clone(), controller.clone());
+    let outer_controller = controller.clone();
     let work = move || {
         // Decided once: it picks both how the operation is settled and whether its result
         // is marked as one the user has not been shown (the upgrade produced it).
-        let before_upgrade = crate::runtime_migration::blocks_operations(&app);
-        let operation = match recover(&app, &controller, &journal, &cancellation, before_upgrade) {
+        let before_upgrade = controller
+            .runtime_host()
+            .is_ok_and(|host| host.blocks_operations());
+        let operation = match recover(&controller, &journal, &cancellation, before_upgrade) {
             Ok(settlement) => finish_settlement(&controller, settlement, before_upgrade),
             // Retain the journal: never discard ownership after an uncertain
             // cleanup. The next launch retries; dismissing abandons it (E-43).
@@ -923,11 +921,11 @@ pub(super) fn resume(
             }
         }
         finish(&controller);
-        publish(&app, &controller);
+        publish(&controller);
     };
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         if super::contain_worker_panic(&outer_controller, kind, &archive, target, work) {
-            publish(&outer_app, &outer_controller);
+            publish(&outer_controller);
         }
     });
     Ok(())
@@ -952,7 +950,6 @@ pub(super) fn finish_settlement(
 }
 
 fn recover(
-    app: &AppHandle,
     controller: &Controller,
     journal: &Journal,
     cancellation: &backup::Cancellation,
@@ -964,12 +961,13 @@ fn recover(
     // or write to it, so the operation is settled without the runtime, and whatever
     // only the runtime can clean up waits for the converted storage. After the
     // migration, this is the ordinary recovery in the storage in use.
+    let host = controller.runtime_host()?;
     if before_upgrade {
-        let paths = runtime::inert_runtime_paths(app)?;
+        let paths = runtime::inert_runtime_paths(host)?;
         return settle_before_migration(&paths, controller, journal, cancellation);
     }
     recover_at_paths(
-        &runtime::runtime_paths(app)?,
+        &runtime::runtime_paths(host)?,
         controller,
         journal,
         cancellation,

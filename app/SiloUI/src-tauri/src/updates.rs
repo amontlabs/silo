@@ -209,7 +209,7 @@ fn busy(phase: &str) -> bool {
 }
 fn ready(app: &AppHandle) -> Result<(), String> {
     readiness(|| {
-        crate::backup_controller::update_ready(app)?;
+        crate::commands::backup_controller::update_ready(app)?;
         // Fast readiness check only: refuse if any computer operation is active or queued.
         if !crate::runtime::OPERATIONS.is_idle() {
             return Err("Wait for computer operations to finish before updating.".into());
@@ -701,7 +701,7 @@ fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), I
     let admission = ADMISSION
         .try_write()
         .map_err(|_| "Wait for active operations to finish before updating.".to_string())?;
-    let backup = crate::backup_controller::update_guard(app)?;
+    let backup = crate::commands::backup_controller::update_guard(app)?;
     let github = crate::github::update_guard()?;
     let secrets = crate::secrets::update_guard()?;
     crate::runtime::shutdown::ensure_accepting_operations()?;
@@ -810,7 +810,7 @@ pub(crate) async fn install_update(
             let admission = ADMISSION.try_write().map_err(|_| "Wait for active operations to finish before updating.")?;
             crate::macos_computers::close_for_update()?;
             closed_macos.set(true);
-            let backup = crate::backup_controller::update_guard(&worker)?;
+            let backup = crate::commands::backup_controller::update_guard(&worker)?;
             let github = crate::github::update_guard()?;
             let secrets = crate::secrets::update_guard()?;
             // The installer waits its turn for device-wide work before stopping computers.

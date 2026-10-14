@@ -251,7 +251,7 @@ fn main() {
             commands::applications::list_applications,
             commands::applications::choose_application,
             commands::dependencies::read_dependencies,
-            backup_controller::read_backup_state,
+            commands::backup_controller::read_backup_state,
             runtime_migration::read_runtime_migration_state,
             runtime_migration::retry_runtime_migration,
             runtime_migration::continue_after_migration_failure,
@@ -260,16 +260,16 @@ fn main() {
             commands::pre_upgrade_backup::delete_pre_upgrade_backup,
             commands::pre_upgrade_backup::reveal_pre_upgrade_backup,
             commands::pre_upgrade_backup::acknowledge_pre_upgrade_backup_notice,
-            backup_controller::choose_backup_destination,
-            backup_controller::choose_backup_archive,
-            backup_controller::inspect_backup_archive,
-            backup_controller::cancel_backup_inspection,
-            backup_controller::reveal_backup_archive,
-            backup_controller::start_backup,
-            backup_controller::start_restore,
-            backup_controller::cancel_backup_operation,
-            backup_controller::dismiss_backup_operation,
-            backup_controller::acknowledge_backup_result,
+            commands::backup_controller::choose_backup_destination,
+            commands::backup_controller::choose_backup_archive,
+            commands::backup_controller::inspect_backup_archive,
+            commands::backup_controller::cancel_backup_inspection,
+            commands::backup_controller::reveal_backup_archive,
+            commands::backup_controller::start_backup,
+            commands::backup_controller::start_restore,
+            commands::backup_controller::cancel_backup_operation,
+            commands::backup_controller::dismiss_backup_operation,
+            commands::backup_controller::acknowledge_backup_result,
             commands::runtime::read_application_state,
             commands::runtime_storage::read_workspace_storage,
             commands::runtime_storage::reclaim_workspace_storage,
@@ -312,7 +312,7 @@ fn main() {
                 commands::remote::start(app.handle())?;
                 commands::secrets::install(app.handle())?;
                 commands::github::install(app.handle())?;
-                backup_controller::install(app.handle())?;
+                commands::backup_controller::install(app.handle())?;
                 runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
                 #[cfg(debug_assertions)]

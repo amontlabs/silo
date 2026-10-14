@@ -656,7 +656,7 @@ fn convert(app: &AppHandle) -> Result<(), String> {
     let controller = app.state::<Arc<Controller>>();
     let paths = staged_paths(app, &controller.app_data)?;
     if generation(&controller.app_data)?.is_none() {
-        crate::backup_controller::wait_for_migration_recovery(app)?;
+        crate::commands::backup_controller::wait_for_migration_recovery(app)?;
     }
     convert_with(
         &runtime::ProcessRunner,

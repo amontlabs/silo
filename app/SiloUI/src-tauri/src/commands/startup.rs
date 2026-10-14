@@ -15,7 +15,7 @@ impl StartupServices for TauriStartupServices {
     }
 
     fn wait_for_recovery(&self) -> Result<(), String> {
-        crate::backup_controller::wait_for_recovery(&self.app)
+        crate::commands::backup_controller::wait_for_recovery(&self.app)
     }
 
     fn prepare_runtime(&self) {

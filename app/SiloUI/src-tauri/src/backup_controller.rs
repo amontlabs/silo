@@ -1,8 +1,10 @@
 mod recovery;
 
+use crate::runtime::RuntimeHost;
 use crate::{backup, runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use silo_engine::context::{Audience, Event};
 use std::{
     fs,
     io::{Read, Write},
@@ -13,8 +15,6 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
 
 const GIB: u64 = 1024 * 1024 * 1024;
 const RESTORE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
@@ -179,7 +179,7 @@ fn write_history(path: &Path, history: &BackupHistory) -> Result<(), String> {
 
 /// Use `destination` as the export folder. Saving it for the next launch is
 /// best effort: a failure never blocks this export.
-fn remember_destination(controller: &Controller, destination: PathBuf) {
+pub(crate) fn remember_destination(controller: &Controller, destination: PathBuf) {
     let saved = write_history(
         &controller.history_path,
         &BackupHistory {
@@ -199,6 +199,14 @@ fn remember_destination(controller: &Controller, destination: PathBuf) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .destination = Some(destination);
+}
+
+pub(crate) fn destination(controller: &Controller) -> Result<Option<PathBuf>, String> {
+    controller
+        .view
+        .lock()
+        .map(|view| view.destination.clone())
+        .map_err(|_| "Export and import status could not be read. Relaunch Silo and retry.".into())
 }
 
 /// What `install` restores from the app data folder.
@@ -248,6 +256,7 @@ struct ViewState {
 }
 
 pub(crate) struct Controller {
+    host: Option<Arc<dyn RuntimeHost>>,
     history_path: PathBuf,
     journal: Mutex<Option<recovery::Journal>>,
     service: backup::BackupService,
@@ -255,35 +264,37 @@ pub(crate) struct Controller {
     busy: AtomicBool,
     revision: AtomicU64,
 }
+impl Controller {
+    fn runtime_host(&self) -> Result<&dyn RuntimeHost, String> {
+        self.host
+            .as_deref()
+            .ok_or_else(|| "Backup runtime services are unavailable.".to_string())
+    }
+}
 
-pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    let scratch = app
-        .path()
-        .app_cache_dir()
-        .map_err(|error| format!("Silo could not locate private export working storage: {error}"))?
-        .join("backup-work");
+pub(crate) fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
+    let context = host.engine_context();
+    let paths = context.paths();
+    let scratch = paths.app_cache.join("backup-work");
     // The service keeps this runtime command for the life of the process, and an
     // unfinished storage migration ends in a restart. Until then nothing may run
     // `msb` against the previous generation, so the service gets paths that cannot
     // start it. Interrupted work can still settle its files (E-50); operations are
     // refused with the migration message.
-    let migrating = crate::runtime_migration::blocks_operations(app);
+    let migrating = host.blocks_operations();
     let paths = if migrating {
-        runtime::inert_runtime_paths(app)?
+        runtime::inert_runtime_paths(host.as_ref())?
     } else {
-        runtime::runtime_paths(app)?
+        runtime::runtime_paths(host.as_ref())?
     };
-    let history_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join(HISTORY_FILE);
+    let history_path = context.paths().app_data.join(HISTORY_FILE);
     let Saved {
         destination,
         journal,
         journal_error,
     } = load_saved(&history_path, !migrating);
     let controller = Arc::new(Controller {
+        host: Some(host),
         journal: Mutex::new(journal.clone()),
         history_path,
         service: backup::BackupService::new(
@@ -305,13 +316,12 @@ pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
         busy: AtomicBool::new(false),
         revision: AtomicU64::new(1),
     });
-    app.manage(controller.clone());
     // Settle an interrupted operation before automatic runtime migration starts.
     // Recovery removes only the output journaled for this export or import.
     if let Some(journal) = journal {
-        recovery::resume(app.clone(), controller, journal)?;
+        recovery::resume(controller.clone(), journal)?;
     }
-    Ok(())
+    Ok(controller)
 }
 
 /// Startup runs this in its background worker before other recovery or optional
@@ -319,21 +329,17 @@ pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
 /// whose settings were never saved; its recovery is short and never repeats the
 /// import. An interrupted export's recovery only checks its own files, so
 /// startup does not wait for it (E-31).
-pub(crate) fn wait_for_recovery(app: &AppHandle) -> Result<(), String> {
-    wait_for_recovery_with(app, false)
+/// Waits for the startup-recovery work that must settle before automatic starts.
+pub(crate) fn wait_for_recovery(
+    controller: &Controller,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), String> {
+    wait_for_controller_recovery(controller, false, cancelled)
 }
 
-/// Migration must wait for exports too: selecting a new generation quarantines
-/// the previous generation's journal, including an interrupted export's result.
-pub(crate) fn wait_for_migration_recovery(app: &AppHandle) -> Result<(), String> {
-    wait_for_recovery_with(app, true)
-}
-
-fn wait_for_recovery_with(app: &AppHandle, migration: bool) -> Result<(), String> {
-    let controller = app.state::<Arc<Controller>>();
-    wait_for_controller_recovery(&controller, migration, &|| {
-        crate::startup::is_cancelled(app)
-    })
+/// Migration also waits for exports because it quarantines the previous generation's journal.
+pub(crate) fn wait_for_migration_recovery(controller: &Controller) -> Result<(), String> {
+    wait_for_controller_recovery(controller, true, &|| false)
 }
 
 /// Whether the journal still has to be settled before startup or the migration goes on.
@@ -402,15 +408,14 @@ fn wait_for_controller_recovery(
     }
 }
 
-fn require_main(window: &WebviewWindow) -> Result<(), String> {
-    (window.label() == "main")
-        .then_some(())
-        .ok_or_else(|| "Only the main Silo window can export or import computers.".into())
-}
-
-fn publish(app: &AppHandle, controller: &Controller) {
+pub(crate) fn publish(controller: &Controller) {
     controller.revision.fetch_add(1, Ordering::Relaxed);
-    let _ = app.emit("silo://application-state-changed", ());
+    if let Ok(host) = controller.runtime_host() {
+        host.engine_context().publish(
+            Event::new("silo://application-state-changed", Value::Null),
+            Audience::All,
+        );
+    }
 }
 
 /// Binary sizes, as the storage panel shows them (E-41).
@@ -446,20 +451,7 @@ fn archive_from(path: &Path, inspected: &backup::ArchiveInspection) -> Archive {
     }
 }
 
-/// Read on every refresh, so it runs off the main thread and reads only
-/// in-memory state: no file system access that a stalled or sleeping export
-/// volume could block (E-39).
-#[tauri::command]
-pub(crate) async fn read_backup_state(
-    controller: State<'_, Arc<Controller>>,
-) -> Result<BackupState, String> {
-    let controller = controller.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || backup_state(&controller))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-fn backup_state(controller: &Controller) -> Result<BackupState, String> {
+pub(crate) fn backup_state(controller: &Controller) -> Result<BackupState, String> {
     let view = controller.view.lock().map_err(|_| {
         "Export and import status could not be read. Relaunch Silo and retry.".to_string()
     })?;
@@ -497,96 +489,17 @@ fn backup_state(controller: &Controller) -> Result<BackupState, String> {
     })
 }
 
-fn selected_path_text(path: &Path) -> Result<String, String> {
+pub(crate) fn selected_path_text(path: &Path) -> Result<String, String> {
     path.to_str().map(str::to_owned).ok_or_else(|| {
         "Silo cannot use paths containing non-UTF-8 names. Rename the affected file or folder, then choose it again.".into()
     })
-}
-
-#[tauri::command]
-pub(crate) async fn choose_backup_destination(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-) -> Result<Option<String>, String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let starting_directory = controller
-            .view
-            .lock()
-            .map_err(|_| {
-                "Export and import status could not be read. Relaunch Silo and retry.".to_string()
-            })?
-            .destination
-            .clone();
-        let mut dialog = app
-            .dialog()
-            .file()
-            .set_title("Choose where to export")
-            .set_parent(&window);
-        if let Some(directory) = starting_directory {
-            dialog = dialog.set_directory(directory);
-        }
-        let Some(selected) = dialog.blocking_pick_folder() else {
-            return Ok(None);
-        };
-        let path = selected.into_path().map_err(|error| error.to_string())?;
-        let path = fs::canonicalize(&path)
-            .map_err(|error| format!("Silo could not use the selected destination: {error}"))?;
-        let selected = selected_path_text(&path)?;
-        remember_destination(&controller, path.clone());
-        publish(&app, &controller);
-        Ok(Some(selected))
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn choose_backup_archive(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<String>, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let selected = app
-            .dialog()
-            .file()
-            .set_title("Choose a Silo export to import")
-            .set_parent(&window)
-            .add_filter("Silo export", &["silo-backup"])
-            .blocking_pick_file();
-        selected
-            .map(|path| path.into_path().map_err(|error| error.to_string()))
-            .transpose()
-            .and_then(|path| path.map(|path| selected_path_text(&path)).transpose())
-    })
-    .await
-    .map_err(|error| error.to_string())?
 }
 
 /// Checks an export file before the import review. The check can take minutes
 /// for a large file, so it is registered under the caller's request id and
 /// `cancel_backup_inspection` stops it when the review closes. It changes no
 /// state and publishes nothing (E-27).
-#[tauri::command]
-pub(crate) async fn inspect_backup_archive(
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    archive_path: String,
-    request_id: Option<String>,
-) -> Result<ArchiveInspectionResult, String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    let path = PathBuf::from(archive_path);
-    let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    tauri::async_runtime::spawn_blocking(inspection_worker(controller, path, request_id))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-fn inspection_worker(
+pub(crate) fn inspection_worker(
     controller: Arc<Controller>,
     path: PathBuf,
     request_id: String,
@@ -627,17 +540,6 @@ fn inspection_worker(
     }
 }
 
-/// Stops the export file check started under `request_id`, if it is still running.
-#[tauri::command]
-pub(crate) fn cancel_backup_inspection(
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    request_id: String,
-) -> Result<bool, String> {
-    require_main(&window)?;
-    Ok(cancel_inspection(&controller, &request_id))
-}
-
 /// Registers a check; only one runs at a time, so a newer one cancels the older.
 fn register_inspection(controller: &Controller, request_id: String) -> backup::Cancellation {
     let cancellation = backup::Cancellation::default();
@@ -665,7 +567,7 @@ fn finish_inspection(controller: &Controller, request_id: &str) {
     }
 }
 
-fn cancel_inspection(controller: &Controller, request_id: &str) -> bool {
+pub(crate) fn cancel_inspection(controller: &Controller, request_id: &str) -> bool {
     let mut view = controller
         .view
         .lock()
@@ -705,13 +607,10 @@ fn authorize_reveal(operation: Option<&Operation>, requested: &str) -> Result<Pa
     Ok(path)
 }
 
-#[tauri::command]
-pub(crate) async fn reveal_backup_archive(
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    archive_path: String,
-) -> Result<(), String> {
-    require_main(&window)?;
+pub(crate) fn authorize_reveal_archive(
+    controller: &Controller,
+    requested: &str,
+) -> Result<PathBuf, String> {
     let operation = controller
         .view
         .lock()
@@ -720,15 +619,7 @@ pub(crate) async fn reveal_backup_archive(
         })?
         .operation
         .clone();
-    // The file check and the platform file manager can block; neither runs
-    // under the state lock or on an async worker.
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = authorize_reveal(operation.as_ref(), &archive_path)?;
-        tauri_plugin_opener::reveal_item_in_dir(&path)
-            .map_err(|error| format!("Silo could not show the export file: {error}"))
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    authorize_reveal(operation.as_ref(), requested)
 }
 
 fn unique_archive(destination: &Path, computers: &[String], checkpoint: bool) -> PathBuf {
@@ -775,53 +666,7 @@ fn finish(controller: &Controller) {
     controller.busy.store(false, Ordering::Release);
 }
 
-/// Starts an export and returns its operation id: the `operationId` that
-/// `read_backup_state` reports with this export's running state and result, so
-/// a caller can wait for this specific export to finish (E-59).
-#[tauri::command]
-pub(crate) async fn start_backup(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    destination: String,
-    computers: Vec<String>,
-    checkpoint_id: Option<String>,
-) -> Result<String, String> {
-    require_main(&window)?;
-    // A rejection before the export starts is returned to the caller, which shows it
-    // in place; only the background outcome (see `notify_transfer`) reaches the system.
-    start_backup_inner(
-        app,
-        window,
-        controller,
-        destination,
-        computers,
-        checkpoint_id,
-    )
-    .await
-}
-
-async fn start_backup_inner(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    destination: String,
-    computers: Vec<String>,
-    checkpoint_id: Option<String>,
-) -> Result<String, String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    // Resolving the destination, reading settings and saving the journal all
-    // block on the file system; keep them off the async workers (E-39).
-    tauri::async_runtime::spawn_blocking(move || {
-        begin_export(app, controller, destination, computers, checkpoint_id)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-fn begin_export(
-    app: AppHandle,
+pub(crate) fn begin_export(
     controller: Arc<Controller>,
     destination: String,
     computers: Vec<String>,
@@ -852,7 +697,7 @@ fn begin_export(
         let [computer] = computers.as_slice() else {
             return Err("Choose exactly one computer to export from a checkpoint.".into());
         };
-        let paths = runtime::runtime_paths(&app)?;
+        let paths = runtime::runtime_paths(controller.runtime_host()?)?;
         let metadata =
             runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
         let configuration = metadata
@@ -884,12 +729,11 @@ fn begin_export(
         checkpoint_id.clone(),
         checkpoint_name.as_deref(),
     )?;
-    publish(&app, &controller);
+    publish(&controller);
     let failure_archive = pending_archive.clone();
-    let (work_app, work_controller) = (app.clone(), controller.clone());
+    let work_controller = controller.clone();
     let work = move || {
         run_backup(
-            work_app,
             work_controller,
             archive_path,
             computers,
@@ -898,9 +742,9 @@ fn begin_export(
             pending_archive,
         )
     };
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         if contain_worker_panic(&controller, "backup", &failure_archive, None, work) {
-            publish(&app, &controller);
+            publish(&controller);
         }
     });
     Ok(operation_id)
@@ -1033,7 +877,6 @@ fn contain_worker_panic(
 }
 
 fn run_backup(
-    app: AppHandle,
     controller: Arc<Controller>,
     archive_path: PathBuf,
     computers: Vec<String>,
@@ -1043,7 +886,6 @@ fn run_backup(
 ) {
     let started = std::time::Instant::now();
     let result = backup_work(
-        &app,
         &controller,
         &archive_path,
         &computers,
@@ -1067,10 +909,10 @@ fn run_backup(
         Err(error) => failed_transfer("backup", pending_archive, None, error),
     };
     let operation = recovery::complete(&controller, operation);
-    notify_transfer(&app, &operation, started.elapsed());
+    notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
     finish(&controller);
-    publish(&app, &controller);
+    publish(&controller);
 }
 
 /// Why an export or import worker ended without a result. The outcome comes
@@ -1284,7 +1126,6 @@ fn mutation_guard(
 }
 
 fn backup_work(
-    app: &AppHandle,
     controller: &Controller,
     archive_path: &Path,
     names: &[String],
@@ -1298,13 +1139,13 @@ fn backup_work(
         true,
         &|| {
             show_queued(controller);
-            publish(app, controller);
+            publish(controller);
         },
     )?;
     if show_admitted(controller) {
-        publish(app, controller);
+        publish(controller);
     }
-    let paths = runtime::runtime_paths(app)?;
+    let paths = runtime::runtime_paths(controller.runtime_host()?)?;
     backup_at_paths(
         &paths,
         controller,
@@ -1561,25 +1402,13 @@ fn inspect(paths: &runtime::RuntimePaths, name: &str) -> Result<runtime::Inspect
         .map_err(|_| format!("The bundled runtime returned invalid state for computer '{name}'."))
 }
 
-#[tauri::command]
-pub(crate) async fn start_restore(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    archive_path: String,
-    new_name: String,
-    source_name: Option<String>,
-) -> Result<(), String> {
-    require_main(&window)?;
-    // A rejection before the import starts is returned to the caller, which shows it
-    // in place; only the background outcome (see `notify_transfer`) reaches the system.
-    start_restore_inner(app, window, controller, archive_path, new_name, source_name).await
-}
-
 /// Tell the system about a finished export or import. The Backup screen shows the result
 /// itself, so this only adds a system notice (failures, and successes long enough that
 /// the user likely looked away).
-fn notify_transfer(app: &AppHandle, operation: &Operation, elapsed: std::time::Duration) {
+fn notify_transfer(controller: &Controller, operation: &Operation, elapsed: std::time::Duration) {
+    let Ok(host) = controller.runtime_host() else {
+        return;
+    };
     let Operation::Result {
         operation: kind,
         archive,
@@ -1596,7 +1425,7 @@ fn notify_transfer(app: &AppHandle, operation: &Operation, elapsed: std::time::D
         None => archive.computers.iter().map(String::as_str).collect(),
     };
     let computer = match names.as_slice() {
-        [only] => computer_identity(app, only),
+        [only] => computer_identity(host, only),
         _ => None,
     };
     let label = match names.as_slice() {
@@ -1607,13 +1436,16 @@ fn notify_transfer(app: &AppHandle, operation: &Operation, elapsed: std::time::D
     if let Some(notice) =
         crate::notifications::transfer_notice(kind, &label, computer, elapsed, outcome, message)
     {
-        crate::notifications::notify_native(app, notice);
+        host.notify(notice);
     }
 }
 
 /// Best-effort stable id for a computer name, so the notice can route and be cleared.
-fn computer_identity(app: &AppHandle, name: &str) -> Option<crate::notifications::NoticeComputer> {
-    let paths = runtime::runtime_paths(app).ok()?;
+fn computer_identity(
+    host: &dyn RuntimeHost,
+    name: &str,
+) -> Option<crate::notifications::NoticeComputer> {
+    let paths = runtime::runtime_paths(host).ok()?;
     let metadata = runtime::read_metadata(&paths.metadata).ok()?;
     metadata
         .computers
@@ -1625,26 +1457,7 @@ fn computer_identity(app: &AppHandle, name: &str) -> Option<crate::notifications
         })
 }
 
-async fn start_restore_inner(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    archive_path: String,
-    new_name: String,
-    source_name: Option<String>,
-) -> Result<(), String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    // Saving the journal is an fsynced write; keep it off the async workers (E-39).
-    tauri::async_runtime::spawn_blocking(move || {
-        begin_import(app, controller, archive_path, new_name, source_name)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-fn begin_import(
-    app: AppHandle,
+pub(crate) fn begin_import(
     controller: Arc<Controller>,
     archive_path: String,
     new_name: String,
@@ -1710,12 +1523,11 @@ fn begin_import(
             }],
         });
     }
-    publish(&app, &controller);
+    publish(&controller);
     let (failure_archive, target) = (archive.clone(), Some(new_name.clone()));
-    let (work_app, work_controller) = (app.clone(), controller.clone());
+    let work_controller = controller.clone();
     let work = move || {
         run_restore(
-            work_app,
             work_controller,
             path,
             new_name,
@@ -1724,16 +1536,15 @@ fn begin_import(
             archive,
         )
     };
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         if contain_worker_panic(&controller, "restore", &failure_archive, target, work) {
-            publish(&app, &controller);
+            publish(&controller);
         }
     });
     Ok(())
 }
 
 fn run_restore(
-    app: AppHandle,
     controller: Arc<Controller>,
     path: PathBuf,
     new_name: String,
@@ -1757,14 +1568,7 @@ fn run_restore(
                 *current = archive.clone();
             }
         }
-        restore_work(
-            &app,
-            &controller,
-            &path,
-            &selected,
-            &new_name,
-            &cancellation,
-        )?;
+        restore_work(&controller, &path, &selected, &new_name, &cancellation)?;
         Ok::<_, TransferError>(selected)
     })();
     let operation = match result {
@@ -1781,10 +1585,10 @@ fn run_restore(
         Err(error) => failed_transfer("restore", archive, Some(new_name), error),
     };
     let operation = recovery::complete(&controller, operation);
-    notify_transfer(&app, &operation, started.elapsed());
+    notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
     finish(&controller);
-    publish(&app, &controller);
+    publish(&controller);
 }
 
 fn select_archive_source(names: &[String], selected: Option<&str>) -> Result<String, String> {
@@ -1797,14 +1601,13 @@ fn select_archive_source(names: &[String], selected: Option<&str>) -> Result<Str
 }
 
 fn restore_work(
-    app: &AppHandle,
     controller: &Controller,
     archive: &Path,
     source_name: &str,
     new_name: &str,
     cancellation: &backup::Cancellation,
 ) -> Result<(), TransferError> {
-    let paths = runtime::runtime_paths(app)?;
+    let paths = runtime::runtime_paths(controller.runtime_host()?)?;
     restore_at_paths(
         &paths,
         controller,
@@ -1814,7 +1617,7 @@ fn restore_work(
         cancellation,
         &|title| {
             advance_restore_phase(controller, title);
-            publish(app, controller);
+            publish(controller);
         },
     )
 }
@@ -2049,20 +1852,7 @@ fn save_import_metadata(
     Ok(())
 }
 
-/// Journal writes are fsynced, so cancel and dismiss run off the main thread (E-39).
-#[tauri::command]
-pub(crate) async fn cancel_backup_operation(
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-) -> Result<(), String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || cancel_operation(&controller))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
-fn cancel_operation(controller: &Controller) -> Result<(), String> {
+pub(crate) fn cancel_operation(controller: &Controller) -> Result<(), String> {
     let operation_id = {
         let view = controller.view.lock().map_err(|_| {
             "Export and import status could not be read. Relaunch Silo and retry.".to_string()
@@ -2092,6 +1882,13 @@ fn cancel_operation(controller: &Controller) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn acknowledge_result(
+    controller: &Controller,
+    expected_operation_id: &str,
+) -> Result<bool, String> {
+    recovery::acknowledge(controller, expected_operation_id)
+}
+
 /// Past this point an import saves its new computer and is no longer
 /// cancelled. Marking it under the state lock orders it against
 /// `cancel_operation`: a cancel either lands first and wins, or is refused
@@ -2113,57 +1910,7 @@ fn enter_commit(
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) async fn dismiss_backup_operation(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    expected_operation: Value,
-    expected_operation_id: Option<String>,
-) -> Result<bool, String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        // Report whether the result was actually dismissed so the caller does not
-        // hide a result the backend still holds (E-49).
-        let dismissed = dismiss_finished_operation(
-            &controller,
-            Some(&expected_operation),
-            expected_operation_id.as_deref(),
-        )?;
-        if dismissed {
-            publish(&app, &controller);
-        }
-        Ok(dismissed)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-/// The user was shown the result `read_backup_state` reported as unseen, which has the
-/// operation id `expected_operation_id`: the post-upgrade screen did. Only that result is
-/// marked seen; it stays until dismissed. Returns whether it was still waiting to be seen.
-#[tauri::command]
-pub(crate) async fn acknowledge_backup_result(
-    app: AppHandle,
-    window: WebviewWindow,
-    controller: State<'_, Arc<Controller>>,
-    expected_operation_id: String,
-) -> Result<bool, String> {
-    require_main(&window)?;
-    let controller = controller.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let changed = recovery::acknowledge(&controller, &expected_operation_id)?;
-        if changed {
-            publish(&app, &controller);
-        }
-        Ok(changed)
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-fn dismiss_finished_operation(
+pub(crate) fn dismiss_finished_operation(
     controller: &Controller,
     expected: Option<&Value>,
     expected_id: Option<&str>,
@@ -2317,6 +2064,7 @@ mod tests {
 
     pub(super) fn history_controller(path: PathBuf) -> Controller {
         Controller {
+            host: None,
             history_path: path,
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -4292,6 +4040,7 @@ mod tests {
         canonicalize_backup_runtime(&mut second_inspected.config).unwrap();
         crate::computer_use::strip_mount_for_export(&mut second_inspected.config).unwrap();
         let make_controller = |paths: &runtime::RuntimePaths| Controller {
+            host: None,
             history_path: paths.metadata.with_file_name("backup-history.json"),
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -4818,6 +4567,7 @@ mod tests {
         assert_eq!(scope, "full");
 
         let make_controller = |paths: &runtime::RuntimePaths| Controller {
+            host: None,
             history_path: paths.metadata.with_file_name("backup-history.json"),
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -4965,6 +4715,7 @@ mod tests {
         fs::create_dir_all(&cold.home).unwrap();
         fs::create_dir_all(&cold.volumes).unwrap();
         let controller = Controller {
+            host: None,
             history_path: cold.metadata.with_file_name("backup-history.json"),
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -5098,6 +4849,7 @@ mod tests {
             volumes: directory.path().join(format!("{name}-volumes")),
         };
         let make_controller = |paths: &runtime::RuntimePaths| Controller {
+            host: None,
             history_path: paths.metadata.with_file_name("backup-history.json"),
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -5450,6 +5202,7 @@ mod tests {
             volumes: directory.path().join(format!("{name}-volumes")),
         };
         let make_controller = |paths: &runtime::RuntimePaths| Controller {
+            host: None,
             history_path: paths.metadata.with_file_name("backup-history.json"),
             journal: Mutex::new(None),
             service: backup::BackupService::new(
@@ -5671,23 +5424,21 @@ mod tests {
     }
 }
 
-pub(crate) fn update_ready(app: &AppHandle) -> Result<(), String> {
-    let controller = app.state::<Arc<Controller>>();
-    if controller.busy.load(Ordering::Acquire) || recovery::unresolved(&controller)? {
-        Err("Wait for the export or import to finish before updating.".into())
-    } else {
-        Ok(())
-    }
-}
-
 pub(crate) struct UpdateGuard(Arc<Controller>);
 impl Drop for UpdateGuard {
     fn drop(&mut self) {
         self.0.busy.store(false, Ordering::Release);
     }
 }
-pub(crate) fn update_guard(app: &AppHandle) -> Result<UpdateGuard, String> {
-    update_guard_for(app.state::<Arc<Controller>>().inner().clone())
+pub(crate) fn update_ready(controller: &Controller) -> Result<(), String> {
+    if controller.busy.load(Ordering::Acquire) || recovery::unresolved(controller)? {
+        Err("Wait for the export or import to finish before updating.".into())
+    } else {
+        Ok(())
+    }
+}
+pub(crate) fn update_guard(controller: Arc<Controller>) -> Result<UpdateGuard, String> {
+    update_guard_for(controller)
 }
 fn update_guard_for(controller: Arc<Controller>) -> Result<UpdateGuard, String> {
     controller
