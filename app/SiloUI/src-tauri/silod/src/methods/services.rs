@@ -705,8 +705,26 @@ impl Drop for SettleOnDrop {
 }
 
 /// Resumes the set a previous engine update saved, and reports what could not resume.
+/// How long the recovery waits for work that started with the engine to finish: the
+/// background start-up passes hold the computer-operation gate and the GitHub and secrets
+/// locks for a while, and recovery reads the same guards once.
+const RECOVERY_BUSY_RETRIES: u32 = 40;
+const RECOVERY_BUSY_PAUSE: Duration = Duration::from_secs(3);
+
+/// Whether recovery failed only because other work held a guard it needs.
+fn recovery_busy(result: &Result<Option<engine_update::Recovery>, String>) -> bool {
+    matches!(result, Err(message) if message.starts_with("Wait for "))
+}
+
 fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> bool {
-    let result = state.recover(context.as_ref());
+    let mut result = state.recover(context.as_ref());
+    for _ in 0..RECOVERY_BUSY_RETRIES {
+        if !recovery_busy(&result) {
+            break;
+        }
+        std::thread::sleep(RECOVERY_BUSY_PAUSE);
+        result = state.recover(context.as_ref());
+    }
     // A saved set that an installer still owns counts as one: the launch pass must not start
     // computers while it is held.
     let deferred = matches!(result, Ok(None)) && state.watching_installer();

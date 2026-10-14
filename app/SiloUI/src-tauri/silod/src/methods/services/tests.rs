@@ -1124,3 +1124,19 @@ fn services_owns_exactly_its_prefixes_and_not_the_core_methods() {
     assert!(!owns(MethodName::EventsSubscribe));
     let _ = Audience::All;
 }
+
+#[test]
+fn recovery_waits_only_for_guards_that_other_work_holds() {
+    for held in [
+        "Wait for computer operations to finish before updating.",
+        "Wait for the GitHub operation to finish before updating.",
+        "Wait for the secret operation to finish before updating.",
+        "Wait for active operations to finish before updating.",
+    ] {
+        assert!(recovery_busy(&Err(held.to_owned())), "{held}");
+    }
+    assert!(!recovery_busy(&Ok(None)));
+    assert!(!recovery_busy(&Err(
+        "The saved computer is gone.".to_owned()
+    )));
+}
