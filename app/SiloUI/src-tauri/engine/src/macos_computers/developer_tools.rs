@@ -450,6 +450,10 @@ fn failure_reason<'a>(stderr: &'a str, stdout: &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        os::unix::fs::PermissionsExt,
+        process::Command,
+    };
 
     #[test]
     fn checked_lock_pins_apple_packages_lfs_and_gh() {
@@ -486,6 +490,70 @@ mod tests {
         assert!(!script.contains("@GIT_LFS_"));
         assert!(!script.contains("@GH_"));
         assert!(!script.contains("@LOCK_SHA256@"));
+    }
+
+    #[test]
+    fn matching_clt_receipt_does_not_skip_reinstall_when_payload_is_missing() {
+        const BEGIN: &str = "# BEGIN CLT PAYLOAD HEALTH HELPERS";
+        const END: &str = "# END CLT PAYLOAD HEALTH HELPERS";
+        let start = SCRIPT
+            .find(BEGIN)
+            .expect("installer must define its CLT payload health check");
+        let helpers = &SCRIPT[start..];
+        let end = helpers
+            .find(END)
+            .expect("CLT payload health helpers must have a clear test seam");
+        let helpers = &helpers[..end];
+
+        let root = tempfile::tempdir().unwrap();
+        let developer_directory = root.path().join("CommandLineTools");
+        let work = root.path().join("work");
+        let bin = developer_directory.join("usr/bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(developer_directory.join("SDKs/MacOSX.sdk")).unwrap();
+        fs::create_dir_all(&work).unwrap();
+
+        let git = bin.join("git");
+        fs::write(&git, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+        let clang = bin.join("clang");
+        fs::write(
+            &clang,
+            "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then\n    shift\n    printf '#!/bin/sh\\nexit 0\\n' >\"$1\"\n    chmod +x \"$1\"\n    exit 0\n  fi\n  shift\ndone\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&clang, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+        let run_decision = || {
+            let source = format!(
+                "{helpers}\nclt_repair=0\nif clt_needs_reinstall '26.6.0.0.1781586589' '26.6.0.0.1781586589' {} {}; then clt_repair=1; fi\nif clt_package_needs_install '26.6.0.0.1781586589' '26.6.0.0.1781586589' \"$clt_repair\"; then exit 0; else exit 1; fi\n",
+                quote(&developer_directory),
+                quote(&work)
+            );
+            Command::new("/bin/zsh")
+                .args(["-c", &source])
+                .output()
+                .expect("zsh is available on the supported macOS host")
+        };
+
+        // A matching package receipt cannot make a missing required compiler look ready.
+        let missing = run_decision();
+        assert!(
+            missing.status.success(),
+            "missing CLT payload must request reinstall: {}",
+            String::from_utf8_lossy(&missing.stderr)
+        );
+
+        let swiftc = bin.join("swiftc");
+        fs::write(&swiftc, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&swiftc, fs::Permissions::from_mode(0o755)).unwrap();
+        let healthy = run_decision();
+        assert!(
+            !healthy.status.success(),
+            "matching receipts with usable CLT payload should skip reinstall: {}",
+            String::from_utf8_lossy(&healthy.stderr)
+        );
     }
 
     #[test]

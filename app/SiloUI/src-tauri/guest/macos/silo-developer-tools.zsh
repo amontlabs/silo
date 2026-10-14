@@ -5,6 +5,7 @@ setopt pipefail
 STAGE=/private/tmp/silo-developer-tools
 WORK=$STAGE/work
 LOG=$HOME/Library/Logs/silo-developer-tools.log
+CLT_DIRECTORY=/Library/Developer/CommandLineTools
 TOOLS_VERSION='@TOOLS_VERSION@'
 SUPPORTED_GUEST_BUILDS=( @SUPPORTED_GUEST_BUILDS@ )
 APPLE_SIGNER='@APPLE_SIGNER@'
@@ -39,6 +40,30 @@ verify_file() {
   digest=$(/usr/bin/shasum -a 256 "$STAGE/$file" | /usr/bin/awk '{print $1}')
   [[ $size == $bytes && $digest == $expected ]] || fail "staged file did not match its locked size and SHA-256: $file"
 }
+# BEGIN CLT PAYLOAD HEALTH HELPERS
+clt_payload_ready() {
+  local developer_directory=$1 work=$2
+  [[ -x $developer_directory/usr/bin/git ]] || return 1
+  [[ -x $developer_directory/usr/bin/swiftc ]] || return 1
+  [[ -x $developer_directory/usr/bin/clang ]] || return 1
+  [[ -d $developer_directory/SDKs/MacOSX.sdk ]] || return 1
+  "$developer_directory/usr/bin/git" --version >/dev/null 2>&1 || return 1
+  "$developer_directory/usr/bin/swiftc" --version >/dev/null 2>&1 || return 1
+  print -r -- 'int main(void) { return 0; }' >"$work/clt-readiness.c" || return 1
+  "$developer_directory/usr/bin/clang" \
+    -isysroot "$developer_directory/SDKs/MacOSX.sdk" \
+    "$work/clt-readiness.c" -o "$work/clt-readiness" >/dev/null 2>&1 || return 1
+  [[ -x $work/clt-readiness ]] && "$work/clt-readiness" >/dev/null 2>&1
+}
+clt_needs_reinstall() {
+  local installed=$1 version=$2 developer_directory=$3 work=$4
+  [[ $installed != $version ]] || ! clt_payload_ready "$developer_directory" "$work"
+}
+clt_package_needs_install() {
+  local installed=$1 version=$2 repair=$3
+  [[ $installed != $version ]] || (( repair == 1 ))
+}
+# END CLT PAYLOAD HEALTH HELPERS
 
 guest_build=$(/usr/bin/sw_vers -buildVersion)
 supported=0
@@ -47,6 +72,13 @@ for build in $SUPPORTED_GUEST_BUILDS; do
 done
 (( supported == 1 )) || fail "developer tools are not locked for guest build $guest_build"
 [[ $(/usr/bin/uname -m) == arm64 ]] || fail "the locked developer tools require Apple silicon"
+
+installed=$(/usr/sbin/pkgutil --pkg-info com.apple.pkg.CLTools_Executables 2>/dev/null | /usr/bin/awk -F': ' '$1 == "version" {print $2}' || true)
+clt_repair=0
+if clt_needs_reinstall "$installed" @CLT_EXECUTABLES_RECEIPT_VERSION@ "$CLT_DIRECTORY" "$WORK"; then
+  clt_repair=1
+  say "CLT receipt or payload needs repair; reinstalling the locked packages"
+fi
 
 for entry in $CLT_PACKAGES; do
   fields=(${(s:|:)entry})
@@ -64,7 +96,7 @@ for entry in $CLT_PACKAGES; do
     fail "the Apple signing identity does not match the lock: $filename"
   say "Verified Apple package $filename ($APPLE_SIGNER; $receipt $version)"
   installed=$(/usr/sbin/pkgutil --pkg-info "$receipt" 2>/dev/null | /usr/bin/awk -F': ' '$1 == "version" {print $2}' || true)
-  if [[ $installed != $version ]]; then
+  if clt_package_needs_install "$installed" "$version" "$clt_repair"; then
     logged /usr/bin/sudo -n /usr/sbin/installer -pkg "$STAGE/$filename" -target /
   else
     say "Apple package receipt already matches: $receipt $version"
@@ -73,11 +105,11 @@ for entry in $CLT_PACKAGES; do
   [[ $installed == $version ]] || fail "Apple package receipt verification failed: $receipt"
 done
 
-logged /usr/bin/sudo -n /usr/bin/xcode-select --switch /Library/Developer/CommandLineTools
-[[ $(/usr/bin/xcode-select -p) == /Library/Developer/CommandLineTools ]] ||
+logged /usr/bin/sudo -n /usr/bin/xcode-select --switch "$CLT_DIRECTORY"
+[[ $(/usr/bin/xcode-select -p) == $CLT_DIRECTORY ]] ||
   fail "Xcode Command Line Tools are not the active developer directory"
-[[ -x /Library/Developer/CommandLineTools/usr/bin/git ]] || fail "Apple Git is missing"
-[[ -x /Library/Developer/CommandLineTools/usr/bin/swiftc ]] || fail "the Swift compiler is missing"
+[[ -x $CLT_DIRECTORY/usr/bin/git ]] || fail "Apple Git is missing"
+[[ -x $CLT_DIRECTORY/usr/bin/swiftc ]] || fail "the Swift compiler is missing"
 git_version=$(/usr/bin/git --version) || fail "Git did not run"
 say "$git_version"
 [[ $(/usr/sbin/pkgutil --pkg-info com.apple.pkg.CLTools_Executables | /usr/bin/awk -F': ' '$1 == "version" {print $2}') == @CLT_EXECUTABLES_RECEIPT_VERSION@ ]] ||
