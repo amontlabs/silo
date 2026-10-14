@@ -30,6 +30,8 @@ const STREAM_FIXED_HEADER_BYTES: u64 = 24;
 const STREAM_INDEX_ENTRY_BYTES: u64 = 52;
 const MAX_WINDOW_LOG: u32 = 27; // 128 MiB
 const MAX_LOGICAL_COMPONENT_BYTES: u64 = 8 * 1024 * 1024 * 1024 * 1024;
+/// VZMacHardwareModel is an opaque identifier, not a disk-sized payload.
+pub(crate) const MAX_HARDWARE_MODEL_BYTES: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * 1024 * 1024;
 const MAX_CPUS: u64 = 256;
 const MAX_MEMORY_GIB: u64 = 1024;
@@ -328,6 +330,14 @@ impl<R: MsbRunner> BackupService<R> {
                         "The {} export component has an unsupported size.",
                         role.json_name()
                     )));
+                }
+                if role == MacosComponentRole::HardwareModel
+                    && metadata.len() > MAX_HARDWARE_MODEL_BYTES
+                {
+                    return Err(BackupError::InvalidRequest(
+                        "The exported macOS hardware model exceeds the supported size limit."
+                            .into(),
+                    ));
                 }
                 logical_total = logical_total
                     .checked_add(metadata.len())
@@ -770,6 +780,13 @@ fn validate_configuration(config: &MacosArchiveConfiguration, row_name: &str) ->
             || !valid_digest(&component.sha256)
         {
             return Err(invalid_archive("a component length or digest is invalid"));
+        }
+        if component.role == MacosComponentRole::HardwareModel
+            && component.logical_length > MAX_HARDWARE_MODEL_BYTES
+        {
+            return Err(invalid_archive(
+                "the hardware model exceeds the supported size limit",
+            ));
         }
         logical_total = logical_total
             .checked_add(component.logical_length)
@@ -1559,6 +1576,23 @@ mod tests {
                 &[],
             ),
             Err(BackupError::InvalidArchive(_))
+        ));
+    }
+
+    #[test]
+    fn hardware_model_component_is_bounded_before_frame_extraction() {
+        let mut config = valid_config();
+        let model = config
+            .components
+            .iter_mut()
+            .find(|component| component.role == MacosComponentRole::HardwareModel)
+            .unwrap();
+        model.logical_length = MAX_HARDWARE_MODEL_BYTES + 1;
+
+        assert!(matches!(
+            validate_configuration(&config, &config.source_name),
+            Err(BackupError::InvalidArchive(detail))
+                if detail.contains("hardware model exceeds the supported size limit")
         ));
     }
 

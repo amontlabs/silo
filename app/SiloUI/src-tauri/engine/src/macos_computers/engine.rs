@@ -595,6 +595,21 @@ fn read(path: &Path, what: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|error| store::io_error(&format!("read the {what}"), &error))
 }
 
+fn read_hardware_model(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)
+        .map_err(|error| store::io_error("read the hardware model", &error))?;
+    let mut bytes = Vec::new();
+    file.take(crate::backup::MAX_HARDWARE_MODEL_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| store::io_error("read the hardware model", &error))?;
+    if bytes.len() as u64 > crate::backup::MAX_HARDWARE_MODEL_BYTES {
+        return Err("The computer's hardware model exceeds the supported size limit.".into());
+    }
+    Ok(bytes)
+}
+
 fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifier>, String> {
     // SAFETY: Initializes a framework object from data.
     unsafe {
@@ -613,7 +628,7 @@ pub(super) fn validate_archive_configuration(
     record: &Record,
     layout: &Layout,
 ) -> Result<(), String> {
-    let model = read(&layout.hardware_model(), "hardware model")?;
+    let model = read_hardware_model(&layout.hardware_model())?;
     let identifier = read(&layout.machine_identifier(), "identity")?;
     let (app, record, layout) = (app.clone(), record.clone(), layout.clone());
     on_main(&app.clone(), move |_| {
@@ -981,7 +996,7 @@ fn start_machine_once(
     layout: &Layout,
     boot: &Boot,
 ) -> Result<u64, BootFailure> {
-    let model = read(&layout.hardware_model(), "hardware model").map_err(BootFailure::Setup)?;
+    let model = read_hardware_model(&layout.hardware_model()).map_err(BootFailure::Setup)?;
     let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
     let (send, receive) = mpsc::channel::<Result<(), String>>();
     let (app_handle, record, layout) = (app.clone(), record.clone(), layout.clone());
@@ -1942,6 +1957,20 @@ mod tests {
         let host = host_limits();
         assert!(host.cpus >= 1);
         assert!(host.memory_gib >= 4);
+    }
+
+    #[test]
+    fn hardware_model_reader_rejects_data_above_its_allocation_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hardware-model.bin");
+        std::fs::write(
+            &path,
+            vec![0_u8; crate::backup::MAX_HARDWARE_MODEL_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let error = read_hardware_model(&path).unwrap_err();
+        assert!(error.contains("hardware model exceeds the supported size limit"));
     }
 
     #[test]

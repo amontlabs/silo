@@ -21,7 +21,7 @@ pub(crate) use macos_archive::{
     ArchiveRuntimeKind, MacosArchiveComponentInput,
     MacosArchiveConfiguration, MacosArchiveConfig, MacosArchiveMemory,
     MacosArchiveSource, MacosArchiveSourceKind, MacosCheckpointKind,
-    MacosComponentRole, memory_configuration_digest,
+    MacosComponentRole, MAX_HARDWARE_MODEL_BYTES, memory_configuration_digest,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
