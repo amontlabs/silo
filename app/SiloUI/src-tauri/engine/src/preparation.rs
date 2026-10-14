@@ -12,7 +12,7 @@ use crate::{
     },
 };
 use serde::Serialize;
-use silo_engine::{Audience, Event};
+use silo_engine::Event;
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -230,8 +230,11 @@ pub fn snapshot() -> PreparationStatus {
 fn emit() {
     if let Some(context) = silo_engine::context::current() {
         if let Ok(payload) = serde_json::to_value(snapshot()) {
-            // window:main; no client id is available in the desktop host.
-            context.publish(Event::new(STATUS_EVENT, payload), Audience::All);
+            // window:main; the host adapter resolves this client id to the main window.
+            silo_engine::context::publish_to_main_window(
+                context.as_ref(),
+                Event::new(STATUS_EVENT, payload),
+            );
         }
     }
 }

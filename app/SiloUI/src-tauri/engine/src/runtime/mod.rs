@@ -123,6 +123,14 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
     host.engine_context()
         .publish(Event::new(name, payload), Audience::All);
 }
+
+fn publish_main_window_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
+    let context = host.engine_context();
+    silo_engine::context::publish_to_main_window(
+        context.as_ref(),
+        Event::new(name, payload),
+    );
+}
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
 const GITHUB_UPDATE_REPLACED: &str = "A newer GitHub access choice has replaced this update.";
@@ -3610,13 +3618,12 @@ pub fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::St
         Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
     if let Some(context) = silo_engine::context::current() {
-        context.publish(
+        silo_engine::context::publish_to_main_window(
+            context.as_ref(),
             silo_engine::context::Event::new(
                 "silo://computer-configuration-progress",
                 serde_json::to_value(event).unwrap_or(Value::Null),
             ),
-            // window:main
-            silo_engine::context::Audience::All,
         );
     }
 }
@@ -4208,14 +4215,13 @@ fn apply_configuration_with_progress(
             .filter(|entry| entry.step == "activity-storage-warning")
         {
             // window:main
-            publish_event(
+            publish_main_window_event(
                 host,
                 "silo://computer-configuration-progress",
                 serde_json::to_value(warning).unwrap_or(Value::Null),
             );
         }
-        // window:main
-        publish_event(
+        publish_main_window_event(
             host,
             "silo://computer-configuration-progress",
             serde_json::to_value(&event).unwrap_or(Value::Null),

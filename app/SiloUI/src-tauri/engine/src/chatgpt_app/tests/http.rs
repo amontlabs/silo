@@ -25,12 +25,14 @@ struct Server {
     url: String,
     /// The Range header (or empty) of every request, in order.
     ranges: Arc<Mutex<Vec<String>>>,
+    user_agents: Arc<Mutex<Vec<String>>>,
 }
 
-fn request_head(stream: &TcpStream) -> (String, String) {
+fn request_head(stream: &TcpStream) -> (String, String, String) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut path = String::new();
     let mut range = String::new();
+    let mut user_agent = String::new();
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     if let Some(p) = line.split_whitespace().nth(1) {
@@ -44,8 +46,11 @@ fn request_head(stream: &TcpStream) -> (String, String) {
         if let Some(value) = line.to_ascii_lowercase().strip_prefix("range:") {
             range = value.trim().to_owned();
         }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("user-agent:") {
+            user_agent = value.trim().to_owned();
+        }
     }
-    (path, range)
+    (path, range, user_agent)
 }
 
 /// Serves `body` following `script`, one step per connection; the last step
@@ -54,12 +59,15 @@ fn serve(body: Vec<u8>, script: Vec<Step>) -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let ranges = Arc::new(Mutex::new(Vec::new()));
+    let user_agents = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&ranges);
+    let seen_user_agents = Arc::clone(&user_agents);
     std::thread::spawn(move || {
         for (index, stream) in listener.incoming().enumerate() {
             let Ok(mut stream) = stream else { return };
-            let (path, range) = request_head(&stream);
+            let (path, range, user_agent) = request_head(&stream);
             seen.lock().unwrap().push(range.clone());
+            seen_user_agents.lock().unwrap().push(user_agent);
             let step = script[index.min(script.len() - 1)];
             let from = range
                 .strip_prefix("bytes=")
@@ -116,15 +124,15 @@ fn serve(body: Vec<u8>, script: Vec<Step>) -> Server {
     Server {
         url: format!("http://{address}/pkg.deb"),
         ranges,
+        user_agents,
     }
 }
 
 fn downloader() -> HttpDownloader {
-    HttpDownloader {
-        attempts: 5,
-        backoff: Duration::from_millis(1),
-        plain_http: true,
-    }
+    let mut downloader = HttpDownloader::for_app_version(Some("0.11.1"));
+    downloader.backoff = Duration::from_millis(1);
+    downloader.plain_http = true;
+    downloader
 }
 
 fn payload() -> Vec<u8> {
@@ -148,6 +156,18 @@ fn a_plain_download_writes_the_whole_body() {
     assert_eq!(fs::read(&part).unwrap(), body);
     assert_eq!(*seen.last().unwrap(), body.len() as u64);
     assert_eq!(*server.ranges.lock().unwrap(), vec![String::new()]);
+}
+
+#[test]
+fn chatgpt_download_advertises_the_host_silo_version() {
+    let body = payload();
+    let server = serve(body.clone(), vec![Step::Serve]);
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("p.part");
+
+    fetch(&server, &part, body.len()).0.unwrap();
+
+    assert_eq!(*server.user_agents.lock().unwrap(), vec!["silo/0.11.1"]);
 }
 
 #[test]

@@ -15,6 +15,14 @@ pub trait EngineContext: Send + Sync + 'static {
     fn close_remote_displays(&self, _device: Option<&str>) {}
 }
 
+/// Publishes progress that belongs only in Silo's main window.
+pub fn publish_to_main_window(context: &dyn EngineContext, event: Event) {
+    context.publish(
+        event,
+        Audience::Client(ClientId::new("main")),
+    );
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EnginePaths {
     pub app_data: PathBuf,
@@ -79,6 +87,71 @@ pub trait MainThread: Send + Sync {
 pub trait ProcessControl: Send + Sync {
     fn exit(&self, code: i32);
     fn restart(&self) -> !;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct RecordingContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        published: Mutex<Vec<(Event, Audience)>>,
+    }
+
+    impl EngineContext for RecordingContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn publish(&self, event: Event, audience: Audience) {
+            self.published.lock().unwrap().push((event, audience));
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for RecordingContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("test context cannot restart")
+        }
+    }
+
+    #[test]
+    fn main_window_progress_uses_the_main_client_audience() {
+        let context = RecordingContext {
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "0.11.1".into(),
+                package_kind: PackageKind::MacApp,
+            },
+            published: Mutex::new(Vec::new()),
+        };
+
+        publish_to_main_window(&context, Event::new("progress", serde_json::Value::Null));
+
+        let published = context.published.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0.name, "progress");
+        assert_eq!(
+            published[0].1,
+            Audience::Client(ClientId::new("main"))
+        );
+    }
 }
 
 static CONTEXT: OnceLock<Arc<dyn EngineContext>> = OnceLock::new();

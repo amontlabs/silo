@@ -11,6 +11,17 @@ pub(crate) struct TauriEngineContext {
     identity: EngineIdentity,
 }
 
+fn dispatch_by_audience(
+    audience: Audience,
+    emit_to_all: impl FnOnce(),
+    emit_to_client: impl FnOnce(&str),
+) {
+    match audience {
+        Audience::All => emit_to_all(),
+        Audience::Client(client_id) => emit_to_client(client_id.as_str()),
+    }
+}
+
 impl TauriEngineContext {
     pub(crate) fn from_app(app: &AppHandle) -> Result<Self, String> {
         let path = app.path();
@@ -50,16 +61,17 @@ impl EngineContext for TauriEngineContext {
     }
 
     fn publish(&self, event: Event, audience: Audience) {
-        match audience {
-            Audience::All => {
+        dispatch_by_audience(
+            audience,
+            || {
                 let _ = self.app.emit(&event.name, &event.payload);
-            }
-            Audience::Client(client_id) => {
+            },
+            |client_id| {
                 let _ = self
                     .app
-                    .emit_to(client_id.as_str(), &event.name, &event.payload);
-            }
-        }
+                    .emit_to(client_id, &event.name, &event.payload);
+            },
+        );
     }
 
     fn main_thread(&self) -> Option<&dyn MainThread> {
@@ -108,4 +120,26 @@ pub(crate) fn install(app: &mut tauri::App) -> Result<(), String> {
     silo_engine::context::install(std::sync::Arc::new(context.clone()))?;
     app.manage(context);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn main_client_events_are_sent_only_to_the_main_window() {
+        let broadcast = Cell::new(false);
+        let client = RefCell::new(None);
+
+        dispatch_by_audience(
+            Audience::Client(silo_engine::ClientId::new("main")),
+            || broadcast.set(true),
+            |label| *client.borrow_mut() = Some(label.to_owned()),
+        );
+
+        assert!(!broadcast.get());
+        let client = client.into_inner();
+        assert_eq!(client.as_deref(), Some("main"));
+    }
 }

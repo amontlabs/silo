@@ -574,7 +574,7 @@ const REPLY_PREAMBLE: &[u8] = b"\0SILO-BRIDGE-REPLY\n";
 const REPLY_SEARCH_LIMIT: usize = 64 * 1024;
 /// The bridge's reply on its standard output: the preamble, then one frame.
 /// Keep the text field readable by older controllers while current peers use the code.
-fn error_reply(error: &BridgeError) -> Value {
+fn error_reply(error: &BridgeError, app_version: &str) -> Value {
     let legacy = match error.code {
         ErrorCode::UpdateInProgress => "SILO_SANDBOX_UPDATE_IN_PROGRESS",
         ErrorCode::UnsupportedRemoteOperation => UNSUPPORTED,
@@ -583,7 +583,7 @@ fn error_reply(error: &BridgeError) -> Value {
     let mut reply = json!({"error":legacy,"code":error.code,"message":error.message});
     if error.code == ErrorCode::IncompatibleVersion {
         reply["version"] = json!(VERSION);
-        reply["appVersion"] = json!(env!("CARGO_PKG_VERSION"));
+        reply["appVersion"] = json!(app_version);
     }
     reply
 }
@@ -2030,6 +2030,12 @@ pub fn start(
 }
 fn listen() -> Result<(), String> {
     let remote_runtime = remote_runtime()?;
+    let app_version = remote_runtime
+        .runtime_host
+        .engine_context()
+        .identity()
+        .version
+        .clone();
     let lease = lease_control(&directory()?)?;
     let listener = bind_control_socket(&directory()?)?;
     LISTENING.store(true, std::sync::atomic::Ordering::Release);
@@ -2048,6 +2054,7 @@ fn listen() -> Result<(), String> {
             let runtime_host = remote_runtime.runtime_host.clone();
             let macos = remote_runtime.macos.clone();
             let local_access = remote_runtime.local_access.clone();
+            let app_version = app_version.clone();
             thread::spawn(move || {
                 let mut permit = Some(permit);
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -2108,7 +2115,7 @@ fn listen() -> Result<(), String> {
                         let _ = write_frame(&mut stream, &json!({"result":result}));
                     }
                     Err(error) => {
-                        let _ = write_frame(&mut stream, &error_reply(&error));
+                        let _ = write_frame(&mut stream, &error_reply(&error, &app_version));
                     }
                     Ok(None) => {}
                 }
@@ -4107,13 +4114,13 @@ mod health_tests {
     #[test]
     fn the_responder_reply_carries_its_versions() {
         let stale = BridgeError::incompatible_version("Update.", Some(VERSION));
-        let reply = error_reply(&stale);
+        let reply = error_reply(&stale, "0.11.1");
         assert_eq!(reply["code"], json!("incompatible_version"));
         assert_eq!(reply["version"], json!(VERSION));
-        assert_eq!(reply["appVersion"], json!(env!("CARGO_PKG_VERSION")));
+        assert_eq!(reply["appVersion"], json!("0.11.1"));
         let decoded = BridgeError::from_remote_reply(&reply).unwrap();
         assert_eq!(decoded.peer_version, Some(VERSION));
-        assert!(error_reply(&BridgeError::from("x"))
+        assert!(error_reply(&BridgeError::from("x"), "0.11.1")
             .get("version")
             .is_none());
     }
@@ -4644,7 +4651,7 @@ mod reply_tests {
         );
         let error = BridgeError::new(ErrorCode::Cancelled, "Cancelled by owner.");
         assert_eq!(
-            exchange_fixture_reply(&error_reply(&error)),
+            exchange_fixture_reply(&error_reply(&error, "0.11.1")),
             Err(Failure::Reported(error))
         );
         assert!(matches!(
@@ -4916,12 +4923,12 @@ mod dispatch_tests {
         assert_eq!(error.code, ErrorCode::UnsupportedRemoteOperation);
         assert!(!dir.join("operations").exists());
         let mut bytes = Vec::new();
-        write_reply(&mut bytes, &error_reply(&error)).unwrap();
+        write_reply(&mut bytes, &error_reply(&error, "0.11.1")).unwrap();
         let reply = read_reply(std::io::Cursor::new(bytes)).unwrap();
         assert_eq!(reply["error"], error.message);
         assert_eq!(BridgeError::from_remote_reply(&reply).unwrap(), error);
         let updating = BridgeError::updating();
-        let reply = error_reply(&updating);
+        let reply = error_reply(&updating, "0.11.1");
         assert_eq!(reply["error"], "SILO_SANDBOX_UPDATE_IN_PROGRESS");
         assert_eq!(BridgeError::from_remote_reply(&reply).unwrap(), updating);
         assert_eq!(

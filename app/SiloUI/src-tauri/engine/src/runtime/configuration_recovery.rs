@@ -641,10 +641,9 @@ fn recover_inner(
             .unwrap_or_else(|e| e.into_inner())
             .append(computer_progress(&request_id, step, name, fraction));
         if let Ok(payload) = serde_json::to_value(event) {
-            // window:main
-            context.publish(
+            silo_engine::context::publish_to_main_window(
+                context,
                 Event::new("silo://computer-configuration-progress", payload),
-                Audience::All,
             );
         }
     };

@@ -1062,6 +1062,7 @@ fn a_download_of_unknown_size_ends_with_the_stream() {
     let downloader = HttpDownloader {
         attempts: 1,
         backoff: Duration::ZERO,
+        user_agent: user_agent_for_version(Some("0.11.1")),
         plain_http: true,
     };
     downloader

@@ -7,6 +7,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{utils::config::BundleType, AppHandle};
 
+fn computer_action_worker_failure(action: &str) -> crate::bridge_error::BridgeError {
+    let message = if matches!(action, "open-editor" | "open-terminal") {
+        "The application launcher failed.".to_owned()
+    } else {
+        runtime::internal_failure("running the computer action")
+    };
+    crate::bridge_error::BridgeError::from(message)
+}
+
 pub(crate) struct TauriRuntimeHost(AppHandle);
 
 pub(crate) fn host(app: &AppHandle) -> TauriRuntimeHost {
@@ -220,15 +229,12 @@ pub async fn computer_action(
     path: Option<String>,
 ) -> Result<runtime::ApplicationSource, crate::bridge_error::BridgeError> {
     let host: Arc<dyn RuntimeHost> = Arc::new(host(&app));
+    let action_for_error = action.clone();
     tokio::task::spawn_blocking(move || {
         runtime::computer_action_with_host(host.as_ref(), action, name, path)
     })
     .await
-    .map_err(|_| {
-        crate::bridge_error::BridgeError::from(runtime::internal_failure(
-            "running the computer action",
-        ))
-    })?
+    .map_err(|_| computer_action_worker_failure(&action_for_error))?
 }
 
 #[tauri::command]
@@ -297,6 +303,21 @@ pub async fn change_computer_configuration(
             let message = runtime::internal_failure("changing computer settings");
             runtime::notify_configuration_failure(worker_host.as_ref(), &failure_title, &message);
             Err(message)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launcher_worker_failure_keeps_the_launcher_error() {
+        for action in ["open-editor", "open-terminal"] {
+            assert_eq!(
+                computer_action_worker_failure(action).message,
+                "The application launcher failed."
+            );
         }
     }
 }
