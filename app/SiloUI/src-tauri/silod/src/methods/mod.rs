@@ -157,6 +157,50 @@ impl HandlerContext {
     }
 }
 
+/// Methods the engine answers itself, outside any domain module.
+fn is_built_in(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::EngineHandshake
+            | MethodName::EngineState
+            | MethodName::EventsSubscribe
+            | MethodName::EventsUnsubscribe
+            | MethodName::NotificationsList
+            | MethodName::OperationsCancel
+            | MethodName::OperationsJobAcknowledge
+            | MethodName::OperationsJobGet
+            | MethodName::OperationsList
+            | MethodName::GuestSsh
+    )
+}
+
+/// Owned by a domain module but answered with a typed refusal for every `engine.sock`
+/// caller, so the handshake must not advertise them. `desktop.connect` is engine-to-engine
+/// only: a peer reaches it through the owner-side bridge, never through this socket.
+fn is_never_served(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::MacosDisplayStream
+            | MethodName::DisplayNativeAttach
+            | MethodName::DesktopConnect
+    )
+}
+
+/// Whether this engine serves the method: a built-in or one a domain router owns. The
+/// handshake's capability list is derived from this, so it cannot drift from the routers.
+pub fn serves(method: MethodName) -> bool {
+    if is_never_served(method) {
+        return false;
+    }
+    is_built_in(method)
+        || computers::owns(method)
+        || checkpoints::owns(method)
+        || guest::owns(method)
+        || access::owns(method)
+        || display::owns(method)
+        || services::owns(method)
+}
+
 /// Tries domain handlers in stable order and returns the unsupported error if none handles it.
 pub(crate) async fn dispatch(
     context: &HandlerContext,
@@ -188,7 +232,47 @@ pub(crate) async fn dispatch(
 mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
-    use super::{access, checkpoints, computers, display, guest, services};
+    use super::{access, checkpoints, computers, display, guest, serves, services};
+
+    #[test]
+    fn the_capability_set_is_every_routed_method_and_nothing_unserved() {
+        let served: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        for name in [
+            "engine.handshake",
+            "guest.ssh",
+            "computers.list",
+            "computers.launch",
+            "checkpoints.create",
+            "exports.state",
+            "migration.state",
+            "display.show",
+            "settings.read",
+            "engine.shutdown",
+        ] {
+            assert!(served.contains(&name), "{name} must be advertised");
+        }
+        assert!(!served.contains(&"macos.display.stream"));
+        assert!(!served.contains(&"display.native.attach"));
+        assert!(!served.contains(&"desktop.connect"));
+        // Everything in the catalogue is either served or deliberately withheld.
+        let withheld: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| !serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        assert_eq!(
+            withheld,
+            [
+                "desktop.connect",
+                "display.native.attach",
+                "macos.display.stream"
+            ]
+        );
+    }
 
     fn core_method(method: MethodName) -> bool {
         matches!(
@@ -235,5 +319,39 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Tests of different modules share the process-wide operation gate, whose job ids repeat in
+/// every engine context (`job:1`). A test that starts or holds gate work takes this lease for
+/// its whole fixture lifetime so another module's jobs are neither confused with nor queued
+/// behind its own. (A flag and a condition variable rather than a `MutexGuard`, so a fixture
+/// holding it stays `Send`.)
+#[cfg(test)]
+pub(crate) fn process_gate_lock() -> ProcessGateLease {
+    let (held, released) = &*PROCESS_GATE;
+    let mut held = held.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    while *held {
+        held = released
+            .wait(held)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+    *held = true;
+    ProcessGateLease(())
+}
+
+#[cfg(test)]
+static PROCESS_GATE: std::sync::LazyLock<(std::sync::Mutex<bool>, std::sync::Condvar)> =
+    std::sync::LazyLock::new(Default::default);
+
+#[cfg(test)]
+pub(crate) struct ProcessGateLease(());
+
+#[cfg(test)]
+impl Drop for ProcessGateLease {
+    fn drop(&mut self) {
+        let (held, released) = &*PROCESS_GATE;
+        *held.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+        released.notify_one();
     }
 }

@@ -721,6 +721,58 @@ mod tests {
         assert!(read > buffer.len() || flags & libc::MSG_TRUNC != 0);
     }
 
+    /// A burst larger than one service batch must stay readable on the backend's wake
+    /// descriptor until the ring is empty, without any further producer activity.
+    #[test]
+    fn a_burst_over_the_batch_limit_is_fully_delivered_without_new_producer_activity() {
+        use microsandbox_network::netstack::{backend::SmoltcpBackend, shared::SharedState};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+        use std::sync::Arc;
+
+        const BURST: usize = MAX_BATCH + 1;
+        let shared = Arc::new(SharedState::new(1024));
+        let (gateway_end, guest_end) = UnixDatagram::pair().unwrap();
+        guest_end.set_nonblocking(true).unwrap();
+        let stats = FrameStats::default();
+        let mut pump = FramePump::new(
+            gateway_end.as_raw_fd(),
+            GUEST_IP,
+            GUEST_MAC,
+            1500,
+            &stats,
+            Box::new(SmoltcpBackend::new(shared.clone())),
+        );
+        // The network stack pushes a frame and then wakes the reader, once per frame.
+        for index in 0..BURST {
+            let mut frame = ipv4_frame(GUEST_MAC, GUEST_IP);
+            frame[0] = index as u8;
+            shared.rx_ring.push(frame).unwrap();
+            shared.rx_wake.wake();
+        }
+
+        let mut delivered = 0;
+        let mut buffer = [0u8; FRAME_BUFFER_CAP];
+        loop {
+            let events = pump.poll_events();
+            let mut pollfds = [events.frame, events.backend];
+            let ready = unsafe { libc::poll(pollfds.as_mut_ptr(), 2, 0) };
+            assert!(ready >= 0);
+            let backend_ready = pollfds[1].revents & libc::POLLIN != 0;
+            let flush_ready = pollfds[0].revents & libc::POLLOUT != 0;
+            if !backend_ready && !flush_ready {
+                break;
+            }
+            pump.service(pollfds[0].revents, pollfds[1].revents)
+                .unwrap();
+            while guest_end.recv(&mut buffer).is_ok() {
+                delivered += 1;
+            }
+        }
+        assert_eq!(delivered, BURST);
+        assert!(shared.rx_ring.is_empty());
+    }
+
     fn ipv4_frame(source_mac: [u8; 6], source_ip: Ipv4Addr) -> Vec<u8> {
         let mut frame = vec![0u8; ETH_HEADER_LEN + 20];
         frame[..6].copy_from_slice(&[0xff; 6]);

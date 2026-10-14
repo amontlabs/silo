@@ -10,7 +10,12 @@ applies them.
 
 The helper waits for active interface, route, resolver, and IPv6 state. It then
 requires explicit `dig @server`, plain `dig`, `getaddrinfo`, `dscacheutil`, and
-system-trust HTTPS checks to pass. Readiness never comes from saved preferences
+system-trust HTTPS checks to pass. It also requires `proxyCATrusted`: the host
+signs a probe leaf for a reserved name with the computer's CA and stages it as
+`proxy-ca-probe.pem`; the helper evaluates that leaf with the guest's normal trust
+settings at the leaf's first valid day, and the chain must end at the CA with the
+configured fingerprint. A certificate that is present in the keychain but has lost
+its trust settings therefore fails readiness. Readiness never comes from saved preferences
 alone. It reads `/etc/resolv.conf` and `scutil --dns`; it does not change either
 file or flush resolver caches. Failure writes a public receipt with check names
 and a stable error code, then exits nonzero so launchd retries after its
@@ -47,8 +52,9 @@ is a setup failure; the host must not fall back to NAT.
 
 The source is compiled for Apple Silicon macOS 14+ by
 `build-network-bootstrap.sh OUTPUT`. `test-network-bootstrap-config.sh` builds
-the helper, validates config parsing, and runs the inherited-CA cleanup script
-against a synthetic keychain fixture. It does not modify user Keychains, guest
+the helper, validates config parsing, checks that a present but untrusted CA, a
+mismatched fingerprint, and a leaf for another name all fail the trust evaluation,
+and runs the inherited-CA cleanup script against a synthetic keychain fixture. It does not modify user Keychains, guest
 network preferences, or exercise a VM.
 
 References: [SCNetworkConfiguration](https://developer.apple.com/documentation/systemconfiguration/scnetworkconfiguration),

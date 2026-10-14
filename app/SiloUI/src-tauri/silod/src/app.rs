@@ -24,7 +24,7 @@ use crate::{
     socket::{EngineServer, SystemPeerEuidProvider},
 };
 
-const RESTART_EXIT_CODE: i32 = 75;
+pub const RESTART_EXIT_CODE: i32 = 75;
 
 /// Runs the alias ProxyCommand helper from the bundled silod binary. The bundle manifest
 /// selects its channel before the engine-socket client reads channel-specific state.
@@ -127,10 +127,15 @@ fn run_appkit(
     ));
     context.job_registry()?;
     context::install(context.clone())?;
+    // Saved files are converted to the current vocabulary before anything reads them.
+    crate::startup::prepare_stored_data()?;
     context.install_queue_events();
     // Checkpoint records written before automatic checkpoints existed become manual ones,
     // once, before anything reads them.
     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    // Resumes computers a previous engine update saved, before anything else advances them,
+    // and starts the engine's own update schedule.
+    let update_recovery = crate::methods::services::start(context.clone());
     // The engine watches its computers whether or not a client is connected (95 A-26).
     crate::methods::computers::install_health_watch(context.clone());
     crate::methods::access::install(context.clone())?;
@@ -154,15 +159,18 @@ fn run_appkit(
     // Bind while the runtime is entered, even though the listener is later
     // driven on the dedicated I/O thread.
     let _runtime_context = runtime.enter();
+    // The exports controller is installed at boot: it settles an interrupted operation's
+    // journal before any client can start a new one.
+    let exports = crate::startup::install_exports(&context);
     let server = EngineServer::bind(
         paths.socket_path(),
         euid,
         Arc::new(SystemPeerEuidProvider),
-        Arc::new(Dispatcher::core(context)),
+        Arc::new(Dispatcher::core(context.clone())),
     )?;
     drop(_runtime_context);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let signal_process = process.clone();
+    let signal_context = context.clone();
     let server_thread = thread::Builder::new()
         .name("silod-runtime".to_owned())
         .spawn(move || {
@@ -170,7 +178,8 @@ fn run_appkit(
                 match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
                     Ok(mut terminate) => {
                         if terminate.recv().await.is_some() {
-                            signal_process.exit(0);
+                            // SIGTERM is a session end: no prompt, bounded, never cancelled.
+                            crate::methods::services::session_end(signal_context);
                         }
                     }
                     Err(error) => eprintln!("silod: could not install SIGTERM handler: {error}"),
@@ -179,6 +188,18 @@ fn run_appkit(
             runtime.block_on(server.run(shutdown_rx));
         })
         .map_err(|error| format!("Could not start the I/O runtime: {error}"))?;
+
+    // Launch migration, ChatGPT app, engine timers and the launch pass (05 §7).
+    crate::startup::start_background(context.clone(), exports, update_recovery);
+
+    // The delegate keeps the process alive when the last VM window closes and sends every
+    // AppKit quit request (Dock Quit while a VM window is open, logout, shutdown) through the
+    // engine's session-end shutdown. AppKit holds its delegate weakly: keep it for the run.
+    let terminate_context = context.clone();
+    let _delegate = crate::app_delegate::install(
+        mtm,
+        Box::new(move || crate::methods::services::session_end(terminate_context.clone())),
+    );
 
     application.run();
     let exit_code = process.exit_code.load(Ordering::SeqCst);
@@ -324,52 +345,14 @@ fn dispatch_to_main(work: Box<dyn FnOnce() + Send>) -> Result<(), String> {
     Ok(())
 }
 
-/// Tracks engine-owned VM/setup windows. Call these methods on the AppKit main
-/// thread before showing the first window and after the last window closes.
-pub struct WindowPolicy {
-    open_windows: usize,
-}
-
-impl WindowPolicy {
-    pub const fn new() -> Self {
-        Self { open_windows: 0 }
-    }
-
-    pub fn window_opened(&mut self, mtm: MainThreadMarker) -> Result<(), String> {
-        self.open_windows = self.open_windows.saturating_add(1);
-        self.apply(mtm)
-    }
-
-    pub fn window_closed(&mut self, mtm: MainThreadMarker) -> Result<(), String> {
-        self.open_windows = self.open_windows.saturating_sub(1);
-        self.apply(mtm)
-    }
-
-    pub fn open_window_count(&self) -> usize {
-        self.open_windows
-    }
-
-    fn apply(&self, mtm: MainThreadMarker) -> Result<(), String> {
-        let policy = activation_policy_for_window_count(self.open_windows);
-        let application = NSApplication::sharedApplication(mtm);
-        if application.activationPolicy() == policy {
-            return Ok(());
-        }
-        if application.setActivationPolicy(policy) {
-            Ok(())
-        } else {
-            Err(format!(
-                "NSApplication refused activation policy {policy:?}"
-            ))
-        }
-    }
-}
-
-fn activation_policy_for_window_count(open_windows: usize) -> NSApplicationActivationPolicy {
-    if open_windows == 0 {
-        NSApplicationActivationPolicy::Accessory
-    } else {
+/// The activation policy that follows the VM windows: `.regular` (Dock and Cmd-Tab) while at
+/// least one is open, `.accessory` otherwise (95 A-21). Applied on the AppKit main thread by
+/// the display window table.
+pub(crate) fn activation_policy(any_window_open: bool) -> NSApplicationActivationPolicy {
+    if any_window_open {
         NSApplicationActivationPolicy::Regular
+    } else {
+        NSApplicationActivationPolicy::Accessory
     }
 }
 
@@ -379,22 +362,14 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn window_count_selects_regular_only_while_a_window_is_open() {
-        let mut windows = WindowPolicy::new();
-        assert_eq!(windows.open_window_count(), 0);
+    fn the_policy_is_regular_only_while_a_window_is_open() {
         assert_eq!(
-            activation_policy_for_window_count(windows.open_window_count()),
+            activation_policy(false),
             NSApplicationActivationPolicy::Accessory
         );
-        windows.open_windows = 1;
         assert_eq!(
-            activation_policy_for_window_count(windows.open_window_count()),
+            activation_policy(true),
             NSApplicationActivationPolicy::Regular
-        );
-        windows.open_windows = 0;
-        assert_eq!(
-            activation_policy_for_window_count(windows.open_window_count()),
-            NSApplicationActivationPolicy::Accessory
         );
     }
 

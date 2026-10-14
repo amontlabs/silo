@@ -376,6 +376,7 @@ fn storage_targets(storage: &Path) -> Result<Vec<Target>, String> {
     for (folder, convert) in [
         ("checkpoints", convert::checkpoint_record as Convert),
         ("lifecycle-operations", convert::lifecycle_operation),
+        ("storage-maintenance", convert::storage_maintenance),
     ] {
         targets.extend(
             json_files(&storage.join(folder))?

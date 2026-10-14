@@ -181,6 +181,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         }
     }
 

@@ -1,6 +1,6 @@
 //! Guest access is routed through the owning Silo process. Only public SSH keys
 //! cross devices; editor and terminal applications always launch locally.
-use crate::{remote, runtime};
+use crate::{bridge_error::BridgeError, remote, runtime};
 use serde_json::{json, Value};
 use std::process::{Child, Command, Stdio};
 
@@ -39,8 +39,8 @@ pub trait LocalAccess: Send + Sync {
     /// Access-domain methods remain owner-side because credentials and secret values
     /// belong to the selected owner. The silod adapter translates canonical IDs at the
     /// runtime boundary and publishes the corresponding canonical state events.
-    fn access_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, String> {
-        Err("This Silo version does not support that remote operation.".into())
+    fn access_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, BridgeError> {
+        Err(BridgeError::unsupported())
     }
 
     /// Opens the TCP connection a `github.connect.callback` stream carries: the active
@@ -54,6 +54,30 @@ pub trait LocalAccess: Send + Sync {
 /// before request dispatch, like the other stream methods.
 pub(crate) const GITHUB_CALLBACK_STREAM: &str = "github.connect.callback";
 
+/// The methods the access domain serves on the owner. Their errors keep their canonical
+/// codes all the way to the controller; everything else reports plain messages.
+const ACCESS_METHODS: &[&str] = &[
+    "github.state",
+    "github.connect",
+    "github.connect.reopen",
+    "github.repositories.manage",
+    "github.repositories.refresh",
+    "github.disconnect",
+    "github.access.set",
+    "github.configuration.save",
+    "github.configuration.retry",
+    "github.personalToken.save",
+    "github.personalToken.remove",
+    "secrets.list",
+    "secrets.save",
+    "secrets.remove",
+    "secrets.retry",
+    "operations.job.get",
+    "operations.cancel",
+    "operations.job.acknowledge",
+];
+
+/// Runs one owner-side request for callers that report plain messages.
 pub(crate) fn dispatch(
     paths: &runtime::RuntimePaths,
     method: &str,
@@ -61,25 +85,31 @@ pub(crate) fn dispatch(
     checkpoints: &CheckpointHandler,
     local: &dyn LocalAccess,
 ) -> Result<Value, String> {
+    dispatch_typed(paths, method, params, checkpoints, local).map_err(|error| error.message)
+}
+
+/// Runs one owner-side request and keeps the canonical code of an access-domain failure.
+pub(crate) fn dispatch_typed(
+    paths: &runtime::RuntimePaths,
+    method: &str,
+    params: &Value,
+    checkpoints: &CheckpointHandler,
+    local: &dyn LocalAccess,
+) -> Result<Value, BridgeError> {
+    if ACCESS_METHODS.contains(&method) {
+        return local.access_dispatch(method, params);
+    }
+    dispatch_untyped(paths, method, params, checkpoints, local).map_err(BridgeError::from)
+}
+
+fn dispatch_untyped(
+    paths: &runtime::RuntimePaths,
+    method: &str,
+    params: &Value,
+    checkpoints: &CheckpointHandler,
+    local: &dyn LocalAccess,
+) -> Result<Value, String> {
     match method {
-        "github.state"
-        | "github.connect"
-        | "github.connect.reopen"
-        | "github.repositories.manage"
-        | "github.repositories.refresh"
-        | "github.disconnect"
-        | "github.access.set"
-        | "github.configuration.save"
-        | "github.configuration.retry"
-        | "github.personalToken.save"
-        | "github.personalToken.remove"
-        | "secrets.list"
-        | "secrets.save"
-        | "secrets.remove"
-        | "secrets.retry"
-        | "operations.job.get"
-        | "operations.cancel"
-        | "operations.job.acknowledge" => local.access_dispatch(method, params),
         "connections.keys.revoke" => {
             let public_key = params["publicKey"]
                 .as_str()
@@ -481,6 +511,53 @@ socket.socket = RouteSocket
             "silo-remote:host:computer:extra",
         ] {
             assert!(target(input).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod typed_access_tests {
+    use super::*;
+    use crate::bridge_error::ErrorCode;
+
+    struct TypedAccess;
+
+    impl LocalAccess for TypedAccess {
+        fn desktop_connection(&self, _: &str, _: &str) -> Result<Value, String> {
+            unreachable!()
+        }
+        fn desktop_dispatch(&self, _: &str, _: &Value) -> Result<Value, String> {
+            unreachable!()
+        }
+        fn chatgpt_status(&self) -> Result<Value, String> {
+            unreachable!()
+        }
+        fn chatgpt_retry(&self) -> Result<Value, String> {
+            unreachable!()
+        }
+        fn access_dispatch(&self, method: &str, _: &Value) -> Result<Value, BridgeError> {
+            Err(match method {
+                "operations.cancel" => BridgeError::new(ErrorCode::NotFound, "not_found"),
+                "operations.job.acknowledge" => BridgeError::new(ErrorCode::Busy, "busy"),
+                _ => BridgeError::unsupported(),
+            })
+        }
+    }
+
+    #[test]
+    fn access_methods_keep_the_codes_their_owner_reports() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(directory.path());
+        let checkpoints: &CheckpointHandler = &|_, _| Ok(Value::Null);
+        for (method, code) in [
+            ("operations.cancel", ErrorCode::NotFound),
+            ("operations.job.acknowledge", ErrorCode::Busy),
+            ("github.state", ErrorCode::UnsupportedRemoteOperation),
+        ] {
+            assert!(ACCESS_METHODS.contains(&method));
+            let error =
+                dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess).unwrap_err();
+            assert_eq!(error.code, code, "{method}");
         }
     }
 }

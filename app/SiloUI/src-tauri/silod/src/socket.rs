@@ -372,18 +372,25 @@ async fn serve_connection(
             let Some(selected) = selected else {
                 continue;
             };
-            let (bytes, byte_permit, ack, event_progress, _backlog_reservation) = match selected {
-                OutboundFrame::Reply(reply) => {
-                    (reply.bytes, reply.byte_permit, reply.ack, None, None)
-                }
-                OutboundFrame::Event(event) => (
-                    event.bytes,
-                    event.byte_permit,
-                    None,
-                    Some((event.subscription, event.seq)),
-                    event.backlog_reservation,
-                ),
-            };
+            let (bytes, byte_permit, ack, event_progress, _backlog_reservation, close_after_reply) =
+                match selected {
+                    OutboundFrame::Reply(reply) => (
+                        reply.bytes,
+                        reply.byte_permit,
+                        reply.ack,
+                        None,
+                        None,
+                        reply.close_after_reply,
+                    ),
+                    OutboundFrame::Event(event) => (
+                        event.bytes,
+                        event.byte_permit,
+                        None,
+                        Some((event.subscription, event.seq)),
+                        event.backlog_reservation,
+                        false,
+                    ),
+                };
             let result =
                 match time::timeout(REPLY_WRITE_TIMEOUT, write_frame_bytes(&mut writer, &bytes))
                     .await
@@ -408,6 +415,9 @@ async fn serve_connection(
             }
             if let Some((subscription, seq)) = event_progress {
                 written_event_seq.insert(subscription, seq);
+            }
+            if close_after_reply {
+                return Ok(());
             }
         }
         Ok::<(), io::Error>(())
@@ -581,7 +591,12 @@ async fn serve_connection(
                     let result = dispatcher.execute(invoke).await;
                     let queued = if let Some(response) = result.response {
                         if let Some(reserved_reply) = reserved_reply {
-                            match reserved_reply.enqueue(response, None, result.event_barrier) {
+                            match reserved_reply.enqueue(
+                                response,
+                                None,
+                                result.event_barrier,
+                                result.close,
+                            ) {
                                 Ok(()) => true,
                                 Err(error) => {
                                     eprintln!("silod: could not enqueue ordered reply: {error}");
@@ -595,6 +610,7 @@ async fn serve_connection(
                                 response,
                                 None,
                                 result.event_barrier,
+                                result.close,
                             )
                             .await
                             {
@@ -660,13 +676,16 @@ async fn serve_connection(
     let _ = reader_task.await;
     drop(reply_tx);
     drop(event_tx);
+    // The client is gone before anything it opened is closed, so a request that is still
+    // opening a screen can no longer register one behind this teardown.
+    event_stream.disconnect();
     // Stopping a tunnel can wait up to half a second, so it must not hold an async worker.
     let closing = client_id.as_str().to_owned();
     let _ = tokio::task::spawn_blocking(move || {
         silo_engine::desktop_viewer_api::close_client(&closing);
+        crate::methods::computers::close_client_displays(&closing);
     })
     .await;
-    event_stream.disconnect();
 
     if (immediate_disconnect || !close_after_reply) && writer_result.is_none() {
         // A disconnected client cannot consume queued frames. Stop the writer so
@@ -768,6 +787,7 @@ struct OutboundReply {
     byte_permit: OwnedSemaphorePermit,
     ack: Option<oneshot::Sender<Result<(), String>>>,
     event_barrier: Option<HashMap<String, u64>>,
+    close_after_reply: bool,
 }
 
 struct OutboundEvent {
@@ -789,6 +809,7 @@ impl ReservedReply {
         response: ResponseEnvelope<Value>,
         ack: Option<oneshot::Sender<Result<(), String>>>,
         event_barrier: Option<HashMap<String, u64>>,
+        close_after_reply: bool,
     ) -> Result<(), String> {
         let bytes = encode_response(&response)?;
         let byte_permit = self
@@ -801,6 +822,7 @@ impl ReservedReply {
             byte_permit,
             ack,
             event_barrier,
+            close_after_reply,
         });
         Ok(())
     }
@@ -826,7 +848,9 @@ fn spawn_inline_response(
     let byte_budget = byte_budget.clone();
     tasks.spawn(async move {
         let _permit = permit;
-        if let Err(error) = enqueue_response(&sender, &byte_budget, response, ack, None).await {
+        if let Err(error) =
+            enqueue_response(&sender, &byte_budget, response, ack, None, false).await
+        {
             eprintln!("silod: could not enqueue inline reply: {error}");
         }
     });
@@ -839,6 +863,7 @@ async fn enqueue_response(
     response: ResponseEnvelope<Value>,
     ack: Option<oneshot::Sender<Result<(), String>>>,
     event_barrier: Option<HashMap<String, u64>>,
+    close_after_reply: bool,
 ) -> Result<(), String> {
     let bytes = encode_response(&response)?;
     let byte_count = u32::try_from(bytes.len()).map_err(|error| error.to_string())?;
@@ -853,6 +878,7 @@ async fn enqueue_response(
             byte_permit,
             ack,
             event_barrier,
+            close_after_reply,
         })
         .await
         .map_err(|error| error.to_string())
@@ -1241,6 +1267,7 @@ mod tests {
                 },
                 None,
                 None,
+                false,
             )
             .unwrap();
         order.lock().await.push("reply");
@@ -1272,7 +1299,7 @@ mod tests {
             }),
         };
 
-        enqueue_response(&sender, &byte_budget, response, None, None)
+        enqueue_response(&sender, &byte_budget, response, None, None, false)
             .await
             .unwrap();
         let queued = receiver.recv().await.unwrap();
@@ -1306,7 +1333,7 @@ mod tests {
             }),
         };
 
-        enqueue_response(&sender, &byte_budget, response, None, None)
+        enqueue_response(&sender, &byte_budget, response, None, None, false)
             .await
             .unwrap();
         let queued = receiver.recv().await.unwrap();
@@ -1905,6 +1932,84 @@ mod tests {
 
         let _ = shutdown_tx.send(());
         server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_closed_connection_ends_only_its_own_screens() {
+        use crate::methods::computers::{display_gateways, register_display};
+
+        let context = test_context();
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(context.clone())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+
+        // Two connected clients, each with a screen open.
+        let mut first = handshaken_client(&socket).await;
+        let mut second = handshaken_client(&socket).await;
+        // A client's event stream exists once its first regular request arrived.
+        for client in [&mut first, &mut second] {
+            write_json_frame(
+                client,
+                &serde_json::json!({ "id": "state", "method": "engine.state", "params": {} }),
+            )
+            .await
+            .unwrap();
+            let _: Value = read_json_frame(client).await.unwrap().unwrap();
+        }
+        let clients = context.connected_clients();
+        assert_eq!(clients.len(), 2, "{clients:?}");
+        for client in &clients {
+            let key = (
+                client.clone(),
+                "teardown-device".to_owned(),
+                "teardown-computer".to_owned(),
+            );
+            register_display(&context, key, crate::methods::computers::tests::gateway()).unwrap();
+        }
+
+        // The first connection closes; the socket's own teardown ends its screens. The
+        // teardown runs on other threads, so give them turns instead of sleeping.
+        drop(first);
+        let screen = |client: &String| {
+            (
+                client.clone(),
+                "teardown-device".to_owned(),
+                "teardown-computer".to_owned(),
+            )
+        };
+        let mut settled = false;
+        for _ in 0..5_000_000 {
+            let remaining = context.connected_clients();
+            let screens = display_gateways()
+                .keys()
+                .filter(|(_, device, _)| device == "teardown-device")
+                .count();
+            if remaining.len() == 1 && screens == 1 {
+                settled = true;
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(settled, "the closed connection's screen was never ended");
+        // Exactly the surviving client keeps its screen, and it is still running.
+        let remaining = context.connected_clients();
+        assert!(display_gateways()
+            .get(&screen(&remaining[0]))
+            .unwrap()
+            .running());
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+        crate::methods::computers::close_client_displays(&remaining[0]);
     }
 
     #[tokio::test]

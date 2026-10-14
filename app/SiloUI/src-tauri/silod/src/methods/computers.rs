@@ -68,7 +68,7 @@ pub(super) fn owns(method: MethodName) -> bool {
 /// controller is rebuilt per call so every call sees the same durable storage selection as
 /// the other silod domains.
 #[derive(Clone)]
-struct SilodRuntimeHost {
+pub(crate) struct SilodRuntimeHost {
     context: Arc<SilodContext>,
 }
 
@@ -79,7 +79,7 @@ impl SilodRuntimeHost {
         }
     }
 
-    fn for_engine(context: Arc<SilodContext>) -> Self {
+    pub(crate) fn for_engine(context: Arc<SilodContext>) -> Self {
         Self { context }
     }
 
@@ -87,7 +87,7 @@ impl SilodRuntimeHost {
         silo_engine::runtime_migration::Controller::new(self.context.paths().app_data.clone())
     }
 
-    fn macos_context(&self) -> MacosContext {
+    pub(crate) fn macos_context(&self) -> MacosContext {
         let engine: Arc<dyn EngineContext> = self.context.clone();
         MacosContext::new(
             engine,
@@ -257,8 +257,9 @@ pub fn install_health_watch(context: Arc<SilodContext>) {
     }));
 }
 
-/// The engine-owned VM window belongs to the display domain (95 A-21). The computers domain
-/// never opens a window, so asking this host for one is refused instead of pretending.
+/// The engine-owned VM window (95 A-21). A computer's own work, such as a setup that needs
+/// the installer screen, opens the same native window `display.show` does, through the
+/// display domain's main-thread runner and window table.
 struct SilodMacosHost {
     runtime: SilodRuntimeHost,
 }
@@ -266,15 +267,17 @@ struct SilodMacosHost {
 impl silo_engine::macos_computers::MacosHost for SilodMacosHost {
     fn show_display(
         &self,
-        _context: &MacosContext,
-        _id: &str,
-        _title: &str,
-        _toolbar: bool,
+        context: &MacosContext,
+        id: &str,
+        title: &str,
+        toolbar: bool,
     ) -> Result<(), String> {
-        Err("Use display.show to open a macOS computer's screen.".to_owned())
+        super::display::show_native_display(context, id, title, toolbar)
     }
 
-    fn close_display(&self, _id: &str) {}
+    fn close_display(&self, id: &str) {
+        super::display::close_native_display(id);
+    }
 
     fn linux_computer_names(&self) -> Vec<String> {
         silo_engine::runtime::computer_names(&self.runtime)
@@ -464,13 +467,30 @@ fn accept_linux_setup_job(
 /// A fallback for failures before the engine accepted its work. After acceptance the engine
 /// has already ended the job, and a second, different outcome is refused by the registry.
 fn finish_job_error(context: &SilodContext, job_id: JobId, message: String) {
+    finish_job_error_to(context, job_id, message, Audience::All);
+}
+
+fn finish_job_error_to(context: &SilodContext, job_id: JobId, message: String, audience: Audience) {
     let _ = silo_engine::jobs::finish_with_error(
         context,
         job_id,
         error_code(&message),
         message,
-        Audience::All,
+        audience,
     );
+}
+
+/// Ends a job whose work failed before the engine took it over. A setup job's outcome
+/// belongs to the client that asked, so the binding is released only after it was sent.
+fn fail_engine_job(context: &SilodContext, job_id: JobId, message: String) {
+    let request_id = job_id.as_str().strip_prefix("setup:").map(str::to_owned);
+    let audience = request_id
+        .as_deref()
+        .map_or(Audience::All, silo_engine::runtime::setup_audience);
+    finish_job_error_to(context, job_id, message, audience);
+    if let Some(request_id) = request_id {
+        silo_engine::runtime::release_setup_audience(&request_id);
+    }
 }
 
 fn finish_job_result(context: &SilodContext, job_id: JobId, value: Value) {
@@ -488,10 +508,7 @@ fn run_engine_job(
 ) {
     tokio::task::spawn_blocking(move || {
         if let Err(message) = work() {
-            if let Some(request_id) = job_id.as_str().strip_prefix("setup:") {
-                silo_engine::runtime::release_setup_audience(request_id);
-            }
-            finish_job_error(&context, job_id, message);
+            fail_engine_job(&context, job_id, message);
         }
     });
 }
@@ -568,7 +585,9 @@ async fn read_computers(
         .await
         .map_err(invalid)?;
     let result: ComputersListResult = serde_json::from_value(json!({
-        "linux": with_kind(encode(linux)?, "linux"),
+        "linux": linux
+            .to_canonical_value()
+            .map_err(|error| DispatchError::internal(error.to_string()))?,
         "macos": with_kind(encode(macos)?, "macos"),
     }))
     .map_err(|error| DispatchError::internal(error.to_string()))?;
@@ -586,8 +605,12 @@ async fn read_shell(
     let source: ApplicationSource = tokio::task::spawn_blocking(move || {
         let state = silo_engine::runtime::read_application_shell_with_host(&host, params.error)
             .map_err(invalid)?;
-        serde_json::from_value(with_kind(encode(state)?, "linux"))
-            .map_err(|error| DispatchError::internal(error.to_string()))
+        serde_json::from_value(
+            state
+                .to_canonical_value()
+                .map_err(|error| DispatchError::internal(error.to_string()))?,
+        )
+        .map_err(|error| DispatchError::internal(error.to_string()))
     })
     .await
     .map_err(join_failure)??;
@@ -736,17 +759,19 @@ async fn read_storage(
     .await
     .map_err(join_failure)?
     .map_err(invalid)?;
-    let mut value = encode(state)?;
-    // The engine reads history written before the catalogue existed, tagged `legacy`; the
-    // API has no such trigger (95 §3), so the entry keeps its amount and time as a manual one.
-    if let Some(history) = value.get_mut("history").and_then(Value::as_array_mut) {
-        for entry in history {
-            if entry["trigger"] == "legacy" {
-                entry["trigger"] = Value::String("manual".to_owned());
-            }
-        }
-    }
-    Ok(plain(value))
+    Ok(plain(
+        canonical_storage(state).map_err(DispatchError::internal)?,
+    ))
+}
+
+/// The one encoding of a computer's storage state for clients: read results and reclaim
+/// job results both pass through the API type, so a value outside its catalogue (a trigger
+/// it does not list) is an error instead of reaching a client.
+fn canonical_storage(state: impl Serialize) -> Result<Value, String> {
+    let value = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    let state: silo_api::methods::storage::StorageState = serde_json::from_value(value)
+        .map_err(|error| format!("The storage state does not match the API: {error}"))?;
+    serde_json::to_value(state).map_err(|error| error.to_string())
 }
 
 // MARK: Lifecycle
@@ -850,8 +875,12 @@ async fn dismiss_error(
         let _ = registry.acknowledge(&internal);
     }
     let state = state.map_err(HandlerContext::map_engine_error)?;
-    let source: ApplicationSource = serde_json::from_value(with_kind(encode(state)?, "linux"))
-        .map_err(|error| DispatchError::internal(error.to_string()))?;
+    let source: ApplicationSource = serde_json::from_value(
+        state
+            .to_canonical_value()
+            .map_err(|error| DispatchError::internal(error.to_string()))?,
+    )
+    .map_err(|error| DispatchError::internal(error.to_string()))?;
     Ok(plain(encode(source)?))
 }
 
@@ -914,8 +943,10 @@ async fn begin_configuration_change(
     } = params.change
     {
         require_macos(&host, &computer_id)?;
-        let request_id = new_request_id(Some(request_id))?;
-        let job = accept_setup_job(context, "computers.configuration.change", &request_id)?;
+        // The request id only has to be usable: every macOS job is a `job:<n>` (05 job
+        // spaces), and `setup:` is the Linux setup namespace.
+        new_request_id(Some(request_id))?;
+        let job = context.start_job("computers.configuration.change")?;
         let action = Action::ChangeResources {
             cpus,
             memory_gib,
@@ -998,27 +1029,28 @@ async fn begin_create(
             require_local_device(context, device_id.as_deref())?;
             let request: silo_engine::macos_computers::CreateRequest =
                 serde_json::from_value(encode(request)?).map_err(invalid)?;
-            let job = context.start_job("computers.create")?;
-            let job_id = job.job_id.clone();
-            let created = silo_engine::macos_computers::create_macos_computer_with_job(
+            // A refused request is an error and leaves no job: the job is allocated after
+            // the last synchronous refusal, and the answer comes back as soon as the
+            // preparing row exists. The work waits for its turn in the background.
+            let engine = host.context.clone();
+            let (row, job_id) = silo_engine::macos_computers::create_macos_computer_accepting(
                 host.macos_context(),
                 request,
-                job_id.clone(),
+                move || {
+                    silo_engine::jobs::allocate(engine.as_ref(), "computers.create")
+                        .map(|accepted| accepted.job_id)
+                        .map_err(|error| error.to_string())
+                },
             )
-            .await;
-            // A refused request ends the job with its reason; the job id is still the answer,
-            // as for Linux, and the row is absent.
-            let computer = match created {
-                Ok(row) => {
-                    let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
-                    serde_json::from_value(value["computers"][0].clone()).ok()
-                }
-                Err(message) => {
-                    finish_job_error(&host.context, job_id.clone(), message);
-                    None
-                }
-            };
-            Ok(plain(encode(ComputerCreateResult { job_id, computer })?))
+            .await
+            .map_err(invalid)?;
+            let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
+            let computer = serde_json::from_value(value["computers"][0].clone())
+                .map_err(|error| DispatchError::internal(error.to_string()))?;
+            Ok(plain(encode(ComputerCreateResult {
+                job_id,
+                computer: Some(computer),
+            })?))
         }
     }
 }
@@ -1167,6 +1199,7 @@ async fn begin_storage_reclaim(
             worker_job,
             cancellation,
         )
+        .and_then(canonical_storage)
     });
     job_output(job)
 }
@@ -1264,7 +1297,7 @@ type DisplayKey = (String, String, String);
 
 /// Loopback gateways of the screens a client has open, one per (client, device, computer):
 /// a client reopening a screen replaces its own gateway and no other client's (95 A-28).
-fn display_gateways(
+pub(crate) fn display_gateways(
 ) -> std::sync::MutexGuard<'static, HashMap<DisplayKey, silo_engine::macos_display_gateway::Gateway>>
 {
     static GATEWAYS: OnceLock<
@@ -1290,6 +1323,31 @@ fn close_displays_where(matches: impl Fn(&DisplayKey) -> bool) {
     };
     // Dropping a gateway stops it; that must not happen under the registry lock.
     drop(removed);
+}
+
+/// Registers a client's gateway unless that client is already gone. A request that was
+/// still opening its screen when the connection ended must not leave a gateway behind:
+/// the check and the insertion happen under the registry lock, and teardown disconnects
+/// the client before it takes that lock to remove the client's gateways.
+pub(crate) fn register_display(
+    context: &SilodContext,
+    key: DisplayKey,
+    gateway: silo_engine::macos_display_gateway::Gateway,
+) -> Result<(), DispatchError> {
+    let replaced = {
+        let mut gateways = display_gateways();
+        if !context.is_client_connected(&silo_engine::context::ClientId::new(key.0.clone())) {
+            drop(gateways);
+            drop(gateway);
+            return Err(DispatchError {
+                code: ErrorCode::Cancelled,
+                message: "The client disconnected before its screen opened.".to_owned(),
+            });
+        }
+        gateways.insert(key, gateway)
+    };
+    drop(replaced);
+    Ok(())
 }
 
 /// Ends the screens of one client, as it disconnects.
@@ -1412,8 +1470,7 @@ async fn macos_display_session(
         silo_engine::macos_display_gateway::Gateway::start(open, display_origins(context))
             .map_err(invalid)?;
     let url = gateway.url();
-    let replaced = display_gateways().insert(key, gateway);
-    drop(replaced);
+    register_display(context.silod_context(), key, gateway)?;
     Ok(plain(encode(MacosDisplaySessionResult {
         url,
         username: credentials.username,
@@ -1519,7 +1576,7 @@ async fn route(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use serde_json::{json, Value};
@@ -1555,9 +1612,11 @@ mod tests {
         _root: tempfile::TempDir,
         context: HandlerContext,
         events: EventReceiver,
+        _gate: crate::methods::ProcessGateLease,
     }
 
     fn fixture() -> Fixture {
+        let gate = crate::methods::process_gate_lock();
         let root = tempfile::tempdir().unwrap();
         let path = |name: &str| root.path().join(name);
         let paths = EnginePaths {
@@ -1606,6 +1665,7 @@ mod tests {
             _root: root,
             context,
             events,
+            _gate: gate,
         }
     }
 
@@ -1989,9 +2049,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn creating_a_macos_computer_that_is_refused_ends_its_job_with_the_reason() {
-        let mut f = fixture();
-        let result = f
+    async fn creating_a_macos_computer_that_is_refused_is_refused_at_once_and_leaves_no_job() {
+        let f = fixture();
+        let error = f
             .call(
                 MethodName::ComputersCreate,
                 json!({
@@ -2000,12 +2060,11 @@ mod tests {
                 }),
             )
             .await
-            .unwrap();
-        let created: ComputerCreateResult = serde_json::from_value(result).unwrap();
-        assert!(created.computer.is_none());
-        let finished = f.next_event("operations.job.finished").await;
-        assert_eq!(finished["jobId"], created.job_id.as_str());
-        assert!(finished["error"]["message"].is_string());
+            .unwrap_err();
+        assert!(!error.message.is_empty());
+        // Not a job that ends with a reason: no job was ever accepted.
+        let registry = f.context.silod_context().job_registry().unwrap();
+        assert!(registry.list_unacknowledged().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -2319,11 +2378,6 @@ mod tests {
 
     #[tokio::test]
     async fn each_clients_screens_end_on_their_own() {
-        fn gateway() -> silo_engine::macos_display_gateway::Gateway {
-            let open: silo_engine::macos_display_gateway::Open =
-                Arc::new(|_| Err("no guest in this test".to_owned()));
-            silo_engine::macos_display_gateway::Gateway::start(open, vec![]).unwrap()
-        }
         let (a, b) = (
             format!("screens-a-{}", uuid::Uuid::new_v4()),
             format!("screens-b-{}", uuid::Uuid::new_v4()),
@@ -2345,6 +2399,26 @@ mod tests {
         }
         close_displays(Some("d"));
         assert!(!display_gateways().contains_key(&(b, "d".into(), "c".into())));
+    }
+
+    #[test]
+    fn storage_state_is_checked_against_the_api_for_reads_and_reclaim_results() {
+        let state = |trigger: &str| {
+            json!({
+                "history": [{"at": 1, "trigger": trigger, "reclaimedBytes": 5, "error": null}],
+                "workspaceHostBytes": null, "runtimeHostBytes": null, "checkpointHostBytes": null,
+                "checkpointCount": 0, "workspaceUsedBytes": null, "workspaceCapacityBytes": null,
+                "lastReclaimedBytes": 5, "lastTrimAt": 1, "lastError": null,
+            })
+        };
+        for trigger in ["manual", "afterStart", "beforeStop", "scheduled"] {
+            let value = canonical_storage(state(trigger)).unwrap();
+            assert_eq!(value["history"][0]["trigger"], trigger);
+        }
+        // Nothing is translated on the way out: history that was not converted at launch
+        // fails here instead of being quietly relabelled.
+        let error = canonical_storage(state("legacy")).unwrap_err();
+        assert!(error.contains("does not match the API"), "{error}");
     }
 
     #[tokio::test]
@@ -2417,6 +2491,105 @@ mod tests {
                 descriptor.name
             );
         }
+    }
+
+    pub(crate) fn gateway() -> silo_engine::macos_display_gateway::Gateway {
+        let open: silo_engine::macos_display_gateway::Open =
+            Arc::new(|_| Err("no guest in this test".to_owned()));
+        silo_engine::macos_display_gateway::Gateway::start(open, vec![]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_disconnected_client_cannot_register_a_screen_and_others_keep_theirs() {
+        let a = fixture();
+        let b = another_client(&a);
+        let silod = a.context.silod_context();
+        let a_id = a.context.client_identity().client_id.clone();
+        // A second connection of the same engine, as a different client.
+        let b_id = silod
+            .connected_clients()
+            .into_iter()
+            .find(|id| *id != a_id)
+            .unwrap();
+        let (a_key, b_key) = (
+            (a_id.clone(), "d".to_owned(), "c".to_owned()),
+            (b_id.clone(), "d".to_owned(), "c".to_owned()),
+        );
+        register_display(silod, a_key.clone(), gateway()).unwrap();
+        register_display(silod, b_key.clone(), gateway()).unwrap();
+
+        // Client A's connection ends: its screen closes and nothing of B's does.
+        silod.disconnect_events(&ClientId::new(a_id.clone()));
+        assert!(!display_gateways().contains_key(&a_key));
+        assert!(display_gateways().get(&b_key).unwrap().running());
+
+        // A request that was still opening A's screen cannot register it afterwards.
+        let late = register_display(silod, a_key.clone(), gateway()).unwrap_err();
+        assert_eq!(late.code, ErrorCode::Cancelled);
+        assert!(!display_gateways().contains_key(&a_key));
+        drop(b);
+        close_client_displays(&b_id);
+    }
+
+    /// A second connected client of the same engine, subscribed like the fixture's own.
+    fn another_client(f: &Fixture) -> EventReceiver {
+        let silod = f.context.silod_context();
+        let client = ClientId::new(format!("other-{}", uuid::Uuid::new_v4()));
+        let events = silod.connect_event_stream(client.clone());
+        let subscription = silod
+            .subscribe_events(&client, vec!["operations.*".into()])
+            .unwrap();
+        silod.activate_events(&client, &subscription).unwrap();
+        events
+    }
+
+    #[tokio::test]
+    async fn an_early_setup_failure_reaches_only_the_client_that_asked() {
+        let mut requester = fixture();
+        let mut bystander = another_client(&requester);
+        let request = "early-failure";
+        let job = accept_linux_setup_job(&requester.context, "computers.create", request).unwrap();
+        // The work fails before the engine took the job over, as a runtime that is not
+        // ready does: the fallback ends the job.
+        fail_engine_job(
+            requester.context.silod_context(),
+            job.job_id.clone(),
+            "The runtime is not ready.".into(),
+        );
+        let finished = requester.next_event("operations.job.finished").await;
+        assert_eq!(finished["jobId"], "setup:early-failure");
+        assert_eq!(finished["error"]["message"], "The runtime is not ready.");
+
+        // The other client receives neither the job nor its error: the next job outcome it
+        // sees is one sent to everyone afterwards.
+        let everyone = requester
+            .context
+            .start_job("computers.start")
+            .unwrap()
+            .job_id;
+        finish_job_result(
+            requester.context.silod_context(),
+            everyone.clone(),
+            json!({}),
+        );
+        // Both outcomes are already queued, so this never waits.
+        let seen = loop {
+            match bystander.recv().await {
+                Some(EventDelivery::Event(event))
+                    if event.event.name == "operations.job.finished" =>
+                {
+                    break event.event.payload;
+                }
+                Some(_) => continue,
+                None => panic!("the event stream ended"),
+            }
+        };
+        assert_eq!(seen["jobId"], everyone.as_str());
+        // The binding ended with the outcome.
+        assert_eq!(
+            silo_engine::runtime::setup_audience(request),
+            Audience::Client(ClientId::new("main"))
+        );
     }
 
     #[tokio::test]

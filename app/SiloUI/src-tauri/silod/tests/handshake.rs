@@ -38,7 +38,11 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
     let socket_path = temporary.path().join(".silo/engine.sock");
     let euid = unsafe { libc::geteuid() };
     let context = Arc::new(SilodContext::new(
-        EnginePaths::default(),
+        EnginePaths {
+            home: temporary.path().to_path_buf(),
+            app_config: temporary.path().join("config"),
+            ..Default::default()
+        },
         EngineIdentity {
             channel: silo_engine::channel::Channel::Development,
             version: "0.1.0".to_owned(),
@@ -51,6 +55,7 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
         Arc::new(NoopMainThread),
         Arc::new(NoopProcess),
     ));
+    silo_engine::context::install(context.clone()).unwrap();
     let server = EngineServer::bind(
         socket_path.clone(),
         euid,
@@ -102,6 +107,9 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
                         "operations.job.acknowledge",
                         "operations.job.get",
                         "operations.list",
+                        "computers.list",
+                        "exports.state",
+                        "display.show",
                     ]
                     .iter()
                     .all(|expected| capabilities.iter().any(|value| value == expected))
@@ -146,7 +154,55 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
         ResponseEnvelope::Success { id, .. } if id == "state-2"
     ));
 
-    drop(client);
+    write_json_frame(
+        &mut client,
+        &serde_json::json!({ "id": "settings-read-1", "method": "settings.read", "params": {} }),
+    )
+    .await
+    .unwrap();
+    let settings: ResponseEnvelope<Value> =
+        timeout(Duration::from_secs(2), read_json_frame(&mut client))
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    assert!(matches!(
+        settings,
+        ResponseEnvelope::Success { id, result }
+            if id == "settings-read-1"
+                && result["revision"].as_u64().is_some()
+                && result["settings"].is_object()
+                && result["onboardingDraft"].is_null()
+                && result["writeProtected"] == false
+    ));
+
+    write_json_frame(
+        &mut client,
+        &serde_json::json!({ "id": "disconnect-1", "method": "engine.disconnect", "params": {} }),
+    )
+    .await
+    .unwrap();
+    let disconnected: ResponseEnvelope<Value> =
+        timeout(Duration::from_secs(2), read_json_frame(&mut client))
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    assert!(matches!(
+        disconnected,
+        ResponseEnvelope::Success { id, result }
+            if id == "disconnect-1" && result.is_null()
+    ));
+    assert!(matches!(
+        timeout(
+            Duration::from_secs(2),
+            read_json_frame::<_, Value>(&mut client)
+        )
+        .await
+        .unwrap(),
+        Ok(None)
+    ));
+
     let _ = shutdown_tx.send(());
     server_task.await.unwrap();
 }

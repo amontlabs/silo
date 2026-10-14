@@ -112,10 +112,22 @@ impl SilodContext {
     }
 
     pub fn engine_state(&self) -> EngineState {
-        self.state
+        let mut state = self
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .clone();
+        // The engine lifecycle owns shutdown, session end and update state (05 §6); the
+        // stored value is the idle baseline.
+        let lifecycle = self.runtime_state.update().engine_state();
+        state.shutting_down |= lifecycle.shutting_down;
+        state.update_pending |= lifecycle.update_pending;
+        state.session_ending |= lifecycle.session_ending;
+        state.generation = state.generation.max(lifecycle.generation);
+        if lifecycle.shutting_down {
+            state.phase = lifecycle.phase;
+        }
+        state
     }
 
     /// Registers an in-process destination for events belonging to one local client.
@@ -154,6 +166,17 @@ impl SilodContext {
         subscription: &str,
     ) -> HashMap<String, u64> {
         self.wire_events.unsubscribe(client_id, subscription)
+    }
+
+    /// Whether the client's connection is still open: its event stream exists until the
+    /// socket tears the session down.
+    pub fn is_client_connected(&self, client_id: &ClientId) -> bool {
+        self.wire_events.is_connected(client_id)
+    }
+
+    /// The clients with an open connection.
+    pub fn connected_clients(&self) -> Vec<String> {
+        self.wire_events.connected_clients()
     }
 
     pub fn disconnect_events(&self, client_id: &ClientId) {

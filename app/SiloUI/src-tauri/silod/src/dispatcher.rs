@@ -29,6 +29,7 @@ const MAX_REQUEST_IDS: usize = 65_536;
 pub type HandlerFuture<'a> =
     Pin<Box<dyn Future<Output = Result<HandlerOutput, DispatchError>> + Send + 'a>>;
 
+#[derive(Debug)]
 pub struct HandlerOutput {
     pub value: Value,
     pub event_barrier: Option<std::collections::HashMap<String, u64>>,
@@ -134,21 +135,7 @@ impl Default for CoreMethodRegistry {
         let capabilities = method_registry()
             .iter()
             .copied()
-            .filter(|descriptor| {
-                matches!(
-                    descriptor.name,
-                    "engine.handshake"
-                        | "engine.state"
-                        | "guest.ssh"
-                        | "events.subscribe"
-                        | "events.unsubscribe"
-                        | "notifications.list"
-                        | "operations.cancel"
-                        | "operations.job.acknowledge"
-                        | "operations.job.get"
-                        | "operations.list"
-                )
-            })
+            .filter(|descriptor| methods::serves(descriptor.method))
             .collect();
         Self {
             descriptors: method_registry().to_vec(),
@@ -241,6 +228,9 @@ impl MethodRegistry for CoreMethodRegistry {
                         .map_err(DispatchError::internal)?
                         .acknowledge(&params.job_id)
                         .map_err(HandlerContext::map_registry_error)?;
+                    // The outcome is saved and acknowledged: the replay of an exec job is
+                    // no longer needed (and does nothing for any other job).
+                    silo_engine::guest::forget_finished(&params.job_id);
                     context.job_queue_changed();
                     Ok(Value::Null)
                 }
@@ -496,29 +486,42 @@ impl Dispatcher {
                     .registry
                     .dispatch(method, params, self.context.clone(), request_context)
                     .await;
-                let (response, activate_subscription, event_barrier) = match result {
-                    Ok(result) => {
-                        let HandlerOutput {
-                            value,
-                            event_barrier,
-                        } = result;
-                        // A subscription is pending until its response is queued. The
-                        // parameterized `guest.files.watch` returns its own subscription id.
-                        let subscription_key = match method {
-                            MethodName::EventsSubscribe => Some("subscription"),
-                            MethodName::GuestFilesWatch => Some("subscriptionId"),
-                            _ => None,
-                        };
-                        let activate = subscription_key
-                            .and_then(|key| value.get(key).and_then(Value::as_str))
-                            .map(|subscription| (client_id, subscription.to_owned()));
-                        (success_response(id, value), activate, event_barrier)
-                    }
-                    Err(error) => (error_response(id, error.code, error.message), None, None),
-                };
+                let (response, activate_subscription, event_barrier, close_after_reply) =
+                    match result {
+                        Ok(result) => {
+                            let HandlerOutput {
+                                value,
+                                event_barrier,
+                            } = result;
+                            // A subscription is pending until its response is queued. The
+                            // parameterized `guest.files.watch` returns its own subscription id.
+                            let subscription_key = match method {
+                                MethodName::EventsSubscribe => Some("subscription"),
+                                MethodName::GuestFilesWatch => Some("subscriptionId"),
+                                _ => None,
+                            };
+                            let activate = subscription_key
+                                .and_then(|key| value.get(key).and_then(Value::as_str))
+                                .map(|subscription| (client_id, subscription.to_owned()));
+                            (
+                                success_response(id, value),
+                                activate,
+                                event_barrier,
+                                // Detaching the caller closes only its own connection, after
+                                // the null reply is written; accepted jobs keep running.
+                                method == MethodName::EngineDisconnect,
+                            )
+                        }
+                        Err(error) => (
+                            error_response(id, error.code, error.message),
+                            None,
+                            None,
+                            false,
+                        ),
+                    };
                 DispatchResult {
                     response: Some(response),
-                    close: false,
+                    close: close_after_reply,
                     close_reason: None,
                     activate_subscription,
                     event_barrier,
@@ -809,7 +812,9 @@ mod tests {
         assert!(capabilities.contains(&"events.subscribe".to_owned()));
         assert!(capabilities.contains(&"operations.job.get".to_owned()));
         assert!(capabilities.contains(&"notifications.list".to_owned()));
-        assert!(!capabilities.contains(&"computers.list".to_owned()));
+        assert!(capabilities.contains(&"computers.list".to_owned()));
+        assert!(capabilities.contains(&"display.show".to_owned()));
+        assert!(!capabilities.contains(&"display.native.attach".to_owned()));
     }
 
     #[tokio::test]

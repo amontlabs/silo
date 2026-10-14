@@ -62,7 +62,8 @@ pub(crate) fn command_line(argv: &[String], env: &[(String, String)], root: bool
     if root {
         words.extend(["/usr/bin/sudo".to_owned(), "-n".into()]);
     }
-    words.push("/usr/bin/env".into());
+    // `--` ends env's own options, so no variable name can be read as one.
+    words.extend(["/usr/bin/env".to_owned(), "--".into()]);
     for (key, value) in env {
         words.push(format!("{key}={value}"));
     }
@@ -113,6 +114,15 @@ impl Target {
         match self {
             Self::Linux { id, .. } => id,
             Self::Macos(shell) => shell.id(),
+        }
+    }
+
+    /// Names this computer on this device for per-computer limits: the id, and for a Linux
+    /// computer the runtime it lives in, since ids are only unique within one inventory.
+    pub fn slot_key(&self) -> String {
+        match self {
+            Self::Linux { paths, id, .. } => format!("{}\0{id}", paths.home.display()),
+            Self::Macos(shell) => shell.id().to_owned(),
         }
     }
 
@@ -228,11 +238,13 @@ impl Target {
                     args.push("--env".into());
                     args.push(format!("{key}={value}"));
                 }
-                if stdin {
-                    // Byte-faithful bidirectional streaming without a terminal.
-                    args.push("--stream".into());
-                } else {
-                    args.extend(["--no-tty".into(), "--no-stdin".into()]);
+                // Always stream: without it the runtime CLI buffers the whole of both outputs
+                // in memory until the command ends, so nothing would be live and the host
+                // could not enforce its output cap. Streaming is byte faithful and has no
+                // terminal. Without input the guest sees end-of-file at once.
+                args.push("--stream".into());
+                if !stdin {
+                    args.push("--no-stdin".into());
                 }
                 args.push("--quiet".into());
                 args.push("--".into());
@@ -302,10 +314,40 @@ mod tests {
                 &[("A".into(), "b c".into())],
                 false
             ),
-            "'/usr/bin/env' 'A=b c' 'echo' 'it'\\''s $(unsafe); rm -rf /'"
+            "'/usr/bin/env' '--' 'A=b c' 'echo' 'it'\\''s $(unsafe); rm -rf /'"
         );
         assert!(command_line(&words(&["true"]), &[], true)
-            .starts_with("'/usr/bin/sudo' '-n' '/usr/bin/env' 'true'"));
+            .starts_with("'/usr/bin/sudo' '-n' '/usr/bin/env' '--' 'true'"));
+    }
+
+    #[test]
+    fn linux_commands_always_stream_so_output_is_live_and_bounded() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let argv = vec!["true".to_owned()];
+        for (with_input, expect_no_stdin) in [(false, true), (true, false)] {
+            let plan = target.plan(&argv, &[], false, with_input).unwrap();
+            let has = |flag: &str| plan.args.iter().any(|arg| arg == flag);
+            assert!(
+                has("--stream"),
+                "without --stream the runtime buffers all output until exit"
+            );
+            assert_eq!(has("--no-stdin"), expect_no_stdin);
+            assert!(!has("--tty"));
+        }
+    }
+
+    #[test]
+    fn option_like_environment_names_stay_after_the_end_of_options() {
+        let line = command_line(
+            &["true".to_owned()],
+            &[("-S /usr/bin/printf injected #".to_owned(), "x".to_owned())],
+            false,
+        );
+        assert_eq!(
+            line,
+            "'/usr/bin/env' '--' '-S /usr/bin/printf injected #=x' 'true'"
+        );
     }
 
     #[test]
