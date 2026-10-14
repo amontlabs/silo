@@ -169,6 +169,26 @@ int main(int argc, char **argv) {
         self.assertEqual(loaded.returncode, 0, loaded.stderr)
         self.verify(True)
 
+    def embed_real_engine(self):
+        from embed_engine import embed_engine
+        embed_engine(self.app, self.root / 'executable', build='silo-test')
+        self.seal()
+
+    def test_embedded_engine_is_sealed_with_virtualization_and_the_plist_points_at_it(self):
+        from macos_release_signing import verify_engine
+        self.embed_real_engine()
+        verify_engine(self.app, 'org.silo.preview')
+        self.run_command('codesign', '--verify', '--deep', '--strict', self.app)
+
+    def test_engine_without_the_virtualization_entitlement_rejected(self):
+        from macos_release_signing import verify_engine
+        from embed_engine import DISTRIBUTION
+        self.embed_real_engine()
+        self.sign(self.app / DISTRIBUTION, hardened=True)
+        self.seal()
+        with self.assertRaisesRegex(RuntimeError, 'virtualization'):
+            verify_engine(self.app, 'org.silo.preview')
+
     def test_broad_exception_without_constraint_rejected(self):
         self.sign_helper(None)
         self.seal()
@@ -209,6 +229,42 @@ int main(int argc, char **argv) {
 
 
 class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
+    def test_the_packager_embeds_the_engine_before_resealing_and_verifies_it(self):
+        script = SCRIPT.with_name('package-macos-release.py')
+        with patch.object(sys, 'path', [str(script.parent), *sys.path]):
+            spec = importlib.util.spec_from_file_location('package_macos_release_order', script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='silo-engine-order-') as temporary:
+            root = Path(temporary)
+            app = root / 'Silo.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            (app / 'Contents/MacOS/msb').write_bytes(b'x')
+            calls = []
+            def record(name):
+                return lambda *args, **kwargs: calls.append((name, args, kwargs))
+            with patch.dict(os.environ, {'TAURI_SIGNING_PRIVATE_KEY': 'k'}), \
+                    patch.object(sys, 'argv', [str(script), str(app), str(root / 'out'), '--engine', str(root / 'silod'),
+                                               '--engine-build', 'silo-abc']), \
+                    patch.object(module, 'embed_engine', side_effect=record('embed')), \
+                    patch.object(module, 'sign_runtime', side_effect=record('sign')), \
+                    patch.object(module, 'verify_bundle', side_effect=record('verify')), \
+                    patch.object(module, 'verify_engine', side_effect=record('verify_engine')), \
+                    patch.object(module.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
+                    patch.object(module.tarfile, 'open', side_effect=RuntimeError('stop')):
+                with self.assertRaisesRegex(RuntimeError, 'stop'):
+                    module.main()
+            self.assertEqual([name for name, *_ in calls], ['embed', 'sign', 'verify', 'verify_engine'])
+            _, args, kwargs = calls[0]
+            self.assertEqual(args[1], root / 'silod')
+            self.assertEqual((kwargs['identifier'], kwargs['build']), ('org.silo.preview', 'silo-abc'))
+
+    def test_the_release_workflow_builds_silod_and_passes_it_to_the_packager(self):
+        workflow = (SCRIPT.parent.parent.parent.parent / '.github/workflows/release-platform.yml').read_text()
+        self.assertIn('cargo build --locked --release -p silod --target "$RUNTIME_TARGET"', workflow)
+        line = next(l for l in workflow.splitlines() if 'package-macos-release.py' in l)
+        self.assertIn('--engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod"', line)
+
     def run_packager(self, file_key, signer_exit=0, product_name="Silo"):
         from channel_names import channel_names
         names = channel_names()
@@ -240,8 +296,10 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
                            'TAURI_SIGNING_PRIVATE_KEY_PATH': 'stale-path',
                            'TAURI_SIGNING_PRIVATE_KEY_PASSWORD': 'disposable-password-sentinel'}
             with patch.dict(os.environ, environment), \
-                    patch.object(sys, 'argv', [str(script), str(app), str(root / 'output')]), \
+                    patch.object(sys, 'argv', [str(script), str(app), str(root / 'output'),
+                                               '--engine', str(root / 'silod'), '--engine-build', 'silo-test']), \
                     patch.object(module, 'sign_runtime'), patch.object(module, 'verify_bundle'), \
+                    patch.object(module, 'verify_engine'), patch.object(module, 'embed_engine'), \
                     patch.object(module, 'channel_names', return_value=names, create=True), \
                     patch.object(module.subprocess, 'run', side_effect=command):
                 if signer_exit:
