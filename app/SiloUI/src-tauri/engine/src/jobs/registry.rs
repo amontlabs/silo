@@ -127,6 +127,7 @@ impl From<rusqlite::Error> for RegistryError {
 pub(crate) struct PendingCompletion {
     pub finished: JobFinished,
     pub audience: Audience,
+    pub recovery_placeholder: bool,
 }
 
 impl From<String> for RegistryError {
@@ -302,6 +303,18 @@ impl JobRegistry {
         finished: &JobFinished,
         audience: Audience,
     ) -> Result<bool, RegistryError> {
+        self.finish_with_recovery_placeholder(finished, audience, false)
+    }
+
+    /// Commits a result from a domain journal that remains pending. The result
+    /// is visible to clients, but stays replaceable by the journal's later
+    /// authoritative outcome.
+    pub(crate) fn finish_with_recovery_placeholder(
+        &self,
+        finished: &JobFinished,
+        audience: Audience,
+        recovery_placeholder: bool,
+    ) -> Result<bool, RegistryError> {
         let _admission = self.lock_admission();
         if let Some(pending) = self
             .pending_outcomes
@@ -320,7 +333,7 @@ impl JobRegistry {
                 "A completed job outcome is still pending persistence.",
             ));
         }
-        match self.persist_finish(&finished.job_id, finished) {
+        match self.persist_finish(&finished.job_id, finished, recovery_placeholder) {
             Ok(committed) => {
                 self.pending_outcomes
                     .lock()
@@ -337,6 +350,7 @@ impl JobRegistry {
                     .or_insert_with(|| PendingCompletion {
                         finished: finished.clone(),
                         audience,
+                        recovery_placeholder,
                     });
                 self.admission_suspended.store(true, Ordering::Release);
                 Err(error)
@@ -349,6 +363,7 @@ impl JobRegistry {
         &self,
         job_id: &JobId,
         finished: &JobFinished,
+        recovery_placeholder: bool,
     ) -> Result<bool, RegistryError> {
         let outcome = JobOutcome {
             result: finished.result.clone(),
@@ -381,8 +396,8 @@ impl JobRegistry {
             Some((state, _, true)) if state == "finished" => {
                 transaction.execute(
                     "UPDATE jobs SET outcome_json = ?2, finished_at_ms = ?3, \
-                     recovery_placeholder = 0 WHERE job_id = ?1",
-                    params![job_id.as_str(), outcome_json, now_ms()],
+                     recovery_placeholder = ?4 WHERE job_id = ?1",
+                    params![job_id.as_str(), outcome_json, now_ms(), recovery_placeholder],
                 )?;
             }
             Some((state, _, false)) if state == "finished" => {
@@ -392,9 +407,9 @@ impl JobRegistry {
             Some(_) => {
                 transaction.execute(
                     "UPDATE jobs SET state = 'finished', outcome_json = ?2, finished_at_ms = ?3, \
-                     recovery_placeholder = 0 \
+                     recovery_placeholder = ?4 \
                      WHERE job_id = ?1",
-                    params![job_id.as_str(), outcome_json, now_ms()],
+                    params![job_id.as_str(), outcome_json, now_ms(), recovery_placeholder],
                 )?;
             }
             None => {
@@ -402,9 +417,9 @@ impl JobRegistry {
                 ensure_discovery_budget(&transaction, discovery_bytes)?;
                 let accepted_order = next_value(&transaction, "accepted_order")?;
                 transaction.execute(
-                    "INSERT INTO jobs(job_id, method, state, outcome_json, discovery_bytes, accepted_order, accepted_at_ms, finished_at_ms) \
-                     VALUES (?1, 'unspecified', 'finished', ?2, ?3, ?4, ?5, ?5)",
-                    params![job_id.as_str(), outcome_json, discovery_bytes, accepted_order, now_ms()],
+                    "INSERT INTO jobs(job_id, method, state, outcome_json, discovery_bytes, accepted_order, accepted_at_ms, finished_at_ms, recovery_placeholder) \
+                     VALUES (?1, 'unspecified', 'finished', ?2, ?3, ?4, ?5, ?5, ?6)",
+                    params![job_id.as_str(), outcome_json, discovery_bytes, accepted_order, now_ms(), recovery_placeholder],
                 )?;
             }
         }
@@ -428,7 +443,11 @@ impl JobRegistry {
             self.admission_suspended.store(false, Ordering::Release);
             return Ok(None);
         };
-        self.persist_finish(&job_id, &pending.finished)?;
+        self.persist_finish(
+            &job_id,
+            &pending.finished,
+            pending.recovery_placeholder,
+        )?;
         self.pending_outcomes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -477,8 +496,8 @@ impl JobRegistry {
     }
 
     /// Reconciles a terminal result from an authoritative domain journal after restart.
-    /// Only generic restart placeholders tagged during startup recovery are replaceable;
-    /// previously committed domain outcomes remain immutable.
+    /// Outcomes explicitly marked replaceable by startup or domain recovery may be replaced;
+    /// ordinary committed domain outcomes remain immutable.
     pub fn reconcile_interrupted(
         &self,
         job_id: &JobId,
@@ -1382,6 +1401,71 @@ mod tests {
         assert_eq!(retained.outcome.unwrap().result, completion.result);
         assert!(registry.retry_pending_outcome().unwrap().is_none());
         assert!(registry.allocate("computers.create").unwrap().created);
+    }
+
+    #[test]
+    fn provisional_recovery_finish_stays_replaceable_after_a_storage_retry() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = JobId::new("exports:recovery-retry").unwrap();
+        registry.accept(job_id.clone(), "exports.import").unwrap();
+        registry.mark_running(&job_id).unwrap();
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'exports:recovery-retry' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+
+        let provisional = finished(
+            job_id.clone(),
+            serde_json::json!({"outcome":"failed","message":"recovery deferred"}),
+        );
+        assert_eq!(
+            registry
+                .finish_with_recovery_placeholder(&provisional, Audience::All, true)
+                .unwrap_err()
+                .kind(),
+            RegistryErrorKind::Storage
+        );
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+
+        let retried = registry.retry_pending_outcome().unwrap().unwrap();
+        assert_eq!(retried.finished, provisional);
+        assert!(retried.recovery_placeholder);
+        let is_replaceable: bool = registry
+            .lock_connection()
+            .unwrap()
+            .query_row(
+                "SELECT recovery_placeholder FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(is_replaceable);
+
+        let recovered = finished(
+            job_id.clone(),
+            serde_json::json!({"outcome":"success","message":"recovered"}),
+        );
+        assert!(registry.reconcile_interrupted(&job_id, &recovered).unwrap());
+        assert_eq!(
+            registry
+                .get(&job_id)
+                .unwrap()
+                .unwrap()
+                .outcome
+                .unwrap()
+                .result,
+            recovered.result
+        );
     }
 
     #[test]

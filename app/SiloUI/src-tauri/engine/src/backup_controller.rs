@@ -621,16 +621,28 @@ fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
             }
         }
         Operation::Result { .. } => {
-            if let Err(error) = jobs::publish_finished(
-                context,
-                silo_api::jobs::JobFinished {
-                    job_id,
-                    result: Some(serialized),
-                    error: None,
-                    outcome_chunked: false,
-                },
-                Audience::All,
-            ) {
+            let finished = silo_api::jobs::JobFinished {
+                job_id,
+                result: Some(serialized),
+                error: None,
+                outcome_chunked: false,
+            };
+            let journal_pending = match recovery::snapshot(controller) {
+                Ok(Some(journal)) => {
+                    journal.identity() == operation_id && journal.is_pending()
+                }
+                Ok(None) => false,
+                Err(error) => {
+                    eprintln!("Silo could not inspect backup recovery before publishing its job: {error}");
+                    true
+                }
+            };
+            let published = if journal_pending {
+                jobs::publish_finished_provisionally(context, finished, Audience::All)
+            } else {
+                jobs::publish_finished(context, finished, Audience::All)
+            };
+            if let Err(error) = published {
                 eprintln!("Silo could not publish the backup outcome: {error}");
             }
         }
@@ -778,16 +790,32 @@ pub fn backup_state(controller: &Controller) -> Result<BackupState, String> {
     })?;
     let journal = recovery::snapshot(controller)?;
     let busy = controller.busy.load(Ordering::Acquire);
-    // A worker saves its journal before publishing its view. A result must come
-    // from that same journal unless recovery failed and kept it pending for retry.
+    // A worker saves its journal before publishing its view. During handoff,
+    // the journal identity distinguishes a successor's Running state from a
+    // predecessor's terminal view; a matching pending journal keeps the
+    // recovery failure visible instead of substituting its Running placeholder.
+    let journal_matches_view = journal
+        .as_ref()
+        .is_some_and(|journal| view.operation_id.as_deref() == Some(journal.identity()));
+    let active_running_operation = journal
+        .as_ref()
+        .is_some_and(recovery::Journal::is_pending)
+        && busy
+        && (!journal_matches_view || matches!(view.operation, Some(Operation::Running { .. })));
     let operation = match (&view.operation, &journal) {
-        (Some(Operation::Result { .. }), Some(journal)) if !journal.is_pending() || busy => {
+        (Some(Operation::Result { .. }), Some(journal))
+            if !journal.is_pending() || (busy && !journal_matches_view) =>
+        {
             Some(journal.operation())
         }
         _ => view.operation.clone(),
     };
     let availability_message = view.journal_error.clone().or_else(|| {
-        (!busy && journal.as_ref().is_some_and(recovery::Journal::is_pending)).then(|| "The interrupted export or import could not finish. Relaunch Silo to retry. Saved progress was preserved.".into())
+        (journal
+            .as_ref()
+            .is_some_and(recovery::Journal::is_pending)
+            && !active_running_operation)
+        .then(|| "The interrupted export or import could not finish. Relaunch Silo to retry. Saved progress was preserved.".into())
     });
     let result_unseen = matches!(operation, Some(Operation::Result { .. }))
         && journal
@@ -2427,7 +2455,7 @@ mod tests {
         paths: EnginePaths,
         identity: EngineIdentity,
         runtime_state: Arc<EngineRuntimeState>,
-        publication_events: Mutex<Option<std::sync::mpsc::Sender<String>>>,
+        publication_events: Mutex<Option<std::sync::mpsc::Sender<Event>>>,
     }
 
     impl EngineContext for StartupTestContext {
@@ -2450,7 +2478,7 @@ mod tests {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .as_ref()
             {
-                let _ = sender.send(event.name);
+                let _ = sender.send(event);
             }
         }
 
@@ -2779,7 +2807,7 @@ mod tests {
         assert!(still_placeholder.outcome.unwrap().error.is_some());
         resume_publication_tx.send(()).unwrap();
         loop {
-            if published_rx.recv().unwrap() == "silo://application-state-changed" {
+            if published_rx.recv().unwrap().name == "silo://application-state-changed" {
                 break;
             }
         }
@@ -2793,6 +2821,151 @@ mod tests {
         assert_eq!(result["operation"], "restore");
         assert_eq!(result["outcome"], "failed");
         assert_eq!(result["message"], "Silo closed before this import finished.");
+    }
+
+    #[test]
+    fn pending_recovery_publishes_the_state_that_remains_after_busy_is_released() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let archive = completed_archive();
+        let journal = recovery::Journal::restore(archive.clone(), "copy".into(), None);
+        let operation_id = journal.identity().to_owned();
+        recovery::begin(&controller, journal).unwrap();
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation_id = Some(operation_id);
+            view.operation = Some(Operation::Result {
+                operation: "restore",
+                archive,
+                running_names: Vec::new(),
+                target_name: Some("copy".into()),
+                outcome: "failed",
+                title: "Could not resume the interrupted operation".into(),
+                message: "The recovery journal could not be settled.".into(),
+                detail: Some("Saved progress was preserved.".into()),
+            });
+        }
+        controller.busy.store(true, Ordering::Release);
+        let (published_tx, published_rx) = std::sync::mpsc::channel();
+        *context
+            .publication_events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(published_tx);
+        let (at_publication_rx, resume_publication_tx) = pause_terminal_publication(&controller);
+        let worker_controller = controller.clone();
+        let worker = std::thread::spawn(move || {
+            publish_and_finish(&worker_controller, || publish(&worker_controller));
+        });
+
+        at_publication_rx.recv().unwrap();
+        assert!(controller.busy.load(Ordering::Acquire));
+        assert!(recovery::pending(&controller).unwrap());
+        resume_publication_tx.send(()).unwrap();
+        worker.join().unwrap();
+
+        assert!(!controller.busy.load(Ordering::Acquire));
+        let published = published_rx
+            .try_iter()
+            .find(|event| event.name == "exports.changed")
+            .expect("pending recovery must publish exports.changed");
+        let actual = serde_json::to_value(backup_state(&controller).unwrap()).unwrap();
+        assert_eq!(published.payload, actual);
+        assert_eq!(published.payload["availability"], "unavailable");
+        assert_eq!(published.payload["operation"]["kind"], "result");
+        assert_eq!(published.payload["operation"]["outcome"], "failed");
+    }
+
+    #[test]
+    fn a_pending_recovery_result_remains_replaceable_by_startup_reconciliation() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let archive = completed_archive();
+        let journal = recovery::Journal::restore(archive.clone(), "copy".into(), None);
+        let operation_id = journal.identity().to_owned();
+        let job_id = JobId::new(format!("exports:{operation_id}")).unwrap();
+        let engine_data = context
+            .paths
+            .home
+            .join(context.identity.channel.state_dir_name())
+            .join("engine");
+        let first_registry = silo_engine::jobs::JobRegistry::open(&engine_data).unwrap();
+        first_registry.accept(job_id.clone(), "exports.import").unwrap();
+        first_registry.mark_running(&job_id).unwrap();
+        drop(first_registry);
+
+        // Reopening converts the interrupted job into the replaceable generic
+        // restart placeholder that backup recovery must preserve while pending.
+        context.job_registry().unwrap();
+        recovery::begin(&controller, journal).unwrap();
+        let import_id = uuid::Uuid::new_v4().to_string();
+        recovery::save_restore_identity(
+            &controller,
+            &import_id,
+            "silo-import-0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
+        let failed_recovery = recovery::complete_marked(
+            &controller,
+            Operation::Result {
+                operation: "restore",
+                archive: archive.clone(),
+                running_names: Vec::new(),
+                target_name: Some("copy".into()),
+                outcome: "failed",
+                title: "Could not resume the interrupted operation".into(),
+                message: "Cleanup needs to be retried.".into(),
+                detail: Some("Saved progress was preserved.".into()),
+            },
+            false,
+        );
+        assert!(recovery::pending(&controller).unwrap());
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation_id = Some(operation_id);
+            view.operation = Some(failed_recovery);
+        }
+        controller.busy.store(true, Ordering::Release);
+        let (at_publication_rx, resume_publication_tx) = pause_terminal_publication(&controller);
+        let worker_controller = controller.clone();
+        let worker = std::thread::spawn(move || {
+            publish_and_finish(&worker_controller, || publish(&worker_controller));
+        });
+        at_publication_rx.recv().unwrap();
+        assert!(recovery::pending(&controller).unwrap());
+        resume_publication_tx.send(()).unwrap();
+        worker.join().unwrap();
+
+        let provisional = jobs::get_at(context.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(provisional.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            provisional.outcome.unwrap().result.unwrap()["outcome"],
+            "failed"
+        );
+
+        let recovered = Operation::Result {
+            operation: "restore",
+            archive,
+            running_names: Vec::new(),
+            target_name: Some("copy".into()),
+            outcome: "success",
+            title: "Import complete".into(),
+            message: "The imported computer is ready.".into(),
+            detail: None,
+        };
+        recovery::clear_restore_identity(&controller).unwrap();
+        recovery::complete(&controller, recovered);
+
+        reconcile_jobs_before_serving(context.as_ref()).unwrap();
+        let final_job = jobs::get_at(context.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        let result = final_job.outcome.unwrap().result.unwrap();
+        assert_eq!(result["outcome"], "success");
+        assert_eq!(result["message"], "The imported computer is ready.");
     }
 
     /// What the first launch of an upgrade made of the journal the previous version left
@@ -4091,6 +4264,7 @@ mod tests {
             detail: None,
         };
         set_operation(&controller, previous).unwrap();
+        controller.view.lock().unwrap().operation_id = Some("predecessor".into());
         // The next export has saved its journal but has not replaced the view yet.
         controller.busy.store(true, Ordering::Release);
         recovery::begin(
@@ -4104,6 +4278,7 @@ mod tests {
             matches!(state.operation, Some(Operation::Running { .. })),
             "a new export must not inherit the old success"
         );
+        assert_eq!(state.availability, "available");
         let current = Operation::Result {
             operation: "backup",
             archive: Archive {

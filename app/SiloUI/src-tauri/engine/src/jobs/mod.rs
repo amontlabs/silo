@@ -145,9 +145,33 @@ pub fn publish_finished(
     finished: JobFinished,
     audience: Audience,
 ) -> Result<(), RegistryError> {
+    publish_finished_with_recovery_placeholder(context, finished, audience, false)
+}
+
+/// Publishes a visible result while its domain journal still needs recovery.
+/// The registry keeps the restart placeholder replaceable until the domain
+/// commits an authoritative result.
+pub(crate) fn publish_finished_provisionally(
+    context: &dyn EngineContext,
+    finished: JobFinished,
+    audience: Audience,
+) -> Result<(), RegistryError> {
+    publish_finished_with_recovery_placeholder(context, finished, audience, true)
+}
+
+fn publish_finished_with_recovery_placeholder(
+    context: &dyn EngineContext,
+    finished: JobFinished,
+    audience: Audience,
+    recovery_placeholder: bool,
+) -> Result<(), RegistryError> {
     let payload = finished_event_payload(&finished)?;
     let registry = context.job_registry()?;
-    if registry.finish_with_audience(&finished, audience.clone())? {
+    if registry.finish_with_recovery_placeholder(
+        &finished,
+        audience.clone(),
+        recovery_placeholder,
+    )? {
         context.publish(Event::new("operations.job.finished", payload), audience);
         context.job_queue_changed();
     }
