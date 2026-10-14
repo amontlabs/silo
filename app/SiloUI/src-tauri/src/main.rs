@@ -6,7 +6,6 @@ mod command_permissions_tests;
 #[cfg(debug_assertions)]
 mod desktop_viewer_bench;
 mod engine_client;
-mod engine_context;
 mod host_launch;
 mod quit;
 #[cfg(test)]
@@ -28,35 +27,11 @@ mod window_material;
 use tauri::{Emitter, Manager, WindowEvent};
 
 fn main() {
-    #[cfg(target_os = "linux")]
-    if std::env::current_exe().is_ok_and(|path| path == std::path::Path::new("/usr/bin/silo-ui"))
-        && std::path::Path::new(system_integrations::PACKAGE_UPDATE_MARKER).exists()
-    {
-        system_integrations::explain_unfinished_package_update();
-        return;
-    }
-
-    // The bundle identifier embedded at build time decides the channel, including
-    // for the bridge modes below that run without a window or Tauri runtime.
+    // The bundle identifier embedded at build time decides the channel.
     let context = tauri::generate_context!();
-    channel::init(&context.config().identifier);
-    let args: Vec<_> = std::env::args().collect();
-    let bridge = match args.get(1).map(String::as_str) {
-        Some("--remote-bridge") => Some(remote::run_bridge()),
-        Some("--remote-guest") => Some(match remote::guest_stream_params(&args[2..]) {
-            Ok(params) => remote::run_remote_stream(&args[2], "guest.ssh", params),
-            Err(error) => Err(error),
-        }),
-        Some(editor::TRANSPORT_MODE) => Some(commands::editor::run_transport(&args[2..])),
-        _ => None,
-    };
-    if let Some(result) = bridge {
-        if let Err(error) = result {
-            eprintln!("{error}");
-            std::process::exit(1);
-        }
-        return;
-    }
+    silo_client::channel::init(&context.config().identifier);
+    // Helpers that still read the engine's copy of the channel need the same answer.
+    silo_engine::channel::init(&context.config().identifier);
     // Plugins initialize while the app is built, in registration order, and the
     // setup hook runs only after that. A second launch therefore exits inside
     // the single-instance plugin before any migration, Connections or computer work.
@@ -157,7 +132,6 @@ fn main() {
             commands::settings::read_settings,
             commands::settings::update_settings,
             commands::settings::update_onboarding_draft,
-            commands::settings::import_legacy_theme,
             commands::settings::flush_settings,
             commands::settings::begin_settings_flush,
             commands::settings::complete_settings_flush,
@@ -238,33 +212,12 @@ fn main() {
         .setup(|app| {
             // Tauri panics on a setup error. Explain the failure and exit instead.
             let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-                engine_context::install(app)?;
-                commands::creation_inputs::install(app.handle())?;
-                runtime_migration::vocabulary::run()?;
-                commands::system_shutdown::install(app.handle());
-                let queue_app = app.handle().clone();
-                runtime::OPERATIONS.set_listener(move || {
-                    let _ = queue_app.emit("silo://operation-queue-changed", ());
-                });
-                commands::runtime_migration::install(app.handle())?;
-                // Checkpoint records from before automatic checkpoints become manual ones,
-                // once, before anything reads them (and before the macOS sweep).
-                {
-                    let migration = app.state::<std::sync::Arc<runtime_migration::Controller>>();
-                    let context = silo_engine::context::current()
-                        .ok_or("The engine context is not installed.")?;
-                    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &migration)?;
-                }
-                commands::computer_use::install(app.handle());
-                pre_upgrade_backup::install();
-                commands::remote::start(app.handle())?;
-                commands::secrets::install(app.handle())?;
-                commands::github::install(app.handle())?;
-                commands::backup_controller::install(app.handle())?;
-                commands::runtime_migration::start_if_pending(app.handle())?;
+                // This process is a client: it connects to silod and builds no engine.
+                let config = app.path().app_config_dir()?;
+                app.manage(commands::settings::DraftStore::new(config));
+                commands::settings::install_quit(app.handle());
+                engine_client::install(app.handle())?;
                 status_panel::install(app.handle())?;
-                #[cfg(debug_assertions)]
-                desktop_viewer_bench::start(app.handle());
                 tray::install(app.handle())?;
                 app_menu::install(app.handle())?;
                 let window = app
@@ -294,11 +247,7 @@ fn main() {
                 #[cfg(target_os = "macos")]
                 titlebar::install(&window)?;
                 commands::notifications::install(app.handle());
-                commands::updates::install(app.handle())?;
-                commands::ssh_access::start_monitor(app.handle());
-                commands::editor::refresh_transports(app.handle());
-                commands::runtime_storage::start_monitor(app.handle());
-                commands::startup::install(app.handle());
+                commands::system_shutdown::install(app.handle());
                 Ok(())
             })();
             if let Err(error) = result {
@@ -316,12 +265,6 @@ fn main() {
     #[cfg(target_os = "macos")]
     commands::system_shutdown::install_terminate_handler(app.handle());
     app.run(|_app, _event| {
-        if let tauri::RunEvent::Exit = &_event {
-            commands::settings::exit_backstop(_app);
-            ssh_access::close_all();
-            remote_network::close_all();
-            transfer::close_all(std::time::Duration::from_secs(5));
-        }
         if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event {
             commands::settings::prevent_exit_until_saved(_app, api, *code);
         }
@@ -337,13 +280,11 @@ fn main() {
 }
 
 /// Setup stopped part-way, so some native state the UI relies on is missing. Stop
-/// the UI from using it, explain the failure, and exit without the Quit path: it
-/// would stop computers that this process never managed.
+/// the UI from using it, explain the failure, and exit without the Quit path.
 fn startup_failed(app: &tauri::AppHandle, error: &str) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     let name = channel::current().product_name();
     eprintln!("{name} could not start: {error}");
-    commands::settings::exit_without_shutdown(app);
     if let Ok(blank) = "about:blank".parse::<tauri::Url>() {
         for window in app.webview_windows().values() {
             let _ = window.navigate(blank.clone());
