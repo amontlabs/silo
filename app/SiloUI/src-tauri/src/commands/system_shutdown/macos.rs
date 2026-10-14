@@ -10,6 +10,7 @@ use std::sync::{
     OnceLock,
 };
 
+use crate::system_shutdown::{quit_reason, ShutdownReason};
 use objc2::{
     ffi, msg_send,
     rc::Retained,
@@ -74,11 +75,9 @@ extern "C-unwind" fn should_terminate(_: &AnyObject, _: Sel, _: *mut AnyObject) 
         if !crate::settings::accepts_terminate_request(app) {
             return TERMINATE_NOW;
         }
-        begin_terminate(
-            &PENDING,
-            super::quit_reason(current_quit_reason()),
-            |reason| super::route(app, reason),
-        );
+        begin_terminate(&PENDING, quit_reason(current_quit_reason()), |reason| {
+            super::route(app, reason)
+        });
         TERMINATE_LATER
     })
     .unwrap_or(TERMINATE_NOW)
@@ -100,10 +99,10 @@ fn current_quit_reason() -> Option<u32> {
 
 fn begin_terminate(
     pending: &AtomicBool,
-    reason: super::ShutdownReason,
-    route: impl FnOnce(super::ShutdownReason),
+    reason: ShutdownReason,
+    route: impl FnOnce(ShutdownReason),
 ) {
-    if pending.swap(true, Ordering::SeqCst) && reason == super::ShutdownReason::UserQuit {
+    if pending.swap(true, Ordering::SeqCst) && reason == ShutdownReason::UserQuit {
         return;
     }
     route(reason);

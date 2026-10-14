@@ -7,17 +7,9 @@
 //! - Logout, restart, shutdown and SIGTERM never prompt: Silo stops its local
 //!   computers within a bound and then exits, even if a stop fails.
 //!
-//! On macOS AppKit asks `applicationShouldTerminate:`; Silo replies later, once
-//! the Quit path has finished or was cancelled. On Linux a logind delay
-//! inhibitor holds shutdown while computers stop, and SIGTERM (session logout) enters
-//! the same path.
+//! OS event handling and process exit stay in `commands/system_shutdown`; this
+//! module owns the platform-independent routing policy and budgets.
 use std::time::Duration;
-use tauri::AppHandle;
-
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "macos")]
-mod macos;
 
 /// Upper bound for stopping computers when the session ends without a logind limit.
 pub(crate) const SESSION_END_BUDGET: Duration = Duration::from_secs(20);
@@ -37,17 +29,6 @@ pub(crate) enum ShutdownReason {
     Shutdown,
 }
 
-/// Route an operating-system quit request into Silo's Quit paths.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(crate) fn route(app: &AppHandle, reason: ShutdownReason) {
-    match reason {
-        ShutdownReason::UserQuit => crate::settings::request_quit(app),
-        ShutdownReason::Logout | ShutdownReason::Shutdown => {
-            crate::settings::end_session(app, SESSION_END_BUDGET)
-        }
-    }
-}
-
 /// The Apple event `kAEQuitReason` ('why?') values that end the session. A quit
 /// without a reason (Dock Quit, `osascript`) is a user Quit.
 #[cfg(any(test, target_os = "macos"))]
@@ -63,63 +44,14 @@ pub(crate) fn quit_reason(code: Option<u32>) -> ShutdownReason {
 
 /// Stop within logind's delay, leaving a margin to save settings and exit.
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
-fn logind_budget(max_delay: Option<Duration>) -> Duration {
+pub(crate) fn logind_budget(max_delay: Option<Duration>) -> Duration {
     let max_delay = max_delay.unwrap_or(LOGIND_DEFAULT_DELAY);
     let margin = LOGIND_MARGIN.min(max_delay / 2);
     max_delay.saturating_sub(margin).min(SESSION_END_BUDGET)
 }
 
-/// Install the operating-system quit hooks that need the running app.
-pub(crate) fn install(app: &AppHandle) {
-    listen_for_sigterm(app);
-    #[cfg(target_os = "linux")]
-    linux::install(app);
-}
-
-/// Install `applicationShouldTerminate:` before the event loop starts.
-#[cfg(target_os = "macos")]
-pub(crate) fn install_terminate_handler(app: &AppHandle) {
-    if let Err(error) = macos::install(app) {
-        eprintln!("Silo quit handling: {error}");
-    }
-}
-
-fn listen_for_sigterm(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut terminate = match signal(SignalKind::terminate()) {
-            Ok(terminate) => terminate,
-            Err(error) => {
-                eprintln!("Silo quit handling: SIGTERM cannot be handled: {error}");
-                return;
-            }
-        };
-        // Logout and `systemctl stop` send SIGTERM; later signals only repeat it.
-        while terminate.recv().await.is_some() {
-            crate::settings::end_session(&app, SESSION_END_BUDGET);
-        }
-    });
-}
-
-/// The graceful Quit path finished: let the operating system or Tauri end Silo.
-pub(crate) fn exit(app: &AppHandle) {
-    #[cfg(target_os = "linux")]
-    linux::release();
-    #[cfg(target_os = "macos")]
-    if macos::reply(app, true) {
-        return;
-    }
-    app.exit(0);
-}
-
-/// The user cancelled Quit or it failed: tell AppKit Silo keeps running.
-pub(crate) fn cancel(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    macos::reply(app, false);
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
-}
+/// Compatibility seam for settings callers that still pass host state.
+pub(crate) use crate::commands::system_shutdown::{cancel, exit};
 
 #[cfg(test)]
 mod tests {

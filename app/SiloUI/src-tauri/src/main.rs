@@ -296,7 +296,7 @@ fn main() {
                 engine_context::install(app)?;
                 runtime_migration::vocabulary::run(app.handle())?;
                 settings::install(app.handle());
-                system_shutdown::install(app.handle());
+                commands::system_shutdown::install(app.handle());
                 let queue_app = app.handle().clone();
                 runtime::OPERATIONS.set_listener(move || {
                     let _ = queue_app.emit("silo://operation-queue-changed", ());
@@ -361,7 +361,7 @@ fn main() {
     // tao installs its AppKit delegate while the event loop is created; add the
     // terminate handler before AppKit finishes launching.
     #[cfg(target_os = "macos")]
-    system_shutdown::install_terminate_handler(app.handle());
+    commands::system_shutdown::install_terminate_handler(app.handle());
     app.run(|_app, _event| {
         if let tauri::RunEvent::Exit = &_event {
             settings::exit_backstop(_app);
