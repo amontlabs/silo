@@ -4,6 +4,7 @@
 //! engine's events to the webview, and forwards Tauri commands to canonical engine methods.
 //! No engine runs in this process: every operation here is a request over the socket.
 
+pub(crate) mod forwarding;
 pub(crate) mod launcher;
 pub(crate) mod relay;
 
