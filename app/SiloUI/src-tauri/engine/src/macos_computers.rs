@@ -1682,6 +1682,7 @@ pub fn install_test_computer(
         computer_use: true,
         clipboard: true,
         needs_personalizing: false,
+        proxy_bootstrap: true,
     };
     record.computer_use_approval = Some(approval);
     record.computer_use_desired_approval = Some(approval);
