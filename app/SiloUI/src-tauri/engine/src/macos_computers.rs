@@ -832,6 +832,16 @@ fn publish_macos_job_progress(
     job_id: &silo_api::jobs::JobId,
     progress: silo_api::jobs::JobProgress,
 ) {
+    publish_macos_job_progress_with_hook(context, job_id, progress, || {});
+}
+
+fn publish_macos_job_progress_with_hook(
+    context: &dyn EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    progress: silo_api::jobs::JobProgress,
+    before_lock: impl FnOnce(),
+) {
+    before_lock();
     let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1226,6 +1236,13 @@ fn ensure_checkpoint_retry_worker(app: MacosContext) {
 }
 
 fn retry_pending_checkpoint_completions(app: &MacosContext) {
+    retry_pending_checkpoint_completions_with_hook(app, || {});
+}
+
+fn retry_pending_checkpoint_completions_with_hook(
+    app: &MacosContext,
+    mut after_pending_removed: impl FnMut(),
+) {
     let registry = match app.engine.job_registry() {
         Ok(registry) => registry,
         Err(error) => {
@@ -1248,20 +1265,18 @@ fn retry_pending_checkpoint_completions(app: &MacosContext) {
         })
         .collect::<Vec<_>>();
     for (job_id, computer_id, finished) in pending {
-        let published = {
+        let publication = {
             let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All)
-        };
-        match published {
-            Ok(()) => {
-                MACOS_PENDING_CHECKPOINT_JOBS
-                    .get_or_init(Default::default)
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .remove(&job_id);
-                {
+            match crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All) {
+                Ok(()) => {
+                    MACOS_PENDING_CHECKPOINT_JOBS
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&job_id);
+                    after_pending_removed();
                     let mut checkpoint_jobs = MACOS_CHECKPOINT_JOBS
                         .get_or_init(Default::default)
                         .lock()
@@ -1269,7 +1284,13 @@ fn retry_pending_checkpoint_completions(app: &MacosContext) {
                     if checkpoint_jobs.get(&computer_id) == Some(&job_id) {
                         checkpoint_jobs.remove(&computer_id);
                     }
+                    Ok(())
                 }
+                Err(error) => Err(error),
+            }
+        };
+        match publication {
+            Ok(()) => {
                 let continuation = MACOS_PENDING_FORK_WORKFLOWS
                     .get_or_init(Default::default)
                     .lock()
@@ -5202,6 +5223,125 @@ mod tests {
             .map(|event| event.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, ["operations.job.finished"]);
+    }
+
+    #[test]
+    fn checkpoint_completion_removes_both_progress_guards_under_the_publication_lock() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let accepted = crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create")
+            .unwrap();
+        context
+            .job_registry()
+            .unwrap()
+            .mark_running(&accepted.job_id)
+            .unwrap();
+        let computer_id = "computer-checkpoint-completion-race".to_owned();
+        let finished = macos_job_finished(accepted.job_id.clone(), Ok(()));
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(computer_id.clone(), accepted.job_id.clone());
+        MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(accepted.job_id.clone(), (computer_id, finished));
+
+        let (at_gap_tx, at_gap_rx) = std::sync::mpsc::channel();
+        let (resume_completion_tx, resume_completion_rx) = std::sync::mpsc::channel();
+        let completion_app = app.clone();
+        let completion = std::thread::spawn(move || {
+            retry_pending_checkpoint_completions_with_hook(&completion_app, || {
+                // This is the reviewed gap: the pending guard has been removed,
+                // but the active checkpoint mapping is the last progress guard.
+                at_gap_tx.send(()).unwrap();
+                resume_completion_rx.recv().unwrap();
+            });
+        });
+        at_gap_rx.recv().unwrap();
+
+        let stale = silo_api::jobs::JobProgress::Macos {
+            job_id: accepted.job_id.clone(),
+            kind: None,
+            computer_id: Some("computer-checkpoint-completion-race".into()),
+            data: silo_api::jobs::MacosJobProgress {
+                computer_id: "computer-checkpoint-completion-race".into(),
+                state: silo_api::methods::computers::MacosComputerState::Starting,
+                progress: Some(0.5),
+                detail: None,
+                checkpoint_operation: None,
+            },
+        };
+        let (progress_waiting_tx, progress_waiting_rx) = std::sync::mpsc::channel();
+        let (allow_progress_tx, allow_progress_rx) = std::sync::mpsc::channel();
+        let (progress_done_tx, progress_done_rx) = std::sync::mpsc::channel();
+        let progress_context = context.clone();
+        let progress_job = accepted.job_id.clone();
+        let progress = std::thread::spawn(move || {
+            publish_macos_job_progress_with_hook(
+                progress_context.as_ref(),
+                &progress_job,
+                stale,
+                || {
+                    progress_waiting_tx.send(()).unwrap();
+                    allow_progress_rx.recv().unwrap();
+                },
+            );
+            progress_done_tx.send(()).unwrap();
+        });
+        progress_waiting_rx.recv().unwrap();
+        let publication_lock_held = match MACOS_JOB_EVENT_PUBLISH_LOCK.try_lock() {
+            Ok(guard) => {
+                drop(guard);
+                false
+            }
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                panic!("the macOS job publication lock was poisoned")
+            }
+        };
+        allow_progress_tx.send(()).unwrap();
+        // In the reviewed ordering the lock is free, so wait for stale progress
+        // to publish before allowing active-map cleanup to continue. In the fix,
+        // it is held across both removals and the progress thread waits on it.
+        if !publication_lock_held {
+            progress_done_rx.recv().unwrap();
+        }
+        resume_completion_tx.send(()).unwrap();
+        completion.join().unwrap();
+        progress.join().unwrap();
+
+        let names = context
+            .published_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|event| event.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec!["operations.job.finished"],
+            "stale checkpoint progress must not publish after the terminal result"
+        );
+        assert!(
+            publication_lock_held,
+            "checkpoint result publication and both active-map removals must share the progress lock"
+        );
+        assert!(!MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&accepted.job_id));
+        assert!(!MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|job_id| job_id == &accepted.job_id));
     }
 
     #[test]
