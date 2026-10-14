@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
-use tauri::{AppHandle, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
 
 pub(crate) mod launch;
 #[cfg(target_os = "linux")]
@@ -37,12 +35,21 @@ pub enum ApplicationKind {
     Browser,
 }
 
-/// Open a web address with the current browser preference. Call from a worker.
-pub(crate) fn open_browser(app: &AppHandle, url: &str) -> Result<(), String> {
-    let url = browser_url(url)?;
-    let settings = crate::settings::current_settings(app)?;
-    let selection = browser_selection(&settings, cfg!(target_os = "linux"))?;
-    platform::open_browser(selection, &url)
+pub(crate) use crate::commands::applications::{
+    open_browser, open_terminal, selected_editor, selected_terminal,
+};
+
+/// Open a web address using the selected browser path. Call from a worker.
+pub(crate) fn validated_browser_url(value: &str) -> Result<String, String> {
+    browser_url(value)
+}
+
+pub(crate) fn open_browser_with_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+    url: &str,
+) -> Result<(), String> {
+    let selection = browser_selection(settings, cfg!(target_os = "linux"))?;
+    platform::open_browser(selection, url)
 }
 
 fn browser_url(value: &str) -> Result<String, String> {
@@ -92,8 +99,13 @@ fn browser_path(path: &Path, desktop_entry_required: bool) -> Result<&Path, Stri
     Ok(path)
 }
 
-pub(crate) fn selected_terminal(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::settings::current_settings(app)?;
+fn validate_browser_path(path: &Path, desktop_entry_required: bool) -> Result<(), String> {
+    browser_path(path, desktop_entry_required).map(|_| ())
+}
+
+pub(crate) fn selected_terminal_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Application, String> {
     let path = if settings
         .get("terminalUseSystemDefault")
         .and_then(|v| v.as_bool())
@@ -110,16 +122,16 @@ pub(crate) fn selected_terminal(app: &AppHandle) -> Result<Application, String> 
     platform::application_at(Path::new(&path))
         .ok_or_else(|| "The selected terminal is unavailable. Choose another in Settings.".into())
 }
-pub(crate) fn open_terminal(
-    app: &AppHandle,
+pub(crate) fn open_terminal_with_application(
     application: &Application,
     command: &str,
 ) -> Result<(), String> {
-    platform::open_terminal(app, application, command)
+    platform::open_terminal(application, command)
 }
 
-pub(crate) fn selected_editor(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::settings::current_settings(app)?;
+pub(crate) fn selected_editor_from_settings(
+    settings: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Application, String> {
     let path = if settings
         .get("editorUseSystemDefault")
         .and_then(|value| value.as_bool())
@@ -183,100 +195,49 @@ fn include_selections(
     }
 }
 
-#[tauri::command]
-pub async fn list_applications(
-    app: AppHandle,
-    window: WebviewWindow,
+pub(crate) fn discover_with_selections(
     selections: BTreeMap<String, String>,
 ) -> Result<ApplicationCatalog, String> {
-    if !matches!(window.label(), "main" | "status") {
-        return Err("This window cannot discover applications".into());
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        let _ = &app;
-        let mut catalog = platform::discover()?;
-        include_selections(
-            &mut catalog,
-            selections,
-            cfg!(target_os = "linux"),
-            platform::application_at,
-        );
-        #[cfg(target_os = "linux")]
-        let catalog = {
-            let (send, receive) = std::sync::mpsc::sync_channel(1);
-            app.run_on_main_thread(move || {
-                platform::load_icons(&mut catalog);
-                let _ = send.send(catalog);
-            })
-            .map_err(|error| error.to_string())?;
-            receive.recv().map_err(|error| error.to_string())?
-        };
-        Ok(catalog)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let mut catalog = platform::discover()?;
+    include_selections(
+        &mut catalog,
+        selections,
+        cfg!(target_os = "linux"),
+        platform::application_at,
+    );
+    Ok(catalog)
 }
 
-#[tauri::command]
-pub async fn choose_application(
-    app: AppHandle,
-    window: WebviewWindow,
+pub(crate) fn application_at(path: &Path) -> Option<Application> {
+    platform::application_at(path)
+}
+
+pub(crate) fn chosen_application(
+    path: &Path,
     kind: ApplicationKind,
-) -> Result<Option<Application>, String> {
-    if window.label() != "main" {
-        return Err("Only the main window can choose applications".into());
+) -> Result<Application, String> {
+    validate_browser_path(
+        path,
+        cfg!(target_os = "linux") && matches!(kind, ApplicationKind::Browser),
+    )?;
+    let application =
+        application_at(path).ok_or("The selected item is not an available application")?;
+    if application.name.encode_utf16().count() > 256
+        || application.path.encode_utf16().count() > 4096
+    {
+        return Err("The selected application's name or location is too long".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let title = match kind {
-            ApplicationKind::Terminal => "Choose a terminal",
-            ApplicationKind::Editor => "Choose a code editor",
-            ApplicationKind::Browser => "Choose a browser",
-        };
-        let dialog = app.dialog().file().set_title(title).set_parent(&window);
-        #[cfg(target_os = "macos")]
-        let dialog = dialog
-            .set_directory("/Applications")
-            .add_filter("Applications", &["app"]);
-        #[cfg(target_os = "linux")]
-        let dialog = {
-            let dialog = dialog.set_directory("/usr/share/applications");
-            if matches!(kind, ApplicationKind::Browser) {
-                dialog.add_filter("Desktop entries", &["desktop"])
-            } else {
-                dialog
-            }
-        };
-        let Some(file) = dialog.blocking_pick_file() else {
-            return Ok(None);
-        };
-        let path = file.into_path().map_err(|error| error.to_string())?;
-        browser_path(
-            &path,
-            cfg!(target_os = "linux") && matches!(kind, ApplicationKind::Browser),
-        )?;
-        let application = platform::application_at(&path)
-            .ok_or("The selected item is not an available application")?;
-        if application.name.encode_utf16().count() > 256
-            || application.path.encode_utf16().count() > 4096
-        {
-            return Err("The selected application's name or location is too long".into());
-        }
-        #[cfg(target_os = "linux")]
-        let application = {
-            let (send, receive) = std::sync::mpsc::sync_channel(1);
-            app.run_on_main_thread(move || {
-                let mut application = application;
-                platform::load_icon(&mut application);
-                let _ = send.send(application);
-            })
-            .map_err(|error| error.to_string())?;
-            receive.recv().map_err(|error| error.to_string())?
-        };
-        Ok(Some(application))
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    Ok(application)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn load_icons(catalog: &mut ApplicationCatalog) {
+    platform::load_icons(catalog);
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn load_icon(application: &mut Application) {
+    platform::load_icon(application);
 }
 
 #[cfg(test)]

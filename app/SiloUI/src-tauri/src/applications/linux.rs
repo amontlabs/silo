@@ -705,11 +705,7 @@ mod tests {
     }
 }
 
-pub fn open_terminal(
-    _app: &tauri::AppHandle,
-    application: &Application,
-    command: &str,
-) -> Result<(), String> {
+pub fn open_terminal(application: &Application, command: &str) -> Result<(), String> {
     let executable = terminal_program(Path::new(&application.path))
         .ok_or("The selected terminal is unavailable.")?;
     let mut launch = std::process::Command::new(&executable);
