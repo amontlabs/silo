@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use silo_engine::{context, Audience, Event};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -9,11 +10,41 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex, MutexGuard, OnceLock, PoisonError, TryLockError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError,
     },
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+
+/// Runtime operations are provided by the host adapter until the runtime module is extracted.
+/// Secrets logic only passes computer names and opaque revocation records across this seam.
+pub(crate) trait RuntimeAccess: Send + Sync + 'static {
+    fn apply_secrets(&self, computer: &str) -> Result<Vec<String>, String>;
+    fn validate_computers(&self, computers: &[String]) -> Result<(), String>;
+    fn revoke_secret(&self, record: &PendingRevocation) -> Result<bool, String>;
+}
+
+static RUNTIME: OnceLock<Arc<dyn RuntimeAccess>> = OnceLock::new();
+
+pub(crate) fn install_runtime(runtime: Arc<dyn RuntimeAccess>) -> Result<(), String> {
+    RUNTIME
+        .set(runtime)
+        .map_err(|_| "Secrets runtime access is already installed".to_owned())
+}
+
+fn runtime() -> Result<&'static Arc<dyn RuntimeAccess>, String> {
+    RUNTIME
+        .get()
+        .ok_or_else(|| "Computer secret access is unavailable.".to_owned())
+}
+
+fn publish_changed() {
+    if let Some(context) = context::current() {
+        context.publish(
+            Event::new("silo://application-state-changed", Value::Null),
+            Audience::All,
+        );
+    }
+}
 
 static PATH: OnceLock<PathBuf> = OnceLock::new();
 static OPERATION: Mutex<()> = Mutex::new(());
@@ -521,15 +552,13 @@ fn validate(request: &Request, document: &Document) -> Result<(), String> {
 }
 type Material = Vec<(String, String, Vec<String>)>;
 type OperationGuard = Option<MutexGuard<'static, ()>>;
-fn reconcile(app: &AppHandle, id: &str, operation: &mut OperationGuard) -> Result<(), String> {
+fn reconcile(id: &str, operation: &mut OperationGuard) -> Result<(), String> {
     reconcile_with(
         id,
         operation,
         &runtime_material,
-        &mut |computer, _desired| crate::runtime::apply_secrets(app, computer),
-        &|| {
-            let _ = app.emit("silo://application-state-changed", ());
-        },
+        &mut |computer, _desired| runtime()?.apply_secrets(computer),
+        &publish_changed,
     )
 }
 /// Applies one secret's desired state to each affected computer. The global secret
@@ -753,13 +782,12 @@ fn retry_revocations_with(
 static REVOCATIONS_RUNNING: AtomicBool = AtomicBool::new(false);
 /// One pass per state refresh, off the read/Remove path; busy guests are skipped.
 /// Remote snapshots invoke the same owner-side read and retry path.
-pub(crate) fn schedule_revocations(app: &AppHandle) {
+pub(crate) fn schedule_revocations() {
     if pending_revocations().is_ok_and(|records| records.is_empty())
         || REVOCATIONS_RUNNING.swap(true, Ordering::AcqRel)
     {
         return;
     }
-    let app = app.clone();
     std::thread::spawn(move || {
         struct Running;
         impl Drop for Running {
@@ -771,144 +799,111 @@ pub(crate) fn schedule_revocations(app: &AppHandle) {
         let Ok(_update) = crate::updates::operation_guard() else {
             return;
         };
-        if retry_revocations_with(&mut |record| crate::runtime::revoke_secret(&app, record))
-            .unwrap_or(false)
-        {
-            let _ = app.emit("silo://application-state-changed", ());
+        if retry_revocations_with(&mut |record| runtime()?.revoke_secret(record)).unwrap_or(false) {
+            publish_changed();
         }
     });
 }
 
-fn require_main(window: &WebviewWindow) -> Result<(), String> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err("Secret changes are only available in the main window.".into())
-    }
-}
-#[tauri::command]
-pub async fn read_secrets_state() -> Result<Vec<Value>, String> {
+pub(crate) async fn read_secrets_state() -> Result<Vec<Value>, String> {
     let path = store_path();
-    tauri::async_runtime::spawn_blocking(move || snapshot_from(path))
+    tokio::task::spawn_blocking(move || snapshot_from(path))
         .await
         .map_err(|_| "Secret settings could not be read.".to_string())?
 }
-#[tauri::command]
-pub async fn save_secret(
-    app: AppHandle,
-    window: WebviewWindow,
+
+pub(crate) fn save_secret<G>(
     request: Request,
+    update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let mut operation = Some(lock_unit(&OPERATION));
-        retry_store();
-        let validated_assignments = assignment_revision(&request.computers);
-        let document = load()?;
-        validate(&request, &document)?;
-        crate::runtime::validate_secret_computers(&app, &request.computers)?;
-        let id = request
-            .id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let original = document.secrets.iter().find(|s| s.id == id);
-        let value_id = if let Some(value) = &request.value {
-            let value_id = uuid::Uuid::new_v4().to_string();
-            let mut values = read_vault()?;
-            values.insert(value_id.clone(), value.clone());
-            write_vault(values)?;
-            value_id
-        } else {
-            original.ok_or("Enter a secret value.")?.value_id.clone()
-        };
-        update(|d| {
-            ensure_assignment_revision(&request.computers, &validated_assignments)?;
-            let affected = original
-                .into_iter()
-                .flat_map(|s| s.affected.iter().chain(s.computers.iter()))
-                .chain(request.computers.iter())
-                .cloned()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            d.secrets.retain(|s| s.id != id);
-            d.secrets.push(Secret {
-                id: id.clone(),
-                name: request.name,
-                value_id,
-                computers: request.computers,
-                allowed_domains: request.allowed_domains,
-                affected,
-                pending_computers: Vec::new(),
-                errors: BTreeMap::new(),
-                removing: false,
-            });
-            Ok(())
-        })?;
-        let _ = app.emit("silo://application-state-changed", ());
-        reconcile(&app, &id, &mut operation)?;
-        let _ = prune_values();
-        snapshot()
-    })
-    .await
-    .map_err(|_| "Secret changes could not finish.".to_string())?
+    let _update = update_guard()?;
+    let mut operation = Some(lock_unit(&OPERATION));
+    retry_store();
+    let validated_assignments = assignment_revision(&request.computers);
+    let document = load()?;
+    validate(&request, &document)?;
+    runtime()?.validate_computers(&request.computers)?;
+    let id = request
+        .id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let original = document.secrets.iter().find(|s| s.id == id);
+    let value_id = if let Some(value) = &request.value {
+        let value_id = uuid::Uuid::new_v4().to_string();
+        let mut values = read_vault()?;
+        values.insert(value_id.clone(), value.clone());
+        write_vault(values)?;
+        value_id
+    } else {
+        original.ok_or("Enter a secret value.")?.value_id.clone()
+    };
+    update(|d| {
+        ensure_assignment_revision(&request.computers, &validated_assignments)?;
+        let affected = original
+            .into_iter()
+            .flat_map(|s| s.affected.iter().chain(s.computers.iter()))
+            .chain(request.computers.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        d.secrets.retain(|s| s.id != id);
+        d.secrets.push(Secret {
+            id: id.clone(),
+            name: request.name,
+            value_id,
+            computers: request.computers,
+            allowed_domains: request.allowed_domains,
+            affected,
+            pending_computers: Vec::new(),
+            errors: BTreeMap::new(),
+            removing: false,
+        });
+        Ok(())
+    })?;
+    publish_changed();
+    reconcile(&id, &mut operation)?;
+    let _ = prune_values();
+    snapshot()
 }
-#[tauri::command]
-pub async fn remove_secret(
-    app: AppHandle,
-    window: WebviewWindow,
+
+pub(crate) fn remove_secret<G>(
     id: String,
+    update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Vec<Value>, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let _operation = lock_unit(&OPERATION);
-        retry_store();
+    let _update = update_guard()?;
+    let _operation = lock_unit(&OPERATION);
+    retry_store();
+    remove_from_store(&id)?;
+    publish_changed();
+    schedule_revocations();
+    snapshot()
+}
+
+pub(crate) fn retry_secret<G>(
+    id: String,
+    update_guard: impl FnOnce() -> Result<G, String>,
+) -> Result<Vec<Value>, String> {
+    let _update = update_guard()?;
+    let mut operation = Some(lock_unit(&OPERATION));
+    retry_store();
+    if load()?
+        .secrets
+        .iter()
+        .any(|secret| secret.id == id && secret.removing)
+    {
         remove_from_store(&id)?;
-        let _ = app.emit("silo://application-state-changed", ());
-        schedule_revocations(&app);
-        snapshot()
-    })
-    .await
-    .map_err(|_| "Secret removal could not finish.".to_string())?
+        schedule_revocations();
+    } else {
+        reconcile(&id, &mut operation)?;
+    }
+    let _ = prune_values();
+    snapshot()
 }
-#[tauri::command]
-pub async fn retry_secret(
-    app: AppHandle,
-    window: WebviewWindow,
-    id: String,
-) -> Result<Vec<Value>, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let mut operation = Some(lock_unit(&OPERATION));
-        retry_store();
-        if load()?
-            .secrets
-            .iter()
-            .any(|secret| secret.id == id && secret.removing)
-        {
-            remove_from_store(&id)?;
-            schedule_revocations(&app);
-        } else {
-            reconcile(&app, &id, &mut operation)?;
-        }
-        let _ = prune_values();
-        snapshot()
-    })
-    .await
-    .map_err(|_| "Secret changes could not finish.".to_string())?
-}
-pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    PATH.set(
-        app.path()
-            .app_data_dir()
-            .map_err(|_| "Secret storage is unavailable.")?
-            .join("secrets.json"),
-    )
-    .ok();
-    let app = app.clone();
+
+pub(crate) fn install() -> Result<(), String> {
+    let context = context::current().ok_or("Secret storage is unavailable.")?;
+    let _ = PATH.set(context.paths().app_data.join("secrets.json"));
     std::thread::spawn(move || {
         let mut operation = Some(lock_unit(&OPERATION));
         if let Ok(document) = load() {
@@ -921,12 +916,12 @@ pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
                 .iter()
                 .filter(|secret| !secret.removing && !secret.affected.is_empty())
             {
-                let _ = reconcile(&app, &secret.id, &mut operation);
+                let _ = reconcile(&secret.id, &mut operation);
             }
         }
         drop(operation);
-        schedule_revocations(&app);
-        let _ = app.emit("silo://application-state-changed", ());
+        schedule_revocations();
+        publish_changed();
     });
     Ok(())
 }
