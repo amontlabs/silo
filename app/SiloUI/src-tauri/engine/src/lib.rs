@@ -22,6 +22,7 @@ pub mod desktop_viewer;
 pub mod desktop_viewer_media;
 pub mod device_identity;
 pub mod editor;
+pub mod engine_update;
 pub mod events;
 pub mod files;
 pub mod github;
