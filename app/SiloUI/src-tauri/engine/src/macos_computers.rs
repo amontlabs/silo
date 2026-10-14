@@ -2030,6 +2030,24 @@ fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String
         .map(|entry| entry.record.clone()))
 }
 
+/// The name of the macOS computer with this identity, if one is stored on this device.
+pub fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(candidate, _)| candidate == id)
+        .map(|(_, name)| name)
+}
+
+/// The identity of the macOS computer with this name, if one is stored on this device.
+pub fn id_for_name(app: &MacosContext, name: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(_, candidate)| candidate.eq_ignore_ascii_case(name))
+        .map(|(id, _)| id)
+}
+
 pub fn proxy_contains_name(app: &MacosContext, name: &str) -> bool {
     names(app)
         .iter()

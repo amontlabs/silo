@@ -219,7 +219,16 @@ fn publish_job_progress(
     value: &Value,
     computer_id: Option<String>,
 ) -> Result<(), String> {
-    let data = serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+    let data: silo_api::methods::push::PushOperation =
+        serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+    // `push.changed` carries the same operation state as the job progress.
+    context.publish(
+        silo_engine::context::Event::new(
+            "push.changed",
+            serde_json::to_value(&data).map_err(|error| error.to_string())?,
+        ),
+        silo_engine::context::Audience::All,
+    );
     silo_engine::jobs::publish_progress(
         context,
         silo_api::jobs::JobProgress::Push {
