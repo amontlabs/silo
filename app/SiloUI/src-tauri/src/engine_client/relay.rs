@@ -2,7 +2,8 @@
 //!
 //! The raw frame always goes out as `silo://engine-event`. The UI keeps its established
 //! listeners, so each canonical event also produces the hint or payload those listeners
-//! read: most only trigger a re-read through the forwarding commands.
+//! read: most only trigger a re-read through the forwarding commands. `display.viewer.page`
+//! is not relayed: it is a script for one viewer's guest page (see `TauriSink`).
 
 use serde_json::{json, Value};
 
@@ -77,7 +78,6 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
         "preparation.changed" => vec![("silo://preparation-status", payload)],
         "preparation.chatgpt.changed" => vec![("chatgpt-app-status", payload)],
         "notifications.notice" => vec![("silo://notice", payload)],
-        "display.viewer.page" => vec![("silo://desktop-viewer-page", payload)],
         "operations.job.progress" => progress_events(&payload),
         _ => Vec::new(),
     }

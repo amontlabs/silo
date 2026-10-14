@@ -142,3 +142,47 @@ fn the_ui_crate_does_not_depend_on_the_engine_runtime_crates() {
     }
     assert!(manifest.contains("silo-client"));
 }
+
+/// Every method name the app sends is a canonical one: there are no aliases or old names.
+#[test]
+fn every_forwarded_method_is_in_the_canonical_registry() {
+    let registry: std::collections::HashSet<&str> = silo_api::methods::method_registry()
+        .iter()
+        .map(|descriptor| descriptor.name)
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for (path, text) in without_this_file(sources()) {
+        // Tests use fake method names for the engine's own replies; only code is checked.
+        let code = text.split("#[cfg(test)]").next().unwrap_or(&text);
+        let mut rest = code;
+        while let Some(index) = rest.find(['.', '(']) {
+            rest = &rest[index + 1..];
+            for call in ["call(", "call_with(", "run_job(", "run_job_until_exit("] {
+                if let Some(arguments) = rest.strip_prefix(call) {
+                    let arguments = arguments.trim_start();
+                    if let Some(quoted) = arguments.strip_prefix('"') {
+                        let name = quoted.split('"').next().unwrap_or_default();
+                        assert!(
+                            registry.contains(name),
+                            "{} sends {name}, which is not a canonical method",
+                            path.display()
+                        );
+                        seen.insert(name.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    // The scan is not vacuous: the core forwarding paths are among what it saw.
+    for expected in [
+        "computers.list",
+        "operations.job.get",
+        "settings.read",
+        "engine.shutdown",
+    ] {
+        assert!(
+            seen.contains(expected),
+            "{expected} was not found in the sources"
+        );
+    }
+}
