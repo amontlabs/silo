@@ -13,6 +13,8 @@ const CONTROL: &str = include_str!("helpers/control.pl");
 pub(crate) const FILES: &str = include_str!("helpers/files.pl");
 /// How long a stopped guest process tree may take to answer SIGTERM before SIGKILL.
 pub(crate) const TERMINATE_GRACE_MS: u64 = 3000;
+/// How long `kill` waits for a run that has not recorded its process group yet.
+const STARTUP_WAIT_MS: u64 = 2000;
 /// The signal-name lookup and the process-group kill are short guest commands.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -126,11 +128,12 @@ fn control(
 /// and returns once no member of the group remains. `Ok(false)` means some survived.
 pub(crate) fn terminate(target: &Target, root: bool, token: &str) -> Result<bool, GuestError> {
     let grace = TERMINATE_GRACE_MS.to_string();
+    let wait = STARTUP_WAIT_MS.to_string();
     let (code, _) = control(
         target,
         root,
-        &["kill", token, &grace],
-        CONTROL_TIMEOUT + Duration::from_millis(TERMINATE_GRACE_MS),
+        &["kill", token, &grace, &wait],
+        CONTROL_TIMEOUT + Duration::from_millis(TERMINATE_GRACE_MS + STARTUP_WAIT_MS),
     )?;
     Ok(code == 0)
 }

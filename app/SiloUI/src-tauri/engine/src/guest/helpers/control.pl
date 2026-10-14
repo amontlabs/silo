@@ -1,12 +1,15 @@
-# Silo guest process control. Arguments: kill TOKEN GRACE_MS | status TOKEN.
+# Silo guest process control. Arguments: kill TOKEN GRACE_MS WAIT_MS | status TOKEN.
 # `kill` stops the supervised group (TERM, a grace period, then KILL) and exits 0
-# once no member remains, or 1 if some survive. `status` prints and clears the
-# signal name a supervised run left behind.
+# once no member remains, or 1 if some survive. A run whose supervisor has not yet
+# recorded its group is waited for up to WAIT_MS, because the caller only asks to
+# kill runs that are still going. `status` prints and clears the signal name a
+# supervised run left behind.
 use strict;
 use warnings;
 use Time::HiRes ();
 
-my ($command, $token, $grace) = @ARGV;
+my ($command, $token, $grace, $wait) = @ARGV;
+$wait = 0 unless defined $wait;
 my $state = "/tmp/silo-exec-$token";
 if ($command eq 'status') {
     if (open(my $handle, '<', "$state.sig")) {
@@ -18,9 +21,15 @@ if ($command eq 'status') {
     exit 0;
 }
 my $group;
-if (open(my $handle, '<', "$state.pid")) {
-    $group = <$handle>;
-    close $handle;
+my $deadline_start = Time::HiRes::time() + $wait / 1000;
+while (1) {
+    if (open(my $handle, '<', "$state.pid")) {
+        $group = <$handle>;
+        close $handle;
+    }
+    last if defined $group && $group =~ /^(\d+)$/;
+    last if Time::HiRes::time() >= $deadline_start;
+    Time::HiRes::sleep(0.05);
 }
 if (!defined $group || $group !~ /^(\d+)$/) { exit 0; }
 $group = $1;

@@ -213,6 +213,8 @@ struct Session {
     retain: usize,
     accepts_input: bool,
     cancel: AtomicBool,
+    /// Set once the host process has ended.
+    host_exited: AtomicBool,
     cancelled_at: Mutex<Option<Instant>>,
     input: Mutex<Option<mpsc::Sender<Input>>>,
     pending_input: Arc<AtomicUsize>,
@@ -239,6 +241,7 @@ impl Session {
             retain,
             accepts_input,
             cancel: AtomicBool::new(false),
+            host_exited: AtomicBool::new(false),
             cancelled_at: Mutex::new(None),
             input: Mutex::new(None),
             pending_input: Arc::new(AtomicUsize::new(0)),
@@ -312,8 +315,14 @@ impl Session {
         thread::spawn(move || {
             // The guest tree first: SIGTERM, a grace period, SIGKILL, confirmed gone.
             let _ = terminate(&session.target, session.root, &session.token);
-            thread::sleep(HOST_EXIT_GRACE);
-            session.kill_host();
+            // The host process ends with the guest command; if it lingers, end it too.
+            let deadline = Instant::now() + HOST_EXIT_GRACE;
+            while !session.host_exited.load(Ordering::SeqCst) && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(50));
+            }
+            if !session.host_exited.load(Ordering::SeqCst) {
+                session.kill_host();
+            }
         });
     }
 
@@ -407,14 +416,15 @@ fn wait_for_exit(
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .try_wait();
         match waited {
-            Ok(Some(status)) => break Ok(status),
+            Ok(Some(status)) => {
+                session.host_exited.store(true, Ordering::SeqCst);
+                break Ok(status);
+            }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(error) => break Err(error),
         }
     };
-    for reader in readers {
-        let _ = reader.join();
-    }
+    join_readers(readers, session.cancel.load(Ordering::SeqCst));
     session
         .input
         .lock()
@@ -464,6 +474,25 @@ fn wait_for_exit(
     } else {
         session.finish_exited(&*context, exit_code, signal);
     }
+}
+
+/// Waits for the output readers to reach end-of-file. After a cancellation a descendant of the
+/// command that outlived it could hold the pipes open, so the wait is bounded.
+fn join_readers(readers: Vec<thread::JoinHandle<()>>, bounded: bool) {
+    if !bounded {
+        for reader in readers {
+            let _ = reader.join();
+        }
+        return;
+    }
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        for reader in readers {
+            let _ = reader.join();
+        }
+        let _ = done.send(());
+    });
+    let _ = finished.recv_timeout(Duration::from_secs(2));
 }
 
 fn sessions() -> std::sync::MutexGuard<'static, HashMap<JobId, Arc<Session>>> {
@@ -814,6 +843,29 @@ mod tests {
         );
         // Cancelling again, or after the end, is harmless.
         context.job_registry().unwrap().cancel(&job).unwrap();
+    }
+
+    #[test]
+    fn cancelling_before_the_guest_has_started_the_command_still_ends_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = RecordingContext::new(directory.path());
+        let marker = directory.path().join("survivor");
+        let script = format!("(sleep 3; touch '{}') & sleep 60", marker.display());
+        let job = start(directory.path(), &context, request(&["sh", "-c", &script]));
+        // No pause: the guest supervisor may not have recorded its process group yet.
+        context.job_registry().unwrap().cancel(&job).unwrap();
+        let started = Instant::now();
+        let finished = context.wait_finished(&job);
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            ErrorCode::Cancelled
+        );
+        assert!(started.elapsed() < Duration::from_secs(20));
+        std::thread::sleep(Duration::from_millis(3500));
+        assert!(
+            !marker.exists(),
+            "the command must not outlive its cancellation"
+        );
     }
 
     #[test]

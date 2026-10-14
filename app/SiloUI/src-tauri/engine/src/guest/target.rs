@@ -6,8 +6,10 @@ use crate::{
 };
 use silo_api::jobs::ErrorCode;
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 /// The guest working account as the wire reports it.
@@ -27,6 +29,30 @@ pub enum Target {
         name: String,
     },
     Macos(GuestSsh),
+}
+
+/// The working account of a Linux computer. Checking that the computer is managed and that the
+/// bundled runtime supports the account launches two runtime processes, so a positive answer is
+/// reused for a few seconds; a failure is never cached.
+fn linux_user(paths: &RuntimePaths, name: &str) -> Result<&'static str, GuestError> {
+    static VERIFIED: OnceLock<Mutex<HashMap<(PathBuf, String), Instant>>> = OnceLock::new();
+    const REUSE: Duration = Duration::from_secs(5);
+    let key = (paths.home.clone(), name.to_owned());
+    let verified = VERIFIED.get_or_init(Default::default);
+    let recent = verified
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&key)
+        .is_some_and(|at| at.elapsed() < REUSE);
+    if recent {
+        return Ok(crate::working_account::USER);
+    }
+    let user = crate::working_account::inspect_user(paths, name)?;
+    verified
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key, Instant::now());
+    Ok(user)
 }
 
 /// The one command line SSH carries to a macOS guest: every word single-quoted, so caller
@@ -111,9 +137,7 @@ impl Target {
     /// The working account's login name, once the computer can open it.
     pub fn account_user(&self) -> Result<&'static str, GuestError> {
         match self {
-            Self::Linux { paths, name, .. } => {
-                Ok(crate::working_account::inspect_user(paths, name)?)
-            }
+            Self::Linux { paths, name, .. } => linux_user(paths, name),
             Self::Macos(shell) => Ok(shell.user()),
         }
     }
@@ -187,7 +211,7 @@ impl Target {
                 let user = if root {
                     "root"
                 } else {
-                    crate::working_account::inspect_user(paths, name)?
+                    linux_user(paths, name)?
                 };
                 let mut args = vec![
                     "exec".to_owned(),
