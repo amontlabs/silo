@@ -1329,11 +1329,15 @@ mod tests {
     }
 
     struct Fixture {
+        _registry: std::sync::MutexGuard<'static, ()>,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
     }
 
     fn fixture() -> Fixture {
+        let registry = crate::methods::MACOS_REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let engine = Arc::new(SilodContext::new(
@@ -1355,7 +1359,11 @@ mod tests {
             Arc::new(NoMain),
             Arc::new(NoProcess),
         ));
-        Fixture { directory, engine }
+        Fixture {
+            _registry: registry,
+            directory,
+            engine,
+        }
     }
 
     impl Fixture {

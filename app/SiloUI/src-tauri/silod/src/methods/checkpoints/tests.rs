@@ -2,7 +2,7 @@
 //! (the macOS inventory, the operation gate, the export controller) runs under one lock.
 
 use std::{
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -23,8 +23,6 @@ use crate::{
 };
 
 use super::handle;
-
-static GLOBAL: Mutex<()> = Mutex::new(());
 
 const LINUX_ID: &str = "11111111-1111-4111-8111-111111111111";
 
@@ -59,7 +57,7 @@ fn fixture() -> Fixture {
 /// `converted_backup`: the device was migrated by conversion, so `runtime/` is a pre-upgrade
 /// backup instead of the clean generation being in use.
 fn fixture_with(converted_backup: bool) -> Fixture {
-    let lock = GLOBAL
+    let lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let directory = tempfile::tempdir().unwrap();
