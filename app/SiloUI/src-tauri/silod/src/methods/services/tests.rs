@@ -101,12 +101,13 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
 }
 
 /// Settings functions read the process-wide installed context, so every settings test shares
-/// one installed fixture.
+/// one installed fixture. Another module's tests may have installed their own context first in
+/// this test binary; the settings store then lives under that context, which is equivalent here.
 fn installed() -> &'static Fixture {
     static INSTALLED: OnceLock<Fixture> = OnceLock::new();
     INSTALLED.get_or_init(|| {
         let fixture = fixture();
-        silo_engine::context::install(fixture.silod.clone()).unwrap();
+        let _ = silo_engine::context::install(fixture.silod.clone());
         fixture
     })
 }
