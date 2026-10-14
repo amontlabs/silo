@@ -6,6 +6,8 @@ pub(crate) use silo_client::channel;
 pub(crate) use silo_engine::{
     applications, notifications, system_integrations, system_shutdown, terminal,
 };
+// The installer's lock, held across an engine update (design/p2 §3.3).
+pub(crate) use silo_engine::engine_update::installer;
 #[cfg(test)]
 mod command_permissions_tests;
 #[cfg(test)]

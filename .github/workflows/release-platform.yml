@@ -284,12 +284,15 @@ jobs:
           python3 scripts/measure-command.py release-bundle -- python3 scripts/retry-bundle.py --log "$RUNNER_TEMP/silo-bundle.log" -- npx tauri bundle --target "$RUNTIME_TARGET" --bundles "$RELEASE_BUNDLES" --ci --verbose
       # The verbose bundle log stays on the runner: it can contain signing and
       # build configuration details (see scripts/retry-bundle.py).
+      - name: Build the engine (silod) for the macOS bundle
+        if: runner.os == 'macOS'
+        run: cargo build --locked --release -p silod --target "$RUNTIME_TARGET"
       - name: Enforce exact macOS runtime libraries and rebuild signed packages
         if: runner.os == 'macOS'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY || env.SILO_TEST_SIGNING_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-        run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets
+        run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets --engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod"
       - name: Verify macOS library constraints
         if: runner.os == 'macOS'
         run: python3 scripts/test-macos-library-constraints.py --constraints-only --output "$RUNNER_TEMP/library-constraints"

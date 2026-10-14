@@ -23,5 +23,10 @@ smithers.db-wal
 # Vite dependency caches
 .vite/
 
+# Job registry databases; the engine keeps them in its data folder, never in the source tree
+registry.sqlite3
+registry.sqlite3-shm
+registry.sqlite3-wal
+
 # Job registry files that engine tests create under their working directory
 app/SiloUI/src-tauri/engine/engine/

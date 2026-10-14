@@ -720,7 +720,10 @@ fn now() -> u64 {
 fn delete_account_credential() -> Result<(), String> {
     match ACCOUNT_SECRET.write(None, || match entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(_) => Err("Cannot remove GitHub credentials from the system credential store.".into()),
+        Err(error) => Err(crate::credential_store::describe(
+            &error,
+            "Cannot remove GitHub credentials from the system credential store.",
+        )),
     }) {
         Ok(()) => {
             *PENDING_REFRESH
@@ -729,9 +732,12 @@ fn delete_account_credential() -> Result<(), String> {
             publish_credential_observation(Ok(None));
             Ok(())
         }
-        Err(_) => {
-            let message =
-                "Cannot remove GitHub credentials from the system credential store.".to_string();
+        Err(error) => {
+            let message = if crate::credential_store::is_access_denied_message(&error) {
+                error
+            } else {
+                "Cannot remove GitHub credentials from the system credential store.".to_string()
+            };
             publish_credential_observation(Err(message.clone()));
             Err(message)
         }
@@ -756,7 +762,10 @@ fn read_entry(entry: &keyring::Entry) -> Result<Option<Credential>, String> {
             .map(Some)
             .map_err(|_| "Stored GitHub credentials are invalid. Reconnect GitHub.".into()),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err("Cannot read GitHub credentials from the system credential store.".into()),
+        Err(error) => Err(crate::credential_store::describe(
+            &error,
+            "Cannot read GitHub credentials from the system credential store.",
+        )),
     }
 }
 fn store(c: &Credential) -> Result<(), String> {
@@ -794,16 +803,22 @@ fn flush_account_credential() {
         Some(c) => entry().and_then(|entry| store_entry(&entry, c)),
         None => match entry()?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => {
-                Err("Cannot remove GitHub credentials from the system credential store.".into())
-            }
+            Err(error) => Err(crate::credential_store::describe(
+                &error,
+                "Cannot remove GitHub credentials from the system credential store.",
+            )),
         },
     });
 }
 fn store_entry(entry: &keyring::Entry, c: &Credential) -> Result<(), String> {
     entry
         .set_password(&serde_json::to_string(c).map_err(|_| "Cannot encode GitHub credentials.")?)
-        .map_err(|_| "Cannot save GitHub credentials in the system credential store.".into())
+        .map_err(|error| {
+            crate::credential_store::describe(
+                &error,
+                "Cannot save GitHub credentials in the system credential store.",
+            )
+        })
 }
 #[cfg(test)]
 thread_local! {
@@ -1234,9 +1249,10 @@ fn read_ledger(entry: &keyring::Entry) -> Result<TokenLedger, String> {
         Ok(secret) => serde_json::from_str(&secret)
             .map_err(|_| "Stored GitHub runtime credentials are invalid.".into()),
         Err(keyring::Error::NoEntry) => Ok(TokenLedger::new()),
-        Err(_) => {
-            Err("Cannot read GitHub runtime credentials from the system credential store.".into())
-        }
+        Err(error) => Err(crate::credential_store::describe(
+            &error,
+            "Cannot read GitHub runtime credentials from the system credential store.",
+        )),
     }
 }
 fn save_ledger(entry: &keyring::Entry, ledger: &TokenLedger) -> Result<(), String> {
@@ -1245,8 +1261,11 @@ fn save_ledger(entry: &keyring::Entry, ledger: &TokenLedger) -> Result<(), Strin
             &serde_json::to_string(ledger)
                 .map_err(|_| "Cannot encode GitHub runtime credentials.")?,
         )
-        .map_err(|_| {
-            "Cannot save GitHub runtime credentials in the system credential store.".into()
+        .map_err(|error| {
+            crate::credential_store::describe(
+                &error,
+                "Cannot save GitHub runtime credentials in the system credential store.",
+            )
         })
 }
 // Record each successful issuance before making another network request. A

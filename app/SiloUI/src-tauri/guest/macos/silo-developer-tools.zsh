@@ -157,7 +157,9 @@ if ! /usr/bin/grep -Fqx "$PATH_LINE" "$ZSHENV" 2>/dev/null; then
 fi
 
 [[ -f $STAGE/setup-github.sh ]] || fail "the shared GitHub credential helper installer is missing"
-logged /usr/bin/sudo -n /usr/bin/env "PATH=$PATH" /bin/sh "$STAGE/setup-github.sh"
+# macOS sudo keeps HOME, so root would create ~/.local/state/gh in the account home (`gh --version`
+# writes its device id there) and later installers could not create ~/.local/share. Root gets its own HOME.
+logged /usr/bin/sudo -n /usr/bin/env "HOME=/var/root" "PATH=$PATH" /bin/sh "$STAGE/setup-github.sh"
 [[ $(/usr/bin/git config --system --get credential.https://github.com.helper) == /usr/local/libexec/silo-github-credential ]] ||
   fail "the shared GitHub credential helper is not configured"
 [[ $(/usr/bin/git lfs version) == "git-lfs/$GIT_LFS_VERSION"* ]] || fail "Git LFS version verification failed"

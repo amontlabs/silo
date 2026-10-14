@@ -29,7 +29,10 @@ fn read() -> Result<Option<PersonalToken>, String> {
             serde_json::from_str(&value).map_err(|_| "Stored GitHub token is invalid.".into())
         }
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err("Cannot read the GitHub token from the system credential store.".into()),
+        Err(error) => Err(crate::credential_store::describe(
+            &error,
+            "Cannot read the GitHub token from the system credential store.",
+        )),
     })
 }
 pub(super) fn status() -> Value {
@@ -326,7 +329,12 @@ pub fn save_github_personal_token(token: String) -> Result<Value, String> {
                 .set_password(
                     &serde_json::to_string(&token).map_err(|_| "Cannot encode GitHub token.")?,
                 )
-                .map_err(|_| "Cannot save GitHub token in the system credential store.".into())
+                .map_err(|error| {
+                    crate::credential_store::describe(
+                        &error,
+                        "Cannot save GitHub token in the system credential store.",
+                    )
+                })
         },
         |token| {
             publish(json!({"state":"connected","saved":true,"account":token.account}));
@@ -346,7 +354,10 @@ pub fn remove_github_personal_token() -> Result<Value, String> {
     SECRET.retry();
     SECRET.write(None, || match entry()?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(_) => Err("Cannot remove GitHub token from the system credential store.".into()),
+        Err(error) => Err(crate::credential_store::describe(
+            &error,
+            "Cannot remove GitHub token from the system credential store.",
+        )),
     })?;
     publish(json!({"state":"disconnected","saved":false}));
     CHECK_AT.store(now() + 300, Ordering::SeqCst);

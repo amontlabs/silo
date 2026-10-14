@@ -1,14 +1,23 @@
 //! Tauri adapters for engine updates. The engine owns the schedule, the feed and the state
 //! (`updates.*`, `updates.changed`); this app shows them and opens the release page.
-//! Replacing the app bundle is the shared installer's work, not an in-process command.
+//! Installing replaces the app bundle, so it follows the shared installer handoff (the same
+//! sequence Fjord's `EngineHandoff` runs): take `installer.lock`, `engine.update.prepare`,
+//! `engine.shutdown {reason: "update"}`, swap the bundle, restart. The lock is held until the
+//! new package is in place; if the app dies first the engine's watchdog aborts the update.
+
+use std::path::Path;
 
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::engine_client::{Engine, EngineClient, EngineError};
 
-const INSTALL_UNAVAILABLE: &str =
-    "Silo cannot install an update by itself yet. Download the new version from the release page.";
+const DEVELOPMENT_CHANNEL: &str =
+    "Silo Dev is built from source and does not install releases. Build the new version instead.";
+const NO_UPDATE: &str = "There is no update to install. Check for updates first.";
+const INSTALLER_BUSY: &str =
+    "Another app is installing a Silo update. Wait for it to finish, then try again.";
 
 pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
     engine.call("updates.state", json!({})).await
@@ -59,9 +68,76 @@ pub(crate) async fn download_update(engine: Engine<'_>) -> Result<Value, String>
     download(&engine).await.map_err(String::from)
 }
 
+/// Runs the installer side of an engine update. `swap` replaces the app bundle once the
+/// engine has saved its running computers and exited; it runs with the lock still held.
+///
+/// Everything that fails before the engine leaves aborts the prepared update, so the engine
+/// keeps serving. A failure after it left cannot be undone: the lock is released and whichever
+/// engine starts next restores the saved computers.
+pub(crate) async fn hand_off<L>(
+    engine: &EngineClient,
+    take_lock: impl FnOnce() -> std::io::Result<L>,
+    swap: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _lock = take_lock().map_err(|error| match error.kind() {
+        std::io::ErrorKind::WouldBlock => INSTALLER_BUSY.to_owned(),
+        _ => format!("Silo could not take the installer lock: {error}"),
+    })?;
+    // The engine saves and holds the running computers; `resuming` is for the new engine.
+    if let Err(error) = engine.run_job("engine.update.prepare", json!({})).await {
+        let _ = engine.call("engine.update.abort", json!({})).await;
+        return Err(String::from(error));
+    }
+    if let Err(error) = engine
+        .run_job_until_exit(
+            "engine.shutdown",
+            json!({"stopComputers": false, "reason": "update"}),
+        )
+        .await
+    {
+        let _ = engine.call("engine.update.abort", json!({})).await;
+        return Err(String::from(error));
+    }
+    swap()
+}
+
+fn engine_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    Ok(silo_client::channel::current().engine_directory(&home))
+}
+
+fn locked(directory: &Path) -> impl FnOnce() -> std::io::Result<crate::installer::Held> + '_ {
+    move || crate::installer::Held::take(directory)
+}
+
 #[tauri::command]
-pub(crate) async fn install_update(_stop_computers: bool) -> Result<Value, String> {
-    Err(INSTALL_UNAVAILABLE.to_owned())
+pub(crate) async fn install_update(
+    app: AppHandle,
+    engine: Engine<'_>,
+    _stop_computers: bool,
+) -> Result<Value, String> {
+    if silo_client::channel::current() == silo_client::channel::Channel::Development {
+        return Err(DEVELOPMENT_CHANNEL.to_owned());
+    }
+    // The verified package is fetched first, so the engine is down only for the swap.
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or(NO_UPDATE)?;
+    let package = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    let directory = engine_directory(&app)?;
+    hand_off(&engine, locked(&directory), || {
+        update.install(package).map_err(|error| error.to_string())
+    })
+    .await?;
+    // The new app starts its own bundled engine, which restores the saved computers.
+    app.restart()
 }
 
 #[tauri::command]
@@ -151,11 +227,102 @@ mod tests {
         assert_eq!(error.code, "unsupported_remote_operation");
     }
 
+    fn handoff_engine(fail: Option<&'static str>) -> FakeEngine {
+        FakeEngine::start(move |method, _| {
+            if fail == Some(method) {
+                return Err(("busy", "The engine refused.".into()));
+            }
+            match method {
+                "engine.update.prepare" | "engine.shutdown" => Ok(json!({"jobId": "job:1"})),
+                "operations.job.get" => Ok(
+                    json!({"jobId": "job:1", "state": "finished", "outcome": {"result": {"resuming": []}}}),
+                ),
+                _ => Ok(json!({"subscription": "sub"})),
+            }
+        })
+    }
+
     #[tokio::test]
-    async fn installing_in_process_is_not_offered() {
-        assert!(install_update(true)
+    async fn the_handoff_prepares_shuts_down_for_the_update_then_swaps_under_the_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let mut swapped = false;
+        hand_off(&engine, locked(directory.path()), || {
+            // The lock is still held while the bundle is replaced.
+            assert!(crate::installer::coordinator_present(directory.path()));
+            swapped = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(swapped);
+        assert_eq!(fake.calls("engine.update.prepare").len(), 1);
+        assert_eq!(
+            fake.calls("engine.shutdown"),
+            vec![json!({"stopComputers": false, "reason": "update"})]
+        );
+        assert!(fake.calls("engine.update.abort").is_empty());
+        // Dropping the guard released the lock.
+        assert!(!crate::installer::coordinator_present(directory.path()));
+    }
+
+    #[tokio::test]
+    async fn a_refused_prepare_aborts_and_never_shuts_down_or_swaps() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(Some("engine.update.prepare"));
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(&engine, locked(directory.path()), || {
+            panic!("the bundle must not be replaced")
+        })
+        .await
+        .unwrap_err();
+        assert!(error.contains("refused"), "{error}");
+        assert_eq!(fake.calls("engine.update.abort").len(), 1);
+        assert!(fake.calls("engine.shutdown").is_empty());
+        assert!(!crate::installer::coordinator_present(directory.path()));
+    }
+
+    #[tokio::test]
+    async fn a_refused_shutdown_aborts_and_keeps_the_bundle() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(Some("engine.shutdown"));
+        let (engine, _) = connected_client(&fake).await;
+        hand_off(&engine, locked(directory.path()), || {
+            panic!("the bundle must not be replaced")
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(fake.calls("engine.update.abort").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_held_lock_means_another_installer_and_nothing_is_asked_of_the_engine() {
+        let directory = tempfile::tempdir().unwrap();
+        let _other = crate::installer::Held::take(directory.path()).unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(&engine, locked(directory.path()), || Ok(()))
             .await
-            .unwrap_err()
-            .contains("release page"));
+            .unwrap_err();
+        assert_eq!(error, INSTALLER_BUSY);
+        assert!(fake.calls("engine.update.prepare").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_swap_after_the_engine_left_releases_the_lock_without_an_abort() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(
+            &engine,
+            locked(directory.path()),
+            || Err("disk full".into()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "disk full");
+        assert!(fake.calls("engine.update.abort").is_empty());
+        assert!(!crate::installer::coordinator_present(directory.path()));
     }
 }

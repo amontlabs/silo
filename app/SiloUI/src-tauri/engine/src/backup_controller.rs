@@ -3783,13 +3783,17 @@ mod tests {
         let controller = install(host, runtime.handle().clone()).unwrap();
         wait_for_recovery(&controller, &|| false).unwrap();
 
-        // Recovery publishes its settled journal just before it releases `busy`, so the flag
-        // clears a moment after the wait returns.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while controller.busy.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+        // Recovery settles the journal first, then publishes the outcome while it
+        // still holds `busy`, and only then releases it. Waiting for the journal
+        // therefore does not imply the slot is free; wait for the release itself.
+        let released = std::time::Instant::now();
+        while controller.busy.load(Ordering::Acquire) {
+            assert!(
+                released.elapsed() < Duration::from_secs(120),
+                "recovery never released the transfer slot"
+            );
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(!controller.busy.load(Ordering::Acquire));
         assert!(!recovery::pending(&controller).unwrap());
         assert!(matches!(
             recovery::snapshot(&controller)

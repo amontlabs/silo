@@ -373,6 +373,13 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
                     .map(|output| output.value)
                     .map_err(bridge_error)
             }
+            "guest.exec.input" => {
+                let typed = serde_json::from_value(params.clone())
+                    .map_err(|error| BridgeError::from(format!("Invalid params: {error}")))?;
+                super::guest::exec_input_owner(&typed)
+                    .map(|_| Value::Null)
+                    .map_err(bridge_error)
+            }
             "desktop.job" => super::display::start_owner_desktop_job(&self.0.context, params)
                 .map_err(bridge_error),
             "operations.list"

@@ -71,6 +71,30 @@ def sign_runtime(app):
             '--entitlements', Path(__file__).resolve().parent.parent / 'src-tauri/Entitlements.plist', app)
 
 
+ENGINE_DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
+
+
+def verify_engine(app, identifier):
+    """The embedded engine is sealed with the virtualization entitlement, and the app's LaunchAgent
+    plist points at it."""
+    engine = app / ENGINE_DISTRIBUTION
+    executable = engine / 'Contents/MacOS/silod'
+    command('codesign', '--verify', '--strict', engine)
+    display = command('codesign', '--display', '--verbose=4', executable).stderr
+    if not re.search(rb'flags=0x[0-9a-f]+\([^\n)]*\bruntime\b', display):
+        raise RuntimeError('silod must retain hardened runtime.')
+    raw = command('codesign', '--display', '--entitlements', ':-', executable).stdout
+    entitlements = plistlib.loads(raw) if raw.strip() else {}
+    if entitlements.get('com.apple.security.virtualization') is not True:
+        raise RuntimeError('silod must be signed with com.apple.security.virtualization.')
+    if entitlements.get('com.apple.security.cs.disable-library-validation'):
+        raise RuntimeError('Only the constrained VM helper may have the library-loading exception.')
+    agent = app / 'Contents/Library/LaunchAgents' / f'{identifier}.engine.plist'
+    plist = plistlib.loads(agent.read_bytes())
+    if plist.get('BundleProgram') != f'{ENGINE_DISTRIBUTION}/Contents/MacOS/silod':
+        raise RuntimeError('The LaunchAgent plist must point at the embedded engine.')
+
+
 def verify_bundle(app):
     command('codesign', '--verify', '--deep', '--strict', app)
     for name in TOOLS:

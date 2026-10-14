@@ -99,16 +99,22 @@ impl CaStore for KeychainStore {
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => {
-                Err("Cannot read the macOS proxy CA from the system credential store.".into())
-            }
+            Err(error) => Err(crate::credential_store::describe(
+                &error,
+                "Cannot read the macOS proxy CA from the system credential store.",
+            )),
         }
     }
 
     fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
         keyring::Entry::new(service, account)
             .and_then(|entry| entry.set_password(value))
-            .map_err(|_| "Cannot save the macOS proxy CA in the system credential store.".into())
+            .map_err(|error| {
+                crate::credential_store::describe(
+                    &error,
+                    "Cannot save the macOS proxy CA in the system credential store.",
+                )
+            })
     }
 
     fn delete(&self, service: &str, account: &str) -> Result<(), String> {
@@ -116,9 +122,10 @@ impl CaStore for KeychainStore {
             .map_err(|_| "Cannot access the macOS proxy CA in the system credential store.")?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => {
-                Err("Cannot remove the macOS proxy CA from the system credential store.".into())
-            }
+            Err(error) => Err(crate::credential_store::describe(
+                &error,
+                "Cannot remove the macOS proxy CA from the system credential store.",
+            )),
         }
     }
 }

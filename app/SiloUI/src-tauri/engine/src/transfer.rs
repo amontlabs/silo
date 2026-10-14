@@ -2802,13 +2802,15 @@ mod tests {
     fn the_client_cannot_write_far_past_the_listed_size_even_between_checks() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("written");
-        // The client stops the group and removes the partial as soon as it sees the overrun,
-        // so the script ignores TERM and counts through a descriptor opened beforehand.
+        // The overrun must happen between two checks of the partial, whatever the load, so
+        // the script writes its bulk to a file the checks never look at and the size limit
+        // alone has to stop it. It counts the bytes that reached the file, then exits with
+        // the status the limit gave the writer, before the client has anything to stop.
         let (world, destination, path) = download_world(
             &dir,
             4,
             &format!(
-                "trap '' TERM; : > \"$partial\"; exec 4< \"$partial\"; head -c 3000000 /dev/zero >> \"$partial\"; code=$?; wc -c <&4 > {marker}.tmp; mv {marker}.tmp {marker}; exit $code",
+                ": > \"$partial\"; head -c 3000000 /dev/zero > \"$partial.bulk\"; code=$?; wc -c < \"$partial.bulk\" > {marker}; rm -f \"$partial.bulk\"; exit $code",
                 marker = marker.display()
             ),
         );
@@ -2821,14 +2823,11 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, TOO_LARGE);
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !marker.exists() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
         let written: u64 = fs::read_to_string(&marker).unwrap().trim().parse().unwrap();
         assert!(written > 4, "{written}");
         assert!(written <= 4 + WRITE_SLACK, "{written}");
         assert!(!destination.exists());
+        assert!(leftovers(&world.local).is_empty());
     }
 
     #[test]
@@ -2863,7 +2862,9 @@ mod tests {
     fn a_file_swapped_for_a_link_before_it_is_read_is_discarded() {
         let Some(world) = world() else { return };
         fs::write(world.remote.join("f"), b"data").unwrap();
-        fs::write(world.local.join("secret"), b"other").unwrap();
+        // Shorter than the file it replaces, so the listing shows the swap by its size and
+        // a progress check on the partial can never end the download as too large first.
+        fs::write(world.local.join("secret"), b"no").unwrap();
         intercepted(
             &world,
             "^get",

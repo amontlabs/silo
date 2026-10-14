@@ -512,6 +512,18 @@ mod tests {
     }
 
     #[test]
+    fn root_runs_the_shared_github_setup_with_its_own_home() {
+        // macOS sudo keeps HOME. Without this, `gh --version` run by root left a root-owned
+        // ~/.local in the account home and the computer-use install failed with EACCES
+        // (live qualification, 2026-10-14).
+        let call = SCRIPT
+            .lines()
+            .find(|line| line.contains("setup-github.sh\"") && line.contains("sudo"))
+            .expect("the installer runs the shared GitHub setup through sudo");
+        assert!(call.contains("\"HOME=/var/root\""), "{call}");
+    }
+
+    #[test]
     fn installer_expands_a_checked_lock_without_unresolved_placeholders() {
         let script = script(&lock().unwrap());
         assert!(script.contains("CLTools_Executables_Universal.pkg"));

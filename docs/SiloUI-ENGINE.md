@@ -69,3 +69,40 @@ used to call the engine in-process forwards to the canonical `silod` method over
 - **Packaging.** `scripts/embed_engine.py` embeds `Silo Engine.app` (the signed `silod`, its
   manifest and plist) under `Contents/Resources/SiloEngineDistribution/` and copies the agent plist
   into `Contents/Library/LaunchAgents/`; `scripts/build_desktop.py` runs it before signing the app.
+
+## Signing the dev silod with a stable identity
+
+`silod` is sealed ad hoc (`codesign --sign -`) by default. An ad hoc signature is different
+for every build, so a Keychain item whose access list names the previous `silod` build refuses
+the next one. The engine never waits for the "wants to use your confidential information"
+dialog (it forbids Keychain UI for the whole process): the call fails and the client gets the
+`credential_access_denied` error ("Allow Silo's engine to use its saved sign-in"). Unattended
+work (launch migration, timers, startup) skips and retries later.
+
+To make approvals survive rebuilds, sign the dev engine with a stable identity.
+
+1. Create a self-signed code-signing certificate once: Keychain Access, Certificate Assistant,
+   Create a Certificate, name `Silo Dev Signing`, identity type Self Signed Root, certificate
+   type Code Signing. (Or use an Apple Development certificate.)
+2. Check it: `security find-identity -v -p codesigning`.
+3. Build with the identity in the environment:
+
+   ```sh
+   export SILO_ENGINE_SIGNING_IDENTITY="Silo Dev Signing"
+   npm --prefix app/SiloUI run desktop:build:debug
+   ```
+
+   `scripts/embed_engine.py` passes it to `codesign` for the nested `Silo Engine.app`
+   (hardened runtime and the virtualization entitlement are unchanged). Unset, it stays `-`.
+4. The first time the engine hits an existing item, approve it once in Silo (or in Keychain
+   Access, Get Info, Access Control, add `Silo Engine`), and choose Always Allow. The next
+   build with the same identity matches the same designated requirement and is not asked again.
+
+The cargo-built `silod` used by tests and the hand-assembled bundles of live runs must be
+sealed the same way: `codesign --force --sign "$SILO_ENGINE_SIGNING_IDENTITY" --options runtime
+--entitlements app/SiloUI/src-tauri/silod/macos/Entitlements.plist <Silo Engine.app>`.
+
+The engine bundle's `Info.plist` has no `LSUIElement`: `silod` sets its own activation policy
+(accessory, regular while a VM window is open), and AppKit refuses that call for a bundle that
+is already an agent app. If AppKit still refuses the accessory policy, `silod` logs it and runs
+on.

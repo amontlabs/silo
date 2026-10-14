@@ -40,6 +40,9 @@ objc2-app-kit = { version = "0.3", features = ["block2"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSettings", "UNUserNotificationCenter", "block2"] }
 block2 = "0.6"
+# keyring 3.6 reports Keychain failures as this exact security-framework version.
+keychain-status = { package = "security-framework", version = "2.11" }
+keychain-status-sys = { package = "security-framework-sys", version = "2.17" }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 objc2-virtualization = "0.3.2"

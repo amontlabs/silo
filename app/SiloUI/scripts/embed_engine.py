@@ -8,6 +8,7 @@ distribution; whichever app registers first supplies the one engine per Mac.
 """
 from pathlib import Path
 import json
+import os
 import plistlib
 import shutil
 import subprocess
@@ -17,8 +18,19 @@ SILOD = APP / 'src-tauri/silod'
 DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
 
 
-def codesign_engine(engine, entitlements, run=subprocess.run):
-    run(['codesign', '--force', '--sign', '-', '--options', 'runtime',
+SIGNING_IDENTITY_ENV = 'SILO_ENGINE_SIGNING_IDENTITY'
+
+
+def signing_identity(environ=os.environ):
+    """The identity that seals silod: `SILO_ENGINE_SIGNING_IDENTITY`, else ad hoc (`-`).
+
+    An ad hoc signature changes with every build, so Keychain access lists that name silod stop
+    matching after a rebuild. A stable identity keeps them valid (docs/SiloUI-ENGINE.md)."""
+    return environ.get(SIGNING_IDENTITY_ENV, '').strip() or '-'
+
+
+def codesign_engine(engine, entitlements, run=subprocess.run, environ=os.environ):
+    run(['codesign', '--force', '--sign', signing_identity(environ), '--options', 'runtime',
          '--entitlements', str(entitlements), str(engine)], check=True, capture_output=True)
     run(['codesign', '--verify', '--strict', str(engine)], check=True, capture_output=True)
 

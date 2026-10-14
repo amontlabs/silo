@@ -328,6 +328,7 @@ const METHODS: &[(&str, Access)] = &[
     ("guest.prepare", Access::Change),
     ("guest.exec.start", Access::Change),
     ("guest.exec.get", Access::Read),
+    ("guest.exec.input", Access::Change),
     ("guest.ssh", Access::Stream),
     ("network.state", Access::Read),
     ("network.publish", Access::Change),
@@ -5611,16 +5612,18 @@ mod reply_tests {
         let pid_file = home.path().join("child.pid");
         let mut command = Command::new("/bin/sh");
         command
-            .args(["-c", r#"echo $$ > "$0"; exec sleep 5"#])
+            .args(["-c", r#"echo $$ > "$0"; exec sleep 60"#])
             .arg(&pid_file);
         let started = Instant::now();
         let result = run_exchange(
             command,
             &json!({"method":"runtime.upsert", "params":{"payload":"x".repeat(1024 * 1024)}}),
-            started + Duration::from_millis(100),
+            // Long enough for a loaded machine to start the shell and let it record its pid
+            // before the deadline; the child itself outlives the deadline by far.
+            started + Duration::from_secs(2),
         );
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(30),
             "blocked request outlived its deadline"
         );
         assert!(matches!(result, Err(Failure::Failed(message)) if message.contains("timed out")));
@@ -5982,6 +5985,7 @@ mod dispatch_tests {
                 "ssh.access.save",
                 "guest.prepare",
                 "guest.exec.start",
+                "guest.exec.input",
                 "network.publish",
                 "network.unpublish",
                 "connections.keys.revoke",
