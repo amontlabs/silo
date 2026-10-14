@@ -1518,9 +1518,11 @@ mod tests {
     struct Fixture {
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
+        _gate: crate::methods::ProcessGateLease,
     }
 
     fn fixture() -> Fixture {
+        let gate = crate::methods::process_gate_lock();
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let engine = Arc::new(SilodContext::new(
@@ -1542,7 +1544,11 @@ mod tests {
             Arc::new(NoMain),
             Arc::new(NoProcess),
         ));
-        Fixture { directory, engine }
+        Fixture {
+            directory,
+            engine,
+            _gate: gate,
+        }
     }
 
     impl Fixture {

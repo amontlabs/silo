@@ -52,12 +52,16 @@ struct Fixture {
     exits: Arc<RecordedExits>,
     home: std::path::PathBuf,
     _directory: Option<tempfile::TempDir>,
+    /// Held while the fixture lives: the engine update takes the process-wide operation gate.
+    _gate: Option<crate::methods::ProcessGateLease>,
 }
 
 fn fixture() -> Fixture {
+    let gate = crate::methods::process_gate_lock();
     let directory = tempfile::tempdir().unwrap();
     let mut fixture = fixture_at(directory.path());
     fixture._directory = Some(directory);
+    fixture._gate = Some(gate);
     fixture
 }
 
@@ -97,6 +101,7 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
         exits,
         home: home.to_path_buf(),
         _directory: None,
+        _gate: None,
     }
 }
 
@@ -106,7 +111,10 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
 fn installed() -> &'static Fixture {
     static INSTALLED: OnceLock<Fixture> = OnceLock::new();
     INSTALLED.get_or_init(|| {
-        let fixture = fixture();
+        // Not `fixture()`: this one lives for the process and must not hold the gate lock.
+        let directory = tempfile::tempdir().unwrap();
+        let mut fixture = fixture_at(directory.path());
+        fixture._directory = Some(directory);
         let _ = silo_engine::context::install(fixture.silod.clone());
         fixture
     })
