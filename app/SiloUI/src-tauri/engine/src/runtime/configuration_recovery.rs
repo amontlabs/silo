@@ -40,6 +40,19 @@ fn path(paths: &RuntimePaths) -> PathBuf {
 fn failure(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::Unavailable(format!("Could not recover computer configuration: {error}"))
 }
+
+fn publish_recovery_progress(
+    context: &dyn silo_engine::EngineContext,
+    event: ComputerConfigurationProgress,
+) {
+    if let Ok(payload) = serde_json::to_value(event) {
+        silo_engine::context::publish_to_main_window(
+            context,
+            Event::new("silo://computer-configuration-progress", payload),
+        );
+    }
+}
+
 pub(super) fn load(paths: &RuntimePaths) -> Result<Option<Journal>, RuntimeError> {
     let file = match File::open(path(paths)) {
         Ok(file) => file,
@@ -234,10 +247,7 @@ impl Drop for CommandLock {
     }
 }
 
-pub fn command_lock(
-    paths: &RuntimePaths,
-    timeout: Duration,
-) -> Result<CommandLock, RuntimeError> {
+pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLock, RuntimeError> {
     prepare_runtime_home(&paths.home, paths.storage_home.as_deref())?;
     let file = fs::OpenOptions::new()
         .read(true)
@@ -640,13 +650,7 @@ fn recover_inner(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .append(computer_progress(&request_id, step, name, fraction));
-        if let Ok(payload) = serde_json::to_value(event) {
-            // window:main
-            context.publish(
-                Event::new("silo://computer-configuration-progress", payload),
-                Audience::All,
-            );
-        }
+        publish_recovery_progress(context, event);
     };
     progress("setup-started", "", 0);
     let result = device_resources()
@@ -707,6 +711,25 @@ mod tests {
             previous: request_of(previous),
             request: request_of(request),
         }
+    }
+
+    #[test]
+    fn recovered_configuration_progress_targets_only_the_main_client() {
+        use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+        let context = RecordingContext::default();
+        publish_recovery_progress(
+            &context,
+            super::super::computer_progress("request", "setup-started", "", 0),
+        );
+
+        let published = context.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(
+            published[0].0.name,
+            "silo://computer-configuration-progress"
+        );
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
     }
 
     #[test]

@@ -308,11 +308,7 @@ pub fn viewer_url(origin: &str) -> String {
 /// WKWebView can inset its CSS viewport below the titlebar while its native
 /// frame (and Tao's content frame) still includes that area. Measure that gap.
 #[cfg(any(target_os = "macos", test))]
-pub fn viewport_inset(
-    shell_height: u32,
-    scale: f64,
-    viewport_height: f64,
-) -> Result<f64, String> {
+pub fn viewport_inset(shell_height: u32, scale: f64, viewport_height: f64) -> Result<f64, String> {
     if !scale.is_finite() || scale <= 0. || !viewport_height.is_finite() || viewport_height <= 0. {
         return Err("Could not determine desktop viewport geometry.".into());
     }

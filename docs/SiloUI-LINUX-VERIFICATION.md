@@ -1,5 +1,10 @@
 # Linux verification
 
+> Historical Linux-host evidence only. Linux host support is discontinued and
+> the Linux build and packaging workflows have been removed. This guide is not
+> a current build, test, or release procedure. Linux guest computers on Mac hosts
+> remain supported.
+
 Linux parity needs separate evidence for each layer. Compilation alone does
 not prove the WebKit UI, desktop services, or hardware virtualization works.
 

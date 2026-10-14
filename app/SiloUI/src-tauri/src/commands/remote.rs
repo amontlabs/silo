@@ -3,6 +3,18 @@ use serde_json::Value;
 use std::sync::Arc;
 use tauri::AppHandle;
 
+fn approval_from_settings(
+    settings: Result<serde_json::Map<String, Value>, String>,
+) -> crate::computer_use::Approval {
+    settings
+        .map(|settings| crate::computer_use::initial_approval_from(&settings))
+        .unwrap_or_default()
+}
+
+fn approval_wire_value<E>(mode: Result<crate::computer_use::Approval, E>) -> String {
+    mode.unwrap_or_default().as_str().to_owned()
+}
+
 struct TauriLocalAccess(AppHandle);
 
 impl remote_access::LocalAccess for TauriLocalAccess {
@@ -238,17 +250,12 @@ pub(crate) async fn remote_upsert_computer(
     let state = remote::remote_upsert_computer(device_id.clone(), configuration, expected).await?;
     if created {
         // Keep reading the preference after the remote computer was saved, as before.
-        let mode = tokio::task::spawn_blocking(move || {
-            crate::settings::current_settings()
-                .map(|settings| {
-                    crate::computer_use::initial_approval_from(&settings)
-                        .as_str()
-                        .to_owned()
-                })
-                .unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default();
+        let mode = approval_wire_value(
+            tokio::task::spawn_blocking(move || {
+                approval_from_settings(crate::settings::current_settings())
+            })
+            .await,
+        );
         if let Err(error) = remote::remote_set_computer_approval(device_id, computer_id, mode).await
         {
             eprintln!("Computer use approval was not set on the new remote computer: {error:?}");
@@ -270,6 +277,20 @@ pub(crate) async fn remote_delete_computer(
         crate::commands::notifications::clear_computer(&app, &deleted);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn both_remote_approval_failure_fallbacks_serialize_ask() {
+        let settings_failure = approval_from_settings(Err("settings unavailable".into()));
+        assert_eq!(settings_failure, crate::computer_use::Approval::Ask);
+
+        let worker_failure = approval_wire_value::<()>(Err(()));
+        assert_eq!(worker_failure, "ask");
+    }
 }
 
 #[tauri::command]

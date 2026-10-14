@@ -233,7 +233,7 @@ pub(super) fn machine_states(_app: &MacosContext) -> Result<Vec<(String, Machine
 pub(super) fn attach_display(
     _app: &MacosContext,
     _id: &str,
-    _native_window: usize,
+    _resolve_native_window: impl FnOnce() -> Result<usize, String> + Send + 'static,
     _toolbar: bool,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())

@@ -280,7 +280,10 @@ impl Controller {
     }
 }
 
-pub fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
+pub fn install(
+    host: Arc<dyn RuntimeHost>,
+    runtime: tokio::runtime::Handle,
+) -> Result<Arc<Controller>, String> {
     let context = host.engine_context();
     let paths = context.paths();
     let scratch = paths.app_cache.join("backup-work");
@@ -327,7 +330,7 @@ pub fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
     // Settle an interrupted operation before automatic runtime migration starts.
     // Recovery removes only the output journaled for this export or import.
     if let Some(journal) = journal {
-        recovery::resume(controller.clone(), journal)?;
+        recovery::resume(controller.clone(), journal, &runtime)?;
     }
     Ok(controller)
 }
@@ -2342,6 +2345,78 @@ pub(crate) use tests::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::RuntimePackageKind;
+    use silo_engine::channel::Channel;
+    use silo_engine::context::{
+        Audience, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+        MainThread, PackageKind, ProcessControl,
+    };
+
+    struct StartupTestContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+    }
+
+    impl EngineContext for StartupTestContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: Event, _audience: Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for StartupTestContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("startup test must not restart the process")
+        }
+    }
+
+    struct StartupTestHost(Arc<StartupTestContext>);
+
+    impl RuntimeHost for StartupTestHost {
+        fn engine_context(&self) -> Arc<dyn EngineContext> {
+            self.0.clone()
+        }
+
+        fn runtime_storage(&self) -> Result<PathBuf, String> {
+            Ok(self.0.paths.app_data.join("runtime"))
+        }
+
+        fn blocks_operations(&self) -> bool {
+            true
+        }
+
+        fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
+            Ok(self.0.paths.resources.join("tools"))
+        }
+
+        fn ensure_runtime_ready(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn runtime_package_kind(&self) -> RuntimePackageKind {
+            RuntimePackageKind::Other
+        }
+    }
 
     /// What the first launch of an upgrade made of the journal the previous version left
     /// in `app_data`.
@@ -2536,6 +2611,74 @@ mod tests {
             computers: vec!["dev".into()],
             checkpoint_name: None,
         }
+    }
+
+    #[test]
+    fn install_schedules_pending_import_recovery_outside_tokio_runtime() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let app_data = directory.path().join("app-data");
+        fs::create_dir_all(&app_data).unwrap();
+        let history_path = app_data.join(HISTORY_FILE);
+        let seed = history_controller(history_path.clone());
+        let destination = directory.path().join("exports");
+        let archive = Archive {
+            name: "interrupted.silo-backup".into(),
+            archive_path: destination
+                .join("interrupted.silo-backup")
+                .display()
+                .to_string(),
+            completed_label: "Unknown".into(),
+            size: "Unknown".into(),
+            destination: destination.display().to_string(),
+            computers: vec!["copy".into()],
+            checkpoint_name: None,
+        };
+        recovery::begin(
+            &seed,
+            recovery::Journal::restore(archive, "copy".into(), Some("source".into())),
+        )
+        .unwrap();
+
+        let context = Arc::new(StartupTestContext {
+            paths: EnginePaths {
+                app_data,
+                app_config: directory.path().join("config"),
+                app_cache: directory.path().join("cache"),
+                app_log: directory.path().join("logs"),
+                resources: directory.path().join("resources"),
+                home: directory.path().join("home"),
+            },
+            identity: EngineIdentity {
+                channel: Channel::Development,
+                version: "0.1.0".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        });
+        let host: Arc<dyn RuntimeHost> = Arc::new(StartupTestHost(context));
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        // This synchronous test has no entered Tokio runtime, just like Tauri setup.
+        let controller = install(host, runtime.handle().clone()).unwrap();
+        wait_for_recovery(&controller, &|| false).unwrap();
+
+        assert!(!controller.busy.load(Ordering::Acquire));
+        assert!(!recovery::pending(&controller).unwrap());
+        assert!(matches!(
+            recovery::snapshot(&controller)
+                .unwrap()
+                .unwrap()
+                .operation(),
+            Operation::Result {
+                outcome: "failed",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -3519,9 +3662,10 @@ mod tests {
             operation: None,
             result_unseen: false,
         };
-        let expected: Value =
-            serde_json::from_str(include_str!("../../../src/test/contracts/backup-state.json"))
-                .unwrap();
+        let expected: Value = serde_json::from_str(include_str!(
+            "../../../src/test/contracts/backup-state.json"
+        ))
+        .unwrap();
         assert_eq!(serde_json::to_value(state).unwrap(), expected);
     }
 
@@ -4345,8 +4489,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path")),
             library: PathBuf::from(
                 std::env::var("SILO_TEST_LIBKRUNFW").expect("packaged library path"),
@@ -4516,8 +4659,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
             home: directory.path().join("cold-target"),
@@ -4742,8 +4884,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
             home: directory.path().join("warm-target"),
@@ -4842,8 +4983,7 @@ mod tests {
             .prefix("silo-ckpt-proof-")
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
-        let guest_image =
-            crate::test_support::manifest_root().join("runtime/guest-image");
+        let guest_image = crate::test_support::manifest_root().join("runtime/guest-image");
         let executable = PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path"));
         let library =
             PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").expect("packaged library path"));
@@ -5074,8 +5214,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let cold = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap()),
             library: PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").unwrap()),
             home: directory.path().join("cold"),

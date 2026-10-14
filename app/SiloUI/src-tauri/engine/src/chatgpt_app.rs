@@ -620,6 +620,7 @@ pub(crate) trait Downloader {
 pub(crate) struct HttpDownloader {
     attempts: u32,
     backoff: Duration,
+    user_agent: String,
     /// Tests only: serve from a loopback HTTP server instead of HTTPS.
     #[cfg(test)]
     plain_http: bool,
@@ -643,16 +644,26 @@ fn refusal(code: u16) -> Error {
 
 impl Default for HttpDownloader {
     fn default() -> Self {
-        Self {
-            attempts: 5,
-            backoff: Duration::from_secs(2),
-            #[cfg(test)]
-            plain_http: false,
-        }
+        let context = silo_engine::context::current();
+        Self::for_app_version(
+            context
+                .as_ref()
+                .map(|context| context.identity().version.as_str()),
+        )
     }
 }
 
 impl HttpDownloader {
+    fn for_app_version(version: Option<&str>) -> Self {
+        Self {
+            attempts: 5,
+            backoff: Duration::from_secs(2),
+            user_agent: user_agent_for_version(version),
+            #[cfg(test)]
+            plain_http: false,
+        }
+    }
+
     fn attempt(
         &self,
         client: &reqwest::blocking::Client,
@@ -764,7 +775,7 @@ impl Downloader for HttpDownloader {
                 }
             }))
             .https_only(!plain_http)
-            .user_agent(concat!("Silo/", env!("CARGO_PKG_VERSION")))
+            .user_agent(self.user_agent.as_str())
             .build()
             .map_err(|_| Error::fatal("Silo could not start a secure download."))?;
         let mut last = Error::retry("The ChatGPT download failed.");
@@ -780,6 +791,10 @@ impl Downloader for HttpDownloader {
         }
         Err(last)
     }
+}
+
+fn user_agent_for_version(version: Option<&str>) -> String {
+    version.map_or_else(|| "Silo".to_owned(), |version| format!("Silo/{version}"))
 }
 
 pub(crate) fn sha256_file(path: &Path) -> std::io::Result<String> {

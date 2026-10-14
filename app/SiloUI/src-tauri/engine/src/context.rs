@@ -8,6 +8,7 @@ use crate::jobs::JobRegistry;
 pub trait EngineContext: Send + Sync + 'static {
     fn paths(&self) -> &EnginePaths;
     fn identity(&self) -> &EngineIdentity;
+    fn runtime_state(&self) -> Arc<EngineRuntimeState>;
     fn publish(&self, event: Event, audience: Audience);
     fn main_thread(&self) -> Option<&dyn MainThread>;
     fn process(&self) -> &dyn ProcessControl;
@@ -35,6 +36,42 @@ pub trait EngineContext: Send + Sync + 'static {
 
     /// Ends client-owned remote display sessions. `None` closes all sessions.
     fn close_remote_displays(&self, _device: Option<&str>) {}
+}
+
+/// Publishes progress that belongs only in Silo's main window.
+pub fn publish_to_main_window(context: &dyn EngineContext, event: Event) {
+    context.publish(event, Audience::Client(ClientId::new("main")));
+}
+
+/// Mutable state whose lifetime belongs to one installed engine instance.
+///
+/// Keeping these stores here makes their ownership explicit: a second engine
+/// context receives fresh settings, shutdown, quit-confirmation, and startup
+/// state instead of inheriting process-wide state from an earlier instance.
+#[derive(Default)]
+pub struct EngineRuntimeState {
+    settings: Arc<crate::settings::SettingsState>,
+    shutdown: Arc<crate::settings::ShutdownState>,
+    quit_confirmation: Arc<crate::settings::QuitConfirmation>,
+    startup: Arc<crate::startup::StartupState>,
+}
+
+impl EngineRuntimeState {
+    pub fn settings(&self) -> &Arc<crate::settings::SettingsState> {
+        &self.settings
+    }
+
+    pub fn shutdown(&self) -> &Arc<crate::settings::ShutdownState> {
+        &self.shutdown
+    }
+
+    pub fn quit_confirmation(&self) -> &Arc<crate::settings::QuitConfirmation> {
+        &self.quit_confirmation
+    }
+
+    pub fn startup(&self) -> &Arc<crate::startup::StartupState> {
+        &self.startup
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -98,12 +135,156 @@ pub trait MainThread: Send + Sync {
     fn run(&self, work: Box<dyn FnOnce() + Send>) -> Result<(), String>;
 }
 
+/// Runs one host closure through the main-thread runner.
+pub fn dispatch_to_main_thread(
+    main_thread: &dyn MainThread,
+    work: Box<dyn FnOnce() + Send>,
+) -> Result<(), String> {
+    main_thread.run(work)
+}
+
 pub trait ProcessControl: Send + Sync {
     fn exit(&self, code: i32);
     fn restart(&self) -> !;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct RecordingContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published: Mutex<Vec<(Event, Audience)>>,
+    }
+
+    impl EngineContext for RecordingContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, audience: Audience) {
+            self.published.lock().unwrap().push((event, audience));
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for RecordingContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("test context cannot restart")
+        }
+    }
+
+    #[test]
+    fn main_window_progress_uses_the_main_client_audience() {
+        let context = RecordingContext {
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "0.11.1".into(),
+                package_kind: PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+            published: Mutex::new(Vec::new()),
+        };
+
+        publish_to_main_window(&context, Event::new("progress", serde_json::Value::Null));
+
+        let published = context.published.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0.name, "progress");
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+    }
+}
+
 static CONTEXT: OnceLock<Arc<dyn EngineContext>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::sync::Mutex;
+
+    pub(crate) struct RecordingContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published: Mutex<Vec<(Event, Audience)>>,
+    }
+
+    impl Default for RecordingContext {
+        fn default() -> Self {
+            Self {
+                paths: EnginePaths::default(),
+                identity: EngineIdentity {
+                    channel: crate::channel::Channel::Production,
+                    version: "0.0.0-test".into(),
+                    package_kind: PackageKind::Other,
+                },
+                runtime_state: Arc::new(EngineRuntimeState::default()),
+                published: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl RecordingContext {
+        pub(crate) fn published(&self) -> Vec<(Event, Audience)> {
+            self.published.lock().unwrap().clone()
+        }
+    }
+
+    impl EngineContext for RecordingContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, audience: Audience) {
+            self.published.lock().unwrap().push((event, audience));
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for RecordingContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("test context cannot restart")
+        }
+    }
+}
 
 /// Installs the host's context once, at startup. Engine code reads it with [`current`].
 pub fn install(context: Arc<dyn EngineContext>) -> Result<(), String> {

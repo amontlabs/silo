@@ -574,7 +574,7 @@ const REPLY_PREAMBLE: &[u8] = b"\0SILO-BRIDGE-REPLY\n";
 const REPLY_SEARCH_LIMIT: usize = 64 * 1024;
 /// The bridge's reply on its standard output: the preamble, then one frame.
 /// Keep the text field readable by older controllers while current peers use the code.
-fn error_reply(error: &BridgeError) -> Value {
+fn error_reply(error: &BridgeError, app_version: &str) -> Value {
     let legacy = match error.code {
         ErrorCode::UpdateInProgress => "SILO_SANDBOX_UPDATE_IN_PROGRESS",
         ErrorCode::UnsupportedRemoteOperation => UNSUPPORTED,
@@ -583,7 +583,7 @@ fn error_reply(error: &BridgeError) -> Value {
     let mut reply = json!({"error":legacy,"code":error.code,"message":error.message});
     if error.code == ErrorCode::IncompatibleVersion {
         reply["version"] = json!(VERSION);
-        reply["appVersion"] = json!(env!("CARGO_PKG_VERSION"));
+        reply["appVersion"] = json!(app_version);
     }
     reply
 }
@@ -1764,11 +1764,7 @@ pub fn guest_stream_params(args: &[String]) -> Result<Value, String> {
         _ => Err("Expected a device and computer identity.".into()),
     }
 }
-pub fn run_remote_stream(
-    device_id: &str,
-    method: &str,
-    params: Value,
-) -> Result<(), String> {
+pub fn run_remote_stream(device_id: &str, method: &str, params: Value) -> Result<(), String> {
     let device = read_existing_config_in(&existing_directory()?)?
         .devices
         .into_iter()
@@ -2030,6 +2026,12 @@ pub fn start(
 }
 fn listen() -> Result<(), String> {
     let remote_runtime = remote_runtime()?;
+    let app_version = remote_runtime
+        .runtime_host
+        .engine_context()
+        .identity()
+        .version
+        .clone();
     let lease = lease_control(&directory()?)?;
     let listener = bind_control_socket(&directory()?)?;
     LISTENING.store(true, std::sync::atomic::Ordering::Release);
@@ -2048,6 +2050,7 @@ fn listen() -> Result<(), String> {
             let runtime_host = remote_runtime.runtime_host.clone();
             let macos = remote_runtime.macos.clone();
             let local_access = remote_runtime.local_access.clone();
+            let app_version = app_version.clone();
             thread::spawn(move || {
                 let mut permit = Some(permit);
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -2108,7 +2111,7 @@ fn listen() -> Result<(), String> {
                         let _ = write_frame(&mut stream, &json!({"result":result}));
                     }
                     Err(error) => {
-                        let _ = write_frame(&mut stream, &error_reply(&error));
+                        let _ = write_frame(&mut stream, &error_reply(&error, &app_version));
                     }
                     Ok(None) => {}
                 }
@@ -2207,7 +2210,6 @@ fn execute(
         };
         return handshake_key_in(&current_home()?.join(".ssh/authorized_keys"), Some(public));
     }
-    let paths = paths().map_err(BridgeError::from)?;
     match method {
         _ if method.starts_with("runtime.") => {
             crate::runtime::remote_ops::dispatch(runtime_host, method, params.clone())
@@ -2215,8 +2217,13 @@ fn execute(
         _ if method.starts_with("macos.") => {
             crate::macos_remote_engine::dispatch(macos, method, params)
         }
-        _ => crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
-            .map_err(BridgeError::from),
+        "chatgpt.status" => local_access.chatgpt_status().map_err(BridgeError::from),
+        "chatgpt.retry" => local_access.chatgpt_retry().map_err(BridgeError::from),
+        _ => {
+            let paths = paths().map_err(BridgeError::from)?;
+            crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
+                .map_err(BridgeError::from)
+        }
     }
 }
 /// The methods this device serves, reported in the handshake.
@@ -4107,13 +4114,13 @@ mod health_tests {
     #[test]
     fn the_responder_reply_carries_its_versions() {
         let stale = BridgeError::incompatible_version("Update.", Some(VERSION));
-        let reply = error_reply(&stale);
+        let reply = error_reply(&stale, "0.11.1");
         assert_eq!(reply["code"], json!("incompatible_version"));
         assert_eq!(reply["version"], json!(VERSION));
-        assert_eq!(reply["appVersion"], json!(env!("CARGO_PKG_VERSION")));
+        assert_eq!(reply["appVersion"], json!("0.11.1"));
         let decoded = BridgeError::from_remote_reply(&reply).unwrap();
         assert_eq!(decoded.peer_version, Some(VERSION));
-        assert!(error_reply(&BridgeError::from("x"))
+        assert!(error_reply(&BridgeError::from("x"), "0.11.1")
             .get("version")
             .is_none());
     }
@@ -4644,7 +4651,7 @@ mod reply_tests {
         );
         let error = BridgeError::new(ErrorCode::Cancelled, "Cancelled by owner.");
         assert_eq!(
-            exchange_fixture_reply(&error_reply(&error)),
+            exchange_fixture_reply(&error_reply(&error, "0.11.1")),
             Err(Failure::Reported(error))
         );
         assert!(matches!(
@@ -4780,6 +4787,112 @@ mod dispatch_tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct PathIndependentContext {
+        paths: crate::context::EnginePaths,
+        identity: crate::context::EngineIdentity,
+        runtime_state: Arc<crate::context::EngineRuntimeState>,
+    }
+
+    impl crate::context::EngineContext for PathIndependentContext {
+        fn paths(&self) -> &crate::context::EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &crate::context::EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<crate::context::EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: crate::context::Event, _audience: crate::context::Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn crate::context::MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn crate::context::ProcessControl {
+            self
+        }
+    }
+
+    impl crate::context::ProcessControl for PathIndependentContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("remote dispatch test context cannot restart")
+        }
+    }
+
+    struct PathIndependentMacosHost;
+
+    impl crate::macos_computers_engine::MacosHost for PathIndependentMacosHost {
+        fn show_display(
+            &self,
+            _context: &crate::macos_computers_engine::MacosContext,
+            _id: &str,
+            _title: &str,
+            _toolbar: bool,
+        ) -> Result<(), String> {
+            Err("Display windows are unavailable in this test.".into())
+        }
+
+        fn close_display(&self, _id: &str) {}
+
+        fn linux_computer_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    struct PathIndependentRuntimeHost(Arc<PathIndependentContext>);
+
+    impl crate::runtime::RuntimeHost for PathIndependentRuntimeHost {
+        fn engine_context(&self) -> Arc<dyn crate::context::EngineContext> {
+            self.0.clone()
+        }
+
+        fn runtime_storage(&self) -> Result<PathBuf, String> {
+            Err("Runtime storage is unavailable in this test.".into())
+        }
+
+        fn blocks_operations(&self) -> bool {
+            false
+        }
+
+        fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
+            Err("Bundled tools are unavailable in this test.".into())
+        }
+
+        fn ensure_runtime_ready(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn runtime_package_kind(&self) -> crate::runtime::RuntimePackageKind {
+            crate::runtime::RuntimePackageKind::MacApp
+        }
+    }
+
+    struct PathIndependentLocalAccess;
+
+    impl crate::remote_access::LocalAccess for PathIndependentLocalAccess {
+        fn desktop_connection(&self, _computer: &str, _computer_id: &str) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+
+        fn desktop_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+
+        fn chatgpt_status(&self) -> Result<Value, String> {
+            Ok(json!({"operation": "status"}))
+        }
+
+        fn chatgpt_retry(&self) -> Result<Value, String> {
+            Ok(json!({"operation": "retry"}))
+        }
+    }
+
     /// A private owner directory (never the real `~/.silo`) with management enabled.
     fn owner() -> (tempfile::TempDir, PathBuf, Config) {
         let home = tempfile::tempdir().unwrap();
@@ -4817,6 +4930,68 @@ mod dispatch_tests {
             .filter(|(_, a)| *a == access)
             .map(|(m, _)| *m)
             .collect()
+    }
+
+    #[test]
+    fn linux_path_resolution_does_not_block_macos_or_chatgpt_handlers() {
+        let path_calls = Arc::new(AtomicUsize::new(0));
+        let resolver_calls = path_calls.clone();
+        let paths: Arc<RuntimePathsResolver> = Arc::new(move || {
+            resolver_calls.fetch_add(1, Ordering::SeqCst);
+            Err("Linux runtime migration is pending.".into())
+        });
+        let context = Arc::new(PathIndependentContext {
+            paths: crate::context::EnginePaths::default(),
+            identity: crate::context::EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "0.11.1".into(),
+                package_kind: crate::context::PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(crate::context::EngineRuntimeState::default()),
+        });
+        let runtime_host = PathIndependentRuntimeHost(context.clone());
+        let macos = crate::macos_computers_engine::MacosContext::new(
+            context,
+            Arc::new(PathIndependentMacosHost),
+        );
+        let local_access = PathIndependentLocalAccess;
+        let checkpoints: Arc<crate::remote_access::CheckpointHandler> =
+            Arc::new(|_, _| Ok(Value::Null));
+
+        for (method, expected) in [
+            ("chatgpt.status", json!({"operation": "status"})),
+            ("chatgpt.retry", json!({"operation": "retry"})),
+        ] {
+            assert_eq!(
+                execute(
+                    paths.as_ref(),
+                    checkpoints.as_ref(),
+                    &runtime_host,
+                    &macos,
+                    &local_access,
+                    method,
+                    &Value::Null,
+                )
+                .unwrap(),
+                expected
+            );
+        }
+
+        let macos_error = execute(
+            paths.as_ref(),
+            checkpoints.as_ref(),
+            &runtime_host,
+            &macos,
+            &local_access,
+            "macos.display.resize",
+            &Value::Null,
+        )
+        .unwrap_err();
+        assert_eq!(
+            macos_error.message,
+            "Invalid macOS computer request: missing computer identity."
+        );
+        assert_eq!(path_calls.load(Ordering::SeqCst), 0);
     }
     /// Quoted `word.word` literals: the method names a dispatcher source matches on.
     fn method_literals(source: &str) -> std::collections::BTreeSet<String> {
@@ -4916,12 +5091,12 @@ mod dispatch_tests {
         assert_eq!(error.code, ErrorCode::UnsupportedRemoteOperation);
         assert!(!dir.join("operations").exists());
         let mut bytes = Vec::new();
-        write_reply(&mut bytes, &error_reply(&error)).unwrap();
+        write_reply(&mut bytes, &error_reply(&error, "0.11.1")).unwrap();
         let reply = read_reply(std::io::Cursor::new(bytes)).unwrap();
         assert_eq!(reply["error"], error.message);
         assert_eq!(BridgeError::from_remote_reply(&reply).unwrap(), error);
         let updating = BridgeError::updating();
-        let reply = error_reply(&updating);
+        let reply = error_reply(&updating, "0.11.1");
         assert_eq!(reply["error"], "SILO_SANDBOX_UPDATE_IN_PROGRESS");
         assert_eq!(BridgeError::from_remote_reply(&reply).unwrap(), updating);
         assert_eq!(

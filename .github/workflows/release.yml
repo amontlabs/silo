@@ -39,8 +39,6 @@ jobs:
       draft: ${{ steps.release.outputs.draft }}
       source-ref: ${{ steps.source.outputs.ref }}
       runtime-macos: ${{ steps.runtime-macos.outputs.cache-hit }}
-      runtime-x64: ${{ steps.runtime-x64.outputs.cache-hit }}
-      runtime-arm64: ${{ steps.runtime-arm64.outputs.cache-hit }}
     steps:
       - name: Validate source revision before checkout
         id: source
@@ -79,20 +77,6 @@ jobs:
         with:
           runner: macos-15
           target: aarch64-apple-darwin
-          lookup-only: 'true'
-      - name: Check exact public runtime cache for x86_64-unknown-linux-gnu
-        id: runtime-x64
-        uses: ./.github/actions/prepare-release-runtime
-        with:
-          runner: ubuntu-24.04
-          target: x86_64-unknown-linux-gnu
-          lookup-only: 'true'
-      - name: Check exact public runtime cache for aarch64-unknown-linux-gnu
-        id: runtime-arm64
-        uses: ./.github/actions/prepare-release-runtime
-        with:
-          runner: ubuntu-24.04-arm
-          target: aarch64-unknown-linux-gnu
           lookup-only: 'true'
       - name: Validate release inputs before building
         id: release
@@ -185,16 +169,6 @@ jobs:
             bundles: app
             asset: macos-arm64
             cache-output: runtime-macos
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            bundles: deb,appimage
-            asset: linux-x64
-            cache-output: runtime-x64
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            bundles: deb,appimage
-            asset: linux-arm64
-            cache-output: runtime-arm64
     uses: ./.github/workflows/release-platform.yml
     with:
       runner: ${{ matrix.runner }}

@@ -12,6 +12,7 @@ pub mod chatgpt_app;
 pub mod clipboard;
 pub mod computer_names;
 pub mod computer_use;
+pub mod context;
 pub mod creation_inputs;
 pub mod dependencies;
 pub mod desktop;
@@ -22,16 +23,15 @@ pub mod desktop_viewer_media;
 pub mod device_identity;
 pub mod events;
 pub mod editor;
-pub mod context;
 pub mod files;
 pub mod github;
 pub mod github_http;
 pub mod github_tokens;
+pub mod health_watch;
 pub mod host_push;
 pub mod host_push_cache;
 pub mod host_push_operations;
 pub mod host_push_transport;
-pub mod health_watch;
 pub mod log_export;
 pub mod log_retention;
 pub mod jobs;
@@ -58,13 +58,13 @@ pub mod settings;
 pub mod ssh_access;
 pub mod ssh_connection;
 pub mod startup;
-pub mod system_shutdown;
 pub mod sync;
+pub mod system_integrations;
+pub mod system_shutdown;
 pub mod terminal;
 pub mod transfer;
 pub mod updates;
 pub mod viewer_clipboard;
-pub mod system_integrations;
 pub mod working_account;
 
 #[cfg(test)]
@@ -75,6 +75,6 @@ pub mod test_support;
 
 pub use channel::{Channel, Keychain};
 pub use context::{
-    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, Event, MainThread, PackageKind,
-    ProcessControl,
+    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+    MainThread, PackageKind, ProcessControl,
 };

@@ -121,11 +121,7 @@ fn session(value: Value) -> Result<Value, String> {
         "expiresIn":id(&value["expires_in"])?, "refreshTokenExpiresIn":id(&value["refresh_token_expires_in"])?}),
     )
 }
-pub fn execute(
-    config: &Configuration,
-    operation: Operation,
-    body: Value,
-) -> Result<Value, String> {
+pub fn execute(config: &Configuration, operation: Operation, body: Value) -> Result<Value, String> {
     execute_with(config, operation, body, github_http::send)
 }
 pub(crate) fn execute_for_computer(

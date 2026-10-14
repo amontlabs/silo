@@ -5,7 +5,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::{Condvar, Mutex, MutexGuard, OnceLock},
+    sync::{Condvar, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -490,7 +490,7 @@ struct InitializedSettings {
 }
 
 #[derive(Default)]
-struct SettingsState {
+pub struct SettingsState {
     store: Mutex<Option<InitializedSettings>>,
     ready: Condvar,
 }
@@ -705,20 +705,21 @@ pub fn exit_request(restarting: bool, approved: bool) -> ExitRequest {
     }
 }
 
-static SETTINGS: OnceLock<SettingsState> = OnceLock::new();
-static SHUTDOWN: OnceLock<ShutdownState> = OnceLock::new();
-static QUIT_CONFIRMATION: OnceLock<QuitConfirmation> = OnceLock::new();
-
-fn state() -> &'static SettingsState {
-    SETTINGS.get_or_init(SettingsState::default)
+fn runtime_state() -> Result<std::sync::Arc<silo_engine::EngineRuntimeState>, String> {
+    silo_engine::context::current()
+        .map(|context| context.runtime_state())
+        .ok_or_else(|| "The engine context is unavailable".to_owned())
 }
 
-pub fn shutdown_state() -> &'static ShutdownState {
-    SHUTDOWN.get_or_init(ShutdownState::default)
+pub fn shutdown_state() -> std::sync::Arc<ShutdownState> {
+    runtime_state()
+        .expect("shutdown state is used only after the engine context is installed")
+        .shutdown()
+        .clone()
 }
 
-pub fn shutdown_state_if_installed() -> Option<&'static ShutdownState> {
-    SHUTDOWN.get()
+pub fn shutdown_state_if_installed() -> Option<std::sync::Arc<ShutdownState>> {
+    runtime_state().ok().map(|state| state.shutdown().clone())
 }
 
 pub fn allow_exit_if_installed() {
@@ -727,32 +728,32 @@ pub fn allow_exit_if_installed() {
     }
 }
 
-pub fn quit_confirmation() -> &'static QuitConfirmation {
-    QUIT_CONFIRMATION.get_or_init(QuitConfirmation::default)
+pub fn quit_confirmation() -> std::sync::Arc<QuitConfirmation> {
+    runtime_state()
+        .expect("Quit confirmation is used only after the engine context is installed")
+        .quit_confirmation()
+        .clone()
 }
 
-/// Initialize the process-wide settings and shutdown policy state.
-pub fn install() {
-    let _ = state();
-    let _ = shutdown_state();
-    let _ = quit_confirmation();
-}
-
-fn configured_path() -> Result<Option<PathBuf>, String> {
-    let context = silo_engine::context::current()
-        .ok_or_else(|| "The engine context is unavailable".to_owned())?;
+fn configured_path(context: &dyn silo_engine::EngineContext) -> Result<Option<PathBuf>, String> {
     Ok(Some(context.paths().app_config.join("settings.json")))
 }
 
 /// Load validated settings from the host-provided settings path.
 pub fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
-    state().initialize(|| Ok(path))
+    let state = runtime_state()?;
+    state.settings().initialize(|| Ok(path))
 }
 
 /// Read validated, persisted preferences. This also supports native callers that
 /// run before the settings window has requested its initial snapshot.
 pub fn current_settings() -> Result<Map<String, Value>, String> {
-    let snapshot = state().initialize(configured_path)?;
+    let context = silo_engine::context::current()
+        .ok_or_else(|| "The engine context is unavailable".to_owned())?;
+    let state = context.runtime_state();
+    let snapshot = state
+        .settings()
+        .initialize(|| configured_path(context.as_ref()))?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
     }
@@ -760,7 +761,14 @@ pub fn current_settings() -> Result<Map<String, Value>, String> {
 }
 
 pub fn read(main: bool) -> Result<Snapshot, String> {
-    let mut snapshot = state().initialized()?.as_ref().unwrap().store.snapshot();
+    let state = runtime_state()?;
+    let mut snapshot = state
+        .settings()
+        .initialized()?
+        .as_ref()
+        .unwrap()
+        .store
+        .snapshot();
     if !main {
         snapshot.onboarding_draft = Value::Null;
     }
@@ -768,24 +776,28 @@ pub fn read(main: bool) -> Result<Snapshot, String> {
 }
 
 fn change(
+    state: &SettingsState,
     operation: impl FnOnce(&mut SettingsStore) -> Result<Snapshot, String>,
 ) -> Result<Snapshot, String> {
-    let mut initialized = state().initialized()?;
+    let mut initialized = state.initialized()?;
     let snapshot = operation(&mut initialized.as_mut().unwrap().store)?;
     crate::computer_use::sync_initial_approval(&snapshot.settings);
     Ok(snapshot)
 }
 
 pub fn update(patch: Map<String, Value>) -> Result<Snapshot, String> {
-    change(|store| store.update(patch))
+    let state = runtime_state()?;
+    change(state.settings(), |store| store.update(patch))
 }
 
 pub fn update_draft(draft: Value) -> Result<Snapshot, String> {
-    change(|store| store.update_draft(draft))
+    let state = runtime_state()?;
+    change(state.settings(), |store| store.update_draft(draft))
 }
 
 pub fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
-    change(|store| {
+    let state = runtime_state()?;
+    change(state.settings(), |store| {
         // Fixture modes never inherit a theme from the production webview origin.
         if store.path.is_none() {
             Ok(store.snapshot())
@@ -796,8 +808,9 @@ pub fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
 }
 
 pub fn flush() -> Result<(Snapshot, Result<(), String>), String> {
+    let state = runtime_state()?;
     let mut saved = Ok(());
-    let snapshot = change(|store| {
+    let snapshot = change(state.settings(), |store| {
         store.snapshot.revision += 1;
         saved = store.flush();
         Ok(store.snapshot())
@@ -806,7 +819,9 @@ pub fn flush() -> Result<(Snapshot, Result<(), String>), String> {
 }
 
 pub fn flush_for_update() -> Result<(), String> {
-    let mut initialized = state()
+    let state = runtime_state()?;
+    let mut initialized = state
+        .settings()
         .store
         .lock()
         .map_err(|_| "Settings could not be saved before updating.")?;
@@ -817,7 +832,9 @@ pub fn flush_for_update() -> Result<(), String> {
 }
 
 pub fn flush_pending() -> Result<(), String> {
-    let mut initialized = state()
+    let state = runtime_state()?;
+    let mut initialized = state
+        .settings()
         .store
         .lock()
         .map_err(|_| "Settings storage is unavailable.")?;
@@ -832,6 +849,20 @@ pub fn public_snapshot(snapshot: &Snapshot) -> Snapshot {
     let mut public = snapshot.clone();
     public.onboarding_draft = Value::Null;
     public
+}
+
+/// Publish the public settings event through the host's event adapter.
+pub fn publish_snapshot(
+    snapshot: &Snapshot,
+    publish: impl FnOnce(silo_engine::Event, silo_engine::Audience),
+) {
+    publish(
+        silo_engine::Event::new(
+            "settings:changed",
+            serde_json::to_value(public_snapshot(snapshot)).unwrap_or(Value::Null),
+        ),
+        silo_engine::Audience::All,
+    );
 }
 
 /// One confirm-capable Quit path (decision 7). Until the main UI opts in with
@@ -915,6 +946,55 @@ impl QuitConfirmation {
 mod tests {
     use super::*;
     use serde_json::json;
+    use silo_engine::EngineRuntimeState;
+
+    #[test]
+    fn settings_shutdown_and_startup_state_belong_to_their_engine_instance() {
+        let first_directory = tempfile::tempdir().unwrap();
+        let second_directory = tempfile::tempdir().unwrap();
+        let first_path = first_directory.path().join("settings.json");
+        let second_path = second_directory.path().join("settings.json");
+        std::fs::write(
+            &first_path,
+            br#"{"schemaVersion":1,"settings":{"theme":"dark"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &second_path,
+            br#"{"schemaVersion":1,"settings":{"theme":"light"}}"#,
+        )
+        .unwrap();
+
+        let first = EngineRuntimeState::default();
+        let second = EngineRuntimeState::default();
+        let first_snapshot = first
+            .settings()
+            .initialize(|| Ok(Some(first_path.clone())))
+            .unwrap();
+        let second_snapshot = second
+            .settings()
+            .initialize(|| Ok(Some(second_path.clone())))
+            .unwrap();
+
+        assert_eq!(first_snapshot.theme(), Some(Theme::Dark));
+        assert_eq!(second_snapshot.theme(), Some(Theme::Light));
+        assert_eq!(
+            first
+                .settings()
+                .initialize(|| Ok(Some(second_path)))
+                .unwrap()
+                .theme(),
+            Some(Theme::Dark)
+        );
+        assert_eq!(first.shutdown().request_generation(), Some(1));
+        assert_eq!(second.shutdown().request_generation(), Some(1));
+        first.quit_confirmation().enable();
+        assert!(first.quit_confirmation().enabled());
+        assert!(!second.quit_confirmation().enabled());
+        first.startup().cancel();
+        assert!(first.startup().is_cancelled());
+        assert!(!second.startup().is_cancelled());
+    }
 
     #[test]
     fn migrated_settings_and_onboarding_draft_are_accepted() {
@@ -1284,14 +1364,22 @@ mod tests {
     }
 
     #[test]
-    fn public_settings_snapshot_never_exposes_onboarding_drafts() {
+    fn settings_event_publishes_revision_and_settings_without_onboarding_draft() {
         let mut store = SettingsStore::load(None);
         store.update_draft(unfinished_draft()).unwrap();
         let snapshot = store.snapshot();
-        let public = public_snapshot(&snapshot);
-        assert!(public.onboarding_draft.is_null());
-        assert_eq!(public.revision, snapshot.revision);
-        assert_eq!(public.settings, snapshot.settings);
+
+        let mut published = None;
+        publish_snapshot(&snapshot, |event, audience| {
+            published = Some((event, audience))
+        });
+
+        let (event, audience) = published.unwrap();
+        assert_eq!(event.name, "settings:changed");
+        assert_eq!(audience, silo_engine::Audience::All);
+        assert!(event.payload["onboardingDraft"].is_null());
+        assert_eq!(event.payload["revision"], snapshot.revision);
+        assert_eq!(event.payload["settings"], json!(snapshot.settings));
         assert_eq!(snapshot.onboarding_draft, unfinished_draft());
     }
 

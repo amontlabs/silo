@@ -54,7 +54,7 @@ No release was published or signed, and no repository or remote release tag was 
 
 ### RL-02 Linux verification seeds production paths for a Dev binary
 
-**P2.** Confirmed at `02344c24`. Locations: [linux-verification.yml](../.github/workflows/linux-verification.yml), debug build and WebDriver steps; [test-linux-desktop.py](../app/SiloUI/scripts/test-linux-desktop.py), `run` fixture identity, settings and autostart paths.
+**P2.** Confirmed at `02344c24`. Locations: the then-current `linux-verification.yml`, debug build and WebDriver steps; [test-linux-desktop.py](../app/SiloUI/scripts/test-linux-desktop.py), `run` fixture identity, settings and autostart paths.
 
 **Trigger.** Run the Linux verification workflow. It invokes `desktop:build -- --debug --no-bundle --ci`, which selects `org.silo.dev`, then invokes the smoke harness without `SILO_LINUX_APPLICATION_ID`.
 
@@ -265,7 +265,7 @@ No release was published or signed, and no repository or remote release tag was 
 
 ### RL-15 Linux packaging filters omit runtime implementations and locked inputs
 
-**P3.** Confirmed at `d36c4914`. Location: [linux-packaging.yml](../.github/workflows/linux-packaging.yml), push and pull-request path filters.
+**P3.** Confirmed at `d36c4914`. Location: the then-current `linux-packaging.yml`, push and pull-request path filters.
 
 **Trigger.** Change only a runtime staging implementation imported by `prepare-microsandbox-runtime.mjs`, the locked guest image, or package/version/dependency metadata.
 
@@ -285,7 +285,7 @@ No release was published or signed, and no repository or remote release tag was 
 
 [package-macos-release.py](../app/SiloUI/scripts/package-macos-release.py) finalizes and verifies the app's VM signature policy before regenerating its `.app.tar.gz` and DMG. It signs the regenerated updater archive, and [verify-release-signatures.py](../app/SiloUI/scripts/verify-release-signatures.py) independently verifies each signature with the committed production public key. The final publication gate also verifies asset membership, checksums, package metadata and feed mappings. The existing O-11 draft-asset trust finding remains excluded; these observations are not independent build provenance or live updater proof. See the upstream [Tauri CLI](https://v2.tauri.app/reference/cli/) and [updater requirements](https://v2.tauri.app/plugin/updater/).
 
-Signing secrets are scoped to packaging/signing steps; synthetic native-test configuration is separate. Public runtime/dependency cache exporters validate allowed archive members and reject application/private build outputs in the exercised fixtures. [ci.yml](../.github/workflows/ci.yml) runs ordinary frontend/script/native checks; [linux-packaging.yml](../.github/workflows/linux-packaging.yml) installs/removes a disposable Debian package and inspects AppImage tool layout. This pass reviewed their source and workflow-pin checks without executing hosted jobs or package installers. Passing packaging does not establish KVM or installed-app behavior.
+Signing secrets are scoped to packaging/signing steps; synthetic native-test configuration is separate. Public runtime/dependency cache exporters validate allowed archive members and reject application/private build outputs in the exercised fixtures. [ci.yml](../.github/workflows/ci.yml) runs ordinary frontend/script/native checks; the then-current `linux-packaging.yml` installed/removed a disposable Debian package and inspected AppImage tool layout. This pass reviewed their source and workflow-pin checks without executing hosted jobs or package installers. Passing packaging does not establish KVM or installed-app behavior.
 
 The host-name scan covered `.silo`, production identifiers/Keychain services, `silo-remote`, and Silo editor profile names across native sources and scripts. Runtime aliases, editor/remote private directories, Keychain services, bridge links and autostart identities use `channel.rs` in the inspected native consumers. The shared `silo-remote:` URL protocol, `.silo-backup` format suffix, guest policy markers and fixture expectations are separate contracts. Owner-invoked production-settings import intentionally handles both channels and was not executed. RL-02, RL-03, RL-09 and RL-11 record concrete fixture-channel failures found by this scan. The integrated script-name reader now executes the native channel API without building the application; its mutation test follows renamed Dev fields.
 

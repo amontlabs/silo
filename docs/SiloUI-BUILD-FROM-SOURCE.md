@@ -2,11 +2,11 @@
 
 Use this path if you want to own the GitHub connection as well as run Silo locally. You create a GitHub App under your account, put its configuration in an ignored local file, and build Silo with it. To install a prebuilt app instead, follow the [README](../README.md#install). Silo's publisher has no ownership of that registration or independent installation access through it. You still need to trust the code you build and run.
 
-You do not need to host a server, create a personal access token, or generate an App private key. Silo talks directly to GitHub and stores user credentials in macOS Keychain or Linux Secret Service. Native builds currently require GitHub App configuration even if you plan to skip GitHub during onboarding.
+Silo's host app builds and runs on Apple Silicon macOS 14+ only. Linux host apps and packages are discontinued. Linux computers remain supported as VMs on a Mac host. You do not need to host a server, create a personal access token, or generate an App private key. Silo talks directly to GitHub and stores user credentials in macOS Keychain. Native builds require GitHub App configuration even if you plan to skip GitHub during onboarding.
 
 ## 1. Install the build tools
 
-Build for the same operating system and architecture where you will run Silo: Apple Silicon macOS 14+, or x86-64/ARM64 Linux compatible with Ubuntu 24.04. Cross-compilation is not covered here.
+Build on the supported host: Apple Silicon macOS 14+. Linux is a guest operating system, not a supported Silo host.
 
 Install [Node.js 24](https://nodejs.org/en/download), Python 3.11 or newer, [Go 1.25 or newer](https://go.dev/doc/install), Git, and [Rust through rustup](https://rustup.rs/). Install the pinned Rust toolchain used by the bundled VM runtime:
 
@@ -20,19 +20,7 @@ rustup toolchain install 1.94.0 --profile minimal
 xcode-select --install
 ```
 
-**Ubuntu 24.04:** install the native build and packaging dependencies:
-
-```sh
-sudo apt update
-sudo apt install -y build-essential pkg-config libwebkit2gtk-4.1-dev \
-  libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
-  patchelf libdbus-1-dev libclang-dev libcap-ng-dev cmake \
-  libfuse2t64 squashfs-tools file gstreamer1.0-libav gstreamer1.0-plugins-base
-```
-
-Linux Debian packages declare `gstreamer1.0-libav`, `gstreamer1.0-plugins-base` (the Opus decoder behind desktop sound) and `openssh-client` as runtime dependencies (RPM packages declare `gstreamer1-plugins-base` and `openssh-clients`): the desktop viewer and editor handoff run `ssh` and `ssh-keygen`. AppImages bundle the GStreamer media framework from the Ubuntu build host, including the installed H.264 decoder and Opus plugins (confirm `libgstopus` is in a built AppImage), but use the system OpenSSH client.
-
-Linux needs a working desktop credential store implementing Secret Service, such as GNOME Keyring, for GitHub login. Running local computers also requires hardware virtualization and access to `/dev/kvm`; compilation alone does not establish that KVM works. See [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/) for OS setup details.
+Linux guests on a Mac use Apple's Virtualization framework and the host's Keychain. They do not require a Linux desktop credential store or `/dev/kvm`.
 
 ## 2. Get the source
 
@@ -123,7 +111,7 @@ npm --prefix app/SiloUI run desktop
 
 This prepares the runtime and opens Silo Dev, a separate build channel (`org.silo.dev`) with its own data, Keychain items and Connections identity, so it never touches an installed Silo. `npm --prefix app/SiloUI run dev:import-production-settings` copies your installed Silo's configuration (not computers) into it; see [build channels](SiloUI-BUILD-CHANNELS.md). Keep the terminal running. `npm --prefix app/SiloUI run dev` starts only the frontend server. The main page requires the native app; it cannot run computers or complete GitHub setup in a browser. For an interactive browser demo with sample data, use the [website preview](../website/README.md#run).
 
-For an optimized app you can launch without the development terminal, use the command for your platform. These are production-channel builds (`org.silo.preview`) and share data with an installed Silo. These commands disable updater artifact signing, so you do not need the project's release signing keys.
+For an optimized app you can launch without the development terminal, use the macOS command below. It is a production-channel build (`org.silo.preview`) and shares data with an installed Silo. The command disables updater artifact signing, so you do not need the project's release signing keys.
 
 **macOS:**
 
@@ -135,15 +123,6 @@ open app/SiloUI/src-tauri/target/release/bundle/macos/Silo.app
 The macOS command applies and verifies the VM helper's exact-engine ad-hoc
 signature before succeeding. It creates a local app without a DMG or updater
 archive; no Apple distribution certificate is required.
-
-**Linux:**
-
-```sh
-npm --prefix app/SiloUI run desktop:build -- --bundles appimage \
-  --config '{"bundle":{"createUpdaterArtifacts":false}}'
-```
-
-Open `app/SiloUI/src-tauri/target/release/bundle/appimage/` and launch the generated `.AppImage` for your architecture. If necessary, enable **Allow executing file as program** in its file properties. Use this AppImage for a personal source build rather than enrolling it in Silo's official Debian update source.
 
 ## 6. Connect and use your repositories
 

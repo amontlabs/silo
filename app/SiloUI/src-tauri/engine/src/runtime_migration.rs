@@ -953,9 +953,7 @@ fn usable_storage(app_data: &Path, writable: bool, status: &str) -> Result<PathB
 /// Record a failed migration in memory even when saving it fails (a full disk
 /// is the likely cause of the failed copy), so Retry and Continue stay
 /// available for this session. The persistence error is returned.
-pub async fn migration_snapshot(
-    controller: Arc<Controller>,
-) -> Result<MigrationState, String> {
+pub async fn migration_snapshot(controller: Arc<Controller>) -> Result<MigrationState, String> {
     tokio::task::spawn_blocking(move || {
         controller
             .state

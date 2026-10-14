@@ -238,7 +238,6 @@ fn main() {
                 engine_context::install(app)?;
                 commands::creation_inputs::install(app.handle())?;
                 runtime_migration::vocabulary::run()?;
-                commands::settings::install(app.handle());
                 commands::system_shutdown::install(app.handle());
                 let queue_app = app.handle().clone();
                 runtime::OPERATIONS.set_listener(move || {

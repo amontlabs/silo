@@ -1814,8 +1814,7 @@ mod tests {
             b"# personal settings\nServerAliveInterval 37\nHost personal\n  User example\n";
         fs::write(home.join(".ssh/config"), existing).unwrap();
         let paths = RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: directory.path().join("msb"),
             home: directory.path().join("runtime"),
             storage_home: None,
@@ -2554,8 +2553,7 @@ mod tests {
             std::env::var("SILO_EDITOR_RUNTIME_HOME").expect("explicit runtime home"),
         );
         let paths = RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: PathBuf::from(
                 std::env::var("SILO_EDITOR_MSB").expect("explicit bundled runtime"),
             ),

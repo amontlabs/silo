@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 
 GITHUB = Path(__file__).resolve().parents[3] / '.github'
@@ -60,7 +59,7 @@ class WorkflowPinTests(unittest.TestCase):
 
 class WorkflowConcurrencyTests(unittest.TestCase):
     def test_verification_supersedes_only_the_same_pull_request(self):
-        for name in ['linux-verification.yml', 'release-tooling.yml']:
+        for name in ['release-tooling.yml']:
             with self.subTest(workflow=name):
                 workflow = (GITHUB / 'workflows' / name).read_text()
                 concurrency = re.search(r'(?m)^concurrency:\n((?: +[^\n]*\n)+)', workflow)
@@ -74,42 +73,22 @@ class WorkflowConcurrencyTests(unittest.TestCase):
 
 
 class WorkflowInputTests(unittest.TestCase):
-    def test_linux_collection_preserves_globs_and_asset_names(self):
-        workflow = (GITHUB / 'workflows/release-platform.yml').read_text()
-        step = workflow.split('      - name: Collect and verify Linux assets\n', 1)[1]
-        command = textwrap.dedent(step.split('        run: |\n', 1)[1].split('      - name:', 1)[0])
-        for target, asset in [
-            ('x86_64-unknown-linux-gnu', 'linux-x64'),
-            ('aarch64-unknown-linux-gnu', 'linux-arm64'),
-            ("x'; touch injected; #", "linux-x64'; touch injected; #"),
-        ]:
-            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                tools = root / 'tools'
-                tools.mkdir()
-                for name in ['python3', 'dpkg-deb']:
-                    executable = tools / name
-                    executable.write_text('#!/bin/sh\nexit 0\n')
-                    executable.chmod(0o755)
-                bundle = root / 'src-tauri/target/release-compile' / target / 'release/bundle'
-                (bundle / 'deb').mkdir(parents=True)
-                (bundle / 'appimage').mkdir()
-                (bundle / 'deb/Silo.deb').write_text('debian fixture')
-                (bundle / 'appimage/Silo.AppImage.sig').write_text('signature fixture')
-                (bundle / 'appimage/Silo.AppImage').write_text(
-                    '#!/bin/sh\nmkdir -p squashfs-root/usr/bin\ntouch squashfs-root/usr/bin/silo-ui\nchmod +x squashfs-root/usr/bin/silo-ui\n')
-                # Render old expressions as Actions would, and bind the new environment.
-                script = command.replace('${{ inputs.target }}', target).replace('${{ inputs.asset }}', asset)
-                result = subprocess.run(['bash', '-e', '-c', script], cwd=root, env={
-                    **os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH'],
-                    'RUNTIME_TARGET': target, 'RELEASE_ASSET': asset,
-                }, capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertFalse((root / 'injected').exists())
-                self.assertEqual(sorted(path.name for path in (root / 'release-assets').iterdir()),
-                                 sorted(f'Silo-{asset}{suffix}' for suffix in ['.deb', '.AppImage', '.AppImage.sig']))
-                self.assertEqual((root / f'release-assets/Silo-{asset}.deb').read_text(), 'debian fixture')
-                self.assertEqual((root / f'release-assets/Silo-{asset}.AppImage.sig').read_text(), 'signature fixture')
+    def test_host_build_ci_targets_macos_only(self):
+        ci = (GITHUB / 'workflows/ci.yml').read_text()
+        rust = ci.split('\n  rust:', 1)[1]
+        release = (GITHUB / 'workflows/release.yml').read_text()
+        warm = (GITHUB / 'workflows/warm-release-caches.yml').read_text()
+        benchmark = (GITHUB / 'workflows/benchmark-dependency-cache.yml').read_text()
+        platform = (GITHUB / 'workflows/release-platform.yml').read_text()
+        self.assertIn('runs-on: macos-15', rust)
+        self.assertNotIn('unknown-linux-gnu', rust)
+        self.assertIn('runner: macos-15', release)
+        self.assertNotIn('unknown-linux-gnu', release)
+        self.assertNotIn('unknown-linux-gnu', warm)
+        self.assertNotIn('unknown-linux-gnu', benchmark)
+        self.assertNotIn('Collect and verify Linux assets', platform)
+        self.assertFalse((GITHUB / 'workflows/linux-verification.yml').exists())
+        self.assertFalse((GITHUB / 'workflows/linux-packaging.yml').exists())
 
     def test_reusable_target_is_a_literal_command_argument(self):
         cases = [

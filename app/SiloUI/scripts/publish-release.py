@@ -8,8 +8,8 @@ import re
 import subprocess
 from datetime import datetime, timezone
 
-PLATFORMS = {"darwin-aarch64": "Silo-macos-arm64.app.tar.gz", "linux-x86_64": "Silo-linux-x64.AppImage", "linux-aarch64": "Silo-linux-arm64.AppImage"}
-PACKAGES = set(PLATFORMS.values()) | {"Silo-macos-arm64.dmg", "Silo-linux-x64.deb", "Silo-linux-arm64.deb"}
+PLATFORMS = {"darwin-aarch64": "Silo-macos-arm64.app.tar.gz"}
+PACKAGES = set(PLATFORMS.values()) | {"Silo-macos-arm64.dmg"}
 EXPECTED = PACKAGES | {name + ".sig" for name in PLATFORMS.values()}
 
 
@@ -25,8 +25,6 @@ def validate_version(version):
 
 DOWNLOADS = (
     ("macOS (Apple Silicon)", (("DMG", "Silo-macos-arm64.dmg"),)),
-    ("Linux x86-64", (("AppImage", "Silo-linux-x64.AppImage"), ("Debian package", "Silo-linux-x64.deb"))),
-    ("Linux ARM64", (("AppImage", "Silo-linux-arm64.AppImage"), ("Debian package", "Silo-linux-arm64.deb"))),
 )
 CHANGE_LISTS = re.compile(r"^### (Major|Minor|Patch) Changes$", re.M)
 

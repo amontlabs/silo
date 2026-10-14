@@ -665,11 +665,7 @@ fn safe_lcu_runtime_version(value: Option<&str>) -> Option<&str> {
     })
 }
 
-pub fn dispatch(
-    paths: &RuntimePaths,
-    method: &str,
-    params: &Value,
-) -> Result<Value, String> {
+pub fn dispatch(paths: &RuntimePaths, method: &str, params: &Value) -> Result<Value, String> {
     let computer_id = params["computerId"]
         .as_str()
         .ok_or("Missing computer identity.")?;

@@ -66,11 +66,6 @@ jobs:
           python-version: '3.12'
       - name: Explain one-time cold preparation
         run: echo 'Exact runtime cache was missing. Prepare once for both native and package jobs on this platform.'
-      - name: Install runtime compiler dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev libclang-dev libcap-ng-dev cmake
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -136,11 +131,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - name: Install native Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libclang-dev libcap-ng-dev cmake gstreamer1.0-libav fish
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -214,11 +204,6 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: app/SiloUI/package-lock.json
-      - name: Install native Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libdbus-1-dev libclang-dev libcap-ng-dev cmake libfuse2t64 minisign squashfs-tools file gstreamer1.0-libav fish xdg-utils
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -296,12 +281,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY || env.SILO_TEST_SIGNING_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         run: |
-          if [[ "$RUNNER_OS" == Linux ]]; then
-            bundle_config_args=(--config src-tauri/tauri.linux.package.conf.json)
-          else
-            bundle_config_args=()
-          fi
-          python3 scripts/measure-command.py release-bundle -- python3 scripts/retry-bundle.py --log "$RUNNER_TEMP/silo-bundle.log" -- npx tauri bundle --target "$RUNTIME_TARGET" --bundles "$RELEASE_BUNDLES" --ci --verbose "${bundle_config_args[@]}"
+          python3 scripts/measure-command.py release-bundle -- python3 scripts/retry-bundle.py --log "$RUNNER_TEMP/silo-bundle.log" -- npx tauri bundle --target "$RUNTIME_TARGET" --bundles "$RELEASE_BUNDLES" --ci --verbose
       # The verbose bundle log stays on the runner: it can contain signing and
       # build configuration details (see scripts/retry-bundle.py).
       - name: Enforce exact macOS runtime libraries and rebuild signed packages
@@ -323,22 +303,6 @@ jobs:
           test -s release-assets/Silo-macos-arm64.app.tar.gz
           test -s release-assets/Silo-macos-arm64.app.tar.gz.sig
           test -s release-assets/Silo-macos-arm64.dmg
-      - name: Collect and verify Linux assets
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p release-assets
-          packages=("src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/deb/"*.deb)
-          test "${#packages[@]}" -eq 1
-          python3 scripts/package-debian-release.py "${packages[0]}"
-          dpkg-deb --info "${packages[0]}"
-          cp "${packages[0]}" "release-assets/Silo-$RELEASE_ASSET.deb"
-          images=("src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/appimage/"*.AppImage)
-          test "${#images[@]}" -eq 1
-          cp "${images[0]}" "release-assets/Silo-$RELEASE_ASSET.AppImage"
-          cp "${images[0]}.sig" "release-assets/Silo-$RELEASE_ASSET.AppImage.sig"
-          chmod +x "release-assets/Silo-$RELEASE_ASSET.AppImage"
-          "release-assets/Silo-$RELEASE_ASSET.AppImage" --appimage-extract >/dev/null
-          test -x squashfs-root/usr/bin/silo-ui
       - name: Verify update signatures
         run: python3 scripts/verify-release-signatures.py release-assets
       - name: Verify signed package versions and architectures
@@ -357,4 +321,3 @@ jobs:
           path: ${{ runner.temp }}/build-phases.jsonl
           if-no-files-found: ignore
           retention-days: 7
-

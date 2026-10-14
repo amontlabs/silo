@@ -5,20 +5,34 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
     },
 };
 
 #[derive(Default)]
-struct StartupState {
+pub struct StartupState {
     cancelled: AtomicBool,
     active: Mutex<()>,
 }
 
-static STARTUP_STATE: OnceLock<StartupState> = OnceLock::new();
+impl StartupState {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
 
-fn state() -> &'static StartupState {
-    STARTUP_STATE.get_or_init(StartupState::default)
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn cancel_and_wait(&self) {
+        self.cancel();
+        // Finish the current bounded start; do not launch the remaining selections.
+        drop(self.active.lock());
+    }
+}
+
+fn state() -> Option<Arc<StartupState>> {
+    silo_engine::context::current().map(|context| context.runtime_state().startup().clone())
 }
 
 /// The result of resuming saved lifecycle actions, reduced to the values startup needs.
@@ -179,8 +193,7 @@ fn startup_failure_title(count: usize) -> String {
 }
 
 // Called once by native app setup, never by a webview mount, refresh or reopen.
-pub fn install(services: Arc<dyn StartupServices>) {
-    let state = state();
+pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
     let Ok(_active) = state.active.lock() else {
         return;
     };
@@ -256,18 +269,19 @@ pub fn install(services: Arc<dyn StartupServices>) {
 }
 
 pub fn is_cancelled<T>(_host: T) -> bool {
-    state().cancelled.load(Ordering::SeqCst)
+    state().is_some_and(|state| state.is_cancelled())
 }
 
 pub fn cancel<T>(_host: T) {
-    state().cancelled.store(true, Ordering::SeqCst);
+    if let Some(state) = state() {
+        state.cancel();
+    }
 }
 
 pub fn cancel_and_wait<T>(_host: T) {
-    let state = state();
-    state.cancelled.store(true, Ordering::SeqCst);
-    // Finish the current bounded start; do not launch the remaining selections.
-    drop(state.active.lock());
+    if let Some(state) = state() {
+        state.cancel_and_wait();
+    }
 }
 
 #[cfg(test)]

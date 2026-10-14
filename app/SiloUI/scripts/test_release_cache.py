@@ -36,7 +36,7 @@ class ReleaseCacheTests(unittest.TestCase):
         self.assertIn("'.github/actions/prepare-release-runtime/action.yml'", ACTION)
 
     def test_jobs_that_prepare_and_build_share_one_go_toolchain_policy(self):
-        for name in ('release-platform', 'linux-packaging', 'warm-release-caches', 'benchmark-dependency-platform'):
+        for name in ('release-platform', 'warm-release-caches', 'benchmark-dependency-platform'):
             text = (ROOT / f'.github/workflows/{name}.yml').read_text()
             jobs = re.split(r'^  [a-z-]+:\n', text.split('\njobs:\n', 1)[1], flags=re.M)
             for job in jobs:
@@ -60,7 +60,7 @@ class ReleaseCacheTests(unittest.TestCase):
             rustup.chmod(0o755)
             log = root / 'calls'
             env = dict(os.environ, PATH=str(commands), GITHUB_WORKSPACE=str(root), SILO_TOOLCHAIN_LOG=str(log))
-            for name in ['release-platform.yml', 'warm-release-caches.yml', 'linux-verification.yml']:
+            for name in ['release-platform.yml', 'warm-release-caches.yml']:
                 workflow = (ROOT / '.github/workflows' / name).read_text()
                 blocks = re.findall(r'          runtime_toolchain=.*\n          rustup toolchain install .*\n          rustup default .*', workflow)
                 self.assertEqual(len(blocks), 3 if name == 'release-platform.yml' else 1)

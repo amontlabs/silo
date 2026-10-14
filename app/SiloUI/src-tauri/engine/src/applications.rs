@@ -211,10 +211,7 @@ pub(crate) fn application_at(path: &Path) -> Option<Application> {
     platform::application_at(path)
 }
 
-pub fn chosen_application(
-    path: &Path,
-    kind: ApplicationKind,
-) -> Result<Application, String> {
+pub fn chosen_application(path: &Path, kind: ApplicationKind) -> Result<Application, String> {
     validate_browser_path(
         path,
         cfg!(target_os = "linux") && matches!(kind, ApplicationKind::Browser),

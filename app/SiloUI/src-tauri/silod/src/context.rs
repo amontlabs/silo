@@ -5,8 +5,8 @@ use std::{
 
 use silo_api::methods::engine::{EngineState, ShutdownPhase};
 use silo_engine::context::{
-    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, Event, MainThread,
-    ProcessControl,
+    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+    MainThread, ProcessControl,
 };
 use silo_engine::events::{EventBus, EventReceiver};
 use tokio::sync::mpsc;
@@ -19,6 +19,7 @@ const MAX_EVENTS_PER_SUBSCRIPTION: usize = 256;
 pub struct SilodContext {
     paths: EnginePaths,
     identity: EngineIdentity,
+    runtime_state: Arc<EngineRuntimeState>,
     local_device: LocalDeviceIdentity,
     events: EventSubscriptions,
     wire_events: EventBus,
@@ -39,6 +40,7 @@ impl SilodContext {
         Self {
             paths,
             identity,
+            runtime_state: Arc::new(EngineRuntimeState::default()),
             local_device,
             events: EventSubscriptions::default(),
             wire_events: EventBus::default(),
@@ -191,6 +193,10 @@ impl EngineContext for SilodContext {
 
     fn identity(&self) -> &EngineIdentity {
         &self.identity
+    }
+
+    fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+        self.runtime_state.clone()
     }
 
     fn publish(&self, event: Event, audience: Audience) {

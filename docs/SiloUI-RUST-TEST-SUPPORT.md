@@ -130,9 +130,9 @@ Logs and timing JSON remain under the ignored
 `app/SiloUI/src-tauri/target/verification/k18/` directory (`parallel-11.log` for
 the failure, `qualified-01.log` through `qualified-10.log`, and `final-*.log`).
 The [ordinary CI workflow](../.github/workflows/ci.yml) uses the same default-thread
-command. The [Linux verification workflow](../.github/workflows/linux-verification.yml)
-and [release platform workflow](../.github/workflows/release-platform.yml) explicitly
-use `--test-threads=1`. Linux execution was outside this local qualification.
+command. The historical Linux-host verification workflow was removed when Linux
+host support ended. The [release platform workflow](../.github/workflows/release-platform.yml)
+uses `--test-threads=1`. Linux execution was outside this local qualification.
 These fixture checks do not establish live computer or packaged-app behavior.
 
 ## Runtime fixtures

@@ -30,7 +30,7 @@ Preserve bundled MicroSandbox and Git tools, guest scripts, the Rust vendor patc
 
 ## Setup and commands
 
-Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.94.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. Supported packages target Apple Silicon macOS 14+ and Linux x86-64/ARM64 on Ubuntu 24.04-compatible systems; Linux VMs require KVM.
+Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.94.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. Silo host builds target Apple Silicon macOS 14+ only. Linux computers remain supported as guests on a Mac.
 
 Native builds and Rust tests require GitHub App configuration. Follow `docs/SiloUI-RELEASES.md#local-setup`; do not print `github-build.local.json`, signing credentials, or verbose build output containing configuration. For native unit tests only, the release guide permits explicit synthetic GitHub configuration. Never distribute those test executables.
 
@@ -52,7 +52,7 @@ cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --locked
 npm --prefix app/SiloUI run test:release
 ```
 
-Frontend tests use Vitest. Use test file arguments to focus a frontend run and a Cargo test filter to focus backend behavior. Rust tests live beside the code in `app/SiloUI/src-tauri/src/` and run with the default parallel thread count. Tests that reach process-wide state take the shared isolation guard; cache-lock tests use separate child processes to isolate file descriptor inheritance. See [native test support](docs/SiloUI-RUST-TEST-SUPPORT.md) for the remaining internally serialized group. `.github/workflows/ci.yml` runs these checks, and a relative-link check of the Markdown documentation, on every push to `main` and every pull request; `.github/workflows/linux-packaging.yml` builds and installs the Linux packages when packaging inputs change and nightly. Keep opt-in live tests separate from ordinary unit tests. Release-tooling changes also need the relevant script tests and workflow checks.
+Frontend tests use Vitest. Use test file arguments to focus a frontend run and a Cargo test filter to focus backend behavior. Rust tests live beside the code in `app/SiloUI/src-tauri/src/` and run with the default parallel thread count. Tests that reach process-wide state take the shared isolation guard; cache-lock tests use separate child processes to isolate file descriptor inheritance. See [native test support](docs/SiloUI-RUST-TEST-SUPPORT.md) for the remaining internally serialized group. `.github/workflows/ci.yml` runs frontend checks, macOS Rust tests, release-tooling checks, and a relative-link check of Markdown documentation on every push to `main` and every pull request. Keep opt-in live tests separate from ordinary unit tests. Release-tooling changes also need the relevant script tests and workflow checks.
 
 For a local macOS debug bundle:
 
@@ -68,7 +68,7 @@ For an optimized local macOS app without installer or updater signing:
 npm --prefix app/SiloUI run desktop:build
 ```
 
-Output: `app/SiloUI/src-tauri/target/release/bundle/macos/Silo.app`. On macOS, this command creates only a local app, applies the existing exact-engine VM signing policy, and verifies the final bundle. No distribution certificate or updater key is required. The previous explicit `--bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'` arguments remain supported. Linux builds retain the native Tauri packaging behavior. Follow the release guide for distributable packages; a local app build does not publish anything. Set an absolute `CARGO_TARGET_DIR` to rebuild separately from an app currently running from the usual output.
+Output: `app/SiloUI/src-tauri/target/release/bundle/macos/Silo.app`. On macOS, this command creates only a local app, applies the existing exact-engine VM signing policy, and verifies the final bundle. No distribution certificate or updater key is required. The previous explicit `--bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'` arguments remain supported. Linux host builds and packages are discontinued; Linux guest computers remain supported on Mac hosts. Follow the release guide for distributable packages; a local app build does not publish anything. Set an absolute `CARGO_TARGET_DIR` to rebuild separately from an app currently running from the usual output.
 
 ## Build channels
 

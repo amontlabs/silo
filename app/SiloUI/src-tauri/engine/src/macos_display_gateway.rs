@@ -555,5 +555,4 @@ mod tests {
         assert_eq!(gateway.token.len(), 32);
         assert!(url.ends_with(&gateway.token));
     }
-
 }
