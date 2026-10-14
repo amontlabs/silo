@@ -16,9 +16,13 @@ export interface StatusBarRoute {
   computerTab?: ComputerDetailTab
 }
 
+/** What Quit does to running computers once the user chose (95 A-2). */
+export type QuitChoice = "keep" | "stop"
+
 export interface StatusBarActions extends Pick<ApplicationActions, "startComputer" | "stopComputer" | "restartComputer" | "openTerminal" | "pushRepository" | "listComputerDirectory"> {
   openSilo: (route?: StatusBarRoute) => void
-  quit: () => void
+  /** Quit Silo. With running computers the user has already chosen: keep them running, or stop them first. */
+  quit: (choice?: QuitChoice) => void
   refresh: () => void
   openEditor: (computer: string, path: string) => void
   openSite: (computer: string, port: number) => void

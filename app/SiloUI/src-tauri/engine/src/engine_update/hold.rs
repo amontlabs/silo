@@ -115,6 +115,12 @@ impl Hold {
                     adapters: &adapters,
                 };
                 while let Ok(command) = receiver.recv() {
+                    // The computers an unresolved journal names stay reserved after every
+                    // step that may change which ones those are.
+                    let sync = !matches!(
+                        command,
+                        Command::Stop | Command::Prepared(_) | Command::OwnsLiveMachines(_)
+                    );
                     match command {
                         Command::Prepare(request, reply) => {
                             let request = PrepareRequest {
@@ -145,6 +151,9 @@ impl Hold {
                                 .send(adapters.iter().any(|adapter| adapter.owns_live_machines()));
                         }
                         Command::Stop => break,
+                    }
+                    if sync {
+                        super::reservation::sync(&store);
                     }
                 }
                 drop(guards);

@@ -12,6 +12,7 @@ import sys
 
 from macos_release_signing import sign_runtime, verify_bundle
 from channel_names import channel_names
+from embed_engine import embed_engine
 
 APP = Path(__file__).resolve().parent.parent
 DEVELOPMENT_CONFIG = 'src-tauri/tauri.dev.conf.json'
@@ -67,6 +68,12 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
                                     'macOS': {'hardenedRuntime': True}}})
     args = arguments + ([] if options.bundles else ['--bundles', 'app'])
     run(tauri + args + ['--config', config], cwd=root, check=True)
+    # The app is a client of the engine and carries its own copy for Service Management.
+    run(['cargo', 'build', '--locked', '--release', '-p', 'silod'] + (['--target', options.target] if options.target else []),
+        cwd=root, check=True)
+    commit = (run(['git', 'rev-parse', 'HEAD'], cwd=root, check=False, capture_output=True, text=True).stdout or '').strip() or 'unknown'
+    silod = target / 'release/silod'
+    embed_engine(bundle, silod, identifier=production['identifier'], build=f'silo-{commit}')
     sign_runtime(bundle)
     verify_bundle(bundle)
     return bundle

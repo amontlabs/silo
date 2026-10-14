@@ -676,13 +676,16 @@ async fn serve_connection(
     let _ = reader_task.await;
     drop(reply_tx);
     drop(event_tx);
+    // The client is gone before anything it opened is closed, so a request that is still
+    // opening a screen can no longer register one behind this teardown.
+    event_stream.disconnect();
     // Stopping a tunnel can wait up to half a second, so it must not hold an async worker.
     let closing = client_id.as_str().to_owned();
     let _ = tokio::task::spawn_blocking(move || {
         silo_engine::desktop_viewer_api::close_client(&closing);
+        crate::methods::computers::close_client_displays(&closing);
     })
     .await;
-    event_stream.disconnect();
 
     if (immediate_disconnect || !close_after_reply) && writer_result.is_none() {
         // A disconnected client cannot consume queued frames. Stop the writer so
@@ -1007,10 +1010,12 @@ fn event_precedes_barrier(event: &OutboundEvent, barrier: Option<&HashMap<String
 }
 
 fn event_frame(event: SequencedEvent, device_id: &str) -> Result<Value, String> {
+    // An event relayed from another engine carries that engine's device id.
+    let origin = event.event.device_id.as_deref().unwrap_or(device_id);
     let candidate = silo_engine::events::wire_event_envelope(
         &event.event,
         &event.subscription,
-        device_id,
+        origin,
         event.seq,
     );
     let typed = serde_json::from_value::<EventEnvelope>(candidate)
@@ -1681,6 +1686,11 @@ mod tests {
         let socket = root.path().join("engine.sock");
         let euid = unsafe { libc::geteuid() };
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        // No child process may be forked while the first listener exists: it would inherit
+        // the descriptor and keep the dropped socket live.
+        let _no_fork = crate::FORK_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let listener = StdUnixListener::bind(&socket).unwrap();
         drop(listener);
         // The returned connection refusal marks this owned socket as stale.
@@ -1932,6 +1942,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_closed_connection_ends_only_its_own_screens() {
+        use crate::methods::computers::{display_gateways, register_display};
+
+        let context = test_context();
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(context.clone())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+
+        // Two connected clients, each with a screen open.
+        let mut first = handshaken_client(&socket).await;
+        let mut second = handshaken_client(&socket).await;
+        // A client's event stream exists once its first regular request arrived.
+        for client in [&mut first, &mut second] {
+            write_json_frame(
+                client,
+                &serde_json::json!({ "id": "state", "method": "engine.state", "params": {} }),
+            )
+            .await
+            .unwrap();
+            let _: Value = read_json_frame(client).await.unwrap().unwrap();
+        }
+        let clients = context.connected_clients();
+        assert_eq!(clients.len(), 2, "{clients:?}");
+        for client in &clients {
+            let key = (
+                client.clone(),
+                "teardown-device".to_owned(),
+                "teardown-computer".to_owned(),
+            );
+            register_display(&context, key, crate::methods::computers::tests::gateway()).unwrap();
+        }
+
+        // The first connection closes; the socket's own teardown ends its screens. The
+        // teardown runs on other threads, so give them turns instead of sleeping.
+        drop(first);
+        let screen = |client: &String| {
+            (
+                client.clone(),
+                "teardown-device".to_owned(),
+                "teardown-computer".to_owned(),
+            )
+        };
+        let mut settled = false;
+        for _ in 0..5_000_000 {
+            let remaining = context.connected_clients();
+            let screens = display_gateways()
+                .keys()
+                .filter(|(_, device, _)| device == "teardown-device")
+                .count();
+            if remaining.len() == 1 && screens == 1 {
+                settled = true;
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(settled, "the closed connection's screen was never ended");
+        // Exactly the surviving client keeps its screen, and it is still running.
+        let remaining = context.connected_clients();
+        assert!(display_gateways()
+            .get(&screen(&remaining[0]))
+            .unwrap()
+            .running());
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+        crate::methods::computers::close_client_displays(&remaining[0]);
+    }
+
+    #[tokio::test]
     async fn relay_while_allowed_stops_when_the_check_turns_false() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1992,5 +2080,42 @@ mod tests {
             Arc::new(Main),
             Arc::new(Process),
         ))
+    }
+
+    #[tokio::test]
+    async fn a_relayed_event_is_framed_with_the_owners_device_id() {
+        use silo_engine::{
+            context::{Audience, ClientId, Event},
+            events::EventBus,
+        };
+        let bus = EventBus::with_device_id("local-device");
+        let client = ClientId::new("framing");
+        let mut stream = bus.connect(client.clone());
+        let subscription = bus
+            .subscribe_devices(
+                &client,
+                vec!["notifications.cleared".to_owned()],
+                Some(vec!["local-device".to_owned(), "owner-device".to_owned()]),
+            )
+            .unwrap();
+        bus.activate(&client, &subscription).unwrap();
+        let payload = serde_json::json!({"computerId": "c1"});
+        bus.publish(
+            Event::new("notifications.cleared", payload.clone()),
+            Audience::All,
+        );
+        bus.publish(
+            Event::from_device("owner-device", "notifications.cleared", payload),
+            Audience::All,
+        );
+        let mut origins = Vec::new();
+        for _ in 0..2 {
+            let EventDelivery::Event(event) = stream.recv().await.unwrap() else {
+                panic!("expected an event");
+            };
+            let frame = event_frame(event, "local-device").unwrap();
+            origins.push(frame["deviceId"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(origins, ["local-device", "owner-device"]);
     }
 }

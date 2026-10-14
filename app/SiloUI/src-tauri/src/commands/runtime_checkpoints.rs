@@ -1,89 +1,103 @@
-//! Tauri adapters for checkpoint commands.
-use crate::{runtime, runtime::checkpoints};
-use serde_json::Value;
-use tauri::AppHandle;
+//! Tauri adapters for checkpoint commands: each starts a `checkpoints.*` job in `silod`,
+//! waits for its outcome and returns the Linux application state the UI renders.
+use crate::engine_client::{Engine, EngineClient, EngineError};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
 
-fn spawn_checkpoint_blocking<F, R>(work: F) -> tokio::task::JoinHandle<R>
-where
-    F: FnOnce() -> R + Send + 'static,
-    R: Send + 'static,
-{
-    // Connections runs remote checkpoint handlers under a StartCondition. Carry it
-    // across this host adapter so queued work can expire before gate admission.
-    runtime::operation_gate::spawn_blocking(work)
+/// Runs one checkpoint job and returns the resulting Linux state.
+pub(crate) async fn checkpoint_job(
+    engine: &EngineClient,
+    method: &str,
+    params: Value,
+) -> Result<Value, EngineError> {
+    engine.run_job(method, params).await?;
+    engine.application_source(false).await
 }
 
-struct AppForkAssignments;
-
-impl checkpoints::ForkAssignments for AppForkAssignments {
-    fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::github::fork_assignment(source, target)
-    }
-
-    fn forget_github(&self, target: &str) -> Result<(), String> {
-        crate::github::forget_fork_assignment(target)
-    }
-
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::secrets::fork_assignments(source, target)
-    }
-
-    fn forget_secrets(&self, target: &str) -> Result<(), String> {
-        crate::secrets::computer_removed(target)
-    }
+pub(crate) async fn create(
+    engine: &EngineClient,
+    computer_id: &str,
+    name: &str,
+) -> Result<Value, EngineError> {
+    checkpoint_job(
+        engine,
+        "checkpoints.create",
+        json!({"computerId": computer_id, "name": name}),
+    )
+    .await
 }
 
-fn publish_application_state_changed() {
-    if let Some(context) = silo_engine::context::current() {
-        context.publish(
-            silo_engine::context::Event::new("silo://application-state-changed", Value::Null),
-            silo_engine::context::Audience::All,
-        );
-    }
+pub(crate) async fn fork(
+    engine: &EngineClient,
+    computer_id: &str,
+    checkpoint_id: Option<&str>,
+    new_name: &str,
+) -> Result<Value, EngineError> {
+    checkpoint_job(
+        engine,
+        "checkpoints.fork",
+        json!({"computerId": computer_id, "checkpointId": checkpoint_id, "newName": new_name}),
+    )
+    .await
 }
 
-fn refreshed_state(
-    app: &AppHandle,
-    paths: &runtime::RuntimePaths,
-) -> Result<runtime::ApplicationSource, String> {
-    let state = runtime::application_state_response(&crate::commands::runtime::host(app), paths)
-        .map_err(|error| error.to_string())?;
-    Ok(state)
+pub(crate) async fn restore(
+    engine: &EngineClient,
+    computer_id: &str,
+    checkpoint_id: &str,
+) -> Result<Value, EngineError> {
+    checkpoint_job(
+        engine,
+        "checkpoints.restore",
+        json!({"computerId": computer_id, "checkpointId": checkpoint_id}),
+    )
+    .await
 }
 
-fn mutate_then_refresh<T>(
-    mutation: impl FnOnce() -> Result<(), String>,
-    refresh: impl FnOnce() -> Result<T, String>,
-    publish: impl FnOnce(),
-) -> Result<T, String> {
-    let mutation_result = mutation();
-    let refreshed = refresh();
-    publish();
-    mutation_result?;
-    refreshed
+pub(crate) async fn abandon(
+    engine: &EngineClient,
+    computer_id: &str,
+) -> Result<Value, EngineError> {
+    checkpoint_job(
+        engine,
+        "checkpoints.abandonRestore",
+        json!({"computerId": computer_id}),
+    )
+    .await
 }
+
+pub(crate) async fn delete(
+    engine: &EngineClient,
+    computer_id: &str,
+    checkpoint_id: &str,
+) -> Result<Value, EngineError> {
+    checkpoint_job(
+        engine,
+        "checkpoints.delete",
+        json!({"computerId": computer_id, "checkpointId": checkpoint_id}),
+    )
+    .await
+}
+
+pub(crate) async fn usage(engine: &EngineClient, computer_id: &str) -> Result<Value, EngineError> {
+    engine
+        .call("checkpoints.usage", json!({"computerId": computer_id}))
+        .await
+}
+
+// The Connections owner adapter (`commands/remote.rs`) still calls the first three by
+// `AppHandle`; they take the engine from the app's managed state and go with that adapter.
 
 #[tauri::command]
 pub(crate) async fn create_checkpoint(
     app: AppHandle,
     computer_id: String,
     name: String,
-) -> Result<runtime::ApplicationSource, String> {
-    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    spawn_checkpoint_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        mutate_then_refresh(
-            || checkpoints::create(&paths, &computer_id, &name),
-            || refreshed_state(&worker_app, &paths),
-            publish_application_state_changed,
-        )
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish creating the checkpoint. Refresh its history before trying again."
-            .to_string()
-    })?
+) -> Result<Value, String> {
+    let engine = app.state::<std::sync::Arc<EngineClient>>();
+    create(&engine, &computer_id, &name)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
@@ -92,31 +106,11 @@ pub(crate) async fn fork_checkpoint(
     computer_id: String,
     checkpoint_id: Option<String>,
     new_name: String,
-) -> Result<runtime::ApplicationSource, String> {
-    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    spawn_checkpoint_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        mutate_then_refresh(
-            || {
-                checkpoints::fork(
-                    &paths,
-                    &AppForkAssignments,
-                    &computer_id,
-                    checkpoint_id.as_deref(),
-                    &new_name,
-                    &|| crate::commands::macos_computers::names(&worker_app),
-                )
-            },
-            || refreshed_state(&worker_app, &paths),
-            publish_application_state_changed,
-        )
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish creating the fork. Refresh the computer list before trying again."
-            .to_string()
-    })?
+) -> Result<Value, String> {
+    let engine = app.state::<std::sync::Arc<EngineClient>>();
+    fork(&engine, &computer_id, checkpoint_id.as_deref(), &new_name)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
@@ -124,176 +118,139 @@ pub(crate) async fn restore_checkpoint(
     app: AppHandle,
     computer_id: String,
     checkpoint_id: String,
-) -> Result<runtime::ApplicationSource, String> {
-    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    spawn_checkpoint_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        mutate_then_refresh(
-            || checkpoints::restore(&paths, &computer_id, &checkpoint_id),
-            || refreshed_state(&worker_app, &paths),
-            publish_application_state_changed,
-        )
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish Restore. Open the Checkpoints tab to review recovery and retry Restore."
-            .to_string()
-    })?
+) -> Result<Value, String> {
+    let engine = app.state::<std::sync::Arc<EngineClient>>();
+    restore(&engine, &computer_id, &checkpoint_id)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
 pub(crate) async fn abandon_restore(
-    app: AppHandle,
+    engine: Engine<'_>,
     computer_id: String,
-) -> Result<runtime::ApplicationSource, String> {
-    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    spawn_checkpoint_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        mutate_then_refresh(
-            || checkpoints::abandon_restore(&paths, &computer_id),
-            || refreshed_state(&worker_app, &paths),
-            publish_application_state_changed,
-        )
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not abandon Restore. Open the Checkpoints tab to review recovery and retry."
-            .to_string()
-    })?
+) -> Result<Value, String> {
+    abandon(&engine, &computer_id).await.map_err(String::from)
 }
 
 #[tauri::command]
 pub(crate) async fn delete_checkpoint(
-    app: AppHandle,
+    engine: Engine<'_>,
     computer_id: String,
     checkpoint_id: String,
-) -> Result<runtime::ApplicationSource, String> {
-    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    spawn_checkpoint_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        mutate_then_refresh(
-            || checkpoints::delete(&paths, &computer_id, &checkpoint_id),
-            || refreshed_state(&worker_app, &paths),
-            publish_application_state_changed,
-        )
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish deleting the checkpoint. Refresh its history before trying again."
-            .to_string()
-    })?
+) -> Result<Value, String> {
+    delete(&engine, &computer_id, &checkpoint_id)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
 pub(crate) async fn read_checkpoint_usage(
-    app: AppHandle,
+    engine: Engine<'_>,
     computer_id: String,
-) -> Result<checkpoints::CheckpointUsage, String> {
-    tokio::task::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app))?;
-        checkpoints::read_usage(&paths, &computer_id)
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not read checkpoint disk usage. Refresh the Storage tab and retry.".to_string()
-    })?
+) -> Result<Value, String> {
+    usage(&engine, &computer_id).await.map_err(String::from)
 }
 
 #[cfg(test)]
-mod tests {
+mod forwarding_tests {
     use super::*;
-    use runtime::operation_gate::{GateError, OperationGate, OperationKind, StartCondition};
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-    use std::time::{Duration, Instant};
+    use crate::engine_client::testing::{connected_client, FakeEngine};
 
-    #[test]
-    fn failed_checkpoint_mutation_still_publishes_after_refresh() {
-        let calls = std::cell::RefCell::new(Vec::new());
-        let result = mutate_then_refresh(
-            || {
-                calls.borrow_mut().push("mutation");
-                Err("mutation failed".into())
-            },
-            || {
-                calls.borrow_mut().push("refresh");
-                Ok("refreshed")
-            },
-            || calls.borrow_mut().push("publish"),
-        );
+    const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
-        assert_eq!(result.unwrap_err(), "mutation failed");
-        assert_eq!(*calls.borrow(), ["mutation", "refresh", "publish"]);
-    }
-
-    #[test]
-    fn failed_checkpoint_refresh_still_publishes_after_mutation() {
-        let calls = std::cell::RefCell::new(Vec::new());
-        let result = mutate_then_refresh(
-            || {
-                calls.borrow_mut().push("mutation");
-                Ok(())
-            },
-            || {
-                calls.borrow_mut().push("refresh");
-                Err::<(), _>("refresh failed".into())
-            },
-            || calls.borrow_mut().push("publish"),
-        );
-
-        assert_eq!(result.unwrap_err(), "refresh failed");
-        assert_eq!(*calls.borrow(), ["mutation", "refresh", "publish"]);
-    }
-
-    #[test]
-    fn queued_remote_checkpoint_expires_before_gate_admission() {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .unwrap();
-        let gate = Arc::new(OperationGate::new());
-        let busy = gate
-            .kind(OperationKind::Lifecycle)
-            .computer("computer-id", "computer", "Running another operation")
-            .unwrap();
-        let wanted = Arc::new(AtomicBool::new(true));
-        let condition = StartCondition::new({
-            let wanted = wanted.clone();
-            move || wanted.load(Ordering::SeqCst)
-        });
-        let checkpoint = {
-            let gate = gate.clone();
-            runtime.block_on(async {
-                StartCondition::scope(Some(condition.clone()), || {
-                    spawn_checkpoint_blocking(move || {
-                        gate.kind(OperationKind::CheckpointCapture)
-                            .computer("computer-id", "computer", "Creating checkpoint")
-                            .map(drop)
-                    })
-                })
-            })
-        };
-
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while gate.snapshot().waiting.is_empty() {
-            assert!(Instant::now() < deadline, "checkpoint did not queue");
-            std::thread::sleep(Duration::from_millis(2));
+    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+        match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "checkpoints.create"
+            | "checkpoints.fork"
+            | "checkpoints.restore"
+            | "checkpoints.delete"
+            | "checkpoints.abandonRestore" => Ok(json!({"jobId": "job:1"})),
+            "operations.job.get" => {
+                Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
+            }
+            "computers.list" => {
+                Ok(json!({"linux": {"computers": [{"configuration": {"id": DEV}}]}, "macos": {}}))
+            }
+            "checkpoints.usage" => Ok(json!({"totalBytes": 5, "checkpoints": []})),
+            _ => Ok(Value::Null),
         }
-        wanted.store(false, Ordering::SeqCst);
-        drop(busy);
+    }
 
+    #[tokio::test]
+    async fn each_command_runs_its_job_and_returns_the_linux_state() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        for state in [
+            create(&engine, DEV, "before").await.unwrap(),
+            fork(&engine, DEV, None, "copy").await.unwrap(),
+            restore(&engine, DEV, "cp1").await.unwrap(),
+            abandon(&engine, DEV).await.unwrap(),
+            delete(&engine, DEV, "cp1").await.unwrap(),
+        ] {
+            assert_eq!(state["computers"][0]["configuration"]["id"], DEV);
+        }
         assert_eq!(
-            runtime.block_on(checkpoint).unwrap(),
-            Err(GateError::Abandoned)
+            fake.calls("checkpoints.create"),
+            vec![json!({"computerId": DEV, "name": "before"})]
         );
-        assert!(condition.expired());
-        assert!(!condition.started());
-        assert!(gate.snapshot().waiting.is_empty());
+        assert_eq!(
+            fake.calls("checkpoints.fork"),
+            vec![json!({"computerId": DEV, "checkpointId": null, "newName": "copy"})]
+        );
+        assert_eq!(
+            fake.calls("checkpoints.restore"),
+            vec![json!({"computerId": DEV, "checkpointId": "cp1"})]
+        );
+        assert_eq!(
+            fake.calls("checkpoints.abandonRestore"),
+            vec![json!({"computerId": DEV})]
+        );
+        assert_eq!(
+            fake.calls("checkpoints.delete"),
+            vec![json!({"computerId": DEV, "checkpointId": "cp1"})]
+        );
+        assert_eq!(fake.calls("operations.job.acknowledge").len(), 5);
+    }
+
+    #[tokio::test]
+    async fn usage_is_read_through_the_query() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(usage(&engine, DEV).await.unwrap()["totalBytes"], 5);
+        assert_eq!(
+            fake.calls("checkpoints.usage"),
+            vec![json!({"computerId": DEV})]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_job_is_the_commands_error_and_no_state_is_read() {
+        let fake = FakeEngine::start(|method, params| match method {
+            "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished",
+                "outcome": {"error": {"code": "busy", "message": "A checkpoint operation is in progress."}}})),
+            other => replies(other, params),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        let error = create(&engine, DEV, "x").await.unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.message.as_str()),
+            ("busy", "A checkpoint operation is in progress.")
+        );
+        assert!(fake.calls("computers.list").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_refusal_at_start_is_typed() {
+        let fake = FakeEngine::start(|method, params| match method {
+            "checkpoints.restore" => Err(("not_found", "This computer no longer exists.".into())),
+            other => replies(other, params),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(
+            restore(&engine, DEV, "cp").await.unwrap_err().code,
+            "not_found"
+        );
     }
 }

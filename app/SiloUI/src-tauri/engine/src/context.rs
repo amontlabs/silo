@@ -20,6 +20,11 @@ pub trait EngineContext: Send + Sync + 'static {
     /// accepting requests.
     fn job_registry(&self) -> Result<Arc<JobRegistry>, String> {
         let paths = self.paths();
+        // Both roots empty would resolve to a relative `engine` folder in whatever
+        // directory the process runs from, which is never a place to keep state.
+        if paths.home.as_os_str().is_empty() && paths.app_data.as_os_str().is_empty() {
+            return Err("The engine has no data directory for its job registry.".into());
+        }
         let engine_data = if paths.home.as_os_str().is_empty() {
             paths.app_data.join("engine")
         } else {
@@ -138,6 +143,9 @@ pub enum PackageKind {
 pub struct Event {
     pub name: String,
     pub payload: serde_json::Value,
+    /// The engine the event came from when it is not this one: a controller re-publishes
+    /// an owner's events with the owner's device id (95 A-3/A-4). `None` is this engine.
+    pub device_id: Option<String>,
 }
 
 impl Event {
@@ -145,6 +153,20 @@ impl Event {
         Self {
             name: name.into(),
             payload,
+            device_id: None,
+        }
+    }
+
+    /// An event relayed from the engine of `device_id`.
+    pub fn from_device(
+        device_id: impl Into<String>,
+        name: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            payload,
+            device_id: Some(device_id.into()),
         }
     }
 }
@@ -261,6 +283,8 @@ pub(crate) mod test_support {
     use std::sync::Mutex;
 
     pub(crate) struct RecordingContext {
+        /// Owns the engine data folder so tests never write into the working directory.
+        _data: tempfile::TempDir,
         paths: EnginePaths,
         identity: EngineIdentity,
         runtime_state: Arc<EngineRuntimeState>,
@@ -269,8 +293,13 @@ pub(crate) mod test_support {
 
     impl Default for RecordingContext {
         fn default() -> Self {
+            let data = tempfile::tempdir().expect("a temporary engine data folder");
             Self {
-                paths: EnginePaths::default(),
+                paths: EnginePaths {
+                    app_data: data.path().to_path_buf(),
+                    ..EnginePaths::default()
+                },
+                _data: data,
                 identity: EngineIdentity {
                     channel: crate::channel::Channel::Production,
                     version: "0.0.0-test".into(),

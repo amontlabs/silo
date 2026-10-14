@@ -163,6 +163,11 @@ pub fn release_setup_audience(request_id: &str) {
         .remove(request_id);
 }
 
+/// Where the progress and outcome of setup request `request_id` go.
+pub fn setup_audience(request_id: &str) -> Audience {
+    setup_progress_audience(request_id)
+}
+
 fn setup_progress_audience(request_id: &str) -> Audience {
     let bound = SETUP_AUDIENCES
         .get_or_init(Default::default)
@@ -173,11 +178,16 @@ fn setup_progress_audience(request_id: &str) -> Audience {
     Audience::Client(bound.unwrap_or_else(|| silo_engine::context::ClientId::new("main")))
 }
 
+/// Publishes one setup stage, warning or failure detail: the canonical job progress to
+/// the client that started the request (10 `computers.configuration.change`), and the
+/// legacy event to the in-process window.
 fn publish_configuration_progress(context: &dyn EngineContext, payload: Value) {
-    silo_engine::context::publish_to_main_window(
-        context,
-        Event::new("silo://computer-configuration-progress", payload),
-    );
+    const SOURCE: &str = "silo://computer-configuration-progress";
+    let audience = setup_progress_audience(payload["requestId"].as_str().unwrap_or_default());
+    if let Err(error) = crate::jobs::publish_source_progress(context, SOURCE, &payload, audience) {
+        eprintln!("silo-engine: could not publish setup progress: {error}");
+    }
+    silo_engine::context::publish_to_main_window(context, Event::new(SOURCE, payload));
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
@@ -679,6 +689,20 @@ pub struct ApplicationSource {
     /// be measured (every computer change is then rejected by `validate_device_ceiling`).
     #[serde(skip_serializing_if = "Option::is_none")]
     device_capacity: Option<DeviceCapacity>,
+}
+
+impl ApplicationSource {
+    /// The one canonical encoding of this state for clients: reads, job results and the
+    /// `computers.changed` event all use it, so a Linux row always carries its `kind`.
+    pub fn to_canonical_value(&self) -> Result<Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(computers) = value.get_mut("computers").and_then(Value::as_array_mut) {
+            for computer in computers {
+                computer["kind"] = Value::String("linux".to_owned());
+            }
+        }
+        Ok(value)
+    }
 }
 
 /// The device limits `validate_device_ceiling` enforces, so editors can clamp defaults and
@@ -2887,6 +2911,23 @@ pub fn read_application_state_sync(
     Ok(source)
 }
 
+/// One engine-timer pass of expired-log cleanup (95 A-26), with no client reading state.
+/// It reads the computers like a state read does, then cleans the stopped ones that are due
+/// (at most hourly each, one pass at a time) on the calling thread. A busy gate postpones the
+/// pass: the next timer pass tries again.
+pub fn expire_stopped_logs(host: &dyn RuntimeHost) -> Result<(), String> {
+    host.ensure_runtime_ready()?;
+    shutdown::ensure_accepting_operations()?;
+    let paths = runtime_paths(host)?;
+    let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)
+        .map_err(|error| error.to_string())?;
+    let due = plan_log_cleanup(&paths, &mut source.computers, Instant::now());
+    if !due.is_empty() {
+        clean_expired_logs(&ProcessRunner, &paths, &OPERATIONS, &due);
+    }
+    Ok(())
+}
+
 /// Expired logs of a stopped computer are cleaned at most this often, off the state-read path.
 const LOG_CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
@@ -3727,7 +3768,8 @@ fn computer_action_with_host_job(
     };
     match result {
         Ok((job_id, computer_id, state, handed_off)) => {
-            let state_value = serde_json::to_value(&state)
+            let state_value = state
+                .to_canonical_value()
                 .map_err(|error| BridgeError::from(error.to_string()))?;
             publish_linux_computers_changed(host.engine_context().as_ref(), &state);
             crate::jobs::finish_with_result(
@@ -3944,19 +3986,7 @@ fn publish_creation_wait_with_context(
         }
         Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
-    let payload = serde_json::to_value(event).unwrap_or(Value::Null);
-    if let Err(error) = crate::jobs::publish_source_progress(
-        context,
-        "silo://computer-configuration-progress",
-        &payload,
-        setup_progress_audience(request_id),
-    ) {
-        eprintln!("silo-engine: could not persist setup wait progress: {error}");
-    }
-    silo_engine::context::publish_to_main_window(
-        context,
-        silo_engine::context::Event::new("silo://computer-configuration-progress", payload),
-    );
+    publish_configuration_progress(context, serde_json::to_value(event).unwrap_or(Value::Null));
 }
 
 pub fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::Step) {
@@ -4571,7 +4601,9 @@ fn finish_setup_job(
             crate::jobs::finish_with_result(
                 context,
                 job_id,
-                serde_json::to_value(state).map_err(|error| error.to_string())?,
+                state
+                    .to_canonical_value()
+                    .map_err(|error| error.to_string())?,
                 audience,
             )
         }
@@ -4616,7 +4648,7 @@ fn publish_linux_computers_changed(
     context: &dyn silo_engine::context::EngineContext,
     state: &ApplicationSource,
 ) {
-    let Ok(linux) = serde_json::to_value(state) else {
+    let Ok(linux) = state.to_canonical_value() else {
         return;
     };
     context.publish(
@@ -6958,6 +6990,44 @@ mod tests {
     }
 
     #[test]
+    fn job_results_and_events_carry_the_linux_row_discriminator() {
+        use silo_engine::context::test_support::RecordingContext;
+
+        let state = ApplicationSource {
+            runtime_repair: None,
+            computers: vec![unread_computer(tests::computer())],
+            activities: Vec::new(),
+            computer_configuration_operation: None,
+            repository_push_operations: Vec::new(),
+            github: Value::Null,
+            secrets: Vec::new(),
+            device_capacity: None,
+        };
+        let context = RecordingContext::default();
+        let request = format!("kinds-{}", uuid::Uuid::new_v4());
+        let job_id = silo_api::jobs::JobId::new(format!("setup:{request}")).unwrap();
+        finish_setup_job(&context, job_id, &Ok(state.clone()), false).unwrap();
+        publish_linux_computers_changed(&context, &state);
+
+        let published = context.published();
+        let finished = published
+            .iter()
+            .find(|(event, _)| event.name == "operations.job.finished")
+            .expect("the outcome is published");
+        let changed = published
+            .iter()
+            .find(|(event, _)| event.name == "computers.changed")
+            .expect("the change is published");
+        // Both deserialize into the canonical types, which require `kind` on every row.
+        let result: silo_api::methods::computers::ApplicationSource =
+            serde_json::from_value(finished.0.payload["result"].clone()).unwrap();
+        let event: silo_api::methods::computers::ApplicationSource =
+            serde_json::from_value(changed.0.payload["linux"].clone()).unwrap();
+        assert_eq!(result.computers.len(), 1);
+        assert_eq!(result, event);
+    }
+
+    #[test]
     fn a_change_outside_lifecycle_publishes_the_canonical_computers_event() {
         use silo_engine::context::{test_support::RecordingContext, Audience};
 
@@ -6985,23 +7055,67 @@ mod tests {
     }
 
     #[test]
-    fn configuration_warning_and_progress_target_only_the_main_client() {
+    fn setup_stages_warnings_and_failures_reach_only_the_client_that_started_the_request() {
         use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
 
+        let request = format!("staged-{}", uuid::Uuid::new_v4());
+        bind_setup_audience(&request, ClientId::new("socket-a"));
         let context = RecordingContext::default();
-        for step in ["activity-storage-warning", "computer-configuration"] {
-            let progress = computer_progress("request", step, "computer", 42);
-            publish_configuration_progress(&context, serde_json::to_value(progress).unwrap());
+        let mut failure = computer_progress(&request, "setup-failed", "computer", 0);
+        failure.level = "error".into();
+        failure.failure_code = Some("runtime".into());
+        failure.diagnostic = Some("The runtime said no.".into());
+        for event in [
+            computer_progress(&request, "activity-storage-warning", "computer", 42),
+            computer_progress(&request, "computer-configuration", "computer", 42),
+            failure,
+        ] {
+            publish_configuration_progress(&context, serde_json::to_value(event).unwrap());
         }
 
         let published = context.published();
-        assert_eq!(published.len(), 2);
-        assert!(published.iter().all(|(event, audience)| {
-            event.name == "silo://computer-configuration-progress"
-                && *audience == Audience::Client(ClientId::new("main"))
-        }));
-        assert_eq!(published[0].0.payload["step"], "activity-storage-warning");
-        assert_eq!(published[1].0.payload["step"], "computer-configuration");
+        // Each stage becomes canonical job progress for the requester and one legacy event
+        // for the in-process window; the other socket client receives neither.
+        assert_eq!(published.len(), 6);
+        for (event, audience) in &published {
+            match event.name.as_str() {
+                "operations.job.progress" => {
+                    assert_eq!(*audience, Audience::Client(ClientId::new("socket-a")));
+                    assert_eq!(event.payload["jobId"], format!("setup:{request}"));
+                }
+                "silo://computer-configuration-progress" => {
+                    assert_eq!(*audience, Audience::Client(ClientId::new("main")));
+                }
+                other => panic!("unexpected event {other}"),
+            }
+        }
+        let progress: Vec<_> = published
+            .iter()
+            .filter(|(event, _)| event.name == "operations.job.progress")
+            .map(|(event, _)| event.payload.clone())
+            .collect();
+        assert_eq!(progress[0]["data"]["step"], "activity-storage-warning");
+        assert_eq!(progress[1]["data"]["step"], "computer-configuration");
+        // The failure detail the requester needs travels with the failed stage.
+        assert_eq!(progress[2]["data"]["step"], "setup-failed");
+        assert_eq!(progress[2]["data"]["failureCode"], "runtime");
+        assert_eq!(progress[2]["data"]["diagnostic"], "The runtime said no.");
+        assert!(published
+            .iter()
+            .all(|(_, audience)| *audience != Audience::Client(ClientId::new("socket-b"))));
+        release_setup_audience(&request);
+
+        // A request nobody bound keeps the in-process client.
+        let unbound = RecordingContext::default();
+        publish_configuration_progress(
+            &unbound,
+            serde_json::to_value(computer_progress("unbound-request", "setup-started", "", 0))
+                .unwrap(),
+        );
+        assert!(unbound
+            .published()
+            .iter()
+            .all(|(_, audience)| *audience == Audience::Client(ClientId::new("main"))));
     }
 
     #[test]

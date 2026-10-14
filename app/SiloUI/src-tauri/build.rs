@@ -71,7 +71,6 @@ fn main() {
             "read_settings",
             "update_settings",
             "update_onboarding_draft",
-            "import_legacy_theme",
             "flush_settings",
             "begin_settings_flush",
             "complete_settings_flush",

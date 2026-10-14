@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod computers;
 pub mod display;
 pub mod guest;
+pub mod operations;
 pub mod services;
 
 /// The macOS computer inventory is process-global. Tests that seed or reset it hold this
@@ -157,12 +158,59 @@ impl HandlerContext {
     }
 }
 
+/// Methods the engine answers itself, outside any domain module.
+fn is_built_in(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::EngineHandshake
+            | MethodName::EngineState
+            | MethodName::EventsSubscribe
+            | MethodName::EventsUnsubscribe
+            | MethodName::NotificationsList
+            | MethodName::OperationsCancel
+            | MethodName::OperationsJobAcknowledge
+            | MethodName::OperationsJobGet
+            | MethodName::OperationsList
+            | MethodName::GuestSsh
+    )
+}
+
+/// Owned by a domain module but answered with a typed refusal for every `engine.sock`
+/// caller, so the handshake must not advertise them. `desktop.connect` is engine-to-engine
+/// only: a peer reaches it through the owner-side bridge, never through this socket.
+fn is_never_served(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::MacosDisplayStream
+            | MethodName::DisplayNativeAttach
+            | MethodName::DesktopConnect
+    )
+}
+
+/// Whether this engine serves the method: a built-in or one a domain router owns. The
+/// handshake's capability list is derived from this, so it cannot drift from the routers.
+pub fn serves(method: MethodName) -> bool {
+    if is_never_served(method) {
+        return false;
+    }
+    is_built_in(method)
+        || computers::owns(method)
+        || checkpoints::owns(method)
+        || guest::owns(method)
+        || access::owns(method)
+        || display::owns(method)
+        || services::owns(method)
+}
+
 /// Tries domain handlers in stable order and returns the unsupported error if none handles it.
 pub(crate) async fn dispatch(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
+    if let Some(result) = operations::handle(method, params, context).await {
+        return result;
+    }
     if let Some(result) = computers::handle(method, params, context).await {
         return result;
     }
@@ -188,7 +236,47 @@ pub(crate) async fn dispatch(
 mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
-    use super::{access, checkpoints, computers, display, guest, services};
+    use super::{access, checkpoints, computers, display, guest, serves, services};
+
+    #[test]
+    fn the_capability_set_is_every_routed_method_and_nothing_unserved() {
+        let served: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        for name in [
+            "engine.handshake",
+            "guest.ssh",
+            "computers.list",
+            "computers.launch",
+            "checkpoints.create",
+            "exports.state",
+            "migration.state",
+            "display.show",
+            "settings.read",
+            "engine.shutdown",
+        ] {
+            assert!(served.contains(&name), "{name} must be advertised");
+        }
+        assert!(!served.contains(&"macos.display.stream"));
+        assert!(!served.contains(&"display.native.attach"));
+        assert!(!served.contains(&"desktop.connect"));
+        // Everything in the catalogue is either served or deliberately withheld.
+        let withheld: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| !serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        assert_eq!(
+            withheld,
+            [
+                "desktop.connect",
+                "display.native.attach",
+                "macos.display.stream"
+            ]
+        );
+    }
 
     fn core_method(method: MethodName) -> bool {
         matches!(

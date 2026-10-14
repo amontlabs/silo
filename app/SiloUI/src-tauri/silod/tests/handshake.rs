@@ -107,6 +107,9 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
                         "operations.job.acknowledge",
                         "operations.job.get",
                         "operations.list",
+                        "computers.list",
+                        "exports.state",
+                        "display.show",
                     ]
                     .iter()
                     .all(|expected| capabilities.iter().any(|value| value == expected))

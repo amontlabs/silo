@@ -1,6 +1,6 @@
 [workspace]
-members = ["api", "src-tauri", "src-tauri/engine", "src-tauri/silod"]
-default-members = ["api", "src-tauri", "src-tauri/engine", "src-tauri/silod"]
+members = ["api", "client", "src-tauri", "src-tauri/engine", "src-tauri/silod"]
+default-members = ["api", "client", "src-tauri", "src-tauri/engine", "src-tauri/silod"]
 resolver = "2"
 
 [patch.crates-io]

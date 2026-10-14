@@ -445,6 +445,22 @@ thread_local! {
     static REMOVES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Whether an unresolved engine update reserves what this admission would change: its
+/// computer, or any computer it is about to delete.
+fn reserved_by_update(scope: &Scope) -> bool {
+    if let Scope::Computer { id } = scope {
+        if crate::engine_update::reservation::is_reserved(id) {
+            return true;
+        }
+    }
+    REMOVES.with(|removes| {
+        removes
+            .borrow()
+            .iter()
+            .any(|id| crate::engine_update::reservation::is_reserved(id))
+    })
+}
+
 /// True when the current thread holds an operation guard. Entry points documented
 /// as "the caller holds the operation gate" `debug_assert!` it (D-43).
 pub fn held() -> bool {
@@ -590,6 +606,12 @@ impl OperationGate {
     }
 
     /// Fix the operation kind for the entries this request creates.
+    /// Only the device's own gate honors the reservations of an unresolved engine update;
+    /// independent gates (tests, tools) are not the computers' admission.
+    fn enforces_update_reservations(&self) -> bool {
+        std::ptr::eq(self, &crate::runtime::OPERATIONS)
+    }
+
     pub fn kind(&self, kind: OperationKind) -> Kinded<'_> {
         Kinded {
             gate: self,
@@ -808,6 +830,10 @@ impl OperationGate {
         if HELD.with(Cell::get) > 0 {
             return Err(GateError::Nested);
         }
+        if self.enforces_update_reservations() && reserved_by_update(&scope) {
+            REMOVES.with(|removes| removes.borrow_mut().clear());
+            return Err(GateError::Busy);
+        }
         let mut state = self.lock();
         if kind == OperationKind::Lifecycle {
             if let (Scope::Computer { id }, Some(request)) = (&scope, retry_after) {
@@ -963,6 +989,9 @@ impl OperationGate {
     ) -> Result<OperationGuard<'_>, GateError> {
         if HELD.with(Cell::get) > 0 {
             return Err(GateError::Nested);
+        }
+        if self.enforces_update_reservations() && reserved_by_update(&scope) {
+            return Err(GateError::Busy);
         }
         let mut state = self.lock();
         if !state.free(&scope) {

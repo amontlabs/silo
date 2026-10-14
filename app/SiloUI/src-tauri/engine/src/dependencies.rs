@@ -1274,6 +1274,10 @@ pub fn read_report(request_id: String, paths: ProbePaths) -> DependencyReport {
 mod tests {
     use super::*;
 
+    /// The bound for work that must finish. It only stops a hung process, so it is far
+    /// longer than a loaded machine can delay one; tests of the timeout itself set their own.
+    const PATIENCE: Duration = Duration::from_secs(120);
+
     fn version_probe(script: &str, arguments: &[&str]) -> Result<String, ProbeError> {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("version-probe");
@@ -1282,7 +1286,7 @@ mod tests {
             &executable,
             arguments,
             &[("HOME", directory.path())],
-            Duration::from_secs(3),
+            PATIENCE,
         )
     }
 
@@ -1300,7 +1304,7 @@ mod tests {
                 &executable,
                 &[value],
                 &[("HOME", directory.path())],
-                Duration::from_secs(3),
+                PATIENCE,
             )
             .unwrap(),
             format!("{value}\n{}\nC\nC", directory.path().display())
@@ -1309,7 +1313,9 @@ mod tests {
 
     #[test]
     fn version_probe_accepts_the_output_limit_and_rejects_overflow_on_either_stream() {
-        let script = "if [ \"$2\" = stderr ]; then exec 1>&2; fi\ni=0\nwhile [ \"$i\" -lt \"$1\" ]; do printf x; i=$((i+1)); done";
+        // One write of `$1` bytes: a shell loop of single-byte writes takes seconds on a loaded machine.
+        let script =
+            "if [ \"$2\" = stderr ]; then exec 1>&2; fi\nhead -c \"$1\" /dev/zero | tr '\\0' x";
         for stream in ["stdout", "stderr"] {
             let at_limit = version_probe(script, &["8192", stream]).unwrap();
             assert_eq!(
@@ -1363,12 +1369,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("version-probe");
         let probe = |path: &Path| {
-            run_bounded_with_timeout(
-                path,
-                &[],
-                &[("HOME", directory.path())],
-                Duration::from_secs(3),
-            )
+            run_bounded_with_timeout(path, &[], &[("HOME", directory.path())], PATIENCE)
         };
         assert!(matches!(probe(&executable), Err(ProbeError::Missing(_))));
         assert!(matches!(
@@ -1621,7 +1622,7 @@ mod tests {
             &std::env::current_exe().unwrap(),
             &["--exact", &helper],
             &[("SILO_TEST_MANIFEST_FIFO", path.as_path())],
-            PROCESS_TIMEOUT,
+            PATIENCE,
         );
         let output = result.expect("FIFO manifest reader must finish without a writer");
         assert!(output.contains("1 passed"), "{output}");
@@ -1631,13 +1632,13 @@ mod tests {
     fn dependency_hash_rejects_directories_and_hashes_valid_files() {
         let directory = tempfile::tempdir().unwrap();
         assert!(matches!(
-            sha256_file(directory.path(), Instant::now() + PROCESS_TIMEOUT),
+            sha256_file(directory.path(), Instant::now() + PATIENCE),
             Err(ProbeError::Malformed(_))
         ));
         let path = directory.path().join("binary");
         fs::write(&path, b"abc").unwrap();
         assert_eq!(
-            sha256_file(&path, Instant::now() + PROCESS_TIMEOUT).unwrap(),
+            sha256_file(&path, Instant::now() + PATIENCE).unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
@@ -1655,7 +1656,7 @@ mod tests {
             &std::env::current_exe().unwrap(),
             &["--exact", &helper, "--nocapture"],
             &[("SILO_TEST_DEPENDENCY_HASH_FIFO", path.as_path())],
-            PROCESS_TIMEOUT,
+            PATIENCE,
         )
         .expect("dependency hashing must not wait for a FIFO writer");
         assert!(output.contains("1 passed"), "{output}");
@@ -1667,7 +1668,7 @@ mod tests {
             return;
         };
         assert!(matches!(
-            sha256_file(Path::new(&path), Instant::now() + PROCESS_TIMEOUT),
+            sha256_file(Path::new(&path), Instant::now() + PATIENCE),
             Err(ProbeError::Malformed(_))
         ));
     }

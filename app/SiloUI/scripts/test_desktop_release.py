@@ -16,6 +16,10 @@ class DesktopBuildTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.calls = []
         self.target = self.root / 'separate cargo output'
+        # Embedding the engine is covered by test_embed_engine.py; here it only has to be asked.
+        embedding = patch('build_desktop.embed_engine')
+        self.embed = embedding.start()
+        self.addCleanup(embedding.stop)
 
     def command(self, args, **kwargs):
         self.calls.append((args, kwargs))
@@ -31,8 +35,14 @@ class DesktopBuildTests(unittest.TestCase):
         self.assertEqual(result, expected)
         sign.assert_called_once_with(expected)
         verify.assert_called_once_with(expected)
-        command = self.calls[-1][0]
+        command = next(args for args, _ in self.calls if args[0] == 'node')
         self.assertIn('--bundles', command)
+        # The engine is built and embedded before the app is signed, so its signature seals.
+        self.assertIn((['cargo', 'build', '--locked', '--release', '-p', 'silod', '--target', 'aarch64-apple-darwin']),
+                      [args for args, _ in self.calls])
+        self.embed.assert_called_once()
+        self.assertEqual(self.embed.call_args.args[0], expected)
+        self.assertEqual(self.embed.call_args.kwargs['identifier'], 'org.silo.preview')
         self.assertEqual(command[-2], '--config')
         self.assertEqual(json.loads(command[-1])['bundle'], {
             'active': True, 'createUpdaterArtifacts': False, 'macOS': {'hardenedRuntime': True},

@@ -40,7 +40,7 @@ export function StatusBar({ source, actions, defaultOpen = false }: { source: Ap
   const dismissingActions: StatusBarActions = {
     ...actions,
     openSilo: (route) => dismissThen(() => actions.openSilo(route)),
-    quit: () => dismissThen(actions.quit),
+    quit: (choice) => dismissThen(() => actions.quit(choice)),
     openTerminal: (name) => dismissThen(() => actions.openTerminal(name)),
     openEditor: (name, path) => dismissThen(() => actions.openEditor(name, path)),
     openSite: (name, port) => dismissThen(() => actions.openSite(name, port)),

@@ -328,8 +328,56 @@ async fn guest_exec_start(
     params: &Value,
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
-    let params: GuestExecStartParams = context.decode_params(params)?;
-    local_device(context, params.device_id.as_deref())?;
+    let typed: GuestExecStartParams = context.decode_params(params)?;
+    if let Some(device) = remote_device(context, typed.device_id.as_deref()) {
+        return remote_exec::<JobStartResult>(device, "guest.exec.start", &typed).await;
+    }
+    let engine = engine_of(context);
+    let accepted = tokio::task::spawn_blocking(move || start_exec(engine, typed))
+        .await
+        .map_err(|error| DispatchError::internal(format!("The guest task failed: {error}")))??;
+    output(accepted)
+}
+
+/// The device a request names when it is not this one.
+fn remote_device(context: &HandlerContext, device_id: Option<&str>) -> Option<String> {
+    device_id
+        .filter(|device| *device != context.silod_context().local_device().device_id)
+        .map(str::to_owned)
+}
+
+/// A command on another device's computer is a job of that device: it runs there, its
+/// output stays there for `guest.exec.get`, and the client follows it by `(deviceId, jobId)`.
+/// `guest.exec.input` names the device too, so a remote command can keep stdin open.
+async fn remote_exec<T: serde::de::DeserializeOwned + Serialize + Send + 'static>(
+    device: String,
+    method: &'static str,
+    params: &(impl Serialize + ?Sized),
+) -> Result<HandlerOutput, DispatchError> {
+    let mut request =
+        serde_json::to_value(params).map_err(|error| DispatchError::internal(error.to_string()))?;
+    if let Some(object) = request.as_object_mut() {
+        object.remove("deviceId");
+    }
+    let reply =
+        tokio::task::spawn_blocking(move || super::access::call_owner(&device, method, request))
+            .await
+            .map_err(|error| DispatchError::internal(format!("The remote task failed: {error}")))?
+            .map_err(HandlerContext::map_engine_error)?;
+    let typed: T = serde_json::from_value(reply).map_err(|error| {
+        DispatchError::internal(format!(
+            "The other device returned an invalid reply to {method}: {error}"
+        ))
+    })?;
+    output(typed)
+}
+
+/// Starts a command on one of this engine's own computers as a job and returns its id. An
+/// owner serving a controller's `guest.exec.start` runs the same steps.
+pub(crate) fn start_exec(
+    engine: Arc<SilodContext>,
+    params: GuestExecStartParams,
+) -> Result<JobStartResult, DispatchError> {
     let request = guest::ExecStart {
         argv: params.argv,
         cwd: params.cwd,
@@ -339,21 +387,17 @@ async fn guest_exec_start(
         stdin_open: params.stdin_open,
         retain_output_bytes: params.retain_output_bytes,
     };
-    let engine = engine_of(context);
-    let computer_id = params.computer_id;
     // Refuse before a job exists: only a valid start on a running computer is accepted.
-    let prepared = {
-        let engine = engine.clone();
-        blocking(move || {
-            let target = resolve(&engine, &computer_id)?;
-            guest::StartedExec::prepare(&target, &request)
-        })
-        .await?
-    };
-    let accepted: JobStartResult = context.start_job("guest.exec.start")?;
-    let job_id = accepted.job_id.clone();
-    blocking(move || prepared.launch(engine, job_id)).await?;
-    output(accepted)
+    let target = resolve(&engine, &params.computer_id).map_err(guest_error)?;
+    let prepared = guest::StartedExec::prepare(&target, &request).map_err(guest_error)?;
+    let accepted = silo_engine::jobs::allocate(engine.as_ref(), "guest.exec.start")
+        .map_err(HandlerContext::map_registry_error)?;
+    prepared
+        .launch(engine, accepted.job_id.clone())
+        .map_err(guest_error)?;
+    Ok(JobStartResult {
+        job_id: accepted.job_id,
+    })
 }
 
 async fn guest_exec_input(
@@ -361,19 +405,41 @@ async fn guest_exec_input(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: GuestExecInputParams = context.decode_params(params)?;
-    guest::exec_input(&params.job_id, params.data, params.close.unwrap_or(false))
-        .map_err(guest_error)?;
+    if let Some(device) = remote_device(context, params.device_id.as_deref()) {
+        return remote_exec::<Value>(device, "guest.exec.input", &params).await;
+    }
+    exec_input_owner(&params)?;
     output(Value::Null)
+}
+
+/// Feeds or closes the stdin of a job of this engine, for a local caller or a controller.
+pub(crate) fn exec_input_owner(params: &GuestExecInputParams) -> Result<(), DispatchError> {
+    guest::exec_input(
+        &params.job_id,
+        params.data.clone(),
+        params.close.unwrap_or(false),
+    )
+    .map_err(guest_error)
 }
 
 async fn guest_exec_get(
     params: &Value,
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
-    let params: GuestExecGetParams = context.decode_params(params)?;
-    local_device(context, params.device_id.as_deref())?;
-    let snapshot = guest::exec_get(context.engine_context(), &params.job_id, params.since_seq)
-        .map_err(guest_error)?;
+    let typed: GuestExecGetParams = context.decode_params(params)?;
+    if let Some(device) = remote_device(context, typed.device_id.as_deref()) {
+        return remote_exec::<GuestExecGetResult>(device, "guest.exec.get", &typed).await;
+    }
+    exec_get_output(context.engine_context(), &typed)
+}
+
+/// The retained output of a job of this engine, for a local caller or for a controller.
+pub(crate) fn exec_get_output(
+    engine: &dyn EngineContext,
+    params: &GuestExecGetParams,
+) -> Result<HandlerOutput, DispatchError> {
+    let snapshot =
+        guest::exec_get(engine, &params.job_id, params.since_seq).map_err(guest_error)?;
     output_fitting(
         GuestExecGetResult {
             state: snapshot.state,
@@ -1160,7 +1226,6 @@ exit 2
                 MethodName::GuestExec,
                 json!({"argv": ["true"], "timeoutMs": 1000}),
             ),
-            (MethodName::GuestExecGet, json!({"jobId": "job:1"})),
             (MethodName::GuestFilesList, json!({"path": "/"})),
             (MethodName::GuestFilesRead, json!({"path": "/"})),
             (MethodName::GuestFilesRemove, json!({"paths": []})),
@@ -1182,6 +1247,134 @@ exit 2
                 "{method:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_command_on_another_device_is_the_owners_job_and_its_output_stays_there() {
+        let fixture = Fixture::new();
+        let device = "99999999-9999-4999-8999-999999999911";
+        let seen = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let log = seen.clone();
+        let _owner = super::super::access::tests::stub_owner(device, move |method, params| {
+            log.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            match method {
+                "guest.exec.start" => Ok(json!({"jobId": "job:31"})),
+                "guest.exec.get" => Ok(json!({
+                    "state": "running",
+                    "output": [{"seq": 4, "stream": "stdout", "data": bytes("hi")}],
+                    "firstRetainedSeq": 1,
+                })),
+                other => panic!("unexpected owner request {other}"),
+            }
+        });
+        let started = fixture
+            .ok(
+                MethodName::GuestExecStart,
+                json!({
+                    "computerId": COMPUTER, "deviceId": device, "argv": ["true"],
+                    "stdinOpen": false, "retainOutputBytes": 1024,
+                }),
+            )
+            .await;
+        // The id is the owner's: no job of this engine stands in for it.
+        assert_eq!(started, json!({"jobId": "job:31"}));
+        let replay = fixture
+            .ok(
+                MethodName::GuestExecGet,
+                json!({"jobId": "job:31", "deviceId": device, "sinceSeq": 3}),
+            )
+            .await;
+        assert_eq!(replay["state"], "running");
+        assert_eq!(replay["output"][0]["seq"], 4);
+        let seen = seen.lock().unwrap();
+        // The owner is told what to run, not which device was meant.
+        assert_eq!(seen[0].0, "guest.exec.start");
+        assert!(seen[0].1.get("deviceId").is_none());
+        assert_eq!(seen[0].1["computerId"], COMPUTER);
+        assert_eq!(seen[1].0, "guest.exec.get");
+        assert_eq!(seen[1].1, json!({"jobId": "job:31", "sinceSeq": 3}));
+    }
+
+    #[tokio::test]
+    async fn a_command_on_another_device_keeps_stdin_open_and_takes_input_there() {
+        let fixture = Fixture::new();
+        let device = "99999999-9999-4999-8999-999999999912";
+        let seen = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let log = seen.clone();
+        let _owner = super::super::access::tests::stub_owner(device, move |method, params| {
+            log.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            match method {
+                "guest.exec.start" => Ok(json!({"jobId": "job:41"})),
+                "guest.exec.input" => Ok(Value::Null),
+                other => panic!("unexpected owner request {other}"),
+            }
+        });
+        let started = fixture
+            .ok(
+                MethodName::GuestExecStart,
+                json!({
+                    "computerId": COMPUTER, "deviceId": device, "argv": ["cat"],
+                    "stdinOpen": true, "retainOutputBytes": 1024,
+                }),
+            )
+            .await;
+        assert_eq!(started, json!({"jobId": "job:41"}));
+        fixture
+            .ok(
+                MethodName::GuestExecInput,
+                json!({"jobId": "job:41", "deviceId": device, "data": [104, 105], "close": true}),
+            )
+            .await;
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].1["stdinOpen"], true);
+        assert_eq!(seen[1].0, "guest.exec.input");
+        // The owner is told what to feed, not which device was meant.
+        assert!(seen[1].1.get("deviceId").is_none());
+        assert_eq!(seen[1].1["jobId"], "job:41");
+        assert_eq!(seen[1].1["close"], true);
+    }
+
+    #[tokio::test]
+    async fn an_owner_serves_a_controllers_command_as_its_own_job_with_replayable_output() {
+        let fixture = Fixture::new();
+        let typed: GuestExecStartParams = serde_json::from_value(json!({
+            "computerId": COMPUTER, "argv": ["sh", "-c", "printf owner-output"],
+            "stdinOpen": false, "retainOutputBytes": 1024,
+        }))
+        .unwrap();
+        let accepted = start_exec(fixture.engine.clone(), typed).expect("the owner accepts it");
+        let get = GuestExecGetParams {
+            job_id: accepted.job_id.clone(),
+            device_id: None,
+            since_seq: None,
+        };
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let replay = loop {
+            let replay = exec_get_output(fixture.engine.as_ref(), &get)
+                .unwrap()
+                .value;
+            if replay["state"] == "exited" {
+                break replay;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the command never ended: {replay}"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        };
+        assert_eq!(replay["exitCode"], 0);
+        assert!(replay["output"]
+            .as_array()
+            .is_some_and(|chunks| !chunks.is_empty()));
+        // The job is in the owner's registry under the id it returned.
+        let found = silo_engine::jobs::get_at(fixture.engine.as_ref(), &accepted.job_id, None)
+            .unwrap()
+            .expect("the owner keeps the job");
+        assert_eq!(found.job_id, accepted.job_id);
     }
 
     #[tokio::test]

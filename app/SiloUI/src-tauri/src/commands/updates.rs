@@ -1,829 +1,328 @@
-//! Tauri adapters for the host-owned signed update flow.
-#[path = "../../engine/src/updates/debian.rs"]
-mod debian;
-use crate::updates as engine;
-use engine::{Snapshot, State, MAX_DOWNLOAD_BYTES, RELEASE_URL};
-use std::{
-    path::{Path, PathBuf},
-    sync::Mutex,
-    time::{Duration, SystemTime},
-};
-use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_updater::{Update, UpdaterExt};
+//! Tauri adapters for engine updates. The engine owns the schedule, the feed and the state
+//! (`updates.*`, `updates.changed`); this app shows them and opens the release page.
+//! Installing replaces the app bundle, so it follows the shared installer handoff (the same
+//! sequence Fjord's `EngineHandoff` runs): take `installer.lock`, `engine.update.prepare`,
+//! `engine.shutdown {reason: "update"}`, swap the bundle, restart. The lock is held until the
+//! new package is in place; if the app dies first the engine's watchdog aborts the update.
 
-struct ManagedState {
-    policy: State,
-    update: Option<Update>,
+use std::path::Path;
+
+use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
+
+use crate::engine_client::{Engine, EngineClient, EngineError};
+
+const DEVELOPMENT_CHANNEL: &str =
+    "Silo Dev is built from source and does not install releases. Build the new version instead.";
+const NO_UPDATE: &str = "There is no update to install. Check for updates first.";
+const INSTALLER_BUSY: &str =
+    "Another app is installing a Silo update. Wait for it to finish, then try again.";
+
+pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
+    engine.call("updates.state", json!({})).await
 }
 
-struct Controller {
-    preferences: PathBuf,
-    state: Mutex<ManagedState>,
+pub(crate) async fn check(engine: &EngineClient) -> Result<Value, EngineError> {
+    engine.call("updates.check", json!({})).await
 }
 
-fn modify(app: &AppHandle, f: impl FnOnce(&mut State)) -> Result<Snapshot, String> {
-    modify_managed(app, |state| f(&mut state.policy))
+/// The download is a job whose progress arrives as `updates.changed`; the result is the
+/// state once it ends.
+pub(crate) async fn download(engine: &EngineClient) -> Result<Value, EngineError> {
+    engine.run_job("updates.download", json!({})).await?;
+    state(engine).await
 }
 
-fn update_snapshot_payload(snapshot: &Snapshot) -> Result<serde_json::Value, serde_json::Error> {
-    let mut payload = serde_json::to_value(snapshot)?;
-    // `UpdateSnapshot` omits the legacy Debian helper field while job progress
-    // intentionally carries the complete source Snapshot.
-    if let Some(fields) = payload.as_object_mut() {
-        fields.remove("installStatus");
-    }
-    Ok(payload)
-}
-
-fn publish_job_progress(
-    context: &dyn silo_engine::EngineContext,
-    job_id: &silo_api::jobs::JobId,
-    snapshot: &Snapshot,
-) -> Result<(), String> {
-    let value = serde_json::to_value(snapshot).map_err(|error| error.to_string())?;
-    let data = serde_json::from_value::<silo_api::methods::updates::UpdateProgressData>(value)
-        .map_err(|error| error.to_string())?;
-    silo_engine::jobs::publish_progress(
-        context,
-        silo_api::jobs::JobProgress::Update {
-            job_id: job_id.clone(),
-            kind: None,
-            computer_id: None,
-            data,
-        },
-        silo_engine::context::Audience::All,
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn emit_update_state(app: &AppHandle, snapshot: &Snapshot) {
-    let _ = app.emit("silo://update-state", snapshot);
-    if let (Some(context), Ok(payload)) = (
-        silo_engine::context::current(),
-        update_snapshot_payload(snapshot),
-    ) {
-        context.publish(
-            silo_engine::context::Event::new("updates.changed", payload),
-            silo_engine::context::Audience::All,
-        );
-    }
-}
-
-fn modify_managed(app: &AppHandle, f: impl FnOnce(&mut ManagedState)) -> Result<Snapshot, String> {
-    let controller = app.state::<Controller>();
-    let mut state = controller
-        .state
-        .lock()
-        .map_err(|_| "Update state is unavailable.")?;
-    f(&mut state);
-    let snapshot = state.policy.snapshot.clone();
-    emit_update_state(app, &snapshot);
-    Ok(snapshot)
-}
-
-fn update_automatic_checks_and_publish(
-    state: &mut State,
-    preferences: &Path,
+pub(crate) async fn set_automatic_checks(
+    engine: &EngineClient,
     enabled: bool,
-    persist: impl FnOnce(&Path, bool) -> Result<(), String>,
-    publish: impl FnOnce(&Snapshot),
-) -> Result<Snapshot, String> {
-    let snapshot = engine::update_automatic_checks(state, preferences, enabled, persist)?;
-    publish(&snapshot);
-    Ok(snapshot)
+) -> Result<Value, EngineError> {
+    engine
+        .call("updates.setAutomaticChecks", json!({"enabled": enabled}))
+        .await
 }
 
-fn fail(app: &AppHandle, message: &str, details: impl ToString) -> Result<Snapshot, String> {
-    modify(app, |state| {
-        engine::record_failure(state, message, details);
-    })
-}
-pub(crate) fn recovery_failed(app: &AppHandle, message: String) {
-    let _ = fail(
-        app,
-        "Some computers could not resume after updating. Relaunch Silo to retry.",
-        &message,
-    );
-    crate::commands::notifications::notify(
-        app,
-        crate::notifications::failure(
-            "update:resume",
-            "Computers couldn\u{2019}t resume after updating",
-            &message,
-            None,
-        ),
-    );
-}
-fn ready(app: &AppHandle) -> Result<(), String> {
-    engine::readiness(|| {
-        crate::commands::backup_controller::update_ready(app)?;
-        // Fast readiness check only: refuse if any computer operation is active or queued.
-        if !crate::runtime::OPERATIONS.is_idle() {
-            return Err("Wait for computer operations to finish before updating.".into());
-        }
-        crate::runtime::shutdown::ensure_accepting_operations()
-    })
-}
-pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Update storage is unavailable.")?
-        .join("update-preferences.json");
-    let preference = engine::read_preferences(&path);
-    let error = preference.as_ref().err().cloned();
-    // Silo Dev is built from source and never replaces itself with a production release.
-    let automatic = preference.unwrap_or(false) && !crate::channel::current().is_development();
-    let executable = std::env::current_exe().unwrap_or_default();
-    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
-    let bundle = match tauri::utils::platform::bundle_type() {
-        Some(tauri::utils::config::BundleType::AppImage) => Some(engine::BundleKind::AppImage),
-        Some(tauri::utils::config::BundleType::Deb) => Some(engine::BundleKind::Debian),
-        _ => None,
-    };
-    let snapshot = Snapshot {
-        last_checked: None,
-        retry_action: None,
-        phase: if error.is_some() { "error" } else { "idle" }.into(),
-        current_version: app.package_info().version.to_string(),
-        available_version: None,
-        release_notes: None,
-        downloaded_bytes: 0,
-        total_bytes: None,
-        automatic_checks: automatic,
-        package_kind: engine::package_kind(&executable, appimage.as_deref(), bundle).into(),
-        release_url: RELEASE_URL.into(),
-        error,
-        error_details: None,
-        running_computers: vec![],
-        can_install: false,
-        install_block_reason: None,
-        install_status: None,
-    };
-    app.manage(Controller {
-        preferences: path,
-        state: Mutex::new(ManagedState {
-            policy: State::new(snapshot, SystemTime::now()),
-            update: None,
-        }),
-    });
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(engine::POLL_INTERVAL).await;
-            let _ = check(app.clone(), true).await;
-        }
-    });
-    Ok(())
-}
+/// The window gained focus: the engine may check for updates now. Fire and forget.
 pub(crate) fn focused(app: &AppHandle) {
-    // The first window event can precede updater setup.
-    let Some(controller) = app.try_state::<Controller>() else {
+    let Some(engine) = crate::engine_client::try_of(app) else {
         return;
     };
-    if let Ok(mut state) = controller.state.lock() {
-        engine::focused(&mut state.policy, SystemTime::now());
-    };
-}
-#[tauri::command]
-pub(crate) async fn get_update_state(app: AppHandle) -> Result<Snapshot, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let installing = app
-            .state::<Controller>()
-            .state
-            .lock()
-            .map_or(true, |state| state.policy.snapshot.phase == "installing");
-        let readiness = if installing {
-            Err("An update operation is already running.".to_string())
-        } else {
-            ready(&app)
-        };
-        // Do not compete with an active runtime mutation just to refresh a settings card.
-        let running = readiness.and_then(|_| {
-            crate::runtime::update_recovery::running_names(&crate::commands::runtime::host(&app))
-                .map_err(|_| {
-                    "Silo could not verify computer status. Check Computers before updating."
-                        .to_string()
-                })
-        });
-        modify(&app, |s| {
-            s.snapshot.can_install = running.is_ok();
-            s.snapshot.install_block_reason = running.as_ref().err().cloned();
-            if let Ok(names) = running {
-                s.snapshot.running_computers = names;
-            }
-        })
-    })
-    .await
-    .map_err(|_| "Update state could not be read.".to_string())?
-}
-#[tauri::command]
-pub(crate) async fn set_update_automatic_checks(
-    app: AppHandle,
-    enabled: bool,
-) -> Result<Snapshot, String> {
-    // The durable write fsyncs twice; keep it off the main thread.
-    tauri::async_runtime::spawn_blocking(move || {
-        let controller = app.state::<Controller>();
-        let mut state = controller
-            .state
-            .lock()
-            .map_err(|_| "Update state is unavailable.")?;
-        update_automatic_checks_and_publish(
-            &mut state.policy,
-            &controller.preferences,
-            enabled,
-            engine::save_preferences,
-            |snapshot| emit_update_state(&app, snapshot),
-        )
-    })
-    .await
-    .map_err(|_| "Update preferences could not be saved.".to_owned())?
-}
-
-#[cfg(test)]
-mod preference_tests {
-    use super::*;
-
-    #[test]
-    fn failed_preference_save_preserves_snapshot_and_does_not_publish() {
-        let directory = tempfile::tempdir().unwrap();
-        let preferences = directory.path().join("prefs.json");
-        let initial = Snapshot {
-            phase: "idle".into(),
-            last_checked: None,
-            retry_action: None,
-            current_version: "1.0.0".into(),
-            available_version: None,
-            release_notes: None,
-            downloaded_bytes: 0,
-            total_bytes: None,
-            automatic_checks: true,
-            package_kind: "manual".into(),
-            release_url: RELEASE_URL.into(),
-            error: None,
-            error_details: None,
-            running_computers: Vec::new(),
-            can_install: false,
-            install_block_reason: None,
-            install_status: None,
-        };
-        let mut state = State::new(initial, SystemTime::now());
-
-        let error = update_automatic_checks_and_publish(
-            &mut state,
-            &preferences,
-            false,
-            |_, _| Err("save failed".into()),
-            |_| panic!("failed persistence must not publish success"),
-        )
-        .unwrap_err();
-
-        assert_eq!(error, "save failed");
-        assert!(state.snapshot.automatic_checks);
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn check_for_update(app: AppHandle) -> Result<Snapshot, String> {
-    check(app, false).await
-}
-async fn check(app: AppHandle, automatic: bool) -> Result<Snapshot, String> {
-    if crate::channel::current().is_development() {
-        // No network request: the development channel has no update feed.
-        return modify(&app, engine::no_feed_available);
-    }
-    let previous_phase = {
-        let controller = app.state::<Controller>();
-        let mut state = controller
-            .state
-            .lock()
-            .map_err(|_| "Update state is unavailable.")?;
-        // Admit automatic checks under the same lock as manual actions.
-        if automatic && !engine::automatic_check_due(&state.policy, SystemTime::now()) {
-            return Ok(state.policy.snapshot.clone());
-        }
-        // Keep a discovered update and verified bytes until the result is known.
-        let previous = engine::begin_check(&mut state.policy)?;
-        emit_update_state(&app, &state.policy.snapshot);
-        previous
-    };
-    let result = async {
-        app.updater_builder()
-            .timeout(Duration::from_secs(30))
-            .build()?
-            .check()
-            .await
-    }
-    .await;
-    match result {
-        Ok(update) => modify_managed(&app, |managed| {
-            engine::complete_check(&mut managed.policy, SystemTime::now(), true);
-            let found = update.as_ref().map(|update| engine::UpdateInfo {
-                version: update.version.clone(),
-                body: update.body.clone(),
-            });
-            let keep = engine::settle_check(&mut managed.policy, found);
-            if !keep {
-                managed.update = update;
-                managed.policy.update = managed.update.as_ref().map(|update| engine::UpdateInfo {
-                    version: update.version.clone(),
-                    body: update.body.clone(),
-                });
-            }
-            managed.policy.snapshot.last_checked = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .ok();
-        }),
-        Err(e) => {
-            let pending = app
-                .state::<Controller>()
-                .state
-                .lock()
-                .map_or(false, |s| s.policy.update.is_some());
-            if !pending {
-                modify(&app, |state| {
-                    engine::complete_check(state, SystemTime::now(), false)
-                })?;
-                return fail(&app, check_error_message(&e), e);
-            }
-            // A failed re-check leaves a found or downloaded update actionable.
-            modify(&app, |state| {
-                engine::check_failed(
-                    state,
-                    SystemTime::now(),
-                    &previous_phase,
-                    check_error_message(&e),
-                    &e,
-                );
-            })
-        }
-    }
-}
-
-fn check_error_message(error: &tauri_plugin_updater::Error) -> &'static str {
-    use tauri_plugin_updater::Error;
-    let kind = match error {
-        Error::ReleaseNotFound => engine::CheckErrorKind::ReleaseUnavailable,
-        Error::Serialization(_) | Error::Semver(_) => engine::CheckErrorKind::InvalidRelease,
-        Error::Reqwest(error) if error.is_decode() => engine::CheckErrorKind::InvalidRelease,
-        Error::TargetNotFound(_) | Error::TargetsNotFound(_) => {
-            engine::CheckErrorKind::NoPlatformRelease
-        }
-        _ => engine::CheckErrorKind::Other,
-    };
-    engine::check_error_message(kind)
-}
-#[tauri::command]
-pub(crate) async fn download_update(app: AppHandle) -> Result<Snapshot, String> {
-    let context = silo_engine::context::current();
-    let (mut update, job, initial_snapshot) = {
-        let controller = app.state::<Controller>();
-        let mut state = controller
-            .state
-            .lock()
-            .map_err(|_| "Update state is unavailable.")?;
-        if matches!(
-            state.policy.snapshot.phase.as_str(),
-            "checking" | "downloading" | "installing"
-        ) {
-            return Err("An update operation is already running.".into());
-        }
-        if matches!(
-            state.policy.snapshot.package_kind.as_str(),
-            "manual" | "debian"
-        ) {
-            return Err("Download the package from Releases to update this installation.".into());
-        }
-        if state.policy.update.is_none() {
-            return Err("Check for an update before downloading.".into());
-        }
-        let update = state
-            .update
-            .clone()
-            .ok_or("Check for an update before downloading.")?;
-        let job = if let Some(context) = context.as_ref() {
-            let acceptance = silo_engine::jobs::allocate(context.as_ref(), "updates.download")
-                .map_err(|error| error.to_string())?;
-            Some((context.clone(), acceptance.job_id))
-        } else {
-            None
-        };
-        if let Err(error) = engine::begin_download(&mut state.policy) {
-            if let Some((job_context, job_id)) = job.as_ref() {
-                if let Err(persist_error) = silo_engine::jobs::finish_with_error(
-                    job_context.as_ref(),
-                    job_id.clone(),
-                    silo_api::jobs::ErrorCode::Internal,
-                    error.clone(),
-                    silo_engine::context::Audience::All,
-                ) {
-                    return Err(persist_error.to_string());
-                }
-            }
-            return Err(error);
-        }
-        let initial_snapshot = state.policy.snapshot.clone();
-        emit_update_state(&app, &state.policy.snapshot);
-        (update, job, initial_snapshot)
-    };
-    if let Some((context, job_id)) = job.as_ref() {
-        if let Err(error) = publish_job_progress(context.as_ref(), job_id, &initial_snapshot) {
-            eprintln!("Silo could not persist initial update progress: {error}");
-        }
-    }
-    update.timeout = Some(Duration::from_secs(30 * 60));
-    let limit = tokio::sync::Notify::new();
-    let mut received = 0u64;
-    let mut last_report = std::time::Instant::now() - Duration::from_secs(1);
-    let result = tokio::select! {
-        _ = limit.notified() => Err("The update exceeds the supported download size.".to_string()),
-        result = update.download(|bytes, total| {
-            received = received.saturating_add(bytes as u64);
-            if received > MAX_DOWNLOAD_BYTES || total.is_some_and(|size| size > MAX_DOWNLOAD_BYTES) { limit.notify_one(); }
-            if last_report.elapsed() >= Duration::from_millis(100) {
-                if let Ok(snapshot) = modify(&app, |state| engine::download_progress(state, received, total)) {
-                    if let Some((context, job_id)) = job.as_ref() {
-                        if let Err(error) = publish_job_progress(context.as_ref(), job_id, &snapshot) {
-                            eprintln!("Silo could not persist update progress: {error}");
-                        }
-                    }
-                }
-                last_report = std::time::Instant::now();
-            }
-        }, || {}) => result.map_err(|e| e.to_string()),
-    };
-    // The completed download and notification can both be ready in the same
-    // select poll. Check the final verified buffer independently of that race.
-    let result = result.and_then(|bytes| {
-        engine::validate_download_size(bytes.len() as u64)?;
-        Ok(bytes)
+    tauri::async_runtime::spawn(async move {
+        let _ = engine.call("updates.focused", json!({})).await;
     });
-    let result = match result {
-        Ok(bytes) => match modify(&app, |state| engine::download_ready(state, bytes)) {
-            Ok(_) => get_update_state(app).await,
-            Err(error) => fail(
-                &app,
-                "The update could not be downloaded or verified. Your installation was not changed. Try again.",
-                error,
-            ),
-        },
-        Err(error) => fail(
-            &app,
-            "The update could not be downloaded or verified. Your installation was not changed. Try again.",
-            error,
-        ),
-    };
-    if let Some((context, job_id)) = job {
-        let finish = match &result {
-            Ok(snapshot) => update_snapshot_payload(snapshot)
-                .map_err(|error| error.to_string())
-                .and_then(|value| {
-                    silo_engine::jobs::finish_with_result(
-                        context.as_ref(),
-                        job_id,
-                        value,
-                        silo_engine::context::Audience::All,
-                    )
-                    .map_err(|error| error.to_string())
-                }),
-            Err(message) => silo_engine::jobs::finish_with_error(
-                context.as_ref(),
-                job_id,
-                silo_api::jobs::ErrorCode::Internal,
-                message.clone(),
-                silo_engine::context::Audience::All,
-            )
-            .map_err(|error| error.to_string()),
-        };
-        if let Err(error) = finish {
-            return Err(format!(
-                "The update finished but its job outcome could not be saved: {error}"
-            ));
-        }
-    }
-    result
-}
-fn installation_preflight(bytes: &[u8]) -> Result<(), String> {
-    let executable =
-        std::env::current_exe().map_err(|_| "The installed application could not be located.")?;
-    let destination = if cfg!(target_os = "macos") {
-        executable
-            .ancestors()
-            .find(|p| p.extension().is_some_and(|e| e == "app"))
-            .map(Path::to_path_buf)
-    } else {
-        std::env::var_os("APPIMAGE").map(PathBuf::from)
-    }
-    .ok_or("This installation must be updated using a downloaded package.")?;
-    engine::preflight_destination(
-        &destination,
-        bytes,
-        cfg!(target_os = "macos"),
-        engine::available_install_space,
-    )
 }
 
-/// How an installation that did not restart Silo ended.
-enum InstallError {
-    /// Nothing was installed (computers were restored where possible); retry the install.
-    Failed(String),
-}
-impl From<String> for InstallError {
-    fn from(error: String) -> Self {
-        Self::Failed(error)
-    }
-}
-/// `exec` skips exit cleanup, so close helpers and release the instance claim first.
-/// A failed replacement must exit without reopening admission or restoring computers:
-/// this process no longer owns the claim. Startup restores the saved running set.
-/// Closes file-transfer admission and lets the running transfer clean up (`close`)
-/// before `prepare` stops computers, since cleanup needs its computer. The returned
-/// guard keeps admission closed; the caller drops it once the update has failed and
-/// its computers are running again, or leaves it to the replaced process.
-fn prepare_after_transfers<P>(
-    close: impl FnOnce() -> P,
-    prepare: impl FnOnce() -> Result<(), String>,
-) -> (P, Result<(), String>) {
-    let closed = close();
-    let result = prepare();
-    (closed, result)
+#[tauri::command]
+pub(crate) async fn get_update_state(engine: Engine<'_>) -> Result<Value, String> {
+    state(&engine).await.map_err(String::from)
 }
 
-fn close_transfers() -> crate::transfer::Pause {
-    crate::transfer::pause(crate::runtime::shutdown::TRANSFER_DRAIN)
+#[tauri::command]
+pub(crate) async fn check_for_update(engine: Engine<'_>) -> Result<Value, String> {
+    check(&engine).await.map_err(String::from)
 }
 
-fn restart_after_install(close: impl FnOnce(), restart: impl FnOnce() -> String) -> ! {
-    close();
-    let error = restart();
-    use std::io::Write;
-    let _ = writeln!(
-        std::io::stderr().lock(),
-        "{error}\nSilo has closed. Reopen Silo to finish the update and restore its computers."
-    );
-    std::process::exit(1)
+#[tauri::command]
+pub(crate) async fn download_update(engine: Engine<'_>) -> Result<Value, String> {
+    download(&engine).await.map_err(String::from)
 }
-/// Debian installs through APT with system authentication. Authentication, the
-/// source check, the refresh and the download all happen while computers keep
-/// running; they are stopped only once the package is ready to install, and
-/// restored if installation then fails.
-fn install_debian(app: &AppHandle, version: &str, consent: bool) -> Result<(), InstallError> {
-    debian::preflight()?;
-    // Refuse new work while the update prepares; the helper's timeout bounds this.
-    let admission = engine::installation_guard()?;
-    let backup = crate::commands::backup_controller::update_guard(app)?;
-    let github = crate::github::update_guard()?;
-    let secrets = crate::secrets::update_guard()?;
-    crate::runtime::shutdown::ensure_accepting_operations()?;
-    let mut runtime = None;
-    let mut transfers = None;
-    let result = debian::install(
-        version,
-        |status| {
-            let _ = modify(app, |s| s.snapshot.install_status = Some(status.into()));
-        },
-        || {
-            // Only now wait for device-wide work, so Quit is never queued behind
-            // an authentication prompt or a download.
-            let guard = crate::runtime::OPERATIONS
-                .kind(crate::runtime::operation_gate::OperationKind::Shutdown)
-                .device("Installing update")
-                .map_err(|e| e.to_string())?;
-            runtime = Some(guard);
-            crate::runtime::shutdown::ensure_accepting_operations()?;
-            crate::settings::flush_for_update()?;
-            let (closed, prepared) = prepare_after_transfers(close_transfers, || {
-                crate::runtime::update_recovery::prepare(
-                    &crate::commands::runtime::host(app),
-                    consent,
-                )
-            });
-            transfers = Some(closed);
-            prepared
-        },
-    );
-    if let Err(error) = result {
-        // Computers can only have stopped once the install stage took the gate.
-        if runtime.is_some() {
-            if let Err(resume) = crate::runtime::update_recovery::restore_locked(
-                &crate::commands::runtime::host(app),
-            ) {
-                return Err(InstallError::Failed(format!(
-                    "{error}\nComputers could not resume: {resume}. Relaunch Silo to retry."
-                )));
-            }
-        }
-        drop(transfers);
-        return Err(InstallError::Failed(error));
+
+/// Runs the installer side of an engine update. `swap` replaces the app bundle once the
+/// engine has saved its running computers and exited; it runs with the lock still held.
+///
+/// Everything that fails before the engine leaves aborts the prepared update, so the engine
+/// keeps serving. A failure after it left cannot be undone: the lock is released and whichever
+/// engine starts next restores the saved computers.
+pub(crate) async fn hand_off<L>(
+    engine: &EngineClient,
+    take_lock: impl FnOnce() -> std::io::Result<L>,
+    swap: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _lock = take_lock().map_err(|error| match error.kind() {
+        std::io::ErrorKind::WouldBlock => INSTALLER_BUSY.to_owned(),
+        _ => format!("Silo could not take the installer lock: {error}"),
+    })?;
+    // The engine saves and holds the running computers; `resuming` is for the new engine.
+    if let Err(error) = engine.run_job("engine.update.prepare", json!({})).await {
+        let _ = engine.call("engine.update.abort", json!({})).await;
+        return Err(String::from(error));
     }
-    // Keep installation guards and shutdown admission closed until this process
-    // is replaced or exits. Startup owns recovery from the retained update journal.
-    crate::runtime::shutdown::begin();
-    let _guards = (admission, backup, github, secrets, runtime, transfers);
-    restart_after_install(
-        || {
-            crate::ssh_access::close_all();
-            crate::remote_network::close_all();
-            crate::desktop_viewer::close_all();
-            crate::macos_remote_viewer::close_all();
-            // exec also skips the single-instance plugin's cleanup: release the
-            // claim so the replacement process does not find it and exit (F-09).
-            crate::single_instance::release(app);
-        },
-        debian::restart,
-    )
+    if let Err(error) = engine
+        .run_job_until_exit(
+            "engine.shutdown",
+            json!({"stopComputers": false, "reason": "update"}),
+        )
+        .await
+    {
+        let _ = engine.call("engine.update.abort", json!({})).await;
+        return Err(String::from(error));
+    }
+    swap()
 }
+
+fn engine_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    Ok(silo_client::channel::current().engine_directory(&home))
+}
+
+fn locked(directory: &Path) -> impl FnOnce() -> std::io::Result<crate::installer::Held> + '_ {
+    move || crate::installer::Held::take(directory)
+}
+
 #[tauri::command]
 pub(crate) async fn install_update(
     app: AppHandle,
-    stop_computers: bool,
-) -> Result<Snapshot, String> {
-    let (update, bytes, is_debian) = {
-        let controller = app.state::<Controller>();
-        let mut state = controller
-            .state
-            .lock()
-            .map_err(|_| "Update state is unavailable.")?;
-        let update = state
-            .update
-            .clone()
-            .ok_or("Download and verify an update before installing.")?;
-        let (bytes, is_debian) = engine::begin_install(&mut state.policy, true)?;
-        emit_update_state(&app, &state.policy.snapshot);
-        (update, bytes, is_debian)
-    };
-    let worker = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), InstallError> {
-        crate::startup::cancel_and_wait(&worker);
-        if is_debian {
-            return install_debian(&worker, &update.version, stop_computers);
-        }
-        // Reservation uses the same atomic gate as backup/restore admission.
-        let closed_macos = std::cell::Cell::new(false);
-        let admission = (|| {
-            // Linux computers are stopped and restored from the update journal after the
-            // restart. macOS computers live in this process and cannot be restored, so
-            // the update refuses while one is busy and admits no new one until it ends.
-            let admission = engine::installation_guard()?;
-            crate::macos_computers::close_for_update()?;
-            closed_macos.set(true);
-            let backup = crate::commands::backup_controller::update_guard(&worker)?;
-            let github = crate::github::update_guard()?;
-            let secrets = crate::secrets::update_guard()?;
-            // The installer waits its turn for device-wide work before stopping computers.
-            let runtime = crate::runtime::OPERATIONS
-                .kind(crate::runtime::operation_gate::OperationKind::Shutdown)
-                .device("Installing update").map_err(|e| e.to_string())?;
-            crate::runtime::shutdown::ensure_accepting_operations()?;
-            Ok::<_, String>((admission, backup, github, secrets, runtime))
-        })();
-        let (_admission, _backup, _github, _secrets, _runtime) = match admission {
-            Ok(guards) => guards,
-            Err(error) => { if closed_macos.get() { crate::macos_computers::reopen_after_update(); } let _ = modify(&worker, |s| engine::restore_install_bytes(s, bytes)); return Err(error.into()); }
-        };
-        let mut transfers = None;
-        let result = installation_preflight(&bytes)
-            .and_then(|_| crate::settings::flush_for_update())
-            .and_then(|_| {
-                let (closed, prepared) = prepare_after_transfers(close_transfers, || {
-                    crate::runtime::update_recovery::prepare(&crate::commands::runtime::host(&worker), stop_computers)
-                });
-                transfers = Some(closed);
-                prepared
-            })
-            .and_then(|_| update.install(&bytes).map_err(|e| e.to_string()));
-        if let Err(error) = result {
-            crate::macos_computers::reopen_after_update();
-            let restore = crate::runtime::update_recovery::restore_locked(&crate::commands::runtime::host(&worker));
-            drop(transfers);
-            let _ = modify(&worker, |s| engine::restore_install_bytes(s, bytes));
-            return Err(match restore { Ok(()) => error, Err(resume) => format!("{error}\nComputers could not resume: {resume}. Relaunch Silo to retry.") }.into());
-        }
-        // Settings are flushed before installation and the UI stays inert.
-        // Tauri restart cannot be deferred by the ordinary exit flush handler.
-        // Close admission before releasing installation guards. The update
-        // journal retains the running set for startup to restore after restart.
-        crate::runtime::shutdown::begin();
-        drop((_admission, _backup, _github, _secrets, _runtime, transfers));
-        worker.restart()
-    }).await.unwrap_or_else(|_| Err(InstallError::Failed("Update installation was interrupted. Relaunch Silo to restore the saved computer state, then download the update again.".into())));
-    match result {
-        Ok(()) => get_update_state(app).await,
-        Err(InstallError::Failed(e)) => fail(
-            &app,
-            if is_debian {
-                debian::failure_message(&e)
-            } else {
-                "The update could not be installed. Try again, or download the latest installer."
-            },
-            e,
-        ),
+    engine: Engine<'_>,
+    _stop_computers: bool,
+) -> Result<Value, String> {
+    if silo_client::channel::current() == silo_client::channel::Channel::Development {
+        return Err(DEVELOPMENT_CHANNEL.to_owned());
     }
+    // The verified package is fetched first, so the engine is down only for the swap.
+    let update = app
+        .updater()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or(NO_UPDATE)?;
+    let package = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    let directory = engine_directory(&app)?;
+    hand_off(&engine, locked(&directory), || {
+        update.install(package).map_err(|error| error.to_string())
+    })
+    .await?;
+    // The new app starts its own bundled engine, which restores the saved computers.
+    app.restart()
 }
+
 #[tauri::command]
-pub(crate) async fn open_update_release(app: tauri::AppHandle) -> Result<(), String> {
-    // The shared browser opener honours the browser setting and leaves no
-    // unreaped child process (F-25).
+pub(crate) async fn set_update_automatic_checks(
+    engine: Engine<'_>,
+    enabled: bool,
+) -> Result<Value, String> {
+    set_automatic_checks(&engine, enabled)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub(crate) async fn open_update_release(app: AppHandle, engine: Engine<'_>) -> Result<(), String> {
+    let url = state(&engine)
+        .await
+        .map_err(String::from)?
+        .get("releaseUrl")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or("The engine reported no release page.")?;
+    // The shared browser opener honours the browser setting and leaves no unreaped child.
     tauri::async_runtime::spawn_blocking(move || {
-        crate::commands::applications::open_browser(&app, RELEASE_URL)
+        crate::commands::applications::open_browser(&app, &url)
     })
     .await
     .map_err(|_| "The browser could not be opened.".to_string())?
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
 
-    #[test]
-    fn transfers_close_before_computers_stop_and_stay_closed_until_released() {
-        let events = std::cell::RefCell::new(Vec::new());
-        struct Closed<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
-        impl Drop for Closed<'_> {
-            fn drop(&mut self) {
-                self.0.borrow_mut().push("reopen");
-            }
-        }
-        let (closed, result) = prepare_after_transfers(
-            || {
-                events.borrow_mut().push("close");
-                Closed(&events)
-            },
-            || {
-                events.borrow_mut().push("stop");
-                Err("stopping failed".to_string())
-            },
-        );
-        assert_eq!(result.unwrap_err(), "stopping failed");
-        assert_eq!(*events.borrow(), ["close", "stop"]);
-        events.borrow_mut().push("restore");
-        drop(closed);
-        assert_eq!(*events.borrow(), ["close", "stop", "restore", "reopen"]);
+    fn snapshot(phase: &str) -> Value {
+        json!({"phase": phase, "currentVersion": "0.11.1", "automaticChecks": true,
+            "releaseUrl": "https://example.test/releases", "canInstall": false})
     }
 
-    #[test]
-    fn unavailable_feed_does_not_blame_the_connection_or_claim_success() {
+    #[tokio::test]
+    async fn state_check_and_automatic_checks_forward_to_the_engine() {
+        let fake = FakeEngine::start(|method, params| match method {
+            "updates.state" => Ok(snapshot("idle")),
+            "updates.check" => Ok(snapshot("available")),
+            "updates.setAutomaticChecks" => {
+                Ok(json!({"phase": "idle", "automaticChecks": params["enabled"]}))
+            }
+            _ => Ok(json!({"subscription": "sub"})),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(state(&engine).await.unwrap()["phase"], "idle");
+        assert_eq!(check(&engine).await.unwrap()["phase"], "available");
+        let toggled = set_automatic_checks(&engine, false).await.unwrap();
+        assert_eq!(toggled["automaticChecks"], false);
         assert_eq!(
-            check_error_message(&tauri_plugin_updater::Error::ReleaseNotFound),
-            "The update service is unavailable. Try again later."
-        );
-        let invalid = serde_json::from_str::<serde_json::Value>("broken").unwrap_err();
-        assert_eq!(
-            check_error_message(&invalid.into()),
-            "The update service returned invalid release information. Try again later."
+            fake.calls("updates.setAutomaticChecks"),
+            vec![json!({"enabled": false})]
         );
     }
 
-    #[test]
-    fn reexec_replaces_or_exits_without_resuming_writes() {
-        use std::{os::unix::process::CommandExt, process::Command};
-        const CHILD: &str = "SILO_REEXEC_TEST_DIRECTORY";
-        const REPLACE: &str = "SILO_REEXEC_TEST_REPLACE";
-        if let Some(directory) = std::env::var_os(CHILD) {
-            let directory = PathBuf::from(directory);
-            let mutation = directory.join("mutation");
-            let worker = std::thread::spawn(move || -> () {
-                restart_after_install(
-                    || fs::write(directory.join("released"), b"claim released").unwrap(),
-                    || {
-                        assert!(directory.join("released").exists());
-                        let error = if std::env::var_os(REPLACE).is_some() {
-                            Command::new("/bin/sh").args(["-c", "exit 0"]).exec()
-                        } else {
-                            Command::new(directory.join("missing-executable")).exec()
-                        };
-                        format!("exec failed: {error}")
-                    },
-                )
-            });
-            worker.join().unwrap();
-            fs::write(mutation, b"ordinary write resumed").unwrap();
-            return;
-        }
-        for replace in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
-            let mut command = Command::new(std::env::current_exe().unwrap());
-            command
-                .args([
-                    "--exact",
-                    "commands::updates::tests::reexec_replaces_or_exits_without_resuming_writes",
-                    "--nocapture",
-                ])
-                .env(CHILD, directory.path())
-                .env("HOME", directory.path())
-                .env_remove(REPLACE);
-            if replace {
-                command.env(REPLACE, "1");
+    #[tokio::test]
+    async fn a_download_waits_for_its_job_then_returns_the_state() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "updates.download" => Ok(json!({"jobId": "job:5"})),
+            "operations.job.get" => {
+                Ok(json!({"jobId": "job:5", "state": "finished", "outcome": {"result": null}}))
             }
-            let output = command.output().unwrap();
-            assert!(directory.path().join("released").exists());
-            assert!(!directory.path().join("mutation").exists());
-            assert_eq!(output.status.code(), Some(if replace { 0 } else { 1 }));
-            if !replace {
-                let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains("exec failed") && error.contains("Reopen Silo"));
+            "updates.state" => Ok(snapshot("downloaded")),
+            _ => Ok(json!({"subscription": "sub"})),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(download(&engine).await.unwrap()["phase"], "downloaded");
+        assert_eq!(fake.calls("operations.job.acknowledge").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_engine_without_updates_reports_a_typed_unavailable_error() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "updates.state" => Err((
+                "unsupported_remote_operation",
+                "The engine does not support updates.state.".into(),
+            )),
+            _ => Ok(json!({"subscription": "sub"})),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        let error = state(&engine).await.unwrap_err();
+        assert_eq!(error.code, "unsupported_remote_operation");
+    }
+
+    fn handoff_engine(fail: Option<&'static str>) -> FakeEngine {
+        FakeEngine::start(move |method, _| {
+            if fail == Some(method) {
+                return Err(("busy", "The engine refused.".into()));
             }
-        }
+            match method {
+                "engine.update.prepare" | "engine.shutdown" => Ok(json!({"jobId": "job:1"})),
+                "operations.job.get" => Ok(
+                    json!({"jobId": "job:1", "state": "finished", "outcome": {"result": {"resuming": []}}}),
+                ),
+                _ => Ok(json!({"subscription": "sub"})),
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn the_handoff_prepares_shuts_down_for_the_update_then_swaps_under_the_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let mut swapped = false;
+        hand_off(&engine, locked(directory.path()), || {
+            // The lock is still held while the bundle is replaced.
+            assert!(crate::installer::coordinator_present(directory.path()));
+            swapped = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(swapped);
+        assert_eq!(fake.calls("engine.update.prepare").len(), 1);
+        assert_eq!(
+            fake.calls("engine.shutdown"),
+            vec![json!({"stopComputers": false, "reason": "update"})]
+        );
+        assert!(fake.calls("engine.update.abort").is_empty());
+        // Dropping the guard released the lock.
+        assert!(!crate::installer::coordinator_present(directory.path()));
+    }
+
+    #[tokio::test]
+    async fn a_refused_prepare_aborts_and_never_shuts_down_or_swaps() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(Some("engine.update.prepare"));
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(&engine, locked(directory.path()), || {
+            panic!("the bundle must not be replaced")
+        })
+        .await
+        .unwrap_err();
+        assert!(error.contains("refused"), "{error}");
+        assert_eq!(fake.calls("engine.update.abort").len(), 1);
+        assert!(fake.calls("engine.shutdown").is_empty());
+        assert!(!crate::installer::coordinator_present(directory.path()));
+    }
+
+    #[tokio::test]
+    async fn a_refused_shutdown_aborts_and_keeps_the_bundle() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(Some("engine.shutdown"));
+        let (engine, _) = connected_client(&fake).await;
+        hand_off(&engine, locked(directory.path()), || {
+            panic!("the bundle must not be replaced")
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(fake.calls("engine.update.abort").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_held_lock_means_another_installer_and_nothing_is_asked_of_the_engine() {
+        let directory = tempfile::tempdir().unwrap();
+        let _other = crate::installer::Held::take(directory.path()).unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(&engine, locked(directory.path()), || Ok(()))
+            .await
+            .unwrap_err();
+        assert_eq!(error, INSTALLER_BUSY);
+        assert!(fake.calls("engine.update.prepare").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_swap_after_the_engine_left_releases_the_lock_without_an_abort() {
+        let directory = tempfile::tempdir().unwrap();
+        let fake = handoff_engine(None);
+        let (engine, _) = connected_client(&fake).await;
+        let error = hand_off(
+            &engine,
+            locked(directory.path()),
+            || Err("disk full".into()),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, "disk full");
+        assert!(fake.calls("engine.update.abort").is_empty());
+        assert!(!crate::installer::coordinator_present(directory.path()));
     }
 }

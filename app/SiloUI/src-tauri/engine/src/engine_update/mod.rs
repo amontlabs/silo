@@ -7,7 +7,9 @@
 pub mod adapter;
 pub mod guards;
 pub mod hold;
+pub mod installer;
 pub mod journal;
+pub mod reservation;
 pub mod transaction;
 pub mod updater;
 
@@ -24,9 +26,13 @@ use silo_api::{
 
 use crate::context::EngineContext;
 
-pub use adapter::{Reconciled, ResumeHeldError, RunningComputer, SaveAdapter, SaveContext};
+pub use adapter::{
+    OriginalState, Reconciled, RestoreError, ResumeHeldError, RunningComputer, SaveAdapter,
+    SaveContext,
+};
 pub use hold::{HeldGuards, Hold, Platform};
 pub use journal::{ComputerKind, Store};
+
 pub use transaction::{Coordinator, PrepareRequest, Recovery};
 
 /// The default bound for a session-end shutdown (`SESSION_END_BUDGET`, 05 §6).
@@ -69,6 +75,17 @@ impl LifecycleError {
     }
 }
 
+/// What one watchdog probe did.
+#[derive(Debug)]
+pub enum WatchdogOutcome {
+    /// Nothing is held, or a shutdown or abort owns the transaction.
+    Idle,
+    /// The coordinator is present, or has not been absent long enough.
+    Waiting,
+    Aborted(Result<(), String>),
+    Recovered(Result<Option<Recovery>, String>),
+}
+
 /// The options of one `engine.shutdown` request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShutdownRequest {
@@ -93,6 +110,9 @@ enum PrepareState {
     /// Accepted; the job id is attached once the handler allocated it.
     Preparing(Option<JobId>),
     Prepared(JobId),
+    /// An earlier owner's prepared update is still under the installer's control. This
+    /// (old-version) engine serves with admission closed and resumes nothing behind it.
+    Deferred,
 }
 
 struct ActiveShutdown {
@@ -111,6 +131,11 @@ struct Inner {
     /// A journal from an earlier owner still has computers to resume.
     recovery_pending: bool,
     recovery_error: Option<String>,
+    /// An abort holds the transaction; a shutdown cannot claim it meanwhile (and vice versa).
+    aborting: bool,
+    /// The earliest absolute deadline of a session-end shutdown.
+    deadline: Option<Instant>,
+    watchdog: installer::Watchdog,
 }
 
 /// What a prepare request does.
@@ -148,6 +173,9 @@ impl Default for UpdateState {
                 hold: None,
                 recovery_pending: false,
                 recovery_error: None,
+                aborting: false,
+                deadline: None,
+                watchdog: installer::Watchdog::default(),
             }),
             platform: Mutex::new(None),
             updater: Mutex::new(None),
@@ -229,6 +257,11 @@ impl UpdateState {
                     "An update is already being prepared.".into(),
                 ));
             }
+            PrepareState::Deferred => {
+                return Err(LifecycleError::Busy(
+                    "An earlier update is still being handed off by the installer.".into(),
+                ));
+            }
             PrepareState::Idle => {}
         }
         if inner.recovery_pending {
@@ -254,16 +287,29 @@ impl UpdateState {
         let mut inner = self.lock();
         inner.prepare = PrepareState::Prepared(job);
         inner.hold = Some(Arc::new(hold));
+        inner.watchdog.reset();
     }
 
-    /// Forgets a preparation that failed. Its hold ends, which releases admission.
-    pub fn prepare_failed(&self) {
+    /// Forgets a preparation that failed. Its hold ends, which releases admission. When the
+    /// rollback left computers unresolved their journal remains: the update stays pending and
+    /// their computers stay reserved until `abort` or the next start settles them.
+    pub fn prepare_failed(&self, context: &dyn EngineContext) {
         let hold = {
             let mut inner = self.lock();
             inner.prepare = PrepareState::Idle;
             inner.hold.take()
         };
         drop(hold);
+        let store = store(context);
+        reservation::sync(&store);
+        if store.exists() {
+            let mut inner = self.lock();
+            inner.recovery_pending = true;
+            inner.recovery_error = Some(
+                "Some computers could not resume after the update failed to prepare. Relaunch Silo to retry."
+                    .into(),
+            );
+        }
     }
 
     /// The hold of a prepared update.
@@ -282,22 +328,36 @@ impl UpdateState {
     /// `engine.update.abort`: resumes the saved set. With no preparation in this process but a
     /// journal from an earlier owner, a temporary hold resumes that set.
     pub fn abort(&self, context: &dyn EngineContext) -> Result<(), String> {
-        let (hold, preparing, shutting_down) = {
-            let inner = self.lock();
-            (
-                inner.hold.clone(),
-                matches!(inner.prepare, PrepareState::Preparing(_)),
-                inner.shutdown.is_some(),
-            )
+        let hold = {
+            let mut inner = self.lock();
+            let hold = inner.hold.clone();
+            let preparing = matches!(inner.prepare, PrepareState::Preparing(_));
+            if preparing && hold.is_none() {
+                return Err("The update is still being prepared. Wait for it to finish.".into());
+            }
+            if inner.shutdown.is_some() && hold.is_some() {
+                return Err(
+                    "Silo is shutting down for the update. It can no longer be aborted.".into(),
+                );
+            }
+            if inner.aborting {
+                return Err("The update is already being aborted.".into());
+            }
+            // Claimed under the same lock a shutdown takes its own claim under.
+            inner.aborting = true;
+            hold
         };
-        if preparing && hold.is_none() {
-            return Err("The update is still being prepared. Wait for it to finish.".into());
-        }
-        if shutting_down && hold.is_some() {
-            return Err(
-                "Silo is shutting down for the update. It can no longer be aborted.".into(),
-            );
-        }
+        let result = self.abort_claimed(context, hold);
+        self.lock().aborting = false;
+        reservation::sync(&store(context));
+        result
+    }
+
+    fn abort_claimed(
+        &self,
+        context: &dyn EngineContext,
+        hold: Option<Arc<Hold>>,
+    ) -> Result<(), String> {
         match hold {
             Some(hold) => {
                 hold.abort()?;
@@ -329,27 +389,44 @@ impl UpdateState {
     // MARK: Recovery
 
     /// Marks the update pending when an earlier owner left a journal, so `engine.state` says
-    /// so from the first request. `recover` settles it.
+    /// so from the first request, and reserves the computers it names. `recover` settles it.
     pub fn mark_recovery_pending(&self, context: &dyn EngineContext) {
-        if store(context).exists() {
+        let store = store(context);
+        if store.exists() {
             self.lock().recovery_pending = true;
+            reservation::sync(&store);
         }
     }
 
     /// Runs at engine start, before ordinary lifecycle recovery. Blocking.
+    ///
+    /// When the installer still owns a prepared transaction that this (old-version) engine
+    /// would otherwise resume behind its back, nothing is resumed: the engine keeps admission
+    /// closed and waits for the coordinator to finish or disappear (`watchdog_tick`).
     pub fn recover(&self, context: &dyn EngineContext) -> Result<Option<Recovery>, String> {
         let store = store(context);
         if !store.exists() {
             return Ok(None);
         }
         self.lock().recovery_pending = true;
-        let result = Hold::start(self.platform()?, store, None).and_then(|hold| {
-            let result = hold.recover();
-            hold.end();
-            result
-        });
+        reservation::sync(&store);
+        let result = match self.defer_to_installer(context, &store) {
+            Ok(true) => return Ok(None),
+            Ok(false) => Hold::start(self.platform()?, store.clone(), None).and_then(|hold| {
+                let result = hold.recover();
+                hold.end();
+                result
+            }),
+            Err(why) => Err(why),
+        };
+        self.apply_recovery(&result);
+        reservation::sync(&store);
+        result
+    }
+
+    fn apply_recovery(&self, result: &Result<Option<Recovery>, String>) {
         let mut inner = self.lock();
-        match &result {
+        match result {
             Ok(Some(recovery)) if recovery.settled() => {
                 inner.recovery_pending = false;
                 inner.recovery_error = None;
@@ -368,7 +445,100 @@ impl UpdateState {
             Ok(None) => inner.recovery_pending = false,
             Err(why) => inner.recovery_error = Some(why.clone()),
         }
-        result
+    }
+
+    /// Whether an old engine must leave the saved set to the installer that holds it. Takes
+    /// the admission hold so ordinary work stays out while the engine waits.
+    fn defer_to_installer(
+        &self,
+        context: &dyn EngineContext,
+        store: &Store,
+    ) -> Result<bool, String> {
+        let Some(journal) = store.load()? else {
+            return Ok(false);
+        };
+        let installer_owns = matches!(
+            journal.phase,
+            journal::TransactionPhase::Prepared
+                | journal::TransactionPhase::Releasing
+                | journal::TransactionPhase::Released
+        ) && journal.source_engine_version == context.identity().version
+            && installer::coordinator_present(store.directory());
+        if !installer_owns {
+            return Ok(false);
+        }
+        let hold = Hold::start(self.platform()?, store.clone(), None)?;
+        let mut inner = self.lock();
+        inner.prepare = PrepareState::Deferred;
+        inner.hold = Some(Arc::new(hold));
+        inner.watchdog.reset();
+        Ok(true)
+    }
+
+    /// Whether an update is held and waiting on the installer (prepared or deferred).
+    pub fn watching_installer(&self) -> bool {
+        matches!(
+            self.lock().prepare,
+            PrepareState::Prepared(_) | PrepareState::Deferred
+        )
+    }
+
+    /// One probe of the installer lock at `now`. After [`installer::ABANDONED_AFTER`] of
+    /// continuously finding no coordinator, a prepared update is aborted and a deferred one
+    /// is recovered, serialized against shutdown through the same claim `abort` takes.
+    pub fn watchdog_tick(
+        &self,
+        context: &dyn EngineContext,
+        coordinator_present: bool,
+        now: Instant,
+    ) -> WatchdogOutcome {
+        let deferred = {
+            let mut inner = self.lock();
+            let deferred = match inner.prepare {
+                PrepareState::Prepared(_) => false,
+                PrepareState::Deferred => true,
+                _ => {
+                    inner.watchdog.reset();
+                    return WatchdogOutcome::Idle;
+                }
+            };
+            // A shutdown for the update owns the transaction from its claim on.
+            if inner.shutdown.is_some() || inner.aborting {
+                inner.watchdog.reset();
+                return WatchdogOutcome::Idle;
+            }
+            if !inner.watchdog.observe(coordinator_present, now) {
+                return WatchdogOutcome::Waiting;
+            }
+            deferred
+        };
+        if !deferred {
+            return WatchdogOutcome::Aborted(self.abort(context));
+        }
+        // A deferred set is restored by the engine that waited for it.
+        let hold = {
+            let mut inner = self.lock();
+            if inner.shutdown.is_some() || inner.aborting {
+                return WatchdogOutcome::Idle;
+            }
+            inner.aborting = true;
+            inner.hold.clone()
+        };
+        let result = match hold {
+            Some(hold) => hold.recover(),
+            None => Ok(None),
+        };
+        {
+            let mut inner = self.lock();
+            inner.aborting = false;
+            // Settled or not, admission reopens; an unresolved set keeps its journal and the
+            // reservation of its computers.
+            inner.prepare = PrepareState::Idle;
+            inner.hold = None;
+        }
+        self.apply_recovery(&result);
+        reservation::sync(&store(context));
+        WatchdogOutcome::Recovered(result)
     }
 
     // MARK: Shutdown
@@ -380,7 +550,18 @@ impl UpdateState {
     ) -> Result<ShutdownStart, LifecycleError> {
         let platform = self.platform().ok();
         let mut inner = self.lock();
-        let prepared = matches!(inner.prepare, PrepareState::Prepared(_));
+        if inner.aborting && request.reason != ShutdownReason::SessionEnd {
+            return Err(LifecycleError::Busy(
+                "The update is being aborted. Wait for it to finish.".into(),
+            ));
+        }
+        let prepared = matches!(
+            inner.prepare,
+            PrepareState::Prepared(_) | PrepareState::Deferred
+        );
+        // The earliest absolute deadline wins, whoever asked for it and whenever.
+        let deadline = (request.reason == ShutdownReason::SessionEnd)
+            .then(|| Instant::now() + request.deadline.unwrap_or(SESSION_END_BUDGET));
         let mode = match (request.reason, request.stop_computers) {
             (ShutdownReason::Update, true) => {
                 return Err(LifecycleError::Refused(
@@ -399,6 +580,10 @@ impl UpdateState {
             // failure no longer cancels it.
             if request.reason == ShutdownReason::SessionEnd {
                 inner.session_ending = true;
+                inner.deadline = match (inner.deadline, deadline) {
+                    (Some(current), Some(new)) => Some(current.min(new)),
+                    (current, new) => current.or(new),
+                };
             }
             let active = inner.shutdown.as_ref().expect("checked above");
             if request.reason == ShutdownReason::SessionEnd
@@ -453,6 +638,7 @@ impl UpdateState {
         inner.generation += 1;
         inner.phase = ShutdownPhase::Requested;
         inner.session_ending = request.reason == ShutdownReason::SessionEnd;
+        inner.deadline = deadline;
         inner.shutdown = Some(ActiveShutdown {
             request,
             mode,
@@ -480,11 +666,21 @@ impl UpdateState {
         inner.shutdown = None;
         inner.phase = ShutdownPhase::Idle;
         inner.session_ending = false;
+        inner.deadline = None;
+    }
+
+    /// The absolute deadline of a session-end shutdown, if one is under way.
+    pub fn deadline(&self) -> Option<Instant> {
+        self.lock().deadline
     }
 
     /// Performs an accepted shutdown. Blocking. The caller records the job outcome and exits
     /// the process after `Ok`; after `Err` it reopens service unless the reason is a session
     /// end, which never cancels.
+    ///
+    /// A session end is bounded as a whole: the work (gate waits, computer stops, releases)
+    /// runs on a worker, and once the earliest absolute deadline any session-end request set
+    /// has passed the shutdown stops waiting for it and goes on to flush and exit.
     pub fn run_shutdown(&self) -> Result<(), String> {
         let (request, mode) = {
             let inner = self.lock();
@@ -495,21 +691,31 @@ impl UpdateState {
             (active.request.clone(), active.mode)
         };
         let platform = self.platform()?;
-        let deadline = (request.reason == ShutdownReason::SessionEnd)
-            .then(|| Instant::now() + request.deadline.unwrap_or(SESSION_END_BUDGET));
         self.set_phase(ShutdownPhase::Approved);
         if mode != ShutdownMode::Update {
             // Refuse new work everywhere; an update shutdown already holds admission closed.
             platform.begin_shutdown();
         }
         self.set_phase(ShutdownPhase::Finishing);
-        let finished = match mode {
-            ShutdownMode::Update => match self.hold() {
-                Some(hold) => hold.release(),
-                None => Err(NOT_PREPARED.to_owned()),
-            },
-            ShutdownMode::Stop => platform.stop_computers(deadline),
-            ShutdownMode::Detach => Ok(()),
+        let work = {
+            let platform = platform.clone();
+            let hold = self.hold();
+            let deadline = (request.reason == ShutdownReason::SessionEnd)
+                .then(|| self.deadline())
+                .flatten();
+            move || match mode {
+                ShutdownMode::Update => match hold {
+                    Some(hold) => hold.release(),
+                    None => Err(NOT_PREPARED.to_owned()),
+                },
+                ShutdownMode::Stop => platform.stop_computers(deadline),
+                ShutdownMode::Detach => Ok(()),
+            }
+        };
+        let finished = if request.reason == ShutdownReason::SessionEnd {
+            self.run_before_deadline(work)
+        } else {
+            work()
         };
         // A session end never cancels on failure: it flushes and exits regardless.
         let session_end = self.lock().session_ending;
@@ -531,6 +737,45 @@ impl UpdateState {
                 Ok(())
             }
             Ok(()) => Ok(()),
+        }
+    }
+
+    /// Runs `work` on a worker and waits for it only until the shutdown's deadline, which is
+    /// re-read as it waits so a later, earlier deadline applies to work already under way.
+    fn run_before_deadline(
+        &self,
+        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+    ) -> Result<(), String> {
+        const SLICE: Duration = Duration::from_millis(50);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("silo-shutdown-work".into())
+            .spawn(move || {
+                let _ = sender.send(work());
+            });
+        if let Err(error) = spawned {
+            return Err(format!("Shutdown could not start: {error}"));
+        }
+        loop {
+            let wait = self.deadline().map_or(SLICE, |deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(SLICE)
+            });
+            match receiver.recv_timeout(wait) {
+                Ok(outcome) => return outcome,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Shutdown stopped unexpectedly.".into())
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    if self
+                        .deadline()
+                        .is_some_and(|deadline| Instant::now() >= deadline)
+                    {
+                        return Err("Shutdown did not finish before its deadline.".into());
+                    }
+                }
+            }
         }
     }
 

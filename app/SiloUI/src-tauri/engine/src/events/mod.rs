@@ -1,7 +1,7 @@
 //! Bounded engine event fanout with per-subscription sequences.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -105,6 +105,18 @@ struct SubscriberState {
     closed: bool,
 }
 
+impl SubscriptionState {
+    /// Whether an event from `origin` (`None`: this engine, whose id is `local`) is one this
+    /// subscription asked for.
+    fn wants_device(&self, origin: Option<&str>, local: &str) -> bool {
+        match (&self.devices, origin) {
+            (None, None) => true,
+            (None, Some(_)) => false,
+            (Some(devices), origin) => devices.contains(origin.unwrap_or(local)),
+        }
+    }
+}
+
 #[derive(Default)]
 struct SubscriptionBacklog {
     events: AtomicUsize,
@@ -129,6 +141,9 @@ impl Drop for ReservationLease {
 
 struct SubscriptionState {
     selectors: Vec<String>,
+    /// The engines whose events this subscription receives, this one included only when
+    /// named. `None` is this engine alone (`events.subscribe` without `deviceIds`).
+    devices: Option<HashSet<String>>,
     active: bool,
     closing: bool,
     next_seq: u64,
@@ -178,6 +193,18 @@ impl EventBus {
         client_id: &ClientId,
         selectors: Vec<String>,
     ) -> Result<String, EventError> {
+        self.subscribe_devices(client_id, selectors, None)
+    }
+
+    /// Like `subscribe`, for the engines in `devices`: events published by this engine
+    /// reach the subscription only when it names this engine's own device id, and events
+    /// relayed from another engine only when it names that engine.
+    pub fn subscribe_devices(
+        &self,
+        client_id: &ClientId,
+        selectors: Vec<String>,
+        devices: Option<Vec<String>>,
+    ) -> Result<String, EventError> {
         validate_selectors(&selectors)?;
         let subscriber = self.find_subscriber(client_id)?;
         let id = Uuid::new_v4().to_string();
@@ -197,6 +224,7 @@ impl EventBus {
             id.clone(),
             SubscriptionState {
                 selectors,
+                devices: devices.map(|devices| devices.into_iter().collect()),
                 active: false,
                 closing: false,
                 next_seq: 1,
@@ -262,6 +290,28 @@ impl EventBus {
         barrier
     }
 
+    /// Whether `client_id` still has a connected event stream.
+    pub fn is_connected(&self, client_id: &ClientId) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .get(client_id.as_str())
+            .is_some_and(|subscriber| subscriber.strong_count() > 0)
+    }
+
+    /// The clients that currently have a connected event stream.
+    pub fn connected_clients(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .iter()
+            .filter(|(_, subscriber)| subscriber.strong_count() > 0)
+            .map(|(client, _)| client.clone())
+            .collect()
+    }
+
     pub fn disconnect(&self, client_id: &ClientId) {
         let subscriber = self
             .inner
@@ -317,6 +367,90 @@ impl EventBus {
 
     pub fn publish(&self, event: Event, audience: Audience) -> u64 {
         self.publish_with_fanout_hook(event, audience, || {})
+    }
+
+    /// The other engines that at least one live subscription asked to receive events from.
+    pub fn subscribed_devices(&self) -> HashSet<String> {
+        let subscribers = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect::<Vec<_>>();
+        let mut devices = HashSet::new();
+        for subscriber in subscribers {
+            let state = subscriber
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.closed {
+                continue;
+            }
+            for subscription in state.subscriptions.values() {
+                if subscription.closing {
+                    continue;
+                }
+                for device in subscription.devices.iter().flatten() {
+                    if **device != *self.device_id {
+                        devices.insert(device.clone());
+                    }
+                }
+            }
+        }
+        devices
+    }
+
+    /// Tells every subscription that receives events from `device` that some were lost, as an
+    /// overflowing backlog does: the owning sessions end, and their clients subscribe again
+    /// and re-read before they trust later events (95 A-4). Returns how many sessions ended.
+    pub fn raise_gap_for_device(&self, device: &str) -> usize {
+        let subscribers = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect::<Vec<_>>();
+        let mut ended = 0;
+        for subscriber in subscribers {
+            let mut state = subscriber
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.closed {
+                continue;
+            }
+            let affected = state
+                .subscriptions
+                .iter()
+                .find(|(_, subscription)| {
+                    !subscription.closing
+                        && subscription
+                            .devices
+                            .as_ref()
+                            .is_some_and(|devices| devices.contains(device))
+                })
+                .map(|(id, subscription)| GapSignal {
+                    subscription: id.clone(),
+                    expected_seq: subscription.last_delivered.saturating_add(1),
+                    dropped_seq: subscription.next_seq,
+                });
+            let Some(gap) = affected else { continue };
+            state.queue.clear();
+            for subscription in state.subscriptions.values_mut() {
+                subscription.pending.clear();
+            }
+            state.gap = Some(gap);
+            state.closed = true;
+            drop(state);
+            subscriber.notify.notify_waiters();
+            subscriber.notify.notify_one();
+            ended += 1;
+        }
+        ended
     }
 
     /// Whether `client_id` still holds subscription `subscription` (it is gone after
@@ -476,11 +610,12 @@ impl Subscriber {
             .iter()
             .filter_map(|(id, subscription)| match only {
                 Some(only) => (id == only && !subscription.closing).then(|| id.clone()),
-                None => subscription
+                None => (subscription
                     .selectors
                     .iter()
                     .any(|selector| selector_matches(selector, &event.name))
-                    .then(|| id.clone()),
+                    && subscription.wants_device(event.device_id.as_deref(), device_id))
+                .then(|| id.clone()),
             })
             .collect::<Vec<_>>();
         let found = !matching.is_empty();
@@ -491,7 +626,8 @@ impl Subscriber {
                 };
                 let seq = subscription.next_seq;
                 subscription.next_seq = subscription.next_seq.saturating_add(1);
-                let bytes = encoded_frame_size(event, &id, device_id, seq, payload_bytes);
+                let origin = event.device_id.as_deref().unwrap_or(device_id);
+                let bytes = encoded_frame_size(event, &id, origin, seq, payload_bytes);
                 let domain = event.name.split('.').next().unwrap_or(&event.name);
                 subscription.latest_by_domain.insert(domain.to_owned(), seq);
                 let queued_events = subscription.backlog.events.load(Ordering::Acquire);
@@ -1078,5 +1214,127 @@ mod tests {
                     .len()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn relayed_events_reach_only_subscriptions_that_name_their_device() {
+        let bus = EventBus::with_device_id("local");
+        let names = ["none", "local", "owner", "both", "other"];
+        let devices: [Option<Vec<String>>; 5] = [
+            None,
+            Some(vec!["local".to_owned()]),
+            Some(vec!["owner".to_owned()]),
+            Some(vec!["local".to_owned(), "owner".to_owned()]),
+            Some(vec!["other".to_owned()]),
+        ];
+        let mut receivers = Vec::new();
+        for (name, devices) in names.iter().zip(devices) {
+            let client = ClientId::new(*name);
+            let receiver = bus.connect(client.clone());
+            let subscription = bus
+                .subscribe_devices(&client, vec!["computers.changed".to_owned()], devices)
+                .unwrap();
+            bus.activate(&client, &subscription).unwrap();
+            receivers.push(receiver);
+        }
+        bus.publish(
+            Event::new("computers.changed", serde_json::json!({"from": "local"})),
+            Audience::All,
+        );
+        bus.publish(
+            Event::from_device(
+                "owner",
+                "computers.changed",
+                serde_json::json!({"from": "owner"}),
+            ),
+            Audience::All,
+        );
+        bus.publish(
+            Event::new("computers.changed", serde_json::json!({"end": true})),
+            Audience::All,
+        );
+        let expected: [&[&str]; 5] = [
+            &["local", "end"],
+            &["local", "end"],
+            &["owner"],
+            &["local", "owner", "end"],
+            &[],
+        ];
+        for ((name, receiver), expected) in names.iter().zip(&mut receivers).zip(expected) {
+            let mut seen = Vec::new();
+            while seen.len() < expected.len() {
+                let Some(EventDelivery::Event(event)) = receiver.recv().await else {
+                    panic!("{name}: expected an event");
+                };
+                let origin = event.event.payload["from"].as_str().unwrap_or("end");
+                assert_eq!(event.event.device_id.is_some(), origin == "owner", "{name}");
+                seen.push(origin.to_owned());
+            }
+            assert_eq!(seen, expected, "{name}");
+            assert!(
+                receiver.subscriber.state.lock().unwrap().queue.is_empty(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn subscribed_devices_lists_other_engines_of_live_subscriptions() {
+        let bus = EventBus::with_device_id("local");
+        let (a, b) = (ClientId::new("a"), ClientId::new("b"));
+        let _keep_a = bus.connect(a.clone());
+        let _keep_b = bus.connect(b.clone());
+        let selectors = || vec!["computers.changed".to_owned()];
+        bus.subscribe_devices(&a, selectors(), Some(vec!["local".into(), "x".into()]))
+            .unwrap();
+        let second = bus
+            .subscribe_devices(&b, selectors(), Some(vec!["y".into()]))
+            .unwrap();
+        bus.subscribe(&b, selectors()).unwrap();
+        assert_eq!(
+            bus.subscribed_devices(),
+            ["x", "y"].map(str::to_owned).into_iter().collect()
+        );
+        // An unsubscribed one no longer counts, and neither does a disconnected client.
+        bus.unsubscribe(&b, &second);
+        assert_eq!(
+            bus.subscribed_devices(),
+            ["x"].map(str::to_owned).into_iter().collect()
+        );
+        bus.disconnect(&a);
+        assert!(bus.subscribed_devices().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_device_gap_ends_only_the_sessions_that_listen_to_that_device() {
+        let bus = EventBus::with_device_id("local");
+        let (listening, other) = (ClientId::new("listening"), ClientId::new("other"));
+        let mut listening_events = bus.connect(listening.clone());
+        let mut other_events = bus.connect(other.clone());
+        for (client, devices) in [(&listening, Some(vec!["owner".to_owned()])), (&other, None)] {
+            let subscription = bus
+                .subscribe_devices(client, vec!["computers.changed".to_owned()], devices)
+                .unwrap();
+            bus.activate(client, &subscription).unwrap();
+        }
+        assert_eq!(bus.raise_gap_for_device("owner"), 1);
+        assert!(matches!(
+            listening_events.recv().await,
+            Some(EventDelivery::Gap(_))
+        ));
+        assert!(
+            listening_events.recv().await.is_none(),
+            "the session is closed"
+        );
+        // The other session is untouched.
+        bus.publish(
+            Event::new("computers.changed", serde_json::json!({})),
+            Audience::All,
+        );
+        assert!(matches!(
+            other_events.recv().await,
+            Some(EventDelivery::Event(_))
+        ));
+        assert_eq!(bus.raise_gap_for_device("owner"), 0);
     }
 }

@@ -770,6 +770,14 @@ fn schedule_repairs(app: &MacosContext, records: &[super::store::Record]) {
     }
 }
 
+/// Schedules a repair for every running computer without reading the network state.
+pub(super) fn repair_running(app: &MacosContext) -> Result<(), String> {
+    super::ensure_loaded(app)?;
+    let records = super::store::load_all(&app.paths().app_data);
+    schedule_repairs(app, &records);
+    Ok(())
+}
+
 pub(super) fn state(app: &MacosContext) -> Result<NetworkState, String> {
     super::ensure_loaded(app)?;
     let records = super::store::load_all(&app.paths().app_data);

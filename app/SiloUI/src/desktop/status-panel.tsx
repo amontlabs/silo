@@ -42,7 +42,7 @@ export function StatusPanel({ source: input, actions, notice }: { source: Applic
   function dismissThen(action: () => void) { void desktopCommand("hide_status").then(action) }
   const nativeActions: StatusBarActions = {
     ...actions,
-    quit: () => { void desktopCommand("quit_app") },
+    quit: (choice) => { void desktopCommand("quit_app", { choice: choice ?? null }) },
     openTerminal: (name) => dismissThen(() => actions.openTerminal(name)),
     openEditor: (name, path) => dismissThen(() => actions.openEditor(name, path)),
     openSite: (name, port) => dismissThen(() => actions.openSite(name, port)),
