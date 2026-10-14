@@ -2066,6 +2066,7 @@ enum PayloadMode<'a> {
         dir: &'a Path,
         source: Option<&'a str>,
         roles: &'a [MacosComponentRole],
+        stage_free: u64,
     },
 }
 
@@ -2154,10 +2155,16 @@ fn read_and_verify_package(
     if manifest.runtime.name == macos_archive::RUNTIME_NAME {
         let selection = match &mode {
             PayloadMode::VerifyAll => None,
-            PayloadMode::ExtractMacos { dir, source, roles } => Some((
+            PayloadMode::ExtractMacos {
+                dir,
+                source,
+                roles,
+                stage_free,
+            } => Some((
                 *dir,
                 select_restore_source(&manifest, *source)?,
                 *roles,
+                *stage_free,
             )),
             PayloadMode::Extract { .. } => {
                 return Err(BackupError::InvalidRequest(
@@ -2169,11 +2176,12 @@ fn read_and_verify_package(
         let component_paths = macos_archive::verify_payloads(
             &mut file,
             &manifest,
-            selection.map(|(_, index, roles)| (index, roles)),
-            selection.map(|(dir, _, _)| dir),
+            selection.map(|(_, index, roles, _)| (index, roles)),
+            selection.map(|(dir, _, _, _)| dir),
+            selection.map(|(_, _, _, stage_free)| stage_free),
             cancellation,
         )?;
-        let macos_extracted = selection.map(|(_, index, _)| MacosExtractedPayload {
+        let macos_extracted = selection.map(|(_, index, _, _)| MacosExtractedPayload {
             index,
             component_paths: component_paths.unwrap_or_default(),
         });
@@ -2376,6 +2384,12 @@ fn verify_mixed_payloads(
                     PayloadMode::ExtractMacos { dir, .. } if should_extract => Some(*dir),
                     _ => None,
                 };
+                let stage_free = match &mode {
+                    PayloadMode::ExtractMacos { stage_free, .. } if should_extract => {
+                        Some(*stage_free)
+                    }
+                    _ => None,
+                };
                 let native = mixed_native_configuration(computer)?;
                 let row = PackageComputer {
                     name: computer.name.clone(),
@@ -2401,6 +2415,7 @@ fn verify_mixed_payloads(
                     &row_manifest,
                     roles.map(|roles| (0, roles)),
                     stage,
+                    stage_free,
                     cancellation,
                 )?;
                 if should_extract {
@@ -6706,6 +6721,7 @@ mod tests {
                 dir: stage.path(),
                 source: Some("mac-box"),
                 roles: &[MacosComponentRole::Disk],
+                stage_free: u64::MAX,
             },
         );
         assert!(matches!(

@@ -7,8 +7,8 @@ use super::{
     BackupError, BackupResult, BackupService, Cancellation, MsbRunner, PackageComputer,
     PackageManifest, RuntimeManifest, FORMAT_VERSION,
     FREE_SPACE_RESERVE, MAX_MANIFEST_BYTES, MAGIC, DEFAULT_MAX_ARCHIVE_BYTES,
-    check_cancelled, now_ms, open_regular_file, pending_digest, read_and_verify_package,
-    validate_manifest, write_immutable_package,
+    check_cancelled, format_bytes, now_ms, open_regular_file, pending_digest,
+    read_and_verify_package, validate_manifest, write_immutable_package,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -516,6 +516,7 @@ impl<R: MsbRunner> BackupService<R> {
             .prefix("restore-macos-")
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir_in(stage_parent)?;
+        let stage_free = (self.free_space)(stage.path())?;
         if fs::metadata(stage.path())?.permissions().mode() & 0o777 != 0o700 {
             return Err(BackupError::InvalidRequest(
                 "The macOS import staging directory is not owner-only.".into(),
@@ -529,6 +530,7 @@ impl<R: MsbRunner> BackupService<R> {
                 dir: stage.path(),
                 source: source_name,
                 roles,
+                stage_free,
             },
         )?;
         if package.manifest.runtime.name != RUNTIME_NAME
@@ -600,10 +602,11 @@ pub(super) fn verify_payloads(
     manifest: &PackageManifest,
     selected: Option<(usize, &[MacosComponentRole])>,
     stage: Option<&Path>,
+    stage_free: Option<u64>,
     cancellation: &Cancellation,
 ) -> Result<Option<BTreeMap<MacosComponentRole, PathBuf>>, BackupError> {
-    let selected_paths = match (selected, stage) {
-        (Some((index, roles)), Some(_)) => {
+    let selected_paths = match (selected, stage, stage_free) {
+        (Some((index, roles)), Some(_), Some(stage_free)) => {
             let config = manifest
                 .computers
                 .get(index)
@@ -619,9 +622,25 @@ pub(super) fn verify_payloads(
                     "The selected export does not contain every requested component.".into(),
                 ));
             }
+            let required = config
+                .components
+                .iter()
+                .filter(|component| roles.contains(&component.role))
+                .try_fold(FREE_SPACE_RESERVE, |required, component| {
+                    required.checked_add(component.logical_length)
+                })
+                .ok_or_else(|| invalid_archive("selected component sizes overflow"))?;
+            if stage_free < required {
+                return Err(BackupError::InsufficientSpace(format!(
+                    "Importing {} needs {} of free space for staged macOS components; {} is available.",
+                    manifest.computers[index].name,
+                    format_bytes(required),
+                    format_bytes(stage_free)
+                )));
+            }
             Some(BTreeMap::new())
         }
-        (None, None) => None,
+        (None, None, None) => None,
         _ => return Err(invalid_archive("the component extraction request is inconsistent")),
     };
     let mut selected_paths = selected_paths;
@@ -1574,5 +1593,72 @@ mod tests {
             .map(|entry| entry.expect("read stage entry").file_name())
             .collect::<Vec<_>>();
         assert_eq!(children, [std::ffi::OsStr::new("invalid.silo-backup")]);
+    }
+
+    #[test]
+    fn component_extraction_checks_free_space_before_expanding_payloads() {
+        let temp = tempfile::tempdir().expect("create temporary directory");
+        let archive = temp.path().join("oversized-components.silo-backup");
+        let mut config = valid_config();
+        config.source_name = "source-mac".into();
+        let runtime_config = serde_json::to_value(&config).unwrap();
+        let payload_size = stream_size(&config).unwrap();
+        // The frame bytes are intentionally invalid. The space preflight must
+        // reject the 32 GiB logical disk before trying to read or expand them.
+        let payload = vec![0_u8; payload_size as usize];
+        let manifest = PackageManifest {
+            schema_version: FORMAT_VERSION,
+            created_at_ms: 1,
+            runtime: RuntimeManifest {
+                name: RUNTIME_NAME.into(),
+                version: RUNTIME_VERSION.into(),
+                snapshot_format: SNAPSHOT_FORMAT.into(),
+                guest_architecture: "aarch64".into(),
+            },
+            computers: vec![PackageComputer {
+                name: config.source_name.clone(),
+                runtime_config,
+                computer_configuration: serde_json::json!({}),
+                payload_size,
+                payload_sha256: digest(&payload),
+                volumes: Vec::new(),
+            }],
+        };
+        let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+        let mut file = File::create(&archive).unwrap();
+        file.write_all(MAGIC).unwrap();
+        file.write_all(&FORMAT_VERSION.to_be_bytes()).unwrap();
+        file.write_all(&(manifest_bytes.len() as u64).to_be_bytes())
+            .unwrap();
+        file.write_all(&manifest_bytes).unwrap();
+        file.write_all(&payload).unwrap();
+
+        let mut service = BackupService::with_runner(
+            super::super::MsbCommand {
+                executable: temp.path().join("msb"),
+                home: temp.path().join("home"),
+                storage_home: None,
+                library: temp.path().join("libkrunfw"),
+            },
+            temp.path().join("scratch"),
+            super::super::SystemMsbRunner,
+        );
+        service.free_space = |_| Ok(FREE_SPACE_RESERVE + 16 * 1024 * 1024);
+
+        let Err(error) = service.extract_macos_components(
+            &archive,
+            Some("source-mac"),
+            &[MacosComponentRole::Disk],
+            temp.path(),
+            &Cancellation::default(),
+        ) else {
+            panic!("extraction ignored the insufficient free-space budget");
+        };
+        assert!(matches!(error, BackupError::InsufficientSpace(_)), "{error}");
+        let children = fs::read_dir(temp.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(children, [std::ffi::OsStr::new("oversized-components.silo-backup")]);
     }
 }
