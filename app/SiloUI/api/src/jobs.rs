@@ -38,6 +38,7 @@ pub enum ErrorCode {
     NeedsPersonalizing,
     SetupIncomplete,
     ScreenSharingUnavailable,
+    DesktopUpdateRequired,
 }
 
 /// A string JobId with one of the six canonical id-space prefixes.

@@ -101,7 +101,9 @@ fn map_error(message: impl Into<String>) -> DispatchError {
     let message = message.into();
     let lower = message.to_ascii_lowercase();
     let has = |needle: &str| lower.contains(needle);
-    let code = if has("was cancelled") {
+    let code = if message == silo_engine::desktop_viewer_api::SECOND_VIEWER_REFUSAL {
+        ErrorCode::DesktopUpdateRequired
+    } else if has("was cancelled") {
         ErrorCode::Cancelled
     } else if has("already waiting") {
         ErrorCode::AlreadyQueued
@@ -673,6 +675,7 @@ fn open_viewer(
     } else {
         None
     };
+    let mut remote_status = None;
     let (connection, name) = if let Some(paths) = &paths {
         let name = runtime::remote_ops::local_computer_name_in(paths, computer_id)?;
         let connection =
@@ -690,6 +693,7 @@ fn open_viewer(
             json!({"computerId": computer_id}),
         )?;
         let name = status["name"].as_str().unwrap_or(computer_id).to_owned();
+        remote_status = Some(status);
         (connection, name)
     };
     let plan = silo_engine::desktop_viewer_api::claim(
@@ -708,6 +712,23 @@ fn open_viewer(
         } => (connection_id, generation, stale),
     };
     drop(stale);
+    // The first viewer is always allowed. A later one evicts the first on a desktop older than
+    // recipe 5, so it is refused unless the status shows the multi-client patch.
+    if let Err(message) = silo_engine::desktop_viewer_api::gate_second_viewer(
+        client,
+        owner_device,
+        computer_id,
+        || match (&paths, remote_status) {
+            (_, Some(status)) => Ok(status),
+            (Some(paths), None) => {
+                silo_engine::desktop::local(paths, &name, None, Some(computer_id))
+            }
+            (None, None) => Err("Computer runtime is unavailable.".to_owned()),
+        },
+    ) {
+        silo_engine::desktop_viewer_api::abort(client, &connection_id, generation);
+        return Err(message);
+    }
     let connect = || -> Result<(silo_engine::desktop_proxy::Proxy, silo_engine::owned_tunnel::Tunnel), String> {
         let port = connection["port"].as_u64().and_then(|port| u16::try_from(port).ok()).filter(|port| *port > 0).ok_or("Invalid desktop endpoint.")?;
         let username = connection["username"].as_str().ok_or("Missing desktop credentials.")?;
@@ -1676,6 +1697,10 @@ mod tests {
             (
                 "OpenSSH is required to view computer desktops.",
                 ErrorCode::OpenSshMissing,
+            ),
+            (
+                silo_engine::desktop_viewer_api::SECOND_VIEWER_REFUSAL,
+                ErrorCode::DesktopUpdateRequired,
             ),
             ("Something else broke.", ErrorCode::Internal),
         ] {
