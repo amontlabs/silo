@@ -1737,6 +1737,7 @@ pub fn install_test_computer(
         developer_tools: true,
         computer_use: true,
         clipboard: true,
+        roots: true,
         needs_personalizing: false,
     };
     record.computer_use_approval = Some(approval);
@@ -2866,7 +2867,7 @@ fn acquire_macos_transfer_turn<'a>(
     name: &str,
     revalidate: impl FnOnce() -> Result<(), String>,
 ) -> Result<runtime::operation_gate::OperationGuard<'a>, String> {
-    let mut operation = acquire_computer_operation(
+    let operation = acquire_computer_operation(
         gate,
         computer_id,
         name,
