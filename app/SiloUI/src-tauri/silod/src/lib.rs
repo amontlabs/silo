@@ -18,6 +18,7 @@ pub mod socket;
 pub fn entry(args: &[String]) -> Result<i32, String> {
     match args.get(1).map(String::as_str) {
         Some("--service") => service::run_command(&args[2..]),
+        Some("--remote-guest") => app::run_remote_guest(&args[2..]),
         Some("--agent") | None => app::run_agent(),
         Some(argument) => Err(format!("unsupported silod argument: {argument}")),
     }

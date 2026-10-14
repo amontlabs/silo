@@ -192,16 +192,15 @@ fn is_restart_scheduled(error: tokio::task::JoinError) -> bool {
 }
 
 async fn serve_connection(
-    stream: UnixStream,
+    mut stream: UnixStream,
     dispatcher: Arc<Dispatcher>,
     _session_permit: OwnedSemaphorePermit,
     request_permits: Arc<Semaphore>,
     control_permits: Arc<Semaphore>,
 ) {
-    let (mut reader, mut writer) = stream.into_split();
     let first = match time::timeout(
         FIRST_HANDSHAKE_TIMEOUT,
-        read_json_frame::<_, Value>(&mut reader),
+        read_json_frame::<_, Value>(&mut stream),
     )
     .await
     {
@@ -221,7 +220,7 @@ async fn serve_connection(
     let first_prepared = match first_prepared {
         PreparedRequest::Close(response, reason) => {
             if let Some(response) = response {
-                let _ = write_initial_response(&mut writer, &response).await;
+                let _ = write_initial_response(&mut stream, &response).await;
             }
             eprintln!("silod: closed client before handshake: {reason}");
             return;
@@ -230,7 +229,7 @@ async fn serve_connection(
     };
     let first_result = dispatcher.execute(first_prepared).await;
     if let Some(response) = first_result.response {
-        if let Err(error) = write_initial_response(&mut writer, &response).await {
+        if let Err(error) = write_initial_response(&mut stream, &response).await {
             eprintln!("silod: handshake response failed: {error}");
             return;
         }
@@ -239,9 +238,53 @@ async fn serve_connection(
         return;
     }
 
+    // Inspect the first request after negotiation before starting the multiplexed session.
+    // guest.ssh changes the connection to raw bytes, so it is accepted only here, once.
+    let initial_request = match read_json_frame::<_, Value>(&mut stream).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("silod: client frame failed: {error}");
+            return;
+        }
+    };
+    if initial_request.get("method").and_then(Value::as_str) == Some("guest.ssh") {
+        let prepared = dispatcher.prepare(initial_request, &mut session);
+        let (response, guest) = dispatcher.execute_stream(prepared).await;
+        if let Some(response) = response {
+            if let Err(error) = write_initial_response(&mut stream, &response).await {
+                eprintln!("silod: guest stream response failed: {error}");
+                return;
+            }
+        }
+        let Some(guest) = guest else {
+            return;
+        };
+        if let Err(error) = guest.set_nonblocking(true) {
+            eprintln!("silod: guest stream setup failed: {error}");
+            return;
+        }
+        let mut guest = match tokio::net::TcpStream::from_std(guest) {
+            Ok(guest) => guest,
+            Err(error) => {
+                eprintln!("silod: guest stream setup failed: {error}");
+                return;
+            }
+        };
+        if let Err(error) = tokio::io::copy_bidirectional(&mut stream, &mut guest).await {
+            eprintln!("silod: guest stream ended: {error}");
+        }
+        return;
+    }
+
+    let (mut reader, mut writer) = stream.into_split();
+
     let (reply_tx, mut reply_rx) = mpsc::channel::<OutboundReply>(MAX_PENDING_REPLIES);
     let reply_byte_budget = Arc::new(Semaphore::new(MAX_PENDING_REPLY_BYTES));
     let (frame_tx, mut frame_rx) = mpsc::channel(1);
+    if frame_tx.send(Ok(Some(initial_request))).await.is_err() {
+        return;
+    }
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_json_frame::<_, Value>(&mut reader).await;
@@ -321,6 +364,21 @@ async fn serve_connection(
                 params,
                 request_context,
             } => {
+                if method == silo_api::methods::MethodName::GuestSsh {
+                    if enqueue_response(
+                        &reply_tx,
+                        &reply_byte_budget,
+                        dispatcher.stream_not_first_response(id),
+                        None,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        break;
+                    }
+                    close_after_reply = true;
+                    break;
+                }
                 let Ok(session_permit) = session_request_permits.clone().try_acquire_owned() else {
                     if enqueue_response(
                         &reply_tx,
@@ -638,6 +696,120 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(read, 0);
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn guest_ssh_is_a_one_shot_stream_after_the_canonical_handshake() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(test_context())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+        let mut client = UnixStream::connect(&socket).await.unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "handshake",
+                "method": "engine.handshake",
+                "params": {
+                    "protocol": { "min": 6, "max": 6 },
+                    "client": { "name": "test", "version": "0.1.0" }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let handshake: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert!(handshake["result"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|method| method == "guest.ssh"));
+
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "stream",
+                "method": "guest.ssh",
+                "params": { "computerId": "not-a-uuid" }
+            }),
+        )
+        .await
+        .unwrap();
+        let refusal: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(refusal["id"], "stream");
+        assert_eq!(refusal["error"]["code"], "internal");
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            tokio::io::AsyncReadExt::read(&mut client, &mut byte)
+                .await
+                .unwrap(),
+            0
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn guest_ssh_is_rejected_after_a_regular_request() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(test_context())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+        let mut client = UnixStream::connect(&socket).await.unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "handshake",
+                "method": "engine.handshake",
+                "params": { "protocol": { "min": 6, "max": 6 } }
+            }),
+        )
+        .await
+        .unwrap();
+        let _: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({ "id": "state", "method": "engine.state", "params": {} }),
+        )
+        .await
+        .unwrap();
+        let _: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "late-stream",
+                "method": "guest.ssh",
+                "params": { "computerId": "not-a-uuid" }
+            }),
+        )
+        .await
+        .unwrap();
+        let refusal: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(refusal["id"], "late-stream");
+        assert_eq!(
+            refusal["error"]["message"],
+            "guest.ssh must be the first request after engine.handshake."
+        );
+
         let _ = shutdown_tx.send(());
         server_task.await.unwrap();
     }

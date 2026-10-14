@@ -1764,7 +1764,118 @@ pub fn guest_stream_params(args: &[String]) -> Result<Value, String> {
         _ => Err("Expected a device and computer identity.".into()),
     }
 }
+
+/// Connects to this channel's canonical engine socket and completes its handshake. The socket
+/// is returned only when `device_id` is the local engine identity; other ids stay on the
+/// Connections-backed route below.
+fn local_engine_for_device(device_id: &str) -> Result<Option<UnixStream>, String> {
+    let socket_path = crate::channel::current()
+        .state_dir(&current_home()?)
+        .join("engine.sock");
+    local_engine_for_device_at(device_id, &socket_path)
+}
+
+fn local_engine_for_device_at(
+    device_id: &str,
+    socket_path: &Path,
+) -> Result<Option<UnixStream>, String> {
+    let mut socket = match UnixStream::connect(socket_path) {
+        Ok(socket) => socket,
+        Err(_) => return Ok(None),
+    };
+    socket
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_write_timeout(Some(Duration::from_secs(15)))
+        .map_err(|error| error.to_string())?;
+    write_frame(
+        &mut socket,
+        &json!({
+            "id": "local-engine-handshake",
+            "method": "engine.handshake",
+            "params": {
+                "protocol": {
+                    "min": silo_api::transport::PROTOCOL_VERSION,
+                    "max": silo_api::transport::PROTOCOL_VERSION
+                },
+                "client": {
+                    "name": "Silo SSH ProxyCommand",
+                    "version": env!("CARGO_PKG_VERSION")
+                }
+            }
+        }),
+    )?;
+    let reply = match read_frame(&mut socket) {
+        Ok(reply) => reply,
+        Err(_) => return Ok(None),
+    };
+    let Ok(silo_api::transport::ResponseEnvelope::Success { id, result }) =
+        serde_json::from_value::<silo_api::transport::ResponseEnvelope<silo_api::transport::HandshakeResult>>(
+            reply,
+        )
+    else {
+        return Ok(None);
+    };
+    if id != "local-engine-handshake" || result.protocol != silo_api::transport::PROTOCOL_VERSION {
+        return Ok(None);
+    }
+    if result.device_id == device_id {
+        Ok(Some(socket))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Sends one canonical `guest.ssh` request and turns the engine socket into a raw duplex stream.
+/// The server accepts this method only as the first request after the handshake.
+fn run_local_engine_stream(
+    mut socket: UnixStream,
+    method: &str,
+    params: &Value,
+) -> Result<(), String> {
+    socket
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_write_timeout(Some(Duration::from_secs(60)))
+        .map_err(|error| error.to_string())?;
+    write_frame(
+        &mut socket,
+        &json!({"id":"local-guest-ssh","method":method,"params":params}),
+    )?;
+    let reply = read_frame(&mut socket)?;
+    if reply.get("id").and_then(Value::as_str) != Some("local-guest-ssh") {
+        return Err("The local engine returned an invalid stream response.".into());
+    }
+    if let Some(error) = reply.get("error") {
+        return Err(error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("The local engine refused the guest connection.")
+            .to_owned());
+    }
+    if reply.get("result") != Some(&json!({})) {
+        return Err("The local engine returned an invalid stream response.".into());
+    }
+    socket
+        .set_read_timeout(None)
+        .map_err(|error| error.to_string())?;
+    socket
+        .set_write_timeout(None)
+        .map_err(|error| error.to_string())?;
+    let mut input = socket.try_clone().map_err(|error| error.to_string())?;
+    thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut input);
+        let _ = input.shutdown(std::net::Shutdown::Write);
+    });
+    copy_raw_stream(&mut socket, &mut std::io::stdout().lock()).map_err(|error| error.to_string())
+}
+
 pub fn run_remote_stream(device_id: &str, method: &str, params: Value) -> Result<(), String> {
+    if let Some(socket) = local_engine_for_device(device_id)? {
+        return run_local_engine_stream(socket, method, &params);
+    }
     let device = read_existing_config_in(&existing_directory()?)?
         .devices
         .into_iter()
@@ -3287,6 +3398,59 @@ mod port_stream_tests {
         ] {
             assert!(guest_stream_params(&args(bad)).is_err());
         }
+    }
+
+    fn mock_engine_socket(device_id: &'static str) -> (tempfile::TempDir, thread::JoinHandle<Value>) {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("engine.sock");
+        let listener = UnixListener::bind(path).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = read_frame(&mut stream).unwrap();
+            write_frame(
+                &mut stream,
+                &json!({
+                    "id": "local-engine-handshake",
+                    "result": {
+                        "deviceId": device_id,
+                        "name": "Test Mac",
+                        "protocol": silo_api::transport::PROTOCOL_VERSION,
+                        "capabilities": ["engine.handshake", "guest.ssh"],
+                        "clientId": "test-client"
+                    }
+                }),
+            )
+            .unwrap();
+            request
+        });
+        (root, server)
+    }
+
+    #[test]
+    fn local_proxy_route_uses_engine_handshake_identity() {
+        let (root, server) = mock_engine_socket("local-device");
+        let socket = local_engine_for_device_at("local-device", &root.path().join("engine.sock"))
+            .unwrap()
+            .expect("matching local identity should select engine.sock");
+        let handshake = server.join().unwrap();
+        assert_eq!(handshake["method"], "engine.handshake");
+        assert_eq!(
+            handshake["params"]["protocol"],
+            json!({
+                "min": silo_api::transport::PROTOCOL_VERSION,
+                "max": silo_api::transport::PROTOCOL_VERSION
+            })
+        );
+        drop(socket);
+    }
+
+    #[test]
+    fn a_different_device_identity_does_not_select_engine_sock() {
+        let (root, server) = mock_engine_socket("local-device");
+        assert!(local_engine_for_device_at("remote-device", &root.path().join("engine.sock"))
+            .unwrap()
+            .is_none());
+        assert_eq!(server.join().unwrap()["method"], "engine.handshake");
     }
 }
 

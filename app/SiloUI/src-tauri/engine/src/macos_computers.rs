@@ -24,6 +24,8 @@ mod guest_access;
 pub(crate) mod files;
 #[path = "macos_computers/ssh_alias.rs"]
 mod ssh_alias;
+#[path = "macos_computers/ssh_stream.rs"]
+mod ssh_stream;
 #[path = "macos_computers/ports.rs"]
 mod ports;
 #[path = "macos_computers/developer_tools.rs"]
@@ -1058,6 +1060,16 @@ pub(crate) fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::T
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::connect(app, id)
+}
+
+/// Opens the direct SSH or published-port connection used by the local engine socket's
+/// one-shot `guest.ssh` stream method.
+pub fn connect_guest_ssh_stream(
+    app_data: &std::path::Path,
+    computer_id: &str,
+    port: u16,
+) -> Result<std::net::TcpStream, String> {
+    ssh_stream::connect(app_data, computer_id, port)
 }
 
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).

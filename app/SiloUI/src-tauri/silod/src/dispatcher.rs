@@ -1,4 +1,10 @@
-use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::HashSet,
+    future::Future,
+    net::TcpStream,
+    pin::Pin,
+    sync::Arc,
+};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -6,6 +12,7 @@ use silo_api::{
     jobs::ErrorCode,
     methods::{
         engine::{EngineState, EngineStateParams},
+        guest::{GuestSshParams, GuestSshPurpose},
         method_registry, MethodDescriptor, MethodName,
     },
     transport::{
@@ -23,6 +30,8 @@ const MAX_REQUEST_IDS: usize = 65_536;
 
 pub type HandlerFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>>;
+pub type StreamFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<TcpStream, DispatchError>> + Send + 'a>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestContext {
@@ -81,6 +90,16 @@ pub trait MethodRegistry: Send + Sync {
         context: Arc<SilodContext>,
         request: RequestContext,
     ) -> HandlerFuture<'a>;
+
+    fn open_stream<'a>(
+        &'a self,
+        method: MethodName,
+        _params: Value,
+        _context: Arc<SilodContext>,
+        _request: RequestContext,
+    ) -> StreamFuture<'a> {
+        Box::pin(async move { Err(DispatchError::unsupported(method_name(method))) })
+    }
 }
 
 pub struct CoreMethodRegistry {
@@ -92,7 +111,12 @@ impl Default for CoreMethodRegistry {
         let descriptors = method_registry()
             .iter()
             .copied()
-            .filter(|descriptor| matches!(descriptor.name, "engine.handshake" | "engine.state"))
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.name,
+                    "engine.handshake" | "engine.state" | "guest.ssh"
+                )
+            })
             .collect();
         Self { descriptors }
     }
@@ -127,6 +151,38 @@ impl MethodRegistry for CoreMethodRegistry {
             }
         })
     }
+
+    fn open_stream<'a>(
+        &'a self,
+        method: MethodName,
+        params: Value,
+        context: Arc<SilodContext>,
+        _request: RequestContext,
+    ) -> StreamFuture<'a> {
+        Box::pin(async move {
+            if method != MethodName::GuestSsh {
+                return Err(DispatchError::unsupported(method_name(method)));
+            }
+            let params: GuestSshParams = serde_json::from_value(params)
+                .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))?;
+            let port = match (params.purpose, params.port) {
+                (None, None) => 22,
+                (Some(GuestSshPurpose::Port), Some(port)) if port != 0 => port,
+                _ => return Err(DispatchError::internal("Invalid guest connection.")),
+            };
+            let app_data = context.paths().app_data.clone();
+            tokio::task::spawn_blocking(move || {
+                silo_engine::macos_computers_engine::connect_guest_ssh_stream(
+                    &app_data,
+                    &params.computer_id,
+                    port,
+                )
+            })
+            .await
+            .map_err(|error| DispatchError::internal(error.to_string()))?
+            .map_err(DispatchError::internal)
+        })
+    }
 }
 
 pub struct Dispatcher {
@@ -156,6 +212,14 @@ impl Dispatcher {
             id,
             ErrorCode::Busy,
             "The engine is at its current request capacity; retry shortly.".to_owned(),
+        )
+    }
+
+    pub fn stream_not_first_response(&self, id: String) -> ResponseEnvelope<Value> {
+        error_response(
+            id,
+            ErrorCode::UnsupportedRemoteOperation,
+            "guest.ssh must be the first request after engine.handshake.".to_owned(),
         )
     }
 
@@ -292,6 +356,34 @@ impl Dispatcher {
                     close_reason: None,
                 }
             }
+        }
+    }
+
+    pub async fn execute_stream(
+        &self,
+        prepared: PreparedRequest,
+    ) -> (Option<ResponseEnvelope<Value>>, Option<TcpStream>) {
+        match prepared {
+            PreparedRequest::Invoke {
+                id,
+                method,
+                params,
+                request_context,
+            } => match self
+                .registry
+                .open_stream(method, params, self.context.clone(), request_context)
+                .await
+            {
+                Ok(stream) => (
+                    Some(success_response(id, serde_json::json!({}))),
+                    Some(stream),
+                ),
+                Err(error) => (Some(error_response(id, error.code, error.message)), None),
+            },
+            PreparedRequest::Reply(response) | PreparedRequest::Close(Some(response), _) => {
+                (Some(response), None)
+            }
+            PreparedRequest::Close(None, _) => (None, None),
         }
     }
 
@@ -536,8 +628,32 @@ mod tests {
         ));
         assert_eq!(
             dispatcher.capabilities(),
-            ["engine.handshake", "engine.state"]
+            ["engine.handshake", "engine.state", "guest.ssh"]
         );
+    }
+
+    #[tokio::test]
+    async fn guest_ssh_stream_rejects_invalid_computer_identity() {
+        let dispatcher = dispatcher();
+        let mut session = SessionState::default();
+        let _ = dispatcher
+            .execute(dispatcher.prepare(handshake("one", 6, 6), &mut session))
+            .await;
+        let prepared = dispatcher.prepare(
+            serde_json::json!({
+                "id": "two",
+                "method": "guest.ssh",
+                "params": { "computerId": "not-a-uuid" }
+            }),
+            &mut session,
+        );
+        let (response, stream) = dispatcher.execute_stream(prepared).await;
+        assert!(stream.is_none());
+        assert!(matches!(
+            response,
+            Some(ResponseEnvelope::Error { id, error })
+                if id == "two" && error.code == ErrorCode::Internal
+        ));
     }
 
     #[tokio::test]
