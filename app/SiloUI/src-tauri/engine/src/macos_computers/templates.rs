@@ -395,7 +395,7 @@ fn remove_partials(app_data: &Path) -> Result<(), String> {
 pub(super) fn eligible(record: &Record) -> bool {
     record.installed
         && record.setup_version.is_some()
-        && record.setup.complete()
+        && record.setup_complete()
         && record.pristine
         && record.template.is_none()
         && record.restore_image.is_some()
@@ -414,7 +414,7 @@ pub(super) fn refreshes(app_data: &Path, record: &Record) -> bool {
         return false;
     };
     record.installed
-        && record.setup.complete()
+        && record.setup_complete()
         && !record.inherited_access
         && !record.computer_use_stale()
         && list(app_data).iter().any(|template| {
@@ -745,6 +745,7 @@ mod tests {
             roots: true,
             needs_personalizing: false,
         };
+        record.developer_tools_version = Some(super::developer_tools::version());
         let layout = Layout::new(data.path(), &record.id);
         fs::create_dir_all(&layout.dir).unwrap();
         fs::write(layout.disk(), vec![7u8; 4096]).unwrap();

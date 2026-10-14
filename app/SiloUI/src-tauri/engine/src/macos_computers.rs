@@ -64,7 +64,7 @@ use silo_engine::{Audience, EngineContext, Event};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex, Once,
     },
     time::{Duration, Instant},
@@ -243,7 +243,7 @@ impl Entry {
             detail: self.detail.clone(),
             display_open: self.display_open,
             installed: self.record.installed,
-            setup_complete: self.record.setup.complete(),
+            setup_complete: self.record.setup_complete(),
             needs_personalizing: self.record.setup.needs_personalizing,
             checkpoints: self
                 .checkpoints
@@ -614,10 +614,8 @@ fn app_data(app: &MacosContext) -> Result<PathBuf, String> {
 fn settle_restore(layout: &Layout, mut record: Record) -> Record {
     match checkpoints::recover(layout) {
         Ok(Some(pending)) => {
-            // Without the checkpoint's record the guest's computer use is unknown: stale.
-            record.computer_use_version = checkpoints::find(layout, &pending.checkpoint_id)
-                .ok()
-                .and_then(|meta| meta.computer_use_version);
+            let metadata = checkpoints::find(layout, &pending.checkpoint_id).ok();
+            restore_checkpoint_metadata(&mut record, metadata.as_ref());
             record.pending_restore = Some(pending);
             record.pristine = false;
             if store::save(layout, &record).is_ok() {
@@ -628,6 +626,13 @@ fn settle_restore(layout: &Layout, mut record: Record) -> Record {
         Err(message) => eprintln!("A macOS computer's Restore could not be settled: {message}"),
     }
     record
+}
+
+fn restore_checkpoint_metadata(record: &mut Record, metadata: Option<&checkpoints::Meta>) {
+    // Missing metadata means the restored disk's computer use is unknown and must be updated.
+    record.computer_use_version = metadata.and_then(|meta| meta.computer_use_version.clone());
+    record.setup.developer_tools = metadata.is_some_and(|meta| meta.developer_tools);
+    record.developer_tools_version = metadata.and_then(|meta| meta.developer_tools_version.clone());
 }
 
 fn ensure_loaded(app: &MacosContext) -> Result<(), String> {
@@ -1259,7 +1264,7 @@ fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, c
     ) {
         Ok(guard) => guard,
         Err(runtime::operation_gate::GateError::Cancelled) => {
-            cancel.store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+            creation_queue_cancelled(cancel);
             end_workflow(app, &id, &layout, Err(Stop::Cancelled));
             return;
         }
@@ -1274,6 +1279,12 @@ fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, c
     };
     let result = run_creation(app, data, record, &layout, cancel);
     end_workflow(app, &id, &layout, result);
+}
+
+/// A queued Create can be cancelled without deleting the saved computer. Only Delete
+/// sets `CANCEL_AND_REMOVE`; Quit aborts the worker while keeping the incomplete record.
+fn creation_queue_cancelled(cancel: &AtomicU8) {
+    request_abort(cancel);
 }
 
 /// Provisions an installed computer again, resuming at the first unfinished step.
@@ -1726,21 +1737,102 @@ fn change_resource_configuration(
         engine::host_limits(),
         &others,
     )?;
-    store::save(&Layout::new(&data, id), &updated)?;
-    update(app, id, |entry| entry.record = updated);
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        updated,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
     emit(app);
     Ok(())
 }
 
+fn persist_then_commit(
+    record: Record,
+    persist: impl FnOnce(&Record) -> Result<(), String>,
+    reconcile: impl FnOnce() -> Option<Record>,
+    commit: impl FnOnce(Record),
+) -> Result<(), String> {
+    match persist(&record) {
+        Ok(()) => {
+            commit(record);
+            Ok(())
+        }
+        Err(error) => {
+            if let Some(saved) = reconcile() {
+                commit(saved);
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Starts a local macOS computer for the launch coordinator. Returns false when `id` belongs
 /// to another runtime, so the caller can fall through to the Linux start path.
-pub fn start_at_launch(app: &MacosContext, id: &str) -> Result<bool, String> {
+pub fn start_at_launch(
+    app: &MacosContext,
+    id: &str,
+    cancelled: &AtomicBool,
+) -> Result<bool, String> {
     ensure_loaded(app)?;
-    if !registry().entries.iter().any(|entry| entry.record.id == id) {
+    let Some(record) = registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| entry.record.clone())
+    else {
         return Ok(false);
+    };
+    let started = launch_start_after_queue(
+        &runtime::OPERATIONS,
+        id,
+        &record.name,
+        cancelled,
+        || runtime::shutdown::ensure_accepting_operations().is_ok() && admission().is_ok(),
+        || start(app, id),
+    )?;
+    Ok(started.is_some())
+}
+
+fn launch_start_after_queue<T>(
+    gate: &runtime::operation_gate::OperationGate,
+    id: &str,
+    name: &str,
+    cancelled: &AtomicBool,
+    accepting: impl Fn() -> bool,
+    start: impl FnOnce() -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    let label = format!("Starting {name}");
+    let keep_waiting = || !cancelled.load(Ordering::SeqCst) && accepting();
+    let guard = gate
+        .kind(runtime::operation_gate::OperationKind::Lifecycle)
+        .acquire_while(
+            runtime::operation_gate::Scope::Computer { id: id.into() },
+            Some(name.to_owned()),
+            &label,
+            &keep_waiting,
+        );
+    let _guard = match guard {
+        Ok(guard) => guard,
+        Err(runtime::operation_gate::GateError::Cancelled)
+            if cancelled.load(Ordering::SeqCst) || !accepting() =>
+        {
+            return Ok(None);
+        }
+        Err(runtime::operation_gate::GateError::Abandoned)
+            if cancelled.load(Ordering::SeqCst) || !accepting() =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    if cancelled.load(Ordering::SeqCst) || !accepting() {
+        return Ok(None);
     }
-    perform(app, id, Action::Start)?;
-    Ok(true)
+    start().map(Some)
 }
 
 /// The stored macOS computer IDs available to the launch settings.
@@ -2434,6 +2526,8 @@ fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), Str
         running,
         macos_version: held.record.os_version(),
         computer_use_version: held.record.computer_use_version.clone(),
+        developer_tools: held.record.setup.developer_tools,
+        developer_tools_version: held.record.developer_tools_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -2469,6 +2563,8 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
         running,
         macos_version: held.record.os_version(),
         computer_use_version: held.record.computer_use_version.clone(),
+        developer_tools: held.record.setup.developer_tools,
+        developer_tools_version: held.record.developer_tools_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -2476,8 +2572,9 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
     let pending = restored?;
     let (mut record, _) = computer(id)?;
     record.pending_restore = Some(pending);
-    // The guest comes back with the computer use it had when the checkpoint was taken.
-    record.computer_use_version = target.computer_use_version.clone();
+    // Derive setup metadata from the restored disk, including older checkpoints with no tools
+    // metadata. The saved computer must never claim tools that are absent from its disk.
+    restore_checkpoint_metadata(&mut record, Some(&target));
     // The disk no longer is what the user left, and only what Start restores is the result.
     record.pristine = false;
     store::save(&layout, &record)?;
@@ -2891,6 +2988,25 @@ pub fn stop_all(app: &MacosContext, deadline: Option<Instant>) -> Result<(), Str
     stopped.and(detached)
 }
 
+/// Refuses new macOS work and asks provisioning and checkpoint operations already in flight to
+/// release their ownership before Quit waits for the device-wide operation guard.
+pub(crate) fn prepare_stop_all() {
+    closed().quit = true;
+    for entry in &registry().entries {
+        abort_workflow_for_quit(entry.state, entry.operation.is_some(), &entry.cancel);
+    }
+}
+
+fn abort_workflow_for_quit(state: State, has_operation: bool, cancel: &AtomicU8) {
+    abort_for_quit(is_creating(state), has_operation, cancel);
+}
+
+pub(crate) fn abort_for_quit(is_workflow: bool, has_operation: bool, cancel: &AtomicU8) {
+    if is_workflow || has_operation {
+        request_abort(cancel);
+    }
+}
+
 /// Detaches the disk image of every macOS computer on disk from this Mac, except
 /// those a creation or setup still owns: their worker detaches its own image, and a
 /// forced detach under it would corrupt the patch. Those report through `stop_busy`.
@@ -2921,8 +3037,8 @@ fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
 }
 
 fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
-    // From here on nothing new is admitted; anything admitted before is in the snapshot.
-    closed().quit = true;
+    // Also makes the admission close visible when Quit acquired the global guard first.
+    prepare_stop_all();
     let busy: Vec<(String, State, Arc<AtomicU8>, bool)> = registry()
         .entries
         .iter()
@@ -2946,11 +3062,6 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
         })
         .map(|(id, _, _, _)| id)
         .collect();
-    for (_, state, cancel, operating) in &busy {
-        if is_creating(*state) || *operating {
-            request_abort(cancel);
-        }
-    }
     // A start in flight cannot be asked to stop, and a checkpoint operation ends at its next
     // step (a paused machine can't answer a shutdown); let both settle first.
     let settle = Instant::now() + Duration::from_secs(30);
@@ -3064,6 +3175,34 @@ mod tests {
     }
 
     #[test]
+    fn restoring_a_pre_tools_checkpoint_clears_tools_readiness_and_fingerprint() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let record = &mut registry.entries[0].record;
+        record.setup.developer_tools = true;
+        record.developer_tools_version = Some("tools-current".into());
+        let target = checkpoints::Meta {
+            schema_version: 1,
+            id: "checkpoint".into(),
+            name: "Before tools".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            kind: checkpoints::Kind::Disk,
+            reason: checkpoints::Reason::Manual,
+            macos_version: None,
+            host_build: String::new(),
+            size_bytes: None,
+            computer_use_version: Some("cu-before".into()),
+            developer_tools: false,
+            developer_tools_version: None,
+        };
+
+        restore_checkpoint_metadata(record, Some(&target));
+
+        assert!(!record.setup.developer_tools);
+        assert_eq!(record.developer_tools_version, None);
+        assert_eq!(record.computer_use_version.as_deref(), Some("cu-before"));
+    }
+
+    #[test]
     fn quit_keeps_time_for_the_forced_stop() {
         let secs = Duration::from_secs;
         assert_eq!(quit_shutdown_timeout(None), Some(QUIT_SHUTDOWN_TIMEOUT));
@@ -3116,6 +3255,7 @@ mod tests {
             roots: true,
             needs_personalizing: false,
         };
+        done.record.developer_tools_version = Some(developer_tools::version());
         let json = serde_json::to_value(done.row()).unwrap();
         assert_eq!(json["state"], "setting-up");
         assert_eq!(json["detail"], "Creating the account");
@@ -3595,6 +3735,30 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_a_queued_creation_keeps_its_folder_record_and_inventory_row() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut registry, id) = registry_with(State::Downloading);
+        let layout = Layout::new(data.path(), &id);
+        let record = registry.entries[0].record.clone();
+        store::save(&layout, &record).unwrap();
+
+        // This is the cancellation branch used by create_workflow after its queue wait.
+        creation_queue_cancelled(&registry.entries[0].cancel);
+        let finish = registry.finish_workflow(&id, Err(Stop::Cancelled));
+        if matches!(&finish, Finish::Remove) {
+            store::remove(&layout).unwrap();
+            registry.finish_cancelled(&id, Ok(()));
+        }
+
+        assert!(matches!(finish, Finish::Kept));
+        assert!(layout.record().exists());
+        assert_eq!(store::load_all(data.path()), [record]);
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.entries[0].row().id, id);
+        assert_eq!(registry.entries[0].state, State::Failed);
+    }
+
+    #[test]
     fn retry_setup_stays_stopped_until_queue_admission_and_uses_the_current_record() {
         let (mut registry, _) = registry_with(State::Stopped);
         registry.entries[0].record.installed = true;
@@ -3614,6 +3778,131 @@ mod tests {
         assert_eq!(admitted.cpus, 8);
         assert_eq!(admitted.memory_gib, 16);
         assert!(reserve_setup(entry).is_err());
+    }
+
+    #[test]
+    fn stale_developer_tools_make_a_complete_computer_retryable_through_provisioning() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let entry = &mut registry.entries[0];
+        entry.record.installed = true;
+        entry.record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+        };
+        entry.record.developer_tools_version = Some("stale-tools".into());
+        assert!(!entry.row().setup_complete);
+
+        reserve_setup(entry).unwrap();
+        let record = admit_queued_setup(entry).unwrap();
+
+        assert_eq!(entry.state, State::SettingUp);
+        assert!(provision::developer_tools_outdated(
+            &record,
+            &developer_tools::version()
+        ));
+    }
+
+    #[test]
+    fn failed_resource_save_rolls_back_disk_registry_and_reload_state() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut registry, id) = registry_with(State::Stopped);
+        let record = &mut registry.entries[0].record;
+        record.installed = true;
+        record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+        };
+        record.developer_tools_version = Some(developer_tools::version());
+        let old = record.clone();
+        let layout = Layout::new(data.path(), &id);
+        store::save(&layout, &old).unwrap();
+        let mut registry_record = old.clone();
+        let mut updated = old.clone();
+        updated.cpus += 2;
+        updated.memory_gib += 4;
+        let mut sync_calls = 0;
+
+        let error = persist_then_commit(
+            updated,
+            |record| {
+                store::save_with_sync(&layout, record, |_directory| {
+                    sync_calls += 1;
+                    if sync_calls == 1 {
+                        Err(std::io::Error::other("injected directory sync failure"))
+                    } else {
+                        store::sync_dir(&layout.dir)
+                    }
+                })
+            },
+            || store::read_record(&layout).ok(),
+            |record| registry_record = record,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("injected directory sync failure"));
+        assert_eq!((registry_record.cpus, registry_record.memory_gib), (old.cpus, old.memory_gib));
+        let reloaded = store::load_all(data.path());
+        assert_eq!(reloaded, [old.clone()]);
+        assert_eq!((reloaded[0].cpus, reloaded[0].memory_gib), (old.cpus, old.memory_gib));
+    }
+
+    #[test]
+    fn a_queued_launch_start_skips_boot_after_startup_cancel_or_quit() {
+        for cancel_startup in [true, false] {
+            let gate: &'static runtime::operation_gate::OperationGate =
+                Box::leak(Box::new(runtime::operation_gate::OperationGate::new()));
+            let blocker = gate.computer("mac-id", "Mac", "Blocking computer operation").unwrap();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let accepting = Arc::new(AtomicBool::new(true));
+            let started = Arc::new(AtomicBool::new(false));
+            let worker_cancelled = cancelled.clone();
+            let worker_accepting = accepting.clone();
+            let worker_started = started.clone();
+            let (send, receive) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let result = launch_start_after_queue(
+                    gate,
+                    "mac-id",
+                    "Mac",
+                    &worker_cancelled,
+                    || worker_accepting.load(Ordering::SeqCst),
+                    || {
+                        worker_started.store(true, Ordering::SeqCst);
+                        Ok(())
+                    },
+                );
+                send.send(result).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while gate.snapshot().waiting.is_empty() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(!gate.snapshot().waiting.is_empty(), "launch Start did not queue");
+            if cancel_startup {
+                cancelled.store(true, Ordering::SeqCst);
+            } else {
+                accepting.store(false, Ordering::SeqCst);
+            }
+            let result_before_release = receive.recv_timeout(Duration::from_secs(1));
+            let finished_early = result_before_release.is_ok();
+            drop(blocker);
+            let result = result_before_release
+                .unwrap_or_else(|_| receive.recv_timeout(Duration::from_secs(5)).unwrap());
+            worker.join().unwrap();
+            assert!(finished_early, "launch wait ignored cancellation");
+            assert_eq!(result.unwrap(), None);
+            assert!(!started.load(Ordering::SeqCst));
+        }
     }
 
     fn finish(

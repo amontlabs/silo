@@ -55,8 +55,12 @@ impl StartupServices for TauriStartupServices {
         crate::commands::macos_computers::computer_ids(&self.app)
     }
 
-    fn start_at_launch(&self, id: &str) -> Result<(), String> {
-        if crate::commands::macos_computers::start_at_launch(&self.app, id)? {
+    fn start_at_launch(
+        &self,
+        id: &str,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), String> {
+        if crate::commands::macos_computers::start_at_launch(&self.app, id, cancelled)? {
             Ok(())
         } else {
             runtime::start_at_launch(&crate::commands::runtime::host(&self.app), id)
