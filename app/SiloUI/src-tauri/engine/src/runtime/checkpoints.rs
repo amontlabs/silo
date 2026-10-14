@@ -997,7 +997,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
 
 /// Removes this computer's automatic checkpoints beyond the newest N, oldest first, through
 /// ordinary safe deletion. It never touches manual or before-restore records. The count is
-/// read again before each deletion so turning the setting off stops later deletions, and a
+/// read again once each deletion is admitted so turning the setting off stops later deletions, and a
 /// checkpoint something still needs is kept (visible with its `deleteBlocker`).
 fn prune_automatic_with(
     gate: &super::operation_gate::OperationGate,
@@ -1009,6 +1009,17 @@ fn prune_automatic_with(
 ) {
     use super::operation_gate::{OperationKind, Scope};
 
+    let entries_of = |record: &Record| -> Vec<crate::checkpoints::retention::Entry> {
+        record
+            .checkpoints
+            .iter()
+            .map(|checkpoint| crate::checkpoints::retention::Entry {
+                id: checkpoint.id.clone(),
+                created_at_ms: i128::from(checkpoint.created_at),
+                automatic: checkpoint.kind == "automatic",
+            })
+            .collect()
+    };
     let Ok(count) = retention() else { return };
     if count == 0 {
         return;
@@ -1016,20 +1027,7 @@ fn prune_automatic_with(
     let Ok(record) = load(paths, computer_id) else {
         return;
     };
-    let entries: Vec<_> = record
-        .checkpoints
-        .iter()
-        .map(|checkpoint| crate::checkpoints::retention::Entry {
-            id: checkpoint.id.clone(),
-            created_at_ms: i128::from(checkpoint.created_at),
-            automatic: checkpoint.kind == "automatic",
-        })
-        .collect();
-    for candidate in crate::checkpoints::retention::plan(&entries, count).candidates {
-        // The setting is checked at the moment each deletion is admitted.
-        if !matches!(retention(), Ok(current) if current > 0) {
-            return;
-        }
+    for candidate in crate::checkpoints::retention::plan(&entries_of(&record), count).candidates {
         let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
             Scope::Device,
             None,
@@ -1040,6 +1038,22 @@ fn prune_automatic_with(
         ) else {
             return;
         };
+        // The plan is made again once the queue admits this deletion: the setting and the
+        // history may have changed while it waited, and only a candidate that the current
+        // count still drops is deleted.
+        let Ok(current) = retention() else { return };
+        if current == 0 {
+            return;
+        }
+        let Ok(record) = load(paths, computer_id) else {
+            return;
+        };
+        if !crate::checkpoints::retention::plan(&entries_of(&record), current)
+            .candidates
+            .contains(&candidate)
+        {
+            continue;
+        }
         if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
             // Dependencies and in-progress recovery defer retention. Never force-delete a
             // checkpoint the runtime says something still needs.

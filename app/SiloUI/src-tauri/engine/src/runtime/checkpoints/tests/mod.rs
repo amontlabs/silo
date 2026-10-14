@@ -4311,6 +4311,64 @@ fn retention_stops_when_the_setting_is_turned_off_between_deletions() {
     assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
 }
 
+/// Runs retention with the device lane held, waits (without sleeping) until its first
+/// deletion is queued, changes the setting to `after`, then releases the lane.
+fn prune_while_queued(initial: u32, after: u32, automatic: usize) -> (Store, usize) {
+    let directory = tempfile::tempdir().unwrap();
+    let entries: Vec<Checkpoint> = (1..=automatic as u64)
+        .map(|n| automatic_entry(&native_id(n), n * 10))
+        .collect();
+    let paths = delete_fixture(&directory, entries, None);
+    let mut store = Store::new(vec![("dev", None)]);
+    for n in 1..=automatic as u64 {
+        store = store.with("dev", &native_id(n), &format!("snap_{n}"), None);
+    }
+    let gate = super::super::operation_gate::OperationGate::new();
+    let setting = std::sync::atomic::AtomicU32::new(initial);
+    let hold = gate.device("Holding the lane").unwrap();
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            prune_automatic_with(
+                &gate,
+                &store,
+                &paths,
+                ID,
+                &|| Ok(setting.load(std::sync::atomic::Ordering::SeqCst)),
+                silo_api::jobs::JobId::new("job:7").unwrap(),
+            );
+        });
+        while gate.snapshot().waiting.is_empty() && !worker.is_finished() {
+            std::thread::yield_now();
+        }
+        assert!(!worker.is_finished(), "the deletion never queued");
+        setting.store(after, std::sync::atomic::Ordering::SeqCst);
+        drop(hold);
+        worker.join().unwrap();
+    });
+    let left = load(&paths, ID).unwrap().checkpoints.len();
+    (store, left)
+}
+
+#[test]
+fn retention_turned_off_while_the_deletion_queues_deletes_nothing() {
+    let _test_state = crate::test_support::global_state();
+    let (store, left) = prune_while_queued(2, 0, 5);
+    assert!(store.removals().is_empty());
+    assert_eq!(left, 5);
+}
+
+#[test]
+fn retention_raised_while_the_deletion_queues_keeps_what_the_new_count_retains() {
+    let _test_state = crate::test_support::global_state();
+    let (store, left) = prune_while_queued(2, 5, 5);
+    assert!(store.removals().is_empty());
+    assert_eq!(left, 5);
+    // Lowered while queued, the oldest (the only planned candidate) is still dropped.
+    let (store, left) = prune_while_queued(4, 2, 5);
+    assert!(!store.removals().is_empty());
+    assert_eq!(left, 4);
+}
+
 #[test]
 fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
     let _test_state = crate::test_support::global_state();
