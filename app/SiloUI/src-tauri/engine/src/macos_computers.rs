@@ -1703,7 +1703,9 @@ pub fn upload_files(
     selection: String,
     conflict: crate::transfer::ConflictPolicy,
 ) -> Result<crate::transfer::UploadOutcome, String> {
+    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
     let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    revalidate_transfer_target(&computer_id, generation)?;
     crate::transfer::upload_files_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -1714,6 +1716,7 @@ pub fn upload_files(
         directory,
         selection,
         conflict,
+        Some(operation),
     )
 }
 
@@ -1723,7 +1726,9 @@ pub fn prepare_download(
     computer_id: String,
     path: String,
 ) -> Result<(crate::transfer::DownloadSession, String), String> {
+    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
     let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    revalidate_transfer_target(&computer_id, generation)?;
     crate::transfer::prepare_download_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -1731,7 +1736,66 @@ pub fn prepare_download(
         transfer_id,
         computer_id,
         path,
+        Some(operation),
     )
+}
+
+/// Queue a macOS transfer with the other work for this computer. Capture its generation
+/// before waiting, then refuse to transfer if the guest stopped or restarted in the queue.
+fn acquire_transfer_operation(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<(runtime::operation_gate::OperationGuard<'static>, u64), String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    let (record, state) = computer(computer_id)?;
+    if state != State::Running {
+        return Err("Start this computer to transfer files.".into());
+    }
+    let generation = computer_generation(computer_id)?;
+    let operation = acquire_macos_transfer_turn(
+        &runtime::OPERATIONS,
+        computer_id,
+        &record.name,
+        || {
+            runtime::shutdown::ensure_accepting_operations()?;
+            revalidate_transfer_target(computer_id, generation)
+        },
+    )?;
+    Ok((operation, generation))
+}
+
+fn acquire_macos_transfer_turn<'a>(
+    gate: &'a runtime::operation_gate::OperationGate,
+    computer_id: &str,
+    name: &str,
+    revalidate: impl FnOnce() -> Result<(), String>,
+) -> Result<runtime::operation_gate::OperationGuard<'a>, String> {
+    let mut operation = acquire_computer_operation(
+        gate,
+        computer_id,
+        name,
+        runtime::operation_gate::OperationKind::Other,
+        &format!("Transferring files for {name}"),
+    )?;
+    operation.allow_cancel();
+    revalidate()?;
+    Ok(operation)
+}
+
+fn revalidate_transfer_target(computer_id: &str, generation: u64) -> Result<(), String> {
+    let (_, state) = computer(computer_id)?;
+    ensure_transfer_target(state, computer_generation(computer_id)?, generation)
+}
+
+fn ensure_transfer_target(state: State, current_generation: u64, expected_generation: u64) -> Result<(), String> {
+    if state != State::Running {
+        return Err("Start this computer to transfer files.".into());
+    }
+    if current_generation != expected_generation {
+        return Err("This computer restarted while the transfer was waiting. Retry it.".into());
+    }
+    Ok(())
 }
 
 /// Observe and repair macOS guest listeners and their loopback SSH tunnels.
@@ -3711,6 +3775,98 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_transfer_turn_waits_with_stop_restore_and_export_then_holds_the_scope() {
+        use runtime::operation_gate::{OperationGate, OperationKind};
+        use std::sync::mpsc;
+
+        for kind in [
+            OperationKind::Lifecycle,
+            OperationKind::CheckpointRestore,
+            OperationKind::Export,
+        ] {
+            let gate = OperationGate::new();
+            let (changed, notifications) = mpsc::channel();
+            gate.set_listener(move || {
+                let _ = changed.send(());
+            });
+            let transfer =
+                acquire_macos_transfer_turn(&gate, "computer-id", "dev", || Ok(())).unwrap();
+            while notifications.try_recv().is_ok() {}
+
+            let (entered, admitted) = mpsc::channel();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let _operation = gate
+                        .kind(kind)
+                        .computer("computer-id", "dev", "Conflicting operation")
+                        .unwrap();
+                    entered.send(()).unwrap();
+                });
+
+                notifications.recv().unwrap();
+                let queue = gate.snapshot();
+                assert_eq!(queue.running.len(), 1, "transfer should retain its gate");
+                assert_eq!(queue.waiting.len(), 1, "conflicting work should wait");
+                assert!(queue.waiting[0].cancellable);
+
+                drop(transfer);
+                admitted.recv().unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn macos_transfer_revalidates_running_generation_after_waiting() {
+        use runtime::operation_gate::{OperationGate, OperationKind};
+        use std::sync::{mpsc, Mutex};
+
+        let gate = OperationGate::new();
+        let (changed, notifications) = mpsc::channel();
+        gate.set_listener(move || {
+            let _ = changed.send(());
+        });
+        for (current_state, current_generation, expected_error) in [
+            (State::Stopped, 8, "Start this computer to transfer files."),
+            (
+                State::Running,
+                8,
+                "This computer restarted while the transfer was waiting. Retry it.",
+            ),
+        ] {
+            let observed = Arc::new(Mutex::new((State::Running, 7)));
+            let waiter_state = observed.clone();
+            let (result_tx, result_rx) = mpsc::channel();
+            let stop = gate
+                .kind(OperationKind::Lifecycle)
+                .computer("computer-id", "dev", "Stopping dev")
+                .unwrap();
+            while notifications.try_recv().is_ok() {}
+
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let result = acquire_macos_transfer_turn(
+                        &gate,
+                        "computer-id",
+                        "dev",
+                        || {
+                            let (state, generation) = *waiter_state.lock().unwrap();
+                            ensure_transfer_target(state, generation, 7)
+                        },
+                    );
+                    result_tx.send(result.map(drop)).unwrap();
+                });
+
+                notifications.recv().unwrap();
+                let queue = gate.snapshot();
+                assert_eq!(queue.waiting.len(), 1, "transfer should be visible while waiting");
+                *observed.lock().unwrap() = (current_state, current_generation);
+                drop(stop);
+                assert_eq!(result_rx.recv().unwrap().unwrap_err(), expected_error);
+            });
+        }
+    }
 
     struct ProbeEngineContext {
         paths: silo_engine::EnginePaths,
