@@ -36,7 +36,11 @@ fn lock() -> Lock {
 /// The versions this Silo installs: `(recipe, node, claude)`.
 fn expected() -> (u32, String, String) {
     let lock = lock();
-    (lock.recipe_version, lock.node.version, lock.claude_code.version)
+    (
+        lock.recipe_version,
+        lock.node.version,
+        lock.claude_code.version,
+    )
 }
 
 fn stage(command: &str) -> String {
@@ -68,14 +72,13 @@ pub(crate) fn setup_script() -> String {
 }
 
 fn version_of(raw: &Value, key: &str) -> Option<String> {
-    raw[key].as_str().filter(|v| !v.is_empty()).map(str::to_owned)
+    raw[key]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
 }
 
-fn projection(
-    node: Option<String>,
-    claude: Option<String>,
-    recipe: Option<u32>,
-) -> Value {
+fn projection(node: Option<String>, claude: Option<String>, recipe: Option<u32>) -> Value {
     let (expected_recipe, expected_node, expected_claude) = expected();
     let mut missing = Vec::new();
     if node.is_none() {
@@ -108,7 +111,9 @@ pub(crate) fn linux_state(line: Option<&str>) -> Value {
     projection(
         version_of(&raw, "nodeVersion"),
         version_of(&raw, "claudeVersion"),
-        raw["recipeVersion"].as_u64().and_then(|v| u32::try_from(v).ok()),
+        raw["recipeVersion"]
+            .as_u64()
+            .and_then(|v| u32::try_from(v).ok()),
     )
 }
 
@@ -163,7 +168,9 @@ mod tests {
 
     #[test]
     fn a_half_installed_computer_names_what_is_missing() {
-        let state = linux_state(Some(r#"{"nodeVersion":"24.21.0","claudeVersion":null,"recipeVersion":null}"#));
+        let state = linux_state(Some(
+            r#"{"nodeVersion":"24.21.0","claudeVersion":null,"recipeVersion":null}"#,
+        ));
         assert_eq!(state["state"], "missing");
         assert_eq!(state["missing"], json!(["claude"]));
         assert_eq!(state["nodeVersion"], "24.21.0");
@@ -173,7 +180,9 @@ mod tests {
     fn an_older_recipe_is_outdated_and_the_current_one_is_ready() {
         let (recipe, node, claude) = expected();
         let line = |recipe: u32| {
-            format!(r#"{{"nodeVersion":"{node}","claudeVersion":"{claude}","recipeVersion":{recipe}}}"#)
+            format!(
+                r#"{{"nodeVersion":"{node}","claudeVersion":"{claude}","recipeVersion":{recipe}}}"#
+            )
         };
         assert_eq!(linux_state(Some(&line(recipe - 1)))["state"], "outdated");
         let ready = linux_state(Some(&line(recipe)));

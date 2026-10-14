@@ -274,7 +274,10 @@ fn script(lock: &Lock) -> String {
         .replace("@NODE_SHA256@", &lock.node.asset.sha256)
         .replace("@CLAUDE_VERSION@", &lock.claude_code.version)
         .replace("@CLAUDE_INSTALLER_FILE@", &lock.claude_code.asset.file)
-        .replace("@CLAUDE_INSTALLER_BYTES@", &lock.claude_code.asset.bytes.to_string())
+        .replace(
+            "@CLAUDE_INSTALLER_BYTES@",
+            &lock.claude_code.asset.bytes.to_string(),
+        )
         .replace("@CLAUDE_INSTALLER_SHA256@", &lock.claude_code.asset.sha256)
         .replace("@LOCK_SHA256@", &lock_sha256)
 }

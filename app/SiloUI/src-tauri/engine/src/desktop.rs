@@ -845,7 +845,8 @@ pub fn local_for_job(
             return Err("Unsupported desktop action.".into());
         }
         // Agent tools belong to the computer, not to its desktop.
-        if action != "setup-agent-tools" && crate::desktop::configuration(&configuration).is_none() {
+        if action != "setup-agent-tools" && crate::desktop::configuration(&configuration).is_none()
+        {
             return Err("Add a Linux desktop in computer settings first.".into());
         }
         if action == "setup-computer-use" && !crate::computer_use::is_built_in(&configuration) {
@@ -1509,7 +1510,10 @@ mod tests {
     fn agent_tools_setup_is_a_long_running_action_that_does_not_start_the_computer() {
         let setup = action_script("setup-agent-tools");
         assert!(setup.contains("agent-tools.py\" \"$silo_tools/agent-tools-lock.json\" setup"));
-        assert_eq!(action_timeout("setup-agent-tools"), Duration::from_secs(1800));
+        assert_eq!(
+            action_timeout("setup-agent-tools"),
+            Duration::from_secs(1800)
+        );
         assert!(!action_starts_computer("setup-agent-tools"));
     }
 

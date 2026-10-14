@@ -2,6 +2,7 @@
 
 extern crate self as silo_engine;
 
+pub mod agent_tools;
 pub mod applications;
 pub mod backup;
 pub mod backup_controller;
@@ -12,7 +13,6 @@ pub mod chatgpt_app;
 pub mod checkpoints;
 pub mod clipboard;
 pub mod computer_names;
-pub mod agent_tools;
 pub mod computer_use;
 pub mod context;
 pub mod creation_inputs;
