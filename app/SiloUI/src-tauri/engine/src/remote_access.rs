@@ -69,6 +69,8 @@ pub const EVENTS_STREAM: &str = "events.subscribe";
 /// codes all the way to the controller; everything else reports plain messages.
 const ACCESS_METHODS: &[&str] = &[
     "desktop.job",
+    "guest.exec.start",
+    "guest.exec.get",
     "github.state",
     "github.connect",
     "github.connect.reopen",

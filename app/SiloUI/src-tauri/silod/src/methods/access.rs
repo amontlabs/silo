@@ -356,6 +356,23 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
     fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
+            "guest.exec.start" => {
+                let typed = serde_json::from_value(params.clone())
+                    .map_err(|error| BridgeError::from(format!("Invalid params: {error}")))?;
+                super::guest::start_exec(self.0.context.clone(), typed)
+                    .map_err(bridge_error)
+                    .and_then(|accepted| {
+                        serde_json::to_value(accepted)
+                            .map_err(|error| BridgeError::from(error.to_string()))
+                    })
+            }
+            "guest.exec.get" => {
+                let typed = serde_json::from_value(params.clone())
+                    .map_err(|error| BridgeError::from(format!("Invalid params: {error}")))?;
+                super::guest::exec_get_output(self.0.context.as_ref(), &typed)
+                    .map(|output| output.value)
+                    .map_err(bridge_error)
+            }
             "desktop.job" => super::display::start_owner_desktop_job(&self.0.context, params)
                 .map_err(bridge_error),
             "operations.list"
