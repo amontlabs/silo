@@ -9,6 +9,7 @@ mod chatgpt_app;
 mod clipboard;
 #[cfg(test)]
 mod command_permissions_tests;
+mod commands;
 mod computer_names;
 mod computer_use;
 mod creation_inputs;
@@ -40,10 +41,14 @@ mod host_push_operations;
 mod host_push_transport;
 mod log_export;
 mod log_retention;
-mod macos_computers;
+#[path = "macos_computers.rs"]
+mod macos_computers_engine;
 mod macos_display_gateway;
-mod macos_remote;
-mod macos_remote_viewer;
+#[path = "macos_remote.rs"]
+mod macos_remote_engine;
+pub(crate) use commands::macos_computers;
+pub(crate) use commands::macos_remote;
+pub(crate) use commands::macos_remote_viewer;
 mod network;
 mod notifications;
 mod owned_tunnel;
@@ -144,22 +149,22 @@ fn main() {
             desktop_viewer_media::desktop_viewer_set_audio,
             desktop_viewer_media::desktop_viewer_reset_screen,
             desktop_viewer::desktop_viewer_clipboard,
-            macos_computers::read_macos_computers,
-            macos_computers::create_macos_computer,
-            macos_computers::macos_computer_action,
-            macos_computers::open_macos_display,
-            macos_computers::macos_computer_clipboard,
-            macos_computers::delete_macos_template,
-            macos_computers::create_macos_checkpoint,
-            macos_computers::restore_macos_checkpoint,
-            macos_computers::fork_macos_checkpoint,
-            macos_computers::delete_macos_checkpoint,
-            macos_remote::remote_macos_snapshot,
-            macos_remote::remote_macos_create,
-            macos_remote::remote_macos_action,
-            macos_remote_viewer::open_macos_remote_display,
-            macos_remote_viewer::macos_display_session,
-            macos_remote_viewer::macos_display_resize,
+            commands::macos_computers::read_macos_computers,
+            commands::macos_computers::create_macos_computer,
+            commands::macos_computers::macos_computer_action,
+            commands::macos_computers::open_macos_display,
+            commands::macos_computers::macos_computer_clipboard,
+            commands::macos_computers::delete_macos_template,
+            commands::macos_computers::create_macos_checkpoint,
+            commands::macos_computers::restore_macos_checkpoint,
+            commands::macos_computers::fork_macos_checkpoint,
+            commands::macos_computers::delete_macos_checkpoint,
+            commands::macos_remote::remote_macos_snapshot,
+            commands::macos_remote::remote_macos_create,
+            commands::macos_remote::remote_macos_action,
+            commands::macos_remote_viewer::open_macos_remote_display,
+            commands::macos_remote_viewer::macos_display_session,
+            commands::macos_remote_viewer::macos_display_resize,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
             updates::get_update_state,

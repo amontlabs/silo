@@ -17,9 +17,9 @@ use super::guest_access::CANCELLED;
 use super::input::{self, KeyEvent, Keyboard, Modifier, PointerKind, TextLine};
 use super::setup_log::SetupLog;
 use super::store::Layout;
+use super::MacosContext;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
 
 const ATTEMPTS: usize = 2;
 const POLL: Duration = Duration::from_millis(1500);
@@ -48,7 +48,7 @@ const LOCKED_SUBTITLE: &str = "Silo is setting up this computer. Please don't ty
 /// US layout; it runs first unless `language_ready`, and again when Recovery
 /// still came up in another language.
 pub(super) fn disable_sip(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     cancelled: &dyn Fn() -> bool,
     language_ready: bool,
@@ -110,7 +110,7 @@ pub(super) fn disable_sip(
 /// Keeps the last screen of a failed attempt for diagnosis and says where in
 /// the log. The folder is Silo's log folder for the computer; the UI gets the
 /// error message only.
-fn record_failure(app: &AppHandle, id: &str, password: &str, error: &Failure) {
+fn record_failure(app: &MacosContext, id: &str, password: &str, error: &Failure) {
     let (Failure::Retry(message) | Failure::WrongLanguage(message) | Failure::Fatal(message)) =
         error
     else {
@@ -271,7 +271,7 @@ fn prune_evidence(dir: &Path, kept: usize) {
     }
 }
 
-fn prepare_window(app: &AppHandle, id: &str, title: &str) -> Result<(), Failure> {
+fn prepare_window(app: &MacosContext, id: &str, title: &str) -> Result<(), Failure> {
     super::show_display(app, id, title, false)
         .and_then(|()| engine::focus_display(app, id))
         .and_then(|_| engine::lock_input(app, id, LOCKED_SUBTITLE))
@@ -280,7 +280,7 @@ fn prepare_window(app: &AppHandle, id: &str, title: &str) -> Result<(), Failure>
 
 /// Gives the window its input back when the sequence ends, however it ends.
 struct InputLock<'a> {
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     id: &'a str,
 }
 
@@ -292,7 +292,7 @@ impl Drop for InputLock<'_> {
 
 /// Waits for the halted guest to stop and be released, forcing it if it does
 /// not stop in time or the setup is cancelled.
-fn finish(app: &AppHandle, id: &str, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+fn finish(app: &MacosContext, id: &str, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
     let deadline = Instant::now() + HALT_WAIT;
     while Instant::now() < deadline {
         if cancelled() {
@@ -308,7 +308,7 @@ fn finish(app: &AppHandle, id: &str, cancelled: &dyn Fn() -> bool) -> Result<(),
 }
 
 /// Force-stops the computer and waits for its machine to be released.
-fn stop(app: &AppHandle, id: &str) {
+fn stop(app: &MacosContext, id: &str) {
     let _ = engine::force_stop(app, id);
     let _ = engine::wait_until_stopped(app, id, STOP_WAIT);
 }
@@ -540,13 +540,13 @@ trait Guest {
 }
 
 struct LiveGuest<'a> {
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     id: &'a str,
     started: Instant,
 }
 
 impl<'a> LiveGuest<'a> {
-    fn new(app: &'a AppHandle, id: &'a str) -> Self {
+    fn new(app: &'a MacosContext, id: &'a str) -> Self {
         Self {
             app,
             id,

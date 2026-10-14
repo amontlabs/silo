@@ -7,6 +7,7 @@
 //! other retained logs. The account password is replaced wherever it appears; command input
 //! is never logged at all.
 use super::store::Layout;
+use super::MacosContext;
 use std::{
     fs,
     io::Write,
@@ -14,7 +15,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use tauri::{AppHandle, Manager};
 
 const FILE: &str = "runtime.log";
 /// A file past this size is rotated before the next line is written.
@@ -32,14 +32,8 @@ pub(super) struct SetupLog {
 }
 
 /// The folder of one computer's retained logs.
-pub(super) fn directory(app: &AppHandle, id: &str) -> Option<PathBuf> {
-    Some(
-        app.path()
-            .app_log_dir()
-            .ok()?
-            .join("macos-computers")
-            .join(id),
-    )
+pub(super) fn directory(app: &MacosContext, id: &str) -> Option<PathBuf> {
+    Some(app.paths().app_log.clone().join("macos-computers").join(id))
 }
 
 impl SetupLog {
@@ -82,7 +76,7 @@ impl SetupLog {
     /// The log of computer `id`, hiding the password of its account. `None` when the
     /// computer's folder is gone or unknown; logging is best effort and never fails a
     /// setup, and it never creates the computer's folder or its credentials.
-    pub(super) fn open(app: &AppHandle, id: &str) -> Option<Self> {
+    pub(super) fn open(app: &MacosContext, id: &str) -> Option<Self> {
         let layout = Layout::new(&super::app_data(app).ok()?, id);
         if !layout.dir.is_dir() {
             return None;

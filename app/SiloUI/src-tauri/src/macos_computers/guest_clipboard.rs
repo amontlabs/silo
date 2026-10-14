@@ -15,6 +15,7 @@
 //! MIT License, Copyright (c) trycua).
 use super::guest_access as access;
 use super::store::{Layout, State};
+use super::MacosContext;
 use super::{app_data, computer, engine};
 use crate::{
     desktop_bridge::{ClipboardSupport, GuestClipboard, MAX_IMAGE_BYTES, MAX_TEXT_BYTES},
@@ -27,7 +28,6 @@ use std::{
     sync::{Mutex, OnceLock},
     time::Duration,
 };
-use tauri::AppHandle;
 
 const TEXT_TIMEOUT: Duration = Duration::from_secs(10);
 const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -235,7 +235,7 @@ impl Guest for MacGuest {
 }
 
 /// Runs one transfer in the running computer `id`. Blocks, so call it from a worker thread.
-pub(super) fn run(app: &AppHandle, id: &str, direction: Direction) -> Result<Report, String> {
+pub(super) fn run(app: &MacosContext, id: &str, direction: Direction) -> Result<Report, String> {
     let action = direction.action();
     let Some(_guard) = ActiveGuard::acquire(&format!("macos-computer-{id}")) else {
         return Ok(Report::new(action, Status::Busy, None));
@@ -290,9 +290,9 @@ pub(super) fn feedback(report: &Report, name: &str) -> String {
     not(all(target_os = "macos", target_arch = "aarch64")),
     allow(dead_code)
 )]
-pub(super) fn spawn_from_display(app: &AppHandle, id: &str, direction: Direction) {
+pub(super) fn spawn_from_display(app: &MacosContext, id: &str, direction: Direction) {
     let (app, id) = (app.clone(), id.to_string());
-    tauri::async_runtime::spawn_blocking(move || {
+    std::thread::spawn(move || {
         let name = computer(&id)
             .map(|(record, _)| record.name)
             .unwrap_or_default();
@@ -347,7 +347,7 @@ fn generations() -> &'static Generations {
 
 /// Nothing needs installing in the computer: its clipboard is reached with the
 /// tools macOS ships. Kept so provisioning can call it as a step.
-pub(super) fn install(_app: &AppHandle, _id: &str) -> Result<(), String> {
+pub(super) fn install(_app: &MacosContext, _id: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -505,6 +505,6 @@ mod tests {
     #[test]
     fn installing_needs_nothing() {
         // Compiles against the provisioning step's signature.
-        let _: fn(&AppHandle, &str) -> Result<(), String> = install;
+        let _: fn(&MacosContext, &str) -> Result<(), String> = install;
     }
 }

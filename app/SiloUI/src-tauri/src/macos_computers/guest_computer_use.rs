@@ -7,6 +7,7 @@
 //! TCC rows and registers LCU's agents; see its header for the steps.
 use super::guest_access::{self as access, CommandOutput};
 use super::store::Layout;
+use super::MacosContext;
 use super::{
     app_data, layout_and_record, registry, restore_image, set_detail, setup_log, store, templates,
 };
@@ -21,7 +22,6 @@ use std::{
     sync::{atomic::Ordering, Mutex},
     time::Duration,
 };
-use tauri::AppHandle;
 
 const APP_LOCK: &str = include_str!("../../guest/macos/chatgpt-app-lock.json");
 const LCU_LOCK: &str = include_str!("../../guest/macos/lcu-lock.json");
@@ -330,7 +330,7 @@ impl Job<'_> {
 
 /// Installs computer use in the running computer `id` during its setup.
 pub(super) fn install(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     approval: computer_use::Approval,
 ) -> Result<(), String> {
@@ -351,7 +351,7 @@ pub(super) fn install(
 /// it keeps what already is the pinned app and LCU, replaces what is not, writes the same
 /// grants again and registers the agents with the current options.
 pub(super) fn install_with(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     approval: computer_use::Approval,
     job: &Job,
@@ -432,7 +432,7 @@ pub(super) fn update_wanted(record: &store::Record) -> bool {
 /// ends as soon as the computer is stopped, deleted, restored, forked from or started
 /// again, or Silo quits, and a failure only leaves the old version recorded (it is tried
 /// again at the next Start) and a line in the computer's log.
-pub(super) fn update_in_background(app: &AppHandle, id: &str, attempt: u64) {
+pub(super) fn update_in_background(app: &MacosContext, id: &str, attempt: u64) {
     let wanted = registry()
         .entries
         .iter()
@@ -460,7 +460,7 @@ fn update_may_run(id: &str, attempt: u64) -> bool {
         && registry().update_may_run(id, attempt)
 }
 
-fn run_update(app: &AppHandle, id: &str, attempt: u64) {
+fn run_update(app: &MacosContext, id: &str, attempt: u64) {
     let live = || update_may_run(id, attempt);
     // Nothing below may touch the computer's folder once the computer is not this Start's.
     if !live() {
@@ -472,7 +472,7 @@ fn run_update(app: &AppHandle, id: &str, attempt: u64) {
             log.line(line);
         }
     };
-    let clear = |app: &AppHandle| {
+    let clear = |app: &MacosContext| {
         super::update(app, id, |entry| {
             if entry.attempt == attempt
                 && entry

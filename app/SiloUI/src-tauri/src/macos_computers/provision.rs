@@ -6,6 +6,7 @@
 //! The computer's state stays `setting-up` throughout; each step names itself in
 //! the detail. Machines started here have no display.
 use super::setup_log::SetupLog;
+use super::MacosContext;
 use super::{
     app_data, checkpoints, engine, guest_access, guest_clipboard, guest_computer_use,
     layout_and_record, offline_setup, personalize, recovery, set_detail,
@@ -16,7 +17,6 @@ use std::{
     sync::atomic::{AtomicU8, Ordering},
     time::{Duration, Instant},
 };
-use tauri::AppHandle;
 
 /// How long the first boot may take to give the guest an address.
 const FIRST_BOOT_ADDRESS: Duration = Duration::from_secs(120);
@@ -43,7 +43,7 @@ const INHERITED_ACCESS_GONE: &str =
 
 /// Runs every unfinished step for `record`, saving progress after each.
 pub(super) fn run(
-    app: &AppHandle,
+    app: &MacosContext,
     layout: &Layout,
     record: &mut Record,
     cancel: &AtomicU8,
@@ -72,7 +72,7 @@ pub(super) fn run(
 }
 
 struct Provision<'a> {
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     layout: &'a Layout,
     id: String,
     cancel: &'a AtomicU8,

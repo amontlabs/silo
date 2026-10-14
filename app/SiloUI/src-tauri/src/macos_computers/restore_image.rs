@@ -231,7 +231,16 @@ fn attempt_download(
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(u64, Option<u64>),
 ) -> Result<(), Attempt> {
-    tauri::async_runtime::block_on(attempt_async(client, url, partial, cancelled, progress))
+    let future = attempt_async(client, url, partial, cancelled, progress);
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.block_on(future)
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("the local Tokio runtime can be created")
+            .block_on(future)
+    }
 }
 
 /// Waits for `future`, noticing cancellation every `POLL` and giving up after
