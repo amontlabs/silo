@@ -228,65 +228,73 @@ impl silo_engine::secrets::RuntimeAccess for SecretsRuntimeAccess {
     }
 }
 
-/// MACOS-PROXY: the call site for the macOS secrets and GitHub host proxy.
-///
-/// The proxy lives on branch `engine/p3-macos-proxy` and is merged separately. When it
-/// lands, replace the bodies below with its `proxy_*` entry points (its Tauri commands
-/// show the same shape: `proxy_contains_name`, `proxy_apply_secrets`,
-/// `proxy_validate_computers`, `proxy_revoke_secret`, `proxy_scoped_cached_tokens`,
-/// `proxy_github_policy_is_cached`, `proxy_apply_github_policy`,
-/// `proxy_apply_github_identity`, `proxy_is_pending_restore`). Every Linux path above is
-/// complete; until then no computer is a macOS proxy computer, so none of this runs.
+/// The macOS secrets and GitHub host proxy. Each function resolves the computer by name in
+/// the macOS store and calls the engine's `proxy_*` entry point. No computer is a macOS
+/// proxy computer until the access runtime is installed.
 mod macos_proxy {
+    use super::{SilodMacosHost, RUNTIME_HOST};
     use serde_json::Value;
+    use silo_engine::macos_computers as engine;
+    use std::sync::Arc;
 
-    const UNAVAILABLE: &str =
-        "Secrets and GitHub access for macOS computers are not available in this build yet.";
+    const NOT_INSTALLED: &str = "The access runtime is not initialized.";
+
+    fn context() -> Result<engine::MacosContext, String> {
+        let host = RUNTIME_HOST.get().ok_or(NOT_INSTALLED)?;
+        Ok(engine::MacosContext::new(
+            host.context.clone(),
+            Arc::new(SilodMacosHost(host.clone())),
+        ))
+    }
+
+    /// The context for identity lookups, or `None` before the runtime is installed.
+    pub(super) fn lookup_context() -> Option<engine::MacosContext> {
+        context().ok()
+    }
 
     /// Whether `computer` (a name) is a macOS computer served by the host proxy.
-    pub(super) fn contains_name(_computer: &str) -> bool {
-        false
+    pub(super) fn contains_name(computer: &str) -> bool {
+        context().is_ok_and(|context| engine::proxy_contains_name(&context, computer))
     }
 
-    pub(super) fn apply_secrets(_computer: &str) -> Result<Vec<String>, String> {
-        Err(UNAVAILABLE.into())
+    pub(super) fn apply_secrets(computer: &str) -> Result<Vec<String>, String> {
+        engine::proxy_apply_secrets(&context()?, computer)
     }
 
-    pub(super) fn validate_computers(_computers: &[String]) -> Result<(), String> {
-        Err(UNAVAILABLE.into())
+    pub(super) fn validate_computers(computers: &[String]) -> Result<(), String> {
+        engine::proxy_validate_computers(&context()?, computers)
     }
 
-    pub(super) fn revoke_secret(_computer: &str, _name: &str) -> Result<bool, String> {
-        Err(UNAVAILABLE.into())
+    pub(super) fn revoke_secret(computer: &str, name: &str) -> Result<bool, String> {
+        engine::proxy_revoke_secret(&context()?, computer, name)
     }
 
     pub(super) fn scoped_cached_tokens(
-        _computer: &str,
+        computer: &str,
     ) -> Result<silo_engine::runtime::ScopedTokens, String> {
-        Err(UNAVAILABLE.into())
+        let mut tokens = silo_engine::runtime::ScopedTokens::default();
+        tokens.extend(engine::proxy_scoped_cached_tokens(&context()?, computer)?);
+        Ok(tokens)
     }
 
-    pub(super) fn github_policy_is_cached(
-        _computer: &str,
-        _profile: &Value,
-    ) -> Result<bool, String> {
-        Err(UNAVAILABLE.into())
+    pub(super) fn github_policy_is_cached(computer: &str, profile: &Value) -> Result<bool, String> {
+        engine::proxy_github_policy_is_cached(&context()?, computer, profile)
     }
 
     pub(super) fn apply_github_policy(
-        _computer: &str,
-        _revision: u64,
-        _profile: &Value,
+        computer: &str,
+        revision: u64,
+        profile: &Value,
     ) -> Result<(), String> {
-        Err(UNAVAILABLE.into())
+        engine::proxy_apply_github_policy(&context()?, computer, revision, profile)
     }
 
-    pub(super) fn apply_github_identity(_computer: &str, _identity: &Value) -> Result<(), String> {
-        Err(UNAVAILABLE.into())
+    pub(super) fn apply_github_identity(computer: &str, identity: &Value) -> Result<(), String> {
+        engine::proxy_apply_github_identity(&context()?, computer, identity)
     }
 
-    pub(super) fn is_pending_restore(_computer: &str) -> bool {
-        false
+    pub(super) fn is_pending_restore(computer: &str) -> bool {
+        context().is_ok_and(|context| engine::proxy_is_pending_restore(&context, computer))
     }
 }
 
@@ -534,25 +542,30 @@ fn without_device(params: &Value) -> Value {
     params
 }
 
-/// The name of a Linux computer by identity.
-///
-/// MACOS-PROXY: macOS computers live in the macOS store, not in this metadata. When the
-/// proxy branch is merged, resolve their names here (or ask `macos_proxy`) so secrets and
-/// GitHub policies can target them.
+/// The name of a computer by identity: a Linux computer from the runtime metadata, else a
+/// macOS computer from the macOS store.
 fn computer_name(paths: &RuntimePaths, id: &str) -> Result<String, String> {
     uuid::Uuid::parse_str(id).map_err(|_| "Invalid computer identity.".to_owned())?;
-    runtime::read_metadata(&paths.metadata)
+    let linux = runtime::read_metadata(&paths.metadata)
         .map_err(|error| error.to_string())?
         .computers
         .into_iter()
         .find(|computer| computer.id() == id)
-        .map(|computer| computer.name().to_owned())
+        .map(|computer| computer.name().to_owned());
+    linux
+        .or_else(|| {
+            let context = macos_proxy::lookup_context()?;
+            silo_engine::macos_computers::name_for_id(&context, id)
+        })
         .ok_or_else(|| "This computer no longer exists.".to_owned())
 }
 
 /// The stable identity of a computer by name, or `None` when it no longer exists.
 fn computer_id(paths: &RuntimePaths, name: &str) -> Option<String> {
-    runtime::resolve_computer_id(paths, name).ok()
+    runtime::resolve_computer_id(paths, name).ok().or_else(|| {
+        let context = macos_proxy::lookup_context()?;
+        silo_engine::macos_computers::id_for_name(&context, name)
+    })
 }
 
 /// Rows of `field` keyed by a computer `name` gain `computerId`. Rows for computers that
@@ -2348,6 +2361,44 @@ mod tests {
             remote_target(&context, Some(UNKNOWN_DEVICE)).as_deref(),
             Some(UNKNOWN_DEVICE)
         );
+    }
+
+    #[tokio::test]
+    async fn macos_computers_resolve_through_the_macos_proxy_store() {
+        const MACOS_COMPUTER: &str = "55555555-5555-4555-8555-555555555555";
+        let fixture = fixture();
+        let folder = fixture
+            .context
+            .paths()
+            .app_data
+            .join("macos-computers")
+            .join(MACOS_COMPUTER);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("computer.json"),
+            json!({"name": "Mac Dev"}).to_string(),
+        )
+        .unwrap();
+        let paths = local_paths().unwrap();
+
+        assert_eq!(computer_name(&paths, MACOS_COMPUTER).unwrap(), "Mac Dev");
+        assert_eq!(
+            computer_id(&paths, "Mac Dev").as_deref(),
+            Some(MACOS_COMPUTER)
+        );
+        assert_eq!(
+            computer_id(&paths, "mac dev").as_deref(),
+            Some(MACOS_COMPUTER)
+        );
+        assert!(macos_proxy::contains_name("Mac Dev"));
+        assert!(!macos_proxy::contains_name("dev"));
+        // Linux computers still resolve first, and unknown names stay unknown.
+        assert_eq!(computer_id(&paths, "dev").as_deref(), Some(COMPUTER));
+        assert_eq!(computer_id(&paths, "gone"), None);
+
+        let mut state = json!({"computers": [{"computer": "Mac Dev"}, {"computer": "gone"}]});
+        project_github_ids(&mut state, &paths);
+        assert_eq!(state["computers"], json!([{"computerId": MACOS_COMPUTER}]));
     }
 
     #[tokio::test]
