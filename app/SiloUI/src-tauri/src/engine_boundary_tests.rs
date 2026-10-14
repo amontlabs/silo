@@ -162,6 +162,10 @@ fn every_forwarded_method_is_in_the_canonical_registry() {
                     let arguments = arguments.trim_start();
                     if let Some(quoted) = arguments.strip_prefix('"') {
                         let name = quoted.split('"').next().unwrap_or_default();
+                        // Engine methods are `domain.name`; other `call(` users (D-Bus) are not.
+                        if !name.contains('.') {
+                            continue;
+                        }
                         assert!(
                             registry.contains(name),
                             "{} sends {name}, which is not a canonical method",
