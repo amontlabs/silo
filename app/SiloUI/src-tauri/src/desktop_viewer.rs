@@ -395,7 +395,7 @@ pub(crate) async fn open_desktop(
         let shortcut_label = label.clone();
         viewer.on_window_event(move |event| match event {
             tauri::WindowEvent::Destroyed => {
-                crate::viewer_shortcuts::uninstall(&shortcut_label);
+                crate::commands::viewer_shortcuts::uninstall(&shortcut_label);
                 crate::desktop_viewer_media::forget_viewer(&shortcut_label);
                 let others = menu_app
                     .webview_windows()
@@ -420,7 +420,7 @@ pub(crate) async fn open_desktop(
         });
         let (shortcut_app, shortcut_window) = (app.clone(), viewer.clone());
         let _ = viewer.run_on_main_thread(move || {
-            crate::viewer_shortcuts::install(&shortcut_app, &shortcut_window);
+            crate::commands::viewer_shortcuts::install(&shortcut_app, &shortcut_window);
         });
         Ok(())
     })

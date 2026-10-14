@@ -384,7 +384,7 @@ mod native {
                 "viewer-copy" => Some(crate::viewer_shortcuts::Shortcut::CopyFromComputer),
                 _ => None,
             } {
-                crate::viewer_shortcuts::run_focused(app, shortcut);
+                crate::commands::viewer_shortcuts::run_focused(app, shortcut);
                 return;
             }
             let state = app
