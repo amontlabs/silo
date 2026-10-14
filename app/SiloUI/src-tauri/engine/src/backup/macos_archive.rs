@@ -233,10 +233,11 @@ pub(crate) struct MacosArchiveSource {
     pub(crate) components: Vec<MacosArchiveComponentInput>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ArchiveRuntimeKind {
     MicroSandbox,
     AppleVirtualization,
+    Mixed,
 }
 
 /// Selected files in a private directory on the destination filesystem.
@@ -475,43 +476,11 @@ impl<R: MsbRunner> BackupService<R> {
         match package.manifest.runtime.name.as_str() {
             "microsandbox" => Ok(ArchiveRuntimeKind::MicroSandbox),
             RUNTIME_NAME => Ok(ArchiveRuntimeKind::AppleVirtualization),
+            "silo-computers" => Ok(ArchiveRuntimeKind::Mixed),
             _ => Err(BackupError::UnsupportedArchive(
                 "This export uses an unsupported computer runtime.".into(),
             )),
         }
-    }
-
-    /// Fully verify outer and per-component hashes and frame boundaries, then
-    /// return typed metadata for every archived computer.
-    pub(crate) fn describe_macos_archive(
-        &self,
-        archive: &Path,
-        cancellation: &Cancellation,
-    ) -> Result<Vec<(String, MacosArchiveConfiguration, Value)>, BackupError> {
-        let package = read_and_verify_package(
-            archive,
-            self.max_archive_bytes,
-            cancellation,
-            super::PayloadMode::VerifyAll,
-        )?;
-        if package.manifest.runtime.name != RUNTIME_NAME {
-            return Err(BackupError::InvalidRequest(
-                "The selected export is not an Apple Virtualization archive.".into(),
-            ));
-        }
-        package
-            .manifest
-            .computers
-            .into_iter()
-            .map(|computer| {
-                let config = decode_configuration(&computer.runtime_config)?;
-                Ok((
-                    computer.name,
-                    config,
-                    computer.computer_configuration,
-                ))
-            })
-            .collect()
     }
 
     /// Verify every row in the archive and extract the selected component roles
@@ -562,7 +531,9 @@ impl<R: MsbRunner> BackupService<R> {
                 roles,
             },
         )?;
-        if package.manifest.runtime.name != RUNTIME_NAME {
+        if package.manifest.runtime.name != RUNTIME_NAME
+            && package.manifest.runtime.name != "silo-computers"
+        {
             return Err(BackupError::InvalidRequest(
                 "The selected export is not an Apple Virtualization archive.".into(),
             ));
@@ -574,8 +545,15 @@ impl<R: MsbRunner> BackupService<R> {
             .manifest
             .computers
             .get(extracted.index)
-            .ok_or_else(|| BackupError::InvalidArchive("the selected computer is missing".into()))?;
-        let config = decode_configuration(&computer.runtime_config)?;
+            .ok_or_else(|| {
+                BackupError::InvalidArchive("the selected computer is missing".into())
+            })?;
+        let runtime_config = if package.manifest.runtime.name == "silo-computers" {
+            super::mixed_native_configuration(computer)?
+        } else {
+            computer.runtime_config.clone()
+        };
+        let config = decode_configuration(&runtime_config)?;
         Ok(PreparedMacosArchive {
             source_name: computer.name.clone(),
             config,
@@ -879,7 +857,7 @@ fn decode_configuration(value: &Value) -> Result<MacosArchiveConfiguration, Back
         .map_err(|_| invalid_archive("the macOS runtime configuration is malformed"))
 }
 
-fn stream_size(config: &MacosArchiveConfiguration) -> Result<u64, BackupError> {
+pub(super) fn stream_size(config: &MacosArchiveConfiguration) -> Result<u64, BackupError> {
     let index_size = (config.components.len() as u64)
         .checked_mul(STREAM_INDEX_ENTRY_BYTES)
         .and_then(|size| size.checked_add(STREAM_FIXED_HEADER_BYTES))

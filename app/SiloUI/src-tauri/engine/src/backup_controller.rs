@@ -557,8 +557,8 @@ fn inspect_archive(
         backup::ArchiveRuntimeKind::MicroSandbox => service
             .inspect_archive(path, cancellation)
             .map(|inspection| (archive_from(path, &inspection), Vec::new())),
-        backup::ArchiveRuntimeKind::AppleVirtualization => {
-            let rows = service.describe_macos_archive(path, cancellation)?;
+        backup::ArchiveRuntimeKind::AppleVirtualization | backup::ArchiveRuntimeKind::Mixed => {
+            let (inspection, rows) = service.inspect_archive_with_macos_rows(path, cancellation)?;
             for (name, config, _) in &rows {
                 if !crate::macos_computers::supports_archive_guest_build(&config.guest_build)
                     .map_err(backup::BackupError::InvalidRequest)?
@@ -575,11 +575,6 @@ fn inspect_archive(
                     crate::macos_computers::archive_memory_warning(name, config)
                 })
                 .collect();
-            let inspection = backup::ArchiveInspection {
-                created_at_ms: 0,
-                size_bytes: fs::metadata(path).map_err(backup::BackupError::Io)?.len(),
-                computers: rows.into_iter().map(|(name, _, _)| name).collect(),
-            };
             Ok((archive_from(path, &inspection), warnings))
         }
     }
@@ -1240,7 +1235,58 @@ fn backup_at_paths(
             .count();
         if macos_count != 0 {
             if macos_count != names.len() {
-                return Err("A single export cannot mix MicroSandbox and Apple Virtualization computers yet.".into());
+                if checkpoint_id.is_some() {
+                    return Err(
+                        "Exporting from a checkpoint supports one computer at a time.".into(),
+                    );
+                }
+                let parent = archive_path
+                    .parent()
+                    .ok_or_else(|| "The export destination has no parent directory.".to_string())?;
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                let staging = tempfile::tempdir_in(parent).map_err(|error| error.to_string())?;
+                let linux_archive = staging.path().join("linux.silo-backup");
+                let macos_archive = staging.path().join("macos.silo-backup");
+                let macos_names = names
+                    .iter()
+                    .filter(|name| crate::macos_computers::owns_name(&context, name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let linux_names = names
+                    .iter()
+                    .filter(|name| !crate::macos_computers::owns_name(&context, name))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                backup_at_paths(
+                    paths,
+                    controller,
+                    &linux_archive,
+                    &linux_names,
+                    None,
+                    cancellation,
+                )?;
+                crate::macos_computers::create_archive(
+                    &context,
+                    &controller.service,
+                    &macos_archive,
+                    &macos_names,
+                    None,
+                    cancellation,
+                    recovery::token(controller)?.as_deref(),
+                )?;
+                let result = controller.service.create_mixed_archive_from_archives(
+                    archive_path,
+                    &[linux_archive, macos_archive],
+                    names,
+                    cancellation,
+                    recovery::token(controller)?.as_deref(),
+                )?;
+                let inspection = backup::ArchiveInspection {
+                    created_at_ms: result.created_at_ms,
+                    size_bytes: result.size_bytes,
+                    computers: result.computers,
+                };
+                return Ok(archive_from(&result.destination, &inspection));
             }
             let token = recovery::token(controller)?;
             let result = crate::macos_computers::create_archive(
@@ -1677,6 +1723,41 @@ fn run_restore(
                     }
                 }
                 restore_work(&controller, &path, &selected, &new_name, &cancellation)?;
+                Ok::<_, TransferError>(selected)
+            }
+            backup::ArchiveRuntimeKind::Mixed => {
+                let inspection = controller.service.describe_archive(&path, &cancellation)?;
+                let selected =
+                    select_archive_source(&inspection.computers, source_name.as_deref())?;
+                archive = archive_from(&path, &inspection);
+                if let Ok(mut view) = controller.view.lock() {
+                    if let Some(Operation::Running {
+                        archive: current, ..
+                    }) = view.operation.as_mut()
+                    {
+                        *current = archive.clone();
+                    }
+                }
+                match controller
+                    .service
+                    .archive_computer_kind(&path, &selected, &cancellation)?
+                {
+                    backup::ArchiveRuntimeKind::AppleVirtualization => {
+                        restore_macos_work(
+                            &controller,
+                            &path,
+                            Some(&selected),
+                            &new_name,
+                            &cancellation,
+                        )?;
+                    }
+                    backup::ArchiveRuntimeKind::MicroSandbox => {
+                        restore_work(&controller, &path, &selected, &new_name, &cancellation)?;
+                    }
+                    backup::ArchiveRuntimeKind::Mixed => unreachable!(
+                        "row-specific archive selection never returns the mixed adapter"
+                    ),
+                }
                 Ok::<_, TransferError>(selected)
             }
         }
