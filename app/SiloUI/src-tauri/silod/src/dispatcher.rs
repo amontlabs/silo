@@ -794,7 +794,7 @@ mod tests {
         ));
 
         let unsupported = dispatcher.prepare(
-            serde_json::json!({ "id": "three", "method": "computers.list", "params": {} }),
+            serde_json::json!({ "id": "three", "method": "computers.unknown", "params": {} }),
             &mut session,
         );
         let unsupported = dispatcher.execute(unsupported).await;
