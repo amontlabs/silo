@@ -131,6 +131,11 @@ fn run_appkit(
     // Checkpoint records written before automatic checkpoints existed become manual ones,
     // once, before anything reads them.
     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    // Computers made before the network bootstrap existed are converted once per launch. Start
+    // and computer-changing work stay closed until the pass ends; the pass boots guests, so it
+    // runs on its own thread and waits for the AppKit loop below to start.
+    silo_engine::macos_computers::begin_proxy_bootstrap_migration();
+    start_proxy_bootstrap_migration(context.clone());
     // Resumes computers a previous engine update saved, before anything else advances them,
     // and starts the engine's own update schedule.
     crate::methods::services::start(context.clone());
@@ -192,6 +197,26 @@ fn run_appkit(
         .map_err(|_| "The silod I/O runtime panicked".to_owned())?;
     drop(owner);
     Ok(exit_code)
+}
+
+/// Runs the launch migration of macOS computers that predate the proxy bootstrap.
+fn start_proxy_bootstrap_migration(context: Arc<SilodContext>) {
+    let spawned = thread::Builder::new()
+        .name("silod-proxy-migration".to_owned())
+        .spawn(move || {
+            if let Err(error) =
+                silo_engine::macos_computers::migrate_proxy_bootstraps_at_launch(
+                    &context.macos_context(),
+                )
+            {
+                eprintln!("silod: the macOS network migration reported: {error}");
+            }
+        });
+    if let Err(error) = spawned {
+        // Nothing converted: computers without a bootstrap stay not set up and refuse Start.
+        eprintln!("silod: could not start the macOS network migration: {error}");
+        silo_engine::macos_computers::end_proxy_bootstrap_migration();
+    }
 }
 
 fn set_private_umask() {

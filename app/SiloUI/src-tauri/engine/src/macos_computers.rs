@@ -633,6 +633,12 @@ pub fn begin_proxy_bootstrap_migration() {
     PROXY_BOOTSTRAP_MIGRATION_READY.store(false, Ordering::SeqCst);
 }
 
+/// Opens macOS Start again when the host could not run the launch migration at all.
+pub fn end_proxy_bootstrap_migration() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+}
+
 fn ensure_proxy_bootstrap_migration_ready() -> Result<(), String> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if !PROXY_BOOTSTRAP_MIGRATION_READY.load(Ordering::SeqCst) {
