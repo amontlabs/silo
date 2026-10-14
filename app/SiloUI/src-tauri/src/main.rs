@@ -3,8 +3,6 @@ mod commands;
 pub(crate) use silo_engine::*;
 #[cfg(test)]
 mod command_permissions_tests;
-#[cfg(debug_assertions)]
-mod desktop_viewer_bench;
 mod engine_client;
 mod host_launch;
 mod quit;

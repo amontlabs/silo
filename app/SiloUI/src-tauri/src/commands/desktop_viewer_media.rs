@@ -1,91 +1,213 @@
-use tauri::{AppHandle, Window};
+//! Sound, audio and screen controls of a desktop viewer: each forwards to the engine, which
+//! owns the page probe, the revision ordering and the guest bridge.
+use serde::Serialize;
+use serde_json::{json, Value};
+use tauri::Window;
 
-use crate::desktop_viewer_media::{self, SoundSupport};
+use crate::{
+    commands::desktop_viewer::{connection_of, require_computer, require_connection},
+    engine_client::{Engine, EngineClient, EngineError},
+};
 
-fn require_viewer(window: &Window, computer: &str) -> Result<String, String> {
-    if !crate::desktop_viewer::is_viewer_label(window.label()) {
-        return Err("Only a desktop viewer can use this command.".into());
-    }
-    crate::commands::desktop_viewer::require_computer(window, computer)?;
-    Ok(window.label().to_string())
+/// What the UI parses from the sound check.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct SoundSupport {
+    pub sound: bool,
 }
 
-/// Reports whether this device can play the computer's sound, waiting briefly
-/// for the page's connection. An unsupported engine also stops the audio stream.
+fn connection_params(connection: &str) -> Value {
+    json!({"connectionId": connection})
+}
+
+/// Whether this device can play the computer's sound, waiting for the page's connection.
+pub(crate) async fn sound_check(
+    engine: &EngineClient,
+    connection: &str,
+) -> Result<SoundSupport, EngineError> {
+    let answer = engine
+        .call("display.viewer.sound.check", connection_params(connection))
+        .await?;
+    answer
+        .get("sound")
+        .and_then(Value::as_bool)
+        .map(|sound| SoundSupport { sound })
+        .ok_or_else(|| EngineError::internal("The engine returned an unreadable sound check."))
+}
+
+pub(crate) async fn sound_cancel(
+    engine: &EngineClient,
+    connection: &str,
+) -> Result<(), EngineError> {
+    engine
+        .call("display.viewer.sound.cancel", connection_params(connection))
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn set_audio(
+    engine: &EngineClient,
+    connection: &str,
+    muted: bool,
+    active: bool,
+    revision: u64,
+) -> Result<(), EngineError> {
+    engine
+        .call(
+            "display.viewer.audio.set",
+            json!({
+                "connectionId": connection,
+                "muted": muted,
+                "active": active,
+                "revision": revision,
+            }),
+        )
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn reset_screen(
+    engine: &EngineClient,
+    connection: &str,
+) -> Result<(), EngineError> {
+    engine
+        .call("display.viewer.screen.reset", connection_params(connection))
+        .await
+        .map(|_| ())
+}
+
+/// Reports whether this device can play the computer's sound. An unsupported engine also
+/// stops the audio stream.
 #[tauri::command]
 pub(crate) async fn desktop_viewer_sound_support(
-    app: AppHandle,
+    engine: Engine<'_>,
     window: Window,
     computer: String,
 ) -> Result<SoundSupport, String> {
-    let label = require_viewer(&window, &computer)?;
-    let (answer, start) = desktop_viewer_media::probes().enlist(&label)?;
-    if start {
-        tokio::task::spawn_blocking(move || {
-            desktop_viewer_media::probes().work(
-                &label,
-                desktop_viewer_media::PROBE_DEADLINE,
-                |obsolete| {
-                    desktop_viewer_media::probe(
-                        || {
-                            crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
-                                desktop_viewer_media::probe_step(bridge)
-                            })
-                        },
-                        desktop_viewer_media::PROBE_ATTEMPTS,
-                        desktop_viewer_media::PROBE_PAUSE,
-                        obsolete,
-                    )
-                },
-            )
-        });
-    }
-    answer
+    let connection = require_connection(&window, &computer)?;
+    sound_check(&engine, &connection)
         .await
-        .map_err(|_| desktop_viewer_media::SUPERSEDED)?
-        .map(|sound| SoundSupport { sound })
+        .map_err(String::from)
 }
 
 /// Abandons the viewer's sound check, for a page or connection that is gone.
 #[tauri::command]
-pub(crate) fn desktop_viewer_sound_cancel(window: Window, computer: String) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    desktop_viewer_media::probes().cancel(&label);
-    Ok(())
+pub(crate) async fn desktop_viewer_sound_cancel(
+    engine: Engine<'_>,
+    window: Window,
+    computer: String,
+) -> Result<(), String> {
+    if !crate::commands::desktop_viewer::is_viewer_label(window.label()) {
+        return Err("Only a desktop viewer can use this command.".into());
+    }
+    require_computer(&window, &computer)?;
+    // Without a connection there is no check to abandon.
+    let Some(connection) = connection_of(window.label()) else {
+        return Ok(());
+    };
+    sound_cancel(&engine, &connection)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
 pub(crate) async fn desktop_viewer_set_audio(
-    app: AppHandle,
+    engine: Engine<'_>,
     window: Window,
     computer: String,
     muted: bool,
     active: bool,
     revision: u64,
 ) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    let latest = desktop_viewer_media::sound_revision(&label)?;
-    tokio::task::spawn_blocking(move || {
-        crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
-            desktop_viewer_media::apply_audio_ordered(&latest, revision, bridge, muted, active)
-        })
-    })
-    .await
-    .map_err(|_| "Desktop sound change failed.")?
+    let connection = require_connection(&window, &computer)?;
+    set_audio(&engine, &connection, muted, active, revision)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
 pub(crate) async fn desktop_viewer_reset_screen(
-    app: AppHandle,
+    engine: Engine<'_>,
     window: Window,
     computer: String,
 ) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    tokio::task::spawn_blocking(move || {
-        crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
-            desktop_viewer_media::reset_screen(bridge)
-        })
-    })
-    .await
-    .map_err(|_| "Desktop screen reset failed.")?
+    let connection = require_connection(&window, &computer)?;
+    reset_screen(&engine, &connection)
+        .await
+        .map_err(String::from)
+}
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
+
+    #[tokio::test]
+    async fn the_sound_check_asks_the_engine_and_translates_its_answer() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "display.viewer.sound.check" => Ok(json!({"sound": true})),
+            _ => Ok(Value::Null),
+        });
+        let (client, _) = connected_client(&fake).await;
+        let support = sound_check(&client, "c1").await.unwrap();
+        assert_eq!(
+            serde_json::to_value(support).unwrap(),
+            json!({"sound": true})
+        );
+        assert_eq!(
+            fake.calls("display.viewer.sound.check"),
+            [json!({"connectionId": "c1"})]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_sound_answer_is_a_failure_not_silence() {
+        let fake = FakeEngine::start(|_, _| Ok(json!({})));
+        let (client, _) = connected_client(&fake).await;
+        assert!(sound_check(&client, "c1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_superseded_check_reports_the_engines_cancellation() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            _ => Err(("cancelled", "The desktop sound check was cancelled.".into())),
+        });
+        let (client, _) = connected_client(&fake).await;
+        let error = sound_check(&client, "c1").await.unwrap_err();
+        assert!(error.is("cancelled"));
+        assert_eq!(error.message, "The desktop sound check was cancelled.");
+    }
+
+    #[tokio::test]
+    async fn cancel_audio_and_reset_send_the_connection_and_their_fields() {
+        let fake = FakeEngine::start(|_, _| Ok(Value::Null));
+        let (client, _) = connected_client(&fake).await;
+        sound_cancel(&client, "c1").await.unwrap();
+        set_audio(&client, "c1", true, false, 7).await.unwrap();
+        reset_screen(&client, "c1").await.unwrap();
+        assert_eq!(
+            fake.calls("display.viewer.sound.cancel"),
+            [json!({"connectionId": "c1"})]
+        );
+        assert_eq!(
+            fake.calls("display.viewer.audio.set"),
+            [json!({"connectionId": "c1", "muted": true, "active": false, "revision": 7})]
+        );
+        assert_eq!(
+            fake.calls("display.viewer.screen.reset"),
+            [json!({"connectionId": "c1"})]
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_errors_reach_the_ui_as_their_message() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            _ => Err(("not_found", "Unknown desktop viewer.".into())),
+        });
+        let (client, _) = connected_client(&fake).await;
+        let error = reset_screen(&client, "gone").await.unwrap_err();
+        assert!(error.is("not_found"));
+        assert_eq!(String::from(error), "Unknown desktop viewer.");
+    }
 }

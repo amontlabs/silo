@@ -130,6 +130,12 @@ pub(crate) struct TauriSink(pub AppHandle);
 
 impl EventSink for TauriSink {
     fn event(&self, frame: &Value) {
+        // A viewer page script goes to that viewer's guest page and nowhere else.
+        if frame.get("event").and_then(Value::as_str) == Some("display.viewer.page") {
+            let payload = frame.get("payload").cloned().unwrap_or(Value::Null);
+            crate::commands::desktop_viewer::deliver_page(&self.0, &payload);
+            return;
+        }
         let _ = self.0.emit(relay::ENGINE_EVENT, frame);
         let payload = frame.get("payload").cloned().unwrap_or(Value::Null);
         match frame.get("event").and_then(Value::as_str) {
