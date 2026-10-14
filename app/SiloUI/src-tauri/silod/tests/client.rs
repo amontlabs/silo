@@ -35,8 +35,14 @@ async fn the_client_negotiates_requests_and_subscribes_against_silod() {
     let temporary = tempfile::tempdir().unwrap();
     let socket_path = temporary.path().join(".silo/engine.sock");
     let euid = unsafe { libc::geteuid() };
+    // Real folders: the job registry the dispatcher reads lives under the engine data
+    // folder, and an empty path would put it in whatever directory the test runs from.
     let context = Arc::new(SilodContext::new(
-        EnginePaths::default(),
+        EnginePaths {
+            app_data: temporary.path().join("data"),
+            home: temporary.path().join("home"),
+            ..EnginePaths::default()
+        },
         EngineIdentity {
             channel: silo_engine::channel::Channel::Development,
             version: "0.1.0".to_owned(),
