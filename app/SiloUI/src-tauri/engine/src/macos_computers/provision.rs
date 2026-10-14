@@ -466,8 +466,38 @@ impl Provision<'_> {
                 "Silo could not log in to the imported computer with its new key.".into(),
             ));
         }
+        // The offline password rewrite could not keep SecureToken; give it back now that
+        // the computer is up and the password is known.
+        let token = self.enable_secure_token(record, &account)?;
         self.shut_down()?;
-        self.mark(record, |setup| setup.needs_personalizing = false)
+        self.mark(record, |setup| setup.needs_personalizing = false)?;
+        if token != personalize::SecureToken::Enabled {
+            // Usable and complete; the message stays as its failure detail.
+            return Err(Stop::Failed(
+                "Silo could not turn on SecureToken for the imported computer's account. It is otherwise ready to start.".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Enables SecureToken for the working account and reads it back. Repeating it is safe.
+    fn enable_secure_token(
+        &self,
+        record: &Record,
+        account: &guest_access::GuestAccount,
+    ) -> Result<personalize::SecureToken, Stop> {
+        let output = guest_access::run(
+            self.layout,
+            record,
+            &personalize::command(&personalize::secure_token_script()),
+            Some(&personalize::secure_token_input(&account.password)),
+            GUEST_COMMAND,
+        )?;
+        self.log_command("secure token", &output);
+        Ok(personalize::secure_token_outcome(
+            output.status,
+            &output.stdout,
+        ))
     }
 
     /// Waits until the guest answers a login with the template's key or its own.

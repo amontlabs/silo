@@ -182,6 +182,79 @@ pub(super) fn outcome(status: i32, stdout: &str) -> Result<Outcome, String> {
     })
 }
 
+/// What `sysadminctl -secureTokenStatus` said about the working account.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SecureToken {
+    Enabled,
+    Disabled,
+    Unknown,
+}
+
+pub(super) const TOKEN_MARKER: &str = "SILO_SECURETOKEN=";
+
+/// Reads `sysadminctl -secureTokenStatus` output ("Secure token is ENABLED for user silo",
+/// printed on stderr, so callers merge the streams) for `user`.
+pub(super) fn parse_secure_token(output: &str, user: &str) -> SecureToken {
+    for line in output.lines() {
+        let line = line.trim();
+        let Some((_, rest)) = line.split_once("Secure token is ") else {
+            continue;
+        };
+        let rest = rest.trim_end_matches('.');
+        if rest == format!("ENABLED for user {user}") {
+            return SecureToken::Enabled;
+        }
+        if rest == format!("DISABLED for user {user}") {
+            return SecureToken::Disabled;
+        }
+    }
+    SecureToken::Unknown
+}
+
+/// Enables SecureToken for the working account of an imported computer, whose offline
+/// password rewrite could not keep it. The account is its own admin: the password arrives on
+/// standard input and is only ever the value of a shell variable. A token that is already
+/// enabled is left alone, so the script can be repeated. It prints
+/// `SILO_SECURETOKEN=enabled|disabled|unknown` from a final status read.
+pub(super) fn secure_token_script() -> String {
+    format!(
+        "set +e
+IFS= read -r SILO_PASSWORD
+if [ -z \"$SILO_PASSWORD\" ]; then /bin/echo {TOKEN_MARKER}unknown; exit {MISSING_SECRETS}; fi
+if ! /usr/sbin/sysadminctl -secureTokenStatus {USER} 2>&1 | /usr/bin/grep -q 'ENABLED for user {USER}'; then
+/usr/sbin/sysadminctl -secureTokenOn {USER} -password \"$SILO_PASSWORD\" -adminUser {USER} -adminPassword \"$SILO_PASSWORD\" >/dev/null 2>&1
+fi
+unset SILO_PASSWORD
+status=$(/usr/sbin/sysadminctl -secureTokenStatus {USER} 2>&1)
+case \"$status\" in
+*'ENABLED for user {USER}'*) /bin/echo {TOKEN_MARKER}enabled ;;
+*'DISABLED for user {USER}'*) /bin/echo {TOKEN_MARKER}disabled ;;
+*) /bin/echo {TOKEN_MARKER}unknown ;;
+esac
+"
+    )
+}
+
+/// The token state the SecureToken script printed.
+pub(super) fn secure_token_outcome(status: i32, stdout: &str) -> SecureToken {
+    if status == MISSING_SECRETS {
+        return SecureToken::Unknown;
+    }
+    match stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(TOKEN_MARKER))
+    {
+        Some("enabled") => SecureToken::Enabled,
+        Some("disabled") => SecureToken::Disabled,
+        _ => SecureToken::Unknown,
+    }
+}
+
+/// The standard input of the SecureToken command.
+pub(super) fn secure_token_input(password: &str) -> Vec<u8> {
+    format!("{password}\n").into_bytes()
+}
+
 fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -207,6 +280,66 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn the_secure_token_status_is_parsed_for_the_working_account() {
+        assert_eq!(
+            parse_secure_token(
+                "2026 sysadminctl[1:2] Secure token is ENABLED for user silo\n",
+                "silo"
+            ),
+            SecureToken::Enabled
+        );
+        assert_eq!(
+            parse_secure_token("Secure token is DISABLED for user silo", "silo"),
+            SecureToken::Disabled
+        );
+        assert_eq!(
+            parse_secure_token("Secure token is ENABLED for user other", "silo"),
+            SecureToken::Unknown
+        );
+        assert_eq!(parse_secure_token("", "silo"), SecureToken::Unknown);
+    }
+
+    #[test]
+    fn the_secure_token_command_keeps_the_password_off_the_script_and_is_idempotent() {
+        let script = secure_token_script();
+        let command = command(&script);
+        for text in [&script, &command, &decoded(&command)] {
+            assert!(!text.contains(PASSWORD));
+        }
+        assert!(script.contains("IFS= read -r SILO_PASSWORD"));
+        assert!(script.contains(
+            "sysadminctl -secureTokenOn silo -password \"$SILO_PASSWORD\" -adminUser silo -adminPassword \"$SILO_PASSWORD\""
+        ));
+        // The enabling call is guarded by a status read, and a final read decides the outcome.
+        let guard = script
+            .find("! /usr/sbin/sysadminctl -secureTokenStatus")
+            .unwrap();
+        assert!(guard < script.find("-secureTokenOn").unwrap());
+        assert_eq!(script.matches("-secureTokenStatus").count(), 2);
+        assert_eq!(
+            secure_token_input(PASSWORD),
+            format!("{PASSWORD}\n").into_bytes()
+        );
+    }
+
+    #[test]
+    fn the_secure_token_outcome_reads_the_marker() {
+        assert_eq!(
+            secure_token_outcome(0, "SILO_SECURETOKEN=enabled\n"),
+            SecureToken::Enabled
+        );
+        assert_eq!(
+            secure_token_outcome(0, "SILO_SECURETOKEN=disabled\n"),
+            SecureToken::Disabled
+        );
+        assert_eq!(secure_token_outcome(0, "noise"), SecureToken::Unknown);
+        assert_eq!(
+            secure_token_outcome(MISSING_SECRETS, "SILO_SECURETOKEN=enabled"),
+            SecureToken::Unknown
+        );
     }
 
     #[test]
