@@ -1,8 +1,25 @@
 //! Tauri adapters for settings commands, native appearance, and process shutdown.
 use crate::settings::{self, ExitRequest, Snapshot, Theme};
 use serde_json::{Map, Value};
-use std::time::{Duration, Instant};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+
+static SETTINGS_CHANGE_LOCK: Mutex<()> = Mutex::new(());
+
+fn settings_change<T>(
+    change: impl FnOnce() -> Result<T, String>,
+    publish: impl FnOnce(&T),
+) -> Result<T, String> {
+    let _serial = SETTINGS_CHANGE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let value = change()?;
+    publish(&value);
+    Ok(value)
+}
 
 fn require_main(label: &str) -> Result<(), String> {
     if label == "main" {
@@ -27,18 +44,10 @@ fn publish_snapshot(app: &AppHandle, snapshot: &Snapshot) {
         eprintln!("Silo settings: {error}");
     }
     if let Some(context) = silo_engine::context::current() {
-        context.publish(
-            silo_engine::context::Event::new(
-                "settings:changed",
-                serde_json::to_value(settings::public_snapshot(snapshot)).unwrap_or(Value::Null),
-            ),
-            silo_engine::context::Audience::All,
-        );
+        settings::publish_snapshot(snapshot, |event, audience| {
+            context.publish(event, audience);
+        });
     }
-}
-
-pub(crate) fn install(_app: &AppHandle) {
-    settings::install();
 }
 
 #[tauri::command]
@@ -52,10 +61,15 @@ pub(crate) async fn initialize_settings(
         .app_config_dir()
         .map_err(|error| error.to_string())?
         .join("settings.json");
-    let snapshot = tokio::task::spawn_blocking(move || settings::initialize(Some(path)))
+    let publish_app = app.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        settings_change(
+            || settings::initialize(Some(path)),
+            |snapshot| publish_snapshot(&publish_app, snapshot),
+        )
+    })
         .await
         .map_err(|error| error.to_string())??;
-    publish_snapshot(&app, &snapshot);
     Ok(snapshot)
 }
 
@@ -77,10 +91,15 @@ pub(crate) async fn update_settings(
     patch: Map<String, Value>,
 ) -> Result<Snapshot, String> {
     require_main(window.label())?;
-    let snapshot = tokio::task::spawn_blocking(move || settings::update(patch))
+    let publish_app = app.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        settings_change(
+            || settings::update(patch),
+            |snapshot| publish_snapshot(&publish_app, snapshot),
+        )
+    })
         .await
         .map_err(|error| error.to_string())??;
-    publish_snapshot(&app, &snapshot);
     Ok(snapshot)
 }
 
@@ -91,10 +110,15 @@ pub(crate) async fn update_onboarding_draft(
     draft: Value,
 ) -> Result<Snapshot, String> {
     require_main(window.label())?;
-    let snapshot = tokio::task::spawn_blocking(move || settings::update_draft(draft))
+    let publish_app = app.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        settings_change(
+            || settings::update_draft(draft),
+            |snapshot| publish_snapshot(&publish_app, snapshot),
+        )
+    })
         .await
         .map_err(|error| error.to_string())??;
-    publish_snapshot(&app, &snapshot);
     Ok(snapshot)
 }
 
@@ -105,20 +129,30 @@ pub(crate) async fn import_legacy_theme(
     theme: String,
 ) -> Result<Snapshot, String> {
     require_main(window.label())?;
-    let snapshot = tokio::task::spawn_blocking(move || settings::import_legacy_theme(theme))
+    let publish_app = app.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        settings_change(
+            || settings::import_legacy_theme(theme),
+            |snapshot| publish_snapshot(&publish_app, snapshot),
+        )
+    })
         .await
         .map_err(|error| error.to_string())??;
-    publish_snapshot(&app, &snapshot);
     Ok(snapshot)
 }
 
 #[tauri::command]
 pub(crate) async fn flush_settings(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     require_main(window.label())?;
-    let (snapshot, saved) = tokio::task::spawn_blocking(settings::flush)
+    let publish_app = app.clone();
+    let (_snapshot, saved) = tokio::task::spawn_blocking(move || {
+        settings_change(
+            settings::flush,
+            |(snapshot, _saved)| publish_snapshot(&publish_app, snapshot),
+        )
+    })
         .await
         .map_err(|error| error.to_string())??;
-    publish_snapshot(&app, &snapshot);
     saved
 }
 
@@ -411,8 +445,15 @@ pub(crate) async fn complete_settings_flush(
 
 #[cfg(test)]
 mod tests {
-    use super::{require_main, run_before};
-    use std::time::{Duration, Instant};
+    use super::{require_main, run_before, settings_change};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Arc,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn settings_mutations_are_limited_to_the_main_window() {
@@ -421,6 +462,51 @@ mod tests {
             require_main("status"),
             Err("Only the main window can change settings".into())
         );
+    }
+
+    #[test]
+    fn overlapping_settings_invokes_cannot_apply_an_obsolete_native_theme() {
+        let applied_revision = Arc::new(AtomicUsize::new(0));
+        let (first_publish_started_tx, first_publish_started_rx) = mpsc::channel();
+        let (release_first_tx, release_first_rx) = mpsc::channel();
+        let (second_attempted_tx, second_attempted_rx) = mpsc::channel();
+        let (second_mutated_tx, second_mutated_rx) = mpsc::channel();
+
+        let first_revision = applied_revision.clone();
+        let first = thread::spawn(move || {
+            settings_change(
+                || Ok(1usize),
+                |revision| {
+                    first_publish_started_tx.send(()).unwrap();
+                    release_first_rx.recv().unwrap();
+                    first_revision.store(*revision, Ordering::SeqCst);
+                },
+            )
+            .unwrap();
+        });
+        first_publish_started_rx.recv().unwrap();
+
+        let second_revision = applied_revision.clone();
+        let second = thread::spawn(move || {
+            second_attempted_tx.send(()).unwrap();
+            settings_change(
+                || {
+                    second_mutated_tx.send(()).unwrap();
+                    Ok(2usize)
+                },
+                |revision| second_revision.store(*revision, Ordering::SeqCst),
+            )
+            .unwrap();
+        });
+        second_attempted_rx.recv().unwrap();
+        assert!(second_mutated_rx
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
+
+        release_first_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert_eq!(applied_revision.load(Ordering::SeqCst), 2);
     }
 
     #[test]

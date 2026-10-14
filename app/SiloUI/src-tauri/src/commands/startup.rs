@@ -79,5 +79,10 @@ impl StartupServices for TauriStartupServices {
 
 pub(crate) fn install(app: &AppHandle) {
     let services: Arc<dyn StartupServices> = Arc::new(TauriStartupServices { app: app.clone() });
-    tauri::async_runtime::spawn_blocking(move || crate::startup::install(services));
+    let state = silo_engine::context::current()
+        .expect("engine context is installed before startup")
+        .runtime_state()
+        .startup()
+        .clone();
+    tauri::async_runtime::spawn_blocking(move || crate::startup::install(state, services));
 }

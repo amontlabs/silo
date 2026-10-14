@@ -744,7 +744,14 @@ mod tests {
             "oversized preferences allocated {extra} bytes"
         );
         assert_eq!(fs::metadata(&path).unwrap().len(), 128 * 1024 * 1024);
+        let before_save = peak_bytes();
         save_preferences(&path, false).unwrap();
+        let save_extra = peak_bytes().saturating_sub(before_save);
+        eprintln!("large preference repair peak RSS increase: {save_extra} bytes");
+        assert!(
+            save_extra < 32 * 1024 * 1024,
+            "preference repair allocated {save_extra} bytes"
+        );
         assert!(!read_preferences(&path).unwrap());
     }
 
@@ -854,15 +861,26 @@ mod tests {
     }
 
     #[test]
-    fn preflight_rejects_insufficient_space_without_touching_installation() {
+    fn preflight_rejects_insufficient_or_unknown_space_without_touching_installation() {
         let root = tempfile::tempdir().unwrap();
         let destination = root.path().join("Silo.AppImage");
         fs::write(&destination, "old app").unwrap();
-        let payload = vec![0; 2 * 1024 * 1024];
-        let error = preflight_destination(&destination, &payload, false, |_| Ok(0)).unwrap_err();
+        for (size, expected) in [(2 * 1024 * 1024, "2 MiB"), (2 * 1024 * 1024 + 1, "3 MiB")] {
+            let payload = vec![0; size];
+            let error =
+                preflight_destination(&destination, &payload, false, |_| Ok(0)).unwrap_err();
+            assert_eq!(
+                error,
+                format!(
+                    "Not enough space to install the update. Free at least {expected} and retry."
+                )
+            );
+        }
         assert_eq!(
-            error,
-            "Not enough space to install the update. Free at least 2 MiB and retry."
+            preflight_destination(&destination, b"new app", false, |_| {
+                Err("Space unavailable".into())
+            }),
+            Err("Space unavailable".into())
         );
         assert_eq!(fs::read(&destination).unwrap(), b"old app");
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);

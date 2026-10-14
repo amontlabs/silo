@@ -72,6 +72,6 @@ pub mod test_support;
 
 pub use channel::{Channel, Keychain};
 pub use context::{
-    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, Event, MainThread, PackageKind,
-    ProcessControl,
+    Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+    MainThread, PackageKind, ProcessControl,
 };

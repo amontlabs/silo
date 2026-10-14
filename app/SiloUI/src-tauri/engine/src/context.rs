@@ -7,6 +7,7 @@ use crate::channel::Channel;
 pub trait EngineContext: Send + Sync + 'static {
     fn paths(&self) -> &EnginePaths;
     fn identity(&self) -> &EngineIdentity;
+    fn runtime_state(&self) -> Arc<EngineRuntimeState>;
     fn publish(&self, event: Event, audience: Audience);
     fn main_thread(&self) -> Option<&dyn MainThread>;
     fn process(&self) -> &dyn ProcessControl;
@@ -17,10 +18,38 @@ pub trait EngineContext: Send + Sync + 'static {
 
 /// Publishes progress that belongs only in Silo's main window.
 pub fn publish_to_main_window(context: &dyn EngineContext, event: Event) {
-    context.publish(
-        event,
-        Audience::Client(ClientId::new("main")),
-    );
+    context.publish(event, Audience::Client(ClientId::new("main")));
+}
+
+/// Mutable state whose lifetime belongs to one installed engine instance.
+///
+/// Keeping these stores here makes their ownership explicit: a second engine
+/// context receives fresh settings, shutdown, quit-confirmation, and startup
+/// state instead of inheriting process-wide state from an earlier instance.
+#[derive(Default)]
+pub struct EngineRuntimeState {
+    settings: Arc<crate::settings::SettingsState>,
+    shutdown: Arc<crate::settings::ShutdownState>,
+    quit_confirmation: Arc<crate::settings::QuitConfirmation>,
+    startup: Arc<crate::startup::StartupState>,
+}
+
+impl EngineRuntimeState {
+    pub fn settings(&self) -> &Arc<crate::settings::SettingsState> {
+        &self.settings
+    }
+
+    pub fn shutdown(&self) -> &Arc<crate::settings::ShutdownState> {
+        &self.shutdown
+    }
+
+    pub fn quit_confirmation(&self) -> &Arc<crate::settings::QuitConfirmation> {
+        &self.quit_confirmation
+    }
+
+    pub fn startup(&self) -> &Arc<crate::startup::StartupState> {
+        &self.startup
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -97,6 +126,7 @@ mod tests {
     struct RecordingContext {
         paths: EnginePaths,
         identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
         published: Mutex<Vec<(Event, Audience)>>,
     }
 
@@ -107,6 +137,10 @@ mod tests {
 
         fn identity(&self) -> &EngineIdentity {
             &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
         }
 
         fn publish(&self, event: Event, audience: Audience) {
@@ -139,6 +173,7 @@ mod tests {
                 version: "0.11.1".into(),
                 package_kind: PackageKind::MacApp,
             },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
             published: Mutex::new(Vec::new()),
         };
 

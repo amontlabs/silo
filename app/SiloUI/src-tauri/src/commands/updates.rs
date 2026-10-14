@@ -36,6 +36,19 @@ fn modify_managed(app: &AppHandle, f: impl FnOnce(&mut ManagedState)) -> Result<
     let _ = app.emit("silo://update-state", &snapshot);
     Ok(snapshot)
 }
+
+fn update_automatic_checks_and_publish(
+    state: &mut State,
+    preferences: &Path,
+    enabled: bool,
+    persist: impl FnOnce(&Path, bool) -> Result<(), String>,
+    publish: impl FnOnce(&Snapshot),
+) -> Result<Snapshot, String> {
+    let snapshot = engine::update_automatic_checks(state, preferences, enabled, persist)?;
+    publish(&snapshot);
+    Ok(snapshot)
+}
+
 fn fail(app: &AppHandle, message: &str, details: impl ToString) -> Result<Snapshot, String> {
     modify(app, |state| {
         engine::record_failure(state, message, details);
@@ -172,17 +185,61 @@ pub(crate) async fn set_update_automatic_checks(
             .state
             .lock()
             .map_err(|_| "Update state is unavailable.")?;
-        let snapshot = engine::update_automatic_checks(
+        update_automatic_checks_and_publish(
             &mut state.policy,
             &controller.preferences,
             enabled,
             engine::save_preferences,
-        )?;
-        let _ = app.emit("silo://update-state", &snapshot);
-        Ok(snapshot)
+            |snapshot| {
+                let _ = app.emit("silo://update-state", snapshot);
+            },
+        )
     })
     .await
     .map_err(|_| "Update preferences could not be saved.".to_owned())?
+}
+
+#[cfg(test)]
+mod preference_tests {
+    use super::*;
+
+    #[test]
+    fn failed_preference_save_preserves_snapshot_and_does_not_publish() {
+        let directory = tempfile::tempdir().unwrap();
+        let preferences = directory.path().join("prefs.json");
+        let initial = Snapshot {
+            phase: "idle".into(),
+            last_checked: None,
+            retry_action: None,
+            current_version: "1.0.0".into(),
+            available_version: None,
+            release_notes: None,
+            downloaded_bytes: 0,
+            total_bytes: None,
+            automatic_checks: true,
+            package_kind: "manual".into(),
+            release_url: RELEASE_URL.into(),
+            error: None,
+            error_details: None,
+            running_computers: Vec::new(),
+            can_install: false,
+            install_block_reason: None,
+            install_status: None,
+        };
+        let mut state = State::new(initial, SystemTime::now());
+
+        let error = update_automatic_checks_and_publish(
+            &mut state,
+            &preferences,
+            false,
+            |_, _| Err("save failed".into()),
+            |_| panic!("failed persistence must not publish success"),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "save failed");
+        assert!(state.snapshot.automatic_checks);
+    }
 }
 
 #[tauri::command]

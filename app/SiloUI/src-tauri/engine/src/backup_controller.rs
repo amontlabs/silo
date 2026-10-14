@@ -1966,13 +1966,14 @@ mod tests {
     use crate::runtime::RuntimePackageKind;
     use silo_engine::channel::Channel;
     use silo_engine::context::{
-        Audience, EngineContext, EngineIdentity, EnginePaths, Event, MainThread, PackageKind,
-        ProcessControl,
+        Audience, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+        MainThread, PackageKind, ProcessControl,
     };
 
     struct StartupTestContext {
         paths: EnginePaths,
         identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
     }
 
     impl EngineContext for StartupTestContext {
@@ -1982,6 +1983,10 @@ mod tests {
 
         fn identity(&self) -> &EngineIdentity {
             &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
         }
 
         fn publish(&self, _event: Event, _audience: Audience) {}
@@ -2264,6 +2269,7 @@ mod tests {
                 version: "0.1.0".into(),
                 package_kind: PackageKind::Other,
             },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
         });
         let host: Arc<dyn RuntimeHost> = Arc::new(StartupTestHost(context));
         let runtime = tokio::runtime::Builder::new_multi_thread()

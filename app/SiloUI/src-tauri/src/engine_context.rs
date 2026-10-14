@@ -1,6 +1,6 @@
 use silo_engine::{
-    Audience, EngineContext, EngineIdentity, EnginePaths, Event, MainThread, PackageKind,
-    ProcessControl,
+    Audience, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event, MainThread,
+    PackageKind, ProcessControl,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -9,6 +9,7 @@ pub(crate) struct TauriEngineContext {
     app: AppHandle,
     paths: EnginePaths,
     identity: EngineIdentity,
+    runtime_state: std::sync::Arc<EngineRuntimeState>,
 }
 
 fn dispatch_by_audience(
@@ -47,6 +48,7 @@ impl TauriEngineContext {
             app: app.clone(),
             paths,
             identity,
+            runtime_state: std::sync::Arc::new(EngineRuntimeState::default()),
         })
     }
 }
@@ -58,6 +60,10 @@ impl EngineContext for TauriEngineContext {
 
     fn identity(&self) -> &EngineIdentity {
         &self.identity
+    }
+
+    fn runtime_state(&self) -> std::sync::Arc<EngineRuntimeState> {
+        self.runtime_state.clone()
     }
 
     fn publish(&self, event: Event, audience: Audience) {
