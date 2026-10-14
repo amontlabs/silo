@@ -59,7 +59,7 @@ pub(crate) async fn upload_files(
     conflict: transfer::ConflictPolicy,
 ) -> Result<transfer::UploadOutcome, String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    crate::desktop_viewer::require_computer(&window, &computer)?;
+    crate::commands::desktop_viewer::require_computer(&window, &computer)?;
     let owner = window.label().to_owned();
     tokio::task::spawn_blocking(move || {
         let paths = local_paths(&app, &computer)?;

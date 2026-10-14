@@ -79,7 +79,7 @@ fn run(app: &AppHandle, config: &Value, script: &str) -> Result<Value, String> {
     keep_visible(app, &label);
     let before = cpu_times();
     let started = Instant::now();
-    let reply = crate::desktop_viewer::with_bridge(app, &label, |bridge| {
+    let reply = crate::commands::desktop_viewer::with_bridge(app, &label, |bridge| {
         let expectation = bridge.inbox.expect(Op::Diagnostics, budget);
         bridge.page.eval(&format!(
             "({script})({},{});",

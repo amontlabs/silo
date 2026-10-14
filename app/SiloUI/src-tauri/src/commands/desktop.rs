@@ -10,7 +10,7 @@ pub(crate) async fn set_computer_use_approval(
     computer: String,
     mode: String,
 ) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
+    crate::commands::desktop_viewer::require_computer(&window, &computer)?;
     tokio::task::spawn_blocking(move || {
         if let Some((device, computer)) = remote_access::target(&computer)? {
             crate::chatgpt_app::call_owner(
@@ -69,7 +69,7 @@ pub(crate) async fn read_desktop_state(
     window: Window,
     computer: String,
 ) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
+    crate::commands::desktop_viewer::require_computer(&window, &computer)?;
     execute(app, computer, None).await
 }
 
@@ -80,6 +80,6 @@ pub(crate) async fn desktop_action(
     computer: String,
     action: String,
 ) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
+    crate::commands::desktop_viewer::require_computer(&window, &computer)?;
     execute(app, computer, Some(action)).await
 }

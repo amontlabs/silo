@@ -15,7 +15,7 @@ pub(crate) async fn desktop_viewer_clipboard(
     if !crate::desktop_viewer::is_viewer_label(window.label()) {
         return Err("Use the clipboard from a desktop viewer.".into());
     }
-    crate::desktop_viewer::require_computer(&window, &computer)?;
+    crate::commands::desktop_viewer::require_computer(&window, &computer)?;
     let label = window.label().to_string();
     tokio::task::spawn_blocking(move || run_blocking(&app, &label, action))
         .await
@@ -29,7 +29,7 @@ fn run_blocking(app: &AppHandle, label: &str, action: Action) -> Report {
         return Report::new(action, Status::Busy, None);
     };
     let device = crate::clipboard::system();
-    crate::desktop_viewer::with_bridge(app, label, |bridge| {
+    crate::commands::desktop_viewer::with_bridge(app, label, |bridge| {
         Ok(match action {
             Action::Paste => viewer_clipboard::paste(bridge, device),
             Action::Copy => viewer_clipboard::copy(bridge, device),

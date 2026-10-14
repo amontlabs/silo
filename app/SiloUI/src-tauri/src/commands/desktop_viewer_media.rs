@@ -6,7 +6,7 @@ fn require_viewer(window: &Window, computer: &str) -> Result<String, String> {
     if !crate::desktop_viewer::is_viewer_label(window.label()) {
         return Err("Only a desktop viewer can use this command.".into());
     }
-    crate::desktop_viewer::require_computer(window, computer)?;
+    crate::commands::desktop_viewer::require_computer(window, computer)?;
     Ok(window.label().to_string())
 }
 
@@ -28,7 +28,7 @@ pub(crate) async fn desktop_viewer_sound_support(
                 |obsolete| {
                     desktop_viewer_media::probe(
                         || {
-                            crate::desktop_viewer::with_bridge(&app, &label, |bridge| {
+                            crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
                                 desktop_viewer_media::probe_step(bridge)
                             })
                         },
@@ -66,7 +66,7 @@ pub(crate) async fn desktop_viewer_set_audio(
     let label = require_viewer(&window, &computer)?;
     let latest = desktop_viewer_media::sound_revision(&label)?;
     tokio::task::spawn_blocking(move || {
-        crate::desktop_viewer::with_bridge(&app, &label, |bridge| {
+        crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
             desktop_viewer_media::apply_audio_ordered(&latest, revision, bridge, muted, active)
         })
     })
@@ -82,7 +82,7 @@ pub(crate) async fn desktop_viewer_reset_screen(
 ) -> Result<(), String> {
     let label = require_viewer(&window, &computer)?;
     tokio::task::spawn_blocking(move || {
-        crate::desktop_viewer::with_bridge(&app, &label, |bridge| {
+        crate::commands::desktop_viewer::with_bridge(&app, &label, |bridge| {
             desktop_viewer_media::reset_screen(bridge)
         })
     })

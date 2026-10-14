@@ -7,7 +7,8 @@ struct TauriLocalAccess(AppHandle);
 
 impl remote_access::LocalAccess for TauriLocalAccess {
     fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String> {
-        crate::desktop_viewer::local_connection(&self.0, computer, Some(computer_id))
+        let paths = runtime::runtime_paths(&self.0)?;
+        crate::desktop_viewer::local_connection(&paths, computer, Some(computer_id))
     }
 
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String> {
