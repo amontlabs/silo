@@ -138,7 +138,7 @@
     },
     {
       "path": "patches/microsandbox-macos-network-fixes-0.7.6.patch",
-      "sha256": "033a88f9f87f663400920477109f4c824c8b33e34a77b8af469d3488ec545b87"
+      "sha256": "287374715d30d43ca00125a991653d4200dbb488f190e3cbb95b970b6443234d"
     }
   ]
 }

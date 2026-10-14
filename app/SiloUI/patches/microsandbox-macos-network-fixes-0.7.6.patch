@@ -75,3 +75,95 @@ index 4ca0e92..4f1c4b8 100644
      #[test]
      fn write_frame_enqueues_guest_frame_and_wakes_poll_loop() {
          let shared = Arc::new(SharedState::new(1));
+diff --git a/crates/network/lib/engine/network.rs b/crates/network/lib/engine/network.rs
+index 9158774..5fa738b 100644
+--- a/crates/network/lib/engine/network.rs
++++ b/crates/network/lib/engine/network.rs
+@@ -45,6 +45,35 @@ pub fn generate_intercept_ca_pair() -> Result<(Vec<u8>, Vec<u8>), rcgen::Error>
+     Ok((ca.cert_pem(), ca.key_pem()))
+ }
+ 
++/// Issue a certificate for `domain` from an existing interception CA and return it as PEM.
++///
++/// The leaf's private key is discarded, so the result can only be used to ask whether a client
++/// trusts the CA. It cannot terminate TLS for `domain`.
++pub fn issue_trust_probe_pem(
++    ca_cert_pem: &[u8],
++    ca_key_pem: &[u8],
++    domain: &str,
++    validity_hours: u64,
++) -> Result<String, String> {
++    use base64::{Engine, engine::general_purpose::STANDARD};
++
++    let ca = CertAuthority::load(ca_cert_pem, ca_key_pem)?;
++    let cert = crate::engine::tls::certgen::generate_domain_cert(domain, &ca, validity_hours)
++        .map_err(|error| error.to_string())?;
++    let der = cert
++        .chain
++        .first()
++        .ok_or_else(|| "the issued certificate chain is empty".to_owned())?;
++    let encoded = STANDARD.encode(der.as_ref());
++    let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
++    for line in encoded.as_bytes().chunks(64) {
++        pem.push_str(std::str::from_utf8(line).map_err(|error| error.to_string())?);
++        pem.push('\n');
++    }
++    pem.push_str("-----END CERTIFICATE-----\n");
++    Ok(pem)
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Constants
+ //--------------------------------------------------------------------------------------------------
+@@ -1359,6 +1388,51 @@ mod tests {
+         ));
+     }
+ 
++    #[test]
++    fn trust_probe_leaf_is_accepted_only_by_a_client_that_trusts_the_issuing_ca() {
++        use rustls::client::WebPkiServerVerifier;
++        use rustls::client::danger::ServerCertVerifier;
++        use rustls::pki_types::{CertificateDer, ServerName, UnixTime, pem::PemObject};
++        use rustls::RootCertStore;
++
++        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
++        let (cert_pem, key_pem) = generate_intercept_ca_pair().unwrap();
++        let probe = issue_trust_probe_pem(&cert_pem, &key_pem, "probe.invalid", 24 * 365).unwrap();
++        assert_eq!(probe.matches("-----BEGIN CERTIFICATE-----").count(), 1);
++        assert!(!probe.contains("PRIVATE KEY"));
++        let leaf = CertificateDer::from_pem_slice(probe.as_bytes()).unwrap();
++        let ca = CertificateDer::from_pem_slice(&cert_pem).unwrap();
++        let name = ServerName::try_from("probe.invalid").unwrap();
++
++        let mut trusted = RootCertStore::empty();
++        trusted.add(ca).unwrap();
++        let verifier = WebPkiServerVerifier::builder(Arc::new(trusted)).build().unwrap();
++        verifier
++            .verify_server_cert(&leaf, &[], &name, &[], UnixTime::now())
++            .expect("a client that trusts the CA accepts the leaf");
++        let other = ServerName::try_from("other.invalid").unwrap();
++        assert!(
++            verifier
++                .verify_server_cert(&leaf, &[], &other, &[], UnixTime::now())
++                .is_err(),
++            "the leaf is only valid for the probe name"
++        );
++
++        // A CA that is merely present, as an untrusted extra certificate, is not enough.
++        let mut unrelated = RootCertStore::empty();
++        let (other_ca, _) = generate_intercept_ca_pair().unwrap();
++        unrelated
++            .add(CertificateDer::from_pem_slice(&other_ca).unwrap())
++            .unwrap();
++        let verifier = WebPkiServerVerifier::builder(Arc::new(unrelated)).build().unwrap();
++        let ca = CertificateDer::from_pem_slice(&cert_pem).unwrap();
++        assert!(
++            verifier
++                .verify_server_cert(&leaf, &[ca], &name, &[], UnixTime::now())
++                .is_err()
++        );
++    }
++
+     #[test]
+     fn public_ca_generation_returns_a_loadable_pair() {
+         let (cert_pem, key_pem) = generate_intercept_ca_pair().unwrap();

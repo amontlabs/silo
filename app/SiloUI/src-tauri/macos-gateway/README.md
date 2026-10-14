@@ -51,3 +51,11 @@ Revisioned update operations are `put_secret`, `rotate_secret`, `remove_secret`,
 `set_allowed_hosts`, and `set_github_profile`; the GitHub operation carries
 `profile_json:string|null`. The helper ACKs only after the close barrier completes, with
 `closed_previous_generation:true`. Invalid requests return generic error codes without values.
+
+## Trust-probe mode
+
+`--issue-trust-probe` reads one length-prefixed `{cert_pem,key_pem}` CA bundle on stdin and
+writes one length-prefixed `{leaf_pem}` response: a certificate for `TRUST_PROBE_HOST` signed by
+that CA, valid for a year, whose key is discarded. The guest bootstrap evaluates it with the
+system's trust settings, so readiness proves the CA is trusted, not merely present. Like
+`--generate-ca`, this mode does not access the inherited frame or control descriptors.
