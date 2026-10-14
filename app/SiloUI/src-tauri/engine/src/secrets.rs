@@ -824,6 +824,12 @@ pub async fn read_secrets_state() -> Result<Vec<Value>, String> {
         .map_err(|_| "Secret settings could not be read.".to_string())?
 }
 
+/// Synchronous owner-side snapshot for the SSH bridge worker, which does not run on
+/// silod's async socket executor.
+pub fn read_secrets_state_sync() -> Result<Vec<Value>, String> {
+    snapshot()
+}
+
 pub fn save_secret<G>(
     request: Request,
     update_guard: impl FnOnce() -> Result<G, String>,

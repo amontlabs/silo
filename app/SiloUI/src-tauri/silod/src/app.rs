@@ -131,6 +131,8 @@ fn run_appkit(
     // Checkpoint records written before automatic checkpoints existed become manual ones,
     // once, before anything reads them.
     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    crate::methods::access::install(context.clone())?;
+    crate::methods::access::start_connections(context.clone())?;
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
     let runtime_home =

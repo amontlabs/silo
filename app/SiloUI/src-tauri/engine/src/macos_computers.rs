@@ -413,6 +413,29 @@ impl Registry {
         Ok(true)
     }
 
+    /// Stores the desired computer-use approval of computer `id`, changing only that field of
+    /// the record as it is now, durably through `save`. The record is read, changed, saved
+    /// and replaced under one hold of the registry, so a concurrent update completion keeps
+    /// its recorded fingerprint, a failed save leaves the memory as the disk is, and a
+    /// computer being deleted is refused before anything is written to its folder. Returns
+    /// the Start that owns the computer, its state and the saved record.
+    fn set_desired_approval(
+        &mut self,
+        id: &str,
+        approval: crate::computer_use::Approval,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<(u64, State, Record), String> {
+        let entry = self
+            .entry(id)
+            .filter(|entry| !entry.deleting)
+            .ok_or("This computer no longer exists.")?;
+        let mut record = entry.record.clone();
+        record.computer_use_desired_approval = Some(approval);
+        save(&record)?;
+        entry.record = record.clone();
+        Ok((entry.attempt, entry.state, record))
+    }
+
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
     /// missed or came before the state was set, so nothing else will ever finish them.
     fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
@@ -1847,25 +1870,27 @@ pub async fn set_macos_computer_use_approval(
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || {
         ensure_loaded(&app)?;
-        let data = app_data(&app)?;
-        let (mut record, state) = computer(&id)?;
-        record.computer_use_desired_approval = Some(approval);
-        store::save(&Layout::new(&data, &id), &record)?;
-        let (attempt, projection) = {
-            let mut registry = registry();
-            let entry = registry
-                .entry(&id)
-                .ok_or("This computer no longer exists.")?;
-            entry.record = record;
-            (entry.attempt, computer_use_projection(&entry.record))
-        };
-        emit(&app);
-        if state == State::Running {
-            guest_computer_use::update_in_background(&app, &id, attempt);
-        }
-        Ok(projection)
+        apply_desired_approval(&app, &id, approval)
     })
     .await
+}
+
+/// The blocking part of [`set_macos_computer_use_approval`]. Only the desired approval of the
+/// record as it is when the registry is held changes; see `Registry::set_desired_approval`.
+fn apply_desired_approval(
+    app: &MacosContext,
+    id: &str,
+    approval: crate::computer_use::Approval,
+) -> Result<serde_json::Value, String> {
+    let layout = Layout::new(&app_data(app)?, id);
+    let (attempt, state, record) =
+        registry().set_desired_approval(id, approval, |record| store::save(&layout, record))?;
+    let projection = computer_use_projection(&record);
+    emit(app);
+    if state == State::Running {
+        guest_computer_use::update_in_background(app, id, attempt);
+    }
+    Ok(projection)
 }
 
 /// The state of a computer added by [`install_test_computer`].
@@ -2367,6 +2392,24 @@ fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String
         .iter()
         .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
         .map(|entry| entry.record.clone()))
+}
+
+/// The name of the macOS computer with this identity, if one is stored on this device.
+pub fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(candidate, _)| candidate == id)
+        .map(|(_, name)| name)
+}
+
+/// The identity of the macOS computer with this name, if one is stored on this device.
+pub fn id_for_name(app: &MacosContext, name: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(_, candidate)| candidate.eq_ignore_ascii_case(name))
+        .map(|(id, _)| id)
 }
 
 pub fn proxy_contains_name(app: &MacosContext, name: &str) -> bool {
@@ -9290,6 +9333,169 @@ mod tests {
             ))
             .unwrap_err();
         assert_eq!(error, "This computer no longer exists.");
+    }
+
+    /// Guest steps of an update that block the first installation until the test lets it go.
+    struct GatedSteps {
+        installed: std::sync::Mutex<Vec<crate::computer_use::Approval>>,
+        started: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl guest_computer_use::UpdateSteps for GatedSteps {
+        fn wait_for_ssh(
+            &self,
+            _layout: &Layout,
+            _record: &Record,
+            _cancelled: &dyn Fn() -> bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn install(
+            &self,
+            _app: &MacosContext,
+            _id: &str,
+            approval: crate::computer_use::Approval,
+            _job: &guest_computer_use::Job,
+        ) -> Result<(), String> {
+            let first = {
+                let mut installed = self.installed.lock().unwrap();
+                installed.push(approval);
+                installed.len() == 1
+            };
+            if first {
+                self.started.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reversing_the_approval_during_an_update_updates_the_guest_again() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::Running, Approval::Ask);
+        let (started_sender, started) = std::sync::mpsc::sync_channel(1);
+        let (release, released) = std::sync::mpsc::channel();
+        let steps = Arc::new(GatedSteps {
+            installed: std::sync::Mutex::new(Vec::new()),
+            started: started_sender,
+            release: std::sync::Mutex::new(released),
+        });
+        // Applied `ask`; `auto` is requested and its installation starts.
+        apply_desired_approval_without_update(&id, Approval::Auto);
+        let worker = guest_computer_use::spawn_update(&app, &id, 1, steps.clone())
+            .expect("the stale computer is updated");
+        started.recv().unwrap();
+        // While it runs, `ask` is requested again. The record still shows the applied
+        // `ask`, so this request alone queues nothing.
+        let projection = apply_desired_approval(&app, &id, Approval::Ask).unwrap();
+        assert_eq!(projection["approval"], "ask");
+        assert!(guest_computer_use::update_running(&id));
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            *steps.installed.lock().unwrap(),
+            [Approval::Auto, Approval::Ask]
+        );
+        let (record, _) = computer(&id).unwrap();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Ask));
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(!record.computer_use_stale());
+        assert!(!guest_computer_use::update_running(&id));
+        let saved = store::load_all(directory.path());
+        assert_eq!(saved[0].computer_use_approval, Some(Approval::Ask));
+        assert_eq!(
+            saved[0].computer_use_version,
+            Some(templates::computer_use_version_for(Approval::Ask))
+        );
+    }
+
+    /// Records a desired approval the way the setter does, without scheduling an update.
+    fn apply_desired_approval_without_update(id: &str, approval: crate::computer_use::Approval) {
+        registry()
+            .set_desired_approval(id, approval, |_| Ok(()))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_desired_approval_changes_only_that_field_of_the_current_record() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Running);
+        // An update completion recorded its fingerprint after the setter's caller read the
+        // record: the setter must keep it, whatever order they run in.
+        registry
+            .finish_computer_use_update(&id, 1, "v-auto", Approval::Auto, |_| Ok(()))
+            .unwrap();
+        let (attempt, state, saved) = registry
+            .set_desired_approval(&id, Approval::Ask, |_| Ok(()))
+            .unwrap();
+        assert_eq!((attempt, state), (1, State::Running));
+        assert_eq!(saved.computer_use_version.as_deref(), Some("v-auto"));
+        assert_eq!(saved.computer_use_approval, Some(Approval::Auto));
+        assert_eq!(saved.computer_use_desired_approval, Some(Approval::Ask));
+        // A completion after the setter keeps the desired approval.
+        registry
+            .finish_computer_use_update(&id, 1, "v-auto", Approval::Auto, |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            registry.entries[0].record.computer_use_desired_approval,
+            Some(Approval::Ask)
+        );
+        // What was saved is what the memory holds, and a failed save changes neither.
+        let held = std::cell::RefCell::new(None);
+        registry
+            .set_desired_approval(&id, Approval::Auto, |record| {
+                *held.borrow_mut() = Some(record.clone());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            held.borrow()
+                .as_ref()
+                .unwrap()
+                .computer_use_desired_approval,
+            registry.entries[0].record.computer_use_desired_approval
+        );
+        let failing = |_: &Record| Err("disk full".to_string());
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Ask, failing)
+                .unwrap_err(),
+            "disk full"
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_desired_approval,
+            Some(Approval::Auto)
+        );
+    }
+
+    #[test]
+    fn a_desired_approval_is_not_written_for_a_deleted_or_deleting_computer() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Stopped);
+        let never = |_: &Record| -> Result<(), String> { panic!("must not save") };
+        registry.entries[0].deleting = true;
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Auto, never)
+                .unwrap_err(),
+            "This computer no longer exists."
+        );
+        registry.entries.clear();
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Auto, never)
+                .unwrap_err(),
+            "This computer no longer exists."
+        );
     }
 
     #[test]
