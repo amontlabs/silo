@@ -422,11 +422,6 @@ pub(crate) fn serve_route(
 pub(crate) trait Page {
     fn eval(&self, script: &str) -> Result<(), String>;
 }
-impl<R: tauri::Runtime> Page for tauri::Webview<R> {
-    fn eval(&self, script: &str) -> Result<(), String> {
-        tauri::Webview::eval(self, script).map_err(|_| "The desktop display is unavailable.".into())
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum GuestClipboard {
