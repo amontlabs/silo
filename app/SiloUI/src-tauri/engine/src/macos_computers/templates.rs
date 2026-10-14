@@ -882,10 +882,8 @@ mod tests {
                 .chain(std::iter::once(revision.as_str())),
         );
         assert_eq!(setup_version(), base);
-        let without_developer_tools = hash_inputs([
-            offline_setup::setup_inputs().as_str(),
-            revision.as_str(),
-        ]);
+        let without_developer_tools =
+            hash_inputs([offline_setup::setup_inputs().as_str(), revision.as_str()]);
         assert_ne!(setup_version(), without_developer_tools);
         // A template made before the split has no computer-use part.
         let json = serde_json::to_value(meta("25G83", "a", "2026-10-01")).unwrap();

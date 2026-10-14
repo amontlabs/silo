@@ -273,6 +273,7 @@ mod tests {
                 job_id: JobId::new("job:3").unwrap(),
                 result: Some(serde_json::json!({ "ok": true })),
                 error: None,
+                outcome_chunked: false,
             },
         };
         let json = serde_json::to_string(&event).unwrap();

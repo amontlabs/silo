@@ -5,8 +5,11 @@ use serde_json::Value;
 use silo_api::{
     jobs::ErrorCode,
     methods::{
-        engine::{EngineState, EngineStateParams},
-        method_registry, MethodDescriptor, MethodName,
+        engine::{EngineState, EngineStateParams, EventsSubscribeParams, EventsUnsubscribeParams},
+        method_registry,
+        notifications::NotificationsListParams,
+        operations::{AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationsListParams},
+        MethodDescriptor, MethodName,
     },
     transport::{
         ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult,
@@ -18,11 +21,17 @@ use silo_engine::context::EngineContext;
 use uuid::Uuid;
 
 use crate::context::SilodContext;
+use crate::methods::{self, HandlerContext};
 
 const MAX_REQUEST_IDS: usize = 65_536;
 
 pub type HandlerFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<HandlerOutput, DispatchError>> + Send + 'a>>;
+
+pub struct HandlerOutput {
+    pub value: Value,
+    pub event_barrier: Option<std::collections::HashMap<String, u64>>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestContext {
@@ -38,14 +47,14 @@ pub struct DispatchError {
 }
 
 impl DispatchError {
-    fn internal(message: impl Into<String>) -> Self {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Internal,
             message: message.into(),
         }
     }
 
-    fn unsupported(method: &str) -> Self {
+    pub(crate) fn unsupported(method: &str) -> Self {
         Self {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: format!("The engine does not support {method}."),
@@ -74,6 +83,10 @@ impl SessionState {
 pub trait MethodRegistry: Send + Sync {
     fn descriptors(&self) -> &[MethodDescriptor];
 
+    fn capabilities(&self) -> &[MethodDescriptor] {
+        self.descriptors()
+    }
+
     fn dispatch<'a>(
         &'a self,
         method: MethodName,
@@ -85,16 +98,33 @@ pub trait MethodRegistry: Send + Sync {
 
 pub struct CoreMethodRegistry {
     descriptors: Vec<MethodDescriptor>,
+    capabilities: Vec<MethodDescriptor>,
 }
 
 impl Default for CoreMethodRegistry {
     fn default() -> Self {
-        let descriptors = method_registry()
+        let capabilities = method_registry()
             .iter()
             .copied()
-            .filter(|descriptor| matches!(descriptor.name, "engine.handshake" | "engine.state"))
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.name,
+                    "engine.handshake"
+                        | "engine.state"
+                        | "events.subscribe"
+                        | "events.unsubscribe"
+                        | "notifications.list"
+                        | "operations.cancel"
+                        | "operations.job.acknowledge"
+                        | "operations.job.get"
+                        | "operations.list"
+                )
+            })
             .collect();
-        Self { descriptors }
+        Self {
+            descriptors: method_registry().to_vec(),
+            capabilities,
+        }
     }
 }
 
@@ -103,14 +133,20 @@ impl MethodRegistry for CoreMethodRegistry {
         &self.descriptors
     }
 
+    fn capabilities(&self) -> &[MethodDescriptor] {
+        &self.capabilities
+    }
+
     fn dispatch<'a>(
         &'a self,
         method: MethodName,
         params: Value,
         context: Arc<SilodContext>,
-        _request: RequestContext,
+        request: RequestContext,
     ) -> HandlerFuture<'a> {
         Box::pin(async move {
+            let mut event_barrier = None;
+            let result: Result<Value, DispatchError> = async {
             match method {
                 MethodName::EngineState => {
                     serde_json::from_value::<EngineStateParams>(params).map_err(|error| {
@@ -123,8 +159,103 @@ impl MethodRegistry for CoreMethodRegistry {
                 MethodName::EngineHandshake => Err(DispatchError::internal(
                     "engine.handshake is handled by the session negotiator",
                 )),
-                _ => Err(DispatchError::unsupported(method_name(method))),
+                MethodName::EventsSubscribe => {
+                    let params: EventsSubscribeParams = parse_params(params)?;
+                    if let Some(device_ids) = &params.device_ids {
+                        if device_ids.iter().any(|id| id != &context.local_device().device_id) {
+                            return Err(DispatchError {
+                                code: ErrorCode::UnsupportedRemoteOperation,
+                                message: "This engine does not relay subscriptions to remote devices."
+                                    .to_owned(),
+                            });
+                        }
+                    }
+                    let client_id = silo_engine::context::ClientId::new(request.client_id.clone());
+                    let subscription = context
+                        .subscribe_events(&client_id, params.events)
+                        .map_err(DispatchError::internal)?;
+                    serde_json::to_value(silo_api::methods::engine::EventsSubscribeResult {
+                        subscription,
+                    })
+                    .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::EventsUnsubscribe => {
+                    let params: EventsUnsubscribeParams = parse_params(params)?;
+                    event_barrier = Some(context.unsubscribe_events(
+                        &silo_engine::context::ClientId::new(request.client_id.clone()),
+                        &params.subscription,
+                    ));
+                    Ok(Value::Null)
+                }
+                MethodName::OperationsJobGet => {
+                    let params: GetJobParams = parse_params(params)?;
+                    let result = silo_engine::jobs::get_at(
+                        context.as_ref(),
+                        &params.job_id,
+                        params.offset_bytes,
+                    )
+                        .map_err(HandlerContext::map_registry_error)?
+                        .ok_or_else(|| DispatchError {
+                            code: ErrorCode::NotFound,
+                            message: "The job was not found.".to_owned(),
+                        })?;
+                    serde_json::to_value(result)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::OperationsJobAcknowledge => {
+                    let params: AcknowledgeJobParams = parse_params(params)?;
+                    context
+                        .job_registry()
+                        .map_err(DispatchError::internal)?
+                        .acknowledge(&params.job_id)
+                        .map_err(HandlerContext::map_registry_error)?;
+                    context.job_queue_changed();
+                    Ok(Value::Null)
+                }
+                MethodName::OperationsList => {
+                    let _: OperationsListParams = parse_params(params)?;
+                    let snapshot = context
+                        .operation_queue_snapshot(&silo_engine::context::ClientId::new(
+                            request.client_id.clone(),
+                        ))
+                        .map_err(DispatchError::internal)?;
+                    event_barrier = Some(snapshot.event_barrier);
+                    serde_json::to_value(snapshot.queue)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::OperationsCancel => {
+                    let params: CancelJobParams = parse_params(params)?;
+                    context
+                        .job_registry()
+                        .map_err(DispatchError::internal)?
+                        .cancel(&params.job_id)
+                        .map_err(HandlerContext::map_registry_error)?;
+                    Ok(Value::Null)
+                }
+                MethodName::NotificationsList => {
+                    let _: NotificationsListParams = parse_params(params)?;
+                    let snapshot = context
+                        .notifications_snapshot(&silo_engine::context::ClientId::new(
+                            request.client_id.clone(),
+                        ))
+                        .map_err(DispatchError::internal)?;
+                    event_barrier = Some(snapshot.event_barrier);
+                    serde_json::to_value(snapshot.notices)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                _ => {
+                    let handler_context = HandlerContext::new(context.clone(), request.clone());
+                    let output = methods::dispatch(&handler_context, method, &params).await?;
+                    event_barrier = output.event_barrier;
+                    Ok(output.value)
+                }
             }
+            }
+            .await;
+            result.map(|value| HandlerOutput {
+                value,
+                event_barrier,
+            })
         })
     }
 }
@@ -145,10 +276,14 @@ impl Dispatcher {
 
     pub fn capabilities(&self) -> Vec<String> {
         self.registry
-            .descriptors()
+            .capabilities()
             .iter()
             .map(|descriptor| descriptor.name.to_owned())
             .collect()
+    }
+
+    pub fn context(&self) -> Arc<SilodContext> {
+        self.context.clone()
     }
 
     pub fn busy_response(&self, id: String) -> ResponseEnvelope<Value> {
@@ -267,11 +402,15 @@ impl Dispatcher {
                 response: Some(response),
                 close: false,
                 close_reason: None,
+                activate_subscription: None,
+                event_barrier: None,
             },
             PreparedRequest::Close(response, reason) => DispatchResult {
                 response,
                 close: true,
                 close_reason: Some(reason),
+                activate_subscription: None,
+                event_barrier: None,
             },
             PreparedRequest::Invoke {
                 id,
@@ -279,17 +418,35 @@ impl Dispatcher {
                 params,
                 request_context,
             } => {
+                let client_id = request_context.client_id.clone();
                 let result = self
                     .registry
                     .dispatch(method, params, self.context.clone(), request_context)
                     .await;
+                let (response, activate_subscription, event_barrier) = match result {
+                    Ok(result) => {
+                        let HandlerOutput {
+                            value,
+                            event_barrier,
+                        } = result;
+                        let activate = if method == MethodName::EventsSubscribe {
+                            value
+                                .get("subscription")
+                                .and_then(Value::as_str)
+                                .map(|subscription| (client_id, subscription.to_owned()))
+                        } else {
+                            None
+                        };
+                        (success_response(id, value), activate, event_barrier)
+                    }
+                    Err(error) => (error_response(id, error.code, error.message), None, None),
+                };
                 DispatchResult {
-                    response: Some(match result {
-                        Ok(result) => success_response(id, result),
-                        Err(error) => error_response(id, error.code, error.message),
-                    }),
+                    response: Some(response),
                     close: false,
                     close_reason: None,
+                    activate_subscription,
+                    event_barrier,
                 }
             }
         }
@@ -390,6 +547,13 @@ pub struct DispatchResult {
     pub response: Option<ResponseEnvelope<Value>>,
     pub close: bool,
     pub close_reason: Option<String>,
+    pub activate_subscription: Option<(String, String)>,
+    pub event_barrier: Option<std::collections::HashMap<String, u64>>,
+}
+
+fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, DispatchError> {
+    serde_json::from_value(params)
+        .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))
 }
 
 #[derive(Deserialize)]
@@ -416,7 +580,7 @@ impl RawRequest {
     }
 }
 
-fn method_name(method: MethodName) -> &'static str {
+pub(crate) fn method_name(method: MethodName) -> &'static str {
     method_registry()
         .iter()
         .find(|descriptor| descriptor.method == method)
@@ -534,10 +698,104 @@ mod tests {
             Some(ResponseEnvelope::Error { error, .. })
                 if error.code == ErrorCode::UnsupportedRemoteOperation
         ));
+        let capabilities = dispatcher.capabilities();
+        assert!(capabilities.contains(&"engine.handshake".to_owned()));
+        assert!(capabilities.contains(&"engine.state".to_owned()));
+        assert!(capabilities.contains(&"events.subscribe".to_owned()));
+        assert!(capabilities.contains(&"operations.job.get".to_owned()));
+        assert!(capabilities.contains(&"notifications.list".to_owned()));
+        assert!(!capabilities.contains(&"computers.list".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn operations_job_get_retries_pending_completion_before_reading() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = Arc::new(SilodContext::new(
+            EnginePaths {
+                app_data: temporary.path().to_path_buf(),
+                ..EnginePaths::default()
+            },
+            EngineIdentity {
+                channel: Channel::Development,
+                version: "0.1.0".into(),
+                package_kind: PackageKind::MacApp,
+            },
+            LocalDeviceIdentity {
+                device_id: "device-1".into(),
+                name: "Test Mac".into(),
+            },
+            Arc::new(NoopMainThread),
+            Arc::new(NoopProcess),
+        ));
+        let registry = context.job_registry().unwrap();
+        let job_id = silo_api::jobs::JobId::new("transfer:dispatcher-get-retry").unwrap();
+        registry.accept(job_id.clone(), "files.upload").unwrap();
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'transfer:dispatcher-get-retry' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+        let completion = silo_api::jobs::JobFinished {
+            job_id: job_id.clone(),
+            result: Some(serde_json::json!({"status":"uploaded"})),
+            error: None,
+            outcome_chunked: false,
+        };
         assert_eq!(
-            dispatcher.capabilities(),
-            ["engine.handshake", "engine.state"]
+            silo_engine::jobs::publish_finished(
+                context.as_ref(),
+                completion,
+                silo_engine::context::Audience::All,
+            )
+            .unwrap_err()
+            .kind(),
+            silo_engine::jobs::RegistryErrorKind::Storage
         );
+
+        let dispatcher = Dispatcher::core(context);
+        let mut session = SessionState::default();
+        let handshake = dispatcher
+            .execute(dispatcher.prepare(
+                handshake("get-retry-handshake", PROTOCOL_VERSION, PROTOCOL_VERSION),
+                &mut session,
+            ))
+            .await;
+        assert!(!handshake.close);
+
+        let first_get = serde_json::json!({
+            "id": "get-retry-fails-while-storage-fails",
+            "method": "operations.job.get",
+            "params": {"jobId": job_id.as_str()}
+        });
+        let failed_retry = dispatcher
+            .execute(dispatcher.prepare(first_get, &mut session))
+            .await;
+        assert!(matches!(
+            failed_retry.response,
+            Some(ResponseEnvelope::Error { error, .. }) if error.code == ErrorCode::Internal
+        ));
+
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+        let successful_get = serde_json::json!({
+            "id": "get-retries-retained-completion",
+            "method": "operations.job.get",
+            "params": {"jobId": job_id.as_str()}
+        });
+        let retried = dispatcher
+            .execute(dispatcher.prepare(successful_get, &mut session))
+            .await;
+        assert!(matches!(
+            retried.response,
+            Some(ResponseEnvelope::Success { result, .. })
+                if result["state"] == "finished"
+                    && result["outcome"]["result"]["status"] == "uploaded"
+        ));
     }
 
     #[tokio::test]
@@ -610,5 +868,18 @@ mod tests {
             dispatcher.prepare(request, &mut session),
             PreparedRequest::Close(Some(ResponseEnvelope::Error { .. }), _)
         ));
+    }
+
+    #[test]
+    fn not_cancellable_uses_the_contract_internal_error_code() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = silo_engine::jobs::JobRegistry::open(temporary.path()).unwrap();
+        let job_id = silo_api::jobs::JobId::new("job:1").unwrap();
+        registry.accept(job_id.clone(), "test.operation").unwrap();
+
+        let mapped = HandlerContext::map_registry_error(registry.cancel(&job_id).unwrap_err());
+
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(mapped.message, "This operation can't be cancelled.");
     }
 }

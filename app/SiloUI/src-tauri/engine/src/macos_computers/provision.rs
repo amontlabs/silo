@@ -8,8 +8,8 @@
 use super::setup_log::SetupLog;
 use super::MacosContext;
 use super::{
-    app_data, checkpoints, developer_tools, engine, guest_access, guest_clipboard, guest_computer_use,
-    layout_and_record, offline_setup, personalize, recovery, set_detail,
+    app_data, checkpoints, developer_tools, engine, guest_access, guest_clipboard,
+    guest_computer_use, layout_and_record, offline_setup, personalize, recovery, set_detail,
     store::{self, Layout, Record, SetupProgress},
     templates, Stop, RUN,
 };

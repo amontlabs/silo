@@ -152,8 +152,7 @@ impl Record {
     }
 
     pub(super) fn developer_tools_stale(&self) -> bool {
-        self.developer_tools_version.as_deref()
-            != Some(super::developer_tools::version().as_str())
+        self.developer_tools_version.as_deref() != Some(super::developer_tools::version().as_str())
     }
 
     /// Readiness shown to the user and used by operations that require a current setup.
@@ -247,7 +246,9 @@ pub(super) fn change_resources(
         return Err("Finish setting up the computer before changing its CPU or memory.".into());
     }
     if restore_unfinished {
-        return Err("Restart Silo to finish the interrupted Restore before changing CPU or memory.".into());
+        return Err(
+            "Restart Silo to finish the interrupted Restore before changing CPU or memory.".into(),
+        );
     }
     if record
         .pending_restore
@@ -704,14 +705,27 @@ mod tests {
             cpus: original.cpus,
             memory_gib: original.memory_gib,
         };
-        let edited = change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[]).unwrap();
+        let edited =
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[]).unwrap();
         assert_eq!(edited.cpus, 8);
         assert_eq!(edited.memory_gib, 16);
         assert_eq!(edited.disk_gib, original.disk_gib);
-        assert!(change_resources(&original, State::Running, false, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("Stop the computer"));
-        assert!(change_resources(&original, State::Starting, false, 8, 16, expected, HOST, &[]).is_err());
+        assert!(
+            change_resources(&original, State::Running, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("Stop the computer")
+        );
+        assert!(change_resources(
+            &original,
+            State::Starting,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .is_err());
     }
 
     #[test]
@@ -721,9 +735,11 @@ mod tests {
             cpus: original.cpus + 1,
             memory_gib: original.memory_gib,
         };
-        assert!(change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("settings changed"));
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("settings changed")
+        );
     }
 
     #[test]
@@ -737,12 +753,26 @@ mod tests {
             cpus: original.cpus,
             memory_gib: original.memory_gib,
         };
-        assert!(change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("saved memory"));
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("saved memory")
+        );
         original.pending_restore.as_mut().unwrap().memory = false;
-        assert!(change_resources(&original, State::Stopped, false, 11, 16, expected, HOST, &[]).is_err());
-        assert!(change_resources(&original, State::Stopped, false, 8, 29, expected, HOST, &[]).is_err());
+        assert!(change_resources(
+            &original,
+            State::Stopped,
+            false,
+            11,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .is_err());
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 29, expected, HOST, &[]).is_err()
+        );
     }
 
     #[test]
@@ -753,19 +783,46 @@ mod tests {
             cpus: incomplete.cpus,
             memory_gib: incomplete.memory_gib,
         };
-        assert!(change_resources(&incomplete, State::Stopped, false, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("Finish setting up"));
+        assert!(change_resources(
+            &incomplete,
+            State::Stopped,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("Finish setting up"));
 
         let mut uninstalled = finished();
         uninstalled.installed = false;
-        assert!(change_resources(&uninstalled, State::Stopped, false, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("Finish setting up"));
+        assert!(change_resources(
+            &uninstalled,
+            State::Stopped,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("Finish setting up"));
 
-        assert!(change_resources(&finished(), State::Stopped, true, 8, 16, expected, HOST, &[])
-            .unwrap_err()
-            .contains("interrupted Restore"));
+        assert!(change_resources(
+            &finished(),
+            State::Stopped,
+            true,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("interrupted Restore"));
     }
 
     fn finished() -> Record {
@@ -1094,9 +1151,13 @@ mod tests {
         );
 
         let mut old_setup = json.clone();
-        old_setup["setup"].as_object_mut().unwrap().remove("developerTools");
+        old_setup["setup"]
+            .as_object_mut()
+            .unwrap()
+            .remove("developerTools");
         fs::write(layout.record(), serde_json::to_vec(&old_setup).unwrap()).unwrap();
-        let old_with_setup: Record = serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+        let old_with_setup: Record =
+            serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert!(!old_with_setup.setup.developer_tools);
 
         let mut old = json;

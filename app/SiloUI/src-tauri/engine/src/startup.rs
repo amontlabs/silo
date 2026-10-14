@@ -281,16 +281,20 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
                 &macos_ids,
                 &recovered_stops,
             )?;
-            Ok(start_selected(&settings, &state.cancelled, |id, cancelled| {
-                let result = services.start_at_launch(id, cancelled);
-                if let Some(context) = silo_engine::context::current() {
-                    context.publish(
-                        Event::new("silo://application-state-changed", Value::Null),
-                        Audience::All,
-                    );
-                }
-                result
-            }))
+            Ok(start_selected(
+                &settings,
+                &state.cancelled,
+                |id, cancelled| {
+                    let result = services.start_at_launch(id, cancelled);
+                    if let Some(context) = silo_engine::context::current() {
+                        context.publish(
+                            Event::new("silo://application-state-changed", Value::Null),
+                            Audience::All,
+                        );
+                    }
+                    result
+                },
+            ))
         });
     let failures = result.unwrap_or_else(|error| vec![error]);
     if !failures.is_empty() && !state.cancelled.load(Ordering::SeqCst) {
@@ -494,8 +498,11 @@ mod tests {
             vec![mac_second.clone(), linux.to_string(), mac_first.clone()]
         );
 
-        std::fs::write(&metadata, json!({"schemaVersion":1,"computers":[]}).to_string())
-            .unwrap();
+        std::fs::write(
+            &metadata,
+            json!({"schemaVersion":1,"computers":[]}).to_string(),
+        )
+        .unwrap();
         let defaults = json!({"onboardingComplete":true,"startComputersAtLaunch":true});
         let resolved = settings_for_launch_with_macos_ids(
             defaults.as_object().unwrap().clone(),
@@ -603,15 +610,19 @@ mod tests {
         let settings = json!({"onboardingComplete":true,"startComputersAtLaunch":true,"startupComputerIds":["first","second","third"]});
         let cancelled = AtomicBool::new(false);
         let mut calls = Vec::new();
-        let failures = start_selected(settings.as_object().unwrap(), &cancelled, |id, _cancelled| {
-            calls.push(id.to_owned());
-            if id == "first" {
-                Err("First failed".into())
-            } else {
-                cancelled.store(true, Ordering::SeqCst);
-                Ok(())
-            }
-        });
+        let failures = start_selected(
+            settings.as_object().unwrap(),
+            &cancelled,
+            |id, _cancelled| {
+                calls.push(id.to_owned());
+                if id == "first" {
+                    Err("First failed".into())
+                } else {
+                    cancelled.store(true, Ordering::SeqCst);
+                    Ok(())
+                }
+            },
+        );
         assert_eq!(calls, vec!["first", "second"]);
         assert_eq!(failures, vec!["First failed"]);
     }

@@ -67,16 +67,21 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
   useEffect(() => { pending.current = conflict }, [conflict])
   useEffect(() => () => pending.current?.answer(null), [])
 
-  const run = useCallback(async (verb: string, label: string, work: (id: string) => Promise<void>) => {
+  const run = useCallback(async (verb: string, label: string, work: (id: string, setId: (id: string) => void) => Promise<void>) => {
     if (!api || running.current) return
     running.current = true
     setBusy(true)
     const id = nextId()
+    let toastId = id
     active.current = { id, label, verb }
+    const setId = (nextId: string) => {
+      toastId = nextId
+      active.current = { id: nextId, label, verb }
+    }
     try {
-      await work(id)
+      await work(id, setId)
     } catch (error) {
-      showOperationFailure(id, `${verb === "Uploading" ? "Upload" : "Download"} failed`, { description: errorMessage(error), native: false })
+      showOperationFailure(toastId, `${verb === "Uploading" ? "Upload" : "Download"} failed`, { description: errorMessage(error), native: false })
     } finally {
       active.current = null
       running.current = false
@@ -86,28 +91,33 @@ export function useFileTransfers(api: FileTransferActions | undefined): { contro
 
   const controls = useMemo<FileTransferControls | undefined>(() => api && {
     busy,
-    upload: (computer, directory, label) => void run("Uploading", label, async id => {
+    upload: (computer, directory, label) => void run("Uploading", label, async (id, setId) => {
       const picked = await api.chooseUploadFiles()
       if (!picked || picked.names.length === 0) return
       const { names } = picked
-      const start = (policy: ConflictPolicy) => {
-        showOperationProgress(id, {
+      const start = (transferId: string, policy: ConflictPolicy) => {
+        showOperationProgress(transferId, {
           title: `Uploading ${summarizeNames(names)} to ${label}`,
           progress: null,
-          cancel: { onCancel: () => void api.cancel(id).catch(() => {}) },
+          cancel: { onCancel: () => void api.cancel(transferId).catch(() => {}) },
           computer,
         })
-        return api.upload({ id, computer, directory, selection: picked.token, conflict: policy })
+        return api.upload({ id: transferId, computer, directory, selection: picked.token, conflict: policy })
       }
-      let outcome = await start("ask")
+      let transferId = id
+      let outcome = await start(transferId, "ask")
       if (outcome.status === "conflict") {
-        dismissOperationToast(id)
+        dismissOperationToast(transferId)
         const choice = await askConflict(outcome.names)
         if (!choice) return
-        outcome = await start(choice)
+        // The conflict result finishes its job. The user's decision is a new job,
+        // with independent progress and cancellation ownership.
+        transferId = nextId()
+        setId(transferId)
+        outcome = await start(transferId, choice)
       }
-      if (outcome.status === "done") showOperationSuccess(id, `Uploaded ${summarizeNames(outcome.names)} to ${label}`, { description: directory, native: false })
-      else dismissOperationToast(id)
+      if (outcome.status === "done") showOperationSuccess(transferId, `Uploaded ${summarizeNames(outcome.names)} to ${label}`, { description: directory, native: false })
+      else dismissOperationToast(transferId)
     }),
     download: (computer, path, label) => void run("Downloading", label, async id => {
       showOperationProgress(id, {

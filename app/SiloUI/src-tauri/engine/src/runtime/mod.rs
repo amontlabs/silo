@@ -120,8 +120,23 @@ const MAX_COMPUTER_COUNT: usize = 64;
 const MANAGED_LABEL: &str = "silo.managed=true";
 
 fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
-    host.engine_context()
-        .publish(Event::new(name, payload), Audience::All);
+    let context = host.engine_context();
+    let audience = if name == "silo://computer-configuration-progress" {
+        setup_progress_audience()
+    } else {
+        Audience::All
+    };
+    if let Err(error) =
+        crate::jobs::publish_source_progress(context.as_ref(), name, &payload, audience.clone())
+    {
+        eprintln!("silo-engine: could not persist {name} job progress: {error}");
+    }
+    context.publish(Event::new(name, payload), audience);
+}
+
+fn setup_progress_audience() -> Audience {
+    // Preserve the existing setup target while the Tauri client switches to socket IDs.
+    Audience::Client(silo_engine::context::ClientId::new("main"))
 }
 
 fn publish_configuration_progress(context: &dyn EngineContext, payload: Value) {
@@ -3182,6 +3197,27 @@ pub(crate) fn gated_auto_retry<T>(
     gated_auto_retry_with(&AUTO_RETRY_DELAYS, base_label, acquire, prepare, work)
 }
 
+pub(crate) fn gated_auto_retry_with_cancel_token<T>(
+    base_label: &str,
+    token: Arc<AtomicBool>,
+    acquire: impl Fn(&str) -> Result<operation_gate::OperationGuard<'static>, RuntimeError>,
+    prepare: impl Fn(&operation_gate::OperationGuard<'static>),
+    work: impl Fn() -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    gated_auto_retry_classified_with_token(
+        token,
+        &AUTO_RETRY_DELAYS,
+        base_label,
+        acquire,
+        prepare,
+        work,
+        transient_runtime_error,
+        || RuntimeError::Cancelled {
+            operation: base_label.to_owned(),
+        },
+    )
+}
+
 fn gated_auto_retry_with<T>(
     delays: &[Duration],
     base_label: &str,
@@ -3231,9 +3267,29 @@ fn gated_auto_retry_classified<T, E>(
     is_transient: impl Fn(&E) -> bool,
     cancelled: impl Fn() -> E,
 ) -> Result<T, E> {
+    gated_auto_retry_classified_with_token(
+        Arc::new(AtomicBool::new(false)),
+        delays,
+        base_label,
+        acquire,
+        prepare,
+        work,
+        is_transient,
+        cancelled,
+    )
+}
+
+fn gated_auto_retry_classified_with_token<T, E>(
+    token: Arc<AtomicBool>,
+    delays: &[Duration],
+    base_label: &str,
+    acquire: impl Fn(&str) -> Result<operation_gate::OperationGuard<'static>, E>,
+    prepare: impl Fn(&operation_gate::OperationGuard<'static>),
+    work: impl Fn() -> Result<T, E>,
+    is_transient: impl Fn(&E) -> bool,
+    cancelled: impl Fn() -> E,
+) -> Result<T, E> {
     let total = delays.len() + 1;
-    // One shared cancel token for the whole retry sequence, created before the first attempt.
-    let token = Arc::new(AtomicBool::new(false));
     // The first attempt's start time, so every attempt reports one continuous
     // operation in the queue and slow-operation flagging can fire (D-27).
     let mut first_since = None;
@@ -3320,14 +3376,33 @@ pub fn computer_action_with_host(
     let started = std::time::Instant::now();
     let notice_action = action.clone();
     let notice_name = name.clone();
-    let result = (|| -> Result<(String, ApplicationSource, bool), (Option<String>, LifecycleFailure, BridgeError)> {
+    let result = (|| -> Result<
+        (silo_api::jobs::JobId, String, ApplicationSource, bool),
+        (Option<silo_api::jobs::JobId>, Option<String>, LifecycleFailure, BridgeError),
+    > {
         // Setup failures before the operation runs are genuine faults worth notifying about.
-        let paths = runtime_paths(host).map_err(|error| (None, LifecycleFailure::Failed, error.into()))?;
+        let paths = runtime_paths(host).map_err(|error| {
+            (None, None, LifecycleFailure::Failed, error.into())
+        })?;
         // Start/stop/restart change only this computer's runtime; resource admission is
         // against device totals, not other computers, so per-computer ordering is sufficient. The
         // key collapses double-clicked lifecycle requests into one queued action.
         // Resolve the stable id before acquiring so ordering survives a rename.
-        let computer_id = resolve_computer_id(&paths, &name).map_err(|error| (None, LifecycleFailure::Failed, error.into()))?;
+        let computer_id = resolve_computer_id(&paths, &name).map_err(|error| {
+            (None, None, LifecycleFailure::Failed, error.into())
+        })?;
+        let context = host.engine_context();
+        let accepted = crate::jobs::allocate(context.as_ref(), "computers.lifecycle").map_err(
+            |error| {
+                (
+                    None,
+                    Some(computer_id.clone()),
+                    LifecycleFailure::Failed,
+                    BridgeError::from(error.to_string()),
+                )
+            },
+        )?;
+        let job_id = accepted.job_id;
         let base_label = lifecycle_label(&action, &name);
         let key = format!("computer:{computer_id}:{action}");
         // Start/restart may be cancelled while running; stop may not. Expected durations
@@ -3338,19 +3413,49 @@ pub fn computer_action_with_host(
             _ => Duration::from_secs(600),
         };
         let allow_cancel = matches!(action.as_str(), "start" | "restart");
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let cancel_job_id = job_id.clone();
+        let cancel_flag = cancellation.clone();
+        let registry = context.job_registry().map_err(|error| {
+            (
+                Some(job_id.clone()),
+                Some(computer_id.clone()),
+                LifecycleFailure::Failed,
+                BridgeError::from(error.to_string()),
+            )
+        })?;
+        registry.register_cancel(
+            job_id.clone(),
+            crate::jobs::CancelRoute::JobGate,
+            move || {
+                if allow_cancel || !OPERATIONS.contains_job(&cancel_job_id) {
+                    cancel_flag.store(true, Ordering::SeqCst);
+                }
+                OPERATIONS
+                    .cancel_job(&cancel_job_id)
+                    .map_err(|error| error.to_string())
+            },
+        );
         let last_request = std::cell::Cell::new(None);
         let acquire = |label: &str| -> Result<operation_gate::OperationGuard<'static>, RuntimeError> {
             let guard = OPERATIONS
                 .kind(operation_gate::OperationKind::Lifecycle)
                 .retry_after(last_request.get())
-                .acquire(
+                .acquire_for_job(
                     operation_gate::Scope::Computer { id: computer_id.clone() },
                     Some(name.clone()),
                     label,
                     Some(key.clone()),
+                    job_id.clone(),
+                    Some(cancellation.clone()),
                 )
                 .map_err(RuntimeError::from)?;
             last_request.set(Some(guard.request_id()));
+            registry
+                .mark_running(&job_id)
+                .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
+            let gate_id = guard.request_id();
+            registry.associate_gate(gate_id, job_id.clone());
             Ok(guard)
         };
         let prepare = |guard: &operation_gate::OperationGuard<'static>| {
@@ -3377,13 +3482,39 @@ pub fn computer_action_with_host(
             // out as its own event, and the first step after the boot refreshes the state so
             // the row leaves "stopped" as soon as the computer is up.
             let sink: LifecycleSink = {
-                let (computer_id, action) = (computer_id.clone(), action.clone());
+                let (computer_id, action, job_id) =
+                    (computer_id.clone(), action.clone(), job_id.clone());
                 let context = host.engine_context();
                 std::rc::Rc::new(move |step| {
+                    let payload = json!({
+                        "computerId": computer_id,
+                        "action": action,
+                        "step": step.id()
+                    });
+                    let source = serde_json::from_value::<silo_api::jobs::LifecycleProgress>(
+                        payload.clone(),
+                    );
+                    match source {
+                        Ok(data) => {
+        if let Err(error) = crate::jobs::publish_progress(
+                                context.as_ref(),
+                                silo_api::jobs::JobProgress::Lifecycle {
+                                    job_id: job_id.clone(),
+                                    kind: Some(silo_api::methods::operations::OperationKind::Lifecycle),
+                                    computer_id: Some(computer_id.clone()),
+                                    data,
+                                },
+                                Audience::All,
+                            ) {
+                                eprintln!("silo-engine: could not persist lifecycle progress: {error}");
+                            }
+                        }
+                        Err(error) => eprintln!("silo-engine: could not encode lifecycle progress: {error}"),
+                    }
                     context.publish(
                         Event::new(
-                        "silo://lifecycle-progress",
-                        json!({"computerId": computer_id, "action": action, "step": step.id()}),
+                            "silo://lifecycle-progress",
+                            payload,
                         ),
                         Audience::All,
                     );
@@ -3402,7 +3533,13 @@ pub fn computer_action_with_host(
         // Start/stop/restart are idempotent, so transient failures retry automatically.
         // Other lifecycle actions run once.
         let result = if matches!(action.as_str(), "start" | "stop" | "restart") {
-            gated_auto_retry(&base_label, acquire, prepare, work)
+            gated_auto_retry_with_cancel_token(
+                &base_label,
+                cancellation.clone(),
+                acquire,
+                prepare,
+                work,
+            )
         } else {
             match acquire(&base_label) {
                 Ok(guard) => {
@@ -3420,8 +3557,9 @@ pub fn computer_action_with_host(
         // Classify before the typed error is flattened to a message: a cancellation or a
         // deduplicated request is an expected outcome, not a failure to notify about.
         match result {
-            Ok(state) => Ok((computer_id, state, handed_off)),
+            Ok(state) => Ok((job_id, computer_id, state, handed_off)),
             Err(error) => Err((
+                Some(job_id),
                 Some(computer_id),
                 lifecycle_failure(&error),
                 BridgeError::from(error),
@@ -3433,7 +3571,17 @@ pub fn computer_action_with_host(
         host.lifecycle_notice(&notice_action, &notice_name, computer_id, elapsed, outcome);
     };
     match result {
-        Ok((computer_id, state, handed_off)) => {
+        Ok((job_id, computer_id, state, handed_off)) => {
+            let state_value = serde_json::to_value(&state)
+                .map_err(|error| BridgeError::from(error.to_string()))?;
+            publish_linux_computers_changed(host.engine_context().as_ref(), &state);
+            crate::jobs::finish_with_result(
+                host.engine_context().as_ref(),
+                job_id,
+                state_value,
+                Audience::All,
+            )
+            .map_err(|error| BridgeError::from(error.to_string()))?;
             notify(
                 Some(computer_id),
                 if handed_off {
@@ -3444,7 +3592,31 @@ pub fn computer_action_with_host(
             );
             Ok(state)
         }
-        Err((computer_id, failure, message)) => {
+        Err((job_id, computer_id, failure, message)) => {
+            if let Some(job_id) = job_id {
+                let code = match message.code {
+                    ErrorCode::UpdateInProgress => silo_api::jobs::ErrorCode::UpdateInProgress,
+                    ErrorCode::UnsupportedRemoteOperation => {
+                        silo_api::jobs::ErrorCode::UnsupportedRemoteOperation
+                    }
+                    ErrorCode::Cancelled => silo_api::jobs::ErrorCode::Cancelled,
+                    ErrorCode::AlreadyQueued => silo_api::jobs::ErrorCode::AlreadyQueued,
+                    ErrorCode::Busy => silo_api::jobs::ErrorCode::Busy,
+                    ErrorCode::NotFound => silo_api::jobs::ErrorCode::NotFound,
+                    ErrorCode::IncompatibleVersion => {
+                        silo_api::jobs::ErrorCode::IncompatibleVersion
+                    }
+                    ErrorCode::Internal => silo_api::jobs::ErrorCode::Internal,
+                };
+                crate::jobs::finish_with_error(
+                    host.engine_context().as_ref(),
+                    job_id,
+                    code,
+                    message.message.clone(),
+                    Audience::All,
+                )
+                .map_err(|error| BridgeError::from(error.to_string()))?;
+            }
             notify(computer_id, failure.outcome(&message.message));
             Err(message)
         }
@@ -3617,12 +3789,18 @@ fn publish_creation_wait_with_context(
         }
         Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
+    let payload = serde_json::to_value(event).unwrap_or(Value::Null);
+    if let Err(error) = crate::jobs::publish_source_progress(
+        context,
+        "silo://computer-configuration-progress",
+        &payload,
+        setup_progress_audience(),
+    ) {
+        eprintln!("silo-engine: could not persist setup wait progress: {error}");
+    }
     silo_engine::context::publish_to_main_window(
         context,
-        silo_engine::context::Event::new(
-            "silo://computer-configuration-progress",
-            serde_json::to_value(event).unwrap_or(Value::Null),
-        ),
+        silo_engine::context::Event::new("silo://computer-configuration-progress", payload),
     );
 }
 
@@ -4170,6 +4348,105 @@ fn normalize_request_id(request_id: Option<String>) -> Result<String, String> {
     Ok(request_id)
 }
 
+struct AcceptedSetupJob {
+    job_id: silo_api::jobs::JobId,
+    cancelled: Arc<AtomicBool>,
+}
+
+fn accept_setup_job(
+    context: &dyn silo_engine::context::EngineContext,
+    request_id: &str,
+    method: &str,
+) -> Result<AcceptedSetupJob, String> {
+    let accepted = crate::jobs::accept_domain_id(context, "setup", request_id, method)
+        .map_err(|error| error.to_string())?;
+    if !accepted.created {
+        return Err(if accepted.acknowledged {
+            "This setup request ID was already acknowledged. Start a new request.".to_owned()
+        } else {
+            "This setup request ID is already in use.".to_owned()
+        });
+    }
+    let cancel_key = accepted.job_id.as_str().to_owned();
+    let job_id = accepted.job_id.clone();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancel_flag = cancelled.clone();
+    context
+        .job_registry()
+        .map_err(|error| error.to_string())?
+        .register_cancel(job_id, crate::jobs::CancelRoute::SetupGate, move || {
+            let result = OPERATIONS
+                .cancel_existing_key(&cancel_key)
+                .map_err(|error| error.to_string());
+            if result.is_ok() {
+                cancel_flag.store(true, Ordering::SeqCst);
+            }
+            result
+        });
+    Ok(AcceptedSetupJob {
+        job_id: accepted.job_id,
+        cancelled,
+    })
+}
+
+fn finish_setup_job(
+    context: &dyn silo_engine::context::EngineContext,
+    job_id: silo_api::jobs::JobId,
+    result: &Result<ApplicationSource, String>,
+    cancelled: bool,
+) -> Result<(), String> {
+    match result {
+        Ok(state) => {
+            publish_linux_computers_changed(context, state);
+            crate::jobs::finish_with_result(
+                context,
+                job_id,
+                serde_json::to_value(state).map_err(|error| error.to_string())?,
+                setup_progress_audience(),
+            )
+        }
+        Err(message) => crate::jobs::finish_with_error(
+            context,
+            job_id,
+            if cancelled {
+                silo_api::jobs::ErrorCode::Cancelled
+            } else {
+                silo_api::jobs::ErrorCode::Internal
+            },
+            message.clone(),
+            setup_progress_audience(),
+        ),
+    }
+    .map_err(|error| error.to_string())
+}
+
+fn publish_linux_computers_changed(
+    context: &dyn silo_engine::context::EngineContext,
+    state: &ApplicationSource,
+) {
+    let Ok(linux) = serde_json::to_value(state) else {
+        return;
+    };
+    context.publish(
+        Event::new("computers.changed", serde_json::json!({"linux": linux})),
+        Audience::All,
+    );
+}
+
+fn attach_setup_gate_job(
+    context: &dyn silo_engine::context::EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    guard: &operation_gate::OperationGuard<'static>,
+) -> Result<(), String> {
+    let gate_id = guard.request_id();
+    let registry = context.job_registry()?;
+    registry
+        .mark_running(job_id)
+        .map_err(|error| error.to_string())?;
+    registry.associate_gate(gate_id, job_id.clone());
+    Ok(())
+}
+
 /// Validate, save and verify a finalized configuration with the shared journal,
 /// progress events and completion outcome. The caller holds the operation gate and
 /// supplies the exact `request` to persist (a whole-list save or a targeted change
@@ -4302,6 +4579,12 @@ pub fn retry_computer_configuration_with_host(
 ) -> Result<ApplicationSource, String> {
     host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
+    let context = host.engine_context();
+    let accepted = accept_setup_job(
+        context.as_ref(),
+        &request_id,
+        "computers.configuration.retry",
+    )?;
     let failure_title = retry_computer.as_deref().map_or_else(
         || "Couldn\u{2019}t finish computer setup".to_string(),
         |name| format!("Couldn\u{2019}t finish setting up {name}"),
@@ -4317,10 +4600,18 @@ pub fn retry_computer_configuration_with_host(
             .unwrap_or_default();
         crate::creation_inputs::wait_before_gate(&paths, &request_id, &needs)?;
         // Changes the shared computer inventory/metadata; device-wide.
-        let _guard = OPERATIONS
+        let guard = OPERATIONS
             .kind(operation_gate::OperationKind::ComputerConfiguration)
-            .device("Retrying computer settings")
+            .acquire_for_job(
+                operation_gate::Scope::Device,
+                None,
+                "Retrying computer settings",
+                Some(accepted.job_id.as_str().to_owned()),
+                accepted.job_id.clone(),
+                Some(accepted.cancelled.clone()),
+            )
             .map_err(|e| e.to_string())?;
+        attach_setup_gate_job(context.as_ref(), &accepted.job_id, &guard)?;
         shutdown::ensure_accepting_operations()?;
         // Resume the configuration the interrupted attempt recorded. With no pending
         // attempt, re-verify the committed inventory (an idempotent no-op on success).
@@ -4340,6 +4631,8 @@ pub fn retry_computer_configuration_with_host(
     if let Err(message) = &result {
         notify_configuration_failure(host, &failure_title, message);
     }
+    let cancelled = accepted.cancelled.load(Ordering::SeqCst);
+    finish_setup_job(context.as_ref(), accepted.job_id, &result, cancelled)?;
     result
 }
 
@@ -4369,6 +4662,12 @@ pub fn change_computer_configuration_with_host(
 ) -> Result<ApplicationSource, String> {
     host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
+    let context = host.engine_context();
+    let accepted = accept_setup_job(
+        context.as_ref(),
+        &request_id,
+        "computers.configuration.change",
+    )?;
     let failure_title = change.failure_title();
     let deleted = change.deleted_ids();
     let result = (|| {
@@ -4384,9 +4683,15 @@ pub fn change_computer_configuration_with_host(
             .unwrap_or_default();
         crate::creation_inputs::wait_before_gate(&paths, &request_id, &needs)?;
         // Changes the shared computer inventory/metadata; device-wide.
-        let _guard = OPERATIONS
-            .removing(&change.deleted_ids(), &change.label())
+        let guard = OPERATIONS
+            .removing_for_job(
+                &change.deleted_ids(),
+                &change.label(),
+                accepted.job_id.clone(),
+                Some(accepted.cancelled.clone()),
+            )
             .map_err(|e| e.to_string())?;
+        attach_setup_gate_job(context.as_ref(), &accepted.job_id, &guard)?;
         shutdown::ensure_accepting_operations()?;
         // Read fresh, then apply the specific change so a queued edit lands on the
         // latest inventory instead of overwriting concurrent work.
@@ -4405,6 +4710,8 @@ pub fn change_computer_configuration_with_host(
         // A deleted computer has nothing left to open: withdraw its delivered notices.
         Ok(_) => host.clear_computer_notices(&deleted),
     }
+    let cancelled = accepted.cancelled.load(Ordering::SeqCst);
+    finish_setup_job(context.as_ref(), accepted.job_id, &result, cancelled)?;
     result
 }
 
@@ -6381,12 +6688,15 @@ mod tests {
         );
 
         let published = context.published();
-        assert_eq!(published.len(), 1);
+        assert_eq!(published.len(), 2);
+        assert_eq!(published[0].0.name, "operations.job.progress");
+        assert_eq!(published[0].0.payload["jobId"], "setup:request");
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
         assert_eq!(
-            published[0].0.name,
+            published[1].0.name,
             "silo://computer-configuration-progress"
         );
-        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+        assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
     }
 
     #[test]

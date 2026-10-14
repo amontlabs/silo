@@ -138,21 +138,27 @@ fn lock() -> Result<Lock, String> {
         || required_receipts
             .iter()
             .any(|required| !receipt_ids.contains(required))
-        || receipt_ids.iter().collect::<std::collections::HashSet<_>>().len() != receipt_ids.len()
+        || receipt_ids
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != receipt_ids.len()
         || lock.clt.packages.iter().any(|package| {
             !validate_asset(&package.asset, "swcdn.apple.com", ".pkg")
                 || !valid_version(&package.receipt_version)
                 || package
                     .receipt_id
                     .bytes()
-                    .any(|byte| {
-                        !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_'))
-                    })
+                    .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_')))
         })
         || !valid_version(&lock.git_lfs.version)
         || !validate_asset(&lock.git_lfs.asset, "github.com", ".zip")
         || lock.git_lfs.asset.file != format!("git-lfs-darwin-arm64-v{}.zip", lock.git_lfs.version)
-        || !lock.git_lfs.asset.url.contains("/git-lfs/git-lfs/releases/download/")
+        || !lock
+            .git_lfs
+            .asset
+            .url
+            .contains("/git-lfs/git-lfs/releases/download/")
         || !valid_version(&lock.gh.version)
         || !validate_asset(&lock.gh.asset, "github.com", ".zip")
         || lock.gh.asset.file != format!("gh_{}_macOS_arm64.zip", lock.gh.version)
@@ -225,7 +231,10 @@ fn script(lock: &Lock) -> String {
         )
         .replace("@CLT_VERSION@", &lock.clt.version)
         .replace("@CLT_PACKAGES@", &packages)
-        .replace("@CLT_EXECUTABLES_RECEIPT_VERSION@", &executable_receipt_version)
+        .replace(
+            "@CLT_EXECUTABLES_RECEIPT_VERSION@",
+            &executable_receipt_version,
+        )
         .replace("@GIT_LFS_VERSION@", &lock.git_lfs.version)
         .replace("@GIT_LFS_FILE@", &lock.git_lfs.asset.file)
         .replace("@GIT_LFS_BYTES@", &lock.git_lfs.asset.bytes.to_string())
@@ -245,7 +254,8 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 fn hash_file(path: &Path) -> Result<String, String> {
-    let io = |error: std::io::Error| super::store::io_error("check a developer tools download", &error);
+    let io =
+        |error: std::io::Error| super::store::io_error("check a developer tools download", &error);
     let mut file = fs::File::open(path).map_err(io)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1024 * 1024];
@@ -348,17 +358,33 @@ pub(super) fn install(
             "Developer tools are not locked for macOS build {guest_build}. Try setup again after Silo updates its developer tools lock."
         ));
     }
-    let operation_cancelled = || {
-        cancelled() || crate::runtime::OPERATIONS.removal_queued(id)
-    };
+    let operation_cancelled = || cancelled() || crate::runtime::OPERATIONS.removal_queued(id);
     let cache = super::app_data(app)?.join(CACHE_DIR);
     let _turn = download_turn(&operation_cancelled)?;
     let mut artifacts = Vec::with_capacity(lock.clt.packages.len() + 2);
     for package in &lock.clt.packages {
-        artifacts.push(cached(app, id, &cache, &package.asset, &operation_cancelled)?);
+        artifacts.push(cached(
+            app,
+            id,
+            &cache,
+            &package.asset,
+            &operation_cancelled,
+        )?);
     }
-    artifacts.push(cached(app, id, &cache, &lock.git_lfs.asset, &operation_cancelled)?);
-    artifacts.push(cached(app, id, &cache, &lock.gh.asset, &operation_cancelled)?);
+    artifacts.push(cached(
+        app,
+        id,
+        &cache,
+        &lock.git_lfs.asset,
+        &operation_cancelled,
+    )?);
+    artifacts.push(cached(
+        app,
+        id,
+        &cache,
+        &lock.gh.asset,
+        &operation_cancelled,
+    )?);
     if operation_cancelled() {
         return Err(guest_access::CANCELLED.into());
     }
@@ -375,9 +401,7 @@ pub(super) fn install(
     let ready = guest_access::run_cancellable(
         &layout,
         &record,
-        &format!(
-            "/usr/bin/sudo -n /bin/rm -rf {STAGE} && /bin/mkdir -p {STAGE}"
-        ),
+        &format!("/usr/bin/sudo -n /bin/rm -rf {STAGE} && /bin/mkdir -p {STAGE}"),
         Duration::from_secs(60),
         &operation_cancelled,
     )?;
@@ -450,10 +474,7 @@ fn failure_reason<'a>(stderr: &'a str, stdout: &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        os::unix::fs::PermissionsExt,
-        process::Command,
-    };
+    use std::{os::unix::fs::PermissionsExt, process::Command};
 
     #[test]
     fn checked_lock_pins_apple_packages_lfs_and_gh() {
@@ -568,7 +589,10 @@ mod tests {
     #[test]
     fn install_failure_prefers_the_guest_error_over_stdout_progress() {
         assert_eq!(
-            failure_reason("log noise\nerror: receipt verification failed\n", "Verified package\n"),
+            failure_reason(
+                "log noise\nerror: receipt verification failed\n",
+                "Verified package\n"
+            ),
             "receipt verification failed"
         );
         assert_eq!(

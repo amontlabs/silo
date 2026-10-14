@@ -72,7 +72,7 @@ fn select_generation(app_data: &Path, directory: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn selected_runtime_storage(app_data: &Path) -> Result<PathBuf, String> {
+pub fn selected_runtime_storage(app_data: &Path) -> Result<PathBuf, String> {
     Ok(app_data.join(generation(app_data)?.as_deref().unwrap_or("runtime")))
 }
 

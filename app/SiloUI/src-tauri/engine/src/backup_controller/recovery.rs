@@ -247,6 +247,22 @@ pub(super) fn try_load(history: &Path) -> Result<Option<Journal>, LoadFailure> {
     validate(&journal).map_err(LoadFailure::Unusable)?;
     Ok(Some(journal))
 }
+
+/// Returns a terminal operation already committed in the domain journal. The
+/// socket host calls this before serving job get/ack requests after restart.
+pub(super) fn retained_terminal_operation(
+    history: &Path,
+) -> Result<Option<(String, Value)>, String> {
+    let Some(journal) = try_load(history).map_err(LoadFailure::into_message)? else {
+        return Ok(None);
+    };
+    if journal.terminal.is_none() {
+        return Ok(None);
+    }
+    let operation = serde_json::to_value(journal.operation()).map_err(|error| error.to_string())?;
+    Ok(Some((journal.identity().to_owned(), operation)))
+}
+
 /// [`try_load`] with its failure as a message, for tests that only read what was saved.
 #[cfg(test)]
 pub(super) fn load(history: &Path) -> Result<Option<Journal>, String> {
@@ -924,13 +940,10 @@ pub(super) fn resume(
                     .operation = None;
             }
         }
-        finish(&controller);
-        publish(&controller);
+        super::publish_and_finish(&controller, || publish(&controller));
     };
     runtime.spawn_blocking(move || {
-        if super::contain_worker_panic(&outer_controller, kind, &archive, target, work) {
-            publish(&outer_controller);
-        }
+        super::contain_worker_panic(&outer_controller, kind, &archive, target, work);
     });
     Ok(())
 }
