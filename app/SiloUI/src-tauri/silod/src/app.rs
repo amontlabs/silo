@@ -128,6 +128,8 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    crate::methods::access::install(context.clone())?;
+    crate::methods::access::start_connections(context.clone())?;
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
     let runtime_home =

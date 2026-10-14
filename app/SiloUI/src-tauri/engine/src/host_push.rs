@@ -283,6 +283,18 @@ pub(crate) fn discover(
             .0;
     }
 }
+
+/// Discovers repositories for a stable local computer identity.
+/// The socket API accepts IDs; names are resolved only at this runtime boundary.
+pub fn discover_repositories(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    refresh: bool,
+) -> Result<Vec<Value>, String> {
+    uuid::Uuid::parse_str(computer_id).map_err(|_| "Invalid computer identity.")?;
+    let name = runtime::remote_ops::local_computer_name_in(paths, computer_id)?;
+    discover(paths, &name, computer_id, refresh)
+}
 // The guest deadline and runtime output budget bound discovery. An entry-count
 // cutoff discards every result when a computer contains many Git worktrees.
 // Dependency and cache trees are skipped; they hold no repositories to push.
