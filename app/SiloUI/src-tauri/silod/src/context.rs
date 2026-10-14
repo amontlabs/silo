@@ -82,6 +82,10 @@ impl SilodContext {
         self.wire_events.connect(client_id)
     }
 
+    pub fn event_bus(&self) -> &EventBus {
+        &self.wire_events
+    }
+
     pub fn subscribe_events(
         &self,
         client_id: &ClientId,

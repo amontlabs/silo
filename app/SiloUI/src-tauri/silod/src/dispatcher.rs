@@ -21,6 +21,7 @@ use silo_engine::context::EngineContext;
 use uuid::Uuid;
 
 use crate::context::SilodContext;
+use crate::methods::{self, HandlerContext};
 
 const MAX_REQUEST_IDS: usize = 65_536;
 
@@ -46,14 +47,14 @@ pub struct DispatchError {
 }
 
 impl DispatchError {
-    fn internal(message: impl Into<String>) -> Self {
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self {
             code: ErrorCode::Internal,
             message: message.into(),
         }
     }
 
-    fn unsupported(method: &str) -> Self {
+    pub(crate) fn unsupported(method: &str) -> Self {
         Self {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: format!("The engine does not support {method}."),
@@ -82,6 +83,10 @@ impl SessionState {
 pub trait MethodRegistry: Send + Sync {
     fn descriptors(&self) -> &[MethodDescriptor];
 
+    fn capabilities(&self) -> &[MethodDescriptor] {
+        self.descriptors()
+    }
+
     fn dispatch<'a>(
         &'a self,
         method: MethodName,
@@ -93,11 +98,12 @@ pub trait MethodRegistry: Send + Sync {
 
 pub struct CoreMethodRegistry {
     descriptors: Vec<MethodDescriptor>,
+    capabilities: Vec<MethodDescriptor>,
 }
 
 impl Default for CoreMethodRegistry {
     fn default() -> Self {
-        let descriptors = method_registry()
+        let capabilities = method_registry()
             .iter()
             .copied()
             .filter(|descriptor| {
@@ -115,13 +121,20 @@ impl Default for CoreMethodRegistry {
                 )
             })
             .collect();
-        Self { descriptors }
+        Self {
+            descriptors: method_registry().to_vec(),
+            capabilities,
+        }
     }
 }
 
 impl MethodRegistry for CoreMethodRegistry {
     fn descriptors(&self) -> &[MethodDescriptor] {
         &self.descriptors
+    }
+
+    fn capabilities(&self) -> &[MethodDescriptor] {
+        &self.capabilities
     }
 
     fn dispatch<'a>(
@@ -157,7 +170,7 @@ impl MethodRegistry for CoreMethodRegistry {
                             });
                         }
                     }
-                    let client_id = silo_engine::context::ClientId::new(request.client_id);
+                    let client_id = silo_engine::context::ClientId::new(request.client_id.clone());
                     let subscription = context
                         .subscribe_events(&client_id, params.events)
                         .map_err(DispatchError::internal)?;
@@ -169,7 +182,7 @@ impl MethodRegistry for CoreMethodRegistry {
                 MethodName::EventsUnsubscribe => {
                     let params: EventsUnsubscribeParams = parse_params(params)?;
                     event_barrier = Some(context.unsubscribe_events(
-                        &silo_engine::context::ClientId::new(request.client_id),
+                        &silo_engine::context::ClientId::new(request.client_id.clone()),
                         &params.subscription,
                     ));
                     Ok(Value::Null)
@@ -181,7 +194,7 @@ impl MethodRegistry for CoreMethodRegistry {
                         &params.job_id,
                         params.offset_bytes,
                     )
-                        .map_err(registry_error)?
+                        .map_err(HandlerContext::map_registry_error)?
                         .ok_or_else(|| DispatchError {
                             code: ErrorCode::NotFound,
                             message: "The job was not found.".to_owned(),
@@ -195,7 +208,7 @@ impl MethodRegistry for CoreMethodRegistry {
                         .job_registry()
                         .map_err(DispatchError::internal)?
                         .acknowledge(&params.job_id)
-                        .map_err(registry_error)?;
+                        .map_err(HandlerContext::map_registry_error)?;
                     context.job_queue_changed();
                     Ok(Value::Null)
                 }
@@ -216,7 +229,7 @@ impl MethodRegistry for CoreMethodRegistry {
                         .job_registry()
                         .map_err(DispatchError::internal)?
                         .cancel(&params.job_id)
-                        .map_err(registry_error)?;
+                        .map_err(HandlerContext::map_registry_error)?;
                     Ok(Value::Null)
                 }
                 MethodName::NotificationsList => {
@@ -230,7 +243,12 @@ impl MethodRegistry for CoreMethodRegistry {
                     serde_json::to_value(snapshot.notices)
                         .map_err(|error| DispatchError::internal(error.to_string()))
                 }
-                _ => Err(DispatchError::unsupported(method_name(method))),
+                _ => {
+                    let handler_context = HandlerContext::new(context.clone(), request.clone());
+                    let output = methods::dispatch(&handler_context, method, &params).await?;
+                    event_barrier = output.event_barrier;
+                    Ok(output.value)
+                }
             }
             }
             .await;
@@ -258,7 +276,7 @@ impl Dispatcher {
 
     pub fn capabilities(&self) -> Vec<String> {
         self.registry
-            .descriptors()
+            .capabilities()
             .iter()
             .map(|descriptor| descriptor.name.to_owned())
             .collect()
@@ -538,25 +556,6 @@ fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, Dispat
         .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))
 }
 
-fn registry_error(error: silo_engine::jobs::RegistryError) -> DispatchError {
-    let message = error.to_string();
-    let code = match error.kind() {
-        silo_engine::jobs::RegistryErrorKind::NotCancellable
-        | silo_engine::jobs::RegistryErrorKind::Conflict => ErrorCode::Internal,
-        silo_engine::jobs::RegistryErrorKind::Storage
-        | silo_engine::jobs::RegistryErrorKind::Internal => {
-            if message == "not_found" {
-                ErrorCode::NotFound
-            } else if message.starts_with("busy:") || message.contains("cannot be acknowledged") {
-                ErrorCode::Busy
-            } else {
-                ErrorCode::Internal
-            }
-        }
-    };
-    DispatchError { code, message }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawRequest {
@@ -581,7 +580,7 @@ impl RawRequest {
     }
 }
 
-fn method_name(method: MethodName) -> &'static str {
+pub(crate) fn method_name(method: MethodName) -> &'static str {
     method_registry()
         .iter()
         .find(|descriptor| descriptor.method == method)
@@ -705,6 +704,7 @@ mod tests {
         assert!(capabilities.contains(&"events.subscribe".to_owned()));
         assert!(capabilities.contains(&"operations.job.get".to_owned()));
         assert!(capabilities.contains(&"notifications.list".to_owned()));
+        assert!(!capabilities.contains(&"computers.list".to_owned()));
     }
 
     #[tokio::test]
@@ -877,7 +877,7 @@ mod tests {
         let job_id = silo_api::jobs::JobId::new("job:1").unwrap();
         registry.accept(job_id.clone(), "test.operation").unwrap();
 
-        let mapped = registry_error(registry.cancel(&job_id).unwrap_err());
+        let mapped = HandlerContext::map_registry_error(registry.cancel(&job_id).unwrap_err());
 
         assert_eq!(mapped.code, ErrorCode::Internal);
         assert_eq!(mapped.message, "This operation can't be cancelled.");
