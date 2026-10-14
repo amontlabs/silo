@@ -161,6 +161,8 @@ case "$1" in
   exec)
     shift
     printf '%s\n' "$*" >> "$(dirname "$0")/msb.log"
+    # There is no /workspace on this machine; the guest has one.
+    case " $* " in *" test -d /workspace "*|*" test -d /workspace/project "*) exit 0 ;; esac
     while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
       if [ "$1" = "--env" ]; then shift; export "$1"; fi
       shift
@@ -192,6 +194,12 @@ exit 2
         });
         std::fs::write(&paths.metadata, inventory.to_string()).unwrap();
         paths
+    }
+
+    /// A stored macOS computer on `directory` (its record only: there is no live guest).
+    pub fn macos_target(directory: &Path) -> super::Target {
+        let shell = crate::macos_computers::guest_ssh_for_tests(directory, "mac-one");
+        super::Target::Macos(shell)
     }
 
     pub fn target(directory: &Path) -> super::Target {

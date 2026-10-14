@@ -58,6 +58,18 @@ pub fn ensure_alias(
     user_home: &Path,
     request: &AliasEnsure,
 ) -> Result<AliasOutcome, GuestError> {
+    ensure_alias_probing(target, user_home, request, &|config, alias| {
+        crate::editor::probe_alias(config, alias)
+    })
+}
+
+/// `ensure_alias` with the final connection check supplied by the caller.
+pub(crate) fn ensure_alias_probing(
+    target: &Target,
+    user_home: &Path,
+    request: &AliasEnsure,
+    probe_connection: &dyn Fn(&Path, &str) -> Result<(), String>,
+) -> Result<AliasOutcome, GuestError> {
     let (paths, id, name) = linux(target)?;
     crate::editor::require_openssh("connect to computers over SSH")?;
     let path = request.path.as_deref().unwrap_or("/workspace");
@@ -83,7 +95,7 @@ pub fn ensure_alias(
     let account = target.account()?;
     let written =
         crate::editor::ensure_id_alias(paths, user_home, name, id, request.install_include)?;
-    crate::editor::probe_alias(&written.config, &written.alias)?;
+    probe_connection(&written.config, &written.alias)?;
     Ok(AliasOutcome {
         alias: written.alias,
         user: account.user,
@@ -150,6 +162,65 @@ mod tests {
         assert!(
             !home.join(".ssh").exists(),
             "no SSH configuration may be touched"
+        );
+    }
+
+    #[test]
+    fn an_alias_reports_the_account_the_include_and_where_the_entry_lives() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let home = directory.path().join("user");
+        std::fs::create_dir_all(&home).unwrap();
+        let probed = std::cell::RefCell::new(Vec::new());
+        let ensure = |install_include: bool| {
+            ensure_alias_probing(
+                &target,
+                &home,
+                &AliasEnsure {
+                    install_include,
+                    path: Some("/workspace/project".into()),
+                },
+                &|config, alias| {
+                    probed
+                        .borrow_mut()
+                        .push((config.to_owned(), alias.to_owned()));
+                    Ok(())
+                },
+            )
+            .unwrap()
+        };
+        let skipped = ensure(false);
+        assert!(!skipped.include_installed);
+        assert!(!home.join(".ssh/config").exists());
+        let outcome = ensure(true);
+        assert_eq!(outcome.alias, format!("silo-{}", test_support::COMPUTER_ID));
+        assert_eq!(outcome.user, "silo");
+        assert!(outcome.home.starts_with('/'));
+        assert!(outcome.include_installed);
+        assert!(outcome
+            .config_path
+            .ends_with(&format!("{}.conf", test_support::COMPUTER_ID)));
+        assert!(std::fs::read_to_string(home.join(".ssh/config"))
+            .unwrap()
+            .contains(&outcome.include_line));
+        assert_eq!(probed.borrow().len(), 2);
+        // A failing connection check is an error, and the entry stays for the next try.
+        let error = ensure_alias_probing(
+            &target,
+            &home,
+            &AliasEnsure {
+                install_include: true,
+                path: None,
+            },
+            &|_, _| Err("Could not connect to this computer over SSH.".into()),
+        )
+        .unwrap_err();
+        assert!(error.message.starts_with("Could not connect"));
+        remove_alias(&target, &home).unwrap();
+        assert!(!std::path::Path::new(&outcome.config_path).exists());
+        assert_eq!(
+            std::fs::read_to_string(home.join(".ssh/config")).unwrap(),
+            ""
         );
     }
 

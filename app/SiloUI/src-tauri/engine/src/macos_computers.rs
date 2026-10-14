@@ -54,6 +54,8 @@ mod templates;
 
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
+#[cfg(test)]
+pub(crate) use guest_exec::stored_for_tests as guest_ssh_for_tests;
 pub use guest_exec::{lookup as guest_ssh, GuestSsh};
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;

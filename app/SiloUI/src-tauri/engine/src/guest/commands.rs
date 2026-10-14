@@ -146,6 +146,61 @@ mod tests {
     }
 
     #[test]
+    fn macos_commands_wait_for_the_access_work_and_say_so() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::macos_target(directory.path());
+        let home = directory.path().join("user");
+        let settings = serde_json::Map::new();
+        let errors = [
+            terminal_command(&target).unwrap_err(),
+            editor_command(&target, &home, None, &settings).unwrap_err(),
+            prepare(&target, &json!({})).unwrap_err(),
+            ensure_alias(
+                &target,
+                &home,
+                &AliasEnsure {
+                    install_include: true,
+                    path: None,
+                },
+            )
+            .unwrap_err(),
+            crate::guest::remove_alias(&target, &home).unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.code, ErrorCode::UnsupportedRemoteOperation);
+            assert!(
+                error.message.contains("pending parity-2"),
+                "{}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn macos_exec_and_files_reach_the_guest_over_ssh_and_fail_cleanly_without_access() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::macos_target(directory.path());
+        // The command line SSH carries quotes every word, so arguments stay data.
+        let plan = target.plan(
+            &["echo".into(), "it's $(unsafe)".into()],
+            &[("A".into(), "b c".into())],
+            true,
+            false,
+        );
+        // Without the computer's key there is no way to log in: a clear error, no effect.
+        assert_eq!(
+            plan.err().unwrap().message,
+            "This computer's access is missing."
+        );
+        assert_eq!(
+            crate::guest::read(&target, "/tmp/x", None, None)
+                .unwrap_err()
+                .message,
+            "This computer's access is missing."
+        );
+    }
+
+    #[test]
     fn a_stopped_computer_has_no_terminal_command() {
         let directory = tempfile::tempdir().unwrap();
         let paths = test_support::runtime(directory.path());

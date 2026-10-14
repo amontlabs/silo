@@ -29,6 +29,25 @@ pub enum Target {
     Macos(GuestSsh),
 }
 
+/// The one command line SSH carries to a macOS guest: every word single-quoted, so caller
+/// text is data and never shell source. Root work goes through `sudo -n`.
+pub(crate) fn command_line(argv: &[String], env: &[(String, String)], root: bool) -> String {
+    let mut words = Vec::new();
+    if root {
+        words.extend(["/usr/bin/sudo".to_owned(), "-n".into()]);
+    }
+    words.push("/usr/bin/env".into());
+    for (key, value) in env {
+        words.push(format!("{key}={value}"));
+    }
+    words.extend(argv.iter().cloned());
+    words
+        .iter()
+        .map(|word| quote(word))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Resolves `computer_id` against this device's Linux inventory, then its macOS computers.
 ///
 /// `runtime` is the Linux runtime when the device has one; a device whose runtime is not
@@ -211,20 +230,7 @@ impl Target {
                 })
             }
             Self::Macos(shell) => {
-                let mut words = Vec::new();
-                if root {
-                    words.extend(["/usr/bin/sudo".to_owned(), "-n".into()]);
-                }
-                words.push("/usr/bin/env".into());
-                for (key, value) in env {
-                    words.push(format!("{key}={value}"));
-                }
-                words.extend(argv.iter().cloned());
-                let command = words
-                    .iter()
-                    .map(|word| quote(word))
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let command = command_line(argv, env, root);
                 let (program, args) = shell.invocation(&command)?;
                 Ok(Plan {
                     program: PathBuf::from(program),
@@ -258,6 +264,25 @@ impl Target {
 mod tests {
     use super::*;
     use crate::guest::test_support;
+
+    #[test]
+    fn the_macos_command_line_quotes_every_word_so_arguments_stay_data() {
+        let words = |list: &[&str]| {
+            list.iter()
+                .map(|word| (*word).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            command_line(
+                &words(&["echo", "it's $(unsafe); rm -rf /"]),
+                &[("A".into(), "b c".into())],
+                false
+            ),
+            "'/usr/bin/env' 'A=b c' 'echo' 'it'\\''s $(unsafe); rm -rf /'"
+        );
+        assert!(command_line(&words(&["true"]), &[], true)
+            .starts_with("'/usr/bin/sudo' '-n' '/usr/bin/env' 'true'"));
+    }
 
     #[test]
     fn the_account_is_read_from_the_guest_not_derived_from_the_host() {

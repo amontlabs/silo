@@ -429,14 +429,16 @@ impl Dispatcher {
                             value,
                             event_barrier,
                         } = result;
-                        let activate = if method == MethodName::EventsSubscribe {
-                            value
-                                .get("subscription")
-                                .and_then(Value::as_str)
-                                .map(|subscription| (client_id, subscription.to_owned()))
-                        } else {
-                            None
+                        // A subscription is pending until its response is queued. The
+                        // parameterized `guest.files.watch` returns its own subscription id.
+                        let subscription_key = match method {
+                            MethodName::EventsSubscribe => Some("subscription"),
+                            MethodName::GuestFilesWatch => Some("subscriptionId"),
+                            _ => None,
                         };
+                        let activate = subscription_key
+                            .and_then(|key| value.get(key).and_then(Value::as_str))
+                            .map(|subscription| (client_id, subscription.to_owned()));
                         (success_response(id, value), activate, event_barrier)
                     }
                     Err(error) => (error_response(id, error.code, error.message), None, None),

@@ -66,9 +66,40 @@ impl GuestSsh {
     }
 }
 
+/// A stored macOS computer for tests of the callers: a record on disk, no live guest.
+#[cfg(test)]
+pub(crate) fn stored_for_tests(app_data: &Path, name: &str) -> GuestSsh {
+    let record = store::new_record(
+        &store::CreateRequest {
+            name: name.into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+        },
+        "02:00:00:00:00:01".into(),
+    );
+    let layout = Layout::new(app_data, &record.id);
+    store::save(&layout, &record).unwrap();
+    lookup(app_data, &record.id).unwrap().unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stored_macos_computer_is_found_by_id_and_needs_its_access_material_to_connect() {
+        let directory = tempfile::tempdir().unwrap();
+        let stored = stored_for_tests(directory.path(), "mac-one");
+        let found = lookup(directory.path(), stored.id()).unwrap().unwrap();
+        assert_eq!((found.name(), found.user()), ("mac-one", "silo"));
+        // Nothing has loaded it into the live registry, so the login decides reachability.
+        found.ensure_running().unwrap();
+        assert_eq!(
+            found.invocation("true").unwrap_err(),
+            "This computer's access is missing."
+        );
+    }
 
     #[test]
     fn an_unknown_id_is_not_a_macos_computer() {
