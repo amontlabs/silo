@@ -1555,9 +1555,11 @@ mod tests {
         _root: tempfile::TempDir,
         context: HandlerContext,
         events: EventReceiver,
+        _gate: crate::methods::ProcessGateLease,
     }
 
     fn fixture() -> Fixture {
+        let gate = crate::methods::process_gate_lock();
         let root = tempfile::tempdir().unwrap();
         let path = |name: &str| root.path().join(name);
         let paths = EnginePaths {
@@ -1606,6 +1608,7 @@ mod tests {
             _root: root,
             context,
             events,
+            _gate: gate,
         }
     }
 
