@@ -203,7 +203,7 @@ pub fn list_computer_directory(
                 "python3".into(),
                 "-I".into(),
                 "-c".into(),
-                include_str!("../guest/list-directory.py").into(),
+                include_str!("../../guest/list-directory.py").into(),
                 path.clone(),
             ],
             Duration::from_secs(8),

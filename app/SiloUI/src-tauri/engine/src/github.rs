@@ -5369,7 +5369,7 @@ mod tests {
     fn public_github_state_matches_frontend_contract() {
         let _test_state = crate::test_support::global_state();
         let states: Vec<Value> =
-            serde_json::from_str(include_str!("../../src/test/contracts/github-state.json"))
+            serde_json::from_str(include_str!("../../../src/test/contracts/github-state.json"))
                 .unwrap();
         for expected in states {
             let d = Document {

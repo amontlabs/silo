@@ -1892,7 +1892,7 @@ mod tests {
         )
         .unwrap();
         let paths = |home: &str, executable: &str| RuntimePaths {
-            guest_image: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: directory.path().join(executable),
             home: user_home.join(".silo").join(home),
             storage_home: None,

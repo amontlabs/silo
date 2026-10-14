@@ -457,7 +457,7 @@ fn reserved_secret_names() -> &'static ReservedSecretNames {
     static RESERVED: OnceLock<ReservedSecretNames> = OnceLock::new();
     RESERVED.get_or_init(|| {
         serde_json::from_str(include_str!(
-            "../../src/features/application/model/reserved-secret-names.json"
+            "../../../src/features/application/model/reserved-secret-names.json"
         ))
         .expect("the bundled reserved secret names are valid JSON")
     })

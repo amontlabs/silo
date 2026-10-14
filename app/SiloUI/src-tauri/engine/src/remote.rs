@@ -3509,7 +3509,7 @@ mod setup_tests {
     fn commands_that_access_remote_settings_stay_off_the_main_thread() {
         let _test_state = crate::test_support::global_state();
         // Remote commands read durable settings or wait on the configuration lock.
-        let source = include_str!("commands/remote.rs");
+        let source = include_str!("../../src/commands/remote.rs");
         let mut commands = 0;
         let lines: Vec<_> = source.lines().collect();
         for (index, line) in lines.iter().enumerate() {
@@ -4883,8 +4883,8 @@ mod dispatch_tests {
         let served: std::collections::BTreeSet<String> =
             method_literals(include_str!("remote_access.rs"))
                 .into_iter()
-                .chain(method_literals(include_str!("../engine/src/runtime/remote_ops.rs")))
-                .chain(method_literals(include_str!("../engine/src/macos_remote.rs")))
+                .chain(method_literals(include_str!("runtime/remote_ops.rs")))
+                .chain(method_literals(include_str!("macos_remote.rs")))
                 .collect();
         for method in &served {
             assert!(
