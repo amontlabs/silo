@@ -3,6 +3,11 @@ pub mod configuration_recovery;
 #[cfg(test)]
 pub(crate) mod contract_tests;
 mod crash_acknowledgement;
+#[cfg(test)]
+mod engine_contract_tests;
+#[cfg(test)]
+#[path = "../runtime_github_tests.rs"]
+mod github_integration_tests;
 #[path = "../guest_image.rs"]
 pub mod guest_image;
 pub mod image_cache;
@@ -18,11 +23,6 @@ mod secrets_runtime;
 pub mod shutdown;
 pub mod storage;
 pub mod update_recovery;
-#[cfg(test)]
-mod engine_contract_tests;
-#[cfg(test)]
-#[path = "../runtime_github_tests.rs"]
-mod github_integration_tests;
 /// Process-wide ordered admission for work that changes computer runtime state.
 pub static OPERATIONS: operation_gate::OperationGate = operation_gate::OperationGate::new();
 use crate::bridge_error::{BridgeError, ErrorCode};
@@ -126,10 +126,7 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
 
 fn publish_main_window_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
     let context = host.engine_context();
-    silo_engine::context::publish_to_main_window(
-        context.as_ref(),
-        Event::new(name, payload),
-    );
+    silo_engine::context::publish_to_main_window(context.as_ref(), Event::new(name, payload));
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
@@ -998,10 +995,7 @@ fn remove_empty_cache_skeleton(home: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
-pub fn prepare_runtime_home(
-    home: &Path,
-    storage_home: Option<&Path>,
-) -> Result<(), RuntimeError> {
+pub fn prepare_runtime_home(home: &Path, storage_home: Option<&Path>) -> Result<(), RuntimeError> {
     let prepare = || -> std::io::Result<()> {
         use std::os::unix::fs::DirBuilderExt;
         let mut builder = fs::DirBuilder::new();
@@ -5823,10 +5817,7 @@ pub fn disposable_test_action(
 /// Exercise the same explicit Start path as the app for an imported computer.
 /// Live regressions supply disposable runtime paths; no app data is resolved here.
 #[cfg(any(test, feature = "test-support"))]
-pub fn start_disposable_test_import(
-    paths: &RuntimePaths,
-    name: &str,
-) -> Result<(), RuntimeError> {
+pub fn start_disposable_test_import(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
     let _guard = OPERATIONS
         .device("Starting disposable imported computer")
         .map_err(|error| RuntimeError::Invalid(error.to_string()))?;
@@ -6308,10 +6299,7 @@ fn read_saved_metadata(path: &Path) -> Result<Option<ComputerConfigurationReques
 /// Per-computer operation ordering keys on the stable id, so callers that only have a name
 /// turn it into an id before acquiring the operation gate. Returns a clear error when
 /// no local computer by that name currently exists.
-pub fn resolve_computer_id(
-    paths: &RuntimePaths,
-    name: &str,
-) -> Result<String, RuntimeError> {
+pub fn resolve_computer_id(paths: &RuntimePaths, name: &str) -> Result<String, RuntimeError> {
     read_metadata(&paths.metadata)?
         .computers
         .into_iter()
@@ -8539,9 +8527,10 @@ esac
         failed.message = setup_failure_message("permission").unwrap();
         failed.diagnostic = Some("Exit code 13\nPermission denied".into());
         let events = vec![started, completed, failed];
-        let fixture: Value =
-            serde_json::from_str(include_str!("../../../../src/test/contracts/setup-activity.json"))
-                .unwrap();
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../src/test/contracts/setup-activity.json"
+        ))
+        .unwrap();
         assert_eq!(serde_json::to_value(events).unwrap(), fixture);
     }
 
@@ -10670,7 +10659,8 @@ exit 9
             .any(|pair| pair == ["--secret", secrets_runtime::SILO_GITHUB_SECRET_SPEC]));
         // The network option is set explicitly, to the value an export compares against.
         let profile: Value =
-            serde_json::from_str(include_str!("../../../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../../guest/github-network-default.json"))
+                .unwrap();
         assert_eq!(profile["strict"], true);
         assert_eq!(
             calls[3]
@@ -12963,7 +12953,6 @@ exit 9
         assert_eq!(runner.calls.lock().unwrap().len(), 1);
     }
 }
-
 
 /// Apply secret policy under the same per-computer lock as GitHub updates and boot.
 pub fn apply_secrets(host: &dyn RuntimeHost, computer: &str) -> Result<Vec<String>, String> {

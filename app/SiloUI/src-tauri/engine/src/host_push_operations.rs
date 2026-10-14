@@ -287,12 +287,7 @@ fn record_completion_locked(
         }
     }
 }
-pub fn status(
-    paths: &RuntimePaths,
-    computer: &str,
-    path: &str,
-    id: &str,
-) -> Result<Value, String> {
+pub fn status(paths: &RuntimePaths, computer: &str, path: &str, id: &str) -> Result<Value, String> {
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
     let jobs = read(&paths.home.join("repository-push-operations.json"))?;
     let Some(job) = jobs.get(id) else {

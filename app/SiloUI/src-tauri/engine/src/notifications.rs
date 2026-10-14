@@ -381,12 +381,7 @@ pub(crate) fn transfer_notice(
 }
 
 /// A failure notice with a bounded body.
-pub fn failure(
-    key: &str,
-    title: &str,
-    message: &str,
-    computer: Option<NoticeComputer>,
-) -> Notice {
+pub fn failure(key: &str, title: &str, message: &str, computer: Option<NoticeComputer>) -> Notice {
     Notice {
         category: Category::Failures,
         key: key.into(),

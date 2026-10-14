@@ -2,11 +2,7 @@
 use super::*;
 use silo_engine::context::{Audience, Event};
 
-pub fn dispatch(
-    host: &dyn RuntimeHost,
-    method: &str,
-    params: Value,
-) -> Result<Value, BridgeError> {
+pub fn dispatch(host: &dyn RuntimeHost, method: &str, params: Value) -> Result<Value, BridgeError> {
     let paths = runtime_paths(host)?;
     if method == "runtime.snapshot" {
         return serde_json::to_value(read_application_state_sync(

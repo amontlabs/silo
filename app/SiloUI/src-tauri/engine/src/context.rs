@@ -182,10 +182,7 @@ mod tests {
         let published = context.published.lock().unwrap();
         assert_eq!(published.len(), 1);
         assert_eq!(published[0].0.name, "progress");
-        assert_eq!(
-            published[0].1,
-            Audience::Client(ClientId::new("main"))
-        );
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
     }
 }
 

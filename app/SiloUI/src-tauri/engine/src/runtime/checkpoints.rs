@@ -2136,11 +2136,7 @@ fn restore_steps(
     save(paths, computer_id, &record)
 }
 
-pub fn restore(
-    paths: &RuntimePaths,
-    computer_id: &str,
-    checkpoint_id: &str,
-) -> Result<(), String> {
+pub fn restore(paths: &RuntimePaths, computer_id: &str, checkpoint_id: &str) -> Result<(), String> {
     // Restore rewrites only this computer's runtime state and per-computer checkpoint record,
     // not the shared inventory, so it is ordered per computer by stable id.
     let computer_name = computer_configuration(paths, computer_id)
@@ -2674,11 +2670,7 @@ fn delete_checkpoint_with(
     Ok(())
 }
 
-pub fn delete(
-    paths: &RuntimePaths,
-    computer_id: &str,
-    checkpoint_id: &str,
-) -> Result<(), String> {
+pub fn delete(paths: &RuntimePaths, computer_id: &str, checkpoint_id: &str) -> Result<(), String> {
     // A deleted child can release a deleted source's member in another computer's
     // lineage group. Serialize the shared cleanup journal and native store changes.
     let guard = OPERATIONS
@@ -2810,10 +2802,7 @@ fn usage_with(
     })
 }
 
-pub fn read_usage(
-    paths: &RuntimePaths,
-    computer_id: &str,
-) -> Result<CheckpointUsage, String> {
+pub fn read_usage(paths: &RuntimePaths, computer_id: &str) -> Result<CheckpointUsage, String> {
     usage_with(&ProcessRunner, paths, computer_id).map_err(|error| safe_activity_error(&error))
 }
 

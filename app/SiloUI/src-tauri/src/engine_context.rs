@@ -73,9 +73,7 @@ impl EngineContext for TauriEngineContext {
                 let _ = self.app.emit(&event.name, &event.payload);
             },
             |client_id| {
-                let _ = self
-                    .app
-                    .emit_to(client_id, &event.name, &event.payload);
+                let _ = self.app.emit_to(client_id, &event.name, &event.payload);
             },
         );
     }

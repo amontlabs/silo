@@ -234,10 +234,7 @@ impl Drop for CommandLock {
     }
 }
 
-pub fn command_lock(
-    paths: &RuntimePaths,
-    timeout: Duration,
-) -> Result<CommandLock, RuntimeError> {
+pub fn command_lock(paths: &RuntimePaths, timeout: Duration) -> Result<CommandLock, RuntimeError> {
     prepare_runtime_home(&paths.home, paths.storage_home.as_deref())?;
     let file = fs::OpenOptions::new()
         .read(true)

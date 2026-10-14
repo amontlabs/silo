@@ -334,10 +334,7 @@ pub fn download_ready(state: &mut State, bytes: Vec<u8>) {
     state.bytes = Some(bytes);
 }
 
-pub fn begin_install(
-    state: &mut State,
-    has_updater: bool,
-) -> Result<(Vec<u8>, bool), String> {
+pub fn begin_install(state: &mut State, has_updater: bool) -> Result<(Vec<u8>, bool), String> {
     if busy(&state.snapshot.phase) {
         return Err("An update operation is already running.".into());
     }

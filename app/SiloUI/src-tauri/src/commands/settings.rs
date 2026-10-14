@@ -68,8 +68,8 @@ pub(crate) async fn initialize_settings(
             |snapshot| publish_snapshot(&publish_app, snapshot),
         )
     })
-        .await
-        .map_err(|error| error.to_string())??;
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(snapshot)
 }
 
@@ -98,8 +98,8 @@ pub(crate) async fn update_settings(
             |snapshot| publish_snapshot(&publish_app, snapshot),
         )
     })
-        .await
-        .map_err(|error| error.to_string())??;
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(snapshot)
 }
 
@@ -117,8 +117,8 @@ pub(crate) async fn update_onboarding_draft(
             |snapshot| publish_snapshot(&publish_app, snapshot),
         )
     })
-        .await
-        .map_err(|error| error.to_string())??;
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(snapshot)
 }
 
@@ -136,8 +136,8 @@ pub(crate) async fn import_legacy_theme(
             |snapshot| publish_snapshot(&publish_app, snapshot),
         )
     })
-        .await
-        .map_err(|error| error.to_string())??;
+    .await
+    .map_err(|error| error.to_string())??;
     Ok(snapshot)
 }
 
@@ -146,13 +146,12 @@ pub(crate) async fn flush_settings(app: AppHandle, window: WebviewWindow) -> Res
     require_main(window.label())?;
     let publish_app = app.clone();
     let (_snapshot, saved) = tokio::task::spawn_blocking(move || {
-        settings_change(
-            settings::flush,
-            |(snapshot, _saved)| publish_snapshot(&publish_app, snapshot),
-        )
+        settings_change(settings::flush, |(snapshot, _saved)| {
+            publish_snapshot(&publish_app, snapshot)
+        })
     })
-        .await
-        .map_err(|error| error.to_string())??;
+    .await
+    .map_err(|error| error.to_string())??;
     saved
 }
 

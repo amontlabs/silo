@@ -719,9 +719,7 @@ pub fn shutdown_state() -> std::sync::Arc<ShutdownState> {
 }
 
 pub fn shutdown_state_if_installed() -> Option<std::sync::Arc<ShutdownState>> {
-    runtime_state()
-        .ok()
-        .map(|state| state.shutdown().clone())
+    runtime_state().ok().map(|state| state.shutdown().clone())
 }
 
 pub fn allow_exit_if_installed() {
@@ -1372,7 +1370,9 @@ mod tests {
         let snapshot = store.snapshot();
 
         let mut published = None;
-        publish_snapshot(&snapshot, |event, audience| published = Some((event, audience)));
+        publish_snapshot(&snapshot, |event, audience| {
+            published = Some((event, audience))
+        });
 
         let (event, audience) = published.unwrap();
         assert_eq!(event.name, "settings:changed");

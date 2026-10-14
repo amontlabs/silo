@@ -1764,11 +1764,7 @@ pub fn guest_stream_params(args: &[String]) -> Result<Value, String> {
         _ => Err("Expected a device and computer identity.".into()),
     }
 }
-pub fn run_remote_stream(
-    device_id: &str,
-    method: &str,
-    params: Value,
-) -> Result<(), String> {
+pub fn run_remote_stream(device_id: &str, method: &str, params: Value) -> Result<(), String> {
     let device = read_existing_config_in(&existing_directory()?)?
         .devices
         .into_iter()

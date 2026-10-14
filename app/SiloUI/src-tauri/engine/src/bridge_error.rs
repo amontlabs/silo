@@ -158,9 +158,10 @@ mod tests {
             .map(|code| BridgeError::new(code, "Display text may change."))
             .collect();
         let value = serde_json::to_value(&errors).unwrap();
-        let expected: serde_json::Value =
-            serde_json::from_str(include_str!("../../../src/test/contracts/bridge-errors.json"))
-                .unwrap();
+        let expected: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/test/contracts/bridge-errors.json"
+        ))
+        .unwrap();
         assert_eq!(value, expected);
         assert_eq!(
             serde_json::from_value::<Vec<BridgeError>>(value).unwrap(),

@@ -1132,8 +1132,7 @@ mod tests {
         let _test_state = crate::test_support::global_state();
         let temp = tempfile::tempdir().unwrap();
         let paths = RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: temp.path().join("msb"),
             home: temp.path().into(),
             storage_home: None,
@@ -1161,8 +1160,7 @@ mod tests {
         use std::time::Instant;
         let temp = tempfile::tempdir().unwrap();
         let paths = RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             // A nonexistent executable makes computer inspection fail fast, so the read
             // never blocks on a live runtime and never mutates anything.
             executable: temp.path().join("msb"),

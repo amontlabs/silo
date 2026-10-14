@@ -281,8 +281,7 @@ mod tests {
     #[test]
     fn opens_in_computer_without_starting_a_stopped_computer() {
         let paths = RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: "/tmp/Silo app/msb".into(),
             home: "/tmp/runtime home".into(),
             storage_home: None,

@@ -2242,7 +2242,10 @@ mod tests {
         let destination = directory.path().join("exports");
         let archive = Archive {
             name: "interrupted.silo-backup".into(),
-            archive_path: destination.join("interrupted.silo-backup").display().to_string(),
+            archive_path: destination
+                .join("interrupted.silo-backup")
+                .display()
+                .to_string(),
             completed_label: "Unknown".into(),
             size: "Unknown".into(),
             destination: destination.display().to_string(),
@@ -2285,8 +2288,14 @@ mod tests {
         assert!(!controller.busy.load(Ordering::Acquire));
         assert!(!recovery::pending(&controller).unwrap());
         assert!(matches!(
-            recovery::snapshot(&controller).unwrap().unwrap().operation(),
-            Operation::Result { outcome: "failed", .. }
+            recovery::snapshot(&controller)
+                .unwrap()
+                .unwrap()
+                .operation(),
+            Operation::Result {
+                outcome: "failed",
+                ..
+            }
         ));
     }
 
@@ -3271,9 +3280,10 @@ mod tests {
             operation: None,
             result_unseen: false,
         };
-        let expected: Value =
-            serde_json::from_str(include_str!("../../../src/test/contracts/backup-state.json"))
-                .unwrap();
+        let expected: Value = serde_json::from_str(include_str!(
+            "../../../src/test/contracts/backup-state.json"
+        ))
+        .unwrap();
         assert_eq!(serde_json::to_value(state).unwrap(), expected);
     }
 
@@ -4097,8 +4107,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path")),
             library: PathBuf::from(
                 std::env::var("SILO_TEST_LIBKRUNFW").expect("packaged library path"),
@@ -4268,8 +4277,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
             home: directory.path().join("cold-target"),
@@ -4494,8 +4502,7 @@ mod tests {
         fs::remove_dir_all(&paths.volumes).unwrap();
         fs::remove_file(&paths.metadata).unwrap();
         let paths = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: paths.executable.clone(),
             library: paths.library.clone(),
             home: directory.path().join("warm-target"),
@@ -4594,8 +4601,7 @@ mod tests {
             .prefix("silo-ckpt-proof-")
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
-        let guest_image =
-            crate::test_support::manifest_root().join("runtime/guest-image");
+        let guest_image = crate::test_support::manifest_root().join("runtime/guest-image");
         let executable = PathBuf::from(std::env::var("SILO_TEST_MSB").expect("packaged msb path"));
         let library =
             PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").expect("packaged library path"));
@@ -4826,8 +4832,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let cold = runtime::RuntimePaths {
-            guest_image: crate::test_support::manifest_root()
-                .join("runtime/guest-image"),
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap()),
             library: PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").unwrap()),
             home: directory.path().join("cold"),
