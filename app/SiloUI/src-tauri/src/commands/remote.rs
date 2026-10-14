@@ -17,12 +17,12 @@ impl remote_access::LocalAccess for TauriLocalAccess {
     }
 
     fn chatgpt_status(&self) -> Result<Value, String> {
-        serde_json::to_value(crate::chatgpt_app::local_status(&self.0)?)
+        serde_json::to_value(crate::commands::chatgpt_app::local_status(&self.0)?)
             .map_err(|_| "Could not encode the ChatGPT app status.".to_owned())
     }
 
     fn chatgpt_retry(&self) -> Result<Value, String> {
-        serde_json::to_value(crate::chatgpt_app::retry_now(&self.0)?)
+        serde_json::to_value(crate::commands::chatgpt_app::retry_now(&self.0)?)
             .map_err(|_| "Could not encode the ChatGPT app status.".to_owned())
     }
 }

@@ -62,9 +62,9 @@ impl Inputs for Live {
     fn start_chatgpt(&self) {
         // The status is unknown before the first read of a process; start the download
         // worker unless the app is already published.
-        let status = chatgpt_app::local_status(&self.app).ok();
+        let status = crate::commands::chatgpt_app::local_status(&self.app).ok();
         if !matches!(status, Some(Status::Ready { .. })) {
-            chatgpt_app::ensure_in_background(&self.app);
+            crate::commands::chatgpt_app::ensure_in_background(&self.app);
         }
     }
 

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tauri::AppHandle;
 
-use crate::{chatgpt_app, computer_use, runtime};
+use crate::{commands::chatgpt_app, computer_use, runtime};
 
 /// Reconcile every running computer after the published app or LCU changes.
 pub(crate) fn reconcile(app: &AppHandle) {

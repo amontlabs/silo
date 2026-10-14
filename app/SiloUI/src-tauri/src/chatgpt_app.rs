@@ -46,7 +46,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -76,7 +76,6 @@ const RECORD_SUFFIX: &str = ".published.json";
 const PUBLISHED_DIR: &str = "published";
 const RECORD_SCHEMA: u32 = 1;
 const MAX_RECORD_BYTES: u64 = 4096;
-const STATUS_EVENT: &str = "chatgpt-app-status";
 
 // ----------------------------------------------------------------- lock
 
@@ -1922,16 +1921,14 @@ fn collect_garbage_locked(
     Ok(removed)
 }
 
-// ------------------------------------------------------ Tauri commands
+// --------------------------------------------------------- host services
 
-/// The ChatGPT app folder of this channel: `<app data>/chatgpt`.
-pub(crate) fn storage_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
-    app.path()
-        .app_data_dir()
-        .map(|dir| dir.join("chatgpt"))
-        .map_err(|error| format!("Silo could not locate its application storage: {error}"))
-}
+/// A status publisher supplied by the application boundary.
+pub(crate) type StatusPublisher = Arc<dyn Fn(Status) + Send + Sync>;
+/// Work to run after the pinned app becomes ready.
+pub(crate) type ReadyHook = Arc<dyn Fn() + Send + Sync>;
+/// Checks whether any computer is running before removing old published versions.
+pub(crate) type IdleCheck = Arc<dyn Fn() -> bool + Send + Sync>;
 
 /// The last status this process settled on or reported. Status reads that must stay
 /// cheap (every desktop state read) use this; verifying the app tree the first time
@@ -1979,16 +1976,9 @@ pub(crate) fn event_payload(status: serde_json::Value, device: Option<&str>) -> 
     payload
 }
 
-fn emit_local(app: &tauri::AppHandle, status: &Status) {
-    use tauri::Emitter;
-    if let Ok(value) = serde_json::to_value(status) {
-        let _ = app.emit(STATUS_EVENT, event_payload(value, None));
-    }
-}
-
-fn publish(app: &tauri::AppHandle, status: Status) {
+fn publish_status(publisher: &StatusPublisher, status: Status) {
     set_cache(&status);
-    emit_local(app, &status);
+    publisher(status);
 }
 
 fn in_progress(status: &Status) -> bool {
@@ -1999,16 +1989,15 @@ fn in_progress(status: &Status) -> bool {
 }
 
 /// Status from disk (verifies the tree: slow the first time in a process).
-fn compute_status(app: &tauri::AppHandle) -> Result<Status, String> {
+fn compute_status(root: &Path) -> Result<Status, String> {
     if let Some(status) = cached_status().filter(|status| in_progress(status)) {
         if PREPARING.load(Ordering::SeqCst) {
             return Ok(status);
         }
     }
-    let root = storage_root(app)?;
     let lock = Lock::bundled().map_err(|e| e.message)?;
     let arch = DebArch::host().map_err(|e| e.message)?;
-    let status = match current_status(&root, &lock, arch) {
+    let status = match current_status(root, &lock, arch) {
         Status::Idle => cached_status()
             .filter(|s| matches!(s, Status::Failed { .. }))
             .unwrap_or(Status::Idle),
@@ -2019,9 +2008,9 @@ fn compute_status(app: &tauri::AppHandle) -> Result<Status, String> {
 }
 
 /// Recomputes and reports the status (blocking; startup and after changes).
-pub(crate) fn refresh_status_blocking(app: &tauri::AppHandle) -> Status {
-    let status = compute_status(app).unwrap_or(Status::Idle);
-    emit_local(app, &status);
+pub(crate) fn refresh_status_blocking(root: &Path, publisher: &StatusPublisher) -> Status {
+    let status = compute_status(root).unwrap_or(Status::Idle);
+    publisher(status.clone());
     status
 }
 
@@ -2039,30 +2028,26 @@ pub(crate) fn refresh_status_blocking(app: &tauri::AppHandle) -> Status {
 ///
 /// A skipped collection (an operation or computer running, or the storage busy) stays
 /// pending and is retried every `COLLECTION_RETRY` until it ran.
-pub(crate) fn collect_unused(app: &tauri::AppHandle) {
-    if COLLECTION.note(collect_unused_once(app)) {
-        let app = app.clone();
+pub(crate) fn collect_unused(root: PathBuf, idle_check: IdleCheck) {
+    if COLLECTION.note(collect_unused_once(&root, &idle_check)) {
+        let retry_root = root.clone();
+        let retry_idle_check = idle_check.clone();
         let _ = std::thread::Builder::new()
             .name("chatgpt-app-gc".into())
             .spawn(move || {
                 COLLECTION.run_retries(
-                    || collect_unused_once(&app),
+                    || collect_unused_once(&retry_root, &retry_idle_check),
                     || std::thread::sleep(COLLECTION_RETRY),
                 )
             });
     }
 }
 
-fn collect_unused_once(app: &tauri::AppHandle) -> bool {
-    let Ok(root) = storage_root(app) else {
-        return true;
-    };
+fn collect_unused_once(root: &Path, idle_check: &dyn Fn() -> bool) -> bool {
     let (Ok(lock), Ok(arch)) = (Lock::bundled(), DebArch::host()) else {
         return true;
     };
-    collect_unused_gated(&crate::runtime::OPERATIONS, &root, &lock, arch, || {
-        crate::runtime::update_recovery::running_names(app).is_ok_and(|names| names.is_empty())
-    })
+    collect_unused_gated(&crate::runtime::OPERATIONS, root, &lock, arch, idle_check)
 }
 
 const COLLECTION_RETRY: Duration = Duration::from_secs(120);
@@ -2132,13 +2117,12 @@ fn collect_unused_gated(
 /// Downloads and publishes the pinned app (blocking), reporting progress. Returns the
 /// final status; a second concurrent call waits for the first. Only the background
 /// worker (`auto`) calls it, so nothing else starts a download.
-fn run_prepare(app: &tauri::AppHandle) -> Result<Status, String> {
-    let root = storage_root(app)?;
+fn run_prepare(root: &Path, publisher: &StatusPublisher) -> Result<Status, String> {
     let lock = Lock::bundled().map_err(|e| e.message)?;
     let arch = DebArch::host().map_err(|e| e.message)?;
     // The folder computers mount: prepared again here in case the start-up attempt failed.
     // Preparation itself reports a real storage problem.
-    let _ = crate::computer_use::register_published(&root);
+    let _ = crate::computer_use::register_published(root);
     if PREPARING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -2146,7 +2130,7 @@ fn run_prepare(app: &tauri::AppHandle) -> Result<Status, String> {
         while PREPARING.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(500));
         }
-        return compute_status(app);
+        return compute_status(root);
     }
     struct Done;
     impl Drop for Done {
@@ -2155,17 +2139,16 @@ fn run_prepare(app: &tauri::AppHandle) -> Result<Status, String> {
         }
     }
     let done = Done;
-    publish(app, Status::Verifying);
-    let announcer = app.clone();
-    let report = move |status: Status| publish(&announcer, status);
-    let status = match ensure(&root, &lock, arch, &HttpDownloader::default(), &report) {
+    publish_status(publisher, Status::Verifying);
+    let report = |status| publish_status(publisher, status);
+    let status = match ensure(root, &lock, arch, &HttpDownloader::default(), &report) {
         Ok(path) => Status::Ready {
             path,
             version: lock.version.clone(),
         },
         Err(error) => error.status(),
     };
-    publish(app, status.clone());
+    publish_status(publisher, status.clone());
     drop(done);
     Ok(status)
 }
@@ -2174,30 +2157,29 @@ fn run_prepare(app: &tauri::AppHandle) -> Result<Status, String> {
 /// anything: starts the worker, or wakes it when it waits to retry. Returns whether a
 /// worker was started. Never needs the user: the app is downloaded on every device
 /// that runs Silo.
-pub(crate) fn ensure_in_background(app: &tauri::AppHandle) -> bool {
+pub(crate) fn ensure_in_background(
+    root: PathBuf,
+    publisher: StatusPublisher,
+    on_ready: ReadyHook,
+) -> bool {
     let Some(claim) = auto::WORKER.claim(&auto::RETRY) else {
         return false;
     };
-    let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("chatgpt-app".into())
         .spawn(move || {
             auto::lower_priority();
-            let ready_app = app.clone();
+            let ready = on_ready.clone();
             claim.run(&auto::RETRY, || {
                 auto::settle(
                     || {
-                        run_prepare(&app).unwrap_or_else(|error| Status::Failed {
+                        run_prepare(&root, &publisher).unwrap_or_else(|error| Status::Failed {
                             reason: error,
                             retryable: true,
                         })
                     },
                     |delay| auto::RETRY.wait(delay),
-                    || {
-                        // Running built-in computers set computer use up now instead of at their next boot.
-                        crate::computer_use::app_ready(&ready_app);
-                        collect_unused(&ready_app);
-                    },
+                    || ready(),
                 )
             });
         })
@@ -2205,40 +2187,27 @@ pub(crate) fn ensure_in_background(app: &tauri::AppHandle) -> bool {
     spawned
 }
 
-pub(crate) fn local_status(app: &tauri::AppHandle) -> Result<Status, String> {
-    compute_status(app)
+pub(crate) fn local_status(root: &Path) -> Result<Status, String> {
+    compute_status(root)
 }
 
 /// "Retry" (also what a remote controller asks for): wakes a waiting worker or starts a
 /// new one after a failure that is not retried by itself. Returns the status at once;
 /// progress arrives as `chatgpt-app-status` events.
-pub(crate) fn retry_now(app: &tauri::AppHandle) -> Result<Status, String> {
-    let status = compute_status(app)?;
+pub(crate) fn retry_now(
+    root: &Path,
+    publisher: StatusPublisher,
+    on_ready: ReadyHook,
+) -> Result<Status, String> {
+    let status = compute_status(root)?;
     if !matches!(status, Status::Ready { .. }) {
-        ensure_in_background(app);
+        ensure_in_background(root.to_owned(), publisher, on_ready);
     }
     Ok(cached_status().unwrap_or(status))
 }
 
-/// App start: reads the status (the first digest of a process reads every byte), then
-/// prepares the app in the background when the pinned version is not published.
-pub(crate) fn start_automatic(app: &tauri::AppHandle) {
-    let status = refresh_status_blocking(app);
-    collect_unused(app);
-    if matches!(status, Status::Ready { .. }) {
-        // Nobody else syncs the running computers now (the worker that does it when the app
-        // becomes ready has nothing to wait for): finish approval changes that were
-        // saved but never launched before the last quit.
-        crate::computer_use::reconcile(app);
-        return;
-    }
-    // Let the app finish starting first; this is not urgent.
-    std::thread::sleep(auto::START_DELAY);
-    ensure_in_background(app);
-}
-
 /// The remote device a command addresses: `None` for this device, else its device id.
-fn remote_device(device: Option<&str>) -> Result<Option<String>, String> {
+pub(crate) fn remote_device(device: Option<&str>) -> Result<Option<String>, String> {
     match device {
         None | Some("") => Ok(None),
         Some(device) if uuid::Uuid::parse_str(device).is_ok() => Ok(Some(device.to_owned())),
@@ -2259,7 +2228,7 @@ pub(crate) fn call_owner(
 const UPDATE_OWNER: &str = "Update Silo on that device to use computer use.";
 
 /// The message for a failed call to the owning device.
-fn owner_error(error: crate::bridge_error::BridgeError) -> String {
+pub(crate) fn owner_error(error: crate::bridge_error::BridgeError) -> String {
     if error.code == crate::bridge_error::ErrorCode::UnsupportedRemoteOperation {
         UPDATE_OWNER.to_owned()
     } else {
@@ -2267,17 +2236,7 @@ fn owner_error(error: crate::bridge_error::BridgeError) -> String {
     }
 }
 
-fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> impl std::future::Future<Output = Result<T, String>> {
-    let task = tauri::async_runtime::spawn_blocking(work);
-    async move {
-        task.await
-            .map_err(|_| "The ChatGPT app task stopped unexpectedly.".to_owned())?
-    }
-}
-
-fn to_value(status: Status) -> Result<serde_json::Value, String> {
+pub(crate) fn to_value(status: Status) -> Result<serde_json::Value, String> {
     serde_json::to_value(status).map_err(|_| "Could not encode the ChatGPT app status.".into())
 }
 
@@ -2291,7 +2250,7 @@ fn owner_is_current(capabilities: &[String]) -> bool {
 
 /// A remote owner's status: `unknown` for an owner that is not current, else what it
 /// reports. Capabilities that cannot be read are a real failure (offline, disconnected).
-fn owner_status(
+pub(crate) fn owner_status(
     capabilities: Result<Vec<String>, String>,
     status: impl FnOnce() -> Result<serde_json::Value, String>,
 ) -> Result<serde_json::Value, String> {
@@ -2304,46 +2263,17 @@ fn owner_status(
 /// A remote device's status as the UI shows it: one running a Silo without computer use
 /// has no status to report, which is `unknown`, not an error. Real failures (offline,
 /// disconnected) stay errors.
-fn remote_status(result: Result<serde_json::Value, String>) -> Result<serde_json::Value, String> {
+pub(crate) fn remote_status(
+    result: Result<serde_json::Value, String>,
+) -> Result<serde_json::Value, String> {
     match result {
         Err(error) if error == UPDATE_OWNER => Ok(serde_json::json!({"state": "unknown"})),
         other => other,
     }
 }
 
-/// The ChatGPT app status of this device, or of the remote device `device` (its
-/// device id). A remote device running a Silo without computer use answers `unknown`.
-#[tauri::command]
-pub(crate) async fn chatgpt_app_status(
-    app: tauri::AppHandle,
-    device: Option<String>,
-) -> Result<serde_json::Value, String> {
-    blocking(move || match remote_device(device.as_deref())? {
-        Some(device) => owner_status(
-            crate::remote::device_capabilities(&device).map_err(owner_error),
-            || call_owner(&device, "chatgpt.status", serde_json::json!({})),
-        ),
-        None => to_value(local_status(&app)?),
-    })
-    .await
-}
-
-/// Asks a device to try the download again now. It prepares its own copy; this only
-/// wakes it. Resolves with its status at once, progress follows from the status reads.
-#[tauri::command]
-pub(crate) async fn chatgpt_app_retry(
-    app: tauri::AppHandle,
-    device: Option<String>,
-) -> Result<serde_json::Value, String> {
-    blocking(move || match remote_device(device.as_deref())? {
-        Some(device) => call_owner(&device, "chatgpt.retry", serde_json::json!({})),
-        None => to_value(retry_now(&app)?),
-    })
-    .await
-}
-
 // ---------------------------------------------------------------- tests
 
-mod auto;
+pub(crate) mod auto;
 #[cfg(test)]
 mod tests;

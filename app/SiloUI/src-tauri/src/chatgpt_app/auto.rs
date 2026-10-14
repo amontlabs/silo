@@ -11,7 +11,7 @@ use std::{
 };
 
 /// How long after the app starts before the first download begins.
-pub(super) const START_DELAY: Duration = Duration::from_secs(10);
+pub(crate) const START_DELAY: Duration = Duration::from_secs(10);
 
 /// The wait before retry number `failures` (1 for the first retry): 30 s, 1 min, 2 min,
 /// 5 min, 10 min, 30 min, then hourly. A download attempt already retries a broken
