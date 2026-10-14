@@ -242,6 +242,7 @@ pub(crate) async fn macos_display_session(
 
 async fn display_resize(
     engine: &EngineClient,
+    device: &str,
     computer: &str,
     width_px: u64,
     height_px: u64,
@@ -249,7 +250,7 @@ async fn display_resize(
     engine
         .call(
             "macos.display.resize",
-            json!({"computerId": computer, "widthPx": width_px, "heightPx": height_px}),
+            json!({"deviceId": device, "computerId": computer, "widthPx": width_px, "heightPx": height_px}),
         )
         .await
 }
@@ -263,8 +264,8 @@ pub(crate) async fn macos_display_resize(
     width_px: u64,
     height_px: u64,
 ) -> Result<Value, String> {
-    let (_, computer) = target_of(&window)?;
-    display_resize(&engine, &computer, width_px, height_px)
+    let (device, computer) = target_of(&window)?;
+    display_resize(&engine, &device, &computer, width_px, height_px)
         .await
         .map_err(String::from)
 }
@@ -411,11 +412,13 @@ mod tests {
     async fn the_resize_sends_pixels_and_returns_the_applied_size() {
         let fake = FakeEngine::start(|_, _| Ok(json!({"widthPx": 1280, "heightPx": 800})));
         let (client, _) = connected_client(&fake).await;
-        let applied = display_resize(&client, COMPUTER, 1300, 900).await.unwrap();
+        let applied = display_resize(&client, DEVICE, COMPUTER, 1300, 900)
+            .await
+            .unwrap();
         assert_eq!(applied, json!({"widthPx": 1280, "heightPx": 800}));
         assert_eq!(
             fake.calls("macos.display.resize"),
-            [json!({"computerId": COMPUTER, "widthPx": 1300, "heightPx": 900})]
+            [json!({"deviceId": DEVICE, "computerId": COMPUTER, "widthPx": 1300, "heightPx": 900})]
         );
     }
 }

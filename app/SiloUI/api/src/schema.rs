@@ -603,6 +603,13 @@ mod tests {
         let params: MacosDisplayResizeParams = serde_json::from_value(request.clone()).unwrap();
         assert_eq!(serde_json::to_value(params).unwrap(), request);
 
+        let remote = serde_json::json!({
+            "computerId": "computer-1", "widthPx": 1920, "heightPx": 1080, "deviceId": "mac-mini"
+        });
+        let params: MacosDisplayResizeParams = serde_json::from_value(remote.clone()).unwrap();
+        assert_eq!(params.device_id.as_deref(), Some("mac-mini"));
+        assert_eq!(serde_json::to_value(params).unwrap(), remote);
+
         let response = serde_json::json!({"widthPx": 1920, "heightPx": 1080});
         let result: MacosDisplayResizeResult = serde_json::from_value(response.clone()).unwrap();
         assert_eq!(serde_json::to_value(result).unwrap(), response);
