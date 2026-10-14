@@ -59,7 +59,11 @@ pub(crate) fn local_status(app: &AppHandle) -> Result<chatgpt_app::Status, Strin
 /// Wakes a waiting worker or starts a new attempt after a retryable failure.
 pub(crate) fn retry_now(app: &AppHandle) -> Result<chatgpt_app::Status, String> {
     let root = storage_root(app)?;
-    chatgpt_app::retry_now(&root, status_publisher(app.clone()), ready_hook(app, root))
+    chatgpt_app::retry_now(
+        &root,
+        status_publisher(app.clone()),
+        ready_hook(app, root.clone()),
+    )
 }
 
 /// Startup status check and automatic background preparation.

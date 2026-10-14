@@ -2029,14 +2029,14 @@ pub(crate) fn refresh_status_blocking(root: &Path, publisher: &StatusPublisher) 
 /// A skipped collection (an operation or computer running, or the storage busy) stays
 /// pending and is retried every `COLLECTION_RETRY` until it ran.
 pub(crate) fn collect_unused(root: PathBuf, idle_check: IdleCheck) {
-    if COLLECTION.note(collect_unused_once(&root, &idle_check)) {
+    if COLLECTION.note(collect_unused_once(&root, idle_check.as_ref())) {
         let retry_root = root.clone();
         let retry_idle_check = idle_check.clone();
         let _ = std::thread::Builder::new()
             .name("chatgpt-app-gc".into())
             .spawn(move || {
                 COLLECTION.run_retries(
-                    || collect_unused_once(&retry_root, &retry_idle_check),
+                    || collect_unused_once(&retry_root, retry_idle_check.as_ref()),
                     || std::thread::sleep(COLLECTION_RETRY),
                 )
             });
