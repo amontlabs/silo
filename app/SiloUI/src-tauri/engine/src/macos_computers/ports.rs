@@ -869,6 +869,45 @@ pub(super) fn state(app: &MacosContext) -> Result<NetworkState, String> {
     Ok(NetworkState { computers })
 }
 
+/// Saves `mapping`, then runs `start` (which starts its tunnel). The mapping is saved first:
+/// the tunnel's SSH stream is refused for a port that is not published, so a tunnel started
+/// before the save always died ("Could not publish this port."). A `start` that fails undoes
+/// the save.
+fn save_mapping_then_start<T>(
+    app_data: &Path,
+    mapping: Mapping,
+    start: impl FnOnce() -> Result<Option<T>, String>,
+) -> Result<Option<T>, String> {
+    let computer_id = mapping.computer_id.clone();
+    let port = mapping.port;
+    let host_port = mapping.host_port;
+    let previous = {
+        let _lock = configuration_lock();
+        let mut config = read_configuration_unlocked(app_data)?;
+        if config.mappings.iter().any(|saved| {
+            saved.computer_id != computer_id
+                && saved.enabled
+                && host_port.is_some()
+                && saved.host_port == host_port
+        }) {
+            return Err(
+                "This local port is already in use. Choose another or use Automatic.".into(),
+            );
+        }
+        let previous = config.mappings.clone();
+        config
+            .mappings
+            .retain(|saved| saved.computer_id != computer_id || saved.port != port);
+        config.mappings.push(mapping);
+        write_configuration_unlocked(app_data, &config)?;
+        previous
+    };
+    start().inspect_err(|_| {
+        let _lock = configuration_lock();
+        let _ = write_configuration_unlocked(app_data, &Configuration { mappings: previous });
+    })
+}
+
 pub(super) fn publish(
     app: &MacosContext,
     computer_id: &str,
@@ -952,53 +991,15 @@ pub(super) fn publish(
                 enabled: true,
             };
             validate_mapping(&mapping)?;
-            // The mapping is saved before its tunnel starts: the tunnel's SSH stream is
-            // refused for a port that is not published, so a tunnel started first always died
-            // ("Could not publish this port."). A tunnel that cannot start undoes the save.
-            let previous = {
-                let _lock = configuration_lock();
-                config = read_configuration_unlocked(&app.paths().app_data)?;
-                if config.mappings.iter().any(|saved| {
-                    saved.computer_id != computer_id
-                        && saved.enabled
-                        && host_port.is_some()
-                        && saved.host_port == host_port
-                }) {
-                    return Err(
-                        "This local port is already in use. Choose another or use Automatic."
-                            .into(),
-                    );
-                }
-                let previous = config.mappings.clone();
-                config
-                    .mappings
-                    .retain(|saved| saved.computer_id != computer_id || saved.port != port);
-                config.mappings.push(mapping);
-                write_configuration_unlocked(&app.paths().app_data, &config)?;
-                previous
-            };
-            let staged_tunnel = if state == super::store::State::Running {
-                if let Some(target) = tunnel_target {
-                    if tunnel_is_live(&key, target) {
-                        None
-                    } else {
-                        match start_tunnel_for(app, computer_id, &key, target) {
-                            Ok(tunnel) => Some(tunnel),
-                            Err(error) => {
-                                let _lock = configuration_lock();
-                                config.mappings = previous;
-                                let _ =
-                                    write_configuration_unlocked(&app.paths().app_data, &config);
-                                return Err(error);
-                            }
-                        }
+            let start_now = state == super::store::State::Running
+                && tunnel_target.is_some_and(|target| !tunnel_is_live(&key, target));
+            let staged_tunnel =
+                save_mapping_then_start(&app.paths().app_data, mapping, || match tunnel_target {
+                    Some(target) if start_now => {
+                        start_tunnel_for(app, computer_id, &key, target).map(Some)
                     }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+                    _ => Ok(None),
+                })?;
             if let Some(tunnel) = staged_tunnel {
                 install_tunnel(key.clone(), tunnel);
             } else if tunnel_target.is_none() {
@@ -1470,6 +1471,92 @@ mod tests {
                 .any(|line| line == format!("proxycommand {proxy}")),
             "the command-line proxy label did not override the alias:\n{resolved}"
         );
+    }
+
+    const C1: &str = "c690f54f-4cc9-4950-8782-30f21e89d18b";
+    const C2: &str = "d690f54f-4cc9-4950-8782-30f21e89d18b";
+
+    #[test]
+    fn a_published_port_is_saved_before_its_tunnel_starts() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path();
+        let mapping = Mapping {
+            computer_id: C1.into(),
+            port: 8765,
+            host_port: None,
+            scheme: None,
+            enabled: true,
+        };
+        let seen = save_mapping_then_start(data, mapping.clone(), || {
+            // What the tunnel's SSH stream checks: the port is already published.
+            let config = read_configuration_unlocked(data).unwrap();
+            assert!(config.mappings.contains(&mapping));
+            Ok(Some(7))
+        })
+        .unwrap();
+        assert_eq!(seen, Some(7));
+        assert_eq!(
+            read_configuration_unlocked(data).unwrap().mappings,
+            [mapping]
+        );
+    }
+
+    #[test]
+    fn a_tunnel_that_cannot_start_undoes_the_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path();
+        let kept = Mapping {
+            computer_id: C1.into(),
+            port: 1,
+            host_port: None,
+            scheme: None,
+            enabled: true,
+        };
+        write_configuration_unlocked(
+            data,
+            &Configuration {
+                mappings: vec![kept.clone()],
+            },
+        )
+        .unwrap();
+        let new = Mapping {
+            port: 2,
+            ..kept.clone()
+        };
+        let result: Result<Option<()>, String> =
+            save_mapping_then_start(data, new, || Err("Could not publish this port.".into()));
+        assert_eq!(result.unwrap_err(), "Could not publish this port.");
+        assert_eq!(read_configuration_unlocked(data).unwrap().mappings, [kept]);
+    }
+
+    #[test]
+    fn a_host_port_taken_by_another_computer_is_refused_before_the_tunnel_starts() {
+        let directory = tempfile::tempdir().unwrap();
+        let data = directory.path();
+        let taken = Mapping {
+            computer_id: C1.into(),
+            port: 1,
+            host_port: Some(50000),
+            scheme: None,
+            enabled: true,
+        };
+        write_configuration_unlocked(
+            data,
+            &Configuration {
+                mappings: vec![taken.clone()],
+            },
+        )
+        .unwrap();
+        let other = Mapping {
+            computer_id: C2.into(),
+            ..taken.clone()
+        };
+        let mut started = false;
+        let result = save_mapping_then_start(data, other, || {
+            started = true;
+            Ok(Some(()))
+        });
+        assert!(result.is_err() && !started);
     }
 
     #[test]
