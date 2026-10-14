@@ -7,7 +7,9 @@ pub mod checkpoints;
 pub mod computers;
 pub mod display;
 pub mod guest;
+pub mod guest_remote;
 pub mod operations;
+pub mod remote;
 pub mod services;
 
 /// The macOS computer inventory is process-global. Tests that seed or reset it hold this
@@ -39,6 +41,8 @@ pub struct HandlerContext {
     engine: Arc<SilodContext>,
     client: RequestContext,
     client_id: ClientId,
+    /// Set when the request is another device's, run here by `remote::serve_owner`.
+    owner_bridge: bool,
 }
 
 impl HandlerContext {
@@ -48,7 +52,23 @@ impl HandlerContext {
             engine,
             client,
             client_id,
+            owner_bridge: false,
         }
+    }
+
+    /// A request another device's engine sent over Connections, served as a local one. Its
+    /// client is the bridge itself, which no socket event reaches, so work that would answer
+    /// only "the client that asked" is announced to every subscriber instead, and the
+    /// controller reads it through its event relay.
+    pub(crate) fn for_owner_bridge(engine: Arc<SilodContext>, client: RequestContext) -> Self {
+        Self {
+            owner_bridge: true,
+            ..Self::new(engine, client)
+        }
+    }
+
+    pub(crate) fn is_owner_bridge(&self) -> bool {
+        self.owner_bridge
     }
 
     /// The engine interface implemented by silod's host context.
@@ -120,6 +140,17 @@ impl HandlerContext {
     pub fn map_engine_error(error: silo_engine::bridge_error::BridgeError) -> DispatchError {
         use silo_engine::bridge_error::ErrorCode as EngineErrorCode;
 
+        // The owner's own, finer code (`not_running`, `needs_personalizing`...) survives.
+        if let Some(code) = error
+            .api_code
+            .as_deref()
+            .and_then(|code| serde_json::from_value::<ApiErrorCode>(Value::from(code)).ok())
+        {
+            return DispatchError {
+                code,
+                message: error.message,
+            };
+        }
         let code = match error.code {
             EngineErrorCode::UpdateInProgress => ApiErrorCode::UpdateInProgress,
             EngineErrorCode::UnsupportedRemoteOperation => ApiErrorCode::UnsupportedRemoteOperation,
@@ -208,6 +239,9 @@ pub(crate) async fn dispatch(
     method: MethodName,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
+    if let Some(result) = remote::route(method, params, context).await {
+        return result;
+    }
     if let Some(result) = operations::handle(method, params, context).await {
         return result;
     }

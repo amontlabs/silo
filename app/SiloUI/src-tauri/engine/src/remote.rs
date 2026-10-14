@@ -307,6 +307,7 @@ const METHODS: &[(&str, Access)] = &[
     ("github.connect", Access::Change),
     ("github.connect.callback", Access::Stream),
     ("events.subscribe", Access::Stream),
+    ("guest.files.watch", Access::Stream),
     ("github.connect.reopen", Access::Read),
     ("github.repositories.manage", Access::Read),
     ("github.repositories.refresh", Access::Change),
@@ -324,8 +325,6 @@ const METHODS: &[(&str, Access)] = &[
     ("ssh.access.state", Access::Read),
     ("ssh.access.connection", Access::Change),
     ("ssh.access.save", Access::Change),
-    ("files.list", Access::Read),
-    ("guest.prepare", Access::Change),
     ("guest.exec.start", Access::Change),
     ("guest.exec.get", Access::Read),
     ("guest.exec.input", Access::Change),
@@ -352,6 +351,79 @@ const METHODS: &[(&str, Access)] = &[
     ("macos.display.resize", Access::Read),
     ("macos.display.stream", Access::Stream),
 ];
+/// Canonical methods this device serves for a controller by running its own handler for
+/// them: the controller's engine validates the request, drops `deviceId` and sends it
+/// here; the owner runs it as a local request and replies with the canonical result (a job
+/// method replies with the owner's `jobId`, followed by `(deviceId, jobId)`). A query is a
+/// `Read`; everything else is a `Change`, accepted once per request identity. Reads that
+/// the API types as commands (`clipboard.read`) and bounded commands that only observe
+/// (`guest.files.*` reads) are classed as reads.
+///
+/// `silod` serves these in `methods::remote::serve_owner`; its tests keep the two lists
+/// equal to the kinds in the `silo-api` registry.
+pub const OWNER_METHODS: &[(&str, bool)] = &[
+    // (method, changes state)
+    ("activity.setup.read", false),
+    ("checkpoints.abandonRestore", true),
+    ("checkpoints.create", true),
+    ("checkpoints.delete", true),
+    ("checkpoints.fork", true),
+    ("checkpoints.restore", true),
+    ("checkpoints.usage", false),
+    ("clipboard.read", false),
+    ("clipboard.write", true),
+    ("computers.configuration.change", true),
+    ("computers.configuration.read", false),
+    ("computers.configuration.retry", true),
+    ("computers.create", true),
+    ("computers.creation.skipComputerUseWait", true),
+    ("computers.delete", true),
+    ("computers.dismissError", true),
+    ("computers.forceStop", true),
+    ("computers.identities.configure", true),
+    ("computers.identities.verify", false),
+    ("computers.launch", false),
+    ("computers.list", false),
+    ("computers.restart", true),
+    ("computers.start", true),
+    ("computers.stop", true),
+    ("device.dependencies", false),
+    ("device.facts", false),
+    ("exports.acknowledge", true),
+    ("exports.create", true),
+    ("exports.destination.set", true),
+    ("exports.dismiss", true),
+    ("exports.import", true),
+    ("exports.inspect", true),
+    ("exports.state", false),
+    ("files.list", false),
+    ("guest.account", false),
+    ("guest.exec", true),
+    ("guest.files.list", false),
+    ("guest.files.read", false),
+    ("guest.files.remove", true),
+    ("guest.files.write", true),
+    ("guest.prepare", true),
+    ("logs.query", false),
+    ("macos.setup.retry", true),
+    ("macos.template.delete", true),
+    ("migration.preUpgradeBackup.acknowledgeNotice", true),
+    ("migration.preUpgradeBackup.delete", true),
+    ("migration.preUpgradeBackup.get", false),
+    ("migration.preUpgradeBackup.measure", false),
+    ("migration.state", false),
+    ("notifications.list", false),
+    ("preparation.chatgpt.retry", true),
+    ("preparation.chatgpt.status", false),
+    ("preparation.retry", true),
+    ("preparation.status", false),
+    ("storage.read", false),
+    ("storage.reclaim", true),
+];
+/// Whether the owner runs `method` as one of its own canonical handlers.
+pub fn is_owner_method(method: &str) -> bool {
+    OWNER_METHODS.iter().any(|(name, _)| *name == method)
+}
 /// The error an older or newer device reports for a method it does not serve.
 const UNSUPPORTED: &str = "This Silo version does not support that remote operation.";
 fn access(method: &str) -> Option<Access> {
@@ -359,6 +431,18 @@ fn access(method: &str) -> Option<Access> {
         .iter()
         .find(|(name, _)| *name == method)
         .map(|(_, access)| *access)
+        .or_else(|| {
+            OWNER_METHODS
+                .iter()
+                .find(|(name, _)| *name == method)
+                .map(|(_, change)| {
+                    if *change {
+                        Access::Change
+                    } else {
+                        Access::Read
+                    }
+                })
+        })
 }
 /// Whether the method turns its connection into a raw byte stream after the reply.
 fn is_stream_method(method: Option<&str>) -> bool {
@@ -888,6 +972,9 @@ fn error_reply(error: &BridgeError, app_version: &str) -> Value {
         _ => &error.message,
     };
     let mut reply = json!({"error":legacy,"code":error.code,"message":error.message});
+    if let Some(api_code) = &error.api_code {
+        reply["apiCode"] = json!(api_code);
+    }
     if error.code == ErrorCode::IncompatibleVersion {
         reply["version"] = json!(VERSION);
         reply["appVersion"] = json!(app_version);
@@ -1324,7 +1411,7 @@ fn request_timeout(request: &Value) -> Duration {
         || (request["method"] == "desktop.action"
             && matches!(
                 request["params"]["action"].as_str(),
-                Some("update-streamer" | "setup-lcu" | "setup-computer-use")
+                Some("update-streamer" | "setup-lcu" | "setup-computer-use" | "setup-agent-tools")
             ))
         || request["method"] == "computerUse.approval"
     {
@@ -1599,7 +1686,9 @@ fn exchange_with_device(
             .devices
             .into_iter()
             .find(|h| h.id == device_id)
-            .ok_or("This device is no longer connected.")?
+            .ok_or_else(|| {
+                BridgeError::new(ErrorCode::NotFound, "This device is no longer connected.")
+            })?
     };
     let mut request =
         json!({"version":VERSION,"deviceId":device.id,"method":method,"params":params});
@@ -2016,7 +2105,9 @@ fn probe_device(device_id: &str) -> Result<(), BridgeError> {
             .devices
             .into_iter()
             .find(|saved| saved.id == device_id)
-            .ok_or("This device is no longer connected.")?
+            .ok_or_else(|| {
+                BridgeError::new(ErrorCode::NotFound, "This device is no longer connected.")
+            })?
     };
     let request = json!({"version":VERSION,"deviceId":device.id,"method":"handshake","params":{}});
     exchange(&device.address, &request, Instant::now() + PROBE_TIMEOUT)
@@ -2571,7 +2662,9 @@ pub fn open_bridge_stream(
             .devices
             .into_iter()
             .find(|h| h.id == device_id)
-            .ok_or("This device is no longer connected.")?
+            .ok_or_else(|| {
+                BridgeError::new(ErrorCode::NotFound, "This device is no longer connected.")
+            })?
     };
     debug_assert!(is_stream_method(Some(method)));
     let request = json!({"version":VERSION,"deviceId":device.id,"method":method,"params":params});
@@ -2806,8 +2899,49 @@ fn listen() -> Result<(), String> {
                             )?;
                             return Ok(None);
                         }
+                        if request["method"] == crate::remote_access::GUEST_WATCH_STREAM {
+                            authorize(&request)?;
+                            serve_watch_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |params| {
+                                    crate::remote_watch::Watching::start(
+                                        params,
+                                        |params, emit, wanted| {
+                                            local_access.start_guest_watch(params, emit, wanted)
+                                        },
+                                    )
+                                },
+                                &|| {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
                         if request["method"] == "guest.ssh" {
                             authorize(&request)?;
+                            let running = || {
+                                REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                    && crate::runtime::shutdown::ensure_accepting_operations()
+                                        .is_ok()
+                            };
+                            if !is_linux_computer(&paths()?, &request["params"]) {
+                                // A macOS computer: the transport is a TCP connection to the
+                                // guest's SSH port, not a runtime process.
+                                serve_guest_tcp(
+                                    &mut stream,
+                                    &mut permit,
+                                    &STREAMS,
+                                    &request["params"],
+                                    open_macos_guest_ssh,
+                                    running,
+                                )?;
+                                return Ok(None);
+                            }
                             serve_guest_stream(
                                 &mut stream,
                                 &mut permit,
@@ -2942,6 +3076,12 @@ fn execute(
         return handshake_key_in(&current_home()?.join(".ssh/authorized_keys"), Some(public));
     }
     match method {
+        // Canonical methods run the owner's own handlers, even where a legacy prefix
+        // (`macos.`) would otherwise claim them.
+        _ if is_owner_method(method) => {
+            let paths = paths().map_err(BridgeError::from)?;
+            crate::remote_access::dispatch_typed(&paths, method, params, checkpoints, local_access)
+        }
         _ if method.starts_with("runtime.") => {
             crate::runtime::remote_ops::dispatch(runtime_host, method, params.clone())
         }
@@ -2958,7 +3098,11 @@ fn execute(
 }
 /// The methods this device serves, reported in the handshake.
 fn capabilities() -> Vec<&'static str> {
-    METHODS.iter().map(|(method, _)| *method).collect()
+    METHODS
+        .iter()
+        .map(|(method, _)| *method)
+        .chain(OWNER_METHODS.iter().map(|(method, _)| *method))
+        .collect()
 }
 /// Owner side of one bridged request: authorize, classify, then run it. A change is
 /// accepted once per `operationId` (see `operations`), waits for its turn in the
@@ -3540,6 +3684,58 @@ pub(crate) fn revoke_port_streams(computer: &str, port: u16) {
     }
 }
 
+/// Whether the `computerId` of `guest.ssh` params names a Linux computer on this device;
+/// anything else is served as a macOS computer, which reports its own absence.
+fn is_linux_computer(paths: &crate::runtime::RuntimePaths, params: &Value) -> bool {
+    params["computerId"]
+        .as_str()
+        .is_some_and(|id| crate::runtime::remote_ops::local_computer_name_in(paths, id).is_ok())
+}
+
+/// A macOS computer's SSH transport and the means to learn that it must end.
+type GuestTcp = (std::net::TcpStream, Box<dyn Fn() -> bool + Send>);
+
+/// Opens the SSH transport of a macOS computer for a `guest.ssh` stream: its guest address on
+/// port 22, ended when the computer stops or the forward it carries is unpublished.
+fn open_macos_guest_ssh(params: &Value, port: Option<u16>) -> Result<GuestTcp, String> {
+    let id = params["computerId"].as_str().ok_or("Missing computerId.")?;
+    let context = crate::context::current().ok_or("The engine is not ready.")?;
+    let opened =
+        crate::macos_computers::open_guest_ssh_stream(&context.paths().app_data, id, port)?;
+    let crate::macos_computers::GuestSshStream { stream, guard } = opened;
+    Ok((stream, Box::new(move || guard.allowed())))
+}
+
+/// Opens and relays one `guest.ssh` stream to a macOS computer, registering a published-port
+/// forward until it ends.
+fn serve_guest_tcp(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(&Value, Option<u16>) -> Result<GuestTcp, String>,
+    allowed: impl Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let kind = guest_stream_kind(params)?;
+    let _stream_permit = admit_stream(permit, streams)?;
+    let (registration, label) = match kind {
+        GuestStream::Port(port) => (
+            Some(PortRegistration::open(
+                params["computerId"].as_str().ok_or("Missing computerId.")?,
+                port,
+            )),
+            Some(port),
+        ),
+        GuestStream::Interactive => (None, None),
+    };
+    let (guest, guard) = open(params, label)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    relay_tcp(stream, guest, || {
+        allowed() && guard() && registration.as_ref().map_or(true, |r| !r.revoked())
+    })?;
+    Ok(())
+}
+
 /// Opens and relays one `guest.ssh` stream, registering a published-port forward until it ends.
 fn serve_guest_stream(
     stream: &mut UnixStream,
@@ -3624,6 +3820,36 @@ fn serve_event_stream_with(
         allowed,
         heartbeat,
     );
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    Ok(())
+}
+/// Serves one controller's `guest.files.watch`: the owner starts the watch and writes its
+/// hints until the controller leaves. The watch takes one stream permit, and a refusal (no
+/// such computer, not running, too many watches) comes back before the reply.
+fn serve_watch_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(&Value) -> Result<crate::remote_watch::Watching, String>,
+    allowed: &dyn Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let _stream_permit = admit_stream(permit, streams)?;
+    let watching = open(params)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    let peer = stream.try_clone().map_err(|e| e.to_string())?;
+    crate::remote_watch::serve(
+        &mut *stream,
+        &watching,
+        &|| connection_open(&peer),
+        allowed,
+        crate::remote_watch::HEARTBEAT,
+    );
+    drop(watching);
     let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
@@ -4108,6 +4334,210 @@ mod port_stream_tests {
         }
         assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
         assert_eq!(registered(computer, 4000), 0);
+    }
+
+    /// A guest's SSH port: echoes what it is sent, like `cat` for the Linux transport.
+    fn echo_guest() -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 64];
+            while let Ok(read) = connection.read(&mut buffer) {
+                if read == 0 || connection.write_all(&buffer[..read]).is_err() {
+                    break;
+                }
+            }
+        });
+        (address, worker)
+    }
+
+    fn open_tcp(
+        budget: &'static Budget,
+        params: Value,
+        guest: std::net::SocketAddr,
+        ends: Arc<std::sync::atomic::AtomicBool>,
+        labels: Arc<Mutex<Vec<Option<u16>>>>,
+    ) -> Open {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let worker = thread::spawn(move || {
+            let mut permit = None;
+            serve_guest_tcp(
+                &mut server,
+                &mut permit,
+                budget,
+                &params,
+                move |_, label| {
+                    labels.lock().unwrap().push(label);
+                    let stream = std::net::TcpStream::connect(guest).map_err(|e| e.to_string())?;
+                    Ok((
+                        stream,
+                        Box::new(move || !ends.load(Ordering::Acquire))
+                            as Box<dyn Fn() -> bool + Send>,
+                    ))
+                },
+                || true,
+            )
+        });
+        let reply = read_frame(&mut client).unwrap();
+        assert_eq!(reply["result"], json!({}));
+        Open { client, worker }
+    }
+
+    #[test]
+    fn a_macos_guest_ssh_stream_relays_bytes_and_ends_with_its_guard_or_its_port() {
+        let _test_state = crate::test_support::global_state();
+        static BUDGET: Budget = Budget::new(8);
+        let labels: Arc<Mutex<Vec<Option<u16>>>> = Arc::default();
+        // Interactive: bytes reach the guest's SSH port and come back; the guard ends it.
+        let (guest, guest_worker) = echo_guest();
+        let ends = Arc::new(AtomicBool::new(false));
+        let mut interactive = open_tcp(
+            &BUDGET,
+            params("mac-computer", None, None),
+            guest,
+            ends.clone(),
+            labels.clone(),
+        );
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 1);
+        assert!(interactive.echoes());
+        ends.store(true, Ordering::Release);
+        assert!(interactive.closed());
+        guest_worker.join().unwrap();
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        // A published-port forward is registered, labelled for the guest's guard, and the
+        // owner unpublishing the port ends it.
+        let (guest, guest_worker) = echo_guest();
+        let forward = open_tcp(
+            &BUDGET,
+            params("mac-computer", Some("port"), Some(3000)),
+            guest,
+            Arc::new(AtomicBool::new(false)),
+            labels.clone(),
+        );
+        assert_eq!(registered("mac-computer", 3000), 1);
+        revoke_port_streams("mac-computer", 3000);
+        assert!(forward.closed());
+        guest_worker.join().unwrap();
+        assert_eq!(registered("mac-computer", 3000), 0);
+        assert_eq!(*labels.lock().unwrap(), [None, Some(3000)]);
+        // Invalid params never open the guest.
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = None;
+        let opened = AtomicBool::new(false);
+        assert!(serve_guest_tcp(
+            &mut server,
+            &mut permit,
+            &BUDGET,
+            &params("mac-computer", Some("bogus"), None),
+            |_, _| {
+                opened.store(true, Ordering::Release);
+                Err("unreachable".into())
+            },
+            || true,
+        )
+        .is_err());
+        assert!(!opened.load(Ordering::Acquire));
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        client.shutdown(std::net::Shutdown::Both).unwrap();
+    }
+
+    #[test]
+    fn a_computer_that_is_not_in_the_linux_inventory_is_served_as_macos() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(directory.path());
+        let id = "00000000-0000-4000-8000-0000000000c1";
+        crate::runtime::write_metadata(
+            &paths.metadata,
+            &crate::runtime::ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![crate::runtime::ComputerConfiguration {
+                    id: id.into(),
+                    name: "dev".into(),
+                    cpus: 1,
+                    max_cpus: 2,
+                    memory_gib: 2,
+                    max_memory_gib: 4,
+                    workspace_storage_gib: 10,
+                    runtime_storage_gib: 10,
+                    desktop: None,
+                }],
+            },
+        )
+        .unwrap();
+        assert!(is_linux_computer(&paths, &json!({"computerId": id})));
+        for other in [
+            json!({"computerId": "00000000-0000-4000-8000-0000000000c2"}),
+            json!({"computerId": 3}),
+            json!({}),
+        ] {
+            assert!(!is_linux_computer(&paths, &other), "{other}");
+        }
+    }
+
+    #[test]
+    fn a_watch_stream_refuses_before_its_reply_and_otherwise_streams_hints_until_the_controller_leaves(
+    ) {
+        let _test_state = crate::test_support::global_state();
+        static BUDGET: Budget = Budget::new(2);
+        // A refusal (no such computer) is the reply, and takes no permit afterwards.
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = None;
+        let refused = serve_watch_stream(
+            &mut server,
+            &mut permit,
+            &BUDGET,
+            &json!({"computerId": "x", "paths": ["/w"]}),
+            |params| {
+                crate::remote_watch::Watching::start(params, |_, _, _| {
+                    Err("Start this computer to watch it.".into())
+                })
+            },
+            &|| true,
+        );
+        assert_eq!(
+            refused.unwrap_err().message,
+            "Start this computer to watch it."
+        );
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
+        drop(client);
+
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let emitter: Arc<Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>> = Arc::default();
+        let slot = emitter.clone();
+        let worker = thread::spawn(move || {
+            let mut permit = None;
+            serve_watch_stream(
+                &mut server,
+                &mut permit,
+                &BUDGET,
+                &json!({"computerId": "x", "paths": ["/w"]}),
+                move |params| {
+                    crate::remote_watch::Watching::start(params, move |_, emit, _| {
+                        *slot.lock().unwrap() = Some(emit);
+                        Ok(())
+                    })
+                },
+                &|| true,
+            )
+        });
+        assert_eq!(read_frame(&mut client).unwrap()["result"], json!({}));
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 1);
+        let emit = emitter.lock().unwrap().clone().unwrap();
+        emit("/w".into());
+        assert_eq!(
+            crate::remote_watch::read_watch_frame(&mut client),
+            Ok(crate::remote_watch::WatchFrame::Changed("/w".into()))
+        );
+        client.shutdown(std::net::Shutdown::Both).unwrap();
+        worker.join().unwrap().unwrap();
+        assert_eq!(BUDGET.count.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -5880,6 +6310,75 @@ mod dispatch_tests {
     }
 
     #[test]
+    fn owner_methods_are_classified_as_the_registry_kinds_and_served_once() {
+        for (method, changes) in OWNER_METHODS {
+            assert_eq!(
+                self::access(method),
+                Some(if *changes {
+                    Access::Change
+                } else {
+                    Access::Read
+                }),
+                "{method}"
+            );
+            assert!(capabilities().contains(method), "{method}");
+            assert!(is_owner_method(method));
+        }
+        assert!(!is_owner_method("runtime.action"));
+        assert!(!is_owner_method("settings.update"));
+        // A change method runs once per request identity; a read runs every time.
+        let _test_state = crate::test_support::global_state();
+        let (_home, dir, config) = owner();
+        for (method, changes) in OWNER_METHODS {
+            let request = request(&config, method);
+            let runs = AtomicUsize::new(0);
+            for _ in 0..2 {
+                let result = run(&dir, &request, |called, params| {
+                    assert_eq!(called, *method);
+                    assert_eq!(params["computerId"], "computer");
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({"ran":method}))
+                })
+                .unwrap();
+                assert_eq!(result, json!({"ran":method}));
+            }
+            assert_eq!(
+                runs.load(Ordering::SeqCst),
+                if *changes { 1 } else { 2 },
+                "{method}"
+            );
+        }
+        let mut anonymous = request(&config, "computers.start");
+        anonymous["operationId"] = Value::Null;
+        assert_eq!(
+            run(&dir, &anonymous, |method, _| panic!(
+                "{method} must not run"
+            ))
+            .unwrap_err(),
+            "Invalid remote request identity."
+        );
+    }
+
+    #[test]
+    fn the_owners_finer_error_code_crosses_the_bridge() {
+        let error = BridgeError::new(ErrorCode::Internal, "Start the computer first.")
+            .with_api_code("not_running");
+        let reply = error_reply(&error, "0.11.1");
+        assert_eq!(reply["apiCode"], "not_running");
+        assert_eq!(reply["code"], "internal");
+        let decoded = BridgeError::from_remote_reply(&reply).unwrap();
+        assert_eq!(decoded.api_code.as_deref(), Some("not_running"));
+        assert_eq!(decoded, error);
+        // A device that sends none leaves the coarse code alone.
+        let plain = error_reply(&BridgeError::new(ErrorCode::NotFound, "gone"), "0.11.1");
+        assert!(plain.get("apiCode").is_none());
+        assert!(BridgeError::from_remote_reply(&plain)
+            .unwrap()
+            .api_code
+            .is_none());
+    }
+
+    #[test]
     fn linux_path_resolution_does_not_block_macos_or_chatgpt_handlers() {
         let path_calls = Arc::new(AtomicUsize::new(0));
         let resolver_calls = path_calls.clone();
@@ -5983,7 +6482,6 @@ mod dispatch_tests {
                 "computerUse.approval",
                 "ssh.access.connection",
                 "ssh.access.save",
-                "guest.prepare",
                 "guest.exec.start",
                 "guest.exec.input",
                 "network.publish",
@@ -6017,6 +6515,7 @@ mod dispatch_tests {
             [
                 "github.connect.callback",
                 "events.subscribe",
+                "guest.files.watch",
                 "guest.ssh",
                 "macos.display.stream"
             ]
@@ -6042,7 +6541,13 @@ mod dispatch_tests {
         let mut names = capabilities();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), METHODS.len());
+        assert_eq!(names.len(), METHODS.len() + OWNER_METHODS.len());
+        for (method, _) in OWNER_METHODS {
+            assert!(
+                METHODS.iter().all(|(legacy, _)| legacy != method),
+                "{method} is classified twice"
+            );
+        }
     }
 
     #[test]

@@ -199,10 +199,13 @@ async fn the_domain_answers_over_the_socket_with_canonical_results_jobs_and_erro
         json!({"computerId": "x", "deviceId": "another-device", "name": "n"}),
     )
     .await;
+    // Another device is reached through its owner; one this engine is not connected to is
+    // reported as such.
     assert!(matches!(
         remote,
         ResponseEnvelope::Error { error, .. }
-            if error.code == silo_api::jobs::ErrorCode::UnsupportedRemoteOperation
+            if error.code == silo_api::jobs::ErrorCode::NotFound
+                && error.message.contains("no longer connected")
     ));
 
     drop(client);

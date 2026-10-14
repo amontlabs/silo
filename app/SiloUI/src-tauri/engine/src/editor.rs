@@ -852,10 +852,40 @@ fn prepare_remote_transport(
     forwarding: bool,
 ) -> Result<(String, PathBuf, Option<std::net::IpAddr>), String> {
     validate_path(path)?;
+    let context = silo_engine::context::current().ok_or(FAILED)?;
+    let (alias, config, access) =
+        write_remote_transport(&context.paths().home, device, computer, port, &|public| {
+            let (host_public_key, user, guest_address) =
+                crate::remote_access::prepare(device, computer, public, path, forwarding)?;
+            Ok(RemoteAccess {
+                host_public_key,
+                user: user.to_owned(),
+                guest_address,
+            })
+        })?;
+    Ok((alias, config, access.guest_address))
+}
+
+/// What the owner's `guest.prepare` answered for a controller's key: the guest's pinned host
+/// key, the account to sign in as and (for a published-port forward) the guest's address.
+pub struct RemoteAccess {
+    pub host_public_key: String,
+    pub user: String,
+    pub guest_address: Option<std::net::IpAddr>,
+}
+
+/// Writes the controller's configuration for one computer on another device. `authorize`
+/// asks the owner to install the given public key and returns what it answered; the
+/// controller's key is created first, and no file lock is held during that call.
+fn write_remote_transport(
+    home: &Path,
+    device: &str,
+    computer: &str,
+    port: Option<u16>,
+    authorize: &dyn Fn(&str) -> Result<RemoteAccess, String>,
+) -> Result<(String, PathBuf, RemoteAccess), String> {
     uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
     uuid::Uuid::parse_str(computer).map_err(|_| "Invalid computer identity.")?;
-    let context = silo_engine::context::current().ok_or(FAILED)?;
-    let home = &context.paths().home;
     let state = crate::channel::current().state_dir(home);
     crate::runtime::prepare_private_directory(&state).map_err(|e| e.to_string())?;
     let root = state.join("desktop-remote/ssh");
@@ -867,15 +897,22 @@ fn prepare_remote_transport(
         public_key(&client)?
     };
     // The remote call can take minutes; keep the file lock free meanwhile.
-    let (host_public, user, address) =
-        crate::remote_access::prepare(device, computer, &client_public, path, forwarding)?;
+    let access = authorize(&client_public)?;
+    validate_public_key(&access.host_public_key)?;
+    if access.user != crate::working_account::USER {
+        return Err("The other device opens this computer with an account this Silo does not support. Update Silo on both devices.".into());
+    }
+    let user = &access.user;
     let _guard = files_lock();
     let alias = format!(
         "{}-{device}-{computer}",
         crate::channel::current().remote_alias_prefix()
     );
     let known_hosts = root.join(format!("{device}-{computer}.known_hosts"));
-    write_private(&known_hosts, format!("{alias} {host_public}\n").as_bytes())?;
+    write_private(
+        &known_hosts,
+        format!("{alias} {}\n", access.host_public_key).as_bytes(),
+    )?;
     // A published-port forward has its own configuration: its ProxyCommand names the
     // guest port the owner revokes by, and tunnels for other ports run concurrently.
     let proxy = remote_proxy_for(device, computer, port)?;
@@ -885,7 +922,133 @@ fn prepare_remote_transport(
     };
     let contents = format!("Host {alias}\n  HostName {alias}\n  User {user}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n  ForwardAgent no\n  ForwardX11 no\n  UserKnownHostsFile {}\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ProxyCommand {proxy}\n\nHost *\n", ssh_quote(&client)?, ssh_quote(&known_hosts)?);
     write_private(&config, contents.as_bytes())?;
-    Ok((alias, config, address))
+    Ok((alias, config, access))
+}
+
+/// A computer on another device, reachable through the owner: its SSH entry for this
+/// device's clients.
+pub struct RemoteAlias {
+    pub alias: String,
+    pub user: String,
+    pub config: PathBuf,
+    pub include: String,
+    pub include_installed: bool,
+}
+
+/// Writes (or rewrites) `silo-remote-<deviceId>-<computerId>` below this device's state
+/// directory and, with `install_include`, makes it visible through `~/.ssh/config`. The
+/// entry signs in with this device's per-device key, which the owner authorizes through
+/// `authorize` (`guest.prepare`), and reaches the computer through `--remote-guest`, a
+/// ProxyCommand that opens the owner's `guest.ssh` stream.
+pub fn ensure_remote_alias(
+    user_home: &Path,
+    device: &str,
+    computer: &str,
+    install_include: bool,
+    authorize: &dyn Fn(&str) -> Result<RemoteAccess, String>,
+) -> Result<RemoteAlias, String> {
+    let (alias, config, access) =
+        write_remote_transport(user_home, device, computer, None, authorize)?;
+    let root = config.parent().ok_or(FAILED)?;
+    let include = include_line(root)?;
+    let _guard = files_lock();
+    let include_installed = if install_include {
+        self::install_include(user_home, &include)?;
+        true
+    } else {
+        user_config_has_line(user_home, &include)
+    };
+    Ok(RemoteAlias {
+        alias,
+        user: access.user,
+        config,
+        include,
+        include_installed,
+    })
+}
+
+/// Removes the entry for a computer on another device and its pinned host key. The shared
+/// `Include` goes with the last entry. Idempotent; this device's key and the owner's
+/// authorization stay, and a published-port forward's own entry is not touched.
+pub fn remove_remote_alias(user_home: &Path, device: &str, computer: &str) -> Result<(), String> {
+    uuid::Uuid::parse_str(device).map_err(|_| "Invalid device identity.")?;
+    uuid::Uuid::parse_str(computer).map_err(|_| "Invalid computer identity.")?;
+    let root = crate::channel::current()
+        .state_dir(user_home)
+        .join("desktop-remote/ssh");
+    let _guard = files_lock();
+    for file in [
+        format!("{device}-{computer}.conf"),
+        format!("{device}-{computer}.known_hosts"),
+    ] {
+        match fs::remove_file(root.join(file)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(FAILED.into()),
+        }
+    }
+    let entries_left = fs::read_dir(&root).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".conf"))
+    });
+    if !entries_left {
+        let _ = remove_include(user_home, &include_line(&root)?);
+    }
+    Ok(())
+}
+
+/// The workspace folder of a computer on another device: a macOS computer's account is fixed.
+pub fn remote_workspace(macos: bool) -> &'static str {
+    if macos {
+        "/Users/silo/workspace"
+    } else {
+        "/workspace"
+    }
+}
+
+/// Checks a folder a client asks to open in a computer on another device.
+pub fn validate_remote_path(path: &str, macos: bool) -> Result<(), String> {
+    if macos {
+        validate_macos_path(path)
+    } else {
+        validate_path(path)
+    }
+}
+
+/// The home folder of a macOS computer's working account.
+pub const MACOS_HOME: &str = "/Users/silo";
+
+/// The argv a terminal runs to open a shell in a computer on another device.
+pub fn remote_terminal_argv(config: &Path, alias: &str) -> Result<Vec<String>, String> {
+    Ok(vec![
+        "/usr/bin/ssh".to_owned(),
+        "-F".to_owned(),
+        config.to_str().ok_or(FAILED)?.to_owned(),
+        "-t".to_owned(),
+        alias.to_owned(),
+    ])
+}
+
+/// The argv that opens `path` of a computer on another device in the chosen editor. `macos`
+/// selects the workspace root of a macOS computer.
+pub fn remote_editor_argv(
+    command: &applications::launch::EditorCommand,
+    alias: &str,
+    path: &str,
+    user_home: &Path,
+    macos: bool,
+) -> Result<Vec<String>, String> {
+    let launch = if macos {
+        macos_editor_launch(command, alias, path, user_home)?
+    } else {
+        editor_launch(command, alias, path, user_home)?
+    };
+    let mut argv = vec![launch.get_program().to_str().ok_or(FAILED)?.to_owned()];
+    for argument in launch.get_args() {
+        argv.push(argument.to_str().ok_or(FAILED)?.to_owned());
+    }
+    Ok(argv)
 }
 
 fn proxy_command<S: AsRef<str>>(parts: &[S]) -> String {
@@ -1383,7 +1546,7 @@ fn remove_include(user_home: &Path, include: &str) -> Result<(), String> {
 }
 
 /// Checks that `alias` reaches the computer without prompting. Never starts it.
-pub(crate) fn probe_alias(config: &Path, alias: &str) -> Result<(), String> {
+pub fn probe_alias(config: &Path, alias: &str) -> Result<(), String> {
     let mut probe = Command::new("/usr/bin/ssh");
     probe.args(["-F"]).arg(config).args([
         "-o",
@@ -2943,5 +3106,101 @@ mod tests {
             command.arg(uri);
             run(&mut command, Duration::from_secs(10)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_remote_alias_is_keyed_by_ids_and_removal_keeps_the_include_until_the_last_entry() {
+        let _state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let (device, one, two) = (
+            "88888888-8888-4888-8888-888888888841",
+            "99999999-9999-4999-8999-999999999941",
+            "99999999-9999-4999-8999-999999999942",
+        );
+        let host =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKaDgVuE9Eq4wyQDZgT0kPA3H";
+        let keys = std::cell::RefCell::new(Vec::new());
+        let authorize = |public: &str| {
+            keys.borrow_mut().push(public.to_owned());
+            Ok(RemoteAccess {
+                host_public_key: host.into(),
+                user: "silo".into(),
+                guest_address: None,
+            })
+        };
+        let first = ensure_remote_alias(home.path(), device, one, true, &authorize).unwrap();
+        let second = ensure_remote_alias(home.path(), device, two, true, &authorize).unwrap();
+        let prefix = crate::channel::current().remote_alias_prefix();
+        assert_eq!(first.alias, format!("{prefix}-{device}-{one}"));
+        assert!(first.include_installed && second.include_installed);
+        // One key per owner, whichever computer asked, and it is a public key.
+        let keys = keys.borrow().clone();
+        assert_eq!(keys[0], keys[1]);
+        assert!(keys[0].starts_with("ssh-ed25519 "));
+        let user_config = fs::read_to_string(home.path().join(".ssh/config")).unwrap();
+        assert_eq!(user_config.matches(&first.include).count(), 1);
+        let config = fs::read_to_string(&first.config).unwrap();
+        assert!(config.contains("ProxyCommand "));
+        assert!(config.contains(&format!("'--remote-guest' '{device}' '{one}'")));
+        // Without the Include the entry is written and the line is reported as absent.
+        let other = tempfile::tempdir().unwrap();
+        let bare = ensure_remote_alias(other.path(), device, one, false, &authorize).unwrap();
+        assert!(!bare.include_installed);
+        assert!(!other.path().join(".ssh/config").exists());
+        // A wrong account or host key from the owner is refused and writes no entry.
+        let wrong = tempfile::tempdir().unwrap();
+        for access in [
+            RemoteAccess {
+                host_public_key: host.into(),
+                user: "root".into(),
+                guest_address: None,
+            },
+            RemoteAccess {
+                host_public_key: "ssh-rsa AAAA".into(),
+                user: "silo".into(),
+                guest_address: None,
+            },
+        ] {
+            let access = std::cell::RefCell::new(Some(access));
+            let error = ensure_remote_alias(wrong.path(), device, one, true, &|_| {
+                Ok(access.borrow_mut().take().unwrap())
+            });
+            assert!(error.is_err());
+            assert!(!wrong.path().join(".ssh/config").exists());
+        }
+        // Removing one entry leaves the other and the Include; removing the last takes the
+        // Include with it. Repeating it changes nothing.
+        remove_remote_alias(home.path(), device, one).unwrap();
+        remove_remote_alias(home.path(), device, one).unwrap();
+        assert!(!first.config.exists());
+        assert!(second.config.exists());
+        assert!(fs::read_to_string(home.path().join(".ssh/config"))
+            .unwrap()
+            .contains(&first.include));
+        remove_remote_alias(home.path(), device, two).unwrap();
+        assert!(!fs::read_to_string(home.path().join(".ssh/config"))
+            .unwrap()
+            .contains(&first.include));
+        assert!(remove_remote_alias(home.path(), "../x", one).is_err());
+    }
+
+    #[test]
+    fn remote_terminal_and_editor_argvs_name_the_alias() {
+        let argv = remote_terminal_argv(Path::new("/tmp/a b/x.conf"), "silo-remote-d-c").unwrap();
+        assert_eq!(
+            argv,
+            [
+                "/usr/bin/ssh",
+                "-F",
+                "/tmp/a b/x.conf",
+                "-t",
+                "silo-remote-d-c"
+            ]
+        );
+        assert_eq!(remote_workspace(false), "/workspace");
+        assert_eq!(remote_workspace(true), "/Users/silo/workspace");
+        assert!(validate_remote_path("/workspace/a", false).is_ok());
+        assert!(validate_remote_path("/workspace/a", true).is_err());
+        assert!(validate_remote_path("/Users/silo/workspace/a", true).is_ok());
     }
 }

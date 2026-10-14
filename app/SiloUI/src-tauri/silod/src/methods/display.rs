@@ -320,12 +320,19 @@ async fn desktop_status(
         )
         .await
         .map_err(map_error)?;
+        let agent_tools = silo_engine::macos_computers_engine::macos_agent_tools_state(
+            macos_context(context),
+            params.computer_id.clone(),
+        )
+        .await
+        .map_err(map_error)?;
         let result = json!({
             "installed": row["installed"].as_bool().unwrap_or(false), "state": state,
             "autoStart": false, "version": null, "user": null, "display": null,
             "backend": null, "sessionState": session, "streamState": null,
             "updateRequired": false, "updateAvailable": false, "streamerVersion": null,
             "computerUse": computer_use, "name": row["name"],
+            "agentTools": agent_tools,
         });
         return output(
             serde_json::from_value::<DesktopStatus>(result)
@@ -457,7 +464,7 @@ pub(crate) fn start_owner_desktop_job(
     let action = match params["action"].as_str() {
         Some(
             action @ ("start" | "stop" | "restart" | "restart-streamer" | "update-streamer"
-            | "setup-lcu" | "setup-computer-use"),
+            | "setup-lcu" | "setup-computer-use" | "setup-agent-tools"),
         ) => action.to_owned(),
         _ => return Err(DispatchError::internal("Unsupported desktop action.")),
     };
@@ -482,6 +489,7 @@ fn desktop_action_name(action: DesktopAction) -> &'static str {
         DesktopAction::Restart => "restart",
         DesktopAction::RestartStreamer => "restart-streamer",
         DesktopAction::UpdateStreamer => "update-streamer",
+        DesktopAction::SetupAgentTools => "setup-agent-tools",
     }
 }
 

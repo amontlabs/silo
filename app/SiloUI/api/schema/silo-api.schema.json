@@ -17,6 +17,80 @@
       ],
       "type": "object"
     },
+    "AgentToolsState": {
+      "oneOf": [
+        {
+          "const": "ready",
+          "description": "Both tools are installed and the setup recipe is current.",
+          "type": "string"
+        },
+        {
+          "const": "missing",
+          "description": "At least one tool is not installed.",
+          "type": "string"
+        },
+        {
+          "const": "outdated",
+          "description": "Everything is installed, but by an older recipe than this Silo ships.",
+          "type": "string"
+        }
+      ]
+    },
+    "AgentToolsStatus": {
+      "description": "What `claude -p` runs and Fjord's guest scripts need in a computer. Silo never signs in\nto Claude Code; authentication comes from the client.",
+      "properties": {
+        "claudeVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedClaudeVersion": {
+          "type": "string"
+        },
+        "expectedNodeVersion": {
+          "type": "string"
+        },
+        "expectedRecipeVersion": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "missing": {
+          "description": "Any of `node`, `claude`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "nodeVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recipeVersion": {
+          "description": "The recipe that installed the tools; null when none did.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/AgentToolsState"
+        }
+      },
+      "required": [
+        "state",
+        "missing",
+        "expectedNodeVersion",
+        "expectedClaudeVersion",
+        "expectedRecipeVersion"
+      ],
+      "type": "object"
+    },
     "ApplicationComputer": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ApplicationComputer` (lines\n591-628). `kind` is the discriminator required by 10 §1.3 and is added by\nthe canonical API; source fields retain their names and omission behavior.",
       "properties": {
@@ -1548,6 +1622,12 @@
     },
     "ComputerCreationSkipWaitParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requestId": {
           "type": "string"
         }
@@ -2076,6 +2156,12 @@
     },
     "DependencyReportParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requestId": {
           "type": "string"
         }
@@ -2095,14 +2181,23 @@
       "type": "string"
     },
     "DesktopAction": {
-      "enum": [
-        "start",
-        "stop",
-        "restart",
-        "restart-streamer",
-        "update-streamer"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "start",
+            "stop",
+            "restart",
+            "restart-streamer",
+            "update-streamer"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "setup-agent-tools",
+          "description": "Install or update the Node.js runtime and Claude Code CLI (Linux computers).",
+          "type": "string"
+        }
+      ]
     },
     "DesktopActionParams": {
       "properties": {
@@ -2174,6 +2269,18 @@
     },
     "DesktopStatus": {
       "properties": {
+        "agentTools": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentToolsStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The agent tools (Node.js and the Claude Code CLI) of the computer; null when the\ncomputer cannot be inspected (stopped Linux computers)."
+        },
         "autoStart": {
           "type": "boolean"
         },
@@ -6624,7 +6731,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -8576,7 +8683,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -8592,7 +8699,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -13910,7 +14017,7 @@
     {
       "kind": "query",
       "name": "activity.setup.read",
-      "paramsType": "common::EmptyParams",
+      "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
     },
     {

@@ -27,6 +27,7 @@ pub(super) async fn dependencies(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: DependencyReportParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     dependencies::validate_request_id(&params.request_id).map_err(message_error)?;
     let executable_dir = context
         .silod_context()

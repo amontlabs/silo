@@ -2,10 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::common::{DeviceParams, EmptyParams};
+use super::common::DeviceParams;
 
-pub type PreparationStatusParams = EmptyParams;
-pub type PreparationRetryParams = EmptyParams;
+pub type PreparationStatusParams = DeviceParams;
+pub type PreparationRetryParams = DeviceParams;
 pub type ChatGptPreparationStatusParams = DeviceParams;
 pub type ChatGptPreparationRetryParams = DeviceParams;
 pub type PreparationRetryResult = PreparationStatus;

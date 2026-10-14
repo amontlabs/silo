@@ -2,6 +2,7 @@
 
 extern crate self as silo_engine;
 
+pub mod agent_tools;
 pub mod applications;
 pub mod backup;
 pub mod backup_controller;
@@ -58,6 +59,7 @@ pub mod remote_access;
 pub mod remote_events;
 pub mod remote_network;
 pub mod remote_ssh_access;
+pub mod remote_watch;
 pub mod runtime;
 pub mod runtime_migration;
 pub mod secrets;

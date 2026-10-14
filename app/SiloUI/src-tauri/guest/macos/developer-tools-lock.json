@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
-  "supportedGuestBuilds": ["25G83"],
+  "supportedGuestBuilds": [
+    "25G83"
+  ],
   "appleSigner": {
     "identity": "Software Update",
     "leafCertificateSha256": "E074D204AC2498E9DC904A7BC7CED8464119B79D05668028920583B1E896EBB4"
@@ -63,5 +65,19 @@
     "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_macOS_arm64.zip",
     "bytes": 14359983,
     "sha256": "da922c20d1792e5b2cbf375593d7a658acf034c12c84e007e71c76ef959c337e"
+  },
+  "node": {
+    "version": "24.21.0",
+    "file": "node-v24.21.0-darwin-arm64.tar.gz",
+    "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.gz",
+    "bytes": 52909993,
+    "sha256": "bed7eea5325e1108f32ce5228ddd6a5f0f08a499ee42aa7442aea583702f6057"
+  },
+  "claudeCode": {
+    "version": "2.1.287",
+    "file": "bootstrap.sh",
+    "url": "https://downloads.claude.ai/claude-code-releases/bootstrap.sh",
+    "bytes": 9704,
+    "sha256": "3a68d3406cf674e17bed1733a4dcf37805e2e47d87417700007d7e1aa766a944"
   }
 }

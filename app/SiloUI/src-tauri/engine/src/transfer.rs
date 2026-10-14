@@ -1665,6 +1665,83 @@ fn upload_files_over_sftp(
     outcome
 }
 
+/// What a transfer to a computer on another device runs over: this device's SSH
+/// configuration for it, the alias and the folders the computer's OS allows.
+pub struct RemoteTransport {
+    pub config: PathBuf,
+    pub alias: String,
+    pub roots: Vec<String>,
+}
+
+/// The transfer folders of a Linux computer: its workspace and Downloads.
+pub fn linux_transfer_roots() -> Vec<String> {
+    default_roots()
+}
+
+/// `files.upload` to a computer on another device. The transfer job exists before `connect`
+/// runs (it asks the owner to authorize this device's key and can take a while); the bytes
+/// travel over SFTP through the alias's ProxyCommand, which relays the owner's `guest.ssh`
+/// stream, so the job, its progress and its cancellation are the local ones.
+pub fn upload_files_remote(
+    connect: impl FnOnce() -> Result<RemoteTransport, String>,
+    owner: String,
+    transfer_id: String,
+    computer: String,
+    directory: String,
+    selection: String,
+    conflict: ConflictPolicy,
+) -> Result<UploadOutcome, String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.upload")?;
+    let transport = match connect() {
+        Ok(transport) => transport,
+        Err(message) => {
+            fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
+    upload_files_with_transport(
+        transport.config,
+        transport.alias,
+        transport.roots,
+        owner,
+        transfer_id,
+        computer,
+        directory,
+        selection,
+        conflict,
+        None,
+        tracked,
+    )
+}
+
+/// The first half of `files.download` from a computer on another device, as
+/// [`upload_files_remote`] is for uploads.
+pub fn prepare_download_remote(
+    connect: impl FnOnce() -> Result<RemoteTransport, String>,
+    transfer_id: String,
+    computer: String,
+    path: String,
+) -> Result<(DownloadSession, String), String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.download")?;
+    let transport = match connect() {
+        Ok(transport) => transport,
+        Err(message) => {
+            fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
+    prepare_download_with_transport(
+        transport.config,
+        transport.alias,
+        transport.roots,
+        transfer_id,
+        computer,
+        path,
+        None,
+        tracked,
+    )
+}
+
 pub struct DownloadSession {
     slot: Slot,
     sftp: Sftp,
@@ -3469,5 +3546,27 @@ mod tests {
             .collect();
         assert!(take_selection(&tokens[0], "main").is_err());
         assert!(take_selection(tokens.last().unwrap(), "main").is_ok());
+    }
+
+    #[test]
+    fn a_remote_transfer_that_cannot_connect_reports_why_without_touching_the_files() {
+        let upload = upload_files_remote(
+            || Err("Start this computer to connect.".into()),
+            "main".into(),
+            "remote-up".into(),
+            "computer".into(),
+            "/workspace".into(),
+            "token".into(),
+            ConflictPolicy::Ask,
+        );
+        assert_eq!(upload.unwrap_err(), "Start this computer to connect.");
+        let download = prepare_download_remote(
+            || Err("Start this computer to connect.".into()),
+            "remote-down".into(),
+            "computer".into(),
+            "/workspace/a".into(),
+        );
+        assert_eq!(download.err().unwrap(), "Start this computer to connect.");
+        assert_eq!(linux_transfer_roots()[0], "/workspace");
     }
 }

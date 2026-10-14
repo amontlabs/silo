@@ -51,6 +51,17 @@ pub trait LocalAccess: Send + Sync {
         Err("This Silo version does not support that remote operation.".into())
     }
 
+    /// Starts the folder watch a controller's `guest.files.watch` stream carries. `emit`
+    /// receives the watched folder of each hint; the watch ends when `wanted` turns false.
+    fn start_guest_watch(
+        &self,
+        _params: &Value,
+        _emit: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+        _wanted: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Result<(), String> {
+        Err("This Silo version does not support that remote operation.".into())
+    }
+
     /// Opens the TCP connection a `github.connect.callback` stream carries: the active
     /// connect job's loopback callback listener, and nothing else.
     fn github_callback_stream(&self, _params: &Value) -> Result<std::net::TcpStream, String> {
@@ -64,6 +75,9 @@ pub(crate) const GITHUB_CALLBACK_STREAM: &str = "github.connect.callback";
 
 /// The stream that carries an owner's events to a controller (`remote_events`).
 pub const EVENTS_STREAM: &str = "events.subscribe";
+
+/// The stream that carries a folder watch's change hints to a controller (`remote_watch`).
+pub const GUEST_WATCH_STREAM: &str = "guest.files.watch";
 
 /// The methods the access domain serves on the owner. Their errors keep their canonical
 /// codes all the way to the controller; everything else reports plain messages.
@@ -112,7 +126,7 @@ pub(crate) fn dispatch_typed(
     checkpoints: &CheckpointHandler,
     local: &dyn LocalAccess,
 ) -> Result<Value, BridgeError> {
-    if ACCESS_METHODS.contains(&method) {
+    if ACCESS_METHODS.contains(&method) || crate::remote::is_owner_method(method) {
         return local.access_dispatch(method, params);
     }
     dispatch_untyped(paths, method, params, checkpoints, local).map_err(BridgeError::from)
@@ -147,43 +161,6 @@ fn dispatch_untyped(
         "chatgpt.retry" => local.chatgpt_retry(),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {
             crate::ssh_access::remote_dispatch(paths, method, params)
-        }
-        "files.list" => {
-            // A file listing observes one computer's guest without starting or changing it
-            // (`--no-start`), so it takes no gate and stays available during operations.
-            let name = computer_name(paths, params)?;
-            let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0);
-            let offset = usize::try_from(offset).map_err(|_| "Invalid folder offset.")?;
-            let page = crate::files::list_computer_directory(
-                paths,
-                name,
-                string(params, "path")?.into(),
-                offset,
-                params
-                    .get("snapshotId")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            )?;
-            serde_json::to_value(page).map_err(|_| "Could not encode folder listing.".into())
-        }
-        "guest.prepare" => {
-            // Authorizes a remote key inside one computer's guest; wait its turn per computer.
-            let (_guard, name) =
-                prepare_guest_target(&runtime::OPERATIONS, paths, string(params, "computerId")?)?;
-            let user = crate::working_account::inspect_user(paths, &name)?;
-            crate::working_account::require_client_protocol(params)?;
-            let public = crate::editor::authorize_remote(
-                paths,
-                &name,
-                string(params, "publicKey")?,
-                string(params, "path")?,
-            )?;
-            let guest_address = if params["forwarding"].as_bool() == Some(true) {
-                Some(guest_forwarding_address(paths, &name)?)
-            } else {
-                None
-            };
-            Ok(json!({"hostPublicKey": public, "user":user, "guestAddress":guest_address}))
         }
         "network.state" => crate::remote_network::device_state(paths),
         "network.publish" => {
@@ -235,6 +212,32 @@ fn dispatch_untyped(
         }
         _ => Err("This Silo version does not support that remote operation.".into()),
     }
+}
+
+/// `guest.prepare` on the owner for a Linux computer: authorizes a controller's key and
+/// returns the pinned host key, the account and (with `forwarding`) the guest's address.
+/// Waits its turn on the computer's operation gate. The canonical handler (`silod`) runs it,
+/// for a controller's request and for a local one.
+pub(crate) fn authorize_guest(
+    paths: &runtime::RuntimePaths,
+    params: &Value,
+) -> Result<Value, String> {
+    let (_guard, name) =
+        prepare_guest_target(&runtime::OPERATIONS, paths, string(params, "computerId")?)?;
+    let user = crate::working_account::inspect_user(paths, &name)?;
+    crate::working_account::require_client_protocol(params)?;
+    let public = crate::editor::authorize_remote(
+        paths,
+        &name,
+        string(params, "publicKey")?,
+        string(params, "path")?,
+    )?;
+    let guest_address = if params["forwarding"].as_bool() == Some(true) {
+        Some(guest_forwarding_address(paths, &name)?)
+    } else {
+        None
+    };
+    Ok(json!({"hostPublicKey": public, "user":user, "guestAddress":guest_address}))
 }
 
 fn prepare_guest_target<'a>(

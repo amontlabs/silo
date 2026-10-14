@@ -319,10 +319,7 @@ async fn the_guest_domain_works_end_to_end_over_the_engine_socket() {
             json!({"computerId": COMPUTER, "deviceId": "another-device"}),
         )
         .await;
-    assert_eq!(
-        other_device["error"]["code"],
-        "unsupported_remote_operation"
-    );
+    assert_eq!(other_device["error"]["code"], "not_found");
 
     drop(session);
     let _ = shutdown.send(());

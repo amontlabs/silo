@@ -2040,6 +2040,23 @@ pub async fn macos_computer_use_state(
     .await
 }
 
+/// The `agentTools` object of a macOS computer: Node.js and the Claude Code CLI come from the
+/// developer tools step, so this follows that step's fingerprint.
+pub async fn macos_agent_tools_state(
+    app: MacosContext,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (record, _) = computer(&id)?;
+        Ok(crate::agent_tools::macos_state(
+            record.setup.developer_tools && record.developer_tools_version.is_some(),
+            !record.developer_tools_stale(),
+        ))
+    })
+    .await
+}
+
 /// Stores desired computer-use approval and schedules the existing guest updater when running.
 /// It returns at once; the guest update runs in the background and a stopped computer applies
 /// the change at its next Start.
@@ -2537,6 +2554,11 @@ pub fn open_guest_ssh_stream(
     ssh_stream::open(app_data, computer_id, port)
 }
 pub use ssh_stream::{GuestSshGuard, GuestSshStream};
+
+/// The folders a macOS computer's transfers may use: its workspace and Downloads.
+pub fn transfer_roots() -> Vec<String> {
+    files::transfer_roots()
+}
 
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
 pub fn resize_display(

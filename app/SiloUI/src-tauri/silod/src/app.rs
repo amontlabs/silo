@@ -171,6 +171,7 @@ fn run_appkit(
     // Bind while the runtime is entered, even though the listener is later
     // driven on the dedicated I/O thread.
     let _runtime_context = runtime.enter();
+    crate::methods::remote::install_runtime(runtime.handle().clone());
     // The exports controller is installed at boot: it settles an interrupted operation's
     // journal before any client can start a new one.
     let exports = crate::startup::install_exports(&context);

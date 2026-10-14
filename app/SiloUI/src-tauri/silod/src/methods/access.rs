@@ -399,6 +399,9 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
             | "operations.job.acknowledge" => {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
+            name if silo_engine::remote::is_owner_method(name) => {
+                super::remote::serve_owner(&self.0.context, name, params)
+            }
             _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
         }
     }
@@ -414,6 +417,15 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
             selectors,
         )
         .map(|source| Box::new(source) as Box<dyn silo_engine::remote_events::EventSource>)
+    }
+
+    fn start_guest_watch(
+        &self,
+        params: &Value,
+        emit: Arc<dyn Fn(String) + Send + Sync>,
+        wanted: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) -> Result<(), String> {
+        super::guest::start_owner_watch(self.0.context.as_ref(), params, emit, wanted)
     }
 
     fn github_callback_stream(&self, params: &Value) -> Result<TcpStream, String> {
@@ -1253,7 +1265,7 @@ fn finish_connect(ctx: &SilodContext, job_id: JobId, result: Result<Value, Strin
 
 /// The wire error a controller receives for a failure this engine reports locally: the
 /// canonical code survives the trip, so a controller sees `not_found` and `busy` as such.
-fn bridge_error(error: DispatchError) -> BridgeError {
+pub(crate) fn bridge_error(error: DispatchError) -> BridgeError {
     use silo_engine::bridge_error::ErrorCode as Code;
     let code = match error.code {
         ErrorCode::UpdateInProgress => Code::UpdateInProgress,
@@ -1265,7 +1277,18 @@ fn bridge_error(error: DispatchError) -> BridgeError {
         ErrorCode::IncompatibleVersion => Code::IncompatibleVersion,
         _ => Code::Internal,
     };
-    BridgeError::new(code, error.message)
+    let finer = matches!(code, Code::Internal) && error.code != ErrorCode::Internal;
+    let bridge = BridgeError::new(code, error.message);
+    if finer {
+        // The owner's own code (`not_running`...) travels beside the coarse one.
+        if let Some(name) = serde_json::to_value(error.code)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+        {
+            return bridge.with_api_code(name);
+        }
+    }
+    bridge
 }
 
 /// Owner side of a controller's job follow-up: reads, cancels or acknowledges a job in
@@ -2345,11 +2368,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::{dispatcher::RequestContext, identity::LocalDeviceIdentity};
 
-    const LOCAL_DEVICE: &str = "11111111-1111-4111-8111-111111111111";
-    const COMPUTER: &str = "22222222-2222-4222-8222-222222222222";
+    pub(crate) const LOCAL_DEVICE: &str = "11111111-1111-4111-8111-111111111111";
+    pub(crate) const COMPUTER: &str = "22222222-2222-4222-8222-222222222222";
     const MISSING_COMPUTER: &str = "33333333-3333-4333-8333-333333333333";
     const UNKNOWN_DEVICE: &str = "44444444-4444-4444-8444-444444444444";
-    const NOT_CONNECTED: &str = "This device is no longer connected.";
+    pub(crate) const NOT_CONNECTED: &str = "This device is no longer connected.";
 
     struct NoopMainThread;
     impl MainThread for NoopMainThread {

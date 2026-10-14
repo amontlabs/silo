@@ -268,7 +268,7 @@ async fn the_computers_domain_over_the_engine_socket() {
         engine
             .error_code("computers.list", json!({"deviceId": "elsewhere"}))
             .await,
-        "unsupported_remote_operation"
+        "not_found"
     );
     assert_eq!(
         engine

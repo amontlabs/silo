@@ -93,34 +93,12 @@ pub fn editor_command(
 /// `params` is the wire request (`computerId`, `publicKey`, `path`, `accountProtocol`,
 /// `forwarding?`).
 pub fn prepare(target: &Target, params: &Value) -> Result<Value, GuestError> {
-    struct NoLocalAccess;
-    impl crate::remote_access::LocalAccess for NoLocalAccess {
-        fn desktop_connection(&self, _: &str, _: &str) -> Result<Value, String> {
-            Err("Desktop access is not part of guest.prepare.".into())
-        }
-        fn desktop_dispatch(&self, _: &str, _: &Value) -> Result<Value, String> {
-            Err("Desktop access is not part of guest.prepare.".into())
-        }
-        fn chatgpt_status(&self) -> Result<Value, String> {
-            Err("ChatGPT access is not part of guest.prepare.".into())
-        }
-        fn chatgpt_retry(&self) -> Result<Value, String> {
-            Err("ChatGPT access is not part of guest.prepare.".into())
-        }
-    }
     let Target::Linux { paths, id, .. } = target else {
         return prepare_macos(target, params);
     };
     let mut request = params.clone();
     request["computerId"] = json!(id);
-    let result = crate::remote_access::dispatch(
-        paths,
-        "guest.prepare",
-        &request,
-        &|_, _| Err("Checkpoints are not part of guest.prepare.".into()),
-        &NoLocalAccess,
-    )?;
-    Ok(result)
+    Ok(crate::remote_access::authorize_guest(paths, &request)?)
 }
 
 /// Appends one client key to the working account's `authorized_keys`, keeping the file

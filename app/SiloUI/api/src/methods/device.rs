@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 wire_struct! {
     DependencyReportParams {
         request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
     }
 }
 

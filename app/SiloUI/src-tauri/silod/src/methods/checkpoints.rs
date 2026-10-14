@@ -124,7 +124,8 @@ pub(super) fn message_error(message: impl Into<String>) -> DispatchError {
     failure(Failure::from_message(message))
 }
 
-/// Routing a request to another device is the Connections router's job (P3-connections).
+/// A request for another device is forwarded to its owner by `remote::route` before a
+/// handler runs; one that still arrives here is refused.
 pub(super) fn require_local_device(
     context: &HandlerContext,
     device_id: Option<&str>,
