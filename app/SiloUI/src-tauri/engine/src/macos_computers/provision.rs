@@ -41,7 +41,7 @@ const MACHINE_POLL: Duration = Duration::from_millis(500);
 const INHERITED_ACCESS_GONE: &str =
     "This fork has lost the access it was copied with. Delete it and fork the checkpoint again.";
 
-fn developer_tools_outdated(record: &Record, version: &str) -> bool {
+pub(super) fn developer_tools_outdated(record: &Record, version: &str) -> bool {
     record.developer_tools_version.as_deref() != Some(version)
 }
 

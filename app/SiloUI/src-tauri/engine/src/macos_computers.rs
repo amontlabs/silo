@@ -237,7 +237,7 @@ impl Entry {
             detail: self.detail.clone(),
             display_open: self.display_open,
             installed: self.record.installed,
-            setup_complete: self.record.setup.complete(),
+            setup_complete: self.record.setup_complete(),
             needs_personalizing: self.record.setup.needs_personalizing,
             checkpoints: self
                 .checkpoints
@@ -3031,6 +3031,7 @@ mod tests {
             clipboard: true,
             needs_personalizing: false,
         };
+        done.record.developer_tools_version = Some(developer_tools::version());
         let json = serde_json::to_value(done.row()).unwrap();
         assert_eq!(json["state"], "setting-up");
         assert_eq!(json["detail"], "Creating the account");
@@ -3553,6 +3554,32 @@ mod tests {
         assert_eq!(admitted.cpus, 8);
         assert_eq!(admitted.memory_gib, 16);
         assert!(reserve_setup(entry).is_err());
+    }
+
+    #[test]
+    fn stale_developer_tools_make_a_complete_computer_retryable_through_provisioning() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let entry = &mut registry.entries[0];
+        entry.record.installed = true;
+        entry.record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        entry.record.developer_tools_version = Some("stale-tools".into());
+        assert!(!entry.row().setup_complete);
+
+        reserve_setup(entry).unwrap();
+        let record = admit_queued_setup(entry).unwrap();
+
+        assert_eq!(entry.state, State::SettingUp);
+        assert!(provision::developer_tools_outdated(
+            &record,
+            &developer_tools::version()
+        ));
     }
 
     fn finish(

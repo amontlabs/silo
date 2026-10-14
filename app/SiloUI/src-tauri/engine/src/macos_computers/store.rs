@@ -151,6 +151,16 @@ impl Record {
             != Some(super::templates::computer_use_version_for(approval).as_str())
     }
 
+    pub(super) fn developer_tools_stale(&self) -> bool {
+        self.developer_tools_version.as_deref()
+            != Some(super::developer_tools::version().as_str())
+    }
+
+    /// Readiness shown to the user and used by operations that require a current setup.
+    pub(super) fn setup_complete(&self) -> bool {
+        self.setup.complete() && !self.developer_tools_stale()
+    }
+
     pub(super) fn os_version(&self) -> Option<String> {
         self.restore_image
             .as_ref()
@@ -233,7 +243,7 @@ pub(super) fn change_resources(
     if state != State::Stopped {
         return Err("Stop the computer before changing its CPU or memory.".into());
     }
-    if !record.installed || !record.setup.complete() {
+    if !record.installed || !record.setup_complete() {
         return Err("Finish setting up the computer before changing its CPU or memory.".into());
     }
     if restore_unfinished {
@@ -357,7 +367,7 @@ pub(super) fn checkpoint_allowed(
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if !record.setup.complete() {
+    if !record.setup_complete() {
         return Err(super::checkpoints::NOT_READY.into());
     }
     match state {
@@ -381,7 +391,7 @@ pub(super) fn setup_allowed(state: State, record: &Record) -> Result<(), String>
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if record.setup.complete() {
+    if record.setup_complete() {
         return Err("This computer is already set up.".into());
     }
     match state {
@@ -713,6 +723,7 @@ mod tests {
     fn finished() -> Record {
         let mut record = record(&request());
         record.installed = true;
+        record.developer_tools_version = Some(super::super::developer_tools::version());
         record.setup = SetupProgress {
             account: true,
             sip: true,
@@ -1011,6 +1022,7 @@ mod tests {
         computer.setup.clipboard = true;
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.developer_tools = true;
+        computer.developer_tools_version = Some(super::super::developer_tools::version());
         assert!(setup_allowed(State::Stopped, &computer).is_err());
         assert!(start_allowed(State::SettingUp, &computer).is_err());
     }
