@@ -1363,10 +1363,11 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
             job_id: job_id.clone(),
             result: None,
             error: Some(silo_api::transport::ErrorObject {
+                // A typed refusal (such as the automatic-off one) keeps its own code.
                 code: if cancelled {
                     silo_api::jobs::ErrorCode::Cancelled
                 } else {
-                    silo_api::jobs::ErrorCode::Internal
+                    crate::checkpoints::Failure::from_message(message.clone()).code
                 },
                 message: message.clone(),
                 diagnostics: None,
@@ -5467,6 +5468,18 @@ fn create_checkpoint(
     admitted: &dyn Fn() -> Result<(), String>,
 ) -> Result<checkpoints::Meta, String> {
     require_supported()?;
+    capture_checkpoint(app, id, name, job, policy_kind, admitted)
+}
+
+/// The capture itself, once the Mac is known to support macOS computers.
+fn capture_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    name: &str,
+    job: AcceptedMacosJob,
+    policy_kind: checkpoints::PolicyKind,
+    admitted: &dyn Fn() -> Result<(), String>,
+) -> Result<checkpoints::Meta, String> {
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
     let data = app_data(app)?;
@@ -7111,6 +7124,90 @@ mod tests {
             computers.template = None;
             computers.min_disk_gib = store::MIN_DISK_GIB;
         }
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+    }
+
+    #[test]
+    fn an_automatic_capture_refused_after_admission_keeps_its_error_code() {
+        use checkpoints::PolicyKind;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        ensure_loaded(&app).unwrap();
+        let gate = isolated_operation_gate();
+        let blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Lifecycle)
+            .acquire(
+                runtime::operation_gate::Scope::Computer {
+                    id: source.id.clone(),
+                },
+                Some(source.name.clone()),
+                "Holding the Mac",
+                None,
+            )
+            .unwrap();
+        let job = accept_macos_job(context.as_ref(), "checkpoints.create", gate).unwrap();
+        let job_id = job.job_id.clone();
+        let setting = std::sync::atomic::AtomicU32::new(3);
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                capture_checkpoint(
+                    &app,
+                    &source.id,
+                    "Before run: x, deleted automatically",
+                    job,
+                    PolicyKind::Automatic,
+                    &|| {
+                        if setting.load(Ordering::SeqCst) == 0 {
+                            return Err(crate::checkpoints::AUTOMATIC_OFF.to_owned());
+                        }
+                        Ok(())
+                    },
+                )
+            });
+            while gate.snapshot().waiting.is_empty() && !worker.is_finished() {
+                std::thread::yield_now();
+            }
+            if worker.is_finished() {
+                panic!(
+                    "the capture never queued: {:?}",
+                    worker.join().unwrap().err()
+                );
+            }
+            setting.store(0, Ordering::SeqCst);
+            drop(blocker);
+            worker.join().unwrap()
+        });
+        assert_eq!(
+            result.as_ref().unwrap_err(),
+            crate::checkpoints::AUTOMATIC_OFF
+        );
+        publish_checkpoint_create_completion(&app, job_id.clone(), &source.id, &result, false);
+
+        let finished = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::PermissionDenied
+        );
+        assert!(
+            checkpoints::list(&Layout::new(directory.path(), &source.id))
+                .iter()
+                .all(|meta| meta.policy_kind != PolicyKind::Automatic)
+        );
         MACOS_CHECKPOINT_JOBS
             .get_or_init(Default::default)
             .lock()
