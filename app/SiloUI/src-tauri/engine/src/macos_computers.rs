@@ -28,6 +28,8 @@ mod guest_access;
 mod guest_clipboard;
 #[path = "macos_computers/guest_computer_use.rs"]
 mod guest_computer_use;
+#[path = "macos_computers/guest_exec.rs"]
+mod guest_exec;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "macos_computers/guest_screen.rs"]
 mod guest_screen;
@@ -65,9 +67,15 @@ mod ssh_stream;
 mod store;
 #[path = "macos_computers/templates.rs"]
 mod templates;
+#[path = "macos_computers/update_save.rs"]
+mod update_save;
+pub use update_save::{close_for_save, MacosUpdateAdapter};
 
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
+#[cfg(test)]
+pub(crate) use guest_exec::stored_for_tests as guest_ssh_for_tests;
+pub use guest_exec::{lookup as guest_ssh, GuestSsh};
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -1386,6 +1394,165 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
     if pending {
         ensure_checkpoint_retry_worker(app.clone());
     }
+    publish_checkpoints_changed(app);
+}
+
+fn publish_checkpoints_changed(app: &MacosContext) {
+    if ensure_loaded(app).is_err() {
+        return;
+    }
+    if let Ok(state) = serde_json::to_value(snapshot()) {
+        app.publish(
+            Event::new("checkpoints.changed", serde_json::json!({ "macos": state })),
+            silo_engine::Audience::All,
+        );
+    }
+}
+
+/// Whether the macOS registry holds a computer with this id. Records are read from disk, so
+/// this needs no virtualization support; a Mac without any macOS computer says false.
+pub fn has_computer(app: &MacosContext, id: &str) -> bool {
+    ensure_loaded(app).is_ok() && registry().entry(id).is_some()
+}
+
+fn prune_macos_automatic_checkpoints(
+    app: &MacosContext,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
+    use runtime::operation_gate::{OperationKind, Scope};
+
+    let Ok(count) = retention() else { return };
+    if count == 0 || ensure_loaded(app).is_err() {
+        return;
+    }
+    let Ok(data) = app_data(app) else { return };
+    let layout = Layout::new(&data, computer_id);
+    let entries: Vec<_> = {
+        let mut computers = registry();
+        let Some(entry) = computers.entry(computer_id) else {
+            return;
+        };
+        entry
+            .checkpoints
+            .iter()
+            .map(|checkpoint| crate::checkpoints::retention::Entry {
+                id: checkpoint.id.clone(),
+                created_at_ms: crate::checkpoints::retention::parse_millis(&checkpoint.created_at),
+                automatic: checkpoint.policy_kind == checkpoints::PolicyKind::Automatic,
+            })
+            .collect()
+    };
+    let mut changed = false;
+    for candidate in crate::checkpoints::retention::plan(&entries, count).candidates {
+        // The setting is checked at the moment each deletion is admitted.
+        if !matches!(retention(), Ok(current) if current > 0) {
+            break;
+        }
+        let Ok(_gate) = runtime::OPERATIONS
+            .kind(OperationKind::CheckpointDelete)
+            .acquire_for_job(
+                Scope::Device,
+                None,
+                "Removing an older automatic checkpoint",
+                None,
+                job_id.clone(),
+                None,
+            )
+        else {
+            break;
+        };
+        let Ok(_admitted) = admission() else { break };
+        // Pins are rechecked immediately before each deletion; a pinned record stays
+        // visible with its delete blocker.
+        let pinned = {
+            let mut computers = registry();
+            let Some(entry) = computers.entry(computer_id) else {
+                return;
+            };
+            entry
+                .record
+                .pending_restore
+                .as_ref()
+                .is_some_and(|restore| restore.checkpoint_id == candidate)
+                || entry.operation.is_some()
+                || entry.deleting
+        };
+        if pinned || checkpoints::journal_pins(&layout, &candidate) {
+            continue;
+        }
+        match checkpoints::remove(&layout, &candidate) {
+            Ok(()) => changed = true,
+            Err(message) => eprintln!("Silo kept an older automatic checkpoint: {message}"),
+        }
+    }
+    if changed {
+        refresh_checkpoints(app, computer_id, &layout);
+        emit(app);
+    }
+}
+
+const PENDING_START_BLOCKER: &str = "The next Start of this computer continues from this checkpoint. Start the computer first, or restore another checkpoint.";
+
+/// Why a checkpoint cannot be deleted right now. Deletion and `checkpoints.usage` share it,
+/// so the list never offers a deletion the delete would refuse.
+fn checkpoint_delete_blocker(
+    layout: &Layout,
+    pending: Option<&checkpoints::PendingRestore>,
+    checkpoint_id: &str,
+) -> Option<&'static str> {
+    if checkpoints::journal_pins(layout, checkpoint_id) {
+        Some(UNFINISHED_RESTORE)
+    } else if pending.is_some_and(|pending| pending.checkpoint_id == checkpoint_id) {
+        Some(PENDING_START_BLOCKER)
+    } else {
+        None
+    }
+}
+
+/// Reads macOS checkpoint usage without claiming shared APFS clone bytes as reclaimable:
+/// only a memory checkpoint's saved state has a measured size, and the aggregate is `null`
+/// whenever any checkpoint's disk clones are unmeasured.
+pub fn macos_checkpoint_usage(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<silo_api::methods::checkpoints::CheckpointUsage, String> {
+    // A read of the saved checkpoints: it needs no virtualization support.
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let mut computers = registry();
+    let entry = computers
+        .entry(computer_id)
+        .ok_or_else(|| "This computer no longer exists.".to_owned())?;
+    let layout = Layout::new(&data, computer_id);
+    let rows = entry
+        .checkpoints
+        .iter()
+        .map(|checkpoint| {
+            let size_bytes = (checkpoint.kind == checkpoints::Kind::Memory)
+                .then_some(checkpoint.size_bytes)
+                .flatten();
+            silo_api::methods::checkpoints::CheckpointUsageEntry {
+                id: checkpoint.id.clone(),
+                size_bytes,
+                used_by: Vec::new(),
+                delete_blocker: checkpoint_delete_blocker(
+                    &layout,
+                    entry.record.pending_restore.as_ref(),
+                    &checkpoint.id,
+                )
+                .map(str::to_owned),
+            }
+        })
+        .collect::<Vec<_>>();
+    // A disk clone's private bytes are not measured (B-7), so any checkpoint makes the sum
+    // unknown; an empty list is exactly zero.
+    let total_bytes = rows.is_empty().then_some(0);
+    Ok(silo_api::methods::checkpoints::CheckpointUsage {
+        total_bytes,
+        checkpoints: rows,
+    })
 }
 
 fn finish_fork_command(
@@ -1906,6 +2073,7 @@ pub fn install_test_computer(
         clipboard: true,
         roots: true,
         needs_personalizing: false,
+        proxy_bootstrap: true,
     };
     record.computer_use_approval = Some(approval);
     record.computer_use_desired_approval = Some(approval);
@@ -1938,7 +2106,17 @@ pub async fn create_macos_checkpoint(
     let cancelled = job.cancellation.clone();
     let worker_app = app.clone();
     let worker_id = id.clone();
-    let result = blocking(move || create_checkpoint(&worker_app, &worker_id, &name, job)).await;
+    let result = blocking(move || {
+        create_checkpoint(
+            &worker_app,
+            &worker_id,
+            &name,
+            job,
+            checkpoints::PolicyKind::Manual,
+            &|| Ok(()),
+        )
+    })
+    .await;
     publish_checkpoint_create_completion(
         &app,
         job_id,
@@ -1947,6 +2125,172 @@ pub async fn create_macos_checkpoint(
         cancelled.load(Ordering::SeqCst),
     );
     result.map(|_| ())
+}
+
+/// Retention policy reader: the owner's per-computer automatic checkpoint count.
+pub type RetentionPolicy = Arc<dyn Fn() -> Result<u32, String> + Send + Sync>;
+
+/// Starts a canonical checkpoint-create job and returns after durable acceptance.
+pub fn start_macos_checkpoint_job(
+    app: MacosContext,
+    id: String,
+    name: String,
+    automatic: bool,
+    retention: RetentionPolicy,
+) -> Result<silo_api::jobs::JobId, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    if automatic && retention()? == 0 {
+        return Err(crate::checkpoints::AUTOMATIC_OFF.into());
+    }
+    let policy_kind = if automatic {
+        checkpoints::PolicyKind::Automatic
+    } else {
+        checkpoints::PolicyKind::Manual
+    };
+    let job = accept_checkpoint_job(&app, "checkpoints.create")?;
+    let job_id = job.job_id.clone();
+    let response_job_id = job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let admitted_retention = retention.clone();
+        let result = create_checkpoint(
+            &worker_app,
+            &worker_id,
+            &name,
+            job,
+            policy_kind,
+            &move || {
+                // Checked again once the queue admits the capture.
+                if automatic && admitted_retention()? == 0 {
+                    return Err(crate::checkpoints::AUTOMATIC_OFF.to_owned());
+                }
+                Ok(())
+            },
+        );
+        if result.is_ok() && automatic {
+            prune_macos_automatic_checkpoints(
+                &worker_app,
+                &worker_id,
+                retention.as_ref(),
+                job_id.clone(),
+            );
+        }
+        publish_checkpoint_create_completion(
+            &worker_app,
+            job_id,
+            &worker_id,
+            &result,
+            cancelled.load(Ordering::SeqCst),
+        );
+    });
+    Ok(response_job_id)
+}
+
+pub fn start_macos_checkpoint_restore_job(
+    app: MacosContext,
+    id: String,
+    checkpoint_id: String,
+) -> Result<silo_api::jobs::JobId, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    let job = accept_checkpoint_job(&app, "checkpoints.restore")?;
+    let job_id = job.job_id.clone();
+    let response_job_id = job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = restore_checkpoint(&worker_app, &worker_id, &checkpoint_id, job);
+        publish_checkpoint_completion(
+            &worker_app,
+            job_id,
+            &worker_id,
+            &result,
+            cancelled.load(Ordering::SeqCst),
+        );
+    });
+    Ok(response_job_id)
+}
+
+pub fn start_macos_checkpoint_abandon_job(
+    app: MacosContext,
+    id: String,
+) -> Result<silo_api::jobs::JobId, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    let job = accept_checkpoint_job(&app, "checkpoints.abandonRestore")?;
+    let job_id = job.job_id.clone();
+    let response_job_id = job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = abandon_restore_checkpoint(&worker_app, &worker_id, job);
+        publish_checkpoint_completion(
+            &worker_app,
+            job_id,
+            &worker_id,
+            &result,
+            cancelled.load(Ordering::SeqCst),
+        );
+    });
+    Ok(response_job_id)
+}
+
+pub fn start_macos_checkpoint_fork_job(
+    app: MacosContext,
+    id: String,
+    checkpoint_id: String,
+    new_name: String,
+) -> Result<silo_api::jobs::JobId, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    let job = accept_checkpoint_job(&app, "checkpoints.fork")?;
+    let job_id = job.job_id.clone();
+    let response_job_id = job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let fork = fork_checkpoint(&worker_app, &worker_id, &checkpoint_id, &new_name, job);
+        let (result, continuation) = match fork {
+            Ok(continuation) => (Ok(()), Some(continuation)),
+            Err(message) => (Err(message), None),
+        };
+        finish_fork_command(
+            &worker_app,
+            job_id,
+            &worker_id,
+            &result,
+            cancelled.load(Ordering::SeqCst),
+            continuation,
+        );
+    });
+    Ok(response_job_id)
+}
+
+pub fn start_macos_checkpoint_delete_job(
+    app: MacosContext,
+    id: String,
+    checkpoint_id: String,
+) -> Result<silo_api::jobs::JobId, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    let job = accept_checkpoint_job(&app, "checkpoints.delete")?;
+    let job_id = job.job_id.clone();
+    let response_job_id = job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = delete_checkpoint(&worker_app, &worker_id, &checkpoint_id, job);
+        publish_checkpoint_completion(
+            &worker_app,
+            job_id,
+            &worker_id,
+            &result,
+            cancelled.load(Ordering::SeqCst),
+        );
+    });
+    Ok(response_job_id)
 }
 
 fn publish_checkpoint_create_completion(
@@ -1980,7 +2324,10 @@ fn checkpoint_created_job_result(
                 checkpoints::Reason::Manual => CheckpointReason::Manual,
                 checkpoints::Reason::BeforeRestore => CheckpointReason::BeforeRestore,
             },
-            kind: CheckpointKind::Manual,
+            kind: match meta.policy_kind {
+                checkpoints::PolicyKind::Manual => CheckpointKind::Manual,
+                checkpoints::PolicyKind::Automatic => CheckpointKind::Automatic,
+            },
             size_bytes: meta.size_bytes,
         },
     }
@@ -2828,6 +3175,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
         clipboard: false,
         roots: false,
         needs_personalizing: true,
+        proxy_bootstrap: false,
     };
     record.developer_tools_version = None;
     record.pristine = false;
@@ -2988,9 +3336,22 @@ pub fn upload_files(
     selection: String,
     conflict: crate::transfer::ConflictPolicy,
 ) -> Result<crate::transfer::UploadOutcome, String> {
-    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
-    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
-    revalidate_transfer_target(&computer_id, generation)?;
+    // The job comes first: waiting for the computer's turn and probing the alias can take
+    // longer than a caller waits for the job to exist.
+    let tracked = crate::transfer::begin_transfer_job(&transfer_id, "files.upload")?;
+    let ready =
+        acquire_transfer_operation(app, &computer_id).and_then(|(operation, generation)| {
+            let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+            revalidate_transfer_target(&computer_id, generation)?;
+            Ok((operation, connection))
+        });
+    let (operation, connection) = match ready {
+        Ok(ready) => ready,
+        Err(message) => {
+            crate::transfer::fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
     crate::transfer::upload_files_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -3002,6 +3363,7 @@ pub fn upload_files(
         selection,
         conflict,
         Some(operation),
+        tracked,
     )
 }
 
@@ -3011,9 +3373,20 @@ pub fn prepare_download(
     computer_id: String,
     path: String,
 ) -> Result<(crate::transfer::DownloadSession, String), String> {
-    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
-    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
-    revalidate_transfer_target(&computer_id, generation)?;
+    let tracked = crate::transfer::begin_transfer_job(&transfer_id, "files.download")?;
+    let ready =
+        acquire_transfer_operation(app, &computer_id).and_then(|(operation, generation)| {
+            let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+            revalidate_transfer_target(&computer_id, generation)?;
+            Ok((operation, connection))
+        });
+    let (operation, connection) = match ready {
+        Ok(ready) => ready,
+        Err(message) => {
+            crate::transfer::fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
     crate::transfer::prepare_download_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -3022,6 +3395,7 @@ pub fn prepare_download(
         computer_id,
         path,
         Some(operation),
+        tracked,
     )
 }
 
@@ -3595,7 +3969,24 @@ fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<()
 
 /// Deletes a computer's files, after making sure this Mac no longer holds its disk image.
 fn remove_computer(layout: &Layout) -> Result<(), String> {
-    offline_setup::ensure_detached(&layout.disk())?;
+    remove_computer_with(layout, &offline_setup::ensure_detached, &|id| {
+        proxy_ca::retire(id)
+    })
+}
+
+/// Detaches the disk, retires the computer's proxy CA, then deletes its folder, checkpoints
+/// included. The CA goes before the files so a failure of either step leaves the computer
+/// listed and the whole deletion can be repeated: the folder is the record of what remains to
+/// clean, and retiring an absent CA is not an error.
+fn remove_computer_with(
+    layout: &Layout,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+    retire_ca: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    detach(&layout.disk())?;
+    if let Some(id) = layout.id() {
+        retire_ca(id)?;
+    }
     store::remove(layout)
 }
 
@@ -3757,6 +4148,8 @@ fn copy_template(
         clipboard: true,
         roots: false,
         needs_personalizing: true,
+        // The copy has the template's network identity; personalization stages its own.
+        proxy_bootstrap: false,
     };
     Ok(true)
 }
@@ -4158,80 +4551,226 @@ pub fn computer_ids(app: &MacosContext) -> Vec<String> {
 /// configuration recovery, before lifecycle recovery or launch preferences.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), String> {
-    let failures = {
+    let outcome = (|| -> Result<Vec<String>, MigrationAbort> {
         let _migration = runtime::OPERATIONS
             .kind(runtime::operation_gate::OperationKind::Other)
             .hidden()
             .device("Preparing macOS network access")
-            .map_err(|error| error.to_string())?;
-        ensure_loaded(app)?;
-        let data = app_data(app)?;
-        let mut failures = Vec::new();
-        for id in store::computer_ids(&data) {
-            let layout = Layout::new(&data, &id);
-            let record = match store::read_record(&layout) {
-                Ok(record) if record.id == id => record,
-                Ok(_) => {
-                    failures.push(format!(
-                        "A macOS computer record in {} has a different identity.",
-                        layout.dir.display()
-                    ));
-                    continue;
-                }
-                Err(_) => {
-                    failures.push(format!(
-                        "A macOS computer record in {} could not be read.",
-                        layout.dir.display()
-                    ));
-                    continue;
-                }
-            };
-            if !record.installed || !record.setup.complete() {
-                continue;
-            }
-            if checkpoints::restore_unfinished(&layout) {
-                failures.push(format!(
-                    "{} has an unfinished Restore. Silo left its computer files untouched.",
-                    record.name
-                ));
-                continue;
-            }
-            if record
-                .pending_restore
-                .as_ref()
-                .is_some_and(|restore| restore.memory)
-            {
-                failures.push(format!(
-                    "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
-                    record.name
-                ));
-                continue;
-            }
-            if let Err(error) = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout) {
-                // Never move to another guest until Virtualization.framework has
-                // released this one's machine, even after a timeout or stop error.
-                let samples = engine::machine_samples(app).map_err(|_| {
-                    "Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string()
-                })?;
-                if samples.iter().any(|sample| sample.id == id) {
-                    return Err(format!(
-                        "{} could not be stopped after network setup failed: {error}",
-                        record.name
-                    ));
-                }
-                failures.push(format!("{}: {error}", record.name));
+            .map_err(|error| MigrationAbort::Setup(error.to_string()))?;
+        ensure_loaded(app).map_err(MigrationAbort::Setup)?;
+        let data = app_data(app).map_err(MigrationAbort::Setup)?;
+        let ids = store::computer_ids(&data);
+        migrate_launch_computers(&ids, &mut LiveLaunchMigration { app, data: &data })
+    })();
+    match outcome {
+        // Never move to another guest until Virtualization.framework has released this
+        // one's machine: the launch stays closed and the user relaunches Silo.
+        Err(MigrationAbort::Unsafe(message)) => return Err(message),
+        Err(MigrationAbort::Setup(message)) => {
+            // Nothing was converted. Each computer without a bootstrap stays not set up and
+            // refuses Start, so the rest of the launch can open.
+            PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+            return Err(message);
+        }
+        Ok(failures) => {
+            // Per-computer failures remain fail-closed at the readiness check; valid
+            // computers can still start while the user retries this launch migration later.
+            PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("\n"))
             }
         }
-        failures
-    };
-    // Per-computer failures remain fail-closed at `require_guest_bootstrap`; valid
-    // computers can still start while the user retries this launch migration later.
-    PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
     }
+}
+
+/// Why the launch migration stopped before it visited every computer.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Debug, PartialEq, Eq)]
+enum MigrationAbort {
+    /// The migration could not begin.
+    Setup(String),
+    /// A converted computer's machine may still be held, so no other guest may start.
+    Unsafe(String),
+}
+
+/// What the launch migration does for one computer.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchMigration {
+    Skip,
+    /// The bootstrap is already staged and matches; only the record lacks the step.
+    RecordCurrent,
+    Convert,
+}
+
+/// Decides the launch migration of one computer. The existing bootstrap is checked first:
+/// a computer that already has it is never held back by Restore state, which only matters
+/// to a guest that has to be cold-booted for the conversion.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn plan_launch_migration(
+    record: &Record,
+    bootstrap_current: bool,
+    restore_unfinished: bool,
+) -> Result<LaunchMigration, String> {
+    if !record.installed || !record.setup.guest_steps_complete() || record.setup.needs_personalizing
+    {
+        return Ok(LaunchMigration::Skip);
+    }
+    if bootstrap_current {
+        return Ok(if record.setup.proxy_bootstrap {
+            LaunchMigration::Skip
+        } else {
+            LaunchMigration::RecordCurrent
+        });
+    }
+    if restore_unfinished {
+        return Err(format!(
+            "{} has an unfinished Restore. Silo left its computer files untouched.",
+            record.name
+        ));
+    }
+    if record
+        .pending_restore
+        .as_ref()
+        .is_some_and(|restore| restore.memory)
+    {
+        return Err(format!(
+            "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
+            record.name
+        ));
+    }
+    Ok(LaunchMigration::Convert)
+}
+
+/// What the launch migration needs from the host, so its per-computer decisions can be
+/// tested without a running guest.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+trait LaunchMigrationOps {
+    fn read(&mut self, id: &str) -> Result<Record, String>;
+    fn bootstrap_is_current(&mut self, record: &Record) -> bool;
+    fn restore_unfinished(&mut self, record: &Record) -> bool;
+    fn record_current(&mut self, record: &Record) -> Result<(), String>;
+    fn convert(&mut self, record: &Record) -> Result<(), String>;
+    /// Whether the framework holds no machine for `record`; an error means unknown.
+    fn machine_released(&mut self, record: &Record) -> Result<bool, String>;
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn migrate_launch_computers(
+    ids: &[String],
+    host: &mut impl LaunchMigrationOps,
+) -> Result<Vec<String>, MigrationAbort> {
+    let mut failures = Vec::new();
+    for id in ids {
+        let record = match host.read(id) {
+            Ok(record) => record,
+            Err(failure) => {
+                failures.push(failure);
+                continue;
+            }
+        };
+        let current = host.bootstrap_is_current(&record);
+        let restore_unfinished = !current && host.restore_unfinished(&record);
+        match plan_launch_migration(&record, current, restore_unfinished) {
+            Ok(LaunchMigration::Skip) => {}
+            Ok(LaunchMigration::RecordCurrent) => {
+                if let Err(error) = host.record_current(&record) {
+                    failures.push(format!("{}: {error}", record.name));
+                }
+            }
+            Ok(LaunchMigration::Convert) => {
+                if let Err(error) = host.convert(&record) {
+                    let released = host.machine_released(&record).map_err(|_| {
+                        MigrationAbort::Unsafe("Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string())
+                    })?;
+                    if !released {
+                        return Err(MigrationAbort::Unsafe(format!(
+                            "{} could not be stopped after network setup failed: {error}",
+                            record.name
+                        )));
+                    }
+                    failures.push(format!("{}: {error}", record.name));
+                }
+            }
+            Err(failure) => failures.push(failure),
+        }
+    }
+    Ok(failures)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct LiveLaunchMigration<'a> {
+    app: &'a MacosContext,
+    data: &'a std::path::Path,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl LiveLaunchMigration<'_> {
+    fn layout(&self, record: &Record) -> Layout {
+        Layout::new(self.data, &record.id)
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl LaunchMigrationOps for LiveLaunchMigration<'_> {
+    fn read(&mut self, id: &str) -> Result<Record, String> {
+        let layout = Layout::new(self.data, id);
+        match store::read_record(&layout) {
+            Ok(record) if record.id == id => Ok(record),
+            Ok(_) => Err(format!(
+                "A macOS computer record in {} has a different identity.",
+                layout.dir.display()
+            )),
+            Err(_) => Err(format!(
+                "A macOS computer record in {} could not be read.",
+                layout.dir.display()
+            )),
+        }
+    }
+
+    fn bootstrap_is_current(&mut self, record: &Record) -> bool {
+        proxy::require_guest_bootstrap(record, &self.layout(record)).is_ok()
+    }
+
+    fn restore_unfinished(&mut self, record: &Record) -> bool {
+        checkpoints::restore_unfinished(&self.layout(record))
+    }
+
+    fn record_current(&mut self, record: &Record) -> Result<(), String> {
+        mark_proxy_bootstrap(self.app, &self.layout(record), record.clone())
+    }
+
+    fn convert(&mut self, record: &Record) -> Result<(), String> {
+        let layout = self.layout(record);
+        proxy::migrate_legacy_guest_bootstrap(self.app, record, &layout)
+            .and_then(|()| mark_proxy_bootstrap(self.app, &layout, record.clone()))
+    }
+
+    fn machine_released(&mut self, record: &Record) -> Result<bool, String> {
+        let samples = engine::machine_samples(self.app)?;
+        Ok(!samples.iter().any(|sample| sample.id == record.id))
+    }
+}
+
+/// Records that the computer's network bootstrap exists, making it set up.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn mark_proxy_bootstrap(
+    app: &MacosContext,
+    layout: &Layout,
+    mut record: Record,
+) -> Result<(), String> {
+    if record.setup.proxy_bootstrap {
+        return Ok(());
+    }
+    record.setup.proxy_bootstrap = true;
+    store::save(layout, &record)?;
+    update(app, &record.id, |entry| {
+        entry.record.setup.proxy_bootstrap = true;
+    });
+    emit(app);
+    Ok(())
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -5179,12 +5718,15 @@ fn create_checkpoint(
     id: &str,
     name: &str,
     job: AcceptedMacosJob,
+    policy_kind: checkpoints::PolicyKind,
+    admitted: &dyn Fn() -> Result<(), String>,
 ) -> Result<checkpoints::Meta, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
     let data = app_data(app)?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Capture, &job)?;
+    admitted()?;
     let layout = Layout::new(&data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
@@ -5217,9 +5759,43 @@ fn create_checkpoint(
         disk_gib: held.record.disk_gib,
         setup_fingerprint: held.record.setup_version.clone(),
     };
-    let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
+    let result =
+        checkpoints::create_with_policy(&subject, &name, checkpoints::Reason::Manual, policy_kind);
     refresh_checkpoints(app, id, &layout);
     result
+}
+
+/// Abandons a macOS Restore that did not finish, only while the original files still exist.
+fn abandon_restore_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    job: AcceptedMacosJob,
+) -> Result<(), String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Restore, &job)?;
+    let layout = Layout::new(&data, id);
+    let name = held.record.name.clone();
+    match checkpoints::abandon_restore(&layout, &name, held.record.pending_restore.as_ref())? {
+        checkpoints::Abandon::Discarded => {
+            log_line(app, id, "unfinished Restore abandoned");
+            Ok(())
+        }
+        checkpoints::Abandon::AlreadyReplaced(pending) => {
+            // The roll-forward finished what the interrupted Restore had already begun, so
+            // save the pending Restore it names before refusing the abandon.
+            let (mut record, _) = computer(id)?;
+            let metadata = checkpoints::find(&layout, &pending.checkpoint_id).ok();
+            restore_checkpoint_metadata(&mut record, metadata.as_ref());
+            record.pending_restore = Some(pending);
+            record.pristine = false;
+            store::save(&layout, &record)?;
+            checkpoints::finish_restore(&layout);
+            update(app, id, |entry| entry.record = record);
+            Err(checkpoints::already_replaced(&name))
+        }
+    }
 }
 
 fn restore_checkpoint(
@@ -5300,16 +5876,10 @@ fn delete_checkpoint(
     let held = begin_operation(app, id, checkpoints::OperationKind::Delete, &job)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
-    if checkpoints::journal_pins(&layout, &target.id) {
-        return Err(UNFINISHED_RESTORE.into());
-    }
-    if held
-        .record
-        .pending_restore
-        .as_ref()
-        .is_some_and(|pending| pending.checkpoint_id == target.id)
+    if let Some(blocker) =
+        checkpoint_delete_blocker(&layout, held.record.pending_restore.as_ref(), &target.id)
     {
-        return Err("The next Start of this computer continues from this checkpoint. Start the computer first, or restore another checkpoint.".into());
+        return Err(blocker.into());
     }
     let removed = checkpoints::remove(&layout, &target.id);
     refresh_checkpoints(app, id, &layout);
@@ -5517,6 +6087,7 @@ fn copy_for_fork(
         clipboard: true,
         roots: false,
         needs_personalizing: true,
+        proxy_bootstrap: false,
     };
     // Persist while the fork is still in its creation state, where nothing else can start it.
     if !registry().creation_continues(fork_id) {
@@ -5929,6 +6500,106 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
     }
 }
 
+/// The one-time launch upgrade of every macOS computer's checkpoint records (layout 1 to 2).
+/// It runs before the inventory loads, so no record of the previous layout is mistaken for
+/// garbage. Returns how many records were converted.
+pub fn upgrade_checkpoint_records(app_data: &std::path::Path) -> Result<usize, String> {
+    let Ok(entries) = std::fs::read_dir(store::root(app_data)) else {
+        return Ok(0);
+    };
+    let mut converted = 0;
+    for entry in entries.flatten() {
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        converted += checkpoints::upgrade_records(&Layout::new(app_data, &id))?;
+    }
+    Ok(converted)
+}
+
+/// Forgets the loaded inventory so the next read loads from disk again.
+#[cfg(any(test, feature = "test-support"))]
+pub fn reset_registry_for_test() {
+    let mut computers = registry();
+    computers.entries.clear();
+    computers.loaded = false;
+    computers.template = None;
+    computers.min_disk_gib = store::MIN_DISK_GIB;
+}
+
+/// The policy kinds of a computer's readable checkpoints, newest first.
+#[cfg(any(test, feature = "test-support"))]
+pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<String> {
+    checkpoints::list(&Layout::new(app_data, computer_id))
+        .into_iter()
+        .map(|meta| match meta.policy_kind {
+            checkpoints::PolicyKind::Manual => "manual".to_owned(),
+            checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
+        })
+        .collect()
+}
+
+/// Writes one finished macOS computer with a disk checkpoint under `app_data` and returns
+/// the computer's and the checkpoint's ids.
+#[cfg(any(test, feature = "test-support"))]
+pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, String) {
+    let mut record = store::new_record(
+        &CreateRequest {
+            name: name.into(),
+            cpus: 2,
+            memory_gib: 4,
+            disk_gib: 64,
+        },
+        "02:00:00:00:00:01".into(),
+    );
+    record.installed = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: true,
+        computer_use: true,
+        clipboard: true,
+        roots: true,
+        needs_personalizing: false,
+        proxy_bootstrap: true,
+    };
+    record.developer_tools_version = Some(developer_tools::version());
+    let layout = Layout::new(app_data, &record.id);
+    store::save(&layout, &record).unwrap();
+    std::fs::write(layout.disk(), b"disk").unwrap();
+    std::fs::write(layout.auxiliary_storage(), b"auxiliary").unwrap();
+    std::fs::write(layout.hardware_model(), b"hardware").unwrap();
+    let checkpoint = checkpoints::Meta {
+        schema_version: checkpoints::SCHEMA_VERSION,
+        id: uuid::Uuid::new_v4().to_string(),
+        name: "Seeded".into(),
+        created_at: "2026-10-14T00:00:00Z".into(),
+        kind: checkpoints::Kind::Disk,
+        reason: checkpoints::Reason::Manual,
+        policy_kind: checkpoints::PolicyKind::Manual,
+        macos_version: None,
+        host_build: String::new(),
+        size_bytes: None,
+        cpus: None,
+        memory_gib: None,
+        disk_gib: None,
+        setup_fingerprint: None,
+        computer_use_version: None,
+        developer_tools: true,
+        developer_tools_version: record.developer_tools_version.clone(),
+    };
+    let dir = checkpoints::dir(&layout, &checkpoint.id);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("disk.img"), b"clone").unwrap();
+    std::fs::write(dir.join("auxiliary-storage.img"), b"clone").unwrap();
+    std::fs::write(
+        dir.join("checkpoint.json"),
+        serde_json::to_vec(&checkpoint).unwrap(),
+    )
+    .unwrap();
+    (record.id, checkpoint.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6115,6 +6786,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         source.developer_tools_version = Some(developer_tools::version());
         let source_layout = Layout::new(data, &source.id);
@@ -6140,12 +6812,13 @@ mod tests {
         )
         .unwrap();
         let checkpoint_meta = checkpoints::Meta {
-            schema_version: 1,
+            schema_version: checkpoints::SCHEMA_VERSION,
             id: checkpoint_id.clone(),
             name: "Before fork".into(),
             created_at: "2026-10-14T00:00:00Z".into(),
             kind: checkpoints::Kind::Disk,
             reason: checkpoints::Reason::Manual,
+            policy_kind: checkpoints::PolicyKind::Manual,
             macos_version: None,
             host_build: String::new(),
             size_bytes: None,
@@ -8543,12 +9216,13 @@ mod tests {
         record.setup.developer_tools = true;
         record.developer_tools_version = Some("tools-current".into());
         let target = checkpoints::Meta {
-            schema_version: 1,
+            schema_version: checkpoints::SCHEMA_VERSION,
             id: "checkpoint".into(),
             name: "Before tools".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             kind: checkpoints::Kind::Disk,
             reason: checkpoints::Reason::Manual,
+            policy_kind: checkpoints::PolicyKind::Manual,
             macos_version: None,
             host_build: String::new(),
             size_bytes: None,
@@ -8620,6 +9294,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         done.record.developer_tools_version = Some(developer_tools::version());
         let json = serde_json::to_value(done.row()).unwrap();
@@ -9170,6 +9845,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         entry.record.developer_tools_version = Some("stale-tools".into());
         assert!(!entry.row().setup_complete);
@@ -9198,6 +9874,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
         let old = record.clone();
@@ -9465,6 +10142,7 @@ mod tests {
             clipboard: true,
             roots: false,
             needs_personalizing: true,
+            proxy_bootstrap: false,
         };
         record.template = Some("25G83-abcd".into());
         assert!(!registry.entries[0].row().setup_complete);
@@ -9863,5 +10541,516 @@ mod tests {
         ] {
             assert!(is_busy(state));
         }
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    mod launch_migration {
+        use super::*;
+        use std::collections::{HashMap, HashSet};
+
+        fn legacy(id: &str) -> Record {
+            let mut record = store::new_record(
+                &store::CreateRequest {
+                    name: format!("mac-{id}"),
+                    cpus: 2,
+                    memory_gib: 4,
+                    disk_gib: 64,
+                },
+                "02:00:00:00:00:01".into(),
+            );
+            record.id = id.into();
+            record.installed = true;
+            record.setup = store::SetupProgress {
+                account: true,
+                sip: true,
+                developer_tools: true,
+                computer_use: true,
+                clipboard: true,
+                roots: true,
+                needs_personalizing: false,
+                proxy_bootstrap: false,
+            };
+            record
+        }
+
+        fn with_saved_memory(mut record: Record) -> Record {
+            record.pending_restore = Some(checkpoints::PendingRestore {
+                checkpoint_id: "checkpoint".into(),
+                memory: true,
+            });
+            record
+        }
+
+        #[derive(Default)]
+        struct Fake {
+            records: HashMap<String, Record>,
+            current: HashSet<String>,
+            unfinished: HashSet<String>,
+            failing: HashSet<String>,
+            held: HashSet<String>,
+            unknown_machines: bool,
+            visited: Vec<String>,
+            converted: Vec<String>,
+            recorded: Vec<String>,
+        }
+
+        impl Fake {
+            fn with(mut self, record: Record) -> Self {
+                self.records.insert(record.id.clone(), record);
+                self
+            }
+        }
+
+        impl LaunchMigrationOps for Fake {
+            fn read(&mut self, id: &str) -> Result<Record, String> {
+                self.visited.push(id.to_owned());
+                self.records
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| format!("{id} could not be read"))
+            }
+            fn bootstrap_is_current(&mut self, record: &Record) -> bool {
+                self.current.contains(&record.id)
+            }
+            fn restore_unfinished(&mut self, record: &Record) -> bool {
+                self.unfinished.contains(&record.id)
+            }
+            fn record_current(&mut self, record: &Record) -> Result<(), String> {
+                self.recorded.push(record.id.clone());
+                Ok(())
+            }
+            fn convert(&mut self, record: &Record) -> Result<(), String> {
+                if self.failing.contains(&record.id) {
+                    return Err("staging failed".into());
+                }
+                self.converted.push(record.id.clone());
+                Ok(())
+            }
+            fn machine_released(&mut self, record: &Record) -> Result<bool, String> {
+                if self.unknown_machines {
+                    Err("main thread unavailable".into())
+                } else {
+                    Ok(!self.held.contains(&record.id))
+                }
+            }
+        }
+
+        fn ids(ids: &[&str]) -> Vec<String> {
+            ids.iter().map(|id| (*id).to_owned()).collect()
+        }
+
+        #[test]
+        fn an_already_migrated_computer_with_saved_memory_is_recorded_not_rejected() {
+            let mut fake = Fake::default()
+                .with(with_saved_memory(legacy("migrated")))
+                .with(legacy("other"));
+            fake.current.insert("migrated".into());
+            fake.unfinished.insert("migrated".into());
+
+            let failures = migrate_launch_computers(&ids(&["migrated", "other"]), &mut fake)
+                .expect("the migration completes");
+
+            assert!(failures.is_empty(), "{failures:?}");
+            assert_eq!(fake.recorded, ["migrated"]);
+            assert_eq!(fake.converted, ["other"]);
+        }
+
+        #[test]
+        fn a_recorded_computer_is_left_alone() {
+            let mut done = legacy("done");
+            done.setup.proxy_bootstrap = true;
+            let mut fake = Fake::default().with(done);
+            fake.current.insert("done".into());
+            let failures = migrate_launch_computers(&ids(&["done"]), &mut fake).unwrap();
+            assert!(failures.is_empty());
+            assert!(fake.recorded.is_empty() && fake.converted.is_empty());
+        }
+
+        #[test]
+        fn a_legacy_computer_with_saved_memory_fails_alone_and_unrelated_ones_still_convert() {
+            let mut fake = Fake::default()
+                .with(with_saved_memory(legacy("legacy")))
+                .with(legacy("plain"));
+            let failures = migrate_launch_computers(&ids(&["legacy", "plain"]), &mut fake)
+                .expect("the migration completes");
+
+            assert_eq!(failures.len(), 1);
+            assert!(
+                failures[0].contains("mac-legacy") && failures[0].contains("saved Restore memory")
+            );
+            assert_eq!(fake.converted, ["plain"]);
+        }
+
+        #[test]
+        fn an_unfinished_restore_blocks_only_a_computer_that_needs_conversion() {
+            let mut fake = Fake::default().with(legacy("legacy")).with(legacy("other"));
+            fake.unfinished.insert("legacy".into());
+            let failures = migrate_launch_computers(&ids(&["legacy", "other"]), &mut fake).unwrap();
+            assert_eq!(failures.len(), 1);
+            assert!(failures[0].contains("unfinished Restore"));
+            assert_eq!(fake.converted, ["other"]);
+        }
+
+        #[test]
+        fn a_failed_conversion_with_a_released_machine_does_not_stop_the_others() {
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            let failures = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake).unwrap();
+            assert_eq!(failures, ["mac-bad: staging failed"]);
+            assert_eq!(fake.converted, ["good"]);
+        }
+
+        #[test]
+        fn a_machine_that_may_still_run_stops_the_whole_migration() {
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            fake.held.insert("bad".into());
+            let aborted = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake);
+            assert!(matches!(&aborted, Err(MigrationAbort::Unsafe(message))
+                if message.contains("could not be stopped after network setup failed")));
+            assert_eq!(fake.visited, ["bad"]);
+
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            fake.unknown_machines = true;
+            let aborted = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake);
+            assert!(matches!(&aborted, Err(MigrationAbort::Unsafe(message))
+                if message.contains("could not verify")));
+            assert_eq!(fake.visited, ["bad"]);
+        }
+
+        #[test]
+        fn incomplete_or_uninstalled_computers_are_skipped() {
+            let mut stopped_early = legacy("early");
+            stopped_early.setup.clipboard = false;
+            let mut copy = legacy("copy");
+            copy.setup.needs_personalizing = true;
+            let mut uninstalled = legacy("uninstalled");
+            uninstalled.installed = false;
+            for record in [stopped_early, copy, uninstalled] {
+                assert_eq!(
+                    plan_launch_migration(&record, false, true),
+                    Ok(LaunchMigration::Skip)
+                );
+            }
+        }
+    }
+
+    mod deletion {
+        use super::*;
+        use std::cell::RefCell;
+
+        #[test]
+        fn deleting_a_computer_retires_its_ca_before_removing_its_files() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(layout.dir.join("checkpoints")).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+            let retired = RefCell::new(Vec::new());
+
+            remove_computer_with(&layout, &|_| Ok(()), &|id| {
+                // The folder still exists while the CA is retired.
+                assert!(layout.dir.exists());
+                retired.borrow_mut().push(id.to_owned());
+                Ok(())
+            })
+            .unwrap();
+
+            assert_eq!(retired.into_inner(), ["computer-a"]);
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_ca_retirement_keeps_the_computer_so_the_deletion_can_be_repeated() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+
+            let failed = remove_computer_with(&layout, &|_| Ok(()), &|_| Err("denied".into()));
+            assert_eq!(failed, Err("denied".into()));
+            assert!(layout.record().exists(), "nothing was deleted");
+
+            remove_computer_with(&layout, &|_| Ok(()), &|_| Ok(())).unwrap();
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_detach_retires_nothing() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            let retired = RefCell::new(0);
+            let failed = remove_computer_with(&layout, &|_| Err("attached".into()), &|_| {
+                *retired.borrow_mut() += 1;
+                Ok(())
+            });
+            assert!(failed.is_err());
+            assert_eq!(retired.into_inner(), 0);
+            assert!(layout.dir.exists());
+        }
+    }
+
+    /// Adds a complete disk checkpoint folder to a computer's files.
+    fn add_checkpoint(
+        data: &std::path::Path,
+        computer_id: &str,
+        created_at: &str,
+        policy_kind: checkpoints::PolicyKind,
+        reason: checkpoints::Reason,
+    ) -> String {
+        let layout = Layout::new(data, computer_id);
+        let id = uuid::Uuid::new_v4().to_string();
+        let dir = checkpoints::dir(&layout, &id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("disk.img"), b"clone").unwrap();
+        std::fs::write(dir.join("auxiliary-storage.img"), b"clone").unwrap();
+        let meta = checkpoints::Meta {
+            schema_version: checkpoints::SCHEMA_VERSION,
+            id: id.clone(),
+            name: format!("checkpoint {created_at}"),
+            created_at: created_at.into(),
+            kind: checkpoints::Kind::Disk,
+            reason,
+            policy_kind,
+            macos_version: None,
+            host_build: String::new(),
+            size_bytes: None,
+            cpus: None,
+            memory_gib: None,
+            disk_gib: None,
+            setup_fingerprint: None,
+            computer_use_version: None,
+            developer_tools: false,
+            developer_tools_version: None,
+        };
+        std::fs::write(
+            dir.join("checkpoint.json"),
+            serde_json::to_vec(&meta).unwrap(),
+        )
+        .unwrap();
+        id
+    }
+
+    fn fresh_registry() {
+        let mut computers = registry();
+        computers.entries.clear();
+        computers.loaded = false;
+        computers.template = None;
+        computers.min_disk_gib = store::MIN_DISK_GIB;
+    }
+
+    #[test]
+    fn macos_usage_measures_only_memory_files_and_projects_the_delete_blockers() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), false);
+        assert!(has_computer(&app, &source.id));
+        assert!(!has_computer(&app, "no-such-computer"));
+
+        let usage = macos_checkpoint_usage(&app, &source.id).unwrap();
+        // A disk clone's private bytes are not measured, so the total is unknown.
+        assert_eq!(usage.total_bytes, None);
+        assert_eq!(usage.checkpoints.len(), 1);
+        assert_eq!(usage.checkpoints[0].id, checkpoint_id);
+        assert_eq!(usage.checkpoints[0].size_bytes, None);
+        assert_eq!(usage.checkpoints[0].delete_blocker, None);
+
+        // A Start that will continue from the checkpoint pins it, and deletion says the same.
+        registry().entry(&source.id).unwrap().record.pending_restore =
+            Some(checkpoints::PendingRestore {
+                checkpoint_id: checkpoint_id.clone(),
+                memory: false,
+            });
+        let usage = macos_checkpoint_usage(&app, &source.id).unwrap();
+        assert_eq!(
+            usage.checkpoints[0].delete_blocker.as_deref(),
+            Some(PENDING_START_BLOCKER)
+        );
+
+        // An unfinished Restore that names it takes precedence.
+        let layout = Layout::new(directory.path(), &source.id);
+        std::fs::write(
+            layout.dir.join("restore-journal.json"),
+            format!(r#"{{"phase":"swapping","target":"{checkpoint_id}","memory":false}}"#),
+        )
+        .unwrap();
+        let usage = macos_checkpoint_usage(&app, &source.id).unwrap();
+        assert_eq!(
+            usage.checkpoints[0].delete_blocker.as_deref(),
+            Some(UNFINISHED_RESTORE)
+        );
+        assert_eq!(
+            macos_checkpoint_usage(&app, "no-such-computer").unwrap_err(),
+            "This computer no longer exists."
+        );
+    }
+
+    #[test]
+    fn macos_retention_removes_only_automatic_checkpoints_beyond_the_newest_count() {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, original) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        let oldest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:01Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let older = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:02Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let newer = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:03Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let newest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:04Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let mine = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:00Z",
+            Manual,
+            Reason::Manual,
+        );
+        let recovery = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:05Z",
+            Manual,
+            Reason::BeforeRestore,
+        );
+        ensure_loaded(&app).unwrap();
+
+        prune_macos_automatic_checkpoints(
+            &app,
+            &source.id,
+            &|| Ok(3),
+            silo_api::jobs::JobId::new("job:1").unwrap(),
+        );
+
+        let layout = Layout::new(data, &source.id);
+        let mut left: Vec<String> = checkpoints::list(&layout)
+            .into_iter()
+            .map(|meta| meta.id)
+            .collect();
+        left.sort();
+        let mut expected = vec![original, older, newer, newest, mine, recovery];
+        expected.sort();
+        assert_eq!(
+            left, expected,
+            "{oldest} is the only record beyond the newest three"
+        );
+        assert!(!checkpoints::dir(&layout, &oldest).exists());
+
+        // Turning the policy off removes nothing.
+        prune_macos_automatic_checkpoints(
+            &app,
+            &source.id,
+            &|| Ok(0),
+            silo_api::jobs::JobId::new("job:2").unwrap(),
+        );
+        assert_eq!(checkpoints::list(&layout).len(), 6);
+    }
+
+    #[test]
+    fn macos_retention_keeps_a_checkpoint_a_pending_restore_continues_from() {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        let pinned = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:01Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let _middle = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:02Z",
+            Automatic,
+            Reason::Manual,
+        );
+        let _newest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:03Z",
+            Automatic,
+            Reason::Manual,
+        );
+        ensure_loaded(&app).unwrap();
+        registry().entry(&source.id).unwrap().record.pending_restore =
+            Some(checkpoints::PendingRestore {
+                checkpoint_id: pinned.clone(),
+                memory: false,
+            });
+
+        prune_macos_automatic_checkpoints(
+            &app,
+            &source.id,
+            &|| Ok(2),
+            silo_api::jobs::JobId::new("job:3").unwrap(),
+        );
+
+        let layout = Layout::new(data, &source.id);
+        assert!(
+            checkpoints::dir(&layout, &pinned).exists(),
+            "an excess record the next Start needs stays, visible with its blocker"
+        );
+    }
+
+    #[test]
+    fn an_automatic_macos_capture_is_refused_while_the_setting_is_off() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+
+        let refused = start_macos_checkpoint_job(
+            app,
+            source.id.clone(),
+            "Before run: x, deleted automatically".into(),
+            true,
+            Arc::new(|| Ok(0)),
+        );
+
+        assert_eq!(refused.unwrap_err(), crate::checkpoints::AUTOMATIC_OFF);
     }
 }

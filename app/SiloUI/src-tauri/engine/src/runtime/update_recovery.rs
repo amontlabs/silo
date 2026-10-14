@@ -5,9 +5,9 @@ use std::io::Read;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct RunningComputer {
-    id: String,
-    name: String,
+pub(super) struct RunningComputer {
+    pub(super) id: String,
+    pub(super) name: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,7 +72,7 @@ fn load(paths: &RuntimePaths) -> Result<Option<Journal>, String> {
     }
     Ok(Some(journal))
 }
-fn inspect_exact(
+pub(super) fn inspect_exact(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     configuration: &RunningComputer,
@@ -105,7 +105,7 @@ fn inspect_exact(
     }
     Ok(inspected)
 }
-fn running(
+pub(super) fn running(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
 ) -> Result<Vec<RunningComputer>, String> {

@@ -20,7 +20,9 @@ use microsandbox_types::DeploymentProfile;
 use tempfile::TempDir;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::control::{InitRequest, LoopbackPort, PROTOCOL_VERSION, PortProtocol, ReadyResponse};
+use crate::control::{
+    CaInput, InitRequest, LoopbackPort, PROTOCOL_VERSION, PortProtocol, ReadyResponse,
+};
 
 const MAX_MTU: u16 = 1500;
 const MIN_MTU: u16 = 576;
@@ -237,6 +239,24 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
         secrets,
         ready,
     })
+}
+
+/// The name in the SAN of the trust-probe leaf. The guest's bootstrap evaluates the leaf for
+/// this name; it is not a resolvable host.
+pub const TRUST_PROBE_HOST: &str = "silo-ca-trust-probe.invalid";
+const TRUST_PROBE_VALIDITY_HOURS: u64 = 24 * 365;
+
+/// Signs a certificate for [`TRUST_PROBE_HOST`] with the computer's CA, without keeping the
+/// leaf's key. The guest tests whether its system trust accepts it.
+pub fn issue_trust_probe(ca: &CaInput) -> Result<String, NetworkSetupError> {
+    install_crypto_provider();
+    microsandbox_network::network::issue_trust_probe_pem(
+        ca.cert_pem.as_bytes(),
+        ca.key_pem.as_bytes(),
+        TRUST_PROBE_HOST,
+        TRUST_PROBE_VALIDITY_HOURS,
+    )
+    .map_err(|_| NetworkSetupError::InvalidCa)
 }
 
 pub fn generate_ca() -> Result<GeneratedCa, NetworkSetupError> {
@@ -483,6 +503,20 @@ mod tests {
     use crate::control::{CaInput, SecretInput, UpdateOperation};
     use microsandbox_network::policy::{Action, DestinationGroup};
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn trust_probe_leaf_is_one_certificate_without_a_key() {
+        let GeneratedCa { cert_pem, key_pem } = generate_ca().unwrap();
+        let ca = CaInput {
+            cert_pem: zeroize::Zeroizing::new(cert_pem),
+            key_pem,
+        };
+        let leaf = issue_trust_probe(&ca).unwrap();
+        assert_eq!(leaf.matches("-----BEGIN CERTIFICATE-----").count(), 1);
+        assert!(leaf.ends_with("-----END CERTIFICATE-----\n"));
+        assert!(!leaf.contains("PRIVATE KEY"));
+        assert_ne!(leaf, ca.cert_pem.as_str());
+    }
 
     #[test]
     fn missing_policy_uses_public_egress_with_deny_defaults() {

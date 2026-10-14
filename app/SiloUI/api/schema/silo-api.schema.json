@@ -2582,7 +2582,8 @@
         "running_limit",
         "needs_personalizing",
         "setup_incomplete",
-        "screen_sharing_unavailable"
+        "screen_sharing_unavailable",
+        "desktop_update_required"
       ],
       "type": "string"
     },
@@ -4337,6 +4338,12 @@
     },
     "GuestExecGetParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "jobId": {
           "$ref": "#/$defs/JobId"
         },

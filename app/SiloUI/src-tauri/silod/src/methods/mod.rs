@@ -9,6 +9,11 @@ pub mod display;
 pub mod guest;
 pub mod services;
 
+/// The macOS computer inventory is process-global. Tests that seed or reset it hold this
+/// lock for their whole run, so one module's reset never removes another module's computer.
+#[cfg(test)]
+pub(crate) static MACOS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -230,5 +235,39 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// Tests of different modules share the process-wide operation gate, whose job ids repeat in
+/// every engine context (`job:1`). A test that starts or holds gate work takes this lease for
+/// its whole fixture lifetime so another module's jobs are neither confused with nor queued
+/// behind its own. (A flag and a condition variable rather than a `MutexGuard`, so a fixture
+/// holding it stays `Send`.)
+#[cfg(test)]
+pub(crate) fn process_gate_lock() -> ProcessGateLease {
+    let (held, released) = &*PROCESS_GATE;
+    let mut held = held.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    while *held {
+        held = released
+            .wait(held)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+    *held = true;
+    ProcessGateLease(())
+}
+
+#[cfg(test)]
+static PROCESS_GATE: std::sync::LazyLock<(std::sync::Mutex<bool>, std::sync::Condvar)> =
+    std::sync::LazyLock::new(Default::default);
+
+#[cfg(test)]
+pub(crate) struct ProcessGateLease(());
+
+#[cfg(test)]
+impl Drop for ProcessGateLease {
+    fn drop(&mut self) {
+        let (held, released) = &*PROCESS_GATE;
+        *held.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+        released.notify_one();
     }
 }

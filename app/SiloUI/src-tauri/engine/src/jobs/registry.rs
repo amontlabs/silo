@@ -44,6 +44,7 @@ pub enum CancelRoute {
     Github,
     UpdateDownload,
     MacosGate,
+    GuestExec,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -646,6 +647,18 @@ impl JobRegistry {
         }))
     }
 
+    /// The method that created `job_id`, or `None` when the registry has no such job.
+    pub fn method_of(&self, job_id: &JobId) -> Result<Option<String>, RegistryError> {
+        let connection = self.lock_connection()?;
+        Ok(connection
+            .query_row(
+                "SELECT method FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub fn list_unacknowledged(&self) -> Result<Vec<JobId>, RegistryError> {
         let connection = self.lock_connection()?;
         let mut statement = connection
@@ -951,6 +964,7 @@ fn route_matches(space: JobSpace, route: CancelRoute) -> bool {
             | (JobSpace::Job, CancelRoute::Github)
             | (JobSpace::Job, CancelRoute::UpdateDownload)
             | (JobSpace::Job, CancelRoute::MacosGate)
+            | (JobSpace::Job, CancelRoute::GuestExec)
     )
 }
 

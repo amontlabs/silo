@@ -175,14 +175,7 @@ impl Provision<'_> {
             })?;
             self.check()?;
         }
-        if record.setup.sip
-            && record.setup.developer_tools
-            && !developer_tools_outdated(record, &developer_tools_version)
-            && record.setup.computer_use
-            && record.setup.clipboard
-            && record.setup.roots
-            && !record.computer_use_stale()
-        {
+        if setup_finished(record, &developer_tools_version) {
             if record.imported {
                 record.imported = false;
                 self.mark(record, |_| {})?;
@@ -261,10 +254,14 @@ impl Provision<'_> {
             record.computer_use_desired_approval = Some(approval);
             self.mark(record, |_| {})?;
         }
-        if setup_steps_complete(record.setup) {
+        if record.setup.guest_steps_complete() {
             self.say("Setting up network and trust")?;
-            super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
-                .map_err(Stop::Failed)?;
+            stage_bootstrap(record, |record| {
+                super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
+            })?;
+            // Only now is the computer ready: a failure above leaves the flag unset, so a
+            // retry runs this step again over the temporary NAT boot.
+            self.mark(record, |setup| setup.proxy_bootstrap = true)?;
         }
         self.shut_down()?;
         if record.imported {
@@ -421,10 +418,12 @@ impl Provision<'_> {
         // personalization completes. Stage its first-boot route and System keychain
         // trust before that transition. Incomplete copies stay on NAT until the final
         // provisioning step stages the bootstrap below.
-        if setup_steps_complete(record.setup) {
+        let staged = record.setup.guest_steps_complete();
+        if staged {
             self.say("Setting up network and trust")?;
-            super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
-                .map_err(Stop::Failed)?;
+            stage_bootstrap(record, |record| {
+                super::proxy::stage_guest_bootstrap(self.app, record, self.layout)
+            })?;
         }
         self.shut_down()?;
         // Only a verified computer records the size it really has.
@@ -432,7 +431,10 @@ impl Provision<'_> {
             record.disk_gib = gib;
         }
         record.inherited_access = false;
-        self.mark(record, |setup| setup.needs_personalizing = false)?;
+        self.mark(record, |setup| {
+            setup.needs_personalizing = false;
+            setup.proxy_bootstrap = staged;
+        })?;
         // Its own credentials are the only ones left.
         let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
         // The computer is usable and complete; the message stays as its failure detail.
@@ -718,13 +720,26 @@ fn setup_summary(setup: &SetupProgress) -> String {
     }
 }
 
-fn setup_steps_complete(setup: SetupProgress) -> bool {
-    setup.account
-        && setup.sip
-        && setup.developer_tools
-        && setup.computer_use
-        && setup.clipboard
-        && setup.roots
+/// Stages the guest's network and trust through `stage`. The caller records the result
+/// only after this returns `Ok`, so a failure leaves the computer not set up and Retry
+/// available.
+fn stage_bootstrap(
+    record: &Record,
+    stage: impl FnOnce(&Record) -> Result<(), String>,
+) -> Result<(), Stop> {
+    stage(record).map_err(Stop::Failed)
+}
+
+/// Whether the computer's setup has nothing left to run, so Retry has no work to do.
+fn setup_finished(record: &Record, developer_tools_version: &str) -> bool {
+    record.setup.sip
+        && record.setup.developer_tools
+        && !developer_tools_outdated(record, developer_tools_version)
+        && record.setup.computer_use
+        && record.setup.clipboard
+        && record.setup.roots
+        && !record.computer_use_stale()
+        && record.setup.proxy_bootstrap
 }
 
 /// Which key a copy of a template answers to.
@@ -900,6 +915,34 @@ mod tests {
         assert!(!developer_tools_outdated(&record, &current));
     }
 
+    fn finished_record() -> Record {
+        let mut record = store::new_record(
+            &store::CreateRequest {
+                name: "mac-one".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        record.installed = true;
+        record.setup = SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+            proxy_bootstrap: false,
+        };
+        record.developer_tools_version = Some(developer_tools::version());
+        let approval = crate::computer_use::initial_approval();
+        record.computer_use_approval = Some(approval);
+        record.computer_use_version = Some(templates::computer_use_version_for(approval));
+        record
+    }
+
     #[test]
     fn proxy_bootstrap_is_staged_only_after_all_guest_setup_steps_are_ready() {
         let complete = SetupProgress {
@@ -910,22 +953,61 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: true,
+            proxy_bootstrap: false,
         };
-        assert!(setup_steps_complete(complete));
-        assert!(!setup_steps_complete(SetupProgress {
+        assert!(complete.guest_steps_complete());
+        assert!(!SetupProgress {
             developer_tools: false,
             ..complete
-        }));
-        assert!(!setup_steps_complete(SetupProgress {
+        }
+        .guest_steps_complete());
+        assert!(!SetupProgress {
             roots: false,
             ..complete
-        }));
+        }
+        .guest_steps_complete());
+    }
+
+    /// A staging failure after the last setup flag must leave the computer retryable, and
+    /// the retry must reach the staging step and finish the setup in the same session.
+    #[test]
+    fn a_failed_bootstrap_after_the_last_setup_flag_leaves_setup_incomplete_until_retry() {
+        let mut record = finished_record();
+        // Every guest step is done; only the bootstrap remains.
+        assert!(record.setup.guest_steps_complete());
+        assert!(!setup_finished(&record, &developer_tools::version()));
+
+        let failure = stage_bootstrap(&record, |_| Err("copy failed".into()));
+        assert!(matches!(failure, Err(Stop::Failed(message)) if message == "copy failed"));
+        // Nothing was recorded: not set up, Retry is admitted, and Start is refused.
+        assert!(!record.setup_complete());
+        assert!(store::setup_allowed(store::State::Failed, &record).is_ok());
+        assert!(store::setup_allowed(store::State::Stopped, &record).is_ok());
+        assert!(!setup_finished(&record, &developer_tools::version()));
+        // The retry boots over the temporary Apple NAT, never behind the gateway.
+        assert!(!engine::boots_behind_gateway(&record));
+
+        let mut staged = 0;
+        stage_bootstrap(&record, |_| {
+            staged += 1;
+            Ok(())
+        })
+        .map_err(|_| ())
+        .unwrap();
+        assert_eq!(staged, 1);
+        record.setup.proxy_bootstrap = true;
+
+        assert!(record.setup_complete());
+        assert!(setup_finished(&record, &developer_tools::version()));
+        assert!(store::setup_allowed(store::State::Stopped, &record).is_err());
+        assert!(engine::boots_behind_gateway(&record));
     }
 
     #[test]
     fn the_setup_log_names_the_finished_steps() {
         let mut setup = SetupProgress {
             needs_personalizing: true,
+            proxy_bootstrap: false,
             ..SetupProgress::default()
         };
         assert_eq!(setup_summary(&setup), "nothing done yet");

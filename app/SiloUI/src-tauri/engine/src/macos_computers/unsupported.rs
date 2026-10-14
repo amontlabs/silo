@@ -137,6 +137,15 @@ pub(super) fn save_running(
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn save_and_hold(
+    _app: &MacosContext,
+    _id: &str,
+    _state: &Path,
+    _copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<u64, String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn focus_display(_app: &MacosContext, _id: &str) -> Result<isize, String> {
     Err(UNSUPPORTED.into())
 }

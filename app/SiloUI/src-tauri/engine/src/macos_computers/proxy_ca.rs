@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, OnceLock, PoisonError},
+    sync::{Arc, Mutex, OnceLock, PoisonError, Weak},
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -24,6 +24,8 @@ const MAX_STORED_BYTES: usize = MAX_PEM_BYTES * 2 + 4096;
 pub(super) trait CaStore: Send + Sync {
     fn get(&self, service: &str, account: &str) -> Result<Option<String>, String>;
     fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String>;
+    /// Removes the item; an item that is already absent is not an error.
+    fn delete(&self, service: &str, account: &str) -> Result<(), String>;
 }
 
 /// PEM material intentionally has no `Debug`, `Serialize`, or `Clone` implementation.
@@ -108,19 +110,58 @@ impl CaStore for KeychainStore {
             .and_then(|entry| entry.set_password(value))
             .map_err(|_| "Cannot save the macOS proxy CA in the system credential store.".into())
     }
+
+    fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+        let entry = keyring::Entry::new(service, account)
+            .map_err(|_| "Cannot access the macOS proxy CA in the system credential store.")?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => {
+                Err("Cannot remove the macOS proxy CA from the system credential store.".into())
+            }
+        }
+    }
 }
 
-type ItemLocks = HashMap<(String, String), Arc<Mutex<()>>>;
+/// The store ordinary calls use. Unit tests never reach the live Keychain.
+#[cfg(not(test))]
+fn live_store() -> &'static dyn CaStore {
+    &KeychainStore
+}
+
+#[cfg(test)]
+fn live_store() -> &'static dyn CaStore {
+    static STORE: OnceLock<tests::MemoryStore> = OnceLock::new();
+    STORE.get_or_init(tests::MemoryStore::default)
+}
+
+/// Locks are shared only while some caller holds one, so the map does not grow with the
+/// number of computers ever created.
+type ItemLocks = HashMap<(String, String), Weak<Mutex<()>>>;
 static ITEM_LOCKS: OnceLock<Mutex<ItemLocks>> = OnceLock::new();
 
-fn item_lock(service: &str, account: &str) -> Arc<Mutex<()>> {
+fn item_locks() -> std::sync::MutexGuard<'static, ItemLocks> {
     ITEM_LOCKS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .entry((service.to_owned(), account.to_owned()))
-        .or_default()
-        .clone()
+}
+
+fn item_lock(service: &str, account: &str) -> Arc<Mutex<()>> {
+    let mut locks = item_locks();
+    locks.retain(|_, lock| lock.strong_count() != 0);
+    let key = (service.to_owned(), account.to_owned());
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    lock
+}
+
+/// Drops the lock entries nobody holds any more.
+fn prune_item_locks() {
+    item_locks().retain(|_, lock| lock.strong_count() != 0);
 }
 
 /// Get the stable CA for the current Silo build channel, creating it once if absent.
@@ -135,7 +176,7 @@ pub(super) fn get_or_create(
     get_or_create_with(
         crate::channel::current(),
         computer_id,
-        &KeychainStore,
+        live_store(),
         generate,
     )
 }
@@ -143,7 +184,40 @@ pub(super) fn get_or_create(
 /// Read the channel-scoped CA without creating or replacing Keychain state.
 /// Ordinary Start uses this to fail closed when setup did not persist the CA.
 pub(super) fn get_existing(computer_id: &str) -> Result<Option<CaMaterial>, String> {
-    get_existing_with(crate::channel::current(), computer_id, &KeychainStore)
+    get_existing_with(crate::channel::current(), computer_id, live_store())
+}
+
+/// Removes the computer's CA, key included, from the channel Keychain, and releases the
+/// computer's lock entry. Call it when the computer is deleted; it can be repeated until it
+/// succeeds, and an absent CA is not an error.
+pub(super) fn retire(computer_id: &str) -> Result<(), String> {
+    retire_with(crate::channel::current(), computer_id, live_store())
+}
+
+pub(super) fn retire_with(
+    channel: Channel,
+    computer_id: &str,
+    store: &dyn CaStore,
+) -> Result<(), String> {
+    validate_computer_id(computer_id)?;
+    let service = service_name(channel);
+    let account = account_name(computer_id);
+    let result = {
+        let item_lock = item_lock(&service, &account);
+        let _item_guard = item_lock.lock().unwrap_or_else(PoisonError::into_inner);
+        store.delete(&service, &account).and_then(|()| {
+            // A deletion that reported success but left the item is not retired.
+            match store.get(&service, &account)? {
+                None => Ok(()),
+                Some(mut left) => {
+                    left.zeroize();
+                    Err("The macOS proxy CA could not be removed from the credential store.".into())
+                }
+            }
+        })
+    };
+    prune_item_locks();
+    result
 }
 
 fn get_existing_with(
@@ -324,7 +398,7 @@ mod tests {
     use std::{cell::Cell, collections::HashMap};
 
     #[derive(Default)]
-    struct MemoryStore(Mutex<HashMap<(String, String), String>>);
+    pub(super) struct MemoryStore(Mutex<HashMap<(String, String), String>>);
 
     impl CaStore for MemoryStore {
         fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
@@ -343,6 +417,52 @@ mod tests {
                 .insert((service.to_owned(), account.to_owned()), value.to_owned());
             Ok(())
         }
+
+        fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+            self.0
+                .lock()
+                .unwrap()
+                .remove(&(service.to_owned(), account.to_owned()));
+            Ok(())
+        }
+    }
+
+    /// A store whose deletions fail until `failures` reach zero, or that keeps the item.
+    struct FlakyStore {
+        inner: MemoryStore,
+        failures: std::sync::atomic::AtomicUsize,
+        keeps_items: bool,
+    }
+
+    impl CaStore for FlakyStore {
+        fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+            self.inner.get(service, account)
+        }
+
+        fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
+            self.inner.set(service, account, value)
+        }
+
+        fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+            use std::sync::atomic::Ordering;
+            if self
+                .failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err("denied".into());
+            }
+            if self.keeps_items {
+                return Ok(());
+            }
+            self.inner.delete(service, account)
+        }
+    }
+
+    fn lock_entries() -> usize {
+        item_locks().len()
     }
 
     fn generated(label: &str) -> CaMaterial {
@@ -470,6 +590,10 @@ mod tests {
             fn set(&self, _service: &str, _account: &str, _value: &str) -> Result<(), String> {
                 Ok(())
             }
+
+            fn delete(&self, _service: &str, _account: &str) -> Result<(), String> {
+                Ok(())
+            }
         }
 
         let error = get_or_create_with(Channel::Development, "computer-a", &NoReadback, || {
@@ -493,5 +617,114 @@ mod tests {
             );
         }
         assert!(store.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn retiring_a_computer_removes_its_ca_key_and_only_its_own() {
+        let store = MemoryStore::default();
+        for id in ["computer-a", "computer-b"] {
+            get_or_create_with(Channel::Development, id, &store, || Ok(generated("a2V5"))).unwrap();
+        }
+        retire_with(Channel::Development, "computer-a", &store).unwrap();
+        assert!(
+            get_existing_with(Channel::Development, "computer-a", &store)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            get_existing_with(Channel::Development, "computer-b", &store)
+                .unwrap()
+                .is_some()
+        );
+        // A computer that never had a CA, and a repeat, are not failures.
+        retire_with(Channel::Development, "computer-a", &store).unwrap();
+        retire_with(Channel::Development, "never-staged", &store).unwrap();
+        // Another channel's item with the same computer id is untouched.
+        get_or_create_with(Channel::Production, "computer-c", &store, || {
+            Ok(generated("cHJvZA=="))
+        })
+        .unwrap();
+        retire_with(Channel::Development, "computer-c", &store).unwrap();
+        assert!(get_existing_with(Channel::Production, "computer-c", &store)
+            .unwrap()
+            .is_some());
+        assert!(retire_with(Channel::Development, "../escape", &store).is_err());
+    }
+
+    #[test]
+    fn a_failed_retirement_keeps_the_item_visible_and_can_be_repeated() {
+        let store = FlakyStore {
+            inner: MemoryStore::default(),
+            failures: 1.into(),
+            keeps_items: false,
+        };
+        get_or_create_with(Channel::Development, "computer-a", &store, || {
+            Ok(generated("a2V5"))
+        })
+        .unwrap();
+        assert!(retire_with(Channel::Development, "computer-a", &store).is_err());
+        assert!(
+            get_existing_with(Channel::Development, "computer-a", &store)
+                .unwrap()
+                .is_some()
+        );
+        retire_with(Channel::Development, "computer-a", &store).unwrap();
+        assert!(store.inner.0.lock().unwrap().is_empty());
+
+        // A store that reports success but keeps the item is not a retirement.
+        let lying = FlakyStore {
+            inner: MemoryStore::default(),
+            failures: 0.into(),
+            keeps_items: true,
+        };
+        get_or_create_with(Channel::Development, "computer-b", &lying, || {
+            Ok(generated("a2V5"))
+        })
+        .unwrap();
+        assert!(retire_with(Channel::Development, "computer-b", &lying)
+            .unwrap_err()
+            .contains("could not be removed"));
+    }
+
+    #[test]
+    fn repeated_creation_and_deletion_leaves_no_keys_and_no_lock_entries() {
+        let store = MemoryStore::default();
+        let before = lock_entries();
+        for round in 0..64 {
+            let id = format!("repeat-{round}");
+            get_or_create_with(Channel::Development, &id, &store, || Ok(generated("a2V5")))
+                .unwrap();
+            get_existing_with(Channel::Development, &id, &store).unwrap();
+            retire_with(Channel::Development, &id, &store).unwrap();
+        }
+        assert!(store.0.lock().unwrap().is_empty());
+        // Other tests share the process-wide map, but none of these 64 entries remain.
+        let leftover = item_locks()
+            .keys()
+            .filter(|(_, account)| account.starts_with("computer:repeat-"))
+            .count();
+        assert_eq!(leftover, 0);
+        assert!(
+            lock_entries() <= before + 8,
+            "the lock map did not grow with computers"
+        );
+    }
+
+    #[test]
+    fn a_held_lock_survives_pruning_until_its_holder_is_done() {
+        let service = "org.silo.dev.proxy-ca";
+        let held = item_lock(service, "computer:held-lock");
+        let same = item_lock(service, "computer:held-lock");
+        assert!(Arc::ptr_eq(&held, &same));
+        prune_item_locks();
+        assert!(Arc::ptr_eq(
+            &held,
+            &item_lock(service, "computer:held-lock")
+        ));
+        drop((held, same));
+        prune_item_locks();
+        assert!(item_locks()
+            .keys()
+            .all(|(_, account)| account != "computer:held-lock"));
     }
 }

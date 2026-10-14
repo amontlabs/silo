@@ -7,11 +7,74 @@
 use crate::{desktop_proxy::Proxy, owned_tunnel::Tunnel};
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
+    },
 };
 
 pub const INIT_SCRIPT: &str = include_str!("desktop_viewer_bridge.js");
 const MAX_CONNECTIONS: usize = 16;
+
+/// The refusal for a second concurrent viewer of a computer whose desktop is not on recipe 5.
+/// The dispatcher maps it to `desktop_update_required`.
+pub const SECOND_VIEWER_REFUSAL: &str = "This computer's desktop can only be viewed from one place at a time. Use Update desktop on the computer, then open the viewer again.";
+
+/// Whether a `desktop.status` reply describes a desktop on recipe 5 (the Selkies multi-client
+/// patch): the Selkies backend with no update required and none available. Older recipes
+/// evict the first viewer when a second one connects.
+pub fn supports_independent_viewers(status: &serde_json::Value) -> bool {
+    status["backend"].as_str() == Some("selkies")
+        && status["updateRequired"].as_bool() == Some(false)
+        && status["updateAvailable"].as_bool() == Some(false)
+}
+
+/// Refuses the viewer `owner` just claimed when it is not the first one of the computer and
+/// the desktop is not on recipe 5. `status` reads `desktop.status` and runs only when another
+/// viewer came first. A status that cannot be read refuses with its own error.
+pub fn gate_second_viewer(
+    owner: &str,
+    device: &str,
+    computer: &str,
+    status: impl FnOnce() -> Result<serde_json::Value, String>,
+) -> Result<(), String> {
+    if !has_earlier_viewer(owner, device, computer) {
+        return Ok(());
+    }
+    if supports_independent_viewers(&status()?) {
+        Ok(())
+    } else {
+        Err(SECOND_VIEWER_REFUSAL.to_owned())
+    }
+}
+
+fn next_seq() -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Whether another client claimed a viewer of this computer before `owner` did, so `owner`'s
+/// viewer is not the first. The first viewer is always allowed; later ones need recipe 5.
+pub fn has_earlier_viewer(owner: &str, device: &str, computer: &str) -> bool {
+    let entries = entries()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(mine) = entries
+        .values()
+        .find(|viewer| {
+            viewer.owner == owner && viewer.device == device && viewer.computer == computer
+        })
+        .map(|viewer| viewer.seq)
+    else {
+        return false;
+    };
+    entries.values().any(|viewer| {
+        viewer.owner != owner
+            && viewer.device == device
+            && viewer.computer == computer
+            && viewer.seq < mine
+    })
+}
 
 struct Viewer {
     owner: String,
@@ -25,6 +88,8 @@ struct Viewer {
     tunnel: Option<Tunnel>,
     generation: u64,
     connecting: bool,
+    /// Claim order across the registry, so concurrent opens agree on who came first.
+    seq: u64,
 }
 
 impl Viewer {
@@ -166,6 +231,7 @@ fn claim_in(
         tunnel: None,
         generation,
         connecting: true,
+        seq: next_seq(),
     };
     entries.insert(connection_id.clone(), viewer);
     Ok(OpenPlan::Connect {
@@ -500,6 +566,85 @@ mod tests {
         assert!(ensure_target("client-m", &first, "device-l", "computer-l1").is_err());
         assert!(ensure_target("client-l", "missing", "device-l", "computer-l1").is_err());
         close_client("client-l");
+    }
+
+    fn recipe_status(backend: &str, required: bool, available: bool) -> serde_json::Value {
+        serde_json::json!({"backend": backend, "updateRequired": required, "updateAvailable": available})
+    }
+
+    #[test]
+    fn only_a_current_selkies_desktop_supports_independent_viewers() {
+        assert!(supports_independent_viewers(&recipe_status(
+            "selkies", false, false
+        )));
+        assert!(!supports_independent_viewers(&recipe_status(
+            "selkies", false, true
+        )));
+        assert!(!supports_independent_viewers(&recipe_status(
+            "selkies", true, false
+        )));
+        assert!(!supports_independent_viewers(&recipe_status(
+            "other", false, false
+        )));
+        assert!(!supports_independent_viewers(
+            &serde_json::json!({"backend": null})
+        ));
+        assert!(!supports_independent_viewers(&serde_json::json!({})));
+    }
+
+    #[test]
+    fn the_first_viewer_is_never_gated_and_never_reads_the_status() {
+        let first = connect("gate-first", "device-g", "computer-g1", "G", false);
+        let gate = gate_second_viewer("gate-first", "device-g", "computer-g1", || {
+            panic!("the first viewer must not read the status")
+        });
+        assert_eq!(gate, Ok(()));
+        close("gate-first", &first).unwrap();
+    }
+
+    #[test]
+    fn a_second_viewer_needs_recipe_five() {
+        let first = connect("gate-a", "device-g", "computer-g2", "G", false);
+        let second = connect("gate-b", "device-g", "computer-g2", "G", false);
+        let old = gate_second_viewer("gate-b", "device-g", "computer-g2", || {
+            Ok(recipe_status("selkies", false, true))
+        });
+        assert_eq!(old, Err(SECOND_VIEWER_REFUSAL.to_owned()));
+        let current = gate_second_viewer("gate-b", "device-g", "computer-g2", || {
+            Ok(recipe_status("selkies", false, false))
+        });
+        assert_eq!(current, Ok(()));
+        let unreadable = gate_second_viewer("gate-b", "device-g", "computer-g2", || {
+            Err("The desktop is not running.".into())
+        });
+        assert_eq!(unreadable, Err("The desktop is not running.".to_owned()));
+        // The holder that came first is never gated, even though a second viewer exists.
+        assert_eq!(
+            gate_second_viewer("gate-a", "device-g", "computer-g2", || panic!("first")),
+            Ok(())
+        );
+        // Another computer or device has no earlier viewer.
+        let other = connect("gate-b", "device-g", "computer-g3", "G", false);
+        assert_eq!(
+            gate_second_viewer("gate-b", "device-g", "computer-g3", || panic!("first")),
+            Ok(())
+        );
+        for (owner, id) in [("gate-a", first), ("gate-b", second), ("gate-b", other)] {
+            close(owner, &id).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_first_viewer_stays_first_after_it_is_replaced_by_a_later_one() {
+        let first = connect("gate-c", "device-g", "computer-g4", "G", false);
+        let second = connect("gate-d", "device-g", "computer-g4", "G", false);
+        close("gate-c", &first).unwrap();
+        // With the first gone, the remaining viewer is alone and passes without a status read.
+        assert_eq!(
+            gate_second_viewer("gate-d", "device-g", "computer-g4", || panic!("alone")),
+            Ok(())
+        );
+        close("gate-d", &second).unwrap();
     }
 
     #[test]

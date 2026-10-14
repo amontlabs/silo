@@ -1,0 +1,1857 @@
+diff --git a/crates/network/lib/engine/dns/forwarder.rs b/crates/network/lib/engine/dns/forwarder.rs
+index 822e09b..a66ad7b 100644
+--- a/crates/network/lib/engine/dns/forwarder.rs
++++ b/crates/network/lib/engine/dns/forwarder.rs
+@@ -44,7 +44,7 @@ use super::common::config::NormalizedDnsConfig;
+ use super::common::filter::{is_private_ipv4, is_private_ipv6};
+ use super::common::transport::Transport;
+ #[cfg(not(windows))]
+-use super::nameserver::read_host_dns_servers;
++use super::host_resolvers::{HostResolverSource, HostResolverTable, SystemResolverSource};
+ use super::nameserver::resolve_nameservers;
+ #[cfg(windows)]
+ use super::windows_resolver::WindowsSystemResolver;
+@@ -113,6 +113,9 @@ pub(crate) struct DnsForwarder {
+     /// `host.microsandbox.internal`.
+     gateway: GatewayIps,
+     config: Arc<NormalizedDnsConfig>,
++    /// Guest IP-level MTU. A UDP answer is limited so its datagram fits one frame of this size;
++    /// anything larger is truncated (TC=1) so the guest retries over TCP.
++    mtu: usize,
+ }
+ 
+ /// One configured upstream and its per-transport clients.
+@@ -130,11 +133,36 @@ struct ConfiguredUpstream {
+     tcp: OnceCell<Client>,
+ }
+ 
++/// Upstreams built from one snapshot of the host's resolver table.
++#[cfg(not(windows))]
++struct HostRouting {
++    table: HostResolverTable,
++    /// The upstreams of `table.default_servers`.
++    default: Vec<ConfiguredUpstream>,
++    /// The upstreams of each `table.scoped` entry, in the same order. An entry whose upstreams
++    /// could not be built is empty, and the table does not route to it.
++    scoped: Vec<Vec<ConfiguredUpstream>>,
++}
++
++/// The host's resolver configuration as the forwarder routes with it.
++#[cfg(not(windows))]
++struct HostResolvers {
++    routing: std::sync::RwLock<Arc<HostRouting>>,
++    query_timeout: Duration,
++    /// Counts notifications that were handled, whether or not the table changed.
++    handled: watch::Sender<u64>,
++    /// Keeps the platform watcher alive for as long as the forwarder.
++    _watch: Option<Box<dyn std::any::Any + Send + Sync>>,
++}
++
+ /// Backend for queries addressed to the sandbox gateway.
+ enum ConfiguredResolver {
+-    /// Direct upstreams, tried in order. This covers operator-configured nameservers on every host
+-    /// and host-discovered nameservers on Unix.
++    /// Direct upstreams, tried in order. This covers operator-configured nameservers on every host.
+     Direct(Vec<ConfiguredUpstream>),
++    /// The host's own resolver configuration on Unix: split-DNS domains route to their own
++    /// nameservers, and the table is refreshed when the host's network changes.
++    #[cfg(not(windows))]
++    Host(Arc<HostResolvers>),
+     /// Native Windows DNS Client used only when no nameserver was explicitly configured.
+     #[cfg(windows)]
+     WindowsSystem(WindowsSystemResolver),
+@@ -391,18 +419,20 @@ impl DnsForwarder {
+         response_msg.metadata.id = guest_id;
+         let response_bytes = response_msg.to_bytes().ok()?;
+ 
+-        // UDP truncation: if the wire response exceeds the buffer the
+-        // guest advertised via EDNS (default 512 if no OPT), reply with
+-        // a header-only response carrying TC=1 and the original
+-        // question; the stub retries over TCP, which we also intercept.
++        // UDP truncation: if the wire response exceeds the buffer the guest advertised via EDNS
++        // (default 512 if no OPT), or what one datagram of the guest's MTU can carry, reply with
++        // a header-only response carrying TC=1 and the original question; the stub retries over
++        // TCP, which we also intercept. The datagram is a single unfragmented frame, so the MTU
++        // limit is what keeps a large EDNS answer from vanishing instead of falling back.
+         if transport == Transport::Udp {
+-            let max_size = query_msg.max_payload() as usize;
++            let max_size =
++                udp_response_limit(query_msg.max_payload() as usize, self.mtu, original_dst);
+             if response_bytes.len() > max_size {
+                 tracing::debug!(
+                     domain = %domain,
+                     response_size = response_bytes.len(),
+-                    advertised = max_size,
+-                    "DNS response exceeds guest UDP buffer; setting TC=1"
++                    limit = max_size,
++                    "DNS response exceeds the guest UDP limit; setting TC=1"
+                 );
+                 return build_truncated_response(&query_msg).map(Bytes::from);
+             }
+@@ -455,23 +485,16 @@ impl DnsForwarder {
+     ) -> Option<Message> {
+         match &self.configured {
+             ConfiguredResolver::Direct(upstreams) => {
+-                let total = upstreams.len();
+-                for (index, upstream) in upstreams.iter().enumerate() {
+-                    let Some(client) = self.client_for(upstream, transport).await else {
+-                        continue;
+-                    };
+-                    if let Some(response) = self.send_query(&client, query_msg, domain).await {
+-                        return Some(response);
+-                    }
+-                    if index + 1 < total {
+-                        tracing::debug!(
+-                            domain = %domain,
+-                            upstream = %upstream.addr,
+-                            "upstream DNS unusable, trying next configured nameserver",
+-                        );
+-                    }
+-                }
+-                None
++                self.forward_via(upstreams, query_msg, domain, transport)
++                    .await
++            }
++            #[cfg(not(windows))]
++            ConfiguredResolver::Host(host) => {
++                // The snapshot is cloned out of the lock, so a refresh never waits for a query
++                // and a query keeps the routing it started with.
++                let routing = host.current();
++                self.forward_via(routing.upstreams_for(domain), query_msg, domain, transport)
++                    .await
+             }
+             #[cfg(windows)]
+             ConfiguredResolver::WindowsSystem(resolver) => {
+@@ -500,6 +523,33 @@ impl DnsForwarder {
+         }
+     }
+ 
++    /// Walk `upstreams` in order, stopping at the first that answers.
++    async fn forward_via(
++        &self,
++        upstreams: &[ConfiguredUpstream],
++        query_msg: &Message,
++        domain: &str,
++        transport: Transport,
++    ) -> Option<Message> {
++        let total = upstreams.len();
++        for (index, upstream) in upstreams.iter().enumerate() {
++            let Some(client) = self.client_for(upstream, transport).await else {
++                continue;
++            };
++            if let Some(response) = self.send_query(&client, query_msg, domain).await {
++                return Some(response);
++            }
++            if index + 1 < total {
++                tracing::debug!(
++                    domain = %domain,
++                    upstream = %upstream.addr,
++                    "upstream DNS unusable, trying next configured nameserver",
++                );
++            }
++        }
++        None
++    }
++
+     /// Send one query to one upstream. `None` means this upstream did
+     /// not produce a usable answer, which is what makes the caller fall
+     /// over to the next one: a per-query timeout and a transport error
+@@ -578,6 +628,7 @@ impl DnsForwarder {
+         platform_policy: Option<Arc<NetworkPolicy>>,
+         shared: Arc<SharedState>,
+         gateway: GatewayIps,
++        mtu: usize,
+     ) -> DnsForwarderHandle {
+         let (forwarder_tx, forwarder_rx) = watch::channel(None);
+         handle.spawn(async move {
+@@ -588,6 +639,7 @@ impl DnsForwarder {
+                 platform_policy,
+                 shared,
+                 gateway,
++                mtu,
+             )
+             .await
+             else {
+@@ -610,47 +662,137 @@ impl DnsForwarder {
+         platform_policy: Option<Arc<NetworkPolicy>>,
+         shared: Arc<SharedState>,
+         gateway: GatewayIps,
++        mtu: usize,
+     ) -> Option<Arc<Self>> {
+-        let configured = if !config.nameservers.is_empty() {
+-            match resolve_nameservers(&config.nameservers).await {
+-                Ok(upstreams) if !upstreams.is_empty() => ConfiguredResolver::Direct(
+-                    Self::build_direct_upstreams(upstreams, config.query_timeout).await?,
+-                ),
+-                Ok(_) => {
+-                    tracing::error!("no configured nameservers resolved to an address");
+-                    return None;
+-                }
+-                Err(e) => {
+-                    tracing::error!(error = %e, "failed to resolve configured nameservers");
+-                    return None;
+-                }
++        #[cfg(not(windows))]
++        let source: Arc<dyn HostResolverSource> = Arc::new(SystemResolverSource);
++        #[cfg(not(windows))]
++        return Self::build_with_source(
++            config,
++            gateway_ips,
++            network_policy,
++            platform_policy,
++            shared,
++            gateway,
++            mtu,
++            source,
++        )
++        .await;
++        #[cfg(windows)]
++        Self::build_configured(
++            config,
++            gateway_ips,
++            network_policy,
++            platform_policy,
++            shared,
++            gateway,
++            mtu,
++        )
++        .await
++    }
++
++    /// Like [`Self::build`], reading the host's resolver configuration from `source`.
++    #[cfg(not(windows))]
++    #[allow(clippy::too_many_arguments)]
++    async fn build_with_source(
++        config: Arc<NormalizedDnsConfig>,
++        gateway_ips: Arc<HashSet<IpAddr>>,
++        network_policy: Arc<NetworkPolicy>,
++        platform_policy: Option<Arc<NetworkPolicy>>,
++        shared: Arc<SharedState>,
++        gateway: GatewayIps,
++        mtu: usize,
++        source: Arc<dyn HostResolverSource>,
++    ) -> Option<Arc<Self>> {
++        let configured = if config.nameservers.is_empty() {
++            Self::build_host_resolvers(source, config.query_timeout).await?
++        } else {
++            Self::build_explicit(&config).await?
++        };
++        Some(Arc::new(Self {
++            configured,
++            gateway_ips,
++            network_policy,
++            platform_policy,
++            shared,
++            gateway,
++            config,
++            mtu,
++        }))
++    }
++
++    /// The host's resolver table, followed for as long as the forwarder lives.
++    #[cfg(not(windows))]
++    async fn build_host_resolvers(
++        source: Arc<dyn HostResolverSource>,
++        query_timeout: Duration,
++    ) -> Option<ConfiguredResolver> {
++        let reader = Arc::clone(&source);
++        let table = match tokio::task::spawn_blocking(move || reader.read()).await {
++            Ok(Ok(table)) if !table.is_empty() => table,
++            Ok(Ok(_)) => {
++                tracing::error!("no upstream DNS servers discovered from host");
++                return None;
+             }
+-        } else if cfg!(windows) {
+-            #[cfg(windows)]
+-            {
+-                ConfiguredResolver::WindowsSystem(WindowsSystemResolver::new(config.query_timeout))
++            Ok(Err(e)) => {
++                tracing::error!(error = %e, "failed to read host DNS configuration");
++                return None;
+             }
+-            #[cfg(not(windows))]
+-            unreachable!()
+-        } else {
+-            #[cfg(not(windows))]
+-            match read_host_dns_servers().await {
+-                Ok(upstreams) if !upstreams.is_empty() => ConfiguredResolver::Direct(
+-                    Self::build_direct_upstreams(upstreams, config.query_timeout).await?,
+-                ),
+-                Ok(_) => {
+-                    tracing::error!("no upstream DNS servers discovered from host");
+-                    return None;
+-                }
+-                Err(e) => {
+-                    tracing::error!(error = %e, "failed to read host DNS configuration");
+-                    return None;
+-                }
++            Err(e) => {
++                tracing::error!(error = %e, "host DNS configuration read did not finish");
++                return None;
+             }
+-            #[cfg(windows)]
+-            unreachable!()
+         };
++        let routing = HostRouting::build(table, query_timeout).await?;
++        let watch = source.watch();
++        let (changes, guard) = match watch {
++            Some(watch) => (Some(watch.changes), Some(watch._guard)),
++            None => (None, None),
++        };
++        let host = Arc::new(HostResolvers {
++            routing: std::sync::RwLock::new(Arc::new(routing)),
++            query_timeout,
++            handled: watch::channel(0).0,
++            _watch: guard,
++        });
++        if let Some(changes) = changes {
++            tokio::spawn(follow_host_changes(Arc::downgrade(&host), source, changes));
++        }
++        Some(ConfiguredResolver::Host(host))
++    }
+ 
++    /// Operator-configured nameservers, resolved once.
++    async fn build_explicit(config: &NormalizedDnsConfig) -> Option<ConfiguredResolver> {
++        match resolve_nameservers(&config.nameservers).await {
++            Ok(upstreams) if !upstreams.is_empty() => Some(ConfiguredResolver::Direct(
++                Self::build_direct_upstreams(upstreams, config.query_timeout).await?,
++            )),
++            Ok(_) => {
++                tracing::error!("no configured nameservers resolved to an address");
++                None
++            }
++            Err(e) => {
++                tracing::error!(error = %e, "failed to resolve configured nameservers");
++                None
++            }
++        }
++    }
++
++    #[cfg(windows)]
++    async fn build_configured(
++        config: Arc<NormalizedDnsConfig>,
++        gateway_ips: Arc<HashSet<IpAddr>>,
++        network_policy: Arc<NetworkPolicy>,
++        platform_policy: Option<Arc<NetworkPolicy>>,
++        shared: Arc<SharedState>,
++        gateway: GatewayIps,
++        mtu: usize,
++    ) -> Option<Arc<Self>> {
++        let configured = if config.nameservers.is_empty() {
++            ConfiguredResolver::WindowsSystem(WindowsSystemResolver::new(config.query_timeout))
++        } else {
++            Self::build_explicit(&config).await?
++        };
+         Some(Arc::new(Self {
+             configured,
+             gateway_ips,
+@@ -659,6 +801,7 @@ impl DnsForwarder {
+             shared,
+             gateway,
+             config,
++            mtu,
+         }))
+     }
+ 
+@@ -737,10 +880,119 @@ impl DnsForwarder {
+             shared,
+             gateway,
+             config,
++            mtu: 1500,
+         })
+     }
+ }
+ 
++#[cfg(not(windows))]
++impl HostRouting {
++    /// Build the upstreams of every resolver in `table`. `None` when none can be built.
++    async fn build(table: HostResolverTable, query_timeout: Duration) -> Option<Self> {
++        let default = if table.default_servers.is_empty() {
++            Vec::new()
++        } else {
++            DnsForwarder::build_direct_upstreams(table.default_servers.clone(), query_timeout)
++                .await
++                .unwrap_or_default()
++        };
++        let mut scoped = Vec::with_capacity(table.scoped.len());
++        for resolver in &table.scoped {
++            scoped.push(
++                DnsForwarder::build_direct_upstreams(resolver.servers.clone(), query_timeout)
++                    .await
++                    .unwrap_or_default(),
++            );
++        }
++        if default.is_empty() && scoped.iter().all(Vec::is_empty) {
++            tracing::error!("no upstream DNS client could be built for the host resolvers");
++            return None;
++        }
++        Some(Self {
++            table,
++            default,
++            scoped,
++        })
++    }
++
++    /// The upstreams that answer `name`: those of the scoped resolver that claims it, else the
++    /// default ones.
++    fn upstreams_for(&self, name: &str) -> &[ConfiguredUpstream] {
++        match self.table.scoped_index_for(name) {
++            Some(index) if !self.scoped[index].is_empty() => &self.scoped[index],
++            _ => &self.default,
++        }
++    }
++}
++
++#[cfg(not(windows))]
++impl HostResolvers {
++    fn current(&self) -> Arc<HostRouting> {
++        self.routing
++            .read()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .clone()
++    }
++
++    fn replace(&self, routing: HostRouting) {
++        *self
++            .routing
++            .write()
++            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(routing);
++    }
++}
++
++/// Re-read the host's resolver table whenever it changes and swap the routing in. A failed or
++/// empty read keeps the routing in use: a query is better served by the last good table than by
++/// none. Ends when the forwarder is gone or the watcher stops.
++#[cfg(not(windows))]
++async fn follow_host_changes(
++    host: std::sync::Weak<HostResolvers>,
++    source: Arc<dyn HostResolverSource>,
++    mut changes: watch::Receiver<u64>,
++) {
++    while changes.changed().await.is_ok() {
++        let Some(host) = host.upgrade() else {
++            return;
++        };
++        let reader = Arc::clone(&source);
++        match tokio::task::spawn_blocking(move || reader.read()).await {
++            Ok(Ok(table)) if !table.is_empty() => {
++                if table != host.current().table {
++                    match HostRouting::build(table, host.query_timeout).await {
++                        Some(routing) => host.replace(routing),
++                        None => tracing::warn!(
++                            "host resolver change could not be applied; keeping the previous resolvers"
++                        ),
++                    }
++                }
++            }
++            Ok(Ok(_)) => tracing::warn!(
++                "host resolver configuration is empty; keeping the previous resolvers"
++            ),
++            Ok(Err(error)) => tracing::warn!(
++                %error,
++                "host resolver configuration unreadable; keeping the previous resolvers"
++            ),
++            Err(error) => tracing::warn!(%error, "host resolver read did not finish"),
++        }
++        host.handled.send_modify(|count| *count += 1);
++    }
++}
++
++/// Largest DNS payload a UDP response may carry: what the guest advertised through EDNS, but no
++/// more than one unfragmented datagram of the guest's MTU can hold. The response leaves as a
++/// single frame, so an answer above the MTU limit never reaches the guest. Truncating it sends
++/// the stub to TCP instead. Without a known destination the larger IPv6 header is assumed.
++fn udp_response_limit(advertised: usize, mtu: usize, destination: Option<IpAddr>) -> usize {
++    const UDP_HEADER: usize = 8;
++    let ip_header = match destination {
++        Some(IpAddr::V4(_)) => 20,
++        Some(IpAddr::V6(_)) | None => 40,
++    };
++    advertised.min(mtu.saturating_sub(ip_header + UDP_HEADER))
++}
++
+ /// Return whether a private/reserved DNS answer was explicitly made reachable.
+ ///
+ /// Rebind protection remains fail-closed unless an address-only TCP or UDP
+@@ -1012,9 +1264,11 @@ fn build_truncated_response(query: &Message) -> Option<Vec<u8>> {
+ 
+ #[cfg(test)]
+ mod tests {
++    use super::super::host_resolvers::{ManualSource, ScopedResolver};
+     use super::*;
+     use crate::policy::{Action, Destination, NetworkProfile, Protocol, Rule};
+     use hickory_net::proto::op::{Edns, MessageType, OpCode, Query};
++    use hickory_net::proto::rr::rdata::TXT;
+     use hickory_net::proto::rr::{DNSClass, Name, RecordType};
+     use std::net::Ipv4Addr;
+     use std::sync::atomic::{AtomicUsize, Ordering};
+@@ -1113,6 +1367,7 @@ mod tests {
+                 ipv6: None,
+             },
+             config,
++            mtu: 1500,
+         })
+     }
+ 
+@@ -1250,6 +1505,301 @@ mod tests {
+         assert_eq!(msg.metadata.id, 0x4242, "guest transaction id is preserved");
+     }
+ 
++    /// Resolve `name` through the gateway path and return the first A answer.
++    async fn resolve_name(forwarder: &DnsForwarder, name: &str) -> Option<Ipv4Addr> {
++        let query = make_query(name, RecordType::A);
++        let raw = query.to_bytes().expect("encode query");
++        let gateway: IpAddr = "10.0.0.1".parse().unwrap();
++        let bytes = forwarder
++            .forward(&raw, Some(gateway), Transport::Udp, None)
++            .await?;
++        let msg = Message::from_bytes(&bytes).expect("parse response");
++        if msg.metadata.response_code != ResponseCode::NoError {
++            return None;
++        }
++        msg.answers.iter().find_map(|r| match &r.data {
++            RData::A(a) => Some(Ipv4Addr::from(*a)),
++            _ => None,
++        })
++    }
++
++    /// A forwarder that follows `source`, built the way the gateway builds one without explicit
++    /// nameservers.
++    async fn forwarder_following(source: Arc<ManualSource>) -> Arc<DnsForwarder> {
++        let config = Arc::new(NormalizedDnsConfig {
++            rebind_protection: false,
++            nameservers: Vec::new(),
++            query_timeout: Duration::from_millis(300),
++        });
++        let gateway_ip: IpAddr = "10.0.0.1".parse().unwrap();
++        DnsForwarder::build_with_source(
++            config,
++            Arc::new(HashSet::from([gateway_ip])),
++            Arc::new(NetworkPolicy::from_profiles([NetworkProfile::Public])),
++            None,
++            Arc::new(SharedState::new(4)),
++            GatewayIps {
++                ipv4: Some("10.0.0.1".parse().unwrap()),
++                ipv6: None,
++            },
++            1500,
++            source,
++        )
++        .await
++        .expect("a forwarder over the host table")
++    }
++
++    fn host_handled(forwarder: &DnsForwarder) -> watch::Receiver<u64> {
++        match &forwarder.configured {
++            ConfiguredResolver::Host(host) => host.handled.subscribe(),
++            _ => panic!("expected the host resolver table"),
++        }
++    }
++
++    fn table(default: SocketAddr, scoped: &[(&str, SocketAddr)]) -> HostResolverTable {
++        HostResolverTable {
++            default_servers: vec![default],
++            scoped: scoped
++                .iter()
++                .map(|(domain, server)| ScopedResolver {
++                    domain: (*domain).to_owned(),
++                    servers: vec![*server],
++                    order: 0,
++                })
++                .collect(),
++        }
++    }
++
++    /// The reported bug: the forwarder used the global resolver for every name, so a VPN's
++    /// supplemental domains were answered by the wrong servers.
++    #[tokio::test]
++    async fn supplemental_domains_route_to_their_own_resolver() {
++        let (public, public_hits) = responding_udp(Ipv4Addr::new(93, 184, 216, 34)).await;
++        let (corp, corp_hits) = responding_udp(Ipv4Addr::new(10, 9, 9, 9)).await;
++        let source = ManualSource::new(table(public, &[("corp.example.com", corp)]));
++        let forwarder = forwarder_following(source).await;
++
++        assert_eq!(
++            resolve_name(&forwarder, "git.corp.example.com.").await,
++            Some(Ipv4Addr::new(10, 9, 9, 9))
++        );
++        assert_eq!(
++            resolve_name(&forwarder, "example.org.").await,
++            Some(Ipv4Addr::new(93, 184, 216, 34))
++        );
++        assert_eq!(corp_hits.load(Ordering::SeqCst), 1);
++        assert_eq!(public_hits.load(Ordering::SeqCst), 1);
++    }
++
++    /// The other reported bug: the servers were read once when the forwarder was built, so a
++    /// running gateway kept answering from the old network after a change.
++    #[tokio::test]
++    async fn a_running_forwarder_follows_resolver_changes() {
++        let (old_default, _) = responding_udp(Ipv4Addr::new(192, 0, 2, 1)).await;
++        let (new_default, _) = responding_udp(Ipv4Addr::new(192, 0, 2, 2)).await;
++        let (vpn, _) = responding_udp(Ipv4Addr::new(10, 8, 8, 8)).await;
++        let source = ManualSource::new(table(old_default, &[]));
++        let forwarder = forwarder_following(source.clone()).await;
++        let mut handled = host_handled(&forwarder);
++
++        assert_eq!(
++            resolve_name(&forwarder, "vpn.corp.test.").await,
++            Some(Ipv4Addr::new(192, 0, 2, 1))
++        );
++
++        // The network changes: a new default resolver and a VPN's supplemental domain.
++        source.change(Ok(table(new_default, &[("corp.test", vpn)])));
++        handled.wait_for(|count| *count >= 1).await.unwrap();
++        assert_eq!(
++            resolve_name(&forwarder, "vpn.corp.test.").await,
++            Some(Ipv4Addr::new(10, 8, 8, 8))
++        );
++        assert_eq!(
++            resolve_name(&forwarder, "example.org.").await,
++            Some(Ipv4Addr::new(192, 0, 2, 2))
++        );
++
++        // The VPN disconnects: its domain returns to the default resolver.
++        source.change(Ok(table(new_default, &[])));
++        handled.wait_for(|count| *count >= 2).await.unwrap();
++        assert_eq!(
++            resolve_name(&forwarder, "vpn.corp.test.").await,
++            Some(Ipv4Addr::new(192, 0, 2, 2))
++        );
++    }
++
++    /// A configuration that cannot be read, or has nothing in it, must not take DNS away.
++    #[tokio::test]
++    async fn an_unreadable_or_empty_change_keeps_the_last_good_resolvers() {
++        let (default, _) = responding_udp(Ipv4Addr::new(192, 0, 2, 1)).await;
++        let source = ManualSource::new(table(default, &[]));
++        let forwarder = forwarder_following(source.clone()).await;
++        let mut handled = host_handled(&forwarder);
++
++        source.change(Err(io::Error::other("configd is restarting")));
++        handled.wait_for(|count| *count >= 1).await.unwrap();
++        source.change(Ok(HostResolverTable::default()));
++        handled.wait_for(|count| *count >= 2).await.unwrap();
++
++        assert_eq!(
++            resolve_name(&forwarder, "example.org.").await,
++            Some(Ipv4Addr::new(192, 0, 2, 1))
++        );
++    }
++
++    /// An upstream that answers every query over UDP and TCP, on one port, with `records` TXT
++    /// records of about 230 bytes each.
++    async fn txt_upstream(records: usize) -> SocketAddr {
++        use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++        fn answer(query: &Message, records: usize) -> Vec<u8> {
++            let mut response = Message::response(query.metadata.id, query.metadata.op_code);
++            response.metadata.response_code = ResponseCode::NoError;
++            response.metadata.recursion_available = true;
++            let question = query.queries[0].clone();
++            response.add_query(question.clone());
++            for index in 0..records {
++                let text = format!("{index:03}{}", "x".repeat(227));
++                response.answers.push(Record::from_rdata(
++                    question.name().clone(),
++                    60,
++                    RData::TXT(TXT::new(vec![text])),
++                ));
++            }
++            response.to_bytes().expect("encode answer")
++        }
++
++        loop {
++            let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++            let addr = tcp.local_addr().unwrap();
++            let Ok(udp) = tokio::net::UdpSocket::bind(addr).await else {
++                continue;
++            };
++            tokio::spawn(async move {
++                let mut buf = [0u8; 4096];
++                loop {
++                    let Ok((len, from)) = udp.recv_from(&mut buf).await else {
++                        continue;
++                    };
++                    if let Ok(query) = Message::from_bytes(&buf[..len]) {
++                        let _ = udp.send_to(&answer(&query, records), from).await;
++                    }
++                }
++            });
++            tokio::spawn(async move {
++                loop {
++                    let Ok((mut stream, _)) = tcp.accept().await else {
++                        continue;
++                    };
++                    tokio::spawn(async move {
++                        loop {
++                            let mut size = [0u8; 2];
++                            if stream.read_exact(&mut size).await.is_err() {
++                                return;
++                            }
++                            let mut body = vec![0u8; usize::from(u16::from_be_bytes(size))];
++                            if stream.read_exact(&mut body).await.is_err() {
++                                return;
++                            }
++                            let Ok(query) = Message::from_bytes(&body) else {
++                                return;
++                            };
++                            let response = answer(&query, records);
++                            let mut framed = (response.len() as u16).to_be_bytes().to_vec();
++                            framed.extend_from_slice(&response);
++                            if stream.write_all(&framed).await.is_err() {
++                                return;
++                            }
++                        }
++                    });
++                }
++            });
++            return addr;
++        }
++    }
++
++    fn edns_txt_query(payload: u16) -> Vec<u8> {
++        let mut query = make_query("big.example.com.", RecordType::TXT);
++        let mut edns = Edns::new();
++        edns.set_max_payload(payload);
++        query.edns = Some(edns);
++        query.to_bytes().expect("encode query")
++    }
++
++    /// The reported bug: with EDNS 4096 a ~2 KiB answer went out as one UDP frame above the
++    /// MTU, which the gateway dropped, so the guest saw neither an answer nor TC=1.
++    #[tokio::test]
++    async fn an_answer_above_the_guest_mtu_is_truncated_and_then_served_over_tcp() {
++        let upstream = txt_upstream(9).await;
++        let forwarder = forwarder_over(&[upstream]).await;
++        let raw = edns_txt_query(4096);
++        let gateway: IpAddr = "10.0.0.1".parse().unwrap();
++
++        let udp = forwarder
++            .forward(&raw, Some(gateway), Transport::Udp, None)
++            .await
++            .expect("a UDP response");
++        let truncated = Message::from_bytes(&udp).unwrap();
++        assert!(
++            truncated.metadata.truncation,
++            "TC must tell the guest to retry over TCP"
++        );
++        assert!(truncated.answers.is_empty());
++        assert!(
++            udp.len() <= 1500 - 20 - 8,
++            "the response fits one unfragmented datagram"
++        );
++
++        let tcp = forwarder
++            .forward(&raw, Some(gateway), Transport::Tcp, None)
++            .await
++            .expect("a TCP response");
++        let whole = Message::from_bytes(&tcp).unwrap();
++        assert!(!whole.metadata.truncation);
++        assert_eq!(whole.answers.len(), 9);
++        assert!(tcp.len() > 2000);
++    }
++
++    #[tokio::test]
++    async fn a_smaller_guest_mtu_lowers_the_udp_limit_below_the_advertised_buffer() {
++        let upstream = txt_upstream(3).await;
++        let mut forwarder = forwarder_over(&[upstream]).await;
++        let raw = edns_txt_query(4096);
++        let gateway: IpAddr = "10.0.0.1".parse().unwrap();
++
++        // About 750 bytes: one datagram at the default MTU...
++        let udp = forwarder
++            .forward(&raw, Some(gateway), Transport::Udp, None)
++            .await
++            .unwrap();
++        let message = Message::from_bytes(&udp).unwrap();
++        assert!(!message.metadata.truncation);
++        assert_eq!(message.answers.len(), 3);
++
++        // ...but not at an MTU of 576, whatever the guest advertised.
++        Arc::get_mut(&mut forwarder)
++            .expect("unique test forwarder")
++            .mtu = 576;
++        let udp = forwarder
++            .forward(&raw, Some(gateway), Transport::Udp, None)
++            .await
++            .unwrap();
++        assert!(Message::from_bytes(&udp).unwrap().metadata.truncation);
++    }
++
++    #[test]
++    fn the_udp_limit_is_the_smaller_of_the_advertised_buffer_and_the_datagram_the_mtu_holds() {
++        let v4 = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
++        let v6 = Some(IpAddr::V6("fd42::1".parse().unwrap()));
++        assert_eq!(udp_response_limit(4096, 1500, v4), 1472);
++        assert_eq!(udp_response_limit(4096, 1500, v6), 1452);
++        assert_eq!(udp_response_limit(4096, 1500, None), 1452);
++        assert_eq!(udp_response_limit(1232, 1500, v4), 1232);
++        assert_eq!(udp_response_limit(512, 1500, v4), 512);
++        assert_eq!(udp_response_limit(4096, 576, v4), 548);
++        assert_eq!(udp_response_limit(4096, 20, v4), 0);
++    }
++
+     fn make_response(query: &Message) -> Message {
+         let mut response = Message::response(query.metadata.id, query.metadata.op_code);
+         response.metadata.response_code = ResponseCode::NoError;
+diff --git a/crates/network/lib/engine/dns/host_resolvers.rs b/crates/network/lib/engine/dns/host_resolvers.rs
+new file mode 100644
+index 0000000..cc7b91e
+--- /dev/null
++++ b/crates/network/lib/engine/dns/host_resolvers.rs
+@@ -0,0 +1,357 @@
++//! Host resolver routing: the host's resolver configuration with its split-DNS entries, a
++//! source that reads it, and the change notifications that keep a running forwarder current.
++//!
++//! The default resolver answers every name that no scoped resolver claims. A scoped resolver
++//! (a VPN's supplemental match domains, or a file in `/etc/resolver`) claims its domain and every
++//! name below it, as the system resolver does, so an internal name never leaks to the default
++//! servers and a public name never goes to a VPN's private ones.
++
++use std::any::Any;
++use std::io;
++use std::net::{IpAddr, SocketAddr};
++
++use tokio::sync::watch;
++
++//--------------------------------------------------------------------------------------------------
++// Constants
++//--------------------------------------------------------------------------------------------------
++
++/// DNS port, used when a resolver entry names none.
++pub(crate) const DNS_PORT: u16 = 53;
++
++//--------------------------------------------------------------------------------------------------
++// Types
++//--------------------------------------------------------------------------------------------------
++
++/// A snapshot of the host's resolver configuration.
++#[derive(Clone, Debug, Default, PartialEq, Eq)]
++pub(crate) struct HostResolverTable {
++    /// Nameservers for every name no scoped resolver claims, in the order to try them.
++    pub(crate) default_servers: Vec<SocketAddr>,
++    /// Resolvers that claim a domain.
++    pub(crate) scoped: Vec<ScopedResolver>,
++}
++
++/// A resolver that answers one domain and the names below it.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct ScopedResolver {
++    /// Lowercase, without leading or trailing dots, never empty.
++    pub(crate) domain: String,
++    pub(crate) servers: Vec<SocketAddr>,
++    /// Among resolvers of the same domain, the lower order answers first.
++    pub(crate) order: u32,
++}
++
++/// Where the host's resolver configuration comes from.
++pub(crate) trait HostResolverSource: Send + Sync + 'static {
++    /// Read the configuration now. Blocking: callers run it off the async runtime.
++    fn read(&self) -> io::Result<HostResolverTable>;
++
++    /// Start watching for configuration changes. `None` when the platform cannot say.
++    fn watch(&self) -> Option<HostResolverWatch> {
++        None
++    }
++}
++
++/// A stream of change notifications. Dropping it stops the underlying watcher.
++pub(crate) struct HostResolverWatch {
++    /// Counts notifications; a receiver wakes when the count moves.
++    pub(crate) changes: watch::Receiver<u64>,
++    /// Keeps the platform watcher alive.
++    pub(crate) _guard: Box<dyn Any + Send + Sync>,
++}
++
++/// The host's own configuration source for this platform.
++pub(crate) struct SystemResolverSource;
++
++//--------------------------------------------------------------------------------------------------
++// Methods
++//--------------------------------------------------------------------------------------------------
++
++impl HostResolverTable {
++    pub(crate) fn is_empty(&self) -> bool {
++        self.default_servers.is_empty() && self.scoped.is_empty()
++    }
++
++    /// The index of the scoped resolver that answers `name`: the longest matching domain, then
++    /// the lowest order, then the first listed. `None` means the default resolver answers.
++    pub(crate) fn scoped_index_for(&self, name: &str) -> Option<usize> {
++        let name = normalize_domain(name)?;
++        self.scoped
++            .iter()
++            .enumerate()
++            .filter(|(_, resolver)| {
++                !resolver.servers.is_empty() && domain_contains(&resolver.domain, &name)
++            })
++            .min_by_key(|(index, resolver)| {
++                (
++                    std::cmp::Reverse(resolver.domain.len()),
++                    resolver.order,
++                    *index,
++                )
++            })
++            .map(|(index, _)| index)
++    }
++
++    /// The nameservers that answer `name`.
++    #[cfg(test)]
++    pub(crate) fn servers_for(&self, name: &str) -> &[SocketAddr] {
++        match self.scoped_index_for(name) {
++            Some(index) => &self.scoped[index].servers,
++            None => &self.default_servers,
++        }
++    }
++}
++
++impl HostResolverSource for SystemResolverSource {
++    fn read(&self) -> io::Result<HostResolverTable> {
++        #[cfg(target_os = "macos")]
++        {
++            let mut table = super::nameserver::scdynamicstore::read_resolver_table()
++                .unwrap_or_else(|error| {
++                    tracing::debug!(%error, "SCDynamicStore resolver table unavailable");
++                    HostResolverTable::default()
++                });
++            if table.default_servers.is_empty() {
++                table.default_servers =
++                    super::nameserver::read_resolv_conf_blocking().unwrap_or_default();
++            }
++            if table.is_empty() {
++                return Err(io::Error::new(
++                    io::ErrorKind::NotFound,
++                    "the host has no resolver configuration",
++                ));
++            }
++            Ok(table)
++        }
++        #[cfg(not(target_os = "macos"))]
++        {
++            Ok(HostResolverTable {
++                default_servers: super::nameserver::read_resolv_conf_blocking()?,
++                scoped: Vec::new(),
++            })
++        }
++    }
++
++    fn watch(&self) -> Option<HostResolverWatch> {
++        #[cfg(target_os = "macos")]
++        {
++            let (sender, changes) = watch::channel(0u64);
++            match super::nameserver::scdynamicstore::watch_changes(sender) {
++                Ok(watcher) => Some(HostResolverWatch {
++                    changes,
++                    _guard: Box::new(watcher),
++                }),
++                Err(error) => {
++                    tracing::warn!(%error, "host resolver changes will not be followed");
++                    None
++                }
++            }
++        }
++        #[cfg(not(target_os = "macos"))]
++        {
++            None
++        }
++    }
++}
++
++//--------------------------------------------------------------------------------------------------
++// Functions
++//--------------------------------------------------------------------------------------------------
++
++/// Lowercase `name` without leading or trailing dots; `None` for the empty name.
++pub(crate) fn normalize_domain(name: &str) -> Option<String> {
++    let name = name.trim_matches('.').to_ascii_lowercase();
++    (!name.is_empty()).then_some(name)
++}
++
++/// Whether `name` is `domain` or a name below it.
++fn domain_contains(domain: &str, name: &str) -> bool {
++    name == domain
++        || name
++            .strip_suffix(domain)
++            .is_some_and(|rest| rest.ends_with('.'))
++}
++
++/// A scoped resolver from the text of a `/etc/resolver/<domain>` file. The file's name is the
++/// domain unless the file has a `domain` line. `None` when the file names no usable nameserver
++/// or domain.
++pub(crate) fn parse_resolver_file(file_name: &str, text: &str) -> Option<ScopedResolver> {
++    let mut domain = file_name.to_owned();
++    let mut port = DNS_PORT;
++    let mut order = 0u32;
++    let mut addresses = Vec::new();
++    for line in text.lines() {
++        let line = line.split('#').next().unwrap_or("").trim();
++        let mut words = line.split_whitespace();
++        let (Some(key), Some(value)) = (words.next(), words.next()) else {
++            continue;
++        };
++        match key {
++            "nameserver" => {
++                if let Ok(address) = value.parse::<IpAddr>() {
++                    addresses.push(address);
++                }
++            }
++            "port" => {
++                if let Ok(value) = value.parse() {
++                    port = value;
++                }
++            }
++            "domain" => domain = value.to_owned(),
++            "search_order" | "order" => {
++                if let Ok(value) = value.parse() {
++                    order = value;
++                }
++            }
++            _ => {}
++        }
++    }
++    let domain = normalize_domain(&domain)?;
++    if addresses.is_empty() {
++        return None;
++    }
++    Some(ScopedResolver {
++        domain,
++        servers: addresses
++            .into_iter()
++            .map(|address| SocketAddr::new(address, port))
++            .collect(),
++        order,
++    })
++}
++
++//--------------------------------------------------------------------------------------------------
++// Tests
++//--------------------------------------------------------------------------------------------------
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn addr(value: &str) -> SocketAddr {
++        value.parse().unwrap()
++    }
++
++    fn scoped(domain: &str, server: &str, order: u32) -> ScopedResolver {
++        ScopedResolver {
++            domain: domain.into(),
++            servers: vec![addr(server)],
++            order,
++        }
++    }
++
++    fn table() -> HostResolverTable {
++        HostResolverTable {
++            default_servers: vec![addr("8.8.8.8:53")],
++            scoped: vec![
++                scoped("corp.example.com", "10.0.0.53:53", 0),
++                scoped("example.com", "10.1.0.53:53", 0),
++                scoped("lab.example.com", "10.2.0.53:53", 5),
++                scoped("lab.example.com", "10.3.0.53:53", 1),
++            ],
++        }
++    }
++
++    #[test]
++    fn a_name_goes_to_the_resolver_with_the_longest_matching_domain() {
++        let table = table();
++        assert_eq!(
++            table.servers_for("host.corp.example.com."),
++            [addr("10.0.0.53:53")]
++        );
++        assert_eq!(
++            table.servers_for("corp.example.com"),
++            [addr("10.0.0.53:53")]
++        );
++        assert_eq!(table.servers_for("www.EXAMPLE.com"), [addr("10.1.0.53:53")]);
++        assert_eq!(table.servers_for("example.com"), [addr("10.1.0.53:53")]);
++    }
++
++    #[test]
++    fn names_outside_every_scoped_domain_use_the_default_resolver() {
++        let table = table();
++        for name in ["example.org", "notexample.com", "com", "", "."] {
++            assert_eq!(table.servers_for(name), [addr("8.8.8.8:53")], "{name:?}");
++        }
++    }
++
++    #[test]
++    fn equal_domains_prefer_the_lowest_order() {
++        assert_eq!(
++            table().servers_for("a.lab.example.com"),
++            [addr("10.3.0.53:53")]
++        );
++    }
++
++    #[test]
++    fn a_scoped_resolver_without_servers_claims_nothing() {
++        let mut table = table();
++        table.scoped[0].servers.clear();
++        assert_eq!(
++            table.servers_for("host.corp.example.com"),
++            [addr("10.1.0.53:53")]
++        );
++    }
++
++    #[test]
++    fn resolver_files_name_a_domain_servers_port_and_order() {
++        let resolver = parse_resolver_file(
++            "Corp.Example.com",
++            "# split dns\nnameserver 10.0.0.53\nnameserver fd00::53 # v6\nport 5353\nsearch_order 3\n",
++        )
++        .unwrap();
++        assert_eq!(resolver.domain, "corp.example.com");
++        assert_eq!(
++            resolver.servers,
++            [addr("10.0.0.53:5353"), addr("[fd00::53]:5353")]
++        );
++        assert_eq!(resolver.order, 3);
++
++        let overridden = parse_resolver_file("ignored", "domain lab.test\nnameserver 192.0.2.1\n");
++        assert_eq!(overridden.unwrap().domain, "lab.test");
++        assert!(parse_resolver_file("corp.test", "port 53\n").is_none());
++        assert!(parse_resolver_file("corp.test", "nameserver not-an-ip\n").is_none());
++        assert!(parse_resolver_file("", "nameserver 192.0.2.1\n").is_none());
++    }
++}
++
++/// A change source for tests and embedders: the counter moves when `notify` is called.
++#[cfg(test)]
++pub(crate) struct ManualSource {
++    table: std::sync::Mutex<io::Result<HostResolverTable>>,
++    sender: watch::Sender<u64>,
++}
++
++#[cfg(test)]
++impl ManualSource {
++    pub(crate) fn new(table: HostResolverTable) -> std::sync::Arc<Self> {
++        std::sync::Arc::new(Self {
++            table: std::sync::Mutex::new(Ok(table)),
++            sender: watch::channel(0).0,
++        })
++    }
++
++    /// Replace the configuration and announce the change.
++    pub(crate) fn change(&self, table: io::Result<HostResolverTable>) {
++        *self.table.lock().unwrap() = table;
++        self.sender.send_modify(|count| *count += 1);
++    }
++}
++
++#[cfg(test)]
++impl HostResolverSource for ManualSource {
++    fn read(&self) -> io::Result<HostResolverTable> {
++        match &*self.table.lock().unwrap() {
++            Ok(table) => Ok(table.clone()),
++            Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
++        }
++    }
++
++    fn watch(&self) -> Option<HostResolverWatch> {
++        Some(HostResolverWatch {
++            changes: self.sender.subscribe(),
++            _guard: Box::new(()),
++        })
++    }
++}
+diff --git a/crates/network/lib/engine/dns/interceptor.rs b/crates/network/lib/engine/dns/interceptor.rs
+index 7ca6702..607b8d6 100644
+--- a/crates/network/lib/engine/dns/interceptor.rs
++++ b/crates/network/lib/engine/dns/interceptor.rs
+@@ -100,6 +100,7 @@ impl DnsInterceptor {
+         gateway: GatewayIps,
+         gateway_mac: [u8; 6],
+         guest_mac: [u8; 6],
++        mtu: usize,
+     ) -> (Self, DnsForwarderHandle) {
+         // Create and bind the smoltcp UDP socket.
+         let rx_meta = vec![PacketMetadata::EMPTY; DNS_SOCKET_PACKET_SLOTS];
+@@ -135,6 +136,7 @@ impl DnsInterceptor {
+             platform_policy,
+             shared.clone(),
+             gateway,
++            mtu,
+         );
+         let proxy = UdpProxy::new(
+             query_rx,
+diff --git a/crates/network/lib/engine/dns/mod.rs b/crates/network/lib/engine/dns/mod.rs
+index 62ed30b..d36bd62 100644
+--- a/crates/network/lib/engine/dns/mod.rs
++++ b/crates/network/lib/engine/dns/mod.rs
+@@ -7,6 +7,7 @@
+ pub(crate) mod client;
+ pub(crate) mod common;
+ pub(crate) mod forwarder;
++pub(crate) mod host_resolvers;
+ pub mod interceptor;
+ pub(crate) mod nameserver;
+ pub(crate) mod proxies;
+diff --git a/crates/network/lib/engine/dns/nameserver.rs b/crates/network/lib/engine/dns/nameserver.rs
+index 629c3d4..fa00b11 100644
+--- a/crates/network/lib/engine/dns/nameserver.rs
++++ b/crates/network/lib/engine/dns/nameserver.rs
+@@ -12,7 +12,7 @@ use resolv_conf::Config as ResolvConfig;
+ use crate::dns::Nameserver;
+ 
+ #[cfg(target_os = "macos")]
+-mod scdynamicstore;
++pub(super) mod scdynamicstore;
+ 
+ //--------------------------------------------------------------------------------------------------
+ // Constants
+@@ -23,7 +23,7 @@ mod scdynamicstore;
+ const DNS_PORT: u16 = 53;
+ 
+ /// Path to the host resolver configuration. Used as a fallback when explicit
+-/// nameservers are not configured and the macOS dynamic store is unavailable.
++/// nameservers are not configured and the host has no better source.
+ #[cfg(not(windows))]
+ const RESOLV_CONF_PATH: &str = "/etc/resolv.conf";
+ 
+@@ -76,36 +76,16 @@ pub(crate) async fn resolve_nameservers(
+     Ok(addresses)
+ }
+ 
+-/// Read the host's configured DNS servers.
++/// Read the nameservers in `/etc/resolv.conf`, the fallback where the host has no better source.
++/// Blocking: callers run it off the async runtime.
+ #[cfg(not(windows))]
+-pub(crate) async fn read_host_dns_servers() -> std::io::Result<Vec<SocketAddr>> {
+-    #[cfg(target_os = "macos")]
+-    if let Some(servers) = try_read_scdynamicstore() {
+-        return Ok(servers);
+-    }
+-    read_resolv_conf(Path::new(RESOLV_CONF_PATH)).await
+-}
+-
+-#[cfg(target_os = "macos")]
+-fn try_read_scdynamicstore() -> Option<Vec<SocketAddr>> {
+-    match scdynamicstore::read_dns_servers() {
+-        Ok(servers) if !servers.is_empty() => Some(servers),
+-        Ok(_) => {
+-            tracing::debug!(
+-                "SCDynamicStore returned no nameservers; falling back to /etc/resolv.conf"
+-            );
+-            None
+-        }
+-        Err(error) => {
+-            tracing::debug!(%error, "SCDynamicStore lookup failed; falling back to /etc/resolv.conf");
+-            None
+-        }
+-    }
++pub(super) fn read_resolv_conf_blocking() -> std::io::Result<Vec<SocketAddr>> {
++    read_resolv_conf(Path::new(RESOLV_CONF_PATH))
+ }
+ 
+ #[cfg(not(windows))]
+-async fn read_resolv_conf(path: &Path) -> std::io::Result<Vec<SocketAddr>> {
+-    let bytes = tokio::fs::read(path).await?;
++fn read_resolv_conf(path: &Path) -> std::io::Result<Vec<SocketAddr>> {
++    let bytes = std::fs::read(path)?;
+     let config = ResolvConfig::parse(&bytes)
+         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))?;
+     Ok(config
+@@ -123,8 +103,8 @@ async fn read_resolv_conf(path: &Path) -> std::io::Result<Vec<SocketAddr>> {
+ mod tests {
+     use super::*;
+ 
+-    #[tokio::test]
+-    async fn read_resolv_conf_parses_nameservers() {
++    #[test]
++    fn read_resolv_conf_parses_nameservers() {
+         let path = std::env::temp_dir().join(format!("msb-resolv-{}.conf", std::process::id()));
+         std::fs::write(
+             &path,
+@@ -138,7 +118,7 @@ mod tests {
+         )
+         .unwrap();
+ 
+-        let servers = read_resolv_conf(&path).await.expect("read ok");
++        let servers = read_resolv_conf(&path).expect("read ok");
+         std::fs::remove_file(&path).ok();
+ 
+         assert_eq!(servers.len(), 3);
+@@ -147,12 +127,8 @@ mod tests {
+         assert_eq!(servers[2], "[2606:4700:4700::1111]:53".parse().unwrap());
+     }
+ 
+-    #[tokio::test]
+-    async fn read_resolv_conf_missing_file_errs() {
+-        assert!(
+-            read_resolv_conf(Path::new("/nonexistent/path/to/resolv.conf"))
+-                .await
+-                .is_err()
+-        );
++    #[test]
++    fn read_resolv_conf_missing_file_errs() {
++        assert!(read_resolv_conf(Path::new("/nonexistent/path/to/resolv.conf")).is_err());
+     }
+ }
+diff --git a/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs b/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
+index c59c702..6d36874 100644
+--- a/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
++++ b/crates/network/lib/engine/dns/nameserver/scdynamicstore.rs
+@@ -12,22 +12,47 @@
+ //! to use). That's the fix for the most common macOS failure mode: "I
+ //! connected to a VPN and DNS stopped working inside the sandbox."
+ //!
+-//! What this intentionally does *not* handle: per-domain split-DNS
+-//! routing (e.g. `*.corp.example.com → 10.0.0.53`, everything else →
+-//! `8.8.8.8`). That routing lives in the per-service `Setup:/Network/
+-//! Service/<uuid>/DNS` / `State:/Network/Service/<uuid>/DNS` keys and
+-//! requires a match engine to implement. Tracked as future work.
++//! Per-domain split-DNS routing (e.g. `*.corp.example.com → 10.0.0.53`,
++//! everything else → `8.8.8.8`) lives in the per-service
++//! `State:/Network/Service/<uuid>/DNS` keys (`SupplementalMatchDomains`)
++//! and in `/etc/resolver/*`. [`read_resolver_table`] reads both into a
++//! [`HostResolverTable`], and [`watch_changes`] reports when any of it
++//! changes so a running forwarder can follow the network.
+ 
+ use std::io::{self, Error, ErrorKind};
+ use std::net::{IpAddr, SocketAddr};
++use std::sync::{
++    Arc,
++    atomic::{AtomicBool, Ordering},
++};
++use std::time::Duration;
+ 
+ use core_foundation::array::CFArray;
+ use core_foundation::base::{CFType, TCFType, ToVoid};
+ use core_foundation::dictionary::CFDictionary;
++use core_foundation::number::CFNumber;
+ use core_foundation::propertylist::CFPropertyList;
++use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes, kCFRunLoopDefaultMode};
+ use core_foundation::string::CFString;
+-use system_configuration::dynamic_store::SCDynamicStoreBuilder;
+-use system_configuration::sys::schema_definitions::kSCPropNetDNSServerAddresses;
++use system_configuration::dynamic_store::{
++    SCDynamicStore, SCDynamicStoreBuilder, SCDynamicStoreCallBackContext,
++};
++use system_configuration::sys::schema_definitions::{
++    kSCPropNetDNSServerAddresses, kSCPropNetDNSServerPort, kSCPropNetDNSSupplementalMatchDomains,
++    kSCPropNetDNSSupplementalMatchOrders,
++};
++use tokio::sync::watch;
++
++use crate::engine::dns::host_resolvers::{
++    DNS_PORT as RESOLVER_DNS_PORT, HostResolverTable, ScopedResolver, normalize_domain,
++    parse_resolver_file,
++};
++
++/// Directory of per-domain resolver files, which `scutil --dns` lists beside the store's.
++const RESOLVER_DIRECTORY: &str = "/etc/resolver";
++
++/// How long the watcher thread runs between checks of its stop flag.
++const WATCHER_POLL: Duration = Duration::from_secs(5);
+ 
+ /// Read the primary DNS servers from the macOS dynamic store.
+ ///
+@@ -88,3 +113,319 @@ pub fn read_dns_servers() -> io::Result<Vec<SocketAddr>> {
+ 
+     Ok(out)
+ }
++
++/// Read the host's resolver table: the primary resolver, every service's supplemental match
++/// domains, and the files in `/etc/resolver`.
++pub fn read_resolver_table() -> io::Result<HostResolverTable> {
++    let store = SCDynamicStoreBuilder::new("microsandbox-network")
++        .build()
++        .ok_or_else(|| Error::other("SCDynamicStoreBuilder::build failed"))?;
++
++    let default_servers = match read_dns_servers() {
++        Ok(servers) => servers,
++        Err(error) if error.kind() == ErrorKind::NotFound => Vec::new(),
++        Err(error) => return Err(error),
++    };
++
++    let mut scoped = Vec::new();
++    if let Some(keys) = store.get_keys("State:/Network/Service/[^/]+/DNS") {
++        for key in keys.iter() {
++            let Some(dict) = store
++                .get(key.clone())
++                .and_then(CFPropertyList::downcast_into::<CFDictionary>)
++            else {
++                continue;
++            };
++            scoped.extend(service_resolvers(&dict));
++        }
++    }
++    scoped.extend(resolver_files(std::path::Path::new(RESOLVER_DIRECTORY)));
++    Ok(HostResolverTable {
++        default_servers,
++        scoped,
++    })
++}
++
++/// The scoped resolvers one service's DNS dictionary defines (none without match domains).
++fn service_resolvers(dict: &CFDictionary) -> Vec<ScopedResolver> {
++    let domains = string_array(
++        dict,
++        unsafe { kSCPropNetDNSSupplementalMatchDomains }.to_void(),
++    );
++    if domains.is_empty() {
++        return Vec::new();
++    }
++    let port = dict
++        .find(unsafe { kSCPropNetDNSServerPort }.to_void())
++        .map(|ptr| unsafe { CFType::wrap_under_get_rule(*ptr) })
++        .and_then(CFType::downcast_into::<CFNumber>)
++        .and_then(|number| number.to_i32())
++        .and_then(|port| u16::try_from(port).ok())
++        .unwrap_or(RESOLVER_DNS_PORT);
++    let servers: Vec<SocketAddr> =
++        string_array(dict, unsafe { kSCPropNetDNSServerAddresses }.to_void())
++            .iter()
++            .filter_map(|address| address.parse::<IpAddr>().ok())
++            .map(|address| SocketAddr::new(address, port))
++            .collect();
++    let orders = number_array(
++        dict,
++        unsafe { kSCPropNetDNSSupplementalMatchOrders }.to_void(),
++    );
++    domains
++        .iter()
++        .enumerate()
++        .filter_map(|(index, domain)| {
++            Some(ScopedResolver {
++                domain: normalize_domain(domain)?,
++                servers: servers.clone(),
++                order: orders.get(index).copied().unwrap_or(0),
++            })
++        })
++        .filter(|resolver| !resolver.servers.is_empty())
++        .collect()
++}
++
++fn string_array(dict: &CFDictionary, key: *const std::ffi::c_void) -> Vec<String> {
++    let Some(array) = dict
++        .find(key)
++        .map(|ptr| unsafe { CFType::wrap_under_get_rule(*ptr) })
++        .and_then(CFType::downcast_into::<CFArray>)
++    else {
++        return Vec::new();
++    };
++    array
++        .iter()
++        .filter_map(|ptr| {
++            unsafe { CFType::wrap_under_get_rule(*ptr) }
++                .downcast_into::<CFString>()
++                .map(|value| value.to_string())
++        })
++        .collect()
++}
++
++fn number_array(dict: &CFDictionary, key: *const std::ffi::c_void) -> Vec<u32> {
++    let Some(array) = dict
++        .find(key)
++        .map(|ptr| unsafe { CFType::wrap_under_get_rule(*ptr) })
++        .and_then(CFType::downcast_into::<CFArray>)
++    else {
++        return Vec::new();
++    };
++    array
++        .iter()
++        .map(|ptr| {
++            unsafe { CFType::wrap_under_get_rule(*ptr) }
++                .downcast_into::<CFNumber>()
++                .and_then(|number| number.to_i64())
++                .and_then(|number| u32::try_from(number).ok())
++                .unwrap_or(0)
++        })
++        .collect()
++}
++
++/// Every usable resolver file in `directory`, in file-name order.
++fn resolver_files(directory: &std::path::Path) -> Vec<ScopedResolver> {
++    let Ok(entries) = std::fs::read_dir(directory) else {
++        return Vec::new();
++    };
++    let mut names: Vec<_> = entries
++        .flatten()
++        .filter_map(|entry| entry.file_name().into_string().ok())
++        .collect();
++    names.sort();
++    names
++        .into_iter()
++        .filter_map(|name| {
++            let text = std::fs::read_to_string(directory.join(&name)).ok()?;
++            parse_resolver_file(&name, &text)
++        })
++        .collect()
++}
++
++/// Reports changes to the host's resolver configuration. Dropping it stops the watcher.
++pub struct ChangeWatcher {
++    run_loop: CFRunLoop,
++    stop: Arc<AtomicBool>,
++}
++
++impl Drop for ChangeWatcher {
++    fn drop(&mut self) {
++        self.stop.store(true, Ordering::SeqCst);
++        self.run_loop.stop();
++    }
++}
++
++/// Watch the dynamic store for DNS changes and count each notification on `sender`.
++///
++/// The store's callbacks run on a dedicated thread that owns a run loop; the thread ends within
++/// [`WATCHER_POLL`] of the watcher being dropped, immediately when its run loop is already
++/// running.
++pub fn watch_changes(sender: watch::Sender<u64>) -> io::Result<ChangeWatcher> {
++    let stop = Arc::new(AtomicBool::new(false));
++    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<CFRunLoop, String>>(1);
++    let thread_stop = Arc::clone(&stop);
++    std::thread::Builder::new()
++        .name("msb-dns-watch".into())
++        .spawn(move || {
++            let context = SCDynamicStoreCallBackContext {
++                callout: notify_change,
++                info: sender,
++            };
++            let Some(store) = SCDynamicStoreBuilder::new("microsandbox-network-watch")
++                .callback_context(context)
++                .build()
++            else {
++                let _ = ready_tx.send(Err("SCDynamicStore session failed".into()));
++                return;
++            };
++            let keys: CFArray<CFString> = CFArray::from_CFTypes(&[
++                CFString::from("State:/Network/Global/DNS"),
++                CFString::from("State:/Network/Global/IPv4"),
++            ]);
++            let patterns: CFArray<CFString> =
++                CFArray::from_CFTypes(&[CFString::from("State:/Network/Service/[^/]+/DNS")]);
++            if !store.set_notification_keys(&keys, &patterns) {
++                let _ = ready_tx.send(Err("SCDynamicStore notification keys failed".into()));
++                return;
++            }
++            let Some(source) = store.create_run_loop_source() else {
++                let _ = ready_tx.send(Err("SCDynamicStore run loop source failed".into()));
++                return;
++            };
++            let run_loop = CFRunLoop::get_current();
++            run_loop.add_source(&source, unsafe { kCFRunLoopCommonModes });
++            if ready_tx.send(Ok(run_loop)).is_err() {
++                return;
++            }
++            while !thread_stop.load(Ordering::SeqCst) {
++                CFRunLoop::run_in_mode(unsafe { kCFRunLoopDefaultMode }, WATCHER_POLL, false);
++            }
++        })
++        .map_err(|error| Error::other(error.to_string()))?;
++    match ready_rx.recv() {
++        Ok(Ok(run_loop)) => Ok(ChangeWatcher { run_loop, stop }),
++        Ok(Err(message)) => Err(Error::other(message)),
++        Err(_) => Err(Error::other(
++            "the DNS watcher thread ended before it started",
++        )),
++    }
++}
++
++fn notify_change(
++    _store: SCDynamicStore,
++    _changed_keys: CFArray<CFString>,
++    sender: &mut watch::Sender<u64>,
++) {
++    sender.send_modify(|count| *count = count.wrapping_add(1));
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use core_foundation::base::CFTypeRef;
++
++    fn string_list(values: &[&str]) -> CFArray<CFString> {
++        CFArray::from_CFTypes(
++            &values
++                .iter()
++                .map(|value| CFString::new(value))
++                .collect::<Vec<_>>(),
++        )
++    }
++
++    #[test]
++    fn a_service_dictionary_yields_one_scoped_resolver_per_match_domain() {
++        let domains = string_list(&["Corp.Example.com", "lab.test", ""]);
++        let servers = string_list(&["10.0.0.53", "not-an-address", "fd00::53"]);
++        let orders: CFArray<CFNumber> =
++            CFArray::from_CFTypes(&[CFNumber::from(7i32), CFNumber::from(2i32)]);
++        let dictionary = CFDictionary::from_CFType_pairs(&[
++            (
++                unsafe { CFString::wrap_under_get_rule(kSCPropNetDNSSupplementalMatchDomains) },
++                domains.as_CFType(),
++            ),
++            (
++                unsafe { CFString::wrap_under_get_rule(kSCPropNetDNSServerAddresses) },
++                servers.as_CFType(),
++            ),
++            (
++                unsafe { CFString::wrap_under_get_rule(kSCPropNetDNSSupplementalMatchOrders) },
++                orders.as_CFType(),
++            ),
++            (
++                unsafe { CFString::wrap_under_get_rule(kSCPropNetDNSServerPort) },
++                CFNumber::from(5353i32).as_CFType(),
++            ),
++        ]);
++        let dictionary = unsafe {
++            CFDictionary::wrap_under_get_rule(dictionary.as_concrete_TypeRef() as CFTypeRef as _)
++        };
++
++        let resolvers = service_resolvers(&dictionary);
++
++        assert_eq!(resolvers.len(), 2, "the empty match domain claims nothing");
++        assert_eq!(resolvers[0].domain, "corp.example.com");
++        assert_eq!(resolvers[0].order, 7);
++        assert_eq!(resolvers[1].domain, "lab.test");
++        assert_eq!(resolvers[1].order, 2);
++        let expected: Vec<SocketAddr> = vec![
++            "10.0.0.53:5353".parse().unwrap(),
++            "[fd00::53]:5353".parse().unwrap(),
++        ];
++        assert!(
++            resolvers
++                .iter()
++                .all(|resolver| resolver.servers == expected)
++        );
++    }
++
++    #[test]
++    fn a_service_without_match_domains_is_not_a_scoped_resolver() {
++        let servers = string_list(&["10.0.0.53"]);
++        let dictionary = CFDictionary::from_CFType_pairs(&[(
++            unsafe { CFString::wrap_under_get_rule(kSCPropNetDNSServerAddresses) },
++            servers.as_CFType(),
++        )]);
++        let dictionary = unsafe {
++            CFDictionary::wrap_under_get_rule(dictionary.as_concrete_TypeRef() as CFTypeRef as _)
++        };
++        assert!(service_resolvers(&dictionary).is_empty());
++    }
++
++    #[test]
++    fn resolver_files_are_read_in_name_order_and_unusable_ones_are_skipped() {
++        let directory = std::env::temp_dir().join(format!("msb-resolver-{}", std::process::id()));
++        std::fs::create_dir_all(&directory).unwrap();
++        std::fs::write(directory.join("lab.test"), "nameserver 192.0.2.2\n").unwrap();
++        std::fs::write(
++            directory.join("corp.test"),
++            "nameserver 192.0.2.1\nport 5300\n",
++        )
++        .unwrap();
++        std::fs::write(directory.join("empty.test"), "# no servers\n").unwrap();
++
++        let resolvers = resolver_files(&directory);
++        std::fs::remove_dir_all(&directory).ok();
++
++        let domains: Vec<_> = resolvers
++            .iter()
++            .map(|resolver| resolver.domain.as_str())
++            .collect();
++        assert_eq!(domains, ["corp.test", "lab.test"]);
++        assert_eq!(
++            resolvers[0].servers,
++            ["192.0.2.1:5300".parse::<SocketAddr>().unwrap()]
++        );
++        assert!(resolver_files(std::path::Path::new("/nonexistent/resolver")).is_empty());
++    }
++
++    #[test]
++    fn the_host_table_can_be_read_and_the_watcher_started_and_stopped() {
++        read_resolver_table().expect("the dynamic store can be read");
++        let (sender, changes) = watch::channel(0u64);
++        let watcher = watch_changes(sender).expect("the watcher starts");
++        assert_eq!(*changes.borrow(), 0);
++        drop(watcher);
++    }
++}
+diff --git a/crates/network/lib/engine/netstack/backend.rs b/crates/network/lib/engine/netstack/backend.rs
+index 4ca0e92..4f1c4b8 100644
+--- a/crates/network/lib/engine/netstack/backend.rs
++++ b/crates/network/lib/engine/netstack/backend.rs
+@@ -58,6 +58,19 @@ impl SmoltcpBackend {
+     }
+ 
+     fn read_frame_from_ring(&mut self, buf: &mut [u8]) -> Result<usize, ReadError> {
++        let result = self.pop_frame_into(buf);
++        // The drain above consumed every wake byte, including those for frames that are still
++        // queued. A reader that bounds its work per wakeup (or that is edge-triggered) would never
++        // be told about them, so readiness must outlive the pop for as long as the ring holds
++        // frames. A producer pushes before it wakes, so a frame pushed after the check below
++        // brings its own wake.
++        if !self.shared.rx_ring.is_empty() {
++            self.shared.rx_wake.wake();
++        }
++        result
++    }
++
++    fn pop_frame_into(&mut self, buf: &mut [u8]) -> Result<usize, ReadError> {
+         self.shared.rx_wake.drain();
+ 
+         let frame = self.shared.rx_ring.pop().ok_or(ReadError::NothingRead)?;
+@@ -173,6 +186,52 @@ mod tests {
+         assert!(fd_is_readable(backend.raw_socket_fd()));
+     }
+ 
++    #[test]
++    fn read_frame_keeps_rx_wake_readable_while_frames_remain() {
++        let shared = Arc::new(SharedState::new(8));
++        let mut backend = SmoltcpBackend::new(shared.clone());
++        let mut buf = [0u8; 64];
++
++        for frame in [vec![1u8], vec![2], vec![3]] {
++            assert!(shared.push_rx_frame_and_wake(frame));
++        }
++
++        for expected in [1u8, 2] {
++            let n = backend.read_frame(&mut buf).expect("frame should be read");
++            assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[expected]);
++            assert!(
++                fd_is_readable(backend.raw_socket_fd()),
++                "queued frames must keep the wake descriptor readable"
++            );
++        }
++        let n = backend.read_frame(&mut buf).expect("last frame");
++        assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[3]);
++        assert!(!fd_is_readable(backend.raw_socket_fd()));
++        assert!(matches!(
++            backend.read_frame(&mut buf),
++            Err(ReadError::NothingRead)
++        ));
++        assert!(!fd_is_readable(backend.raw_socket_fd()));
++    }
++
++    #[test]
++    fn dropping_an_oversized_frame_keeps_the_rest_of_the_ring_readable() {
++        let shared = Arc::new(SharedState::new(4));
++        let mut backend = SmoltcpBackend::new(shared.clone());
++        let mut buf = [0u8; VIRTIO_NET_HDR_LEN + 2];
++
++        assert!(shared.push_rx_frame_and_wake(vec![0; 8]));
++        assert!(shared.push_rx_frame_and_wake(vec![7, 8]));
++
++        assert!(matches!(
++            backend.read_frame(&mut buf),
++            Err(ReadError::NothingRead)
++        ));
++        assert!(fd_is_readable(backend.raw_socket_fd()));
++        let n = backend.read_frame(&mut buf).expect("next frame");
++        assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[7, 8]);
++    }
++
+     #[test]
+     fn write_frame_enqueues_guest_frame_and_wakes_poll_loop() {
+         let shared = Arc::new(SharedState::new(1));
+diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
+index 1b9a794..7dda7b1 100644
+--- a/crates/network/lib/engine/netstack/poll.rs
++++ b/crates/network/lib/engine/netstack/poll.rs
+@@ -326,6 +326,7 @@ pub(crate) fn smoltcp_poll_loop_with_options(
+         config.gateway,
+         config.gateway_mac,
+         config.guest_mac,
++        config.mtu,
+     );
+     let mut port_publisher = PortPublisher::new_with_readiness(
+         &published_ports,
+diff --git a/crates/network/lib/engine/network.rs b/crates/network/lib/engine/network.rs
+index 9158774..c64f8c7 100644
+--- a/crates/network/lib/engine/network.rs
++++ b/crates/network/lib/engine/network.rs
+@@ -45,6 +45,35 @@ pub fn generate_intercept_ca_pair() -> Result<(Vec<u8>, Vec<u8>), rcgen::Error>
+     Ok((ca.cert_pem(), ca.key_pem()))
+ }
+ 
++/// Issue a certificate for `domain` from an existing interception CA and return it as PEM.
++///
++/// The leaf's private key is discarded, so the result can only be used to ask whether a client
++/// trusts the CA. It cannot terminate TLS for `domain`.
++pub fn issue_trust_probe_pem(
++    ca_cert_pem: &[u8],
++    ca_key_pem: &[u8],
++    domain: &str,
++    validity_hours: u64,
++) -> Result<String, String> {
++    use base64::{Engine, engine::general_purpose::STANDARD};
++
++    let ca = CertAuthority::load(ca_cert_pem, ca_key_pem)?;
++    let cert = crate::engine::tls::certgen::generate_domain_cert(domain, &ca, validity_hours)
++        .map_err(|error| error.to_string())?;
++    let der = cert
++        .chain
++        .first()
++        .ok_or_else(|| "the issued certificate chain is empty".to_owned())?;
++    let encoded = STANDARD.encode(der.as_ref());
++    let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
++    for line in encoded.as_bytes().chunks(64) {
++        pem.push_str(std::str::from_utf8(line).map_err(|error| error.to_string())?);
++        pem.push('\n');
++    }
++    pem.push_str("-----END CERTIFICATE-----\n");
++    Ok(pem)
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Constants
+ //--------------------------------------------------------------------------------------------------
+@@ -1359,6 +1388,55 @@ mod tests {
+         ));
+     }
+ 
++    #[test]
++    fn trust_probe_leaf_is_accepted_only_by_a_client_that_trusts_the_issuing_ca() {
++        use rustls::RootCertStore;
++        use rustls::client::WebPkiServerVerifier;
++        use rustls::client::danger::ServerCertVerifier;
++        use rustls::pki_types::{CertificateDer, ServerName, UnixTime, pem::PemObject};
++
++        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
++        let (cert_pem, key_pem) = generate_intercept_ca_pair().unwrap();
++        let probe = issue_trust_probe_pem(&cert_pem, &key_pem, "probe.invalid", 24 * 365).unwrap();
++        assert_eq!(probe.matches("-----BEGIN CERTIFICATE-----").count(), 1);
++        assert!(!probe.contains("PRIVATE KEY"));
++        let leaf = CertificateDer::from_pem_slice(probe.as_bytes()).unwrap();
++        let ca = CertificateDer::from_pem_slice(&cert_pem).unwrap();
++        let name = ServerName::try_from("probe.invalid").unwrap();
++
++        let mut trusted = RootCertStore::empty();
++        trusted.add(ca).unwrap();
++        let verifier = WebPkiServerVerifier::builder(Arc::new(trusted))
++            .build()
++            .unwrap();
++        verifier
++            .verify_server_cert(&leaf, &[], &name, &[], UnixTime::now())
++            .expect("a client that trusts the CA accepts the leaf");
++        let other = ServerName::try_from("other.invalid").unwrap();
++        assert!(
++            verifier
++                .verify_server_cert(&leaf, &[], &other, &[], UnixTime::now())
++                .is_err(),
++            "the leaf is only valid for the probe name"
++        );
++
++        // A CA that is merely present, as an untrusted extra certificate, is not enough.
++        let mut unrelated = RootCertStore::empty();
++        let (other_ca, _) = generate_intercept_ca_pair().unwrap();
++        unrelated
++            .add(CertificateDer::from_pem_slice(&other_ca).unwrap())
++            .unwrap();
++        let verifier = WebPkiServerVerifier::builder(Arc::new(unrelated))
++            .build()
++            .unwrap();
++        let ca = CertificateDer::from_pem_slice(&cert_pem).unwrap();
++        assert!(
++            verifier
++                .verify_server_cert(&leaf, &[ca], &name, &[], UnixTime::now())
++                .is_err()
++        );
++    }
++
+     #[test]
+     fn public_ca_generation_returns_a_loadable_pair() {
+         let (cert_pem, key_pem) = generate_intercept_ca_pair().unwrap();

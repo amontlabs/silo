@@ -135,6 +135,10 @@
     {
       "path": "patches/microsandbox-macos-proxy-0.7.6.patch",
       "sha256": "9eda3fa0a64c124ba9c9077c146a7ee6457e7d65062eadca9755f8bc3517e6e4"
+    },
+    {
+      "path": "patches/microsandbox-macos-network-fixes-0.7.6.patch",
+      "sha256": "8e4a4173049bace12ffce30e1ef5a45066164cae2113d3e25750dbfaab81e982"
     }
   ]
 }

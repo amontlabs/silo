@@ -128,6 +128,12 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    // Checkpoint records written before automatic checkpoints existed become manual ones,
+    // once, before anything reads them.
+    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    // Resumes computers a previous engine update saved, before anything else advances them,
+    // and starts the engine's own update schedule.
+    crate::methods::services::start(context.clone());
     // The engine watches its computers whether or not a client is connected (95 A-26).
     crate::methods::computers::install_health_watch(context.clone());
     crate::methods::access::install(context.clone())?;
@@ -155,11 +161,11 @@ fn run_appkit(
         paths.socket_path(),
         euid,
         Arc::new(SystemPeerEuidProvider),
-        Arc::new(Dispatcher::core(context)),
+        Arc::new(Dispatcher::core(context.clone())),
     )?;
     drop(_runtime_context);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let signal_process = process.clone();
+    let signal_context = context.clone();
     let server_thread = thread::Builder::new()
         .name("silod-runtime".to_owned())
         .spawn(move || {
@@ -167,7 +173,8 @@ fn run_appkit(
                 match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
                     Ok(mut terminate) => {
                         if terminate.recv().await.is_some() {
-                            signal_process.exit(0);
+                            // SIGTERM is a session end: no prompt, bounded, never cancelled.
+                            crate::methods::services::session_end(signal_context);
                         }
                     }
                     Err(error) => eprintln!("silod: could not install SIGTERM handler: {error}"),

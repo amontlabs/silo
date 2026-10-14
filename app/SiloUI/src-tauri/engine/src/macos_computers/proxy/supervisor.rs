@@ -481,6 +481,91 @@ pub(in crate::macos_computers_engine) fn generate_ca(
     CaMaterial::from_pem(cert, key)
 }
 
+/// Asks the pinned gateway build to sign a certificate for the trust-probe name with this
+/// computer's CA. The guest evaluates it to prove its system trust accepts the CA; the
+/// leaf's key is discarded by the helper.
+pub(in crate::macos_computers_engine) fn issue_trust_probe(
+    app: &MacosContext,
+    ca: &CaMaterial,
+) -> Result<String, String> {
+    let binary = gateway_binary(app)?;
+    let request = trust_probe_request(ca)?;
+    let mut child = Command::new(binary)
+        .arg(OsStr::new("--issue-trust-probe"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| TRUST_PROBE_FAILED.to_owned())?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| TRUST_PROBE_FAILED.to_owned())?;
+    let written = stdin.write_all(&request);
+    drop(stdin);
+    drop(request);
+    let output = child
+        .wait_with_output()
+        .map_err(|_| TRUST_PROBE_FAILED.to_owned())?;
+    written.map_err(|_| TRUST_PROBE_FAILED.to_owned())?;
+    if !output.status.success() || !output.stderr.is_empty() {
+        return Err(TRUST_PROBE_FAILED.into());
+    }
+    parse_trust_probe_response(&output.stdout)
+}
+
+const TRUST_PROBE_FAILED: &str = "Silo could not prepare the computer's network trust check.";
+
+/// The framed CA bundle the helper reads on stdin. It holds the CA key, so it is zeroized.
+fn trust_probe_request(ca: &CaMaterial) -> Result<Zeroizing<Vec<u8>>, String> {
+    #[derive(Serialize)]
+    struct Request<'a> {
+        cert_pem: &'a str,
+        key_pem: &'a str,
+    }
+    let mut body = serde_json::to_vec(&Request {
+        cert_pem: ca.certificate_pem(),
+        key_pem: ca.private_key_pem(),
+    })
+    .map_err(|_| TRUST_PROBE_FAILED.to_owned())?;
+    if body.is_empty() || body.len() > MAX_MESSAGE_BYTES {
+        body.zeroize();
+        return Err(TRUST_PROBE_FAILED.into());
+    }
+    let mut framed = Zeroizing::new(Vec::with_capacity(body.len() + 4));
+    framed.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    framed.extend_from_slice(&body);
+    body.zeroize();
+    Ok(framed)
+}
+
+/// The probe certificate from the helper's framed response: exactly one certificate and no
+/// key material.
+fn parse_trust_probe_response(bytes: &[u8]) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct Response {
+        leaf_pem: String,
+    }
+    let invalid = || "The computer network trust check returned invalid data.".to_owned();
+    if bytes.len() < 4 {
+        return Err(invalid());
+    }
+    let size = u32::from_be_bytes(bytes[..4].try_into().expect("four-byte prefix")) as usize;
+    if size == 0 || size > MAX_MESSAGE_BYTES || bytes.len() != size + 4 {
+        return Err(invalid());
+    }
+    let response: Response = serde_json::from_slice(&bytes[4..]).map_err(|_| invalid())?;
+    let pem = response.leaf_pem;
+    if pem.matches("-----BEGIN CERTIFICATE-----").count() != 1
+        || pem.matches("-----END CERTIFICATE-----").count() != 1
+        || pem.contains("PRIVATE KEY")
+        || pem.len() > 16 * 1024
+    {
+        return Err(invalid());
+    }
+    Ok(pem)
+}
+
 #[derive(Deserialize)]
 #[allow(dead_code)]
 struct GeneratedCa {
@@ -956,5 +1041,52 @@ fn invalidate(child: &mut GatewayChild, computer: &str, gateway: &ActiveGateway)
     mark_unavailable(computer, gateway.vm_generation, gateway.helper_generation);
     if child.child.try_wait().ok().flatten().is_none() {
         let _ = child.child.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ca() -> CaMaterial {
+        CaMaterial::from_pem(
+            "-----BEGIN CERTIFICATE-----\nY2VydA==\n-----END CERTIFICATE-----\n".into(),
+            "-----BEGIN PRIVATE KEY-----\na2V5\n-----END PRIVATE KEY-----\n".into(),
+        )
+        .unwrap()
+    }
+
+    fn frame(body: &str) -> Vec<u8> {
+        let mut bytes = (body.len() as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(body.as_bytes());
+        bytes
+    }
+
+    #[test]
+    fn the_trust_probe_request_frames_the_ca_for_the_helper() {
+        let request = trust_probe_request(&ca()).unwrap();
+        let size = u32::from_be_bytes(request[..4].try_into().unwrap()) as usize;
+        assert_eq!(request.len(), size + 4);
+        let json: Value = serde_json::from_slice(&request[4..]).unwrap();
+        assert_eq!(json["cert_pem"], ca().certificate_pem());
+        assert_eq!(json["key_pem"], ca().private_key_pem());
+    }
+
+    #[test]
+    fn the_trust_probe_response_must_be_one_certificate_and_no_key() {
+        let leaf = "-----BEGIN CERTIFICATE-----\nbGVhZg==\n-----END CERTIFICATE-----\n";
+        let ok = frame(&serde_json::json!({ "leaf_pem": leaf }).to_string());
+        assert_eq!(parse_trust_probe_response(&ok).unwrap(), leaf);
+
+        for body in [
+            serde_json::json!({ "leaf_pem": format!("{leaf}{leaf}") }),
+            serde_json::json!({ "leaf_pem": format!("{leaf}-----BEGIN PRIVATE KEY-----") }),
+            serde_json::json!({ "leaf_pem": "" }),
+            serde_json::json!({ "other": leaf }),
+        ] {
+            assert!(parse_trust_probe_response(&frame(&body.to_string())).is_err());
+        }
+        assert!(parse_trust_probe_response(&[]).is_err());
+        assert!(parse_trust_probe_response(&ok[..ok.len() - 1]).is_err());
     }
 }
