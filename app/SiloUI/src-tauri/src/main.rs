@@ -257,8 +257,6 @@ fn main() {
                 commands::computer_use::install(app.handle());
                 pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;
-                commands::secrets::install(app.handle())?;
-                commands::github::install(app.handle())?;
                 commands::backup_controller::install(app.handle())?;
                 commands::runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
