@@ -1552,6 +1552,7 @@ mod tests {
 
     /// An engine over empty temporary state, one connected client and its event stream.
     struct Fixture {
+        _gate_jobs: std::sync::MutexGuard<'static, ()>,
         _root: tempfile::TempDir,
         context: HandlerContext,
         events: EventReceiver,
@@ -1603,6 +1604,7 @@ mod tests {
             },
         );
         Fixture {
+            _gate_jobs: crate::serialize_gate_jobs(),
             _root: root,
             context,
             events,

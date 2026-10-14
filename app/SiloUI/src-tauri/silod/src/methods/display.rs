@@ -1516,6 +1516,7 @@ mod tests {
     }
 
     struct Fixture {
+        _gate_jobs: std::sync::MutexGuard<'static, ()>,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
     }
@@ -1542,7 +1543,11 @@ mod tests {
             Arc::new(NoMain),
             Arc::new(NoProcess),
         ));
-        Fixture { directory, engine }
+        Fixture {
+            _gate_jobs: crate::serialize_gate_jobs(),
+            directory,
+            engine,
+        }
     }
 
     impl Fixture {
