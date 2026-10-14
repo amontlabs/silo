@@ -1120,6 +1120,112 @@ async fn start_job(
     output(accepted)
 }
 
+/// The parts of showing a native window that do not need AppKit: the protocol with the main
+/// thread and the window table with its rollback. They are separate so tests can inject a
+/// failing activation policy and a main thread that runs late.
+mod window_core {
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicU8, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
+    const PENDING: u8 = 0;
+    const RUNNING: u8 = 1;
+    const ABANDONED: u8 = 2;
+
+    /// One piece of work handed to the main thread. Either the main thread starts it or the
+    /// caller gives up on it, never both: work the caller gave up on is skipped when the
+    /// main thread reaches it, so it cannot create a window nobody is waiting for.
+    #[derive(Default)]
+    pub(super) struct MainRequest {
+        state: AtomicU8,
+    }
+
+    impl MainRequest {
+        /// The main thread asks to start. False when the caller gave up.
+        pub(super) fn begin(&self) -> bool {
+            self.state
+                .compare_exchange(PENDING, RUNNING, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        }
+
+        /// The caller gives up. False when the main thread already started: its result is
+        /// then awaited, since the work is under way and will report.
+        pub(super) fn abandon(&self) -> bool {
+            self.state
+                .compare_exchange(PENDING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        }
+    }
+
+    /// Runs `work` on the main thread through `run` and returns its result. After `timeout`
+    /// without a start the work is cancelled and the call fails; work that has started is
+    /// waited for.
+    pub(super) fn run_on_main<T: Send + 'static>(
+        run: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+        timeout: Duration,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let request = Arc::new(MainRequest::default());
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let main_request = request.clone();
+        run(Box::new(move || {
+            if main_request.begin() {
+                let _ = sender.send(work());
+            }
+        }))?;
+        match receiver.recv_timeout(timeout) {
+            Ok(result) => Ok(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if request.abandon() {
+                    Err("Timed out waiting for the AppKit display window.".to_owned())
+                } else {
+                    receiver
+                        .recv()
+                        .map_err(|_| "The AppKit display window work stopped.".to_owned())
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                Err("The AppKit display window work was dropped.".to_owned())
+            }
+        }
+    }
+
+    pub(super) enum Shown<W> {
+        Existing(W),
+        Created(W),
+    }
+
+    /// Shows the window of `id`: the table's own when there is one, else a created one that is
+    /// entered into the table before the activation policy follows it. When the policy
+    /// refuses, the window leaves the table again and is discarded, and the policy is set
+    /// for the windows that remain, so a failed show leaves nothing behind.
+    pub(super) fn show_window<W: Clone>(
+        windows: &mut HashMap<String, W>,
+        id: &str,
+        create: impl FnOnce() -> W,
+        set_policy: &dyn Fn(bool) -> Result<(), String>,
+        discard: impl FnOnce(W),
+    ) -> Result<Shown<W>, String> {
+        if let Some(window) = windows.get(id) {
+            return Ok(Shown::Existing(window.clone()));
+        }
+        let window = create();
+        windows.insert(id.to_owned(), window.clone());
+        if let Err(error) = set_policy(true) {
+            windows.remove(id);
+            discard(window);
+            let _ = set_policy(!windows.is_empty());
+            return Err(error);
+        }
+        Ok(Shown::Created(window))
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod native_display {
     use objc2::{
@@ -1155,7 +1261,8 @@ mod native_display {
                 // state: keep the entry alive until the end of the callback.
                 let _entry = WINDOWS.with(|windows| windows.borrow_mut().remove(&state.id));
                 if let Some(mtm) = MainThreadMarker::new() {
-                    let _ = apply_policy(mtm);
+                    let open = WINDOWS.with(|windows| !windows.borrow().is_empty());
+                    let _ = apply_policy(mtm, open);
                 }
                 silo_engine::macos_computers_engine::display_window_closed(
                     &state.context,
@@ -1180,8 +1287,8 @@ mod native_display {
         static WINDOWS: RefCell<HashMap<String, (Retained<NSWindow>, Retained<DisplayDelegate>)>> = RefCell::new(HashMap::new());
     }
 
-    fn apply_policy(mtm: MainThreadMarker) -> Result<(), String> {
-        let open = WINDOWS.with(|windows| !windows.borrow().is_empty());
+    /// Follows the activation policy to whether any window is open.
+    fn apply_policy(mtm: MainThreadMarker, open: bool) -> Result<(), String> {
         let policy = if open {
             NSApplicationActivationPolicy::Regular
         } else {
@@ -1193,6 +1300,38 @@ mod native_display {
         } else {
             Err("NSApplication refused the display window activation policy".into())
         }
+    }
+
+    /// Builds the window of computer `id` with its delegate.
+    fn build_window(
+        mtm: MainThreadMarker,
+        context: &silo_engine::macos_computers_engine::MacosContext,
+        id: &str,
+        title: &str,
+    ) -> (Retained<NSWindow>, Retained<DisplayDelegate>) {
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0));
+        let style = NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable;
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                mtm.alloc(),
+                frame,
+                style,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        // The registry owns the window; AppKit must not release it again on close.
+        unsafe { window.setReleasedWhenClosed(false) };
+        window.setTitle(&NSString::from_str(title));
+        window.setMinSize(NSSize::new(640.0, 400.0));
+        let content = NSView::initWithFrame(mtm.alloc(), frame);
+        window.setContentView(Some(&content));
+        let delegate = DisplayDelegate::new(mtm, context.clone(), id.to_owned());
+        window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        (window, delegate)
     }
 
     pub(super) fn show(
@@ -1209,63 +1348,36 @@ mod native_display {
         let main = engine
             .main_thread()
             .ok_or("The AppKit main-thread runner is unavailable.")?;
-        let id_for_main = id.clone();
-        let context_for_main = context.clone();
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        main.run(Box::new(move || {
-            let result = (|| -> Result<(), String> {
+        let (id_for_main, context_for_main) = (id.clone(), context.clone());
+        // The main thread skips this work when the wait below gave up, so a late run never
+        // creates a window that no caller attached.
+        super::window_core::run_on_main(
+            |work| main.run(work),
+            std::time::Duration::from_secs(10),
+            move || -> Result<(), String> {
                 let mtm = MainThreadMarker::new()
                     .ok_or("Could not open the display on AppKit's main thread.")?;
-                if let Some(window) = WINDOWS.with(|windows| {
-                    windows
-                        .borrow()
-                        .get(&id_for_main)
-                        .map(|(window, _)| window.clone())
-                }) {
-                    window.makeKeyAndOrderFront(None);
-                    #[allow(deprecated)]
-                    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
-                    return Ok(());
-                }
-                let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0));
-                let style = NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Closable
-                    | NSWindowStyleMask::Miniaturizable
-                    | NSWindowStyleMask::Resizable;
-                let window = unsafe {
-                    NSWindow::initWithContentRect_styleMask_backing_defer(
-                        mtm.alloc(),
-                        frame,
-                        style,
-                        NSBackingStoreType::Buffered,
-                        false,
+                let shown = WINDOWS.with(|windows| {
+                    super::window_core::show_window(
+                        &mut windows.borrow_mut(),
+                        &id_for_main,
+                        || build_window(mtm, &context_for_main, &id_for_main, &title),
+                        &|open| apply_policy(mtm, open),
+                        |(window, _delegate)| {
+                            // Without its delegate the close reports nothing back.
+                            window.setDelegate(None);
+                            window.close();
+                        },
                     )
-                };
-                // The registry owns the window; AppKit must not release it again on close.
-                unsafe { window.setReleasedWhenClosed(false) };
-                window.setTitle(&NSString::from_str(&title));
-                window.setMinSize(NSSize::new(640.0, 400.0));
-                let content = NSView::initWithFrame(mtm.alloc(), frame);
-                window.setContentView(Some(&content));
-                let delegate =
-                    DisplayDelegate::new(mtm, context_for_main.clone(), id_for_main.clone());
-                window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-                WINDOWS.with(|windows| {
-                    windows
-                        .borrow_mut()
-                        .insert(id_for_main.clone(), (window.clone(), delegate));
-                });
-                apply_policy(mtm)?;
+                })?;
+                let (super::window_core::Shown::Existing((window, _))
+                | super::window_core::Shown::Created((window, _))) = shown;
                 #[allow(deprecated)]
                 NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
                 window.makeKeyAndOrderFront(None);
                 Ok(())
-            })();
-            let _ = sender.send(result);
-        }))?;
-        receiver
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .map_err(|_| "Timed out waiting for the AppKit display window.".to_owned())??;
+            },
+        )??;
 
         let resolving_id = id.clone();
         if let Err(error) = silo_engine::macos_computers_engine::attach_display(
@@ -1996,6 +2108,104 @@ mod tests {
             )
             .await;
         assert_eq!(code(remote).await, ErrorCode::UnsupportedRemoteOperation);
+    }
+
+    #[test]
+    fn a_window_whose_activation_policy_fails_is_rolled_back() {
+        use std::{cell::RefCell, collections::HashMap};
+        let mut windows: HashMap<String, u32> = HashMap::new();
+        let policies = RefCell::new(Vec::new());
+        let discarded = RefCell::new(Vec::new());
+        let failing = |open: bool| {
+            policies.borrow_mut().push(open);
+            if open && policies.borrow().len() == 1 {
+                Err("NSApplication refused the activation policy".to_owned())
+            } else {
+                Ok(())
+            }
+        };
+        let refused = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 7,
+            &failing,
+            |window| discarded.borrow_mut().push(window),
+        );
+        assert_eq!(
+            refused.err().unwrap(),
+            "NSApplication refused the activation policy"
+        );
+        // Nothing stays registered, the window was discarded once, and the policy was set
+        // back for the windows that remain (none).
+        assert!(windows.is_empty());
+        assert_eq!(*discarded.borrow(), [7]);
+        assert_eq!(*policies.borrow(), [true, false]);
+        // The next show starts clean, and a second show of the same id reuses its window.
+        let shown = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 8,
+            &failing,
+            |_| panic!("nothing to discard"),
+        );
+        assert!(matches!(shown, Ok(window_core::Shown::Created(8))));
+        let again = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 9,
+            &failing,
+            |_| panic!("nothing to discard"),
+        );
+        assert!(matches!(again, Ok(window_core::Shown::Existing(8))));
+        assert_eq!(windows.len(), 1);
+    }
+
+    #[test]
+    fn a_main_thread_request_that_timed_out_never_creates_its_window() {
+        use std::sync::Mutex;
+        // A main thread that has not got to the work yet: the closure is only kept.
+        let late: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>> = Arc::new(Mutex::new(None));
+        let created = Arc::new(AtomicBool::new(false));
+        let result = window_core::run_on_main(
+            |work| {
+                *late.lock().unwrap() = Some(work);
+                Ok(())
+            },
+            Duration::ZERO,
+            {
+                let created = created.clone();
+                move || created.store(true, Ordering::SeqCst)
+            },
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "Timed out waiting for the AppKit display window."
+        );
+        // The main thread reaches the work afterwards: it is skipped.
+        let work = late.lock().unwrap().take().unwrap();
+        work();
+        assert!(!created.load(Ordering::SeqCst));
+        // On time, the result comes back.
+        let on_time = window_core::run_on_main(
+            |work| {
+                work();
+                Ok(())
+            },
+            Duration::from_secs(5),
+            || 42,
+        );
+        assert_eq!(on_time.unwrap(), 42);
+    }
+
+    #[test]
+    fn a_request_is_either_started_by_the_main_thread_or_abandoned_by_the_caller() {
+        let started_first = window_core::MainRequest::default();
+        assert!(started_first.begin());
+        // Work that has started cannot be abandoned: the caller waits for its result.
+        assert!(!started_first.abandon());
+        let abandoned_first = window_core::MainRequest::default();
+        assert!(abandoned_first.abandon());
+        assert!(!abandoned_first.begin());
     }
 
     #[tokio::test]
