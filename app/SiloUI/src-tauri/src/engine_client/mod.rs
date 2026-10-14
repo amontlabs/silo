@@ -6,6 +6,7 @@
 
 pub(crate) mod launcher;
 pub(crate) mod relay;
+pub(crate) mod targets;
 
 use std::{
     path::PathBuf,

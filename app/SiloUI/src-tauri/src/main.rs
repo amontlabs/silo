@@ -238,7 +238,6 @@ fn main() {
             // Tauri panics on a setup error. Explain the failure and exit instead.
             let result = (|| -> Result<(), Box<dyn std::error::Error>> {
                 engine_context::install(app)?;
-                commands::creation_inputs::install(app.handle())?;
                 runtime_migration::vocabulary::run()?;
                 commands::system_shutdown::install(app.handle());
                 let queue_app = app.handle().clone();
@@ -254,7 +253,6 @@ fn main() {
                         .ok_or("The engine context is not installed.")?;
                     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &migration)?;
                 }
-                commands::computer_use::install(app.handle());
                 pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;
                 commands::secrets::install(app.handle())?;
