@@ -57,6 +57,20 @@ pub(super) fn run(
     patched.and(closed)
 }
 
+/// Replaces the credentials of the existing managed account on an imported disk.
+/// This deliberately does not create an account or edit its home directory: an
+/// import keeps the source computer's account and data identity until its first
+/// password-authenticated setup boot.
+pub(super) fn run_import_rekey(disk: &Path, account: &GuestAccount) -> Result<(), String> {
+    let mut attached = Attached::attach(disk)?;
+    let patched = attached
+        .mount_data_volume()
+        .and_then(|mount| rekey_import_data_volume(&mount, account));
+    // Do not boot a computer while its disk is still mounted by the host.
+    let closed = attached.close();
+    patched.and(closed)
+}
+
 // MARK: Disk
 
 /// A disk image attached to the host without mounting its volumes. `close`
@@ -294,6 +308,125 @@ fn patch(root: &Path, account: &GuestAccount, release: Option<&Release<'_>>) -> 
     configure_autologin(root, &account.password)?;
     enable_ssh(root)?;
     configure_power_and_lock(root)
+}
+
+/// Rekeys only the existing managed account, its automatic login, and sshd.
+/// Validate the complete identity before making any change so an unrelated or
+/// damaged account cannot be silently adopted as Silo's imported account.
+fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), String> {
+    if account.user != USER || account.password.is_empty() {
+        return Err("Silo could not identify the imported computer's managed account.".into());
+    }
+
+    for (relative, allow_missing) in [
+        (
+            "private/var/db/dslocal/nodes/Default/users/silo.plist",
+            false,
+        ),
+        ("Library/Preferences/com.apple.loginwindow.plist", true),
+        ("private/etc/kcpassword", true),
+        (LAUNCHD_DISABLED, true),
+        ("private/var/db/com.apple.xpc.launchd/disabled.migrated", true),
+    ] {
+        validate_import_data_path(root, Path::new(relative), allow_missing)?;
+    }
+
+    let path = root.join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+    let mut user = read_plist(&path)?;
+    validate_import_account_identity(&user)?;
+
+    let salt = random_bytes(SALT_BYTES)?;
+    user.insert(
+        "ShadowHashData".into(),
+        Value::Array(vec![Value::Data(shadow_hash_data(&account.password, &salt)?)]),
+    );
+    write_plist(&user, &path, 0o600, true, Format::Binary)?;
+    configure_autologin(root, &account.password)?;
+    enable_ssh(root)
+}
+
+/// Reject links in the mounted, archive-derived Data volume before privileged
+/// reads or writes. The import disk is stopped and exclusively attached here, so
+/// checking each component also prevents a planted parent symlink from redirecting
+/// the account or login files into the host filesystem.
+fn validate_import_data_path(
+    root: &Path,
+    relative: &Path,
+    allow_missing_leaf: bool,
+) -> Result<PathBuf, String> {
+    use std::path::Component;
+
+    let root_metadata = fs::symlink_metadata(root)
+        .map_err(|error| fs_error("inspect the imported computer's Data volume", &error))?;
+    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+        return Err("Silo could not safely access the imported computer's Data volume.".into());
+    }
+
+    let components: Vec<_> = relative.components().collect();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("Silo could not safely access the imported computer's account files.".into());
+    }
+
+    let mut path = root.to_path_buf();
+    for (index, component) in components.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            unreachable!("components were validated above")
+        };
+        path.push(name);
+        let leaf = index + 1 == components.len();
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error)
+                if leaf
+                    && allow_missing_leaf
+                    && error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(path);
+            }
+            Err(error) => {
+                return Err(fs_error("inspect the imported computer's account files", &error));
+            }
+        };
+        if metadata.file_type().is_symlink()
+            || (leaf && !metadata.is_file())
+            || (!leaf && !metadata.is_dir())
+        {
+            return Err("Silo could not safely access the imported computer's account files.".into());
+        }
+    }
+    Ok(path)
+}
+
+fn validate_import_account_identity(user: &Dictionary) -> Result<(), String> {
+    let generated_uid = required_import_account_field(user, "generateduid")?;
+    if uuid::Uuid::parse_str(generated_uid).is_err()
+        || required_import_account_field(user, "name")? != USER
+        || required_import_account_field(user, "uid")? != UID
+        || required_import_account_field(user, "gid")? != GID
+        || required_import_account_field(user, "home")? != "/Users/silo"
+    {
+        return Err("Silo could not verify the imported computer's managed account identity.".into());
+    }
+    Ok(())
+}
+
+fn required_import_account_field<'a>(user: &'a Dictionary, name: &str) -> Result<&'a str, String> {
+    let values = user
+        .get(name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("Silo could not verify the imported account's {name}."))?;
+    if values.len() != 1 {
+        return Err(format!(
+            "Silo could not verify the imported account's {name}."
+        ));
+    }
+    values[0]
+        .as_string()
+        .ok_or_else(|| format!("Silo could not verify the imported account's {name}."))
 }
 
 fn string_list(value: &str) -> Value {
@@ -659,8 +792,9 @@ const SETUP_REVISION: u32 = 1;
 /// What the account setup consists of, for the version of a template.
 pub(super) fn setup_inputs() -> String {
     format!(
-        "{SETUP_REVISION}\n{}\n{}",
+        "{SETUP_REVISION}\n{}\n{}\n{}",
         finalization_script(""),
+        import_finalization_script(""),
         sudoers()
     )
 }
@@ -676,9 +810,27 @@ pub(super) fn sudoers() -> String {
 /// plus the ownership the host cannot set while it edits the volume offline and
 /// the installation of the sudoers entry.
 pub(super) fn finalization_script(public_key: &str) -> String {
+    finalization_script_with_host_key_rotation(public_key, false)
+}
+
+/// Root finalization for an imported disk. It installs this computer's key and
+/// replaces the source disk's SSH host keys without needing source credentials.
+pub(super) fn import_finalization_script(public_key: &str) -> String {
+    finalization_script_with_host_key_rotation(public_key, true)
+}
+
+fn finalization_script_with_host_key_rotation(
+    public_key: &str,
+    rotate_host_keys: bool,
+) -> String {
     let authorized_key = super::guest_access::shell_quote(public_key.trim());
     let sudoers_entry = sudoers();
     let sudoers_entry = sudoers_entry.trim_end();
+    let rotate_host_keys = if rotate_host_keys {
+        "/bin/rm -f /etc/ssh/ssh_host_*\n/usr/bin/ssh-keygen -A\n"
+    } else {
+        ""
+    };
     format!(
         "set -e
 /usr/bin/touch /var/db/.AppleSetupDone
@@ -710,6 +862,7 @@ pub(super) fn finalization_script(public_key: &str) -> String {
 /usr/sbin/chown root:wheel /etc/sudoers.d/{USER}.new
 /bin/chmod 440 /etc/sudoers.d/{USER}.new
 /bin/mv /etc/sudoers.d/{USER}.new /etc/sudoers.d/{USER}
+{rotate_host_keys}
 attempt=0
 until err=$(/usr/sbin/diskutil apfs updatePreboot / 2>&1) || err=$(/usr/sbin/diskutil apfs updatePreboot /System/Volumes/Data 2>&1); do
 attempt=$((attempt + 1))
@@ -1007,6 +1160,18 @@ mod tests {
     }
 
     #[test]
+    fn import_finalization_installs_its_key_and_rotates_guest_host_keys() {
+        let script = import_finalization_script("ssh-ed25519 AAAA imported-device");
+        assert!(script.contains(
+            "printf '%s\\n' 'ssh-ed25519 AAAA imported-device' > /Users/silo/.ssh/authorized_keys"
+        ));
+        assert!(script.contains("/bin/rm -f /etc/ssh/ssh_host_*\n/usr/bin/ssh-keygen -A"));
+        assert!(script.contains("launchctl enable system/com.openssh.sshd"));
+        assert!(!script.contains("source-password"));
+        assert!(!script.contains("source-key"));
+    }
+
+    #[test]
     fn hdiutil_output_names_the_whole_disk() {
         let output = "/dev/disk7          \tGUID_partition_scheme          \t\n/dev/disk7s1        \tApple_APFS_ISC                 \t\n/dev/disk7s2        \tApple_APFS                     \t\n";
         assert_eq!(parse_whole_disk(output).as_deref(), Some("disk7"));
@@ -1175,6 +1340,60 @@ mod tests {
         root
     }
 
+    fn imported_volume() -> (tempfile::TempDir, String, Value) {
+        let root = volume();
+        let generated_uid = "0A1B2C3D-1111-2222-3333-444455556666".to_string();
+        let old_hash = Value::Array(vec![Value::Data(b"source password hash".to_vec())]);
+        let users = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users");
+        let mut user = Dictionary::new();
+        user.insert("name".into(), string_list(USER));
+        user.insert("uid".into(), string_list(UID));
+        user.insert("gid".into(), string_list(GID));
+        user.insert("home".into(), string_list("/Users/silo"));
+        user.insert("generateduid".into(), string_list(&generated_uid));
+        user.insert(
+            "authentication_authority".into(),
+            string_list(";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>"),
+        );
+        user.insert("ShadowHashData".into(), old_hash.clone());
+        user.insert("retainedField".into(), Value::String("keep me".into()));
+        write_plist(
+            &user,
+            &users.join("silo.plist"),
+            0o600,
+            false,
+            Format::Binary,
+        )
+        .unwrap();
+
+        let home = root.path().join("Users/silo/Documents");
+        fs::create_dir_all(&home).unwrap();
+        fs::write(home.join("original.txt"), b"archive home marker").unwrap();
+
+        let preferences = root.path().join("Library/Preferences");
+        fs::create_dir_all(&preferences).unwrap();
+        write_plist(
+            &Dictionary::new(),
+            &preferences.join("com.apple.loginwindow.plist"),
+            0o644,
+            false,
+            Format::Binary,
+        )
+        .unwrap();
+        let etc = root.path().join("private/etc");
+        fs::create_dir_all(&etc).unwrap();
+        write_file(
+            &etc.join("kcpassword"),
+            &kcpassword("source-password"),
+            0o600,
+            false,
+        )
+        .unwrap();
+        (root, generated_uid, old_hash)
+    }
+
     #[test]
     fn patching_a_volume_writes_the_account_and_its_settings() {
         let root = volume();
@@ -1252,6 +1471,129 @@ mod tests {
         assert_eq!(
             power["AC Power"].as_dictionary().unwrap()["System Sleep Timer"].as_signed_integer(),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn import_rekey_preserves_account_identity_and_home_data_and_changes_auth_state() {
+        let (root, generated_uid, old_hash) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let home_marker = root.path().join("Users/silo/Documents/original.txt");
+        let mut new_account = account();
+        new_account.password = "new-import-password".into();
+
+        rekey_import_data_volume(root.path(), &new_account).unwrap();
+
+        let user = read_plist(&user_path).unwrap();
+        assert_eq!(user["name"], string_list(USER));
+        assert_eq!(user["uid"], string_list(UID));
+        assert_eq!(user["gid"], string_list(GID));
+        assert_eq!(user["home"], string_list("/Users/silo"));
+        assert_eq!(user["generateduid"], string_list(&generated_uid));
+        assert_eq!(user["retainedField"].as_string(), Some("keep me"));
+        assert_ne!(user["ShadowHashData"], old_hash);
+        let hash_data = user["ShadowHashData"].as_array().unwrap()[0]
+            .as_data()
+            .unwrap();
+        let decoded = Value::from_reader(std::io::Cursor::new(hash_data))
+            .unwrap()
+            .into_dictionary()
+            .unwrap();
+        let salted = decoded
+            .get("SALTED-SHA512-PBKDF2")
+            .and_then(Value::as_dictionary)
+            .unwrap();
+        let salt = salted.get("salt").and_then(Value::as_data).unwrap();
+        assert_eq!(
+            hash_data,
+            shadow_hash_data(&new_account.password, salt).unwrap()
+        );
+        assert_eq!(fs::read(home_marker).unwrap(), b"archive home marker");
+
+        let login = read_plist(
+            &root
+                .path()
+                .join("Library/Preferences/com.apple.loginwindow.plist"),
+        )
+        .unwrap();
+        assert_eq!(login["autoLoginUser"].as_string(), Some(USER));
+        assert_eq!(
+            fs::read(root.path().join("private/etc/kcpassword")).unwrap(),
+            kcpassword(&new_account.password)
+        );
+        let disabled = read_plist(&root.path().join(LAUNCHD_DISABLED)).unwrap();
+        assert_eq!(disabled["com.openssh.sshd"].as_boolean(), Some(false));
+        assert!(root
+            .path()
+            .join("private/var/db/com.apple.xpc.launchd/disabled.migrated")
+            .is_file());
+    }
+
+    #[test]
+    fn import_rekey_refuses_a_missing_silo_account_without_creating_one() {
+        let root = volume();
+        fs::create_dir_all(root.path().join("Library/Preferences")).unwrap();
+        write_plist(
+            &Dictionary::new(),
+            &root
+                .path()
+                .join("Library/Preferences/com.apple.loginwindow.plist"),
+            0o644,
+            false,
+            Format::Binary,
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("private/etc")).unwrap();
+        write_file(
+            &root.path().join("private/etc/kcpassword"),
+            &kcpassword("source-password"),
+            0o600,
+            false,
+        )
+        .unwrap();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+
+        assert!(error.contains("could not inspect"), "{error}");
+        assert!(!user_path.exists());
+        assert_eq!(
+            fs::read(root.path().join("private/etc/kcpassword")).unwrap(),
+            kcpassword("source-password")
+        );
+    }
+
+    #[test]
+    fn import_rekey_refuses_a_malformed_account_identity_before_writing() {
+        let (root, _, old_hash) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let mut user = read_plist(&user_path).unwrap();
+        user.insert("uid".into(), string_list("502"));
+        write_plist(&user, &user_path, 0o600, true, Format::Binary).unwrap();
+        let old_login = fs::read(
+            root.path()
+                .join("Library/Preferences/com.apple.loginwindow.plist"),
+        )
+        .unwrap();
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+
+        assert!(error.contains("managed account identity"), "{error}");
+        let user = read_plist(&user_path).unwrap();
+        assert_eq!(user["ShadowHashData"], old_hash);
+        assert_eq!(
+            fs::read(
+                root.path()
+                    .join("Library/Preferences/com.apple.loginwindow.plist")
+            )
+            .unwrap(),
+            old_login
         );
     }
 
