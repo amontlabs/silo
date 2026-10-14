@@ -59,9 +59,10 @@ pub struct DispatchError {
 
 impl DispatchError {
     pub(crate) fn internal(message: impl Into<String>) -> Self {
+        let message = message.into();
         Self {
-            code: ErrorCode::Internal,
-            message: message.into(),
+            code: refine_code(ErrorCode::Internal, &message),
+            message,
         }
     }
 
@@ -690,15 +691,52 @@ fn error_response_with_diagnostics(
     ResponseEnvelope::Error {
         id,
         error: ErrorObject {
-            code,
+            code: refine_code(code, &message),
             message,
             diagnostics,
         },
     }
 }
 
+/// An `internal` failure that is the credential store refusing the engine without asking
+/// carries its own code, so a client can show "Allow Silo's engine to use its saved sign-in".
+pub(crate) fn refine_code(code: ErrorCode, message: &str) -> ErrorCode {
+    if code == ErrorCode::Internal
+        && silo_engine::credential_store::is_access_denied_message(message)
+    {
+        ErrorCode::CredentialAccessDenied
+    } else {
+        code
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_credential_store_refusal_gets_its_own_error_code() {
+        use super::*;
+        let message = silo_engine::credential_store::ACCESS_DENIED_MESSAGE;
+        assert_eq!(
+            DispatchError::internal(message).code,
+            ErrorCode::CredentialAccessDenied
+        );
+        assert_eq!(
+            refine_code(ErrorCode::Internal, &format!("Start failed: {message}")),
+            ErrorCode::CredentialAccessDenied
+        );
+        assert_eq!(refine_code(ErrorCode::Busy, message), ErrorCode::Busy);
+        assert_eq!(
+            DispatchError::internal("Cannot read GitHub credentials.").code,
+            ErrorCode::Internal
+        );
+        let ResponseEnvelope::Error { error, .. } =
+            error_response("1".into(), ErrorCode::Internal, message.into())
+        else {
+            panic!("an error response");
+        };
+        assert_eq!(error.code, ErrorCode::CredentialAccessDenied);
+    }
+
     use super::*;
     use silo_api::transport::ProtocolRange;
     use silo_engine::{

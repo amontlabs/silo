@@ -346,8 +346,9 @@ mod tests {
             (SetupIncomplete, "setup_incomplete"),
             (ScreenSharingUnavailable, "screen_sharing_unavailable"),
             (DesktopUpdateRequired, "desktop_update_required"),
+            (CredentialAccessDenied, "credential_access_denied"),
         ];
-        assert_eq!(codes.len(), 24);
+        assert_eq!(codes.len(), 25);
         for (code, expected) in codes {
             let json = serde_json::to_string(&code).unwrap();
             assert_eq!(json, format!("\"{expected}\""));

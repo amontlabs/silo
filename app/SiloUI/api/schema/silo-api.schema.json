@@ -2583,7 +2583,8 @@
         "needs_personalizing",
         "setup_incomplete",
         "screen_sharing_unavailable",
-        "desktop_update_required"
+        "desktop_update_required",
+        "credential_access_denied"
       ],
       "type": "string"
     },

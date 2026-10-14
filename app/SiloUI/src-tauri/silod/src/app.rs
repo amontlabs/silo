@@ -5,6 +5,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 use objc2::{rc::autoreleasepool, MainThreadMarker};
@@ -90,8 +91,14 @@ fn run_appkit(
     let mtm = MainThreadMarker::new()
         .ok_or_else(|| "silod must initialize AppKit on the process main thread".to_owned())?;
     let application = NSApplication::sharedApplication(mtm);
+    // The engine is unattended: no Keychain call may wait on a dialog. A refused call fails
+    // with `credential_access_denied` and the work is retried later.
+    silo_engine::credential_store::forbid_interaction()?;
+    // The bundle has no LSUIElement, so AppKit starts the process as a regular app and this call
+    // makes it an accessory. If it is refused anyway (an agent-app bundle), the process is
+    // already faceless: run on, and the VM window policy below still applies when it can.
     if !application.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
-        return Err("NSApplication refused accessory activation policy".to_owned());
+        eprintln!("silod: NSApplication refused the accessory activation policy; continuing");
     }
 
     let process = Arc::new(AppProcessControl::new(|| {
@@ -216,16 +223,61 @@ fn run_appkit(
     Ok(exit_code)
 }
 
+/// How long a launch migration that the Keychain refused waits before it tries again.
+const MIGRATION_RETRY: Duration = Duration::from_secs(15 * 60);
+
+/// What one run of the launch migration thread ended with.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MigrationEnd {
+    /// Every computer was visited and none failed.
+    Completed,
+    /// Some computers were left for later and the thread was asked to stop retrying.
+    Skipped,
+    /// A failure that waiting does not fix; computers without a bootstrap refuse Start.
+    Failed(String),
+}
+
+/// Runs `pass` (the launch migration) until it completes. A pass the Keychain refused
+/// (`credential_access_denied`) skips and runs again after `wait`, which returns false to stop.
+/// macOS Start opens after the first pass whatever its result, so a refusal never holds the
+/// launch closed.
+pub(crate) fn drive_proxy_bootstrap_migration(
+    mut pass: impl FnMut() -> Result<(), String>,
+    mut wait: impl FnMut() -> bool,
+) -> MigrationEnd {
+    loop {
+        let result = pass();
+        silo_engine::macos_computers::end_proxy_bootstrap_migration();
+        match result {
+            Ok(()) => return MigrationEnd::Completed,
+            Err(message) if silo_engine::credential_store::is_access_denied_message(&message) => {
+                eprintln!("silod: the macOS network migration was skipped, the Keychain asked for approval: {message}");
+                if !wait() {
+                    return MigrationEnd::Skipped;
+                }
+            }
+            Err(message) => return MigrationEnd::Failed(message),
+        }
+    }
+}
+
 /// Runs the launch migration of macOS computers that predate the proxy bootstrap.
 fn start_proxy_bootstrap_migration(context: Arc<SilodContext>) {
     let spawned = thread::Builder::new()
         .name("silod-proxy-migration".to_owned())
         .spawn(move || {
-            if let Err(error) =
-                silo_engine::macos_computers::migrate_proxy_bootstraps_at_launch(
-                    &context.macos_context(),
-                )
-            {
+            let end = drive_proxy_bootstrap_migration(
+                || {
+                    silo_engine::macos_computers::migrate_proxy_bootstraps_at_launch(
+                        &context.macos_context(),
+                    )
+                },
+                || {
+                    thread::sleep(MIGRATION_RETRY);
+                    true
+                },
+            );
+            if let MigrationEnd::Failed(error) = end {
                 eprintln!("silod: the macOS network migration reported: {error}");
             }
         });
@@ -388,6 +440,75 @@ pub(crate) fn activation_policy(any_window_open: bool) -> NSApplicationActivatio
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    /// The migration gate is process-wide: tests that open and close it take turns.
+    static MIGRATION_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn the_launch_migration_runs_once_completes_and_opens_start() {
+        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
+        let mut passes = 0;
+        let end = drive_proxy_bootstrap_migration(
+            || {
+                passes += 1;
+                Ok(())
+            },
+            || panic!("a completed migration does not wait"),
+        );
+        assert_eq!(end, MigrationEnd::Completed);
+        assert_eq!(passes, 1);
+        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
+    }
+
+    #[test]
+    fn a_keychain_refusal_skips_opens_start_and_retries_until_it_completes() {
+        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
+        let mut passes = 0;
+        let mut waits = 0;
+        let end = drive_proxy_bootstrap_migration(
+            || {
+                passes += 1;
+                if passes < 3 {
+                    Err(format!(
+                        "Computer 1: {}",
+                        silo_engine::credential_store::ACCESS_DENIED_MESSAGE
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            || {
+                waits += 1;
+                true
+            },
+        );
+        assert_eq!(end, MigrationEnd::Completed);
+        assert_eq!((passes, waits), (3, 2));
+        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
+    }
+
+    #[test]
+    fn a_refused_migration_stops_when_asked_to_and_other_failures_do_not_retry() {
+        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
+        let denied = silo_engine::credential_store::ACCESS_DENIED_MESSAGE.to_owned();
+        let end = drive_proxy_bootstrap_migration(|| Err(denied.clone()), || false);
+        assert_eq!(end, MigrationEnd::Skipped);
+        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
+
+        let mut passes = 0;
+        let end = drive_proxy_bootstrap_migration(
+            || {
+                passes += 1;
+                Err("disk full".to_owned())
+            },
+            || panic!("only a refusal waits"),
+        );
+        assert_eq!(end, MigrationEnd::Failed("disk full".to_owned()));
+        assert_eq!(passes, 1);
+    }
 
     #[test]
     fn the_policy_is_regular_only_while_a_window_is_open() {

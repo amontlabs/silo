@@ -639,6 +639,11 @@ pub fn end_proxy_bootstrap_migration() {
     PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
 }
 
+/// Whether macOS Start is open: the launch migration has ended (or never began).
+pub fn proxy_bootstrap_migration_ready() -> bool {
+    ensure_proxy_bootstrap_migration_ready().is_ok()
+}
+
 fn ensure_proxy_bootstrap_migration_ready() -> Result<(), String> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     if !PROXY_BOOTSTRAP_MIGRATION_READY.load(Ordering::SeqCst) {

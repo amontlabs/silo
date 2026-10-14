@@ -5,7 +5,7 @@ import plistlib
 import tempfile
 import unittest
 
-from embed_engine import DISTRIBUTION, SILOD, embed_engine
+from embed_engine import DISTRIBUTION, SILOD, codesign_engine, embed_engine, signing_identity
 
 
 class EmbedEngineTests(unittest.TestCase):
@@ -41,11 +41,34 @@ class EmbedEngineTests(unittest.TestCase):
         inner = plistlib.loads((engine / 'Contents/Library/LaunchAgents/org.silo.preview.engine.plist').read_bytes())
         self.assertEqual(inner['BundleProgram'], 'Contents/MacOS/silod')
 
+    def test_neither_channel_marks_the_engine_as_an_agent_app(self):
+        # silod sets its own activation policy (accessory, regular while a VM window is open).
+        # LSUIElement made AppKit refuse that call, and silod exited at startup.
+        for identifier in ('org.silo.preview', 'org.silo.dev'):
+            engine, _ = self.embed(identifier)
+            info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
+            self.assertNotIn('LSUIElement', info)
+        for channel in ('development', 'production'):
+            info = plistlib.loads((SILOD / f'macos/Info.{channel}.plist').read_bytes())
+            self.assertNotIn('LSUIElement', info)
+
     def test_the_nested_engine_is_signed_with_the_virtualization_entitlement_before_the_app(self):
         engine, _ = self.embed()
         self.assertEqual(self.signed, [(engine, SILOD / 'macos/Entitlements.plist')])
         entitlements = plistlib.loads((SILOD / 'macos/Entitlements.plist').read_bytes())
         self.assertIs(entitlements['com.apple.security.virtualization'], True)
+
+    def test_the_signing_identity_is_ad_hoc_unless_the_environment_names_one(self):
+        self.assertEqual(signing_identity({}), '-')
+        self.assertEqual(signing_identity({'SILO_ENGINE_SIGNING_IDENTITY': '  '}), '-')
+        self.assertEqual(signing_identity({'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}), 'Silo Dev Signing')
+        for environ, expected in (({}, '-'), ({'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}, 'Silo Dev Signing')):
+            calls = []
+            codesign_engine(self.root / 'e.app', self.root / 'ent.plist',
+                            run=lambda command, **_: calls.append(command), environ=environ)
+            sign = calls[0]
+            self.assertEqual(sign[sign.index('--sign') + 1], expected)
+            self.assertIn('runtime', sign)
 
     def test_embedding_again_replaces_the_previous_engine(self):
         engine, _ = self.embed()

@@ -39,6 +39,8 @@ pub enum ErrorCode {
     SetupIncomplete,
     ScreenSharingUnavailable,
     DesktopUpdateRequired,
+    // The system credential store refused the engine without asking (Keychain access list).
+    CredentialAccessDenied,
 }
 
 /// A string JobId with one of the six canonical id-space prefixes.

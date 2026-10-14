@@ -170,7 +170,7 @@ fn read_vault() -> Result<Vault, String> {
     let result = entry().and_then(|entry| match entry.get_password() {
         Ok(value) => serde_json::from_str(&value).map_err(|_| STORE_ERROR.into()),
         Err(keyring::Error::NoEntry) => Ok(Vault::new()),
-        Err(_) => Err(STORE_ERROR.into()),
+        Err(error) => Err(crate::credential_store::describe(&error, STORE_ERROR)),
     });
     // A write or another read that finished meanwhile is at least as recent; keep it.
     lock_vault()
@@ -195,7 +195,7 @@ fn write_vault(value: Vault) -> Result<(), String> {
     let encoded = serde_json::to_string(&value).map_err(|_| STORE_ERROR)?;
     let result = entry()?
         .set_password(&encoded)
-        .map_err(|_| STORE_ERROR.to_string());
+        .map_err(|error| crate::credential_store::describe(&error, STORE_ERROR));
     *cached = Some((result.clone().map(|_| value), Instant::now()));
     result
 }
