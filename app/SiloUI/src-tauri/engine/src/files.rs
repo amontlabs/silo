@@ -19,16 +19,16 @@ const TOO_LARGE: &str = "This folder is too large to list.";
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Entry {
-    name: String,
-    path: String,
-    kind: String,
+    pub(crate) name: String,
+    pub(crate) path: String,
+    pub(crate) kind: String,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectoryPage {
-    entries: Vec<Entry>,
-    next_offset: Option<usize>,
-    snapshot_id: String,
+    pub(crate) entries: Vec<Entry>,
+    pub(crate) next_offset: Option<usize>,
+    pub(crate) snapshot_id: String,
 }
 static NEXT_SNAPSHOT: AtomicU64 = AtomicU64::new(1);
 struct Snapshot {

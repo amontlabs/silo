@@ -27,3 +27,6 @@ smithers.db-wal
 registry.sqlite3
 registry.sqlite3-shm
 registry.sqlite3-wal
+
+# Job registry files that engine tests create under their working directory
+app/SiloUI/src-tauri/engine/engine/

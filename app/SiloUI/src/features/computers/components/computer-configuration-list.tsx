@@ -59,6 +59,8 @@ interface ComputerConfigurationListProps {
   onDeleteComputer?: (configuration: SetupComputerConfiguration, baseline?: SetupComputerConfiguration[]) => Promise<void>
   onConnectDevice?: () => void
   onImportComputer?: () => void
+  /** Exports a local macOS computer or one of its checkpoints. */
+  onExportMacosComputer?: (name: string, checkpoint?: { id: string; name: string }) => void | Promise<unknown>
   /** Wraps the Add button so an import review popover can anchor to it. */
   importPopover?: (addButton: ReactNode) => ReactNode
   onConfigurationsChange: (configurations: SetupComputerConfiguration[], baseline?: SetupComputerConfiguration[]) => Promise<void> | void
@@ -94,7 +96,7 @@ interface ComputerConfigurationListProps {
   includeMacosComputers?: boolean
 }
 
-export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
+export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, onExportMacosComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
   const {
     deviceId, setDeviceId,
     committing,
@@ -548,7 +550,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                 </ComputerListItem>
               )
             })}
-            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} takenNames={[...localLinuxNames, ...macosComputers.map(({ name }) => name)]} />)}
+            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} takenNames={[...localLinuxNames, ...macosComputers.map(({ name }) => name)]} onExport={onExportMacosComputer} />)}
             {remoteMacosRows.map(({ computer, device }) => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} device={device} />)}
         </ComputerList>
         {footer && <div className="mt-3 shrink-0">{footer}</div>}
