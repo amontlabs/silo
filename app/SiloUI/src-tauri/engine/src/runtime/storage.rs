@@ -763,6 +763,36 @@ pub fn workspace_storage(
     storage_with(&ProcessRunner, &paths, id, reclaim).map_err(|error| safe_activity_error(&error))
 }
 
+/// Reclaim storage under a canonical job-owned gate entry. Reads keep using
+/// `workspace_storage`; this seam gives socket clients queue visibility and cancellation.
+pub fn workspace_storage_with_job(
+    host: &dyn RuntimeHost,
+    id: &str,
+    job_id: silo_api::jobs::JobId,
+    cancellation: Arc<AtomicBool>,
+) -> Result<StorageState, String> {
+    let context = host.engine_context();
+    let guard = OPERATIONS
+        .kind(operation_gate::OperationKind::StorageReclaim)
+        .acquire_for_job(
+            operation_gate::Scope::Device,
+            None,
+            "Reclaiming computer storage",
+            Some(job_id.as_str().to_owned()),
+            job_id.clone(),
+            Some(cancellation),
+        )
+        .map_err(|error| error.to_string())?;
+    guard.allow_cancel();
+    if let Ok(registry) = context.job_registry() {
+        let _ = registry.mark_running(&job_id);
+        registry.associate_gate(guard.request_id(), job_id);
+    }
+    shutdown::ensure_accepting_operations()?;
+    let paths = runtime_paths(host)?;
+    storage_with(&ProcessRunner, &paths, id, true).map_err(|error| safe_activity_error(&error))
+}
+
 fn storage_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,

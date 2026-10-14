@@ -26,6 +26,21 @@ use crate::{
 
 const RESTART_EXIT_CODE: i32 = 75;
 
+/// Runs the alias ProxyCommand helper from the bundled silod binary. The bundle manifest
+/// selects its channel before the engine-socket client reads channel-specific state.
+pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
+    autoreleasepool(|_| {
+        if args.len() != 2 && args.len() != 3 {
+            return Err("usage: silod --remote-guest DEVICE_ID COMPUTER_ID [PORT]".to_owned());
+        }
+        let manifest = service::current_bundle_manifest()?;
+        silo_engine::channel::init(&manifest.channel_identifier);
+        let params = silo_engine::remote::guest_stream_params(args)?;
+        silo_engine::remote::run_remote_stream(&args[0], "guest.ssh", params)?;
+        Ok(0)
+    })
+}
+
 pub fn run_agent() -> Result<i32, String> {
     set_private_umask();
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -113,6 +128,10 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    // The engine watches its computers whether or not a client is connected (95 A-26).
+    crate::methods::computers::install_health_watch(context.clone());
+    crate::methods::access::install(context.clone())?;
+    crate::methods::access::start_connections(context.clone())?;
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
     let runtime_home =

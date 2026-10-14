@@ -20,6 +20,8 @@ mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
+#[path = "macos_computers/files.rs"]
+pub(crate) mod files;
 #[path = "macos_computers/guest_access.rs"]
 mod guest_access;
 #[path = "macos_computers/guest_clipboard.rs"]
@@ -35,6 +37,8 @@ mod input;
 mod offline_setup;
 #[path = "macos_computers/personalize.rs"]
 mod personalize;
+#[path = "macos_computers/ports.rs"]
+mod ports;
 #[path = "macos_computers/provision.rs"]
 mod provision;
 #[path = "macos_computers/proxy/mod.rs"]
@@ -49,8 +53,14 @@ mod recovery;
 mod remote_display;
 #[path = "macos_computers/restore_image.rs"]
 mod restore_image;
+#[path = "macos_computers/run_marker.rs"]
+mod run_marker;
 #[path = "macos_computers/setup_log.rs"]
 mod setup_log;
+#[path = "macos_computers/ssh_alias.rs"]
+mod ssh_alias;
+#[path = "macos_computers/ssh_stream.rs"]
+mod ssh_stream;
 #[path = "macos_computers/store.rs"]
 mod store;
 #[path = "macos_computers/templates.rs"]
@@ -60,6 +70,7 @@ use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use silo_engine::{Audience, EngineContext, Event};
 use std::{
     collections::HashMap,
@@ -70,7 +81,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-pub use store::{Action, CreateRequest};
+pub use store::{Action, CreateRequest, ExpectedResources};
 use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
@@ -256,7 +267,7 @@ impl Entry {
             display_open: self.display_open,
             installed: self.record.installed,
             setup_complete: self.record.setup_complete(),
-            needs_personalizing: self.record.setup.needs_personalizing,
+            needs_personalizing: self.record.setup.needs_personalizing || self.record.imported,
             checkpoints: self
                 .checkpoints
                 .iter()
@@ -400,6 +411,29 @@ impl Registry {
         save(&record)?;
         entry.record = record;
         Ok(true)
+    }
+
+    /// Stores the desired computer-use approval of computer `id`, changing only that field of
+    /// the record as it is now, durably through `save`. The record is read, changed, saved
+    /// and replaced under one hold of the registry, so a concurrent update completion keeps
+    /// its recorded fingerprint, a failed save leaves the memory as the disk is, and a
+    /// computer being deleted is refused before anything is written to its folder. Returns
+    /// the Start that owns the computer, its state and the saved record.
+    fn set_desired_approval(
+        &mut self,
+        id: &str,
+        approval: crate::computer_use::Approval,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<(u64, State, Record), String> {
+        let entry = self
+            .entry(id)
+            .filter(|entry| !entry.deleting)
+            .ok_or("This computer no longer exists.")?;
+        let mut record = entry.record.clone();
+        record.computer_use_desired_approval = Some(approval);
+        save(&record)?;
+        entry.record = record.clone();
+        Ok((entry.attempt, entry.state, record))
     }
 
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
@@ -621,6 +655,36 @@ pub fn reopen_after_quit() {
 }
 
 /// Admits macOS computers again after an update did not go ahead.
+/// A macOS refusal a client can act on, with its own stable error code in the API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    NotRunning,
+    NeedsPersonalizing,
+    SetupIncomplete,
+    ScreenSharingUnavailable,
+    RunningLimit,
+}
+
+/// Recognises the refusals above in an engine message. The messages are the engine's own
+/// sentences, so the match is on their stable phrases and tested against the constants.
+pub fn classify_refusal(message: &str) -> Option<Refusal> {
+    if message.contains(store::NEEDS_PERSONALIZING) {
+        Some(Refusal::NeedsPersonalizing)
+    } else if message.contains(engine::LIMIT_EXCEEDED) {
+        Some(Refusal::RunningLimit)
+    } else if message.contains(remote_display::SHARING_UNAVAILABLE)
+        || message.contains("Screen Sharing accepted TCP")
+    {
+        Some(Refusal::ScreenSharingUnavailable)
+    } else if message.contains("Setup has not finished") || message.contains("still being set up") {
+        Some(Refusal::SetupIncomplete)
+    } else if message.contains("isn't running") || message.contains("is not running") {
+        Some(Refusal::NotRunning)
+    } else {
+        None
+    }
+}
+
 pub fn reopen_after_update() {
     closed().update = false;
 }
@@ -681,6 +745,8 @@ fn ensure_loaded(app: &MacosContext) -> Result<(), String> {
             .map(|record| {
                 let (state, detail) = store::initial_state(&record);
                 let layout = Layout::new(&data, &record.id);
+                // A marker from an earlier run of this app is not a running computer.
+                run_marker::clear(&layout);
                 checkpoints::sweep(&layout);
                 let record = settle_restore(&layout, record);
                 let mut entry = Entry::new(record, state, detail);
@@ -790,7 +856,50 @@ fn snapshot() -> MacosComputersState {
     }
 }
 
+/// The running generation this process last published per computer (`None`: cleared).
+static PUBLISHED_RUNS: Mutex<Option<HashMap<String, Option<u64>>>> = Mutex::new(None);
+
+/// Publishes which computers are Running, and in which Start generation, for processes that
+/// cannot read this registry (the engine socket's guest streams). Clears markers of every
+/// other state. Only changes touch the disk.
+fn sync_run_markers(app: &MacosContext) {
+    let Ok(data) = app_data(app) else {
+        return;
+    };
+    let desired: Vec<(String, Option<u64>)> = registry()
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.record.id.clone(),
+                (entry.state == State::Running).then_some(entry.attempt),
+            )
+        })
+        .collect();
+    let mut published = PUBLISHED_RUNS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let published = published.get_or_insert_with(HashMap::new);
+    for (id, generation) in desired {
+        if published.get(&id) == Some(&generation) {
+            continue;
+        }
+        let layout = Layout::new(&data, &id);
+        let done = match generation {
+            Some(generation) => run_marker::publish(&layout, generation).is_ok(),
+            None => {
+                run_marker::clear(&layout);
+                true
+            }
+        };
+        if done {
+            published.insert(id, generation);
+        }
+    }
+}
+
 fn emit(app: &MacosContext) {
+    sync_run_markers(app);
     let state = snapshot();
     publish_job_activity(app, &state);
     if let Ok(payload) = serde_json::to_value(&state) {
@@ -923,7 +1032,14 @@ fn accept_macos_job(
 ) -> Result<AcceptedMacosJob, String> {
     let registry = context.job_registry()?;
     let accepted = crate::jobs::allocate(context, method).map_err(|error| error.to_string())?;
-    let job_id = accepted.job_id;
+    accept_macos_job_with_id(registry, accepted.job_id, gate)
+}
+
+fn accept_macos_job_with_id(
+    registry: Arc<crate::jobs::JobRegistry>,
+    job_id: silo_api::jobs::JobId,
+    gate: &'static runtime::operation_gate::OperationGate,
+) -> Result<AcceptedMacosJob, String> {
     let cancellation = Arc::new(AtomicBool::new(false));
     register_macos_job_cancel(&registry, job_id.clone(), cancellation.clone(), gate);
     Ok(AcceptedMacosJob {
@@ -997,14 +1113,43 @@ fn admit_macos_job_with_completion(
     label: &str,
     finish_on_error: bool,
 ) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
-    let guard = match job.gate.kind(kind).acquire_for_job(
+    let acquired = job.gate.kind(kind).acquire_for_job(
         scope,
         computer_name,
         label,
         Some(job.job_id.as_str().to_owned()),
         job.job_id.clone(),
         Some(job.cancellation.clone()),
-    ) {
+    );
+    finish_admission(context, job, acquired, finish_on_error)
+}
+
+/// Waits in the queue for a device-wide turn that deletes `ids`, linked to `job`.
+fn admit_macos_removal(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    ids: &[String],
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let acquired = job.gate.removing_for_job(
+        ids,
+        label,
+        job.job_id.clone(),
+        Some(job.cancellation.clone()),
+    );
+    finish_admission(context, job, acquired, true)
+}
+
+fn finish_admission(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    acquired: Result<
+        runtime::operation_gate::OperationGuard<'static>,
+        runtime::operation_gate::GateError,
+    >,
+    finish_on_error: bool,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let guard = match acquired {
         Ok(guard) => guard,
         Err(error) => {
             let message = error.to_string();
@@ -1043,10 +1188,7 @@ fn admit_macos_job_with_completion(
 fn fail_macos_job(context: &dyn EngineContext, job: &AcceptedMacosJob, message: String) {
     publish_macos_job_finished(
         context,
-        macos_job_finished(
-            job.job_id.clone(),
-            Err((silo_api::jobs::ErrorCode::Internal, message)),
-        ),
+        macos_job_finished(job.job_id.clone(), Err((job_error_code(&message), message))),
     );
 }
 
@@ -1071,10 +1213,24 @@ fn admit_and_track_computer_workflow(
     Ok(operation)
 }
 
+/// The stable API code of a failed macOS job: an actionable refusal keeps its own code.
+fn job_error_code(message: &str) -> silo_api::jobs::ErrorCode {
+    use silo_api::jobs::ErrorCode;
+    match classify_refusal(message) {
+        Some(Refusal::NotRunning) => ErrorCode::NotRunning,
+        Some(Refusal::NeedsPersonalizing) => ErrorCode::NeedsPersonalizing,
+        Some(Refusal::SetupIncomplete) => ErrorCode::SetupIncomplete,
+        Some(Refusal::ScreenSharingUnavailable) => ErrorCode::ScreenSharingUnavailable,
+        Some(Refusal::RunningLimit) => ErrorCode::RunningLimit,
+        None if message.contains("no longer exists") => ErrorCode::NotFound,
+        None => ErrorCode::Internal,
+    }
+}
+
 fn lifecycle_job_outcome(
     result: Result<(), String>,
 ) -> Result<(), (silo_api::jobs::ErrorCode, String)> {
-    result.map_err(|message| (silo_api::jobs::ErrorCode::Internal, message))
+    result.map_err(|message| (job_error_code(&message), message))
 }
 
 fn macos_job_finished(
@@ -1166,7 +1322,7 @@ fn finish_workflow_job(
                 silo_api::jobs::ErrorCode::Cancelled,
                 "The macOS operation was cancelled.".to_owned(),
             )),
-            Err(Stop::Failed(message)) => Err((silo_api::jobs::ErrorCode::Internal, message)),
+            Err(Stop::Failed(message)) => Err((job_error_code(&message), message)),
         }
     };
     publish_macos_job_finished(app.engine.as_ref(), macos_job_finished(job_id, outcome));
@@ -1485,7 +1641,21 @@ fn accept_loaded_lifecycle_job(
     id: &str,
     method: &str,
 ) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
-    let job = accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?;
+    accept_loaded_lifecycle_job_with_id(app, id, method, None)
+}
+
+fn accept_loaded_lifecycle_job_with_id(
+    app: &MacosContext,
+    id: &str,
+    method: &str,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
+    let job = match job_id {
+        Some(job_id) => {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)?
+        }
+        None => accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?,
+    };
     let prepared: Result<(PathBuf, String), String> = (|| {
         ensure_loaded(app)?;
         let data = app_data(app)?;
@@ -1509,6 +1679,16 @@ pub async fn create_macos_computer(
     blocking(move || create(&app, request)).await
 }
 
+/// Creates a macOS computer under a job id accepted by a canonical API caller.
+pub async fn create_macos_computer_with_job(
+    app: MacosContext,
+    request: CreateRequest,
+    job_id: silo_api::jobs::JobId,
+) -> Result<MacosComputer, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || create_with_job(&app, request, job_id)).await
+}
+
 pub async fn macos_computer_action(
     app: MacosContext,
     id: String,
@@ -1523,9 +1703,202 @@ pub async fn macos_computer_action(
     blocking(move || perform(&app, &id, action)).await
 }
 
+/// Runs a macOS lifecycle operation under a job id accepted by a canonical API caller.
+pub async fn macos_computer_action_with_job(
+    app: MacosContext,
+    id: String,
+    action: Action,
+    job_id: silo_api::jobs::JobId,
+    method: &'static str,
+) -> Result<(), String> {
+    if matches!(
+        action,
+        Action::Start | Action::Setup | Action::ChangeResources { .. }
+    ) {
+        runtime::shutdown::ensure_accepting_operations()?;
+    }
+    blocking(move || perform_with_job(&app, &id, action, Some((job_id, method)))).await
+}
+
 pub async fn open_macos_display(app: MacosContext, id: String) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
+}
+
+/// Closes this computer's engine-owned screen window without stopping its VM.
+pub async fn close_macos_display(app: MacosContext, id: String) -> Result<(), String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        if state == State::SettingUp {
+            return Err("The display cannot close while computer setup is using it.".into());
+        }
+        app.close_display(&id);
+        Ok(())
+    })
+    .await
+}
+
+/// One macOS computer's row as `computers.list` shows it, or `None` when `id` is not one. It
+/// reads the inventory only: unlike [`read_macos_computers`] it never looks for new builds.
+pub async fn read_macos_computer(
+    app: MacosContext,
+    id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let registry = registry();
+        registry
+            .entries
+            .iter()
+            .find(|entry| entry.record.id == id)
+            .map(|entry| serde_json::to_value(entry.row()).map_err(|error| error.to_string()))
+            .transpose()
+    })
+    .await
+}
+
+/// Whether `id` names a macOS computer of this engine.
+pub async fn has_macos_computer(app: MacosContext, id: String) -> Result<bool, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        Ok(computer(&id).is_ok())
+    })
+    .await
+}
+
+/// The computer-use state a record alone can answer: the desired and applied approval and
+/// whether the guest still has to be updated. The receipt fields stay null until the guest
+/// receipt is read.
+fn computer_use_projection(record: &Record) -> serde_json::Value {
+    let desired = record
+        .computer_use_desired_approval
+        .or(record.computer_use_approval)
+        .unwrap_or_else(crate::computer_use::initial_approval);
+    let applied = record
+        .computer_use_approval
+        .filter(|_| !record.computer_use_stale());
+    let updating = guest_computer_use::update_running(&record.id);
+    serde_json::json!({
+        "schemaVersion": null,
+        "state": null,
+        "reason": null,
+        "cause": null,
+        "compatibility": null,
+        "warning": null,
+        "approval": desired.as_str(),
+        "appliedApproval": applied.map_or("unknown", |approval| approval.as_str()),
+        "approvalApply": if applied.is_some() && !updating { "applied" } else { "pending" },
+        "approvalApplyReason": null,
+        "appVersion": null,
+        "chatgptVersion": null,
+        "runtimeVersion": null,
+        "lcuVersion": null,
+        "agents": null,
+        "at": null,
+    })
+}
+
+/// macOS computer-use state that can be projected without entering the guest.
+pub async fn macos_computer_use_state(
+    app: MacosContext,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (record, _) = computer(&id)?;
+        Ok(computer_use_projection(&record))
+    })
+    .await
+}
+
+/// Stores desired computer-use approval and schedules the existing guest updater when running.
+/// It returns at once; the guest update runs in the background and a stopped computer applies
+/// the change at its next Start.
+pub async fn set_macos_computer_use_approval(
+    app: MacosContext,
+    id: String,
+    approval: crate::computer_use::Approval,
+) -> Result<serde_json::Value, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || {
+        ensure_loaded(&app)?;
+        apply_desired_approval(&app, &id, approval)
+    })
+    .await
+}
+
+/// The blocking part of [`set_macos_computer_use_approval`]. Only the desired approval of the
+/// record as it is when the registry is held changes; see `Registry::set_desired_approval`.
+fn apply_desired_approval(
+    app: &MacosContext,
+    id: &str,
+    approval: crate::computer_use::Approval,
+) -> Result<serde_json::Value, String> {
+    let layout = Layout::new(&app_data(app)?, id);
+    let (attempt, state, record) =
+        registry().set_desired_approval(id, approval, |record| store::save(&layout, record))?;
+    let projection = computer_use_projection(&record);
+    emit(app);
+    if state == State::Running {
+        guest_computer_use::update_in_background(app, id, attempt);
+    }
+    Ok(projection)
+}
+
+/// The state of a computer added by [`install_test_computer`].
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TestComputerState {
+    Stopped,
+    Running,
+    SettingUp,
+}
+
+/// Adds a finished computer to the shared inventory, for tests of the layers above the engine.
+/// Its record is saved under `app_data`, and the inventory counts as loaded.
+#[cfg(any(test, feature = "test-support"))]
+pub fn install_test_computer(
+    app_data: &std::path::Path,
+    name: &str,
+    state: TestComputerState,
+    approval: crate::computer_use::Approval,
+) -> String {
+    let mut record = store::new_record(
+        &CreateRequest {
+            name: name.into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+        },
+        engine::random_mac(),
+    );
+    record.installed = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: true,
+        computer_use: true,
+        clipboard: true,
+        roots: true,
+        needs_personalizing: false,
+    };
+    record.computer_use_approval = Some(approval);
+    record.computer_use_desired_approval = Some(approval);
+    record.computer_use_version = Some(templates::computer_use_version_for(approval));
+    store::save(&Layout::new(app_data, &record.id), &record).unwrap();
+    let id = record.id.clone();
+    let state = match state {
+        TestComputerState::Stopped => State::Stopped,
+        TestComputerState::Running => State::Running,
+        TestComputerState::SettingUp => State::SettingUp,
+    };
+    let mut computers = registry();
+    let mut entry = Entry::new(record, state, None);
+    entry.attempt = 1;
+    computers.entries.push(entry);
+    computers.loaded = true;
+    id
 }
 
 /// Saves a checkpoint of a computer: its memory too when it runs.
@@ -1678,6 +2051,23 @@ pub async fn macos_computer_clipboard(
     .await
 }
 
+/// Reads explicit clipboard content from a running macOS computer for a remote API client.
+pub async fn macos_clipboard_read(
+    app: MacosContext,
+    id: String,
+) -> Result<silo_api::methods::clipboard::ClipboardContent, String> {
+    blocking(move || guest_clipboard::read_explicit(&app, &id)).await
+}
+
+/// Writes explicit clipboard content to a running macOS computer.
+pub async fn macos_clipboard_write(
+    app: MacosContext,
+    id: String,
+    content: silo_api::methods::clipboard::ClipboardWritableContent,
+) -> Result<(), String> {
+    blocking(move || guest_clipboard::write_explicit(&app, &id, content)).await
+}
+
 // MARK: For other devices
 
 /// The state of this device's macOS computers as another device reads it. A device that cannot
@@ -1715,21 +2105,33 @@ pub(crate) fn action_for_remote(
 }
 
 /// The sign-in for the screen of a running computer, for another device.
-pub(crate) fn display_session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
+pub fn display_session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::session(app, id)
 }
 
 /// A connection to the Screen Sharing port of a running computer, for the owner to relay.
-pub(crate) fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::TcpStream, String> {
+pub fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::TcpStream, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::connect(app, id)
 }
 
+/// Opens the SSH transport to a running computer for the local engine socket's one-shot
+/// `guest.ssh` stream method. `port` is the published-port label of a forward, used only to
+/// revoke the stream; the stream itself always reaches the guest's SSH port.
+pub fn open_guest_ssh_stream(
+    app_data: &std::path::Path,
+    computer_id: &str,
+    port: Option<u16>,
+) -> Result<GuestSshStream, String> {
+    ssh_stream::open(app_data, computer_id, port)
+}
+pub use ssh_stream::{GuestSshGuard, GuestSshStream};
+
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
-pub(crate) fn resize_display(
+pub fn resize_display(
     app: &MacosContext,
     id: &str,
     width: u64,
@@ -1749,6 +2151,13 @@ pub fn names(app: &MacosContext) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether a selected transfer name belongs to the Apple Virtualization runtime.
+pub(crate) fn owns_name(app: &MacosContext, name: &str) -> bool {
+    names(app)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String> {
     ensure_loaded(app)?;
@@ -1759,10 +2168,344 @@ fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String
         .map(|entry| entry.record.clone()))
 }
 
+/// The name of the macOS computer with this identity, if one is stored on this device.
+pub fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(candidate, _)| candidate == id)
+        .map(|(_, name)| name)
+}
+
+/// The identity of the macOS computer with this name, if one is stored on this device.
+pub fn id_for_name(app: &MacosContext, name: &str) -> Option<String> {
+    let data = app_data(app).ok()?;
+    store::identities(&data)
+        .into_iter()
+        .find(|(_, candidate)| candidate.eq_ignore_ascii_case(name))
+        .map(|(id, _)| id)
+}
+
 pub fn proxy_contains_name(app: &MacosContext, name: &str) -> bool {
     names(app)
         .iter()
         .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+/// Resolve a checkpoint title for the export review phase.
+pub(crate) fn checkpoint_name(
+    app: &MacosContext,
+    computer: &str,
+    checkpoint_id: &str,
+) -> Result<String, String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let record = registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.name.eq_ignore_ascii_case(computer))
+        .map(|entry| entry.record.clone())
+        .ok_or_else(|| format!("Computer '{computer}' is not managed by Silo."))?;
+    checkpoints::find(&Layout::new(&app_data(app)?, &record.id), checkpoint_id)
+        .map(|meta| meta.name)
+}
+
+/// Capture one or more Apple Virtualization computers and write their format-4
+/// component archive. Running sources are paused only while immutable copies are
+/// made; the computer operation slot is released before compression starts.
+pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
+    app: &MacosContext,
+    service: &crate::backup::BackupService<R>,
+    destination: &std::path::Path,
+    names: &[String],
+    checkpoint_id: Option<&str>,
+    cancellation: &crate::backup::Cancellation,
+    token: Option<&str>,
+) -> Result<crate::backup::BackupResult, String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    if names.is_empty() || (checkpoint_id.is_some() && names.len() != 1) {
+        return Err(if checkpoint_id.is_some() {
+            "Exporting from a checkpoint supports one computer at a time.".into()
+        } else {
+            "Choose at least one computer to export.".into()
+        });
+    }
+    let data = app_data(app)?;
+    std::fs::create_dir_all(store::root(&data))
+        .map_err(|error| store::io_error("prepare the macOS export", &error))?;
+    let mut sources = Vec::with_capacity(names.len());
+    let mut captures = Vec::with_capacity(names.len());
+    for name in names {
+        if cancellation.cancelled() {
+            return Err(crate::backup::BackupError::Cancelled.to_string());
+        }
+        let record = registry()
+            .entries
+            .iter()
+            .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.record.clone())
+            .ok_or_else(|| format!("Computer '{name}' is not managed by Silo."))?;
+        let held = begin_operation_for(app, &record.id, checkpoints::OperationKind::Capture, None)?;
+        let record = held.record.clone();
+        let layout = Layout::new(&data, &record.id);
+        let capture = export_capture_dir(&data, token)
+            .map_err(|error| store::io_error("prepare the macOS export", &error))?;
+        let mut source_kind = crate::backup::MacosArchiveSourceKind::WholeComputer;
+        let mut saved_memory = false;
+        let mut source_cpus = held.record.cpus;
+        let mut source_memory_gib = held.record.memory_gib;
+        let mut source_disk_gib = held.record.disk_gib;
+        let mut source_setup_fingerprint = held.record.setup_version.clone();
+        let mut source_computer_use_fingerprint = held.record.computer_use_version.clone();
+        let mut source_guest = held.record.restore_image.clone();
+        let mut source_host_build = checkpoints::host_build();
+
+        if let Some(checkpoint_id) = checkpoint_id {
+            let meta = checkpoints::find(&layout, checkpoint_id)?;
+            source_cpus = meta.cpus.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_memory_gib = meta.memory_gib.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_disk_gib = meta.disk_gib.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_setup_fingerprint = meta.setup_fingerprint.clone();
+            source_computer_use_fingerprint = meta.computer_use_version.clone();
+            source_host_build = meta.host_build.clone();
+            source_guest = meta.macos_version.as_deref().and_then(parse_macos_version);
+            if source_guest.is_none() {
+                return Err(
+                    "This checkpoint predates saved macOS version details and cannot be exported."
+                        .into(),
+                );
+            }
+            saved_memory = meta.kind == checkpoints::Kind::Memory;
+            source_kind = crate::backup::MacosArchiveSourceKind::Checkpoint {
+                id: meta.id.clone(),
+                name: meta.name,
+                kind: match meta.kind {
+                    checkpoints::Kind::Disk => crate::backup::MacosCheckpointKind::Disk,
+                    checkpoints::Kind::Memory => crate::backup::MacosCheckpointKind::Memory,
+                },
+            };
+            clone_archive_component(
+                &checkpoints::dir(&layout, checkpoint_id).join("disk.img"),
+                &capture.path().join("disk.img"),
+            )?;
+            clone_archive_component(
+                &checkpoints::dir(&layout, checkpoint_id).join("auxiliary-storage.img"),
+                &capture.path().join("auxiliary-storage.img"),
+            )?;
+            clone_archive_component(
+                &layout.hardware_model(),
+                &capture.path().join("hardware-model.bin"),
+            )?;
+            clone_archive_component(
+                &layout.machine_identifier(),
+                &capture.path().join("machine-identifier.bin"),
+            )?;
+            if saved_memory {
+                let expected = meta.size_bytes.ok_or_else(|| {
+                    "This memory checkpoint has no saved size and cannot be exported.".to_string()
+                })?;
+                let state = checkpoints::state_file(&layout, checkpoint_id);
+                if std::fs::metadata(&state)
+                    .map(|metadata| metadata.len())
+                    .ok()
+                    != Some(expected)
+                {
+                    return Err(
+                        "This checkpoint's saved memory is incomplete and cannot be exported."
+                            .into(),
+                    );
+                }
+                clone_archive_component(&state, &capture.path().join("state.vzvmsave"))?;
+            }
+        } else {
+            let copy = || -> Result<(), String> {
+                if cancellation.cancelled() {
+                    return Err("The operation was cancelled.".into());
+                }
+                clone_archive_component(&layout.disk(), &capture.path().join("disk.img"))?;
+                clone_archive_component(
+                    &layout.auxiliary_storage(),
+                    &capture.path().join("auxiliary-storage.img"),
+                )?;
+                clone_archive_component(
+                    &layout.hardware_model(),
+                    &capture.path().join("hardware-model.bin"),
+                )?;
+                clone_archive_component(
+                    &layout.machine_identifier(),
+                    &capture.path().join("machine-identifier.bin"),
+                )
+            };
+            if held.state == State::Running {
+                engine::memory_support(app, &record.id)?;
+                let _space = reserve_for_memory(&data, &held.record, true)?;
+                let machine = LiveMachine {
+                    app,
+                    id: &record.id,
+                    cancel: &held.cancel,
+                };
+                checkpoints::Machine::save_running(
+                    &machine,
+                    &capture.path().join("state.vzvmsave"),
+                    &mut || copy(),
+                )?;
+                saved_memory = true;
+            } else {
+                copy()?;
+            }
+        }
+
+        let guest = source_guest.take().ok_or_else(|| {
+            "This computer has no saved macOS restore image details and cannot be exported."
+                .to_string()
+        })?;
+        let setup_fingerprint = source_setup_fingerprint.ok_or_else(|| {
+            "This computer has no setup fingerprint. Use Retry setup before exporting it."
+                .to_string()
+        })?;
+        let computer_use_fingerprint = source_computer_use_fingerprint.ok_or_else(|| {
+            "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
+        })?;
+        let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
+        let memory = if saved_memory {
+            if source_host_build.is_empty() {
+                return Err(
+                    "This memory checkpoint has no host build and cannot be exported.".into(),
+                );
+            }
+            let state = capture.path().join("state.vzvmsave");
+            let size = std::fs::metadata(&state)
+                .map_err(|error| store::io_error("inspect saved memory", &error))?
+                .len();
+            crate::backup::MacosArchiveMemory::Saved {
+                host_build: source_host_build.clone(),
+                configuration_digest: crate::backup::memory_configuration_digest(
+                    source_cpus,
+                    source_memory_gib,
+                    source_disk_gib,
+                    &hardware_model_digest,
+                )?,
+                size,
+                sha256: digest_file(&state)?,
+            }
+        } else {
+            crate::backup::MacosArchiveMemory::None
+        };
+        let config = crate::backup::MacosArchiveConfig {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: record.id.clone(),
+            source_name: name.clone(),
+            cpus: source_cpus,
+            memory_gib: source_memory_gib,
+            disk_gib: source_disk_gib,
+            guest_version: guest.version,
+            guest_build: guest.build,
+            host_build: checkpoints::host_build(),
+            hardware_model_digest,
+            setup_fingerprint,
+            computer_use_fingerprint,
+            source: source_kind,
+            memory,
+        };
+        let mut components = vec![
+            (crate::backup::MacosComponentRole::Disk, "disk.img"),
+            (
+                crate::backup::MacosComponentRole::Auxiliary,
+                "auxiliary-storage.img",
+            ),
+            (
+                crate::backup::MacosComponentRole::HardwareModel,
+                "hardware-model.bin",
+            ),
+            (
+                crate::backup::MacosComponentRole::MachineIdentifier,
+                "machine-identifier.bin",
+            ),
+        ];
+        if saved_memory {
+            components.push((crate::backup::MacosComponentRole::Memory, "state.vzvmsave"));
+        }
+        sources.push(crate::backup::MacosArchiveSource {
+            name: name.clone(),
+            runtime_config: config,
+            // AVF computers use a strict runtime configuration and no MicroSandbox row.
+            computer_configuration: serde_json::json!({}),
+            components: components
+                .into_iter()
+                .map(|(role, file)| crate::backup::MacosArchiveComponentInput {
+                    role,
+                    path: capture.path().join(file),
+                })
+                .collect(),
+        });
+        captures.push(capture);
+        drop(held);
+    }
+    let result = service
+        .create_macos_archive(destination, sources, cancellation, token)
+        .map_err(|error| error.to_string());
+    drop(captures);
+    result
+}
+
+/// Capture folders carry the saved operation's id, so a relaunch can find and remove what an
+/// interrupted export left. The id is journaled before the export starts; RAII cleans up
+/// only when the process lives to run it.
+const EXPORT_CAPTURE_PREFIX: &str = ".silo-macos-export-";
+
+fn export_capture_dir(
+    data: &std::path::Path,
+    token: Option<&str>,
+) -> std::io::Result<tempfile::TempDir> {
+    let prefix = match token {
+        Some(token) => export_capture_prefix(token)
+            .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?,
+        None => EXPORT_CAPTURE_PREFIX.to_owned(),
+    };
+    tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempdir_in(store::root(data))
+}
+
+fn export_capture_prefix(token: &str) -> Result<String, String> {
+    let token = uuid::Uuid::parse_str(token)
+        .map_err(|_| "The export operation identity is invalid.".to_owned())?;
+    Ok(format!("{EXPORT_CAPTURE_PREFIX}{token}-"))
+}
+
+/// Removes the capture folders an export with this saved operation id left behind: disk
+/// clones and saved memory it copied before the process ended. Other operations' folders
+/// stay.
+pub(crate) fn remove_export_captures(data: &std::path::Path, token: &str) -> Result<(), String> {
+    let prefix = export_capture_prefix(token)?;
+    let entries = match std::fs::read_dir(store::root(data)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(store::io_error("inspect macOS export captures", &error)),
+    };
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| store::io_error("inspect macOS export captures", &error))?;
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| store::io_error("inspect a macOS export capture", &error))?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            std::fs::remove_dir_all(entry.path())
+                .map_err(|error| store::io_error("remove a macOS export capture", &error))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -1777,6 +2520,576 @@ pub fn proxy_validate_computers(app: &MacosContext, computers: &[String]) -> Res
         }
     }
     Ok(())
+}
+
+fn parse_macos_version(value: &str) -> Option<store::RestoreImageInfo> {
+    let (version, build) = value.rsplit_once(" (")?;
+    let build = build.strip_suffix(')')?;
+    (!version.is_empty() && !build.is_empty()).then(|| store::RestoreImageInfo {
+        version: version.into(),
+        build: build.into(),
+    })
+}
+
+pub(crate) fn archive_memory_warning(
+    source_name: &str,
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Option<String> {
+    match &config.memory {
+        crate::backup::MacosArchiveMemory::Saved { host_build, .. }
+            if host_build != &checkpoints::host_build() => Some(format!(
+                "{source_name} has saved memory from macOS build {host_build}. It cannot be reused on this Mac; import starts from the computer's disk."
+            )),
+        crate::backup::MacosArchiveMemory::Saved { .. } => Some(format!(
+            "{source_name} has saved memory. Import verifies it but starts the new computer from its disk."
+        )),
+        _ => None,
+    }
+}
+
+/// Whether this Mac's limits allow an archived computer's CPUs, memory, and disk. Imported
+/// computers are created from exactly these values, so inspection checks them up front.
+pub(crate) fn validate_archive_resources(
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Result<(), String> {
+    require_supported()?;
+    check_archive_resources(engine::host_limits(), config)
+}
+
+fn check_archive_resources(
+    limits: store::HostLimits,
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Result<(), String> {
+    store::validate_request(
+        &CreateRequest {
+            name: "archive-check".into(),
+            cpus: config.cpus,
+            memory_gib: config.memory_gib,
+            disk_gib: config.disk_gib,
+        },
+        limits,
+        &[],
+        store::MIN_DISK_GIB,
+    )
+}
+
+/// Whether this Mac supports the archived computer's hardware model, read from the bounded
+/// component file extracted from the archive.
+pub(crate) fn validate_archive_hardware_model(path: &std::path::Path) -> Result<(), String> {
+    require_supported()?;
+    engine::validate_hardware_model_file(path)
+}
+
+pub(crate) fn supports_archive_guest_build(build: &str) -> Result<bool, String> {
+    developer_tools::supports_guest_build(build)
+}
+
+fn clone_archive_component(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    templates::clone_file(from, to).map_err(|error| error.message())
+}
+
+fn digest_file(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| store::io_error("read an archive component", &error))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| store::io_error("read an archive component", &error))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{}", hex_sha256(&digest.finalize())))
+}
+
+fn hex_sha256(digest: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let byte = *byte;
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+/// Import a fully verified Apple Virtualization archive as a stopped computer.
+/// The caller journals `id` before entering this function, so relaunch recovery
+/// can remove only this import's deterministic staging folder.
+#[derive(Debug)]
+pub(crate) enum MacosArchiveImportError {
+    Cancelled,
+    Failed(String),
+}
+
+impl From<String> for MacosArchiveImportError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<&str> for MacosArchiveImportError {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
+}
+
+impl From<crate::backup::BackupError> for MacosArchiveImportError {
+    fn from(error: crate::backup::BackupError) -> Self {
+        match error {
+            crate::backup::BackupError::Cancelled => Self::Cancelled,
+            error => Self::Failed(error.to_string()),
+        }
+    }
+}
+
+pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
+    app: &MacosContext,
+    service: &crate::backup::BackupService<R>,
+    archive: &std::path::Path,
+    source_name: Option<&str>,
+    new_name: &str,
+    id: &str,
+    cancellation: &crate::backup::Cancellation,
+    before_publish: &dyn Fn() -> Result<(), String>,
+) -> Result<String, MacosArchiveImportError> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let id = uuid::Uuid::parse_str(id)
+        .map_err(|_| "The imported computer identity is invalid.")?
+        .to_string();
+    let data = app_data(app)?;
+    let root = store::root(&data);
+    std::fs::create_dir_all(&root)
+        .map_err(|error| store::io_error("prepare the macOS import", &error))?;
+    let stage = root.join(format!(".partial-import-{id}"));
+    let final_dir = root.join(&id);
+    discard_import_folder(&stage, &detach_import_disk)?;
+    if std::fs::symlink_metadata(&final_dir).is_ok() {
+        return Err("The imported computer identity already exists. Choose the export file again and retry.".into());
+    }
+
+    let new_name = new_name.trim();
+    let requested = source_name.unwrap_or_default();
+    let taken = || {
+        let mut names = names(app);
+        names.extend(app.linux_computer_names());
+        names
+    };
+    let _reservation = crate::computer_names::reserve(&[new_name.to_string()], &taken)?;
+    let existing = {
+        let registry = registry();
+        registry
+            .entries
+            .iter()
+            .map(|entry| entry.record.clone())
+            .collect::<Vec<_>>()
+    };
+    let mut builder = std::fs::DirBuilder::new();
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    builder.mode(0o700);
+    builder
+        .create(&stage)
+        .map_err(|error| store::io_error("create the macOS import staging folder", &error))?;
+
+    let prepared = match service.extract_macos_components(
+        archive,
+        (!requested.is_empty()).then_some(requested),
+        &[
+            crate::backup::MacosComponentRole::Disk,
+            crate::backup::MacosComponentRole::Auxiliary,
+            crate::backup::MacosComponentRole::HardwareModel,
+            crate::backup::MacosComponentRole::MachineIdentifier,
+        ],
+        &stage,
+        cancellation,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = discard_import_folder(&stage, &detach_import_disk);
+            return Err(error.into());
+        }
+    };
+    if source_name.is_some_and(|name| name != prepared.source_name)
+        || prepared.config.source_name != prepared.source_name
+        || prepared.config.architecture != "aarch64"
+        || prepared.config.payload_version != 1
+        || uuid::Uuid::parse_str(&prepared.config.source_computer_id).is_err()
+        || prepared.computer_configuration != serde_json::json!({})
+    {
+        drop(prepared);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
+        return Err(
+            "The selected computer identity does not match the verified export file.".into(),
+        );
+    }
+    if !developer_tools::supports_guest_build(&prepared.config.guest_build)? {
+        let build = prepared.config.guest_build.clone();
+        drop(prepared);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
+        return Err(format!(
+            "The export uses macOS build {build}, which this Silo version cannot finish setting up."
+        )
+        .into());
+    }
+    let imported_source_name = prepared.source_name.clone();
+    let request = CreateRequest {
+        name: new_name.trim().to_string(),
+        cpus: prepared.config.cpus,
+        memory_gib: prepared.config.memory_gib,
+        disk_gib: prepared.config.disk_gib,
+    };
+    if let Err(error) = store::validate_request(
+        &request,
+        engine::host_limits(),
+        &existing,
+        store::MIN_DISK_GIB,
+    ) {
+        drop(prepared);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
+        return Err(error.into());
+    }
+    let stage_layout = Layout {
+        dir: stage.clone(),
+        access: None,
+    };
+    for (role, destination) in [
+        (crate::backup::MacosComponentRole::Disk, stage_layout.disk()),
+        (
+            crate::backup::MacosComponentRole::Auxiliary,
+            stage_layout.auxiliary_storage(),
+        ),
+        (
+            crate::backup::MacosComponentRole::HardwareModel,
+            stage_layout.hardware_model(),
+        ),
+    ] {
+        let source = prepared
+            .component_paths
+            .get(&role)
+            .ok_or_else(|| format!("The export is missing its {role:?} component."))?;
+        std::fs::rename(source, destination)
+            .map_err(|error| store::io_error("stage an imported macOS component", &error))?;
+    }
+    // The source machine identifier is verified with every other component but
+    // is never installed on the new computer.
+    let machine_identifier = engine::new_machine_identifier();
+    std::fs::write(stage_layout.machine_identifier(), machine_identifier)
+        .map_err(|error| store::io_error("save the imported computer identity", &error))?;
+    let actual_hardware_digest = digest_file(&stage_layout.hardware_model())?;
+    if actual_hardware_digest != prepared.config.hardware_model_digest {
+        drop(prepared);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
+        return Err("The hardware model does not match the verified export metadata.".into());
+    }
+
+    let account = guest_access::ensure_account(&stage_layout)?;
+    offline_setup::run_import_rekey(&stage_layout.disk(), &account)?;
+    let mut record = store::new_record(&request, engine::random_mac());
+    record.id = id.clone();
+    record.installed = true;
+    record.restore_image = Some(store::RestoreImageInfo {
+        version: prepared.config.guest_version.clone(),
+        build: prepared.config.guest_build.clone(),
+    });
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: false,
+        computer_use: false,
+        clipboard: false,
+        roots: false,
+        needs_personalizing: true,
+    };
+    record.developer_tools_version = None;
+    record.pristine = false;
+    record.template = None;
+    record.setup_version = None;
+    record.computer_use_version = None;
+    record.computer_use_approval = Some(crate::computer_use::initial_approval());
+    record.pending_restore = None;
+    record.inherited_access = false;
+    record.imported = true;
+    engine::validate_archive_configuration(app, &record, &stage_layout)?;
+    store::save(&stage_layout, &record)?;
+    std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| store::io_error("protect the macOS import staging folder", &error))?;
+    store::sync_dir(&stage).map_err(|error| store::io_error("save the macOS import", &error))?;
+    drop(prepared);
+    if let Err(message) = before_publish() {
+        discard_import_folder(&stage, &detach_import_disk)?;
+        return Err(if cancellation.cancelled() {
+            MacosArchiveImportError::Cancelled
+        } else {
+            MacosArchiveImportError::Failed(message)
+        });
+    }
+    std::fs::rename(&stage, &final_dir)
+        .map_err(|error| store::io_error("publish the imported computer", &error))?;
+    store::sync_dir(&root)
+        .map_err(|error| store::io_error("save the imported computer", &error))?;
+    {
+        let mut registry = registry();
+        if registry.entries.iter().any(|entry| entry.record.id == id) {
+            return Err(
+                "The imported computer was saved and needs recovery. Relaunch Silo to finish."
+                    .into(),
+            );
+        }
+        registry.entries.push(Entry::new(
+            record,
+            State::Stopped,
+            Some(store::NEEDS_PERSONALIZING.into()),
+        ));
+    }
+    emit(app);
+    Ok(imported_source_name)
+}
+
+/// Settle a journaled archive import. Returns true only when the final record
+/// proves that its atomic directory rename committed. Any folder this import left is
+/// removed only after its disk image is detached from this Mac; if a detach fails, the
+/// folders stay and so does the caller's journal.
+pub(crate) fn recover_archive_import(app: &MacosContext, id: &str) -> Result<bool, String> {
+    recover_archive_import_in(&app_data(app)?, id, &detach_import_disk)
+}
+
+fn recover_archive_import_in(
+    data: &std::path::Path,
+    id: &str,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+) -> Result<bool, String> {
+    let id = uuid::Uuid::parse_str(id)
+        .map_err(|_| "The imported computer identity is invalid.")?
+        .to_string();
+    let root = store::root(data);
+    let stage = root.join(format!(".partial-import-{id}"));
+    let final_dir = root.join(&id);
+    let committed = match store::read_record(&Layout::new(data, &id)) {
+        Ok(record) if record.id == id => true,
+        _ => false,
+    };
+    if committed {
+        discard_import_folder(&stage, detach)?;
+        return Ok(true);
+    }
+    discard_import_folder(&stage, detach)?;
+    discard_import_folder(&final_dir, detach)?;
+    Ok(false)
+}
+
+fn detach_import_disk(disk: &std::path::Path) -> Result<(), String> {
+    offline_setup::ensure_detached(disk)
+}
+
+/// Removes an import's folder after its disk image is detached. The rekey attaches the image
+/// persistently, so deleting the folder first would delete an attached disk. When the image
+/// cannot be detached the folder is left in place.
+fn discard_import_folder(
+    path: &std::path::Path,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let disk = path.join("disk.img");
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+        && std::fs::symlink_metadata(&disk).is_ok()
+    {
+        detach(&disk)?;
+    }
+    remove_archive_import_folder(path)
+}
+
+fn remove_archive_import_folder(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            std::fs::remove_dir_all(path)
+                .map_err(|error| store::io_error("remove an incomplete macOS import", &error))
+        }
+        Ok(_) => Err("Silo could not verify ownership of the macOS import folder.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(store::io_error("inspect the macOS import folder", &error)),
+    }
+}
+
+/// Browse one macOS computer's `/Users/silo/workspace` through guest SFTP access tooling.
+pub fn list_directory(
+    app: &MacosContext,
+    caller: String,
+    computer_id: String,
+    path: String,
+    offset: usize,
+    snapshot_id: Option<String>,
+) -> Result<crate::files::DirectoryPage, String> {
+    files::list(app, caller, computer_id, path, offset, snapshot_id)
+}
+
+pub fn ensure_ssh_alias(
+    app: &MacosContext,
+    computer_id: &str,
+    path: Option<&str>,
+    install_include: Option<bool>,
+) -> Result<silo_api::methods::guest::GuestSshAliasEnsureResult, String> {
+    ssh_alias::ensure(app, computer_id, path, install_include)
+}
+
+pub fn remove_ssh_alias(app: &MacosContext, computer_id: &str) -> Result<(), String> {
+    ssh_alias::remove(app, computer_id)
+}
+
+pub fn terminal_command(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<silo_api::methods::terminal::CommandResult, String> {
+    ssh_alias::terminal_command(app, computer_id)
+}
+
+pub fn editor_command(
+    app: &MacosContext,
+    computer_id: &str,
+    path: Option<&str>,
+    command: &crate::applications::launch::EditorCommand,
+) -> Result<silo_api::methods::terminal::CommandResult, String> {
+    ssh_alias::editor_command(app, computer_id, path, command)
+}
+
+pub fn upload_files(
+    app: &MacosContext,
+    owner: String,
+    transfer_id: String,
+    computer_id: String,
+    directory: String,
+    selection: String,
+    conflict: crate::transfer::ConflictPolicy,
+) -> Result<crate::transfer::UploadOutcome, String> {
+    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
+    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    revalidate_transfer_target(&computer_id, generation)?;
+    crate::transfer::upload_files_with_transport(
+        PathBuf::from(connection.config_path),
+        connection.alias,
+        files::transfer_roots(),
+        owner,
+        transfer_id,
+        computer_id,
+        directory,
+        selection,
+        conflict,
+        Some(operation),
+    )
+}
+
+pub fn prepare_download(
+    app: &MacosContext,
+    transfer_id: String,
+    computer_id: String,
+    path: String,
+) -> Result<(crate::transfer::DownloadSession, String), String> {
+    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
+    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    revalidate_transfer_target(&computer_id, generation)?;
+    crate::transfer::prepare_download_with_transport(
+        PathBuf::from(connection.config_path),
+        connection.alias,
+        files::transfer_roots(),
+        transfer_id,
+        computer_id,
+        path,
+        Some(operation),
+    )
+}
+
+/// Queue a macOS transfer with the other work for this computer. Capture its generation
+/// before waiting, then refuse to transfer if the guest stopped or restarted in the queue.
+fn acquire_transfer_operation(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<(runtime::operation_gate::OperationGuard<'static>, u64), String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    let (record, state) = computer(computer_id)?;
+    if state != State::Running {
+        return Err("Start this computer to transfer files.".into());
+    }
+    let generation = computer_generation(computer_id)?;
+    let operation =
+        acquire_macos_transfer_turn(&runtime::OPERATIONS, computer_id, &record.name, || {
+            runtime::shutdown::ensure_accepting_operations()?;
+            revalidate_transfer_target(computer_id, generation)
+        })?;
+    Ok((operation, generation))
+}
+
+fn acquire_macos_transfer_turn<'a>(
+    gate: &'a runtime::operation_gate::OperationGate,
+    computer_id: &str,
+    name: &str,
+    revalidate: impl FnOnce() -> Result<(), String>,
+) -> Result<runtime::operation_gate::OperationGuard<'a>, String> {
+    let operation = acquire_computer_operation(
+        gate,
+        computer_id,
+        name,
+        runtime::operation_gate::OperationKind::Other,
+        &format!("Transferring files for {name}"),
+    )?;
+    operation.allow_cancel();
+    revalidate()?;
+    Ok(operation)
+}
+
+fn revalidate_transfer_target(computer_id: &str, generation: u64) -> Result<(), String> {
+    let (_, state) = computer(computer_id)?;
+    ensure_transfer_target(state, computer_generation(computer_id)?, generation)
+}
+
+fn ensure_transfer_target(
+    state: State,
+    current_generation: u64,
+    expected_generation: u64,
+) -> Result<(), String> {
+    if state != State::Running {
+        return Err("Start this computer to transfer files.".into());
+    }
+    if current_generation != expected_generation {
+        return Err("This computer restarted while the transfer was waiting. Retry it.".into());
+    }
+    Ok(())
+}
+
+/// Observe and repair macOS guest listeners and their loopback SSH tunnels.
+pub fn read_network_state(
+    app: &MacosContext,
+) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::state(app)
+}
+
+pub fn publish_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+    host_port: Option<u16>,
+    scheme: Option<String>,
+) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::publish(app, computer_id, port, host_port, scheme)
+}
+
+pub fn remove_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::unpublish(app, computer_id, port)
+}
+
+pub fn open_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+) -> Result<String, String> {
+    ports::open_url(app, computer_id, port)
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -1964,14 +3277,38 @@ fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, S
     create_with_support_check(app, request, require_supported)
 }
 
+fn create_with_job(
+    app: &MacosContext,
+    request: CreateRequest,
+    job_id: silo_api::jobs::JobId,
+) -> Result<MacosComputer, String> {
+    create_with_support_check_and_job(app, request, require_supported, Some(job_id))
+}
+
 fn create_with_support_check(
     app: &MacosContext,
     request: CreateRequest,
     support_check: impl FnOnce() -> Result<(), String>,
 ) -> Result<MacosComputer, String> {
+    create_with_support_check_and_job(app, request, support_check, None)
+}
+
+fn create_with_support_check_and_job(
+    app: &MacosContext,
+    request: CreateRequest,
+    support_check: impl FnOnce() -> Result<(), String>,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<MacosComputer, String> {
     support_check()?;
     let data = app_data(app)?;
-    create_after_acceptance(app, data, request, &runtime::OPERATIONS, create_workflow)
+    create_after_acceptance_with_job(
+        app,
+        data,
+        request,
+        &runtime::OPERATIONS,
+        create_workflow,
+        job_id,
+    )
 }
 
 fn create_after_acceptance(
@@ -1981,14 +3318,33 @@ fn create_after_acceptance(
     gate: &'static runtime::operation_gate::OperationGate,
     workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
 ) -> Result<MacosComputer, String> {
-    launch_macos_job(app.engine.as_ref(), "computers.create", gate, move |job| {
+    create_after_acceptance_with_job(app, data, request, gate, workflow, None)
+}
+
+fn create_after_acceptance_with_job(
+    app: &MacosContext,
+    data: PathBuf,
+    request: CreateRequest,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<MacosComputer, String> {
+    let launch = move |job| {
         let (sender, receiver) = std::sync::mpsc::channel();
         let app = app.clone();
         std::thread::spawn(move || create_job_worker(&app, data, request, job, sender, workflow));
         receiver
             .recv()
             .map_err(|_| "The macOS computer creation worker stopped unexpectedly.".to_owned())?
-    })
+    };
+    match requested_job_id {
+        Some(job_id) => {
+            let registry = app.engine.job_registry()?;
+            let job = accept_macos_job_with_id(registry, job_id, gate)?;
+            launch(job)
+        }
+        None => launch_macos_job(app.engine.as_ref(), "computers.create", gate, launch),
+    }
 }
 
 fn create_job_worker(
@@ -2303,6 +3659,7 @@ fn copy_template(
         developer_tools: true,
         computer_use: true,
         clipboard: true,
+        roots: false,
         needs_personalizing: true,
     };
     Ok(true)
@@ -2437,35 +3794,129 @@ fn with_macos_computer_operation<T>(
 }
 
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
+    perform_with_job(app, id, action, None)
+}
+
+fn perform_with_job(
+    app: &MacosContext,
+    id: &str,
+    action: Action,
+    requested_job: Option<(silo_api::jobs::JobId, &'static str)>,
+) -> Result<(), String> {
     match action {
-        Action::Start => start(app, id),
-        Action::Stop => stop(app, id),
+        Action::Start => start_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
+        Action::Stop => stop_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
         Action::ForceStop => force_stop(app, id),
-        Action::Delete => {
-            ensure_proxy_bootstrap_migration_ready()?;
-            ensure_loaded(app)?;
-            let (record, _) = computer(id)?;
-            let _guard = runtime::OPERATIONS
-                .removing(&[id.to_owned()], &format!("Deleting {}", record.name))
-                .map_err(|error| error.to_string())?;
-            delete(app, id)
-        }
-        Action::Setup => {
-            ensure_proxy_bootstrap_migration_ready()?;
-            begin_setup(app, id)
-        }
+        Action::Delete => delete_action(app, id, requested_job.map(|(job_id, _)| job_id)),
+        Action::Setup => begin_setup_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
         Action::ChangeResources {
             cpus,
             memory_gib,
             expected,
-        } => with_macos_computer_operation(
+        } => change_resources_action(
             app,
             id,
-            runtime::operation_gate::OperationKind::ComputerConfiguration,
-            "Saving computer settings",
-            || change_resource_configuration(app, id, cpus, memory_gib, expected),
+            cpus,
+            memory_gib,
+            expected,
+            requested_job.map(|(job_id, _)| job_id),
         ),
     }
+}
+
+/// Deletes a computer. Under a canonical job the deletion waits in the queue as
+/// "Deleting <name>", can be cancelled while waiting, and ends the job when it is done.
+fn delete_action(
+    app: &MacosContext,
+    id: &str,
+    requested_job: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let job = requested_job
+        .map(|job_id| {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)
+        })
+        .transpose()?;
+    let result = (|| {
+        ensure_proxy_bootstrap_migration_ready().map_err(|message| (false, message))?;
+        ensure_loaded(app).map_err(|message| (false, message))?;
+        let (record, _) = computer(id).map_err(|message| (false, message))?;
+        let label = format!("Deleting {}", record.name);
+        let ids = [id.to_owned()];
+        let _guard = match &job {
+            Some(job) => admit_macos_removal(app.engine.as_ref(), job, &ids, &label)
+                .map_err(|message| (true, message))?,
+            None => runtime::OPERATIONS
+                .removing(&ids, &label)
+                .map_err(|error| (false, error.to_string()))?,
+        };
+        delete(app, id).map_err(|message| (false, message))
+    })();
+    finish_job_after_work(app, id, job, result)
+}
+
+/// Changes a stopped computer's CPU and memory, queued like any other computer operation.
+fn change_resources_action(
+    app: &MacosContext,
+    id: &str,
+    cpus: u64,
+    memory_gib: u64,
+    expected: store::ExpectedResources,
+    requested_job: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let job = requested_job
+        .map(|job_id| {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)
+        })
+        .transpose()?;
+    let result = (|| {
+        ensure_loaded(app).map_err(|message| (false, message))?;
+        let (record, _) = computer(id).map_err(|message| (false, message))?;
+        let label = "Saving computer settings";
+        let _guard = match &job {
+            Some(job) => admit_macos_job(
+                app.engine.as_ref(),
+                job,
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+                Some(record.name.clone()),
+                label,
+            )
+            .map_err(|message| (true, message))?,
+            None => acquire_computer_operation(
+                &runtime::OPERATIONS,
+                id,
+                &record.name,
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                label,
+            )
+            .map_err(|message| (false, message))?,
+        };
+        change_resource_configuration(app, id, cpus, memory_gib, expected)
+            .map_err(|message| (false, message))
+    })();
+    finish_job_after_work(app, id, job, result)
+}
+
+/// Ends the job of a queued action. Admission failures already ended it (`true`).
+fn finish_job_after_work(
+    app: &MacosContext,
+    id: &str,
+    job: Option<AcceptedMacosJob>,
+    result: Result<(), (bool, String)>,
+) -> Result<(), String> {
+    let already_finished = matches!(&result, Err((true, _)));
+    let result = result.map_err(|(_, message)| message);
+    if let Some(job) = job {
+        if !already_finished {
+            finish_macos_job(
+                app.engine.as_ref(),
+                Some(id),
+                job.job_id,
+                lifecycle_job_outcome(result.clone()),
+            );
+        }
+    }
+    result
 }
 
 fn change_resource_configuration(
@@ -2707,10 +4158,28 @@ fn computer(id: &str) -> Result<(Record, State), String> {
         .ok_or_else(|| "This computer no longer exists.".to_string())
 }
 
+fn computer_generation(id: &str) -> Result<u64, String> {
+    registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| entry.attempt)
+        .ok_or_else(|| "This computer no longer exists.".to_string())
+}
+
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
+    start_with_job(app, id, None)
+}
+
+fn start_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
     require_supported()?;
     ensure_proxy_bootstrap_migration_ready()?;
-    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "computers.start")?;
+    let (job, data, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "computers.start", requested_job_id)?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -2791,13 +4260,20 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
         .and_then(|()| start_machine(app, &record, &layout, plan, attempt, pending.as_ref()));
     match started {
         Ok(note) => {
-            update(app, id, |entry| {
+            let running = update(app, id, |entry| {
                 if entry.state == State::Starting && entry.attempt == attempt {
                     entry.state = State::Running;
                     entry.since = Instant::now();
                     entry.detail = note;
+                    true
+                } else {
+                    false
                 }
-            });
+            })
+            .unwrap_or(false);
+            if running {
+                ports::computer_started(app, id);
+            }
             guest_computer_use::update_in_background(app, id, attempt);
             finish_macos_job(
                 app.engine.as_ref(),
@@ -2942,9 +4418,19 @@ fn start_machine(
 }
 
 fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
-    require_supported()?;
+    begin_setup_with_job(app, id, None)
+}
 
-    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "macos.setup.retry")?;
+fn begin_setup_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    require_supported()?;
+    ensure_proxy_bootstrap_migration_ready()?;
+
+    let (job, data, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "macos.setup.retry", requested_job_id)?;
     let (sender, receiver) = std::sync::mpsc::channel();
     let app = app.clone();
     let worker_id = id.to_owned();
@@ -3136,7 +4622,16 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.stop")?;
+    stop_with_job(app, id, None)
+}
+
+fn stop_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let (job, _, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "computers.stop", requested_job_id)?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -3319,7 +4814,12 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
         }
         // The entry stays until the files are gone, so a failed removal can be retried.
         match remove_computer(&Layout::new(&data, id)) {
-            Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
+            Ok(()) => {
+                registry().entries.retain(|entry| entry.record.id != id);
+                if let Err(message) = ports::computer_removed(app, id) {
+                    eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
+                }
+            }
             Err(message) => {
                 update(app, id, |entry| {
                     entry.deleting = false;
@@ -3370,6 +4870,7 @@ fn machine_stopped_with_lifecycle(
             return;
         }
         close_display(&app, &id);
+        ports::computer_stopped(&id);
         if !lifecycle_managed {
             return;
         }
@@ -3405,7 +4906,7 @@ struct Held<'a> {
     record: Record,
     state: State,
     cancel: Arc<AtomicU8>,
-    _operation: runtime::operation_gate::OperationGuard<'static>,
+    _operation: Option<runtime::operation_gate::OperationGuard<'static>>,
 }
 
 impl Drop for Held<'_> {
@@ -3447,26 +4948,42 @@ fn begin_operation<'a>(
     kind: checkpoints::OperationKind,
     job: &AcceptedMacosJob,
 ) -> Result<Held<'a>, String> {
+    begin_operation_for(app, id, kind, Some(job))
+}
+
+/// Claims the computer for `kind`. A checkpoint job admits through the operation queue; an
+/// export holds its own export operation for the whole archive and passes no job.
+fn begin_operation_for<'a>(
+    app: &'a MacosContext,
+    id: &str,
+    kind: checkpoints::OperationKind,
+    job: Option<&AcceptedMacosJob>,
+) -> Result<Held<'a>, String> {
     drop(admission()?);
-    let computer_name = registry()
-        .entry(id)
-        .map(|entry| entry.record.name.clone())
-        .ok_or("This computer no longer exists.")?;
-    let gate_kind = checkpoint_gate_kind(kind);
-    let label = match kind {
-        checkpoints::OperationKind::Capture => "Creating checkpoint",
-        checkpoints::OperationKind::Restore => "Restoring checkpoint",
-        checkpoints::OperationKind::Fork => "Forking checkpoint",
-        checkpoints::OperationKind::Delete => "Deleting checkpoint",
+    let operation = match job {
+        Some(job) => {
+            let computer_name = registry()
+                .entry(id)
+                .map(|entry| entry.record.name.clone())
+                .ok_or("This computer no longer exists.")?;
+            let gate_kind = checkpoint_gate_kind(kind);
+            let label = match kind {
+                checkpoints::OperationKind::Capture => "Creating checkpoint",
+                checkpoints::OperationKind::Restore => "Restoring checkpoint",
+                checkpoints::OperationKind::Fork => "Forking checkpoint",
+                checkpoints::OperationKind::Delete => "Deleting checkpoint",
+            };
+            Some(admit_checkpoint_job(
+                app.engine.as_ref(),
+                job,
+                gate_kind,
+                runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+                Some(computer_name),
+                label,
+            )?)
+        }
+        None => None,
     };
-    let operation = admit_checkpoint_job(
-        app.engine.as_ref(),
-        job,
-        gate_kind,
-        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
-        Some(computer_name),
-        label,
-    )?;
     let _admitted = admission()?;
     let (record, state, cancel) = {
         let mut registry = registry();
@@ -3484,11 +5001,13 @@ fn begin_operation<'a>(
         entry.operation = Some(checkpoints::Operation::running(kind, first_stage(kind)));
         (entry.record.clone(), entry.state, entry.cancel.clone())
     };
-    MACOS_CHECKPOINT_JOBS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(id.to_owned(), job.job_id.clone());
+    if let Some(job) = job {
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.to_owned(), job.job_id.clone());
+    }
     emit(app);
     Ok(Held {
         app,
@@ -3609,6 +5128,10 @@ fn create_checkpoint(
         computer_use_version: held.record.computer_use_version.clone(),
         developer_tools: held.record.setup.developer_tools,
         developer_tools_version: held.record.developer_tools_version.clone(),
+        cpus: held.record.cpus,
+        memory_gib: held.record.memory_gib,
+        disk_gib: held.record.disk_gib,
+        setup_fingerprint: held.record.setup_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -3651,6 +5174,10 @@ fn restore_checkpoint(
         computer_use_version: held.record.computer_use_version.clone(),
         developer_tools: held.record.setup.developer_tools,
         developer_tools_version: held.record.developer_tools_version.clone(),
+        cpus: held.record.cpus,
+        memory_gib: held.record.memory_gib,
+        disk_gib: held.record.disk_gib,
+        setup_fingerprint: held.record.setup_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -3800,6 +5327,7 @@ fn fork_checkpoint_with_workflow(
         record.setup_version = held.record.setup_version.clone();
         record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
+        record.computer_use_desired_approval = held.record.computer_use_desired_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -3903,6 +5431,7 @@ fn copy_for_fork(
         developer_tools: false,
         computer_use: true,
         clipboard: true,
+        roots: false,
         needs_personalizing: true,
     };
     // Persist while the fork is still in its creation state, where nothing else can start it.
@@ -4324,6 +5853,43 @@ mod tests {
     };
     use std::sync::atomic::AtomicUsize;
 
+    #[test]
+    fn engine_refusals_are_classified_for_stable_api_codes() {
+        let cases = [
+            ("This computer isn't running.", Refusal::NotRunning),
+            (
+                "The computer is not running. Start it to show its screen.",
+                Refusal::NotRunning,
+            ),
+            (store::NEEDS_PERSONALIZING, Refusal::NeedsPersonalizing),
+            (engine::LIMIT_EXCEEDED, Refusal::RunningLimit),
+            (
+                remote_display::SHARING_UNAVAILABLE,
+                Refusal::ScreenSharingUnavailable,
+            ),
+            (
+                "Setup has not finished. The screen is available once the computer has been set up for computer use.",
+                Refusal::SetupIncomplete,
+            ),
+        ];
+        for (message, refusal) in cases {
+            assert_eq!(classify_refusal(message), Some(refusal), "{message}");
+        }
+        assert_eq!(classify_refusal("Stop the computer first."), None);
+        assert_eq!(
+            job_error_code("This computer isn't running."),
+            silo_api::jobs::ErrorCode::NotRunning
+        );
+        assert_eq!(
+            job_error_code("This computer no longer exists."),
+            silo_api::jobs::ErrorCode::NotFound
+        );
+        assert_eq!(
+            job_error_code("Stop the computer first."),
+            silo_api::jobs::ErrorCode::Internal
+        );
+    }
+
     struct JobTestContext {
         paths: silo_engine::EnginePaths,
         identity: EngineIdentity,
@@ -4431,6 +5997,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         source.developer_tools_version = Some(developer_tools::version());
@@ -4466,6 +6033,10 @@ mod tests {
             macos_version: None,
             host_build: String::new(),
             size_bytes: None,
+            cpus: Some(source.cpus),
+            memory_gib: Some(source.memory_gib),
+            disk_gib: Some(source.disk_gib),
+            setup_fingerprint: source.setup_version.clone(),
             computer_use_version: source.computer_use_version.clone(),
             developer_tools: true,
             developer_tools_version: source.developer_tools_version.clone(),
@@ -4476,6 +6047,239 @@ mod tests {
         )
         .unwrap();
         (source, checkpoint_id)
+    }
+
+    #[test]
+    fn import_cleanup_detaches_the_disk_before_removing_its_folder() {
+        use std::cell::RefCell;
+
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("disk.img"), b"attached disk").unwrap();
+
+        // The rekey could not detach: recovery must keep the folder and say so, so the caller
+        // keeps its journal and the next launch tries again.
+        let detached_when_asked = RefCell::new(Vec::new());
+        let refuse = |disk: &std::path::Path| {
+            detached_when_asked.borrow_mut().push(disk.exists());
+            Err("The computer's disk is still attached to this Mac.".to_string())
+        };
+        let error = recover_archive_import_in(directory.path(), &id, &refuse).unwrap_err();
+        assert!(error.contains("still attached"));
+        assert!(
+            stage.join("disk.img").exists(),
+            "an attached disk was deleted"
+        );
+        assert_eq!(*detached_when_asked.borrow(), [true]);
+
+        // Once the detach works, the folder goes, after the detach, and nothing was committed.
+        let detached = RefCell::new(Vec::new());
+        let accept = |disk: &std::path::Path| {
+            detached.borrow_mut().push(disk.exists());
+            Ok(())
+        };
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(*detached.borrow(), [true], "removal must follow the detach");
+        assert!(!stage.exists());
+        // Nothing left: recovery is repeatable and detaches nothing.
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(detached.borrow().len(), 1);
+    }
+
+    #[test]
+    fn import_cleanup_keeps_a_published_folder_whose_disk_will_not_detach() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        let published = root.join(&id);
+        for folder in [&stage, &published] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("disk.img"), b"disk").unwrap();
+        }
+        let refuse = |_: &std::path::Path| Err("still attached".to_string());
+        // No record proves the rename committed, so both folders are leftovers.
+        assert!(recover_archive_import_in(directory.path(), &id, &refuse).is_err());
+        assert!(stage.join("disk.img").exists());
+        assert!(published.join("disk.img").exists());
+        let detached = std::cell::RefCell::new(Vec::new());
+        let accept = |disk: &std::path::Path| {
+            detached.borrow_mut().push(disk.to_path_buf());
+            Ok(())
+        };
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(detached.borrow().len(), 2);
+        assert!(!stage.exists() && !published.exists());
+    }
+
+    #[test]
+    fn import_cleanup_of_a_committed_import_detaches_its_leftover_staging_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("disk.img"), b"disk").unwrap();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "imported".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:09".into(),
+        );
+        record.id = id.clone();
+        store::save(&Layout::new(directory.path(), &id), &record).unwrap();
+
+        let refuse = |_: &std::path::Path| Err("still attached".to_string());
+        assert!(recover_archive_import_in(directory.path(), &id, &refuse).is_err());
+        assert!(stage.join("disk.img").exists());
+        assert!(root.join(&id).join("computer.json").exists());
+        let accept = |_: &std::path::Path| Ok(());
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert!(!stage.exists());
+        assert!(root.join(&id).join("computer.json").exists());
+    }
+
+    #[test]
+    fn interrupted_export_captures_are_found_by_their_operation_and_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = store::root(directory.path());
+        std::fs::create_dir_all(&root).unwrap();
+        let operation = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
+
+        // Process termination skips the destructors that would remove a capture.
+        let mut left = Vec::new();
+        for token in [&operation, &operation, &other] {
+            let capture = export_capture_dir(directory.path(), Some(token)).unwrap();
+            std::fs::write(capture.path().join("disk.img"), b"cloned disk").unwrap();
+            std::fs::write(capture.path().join("state.vzvmsave"), b"saved memory").unwrap();
+            left.push(capture.keep());
+        }
+        // A computer folder and a file that merely resembles a capture are never touched.
+        let computer = root.join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&computer).unwrap();
+        let lookalike = root.join(format!(".silo-macos-export-{operation}-file"));
+        std::fs::write(&lookalike, b"not a directory").unwrap();
+
+        remove_export_captures(directory.path(), &operation).unwrap();
+        assert!(!left[0].exists() && !left[1].exists());
+        assert!(
+            left[2].join("disk.img").exists(),
+            "another operation's capture was removed"
+        );
+        assert!(computer.exists());
+        assert!(lookalike.exists());
+        // Reconciling again, or on a folder that never existed, is harmless.
+        remove_export_captures(directory.path(), &operation).unwrap();
+        remove_export_captures(&directory.path().join("missing"), &operation).unwrap();
+        assert!(remove_export_captures(directory.path(), "../escape").is_err());
+    }
+
+    #[test]
+    fn a_live_export_capture_is_named_for_its_operation_and_removed_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(store::root(directory.path())).unwrap();
+        let operation = uuid::Uuid::new_v4().to_string();
+        let capture = export_capture_dir(directory.path(), Some(&operation)).unwrap();
+        let path = capture.path().to_path_buf();
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(&format!(".silo-macos-export-{operation}-")));
+        drop(capture);
+        assert!(!path.exists());
+        assert!(export_capture_dir(directory.path(), Some("not-an-id")).is_err());
+    }
+
+    #[test]
+    fn archive_resources_are_checked_against_this_macs_limits() {
+        let config = |cpus, memory_gib, disk_gib| crate::backup::MacosArchiveConfiguration {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: uuid::Uuid::new_v4().to_string(),
+            source_name: "source".into(),
+            cpus,
+            memory_gib,
+            disk_gib,
+            guest_version: "26.0".into(),
+            guest_build: "25A1".into(),
+            host_build: "25F1".into(),
+            hardware_model_digest: String::new(),
+            setup_fingerprint: String::new(),
+            computer_use_fingerprint: String::new(),
+            source: crate::backup::MacosArchiveSourceKind::WholeComputer,
+            memory: crate::backup::MacosArchiveMemory::None,
+            components: Vec::new(),
+        };
+        let small_mac = store::HostLimits {
+            cpus: 4,
+            memory_gib: 16,
+        };
+        assert!(check_archive_resources(small_mac, &config(4, 8, 64)).is_ok());
+        // Twelve CPUs or 64 GiB of memory do not fit this Mac; neither does a leaner Mac's disk floor.
+        assert!(check_archive_resources(small_mac, &config(12, 8, 64))
+            .unwrap_err()
+            .contains("CPUs"));
+        assert!(check_archive_resources(small_mac, &config(4, 64, 64))
+            .unwrap_err()
+            .contains("Memory"));
+        assert!(check_archive_resources(small_mac, &config(4, 8, 8))
+            .unwrap_err()
+            .contains("Disk"));
+    }
+
+    #[test]
+    fn run_markers_follow_the_registry_state_and_start_generation() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        *PUBLISHED_RUNS.lock().unwrap() = None;
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "marked".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0a".into(),
+        );
+        record.installed = true;
+        let id = record.id.clone();
+        let layout = Layout::new(directory.path(), &id);
+        store::save(&layout, &record).unwrap();
+        {
+            let mut computers = registry();
+            let mut entry = Entry::new(record, State::Running, None);
+            entry.attempt = 4;
+            computers.entries = vec![entry];
+            computers.loaded = true;
+        }
+        let current = || run_marker::current(directory.path(), &id, |_| true);
+
+        sync_run_markers(&app);
+        assert_eq!(current(), Some(4));
+
+        registry().entries[0].state = State::Stopping;
+        sync_run_markers(&app);
+        assert_eq!(current(), None);
+
+        let mut restarted = registry();
+        restarted.entries[0].state = State::Running;
+        restarted.entries[0].attempt = 5;
+        drop(restarted);
+        sync_run_markers(&app);
+        assert_eq!(current(), Some(5));
+
+        registry().entries.clear();
+        *PUBLISHED_RUNS.lock().unwrap() = None;
     }
 
     #[test]
@@ -5796,6 +7600,489 @@ mod tests {
     }
 
     #[test]
+    fn a_waiting_macos_delete_shows_its_job_and_cancels_before_removing_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let gate = isolated_operation_gate();
+        let _blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .acquire(
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Blocking test operation",
+                None,
+            )
+            .unwrap();
+        let accepted = accept_macos_job(context.as_ref(), "computers.delete", gate).unwrap();
+        let job_id = accepted.job_id.clone();
+        let removed = Arc::new(AtomicUsize::new(0));
+        let worker_context = context.clone();
+        let worker_removed = removed.clone();
+        let worker = std::thread::spawn(move || {
+            let admitted = admit_macos_removal(
+                worker_context.as_ref(),
+                &accepted,
+                &["computer-1".to_owned()],
+                "Deleting Mac",
+            );
+            if admitted.is_ok() {
+                worker_removed.fetch_add(1, Ordering::SeqCst);
+            }
+            admitted.map(drop)
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.job_id.as_ref() == Some(&job_id) && entry.label == "Deleting Mac")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the deletion did not enter the wait queue"
+            );
+            std::thread::yield_now();
+        }
+        assert!(gate.removal_queued("computer-1"));
+        context.job_registry().unwrap().cancel(&job_id).unwrap();
+
+        assert_eq!(
+            worker.join().unwrap().unwrap_err(),
+            "The operation was cancelled."
+        );
+        assert_eq!(removed.load(Ordering::SeqCst), 0);
+        let outcome = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap()
+            .outcome
+            .unwrap();
+        assert_eq!(
+            outcome.error.unwrap().code,
+            silo_api::jobs::ErrorCode::Cancelled
+        );
+    }
+
+    #[test]
+    fn macos_transfer_turn_waits_with_stop_restore_and_export_then_holds_the_scope() {
+        use runtime::operation_gate::{OperationGate, OperationKind};
+        use std::sync::mpsc;
+
+        for kind in [
+            OperationKind::Lifecycle,
+            OperationKind::CheckpointRestore,
+            OperationKind::Export,
+        ] {
+            let gate = OperationGate::new();
+            let (changed, notifications) = mpsc::channel();
+            gate.set_listener(move || {
+                let _ = changed.send(());
+            });
+            let transfer =
+                acquire_macos_transfer_turn(&gate, "computer-id", "dev", || Ok(())).unwrap();
+            while notifications.try_recv().is_ok() {}
+
+            let (entered, admitted) = mpsc::channel();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let _operation = gate
+                        .kind(kind)
+                        .computer("computer-id", "dev", "Conflicting operation")
+                        .unwrap();
+                    entered.send(()).unwrap();
+                });
+
+                notifications.recv().unwrap();
+                let queue = gate.snapshot();
+                assert_eq!(queue.running.len(), 1, "transfer should retain its gate");
+                assert_eq!(queue.waiting.len(), 1, "conflicting work should wait");
+                assert!(queue.waiting[0].cancellable);
+
+                drop(transfer);
+                admitted.recv().unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn macos_transfer_revalidates_running_generation_after_waiting() {
+        use runtime::operation_gate::{OperationGate, OperationKind};
+        use std::sync::{mpsc, Mutex};
+
+        let gate = OperationGate::new();
+        let (changed, notifications) = mpsc::channel();
+        gate.set_listener(move || {
+            let _ = changed.send(());
+        });
+        for (current_state, current_generation, expected_error) in [
+            (State::Stopped, 8, "Start this computer to transfer files."),
+            (
+                State::Running,
+                8,
+                "This computer restarted while the transfer was waiting. Retry it.",
+            ),
+        ] {
+            let observed = Arc::new(Mutex::new((State::Running, 7)));
+            let waiter_state = observed.clone();
+            let (result_tx, result_rx) = mpsc::channel();
+            let stop = gate
+                .kind(OperationKind::Lifecycle)
+                .computer("computer-id", "dev", "Stopping dev")
+                .unwrap();
+            while notifications.try_recv().is_ok() {}
+
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let result = acquire_macos_transfer_turn(&gate, "computer-id", "dev", || {
+                        let (state, generation) = *waiter_state.lock().unwrap();
+                        ensure_transfer_target(state, generation, 7)
+                    });
+                    result_tx.send(result.map(drop)).unwrap();
+                });
+
+                notifications.recv().unwrap();
+                let queue = gate.snapshot();
+                assert_eq!(
+                    queue.waiting.len(),
+                    1,
+                    "transfer should be visible while waiting"
+                );
+                *observed.lock().unwrap() = (current_state, current_generation);
+                drop(stop);
+                assert_eq!(result_rx.recv().unwrap().unwrap_err(), expected_error);
+            });
+        }
+    }
+
+    struct ProbeEngineContext {
+        paths: silo_engine::EnginePaths,
+        identity: silo_engine::EngineIdentity,
+        runtime_state: Arc<silo_engine::EngineRuntimeState>,
+    }
+
+    impl silo_engine::EngineContext for ProbeEngineContext {
+        fn paths(&self) -> &silo_engine::EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &silo_engine::EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<silo_engine::EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: Event, _audience: Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn silo_engine::MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn silo_engine::ProcessControl {
+            self
+        }
+    }
+
+    impl silo_engine::ProcessControl for ProbeEngineContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("the live probe context cannot restart")
+        }
+    }
+
+    struct ProbeMacosHost;
+
+    impl MacosHost for ProbeMacosHost {
+        fn show_display(
+            &self,
+            _context: &MacosContext,
+            _id: &str,
+            _title: &str,
+            _toolbar: bool,
+        ) -> Result<(), String> {
+            Err("The live probe does not open a display.".into())
+        }
+
+        fn close_display(&self, _id: &str) {}
+
+        fn linux_computer_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    struct ProbeCleanup {
+        context: MacosContext,
+        computer_id: String,
+        guest_port: Option<u16>,
+        guest_pid: Option<u32>,
+        port_config: PathBuf,
+        original_port_config: Option<(Vec<u8>, std::fs::Permissions)>,
+    }
+
+    impl Drop for ProbeCleanup {
+        fn drop(&mut self) {
+            if let (Some(port), Some(pid)) = (self.guest_port, self.guest_pid) {
+                if let Ok(alias) =
+                    ensure_ssh_alias(&self.context, &self.computer_id, None, Some(false))
+                {
+                    let _ = probe_ssh_command(
+                        &alias.config_path,
+                        &alias.alias,
+                        &format!("kill -TERM {pid}"),
+                    );
+                }
+                let _ = remove_network_port(&self.context, &self.computer_id, port);
+            }
+            let _ = remove_ssh_alias(&self.context, &self.computer_id);
+            match &self.original_port_config {
+                Some((bytes, permissions)) => {
+                    if let Some(parent) = self.port_config.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if std::fs::write(&self.port_config, bytes).is_ok() {
+                        let _ = std::fs::set_permissions(&self.port_config, permissions.clone());
+                    }
+                }
+                None => {
+                    let _ = std::fs::remove_file(&self.port_config);
+                }
+            }
+            ssh_alias::set_proxy_helper_for_test(None);
+        }
+    }
+
+    fn probe_ssh_command(config: &str, alias: &str, remote_command: &str) -> std::process::Output {
+        let mut command = std::process::Command::new("/usr/bin/ssh");
+        crate::applications::launch::sanitize_child(&mut command)
+            .args(["-F", config, "-o", "BatchMode=yes", alias, remote_command])
+            .output()
+            .expect("launch the disposable guest SSH command")
+    }
+
+    #[test]
+    #[ignore = "opt-in live probe; requires one running disposable Silo Dev macOS computer"]
+    fn live_probe_files_ports_and_local_ssh_alias() {
+        let computer_id = std::env::var("SILO_MACOS_LIVE_PROBE_ID")
+            .expect("set the disposable macOS computer UUID");
+        let app_data = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_APP_DATA")
+                .expect("set the Silo Dev application data path"),
+        );
+        let helper = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_HELPER")
+                .expect("set the disposable Dev engine helper path"),
+        );
+        let home = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_HOME").expect("set the host home path"),
+        );
+        uuid::Uuid::parse_str(&computer_id).expect("the probe computer id is a UUID");
+        silo_engine::channel::init(silo_engine::channel::DEVELOPMENT_IDENTIFIER);
+
+        let context = Arc::new(ProbeEngineContext {
+            paths: silo_engine::EnginePaths {
+                app_data: app_data.clone(),
+                app_config: app_data.clone(),
+                app_cache: app_data.clone(),
+                app_log: app_data.clone(),
+                resources: PathBuf::new(),
+                home,
+            },
+            identity: silo_engine::EngineIdentity {
+                channel: silo_engine::channel::Channel::Development,
+                version: env!("CARGO_PKG_VERSION").into(),
+                package_kind: silo_engine::PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(silo_engine::EngineRuntimeState::default()),
+        });
+        let context = MacosContext::new(context, Arc::new(ProbeMacosHost));
+        ssh_alias::set_proxy_helper_for_test(Some(helper));
+        let layout = Layout::new(&app_data, &computer_id);
+        let record = store::read_record(&layout).expect("read the disposable computer record");
+        assert!(record.setup.roots, "the guest must have workspace roots");
+        assert!(
+            record.setup_complete(),
+            "the guest must be set up before probing"
+        );
+
+        {
+            let mut registry = registry();
+            assert!(
+                !registry.loaded,
+                "run this focused probe in a fresh test process"
+            );
+            registry.entries = vec![Entry::new(record, State::Running, None)];
+            registry.loaded = true;
+        }
+
+        let port_config = app_data.join("network/macos-ports.json");
+        let original_port_config = std::fs::read(&port_config).ok().map(|bytes| {
+            let permissions = std::fs::metadata(&port_config)
+                .expect("read port config permissions")
+                .permissions();
+            (bytes, permissions)
+        });
+        let mut cleanup = ProbeCleanup {
+            context: context.clone(),
+            computer_id: computer_id.clone(),
+            guest_port: None,
+            guest_pid: None,
+            port_config,
+            original_port_config,
+        };
+
+        let files = list_directory(
+            &context,
+            "p3-macos-parity-2b-live".into(),
+            computer_id.clone(),
+            files::WORKSPACE.into(),
+            0,
+            None,
+        )
+        .expect("list the live guest workspace");
+        eprintln!(
+            "live_files entries={} next_page={}",
+            files.entries.len(),
+            files.next_offset.is_some()
+        );
+
+        let alias = ensure_ssh_alias(&context, &computer_id, None, Some(false))
+            .expect("ensure and probe the local-engine SSH alias");
+        eprintln!("live_alias alias={} include_not_changed=true", alias.alias);
+
+        let before_ports = read_network_state(&context).expect("read live guest listeners");
+        let initial = before_ports
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .expect("find the disposable computer in network state");
+        let guest_port = (49152..=49215)
+            .find(|port| {
+                !initial
+                    .ports
+                    .iter()
+                    .any(|candidate| candidate.port == *port)
+            })
+            .expect("find an unused disposable guest port");
+        cleanup.guest_port = Some(guest_port);
+        let start = probe_ssh_command(
+            &alias.config_path,
+            &alias.alias,
+            &format!(
+                "(/usr/bin/nohup /usr/bin/nc -lk 127.0.0.1 {guest_port} >/dev/null 2>&1 </dev/null & echo $!)"
+            ),
+        );
+        assert!(
+            start.status.success(),
+            "start the disposable guest listener: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        cleanup.guest_pid = String::from_utf8_lossy(&start.stdout)
+            .split_whitespace()
+            .find_map(|value| value.parse::<u32>().ok());
+        assert!(cleanup.guest_pid.is_some(), "capture the listener PID");
+
+        let listeners = read_network_state(&context).expect("discover the live guest listener");
+        let observed = listeners
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .expect("find the disposable computer after listener discovery");
+        assert!(
+            observed.ports.iter().any(|port| port.port == guest_port),
+            "lsof should report the disposable guest listener"
+        );
+
+        let published = publish_network_port(
+            &context,
+            &computer_id,
+            guest_port,
+            None,
+            Some("http".into()),
+        )
+        .expect("publish the live guest listener through SSH");
+        let published = published
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .and_then(|computer| computer.ports.iter().find(|port| port.port == guest_port))
+            .expect("find the published guest port");
+        assert_eq!(
+            published.state,
+            silo_api::methods::network::PublishedPortState::Reachable
+        );
+        let host_port = published
+            .host_port
+            .expect("published port has a host endpoint");
+        let socket = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], host_port)),
+            Duration::from_secs(3),
+        )
+        .expect("connect through the published loopback tunnel");
+        drop(socket);
+        eprintln!("live_port guest={guest_port} host={host_port} state=reachable");
+
+        if std::env::var("SILO_MACOS_LIVE_PROBE_SHUTDOWN").as_deref() == Ok("1") {
+            let shutdown = probe_ssh_command(
+                &alias.config_path,
+                &alias.alias,
+                "sudo -n /sbin/shutdown -h now",
+            );
+            let shutdown_stderr = String::from_utf8_lossy(&shutdown.stderr);
+            assert!(
+                shutdown.status.success() || shutdown_stderr.contains("closed by remote host"),
+                "gracefully shut down the disposable guest: {shutdown_stderr}"
+            );
+            eprintln!(
+                "live_guest_shutdown=ssh_exit_{}",
+                shutdown.status.code().unwrap_or(-1),
+            );
+        }
+    }
+
+    #[test]
+    fn saved_memory_import_warning_says_import_starts_from_disk() {
+        let config = crate::backup::MacosArchiveConfiguration {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: "e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f".into(),
+            source_name: "Source".into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+            guest_version: "26.6.2".into(),
+            guest_build: "25G83".into(),
+            host_build: checkpoints::host_build(),
+            hardware_model_digest: "0".repeat(64),
+            setup_fingerprint: "setup-1".into(),
+            computer_use_fingerprint: "computer-use-1".into(),
+            source: crate::backup::MacosArchiveSourceKind::WholeComputer,
+            memory: crate::backup::MacosArchiveMemory::Saved {
+                host_build: checkpoints::host_build(),
+                configuration_digest: crate::backup::memory_configuration_digest(
+                    4,
+                    8,
+                    64,
+                    &format!("sha256:{}", "0".repeat(64)),
+                )
+                .unwrap(),
+                size: 1,
+                sha256: "2".repeat(64),
+            },
+            components: Vec::new(),
+        };
+
+        let warning = archive_memory_warning("Source", &config).unwrap();
+
+        assert!(warning.contains("Import verifies it"));
+        assert!(warning.contains("starts the new computer from its disk"));
+    }
+
+    #[test]
     fn stop_shuts_down_inside_the_guest_only_once_setup_is_complete() {
         assert_eq!(stop_plan(true), StopPlan::Shutdown);
         assert_eq!(stop_plan(false), StopPlan::RequestStop);
@@ -5853,6 +8140,10 @@ mod tests {
             macos_version: None,
             host_build: String::new(),
             size_bytes: None,
+            cpus: None,
+            memory_gib: None,
+            disk_gib: None,
+            setup_fingerprint: None,
             computer_use_version: Some("cu-before".into()),
             developer_tools: false,
             developer_tools_version: None,
@@ -5915,6 +8206,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         done.record.developer_tools_version = Some(developer_tools::version());
@@ -6464,6 +8756,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         entry.record.developer_tools_version = Some("stale-tools".into());
@@ -6491,6 +8784,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         record.developer_tools_version = Some(developer_tools::version());
@@ -6757,6 +9051,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: false,
             needs_personalizing: true,
         };
         record.template = Some("25G83-abcd".into());
@@ -6846,6 +9141,298 @@ mod tests {
         let mut open = Closed::default();
         assert!(open.close_for_update(true).is_err());
         assert!(open.check().is_ok());
+    }
+
+    /// Replaces the shared computer inventory with one finished computer in `state`.
+    fn install_computer(
+        directory: &std::path::Path,
+        state: State,
+        approval: crate::computer_use::Approval,
+    ) -> String {
+        registry().entries.clear();
+        let id = install_test_computer(
+            directory,
+            "mac-approval",
+            TestComputerState::Stopped,
+            approval,
+        );
+        registry().entries[0].state = state;
+        id
+    }
+
+    #[test]
+    fn computer_use_state_reports_desired_and_applied_approval() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(macos_computer_use_state(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(state["approval"], "ask");
+        assert_eq!(state["appliedApproval"], "ask");
+        assert_eq!(state["approvalApply"], "applied");
+        assert!(state["state"].is_null() && state["lcuVersion"].is_null());
+        assert!(runtime
+            .block_on(has_macos_computer(app.clone(), id))
+            .unwrap());
+        assert!(!runtime
+            .block_on(has_macos_computer(app, "missing".into()))
+            .unwrap());
+    }
+
+    #[test]
+    fn setting_the_approval_of_a_stopped_computer_waits_for_its_next_start() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(
+                app.clone(),
+                id.clone(),
+                Approval::Auto,
+            ))
+            .unwrap();
+        assert_eq!(state["approval"], "auto");
+        assert_eq!(state["appliedApproval"], "unknown");
+        assert_eq!(state["approvalApply"], "pending");
+        let (record, _) = computer(&id).unwrap();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Auto));
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(record.computer_use_stale());
+        let saved = store::load_all(directory.path());
+        assert_eq!(saved[0].computer_use_desired_approval, Some(Approval::Auto));
+        assert!(!guest_computer_use::update_running(&id));
+        // Putting the applied mode back is already applied.
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(app, id, Approval::Ask))
+            .unwrap();
+        assert_eq!(state["approvalApply"], "applied");
+    }
+
+    #[test]
+    fn setting_the_approval_of_an_unknown_computer_fails() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(set_macos_computer_use_approval(
+                app,
+                "missing".into(),
+                Approval::Auto,
+            ))
+            .unwrap_err();
+        assert_eq!(error, "This computer no longer exists.");
+    }
+
+    /// Guest steps of an update that block the first installation until the test lets it go.
+    struct GatedSteps {
+        installed: std::sync::Mutex<Vec<crate::computer_use::Approval>>,
+        started: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl guest_computer_use::UpdateSteps for GatedSteps {
+        fn wait_for_ssh(
+            &self,
+            _layout: &Layout,
+            _record: &Record,
+            _cancelled: &dyn Fn() -> bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn install(
+            &self,
+            _app: &MacosContext,
+            _id: &str,
+            approval: crate::computer_use::Approval,
+            _job: &guest_computer_use::Job,
+        ) -> Result<(), String> {
+            let first = {
+                let mut installed = self.installed.lock().unwrap();
+                installed.push(approval);
+                installed.len() == 1
+            };
+            if first {
+                self.started.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reversing_the_approval_during_an_update_updates_the_guest_again() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::Running, Approval::Ask);
+        let (started_sender, started) = std::sync::mpsc::sync_channel(1);
+        let (release, released) = std::sync::mpsc::channel();
+        let steps = Arc::new(GatedSteps {
+            installed: std::sync::Mutex::new(Vec::new()),
+            started: started_sender,
+            release: std::sync::Mutex::new(released),
+        });
+        // Applied `ask`; `auto` is requested and its installation starts.
+        apply_desired_approval_without_update(&id, Approval::Auto);
+        let worker = guest_computer_use::spawn_update(&app, &id, 1, steps.clone())
+            .expect("the stale computer is updated");
+        started.recv().unwrap();
+        // While it runs, `ask` is requested again. The record still shows the applied
+        // `ask`, so this request alone queues nothing.
+        let projection = apply_desired_approval(&app, &id, Approval::Ask).unwrap();
+        assert_eq!(projection["approval"], "ask");
+        assert!(guest_computer_use::update_running(&id));
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            *steps.installed.lock().unwrap(),
+            [Approval::Auto, Approval::Ask]
+        );
+        let (record, _) = computer(&id).unwrap();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Ask));
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(!record.computer_use_stale());
+        assert!(!guest_computer_use::update_running(&id));
+        let saved = store::load_all(directory.path());
+        assert_eq!(saved[0].computer_use_approval, Some(Approval::Ask));
+        assert_eq!(
+            saved[0].computer_use_version,
+            Some(templates::computer_use_version_for(Approval::Ask))
+        );
+    }
+
+    /// Records a desired approval the way the setter does, without scheduling an update.
+    fn apply_desired_approval_without_update(id: &str, approval: crate::computer_use::Approval) {
+        registry()
+            .set_desired_approval(id, approval, |_| Ok(()))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_desired_approval_changes_only_that_field_of_the_current_record() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Running);
+        // An update completion recorded its fingerprint after the setter's caller read the
+        // record: the setter must keep it, whatever order they run in.
+        registry
+            .finish_computer_use_update(&id, 1, "v-auto", Approval::Auto, |_| Ok(()))
+            .unwrap();
+        let (attempt, state, saved) = registry
+            .set_desired_approval(&id, Approval::Ask, |_| Ok(()))
+            .unwrap();
+        assert_eq!((attempt, state), (1, State::Running));
+        assert_eq!(saved.computer_use_version.as_deref(), Some("v-auto"));
+        assert_eq!(saved.computer_use_approval, Some(Approval::Auto));
+        assert_eq!(saved.computer_use_desired_approval, Some(Approval::Ask));
+        // A completion after the setter keeps the desired approval.
+        registry
+            .finish_computer_use_update(&id, 1, "v-auto", Approval::Auto, |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            registry.entries[0].record.computer_use_desired_approval,
+            Some(Approval::Ask)
+        );
+        // What was saved is what the memory holds, and a failed save changes neither.
+        let held = std::cell::RefCell::new(None);
+        registry
+            .set_desired_approval(&id, Approval::Auto, |record| {
+                *held.borrow_mut() = Some(record.clone());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            held.borrow()
+                .as_ref()
+                .unwrap()
+                .computer_use_desired_approval,
+            registry.entries[0].record.computer_use_desired_approval
+        );
+        let failing = |_: &Record| Err("disk full".to_string());
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Ask, failing)
+                .unwrap_err(),
+            "disk full"
+        );
+        assert_eq!(
+            registry.entries[0].record.computer_use_desired_approval,
+            Some(Approval::Auto)
+        );
+    }
+
+    #[test]
+    fn a_desired_approval_is_not_written_for_a_deleted_or_deleting_computer() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Stopped);
+        let never = |_: &Record| -> Result<(), String> { panic!("must not save") };
+        registry.entries[0].deleting = true;
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Auto, never)
+                .unwrap_err(),
+            "This computer no longer exists."
+        );
+        registry.entries.clear();
+        assert_eq!(
+            registry
+                .set_desired_approval(&id, Approval::Auto, never)
+                .unwrap_err(),
+            "This computer no longer exists."
+        );
+    }
+
+    #[test]
+    fn closing_a_display_is_refused_during_setup_and_leaves_the_computer_running() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::SettingUp, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let refused = runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap_err();
+        assert!(refused.contains("setup"), "{refused}");
+        registry().entries[0].state = State::Running;
+        runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(computer(&id).unwrap().1, State::Running);
+        let missing = runtime
+            .block_on(close_macos_display(app, "missing".into()))
+            .unwrap_err();
+        assert_eq!(missing, "This computer no longer exists.");
     }
 
     #[test]

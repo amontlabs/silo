@@ -27,13 +27,13 @@ pub(super) const MAX_HEIGHT: u32 = 4320;
 /// The framebuffer size of a computer's display before anything resizes it.
 const DEFAULT_SIZE: (u32, u32) = (2560, 1600);
 
-const SHARING_UNAVAILABLE: &str = "Screen Sharing is not available in this computer yet. Silo turns it on when it sets up computer use; a computer set up earlier is updated in the background shortly after it starts. Try again in a minute.";
+pub(super) const SHARING_UNAVAILABLE: &str = "Screen Sharing is not available in this computer yet. Silo turns it on when it sets up computer use; a computer set up earlier is updated in the background shortly after it starts. Try again in a minute.";
 const RFB_UNAVAILABLE: &str = "Screen Sharing accepted TCP but did not return a valid RFB greeting. Try again once the computer finishes starting.";
 
 /// What a viewer needs to sign in: the guest account and the framebuffer size at this moment.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DisplaySession {
+pub struct DisplaySession {
     pub username: String,
     pub password: String,
     pub width: u32,
@@ -179,6 +179,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         }
     }
