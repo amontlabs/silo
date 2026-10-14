@@ -750,10 +750,13 @@ pub fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
 pub fn current_settings() -> Result<Map<String, Value>, String> {
     let context = silo_engine::context::current()
         .ok_or_else(|| "The engine context is unavailable".to_owned())?;
+    settings_of(context.as_ref())
+}
+
+/// Validated, persisted preferences of one engine context.
+pub fn settings_of(context: &dyn silo_engine::EngineContext) -> Result<Map<String, Value>, String> {
     let state = context.runtime_state();
-    let snapshot = state
-        .settings()
-        .initialize(|| configured_path(context.as_ref()))?;
+    let snapshot = state.settings().initialize(|| configured_path(context))?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
     }

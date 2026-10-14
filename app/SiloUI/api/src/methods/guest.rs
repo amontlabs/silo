@@ -85,6 +85,8 @@ wire_struct! {
     GuestExecGetParams {
         job_id: crate::jobs::JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         since_seq: Option<u64>,
     }
 }
@@ -183,3 +185,28 @@ pub enum GuestSshPurpose {
 wire_struct! { GuestSshAliasEnsureParams { computer_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] install_include: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] path: Option<String> } }
 wire_struct! { GuestSshAliasEnsureResult { alias: String, user: String, home: String, config_path: String, include_line: String, include_installed: bool } }
 pub type GuestSshAliasRemoveParams = ComputerTargetParams;
+
+#[cfg(test)]
+mod tests {
+    use super::GuestExecGetParams;
+    use crate::jobs::JobId;
+
+    #[test]
+    fn exec_get_accepts_an_optional_owner_device() {
+        let local: GuestExecGetParams = serde_json::from_value(serde_json::json!({
+            "jobId": "job:1",
+            "sinceSeq": 3
+        }))
+        .unwrap();
+        assert_eq!(local.device_id, None);
+
+        let remote: GuestExecGetParams = serde_json::from_value(serde_json::json!({
+            "jobId": "job:1",
+            "deviceId": "owner-device",
+            "sinceSeq": 3
+        }))
+        .unwrap();
+        assert_eq!(remote.device_id.as_deref(), Some("owner-device"));
+        assert_eq!(remote.job_id, JobId::new("job:1").unwrap());
+    }
+}

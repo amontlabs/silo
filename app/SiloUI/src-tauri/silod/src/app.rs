@@ -131,6 +131,8 @@ fn run_appkit(
     // Resumes computers a previous engine update saved, before anything else advances them,
     // and starts the engine's own update schedule.
     crate::methods::services::start(context.clone());
+    // The engine watches its computers whether or not a client is connected (95 A-26).
+    crate::methods::computers::install_health_watch(context.clone());
     crate::methods::access::install(context.clone())?;
     crate::methods::access::start_connections(context.clone())?;
 
