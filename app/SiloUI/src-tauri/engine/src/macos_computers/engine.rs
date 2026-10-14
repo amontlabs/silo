@@ -40,7 +40,7 @@ const MAIN_THREAD_WAIT: Duration = Duration::from_secs(10);
 const FETCH_WAIT: Duration = Duration::from_secs(60);
 const CANCEL_WAIT: Duration = Duration::from_secs(30);
 const VIRTUALIZATION_ENTITLEMENT: &str = "com.apple.security.virtualization";
-const LIMIT_EXCEEDED: &str =
+pub(super) const LIMIT_EXCEEDED: &str =
     "macOS allows at most two macOS computers running at once on this Mac.";
 
 /// What a main-thread slot holds for one computer.

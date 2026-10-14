@@ -122,7 +122,7 @@ const MANAGED_LABEL: &str = "silo.managed=true";
 fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
     let context = host.engine_context();
     let audience = if name == "silo://computer-configuration-progress" {
-        setup_progress_audience()
+        setup_progress_audience(payload["requestId"].as_str().unwrap_or_default())
     } else {
         Audience::All
     };
@@ -134,9 +134,37 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
     context.publish(Event::new(name, payload), audience);
 }
 
-fn setup_progress_audience() -> Audience {
-    // Preserve the existing setup target while the Tauri client switches to socket IDs.
-    Audience::Client(silo_engine::context::ClientId::new("main"))
+/// The socket clients that started a setup request. Setup progress and its outcome go only
+/// to the starting client (10 `computers.configuration.change`); a request nobody bound
+/// keeps the in-process Tauri target while that client still uses it.
+static SETUP_AUDIENCES: OnceLock<Mutex<HashMap<String, silo_engine::context::ClientId>>> =
+    OnceLock::new();
+
+/// Directs the progress and outcome of setup request `request_id` to `client`.
+pub fn bind_setup_audience(request_id: &str, client: silo_engine::context::ClientId) {
+    SETUP_AUDIENCES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(request_id.to_owned(), client);
+}
+
+pub fn release_setup_audience(request_id: &str) {
+    SETUP_AUDIENCES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(request_id);
+}
+
+fn setup_progress_audience(request_id: &str) -> Audience {
+    let bound = SETUP_AUDIENCES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(request_id)
+        .cloned();
+    Audience::Client(bound.unwrap_or_else(|| silo_engine::context::ClientId::new("main")))
 }
 
 fn publish_configuration_progress(context: &dyn EngineContext, payload: Value) {
@@ -2243,6 +2271,96 @@ pub fn configure_computer_identities_with_host(
     result
 }
 
+/// Saves Git identities as a canonical job: each computer's lane is a queue entry owned by
+/// the job, so it shows the job id while waiting and `operations.cancel` can remove it. The
+/// job ends here with no result, or with the failure and its code.
+pub fn configure_computer_identities_with_host_and_job(
+    host: &dyn RuntimeHost,
+    identities: Vec<ComputerIdentity>,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
+    let context = host.engine_context();
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let registry = context.job_registry()?;
+    {
+        let (cancel_id, cancel_flag) = (job_id.clone(), cancellation.clone());
+        registry.register_cancel(
+            job_id.clone(),
+            crate::jobs::CancelRoute::JobGate,
+            move || {
+                // Between lanes no entry exists; the flag stops the next one.
+                cancel_flag.store(true, Ordering::SeqCst);
+                OPERATIONS
+                    .cancel_job(&cancel_id)
+                    .map_err(|error| error.to_string())
+            },
+        );
+    }
+    let lane_job = job_id.clone();
+    let lane_registry = registry.clone();
+    let lane_cancellation = cancellation.clone();
+    let lane = move |configuration: &ComputerConfiguration,
+                     label: &str|
+          -> Result<Option<operation_gate::OperationGuard<'static>>, RuntimeError> {
+        if lane_cancellation.load(Ordering::SeqCst) {
+            return Err(RuntimeError::Cancelled {
+                operation: "Saving the Git identity".into(),
+            });
+        }
+        let guard = OPERATIONS
+            .kind(operation_gate::OperationKind::Other)
+            .acquire_for_job(
+                operation_gate::Scope::Computer {
+                    id: configuration.id().to_owned(),
+                },
+                Some(configuration.name().to_owned()),
+                label,
+                None,
+                lane_job.clone(),
+                Some(lane_cancellation.clone()),
+            )?;
+        lane_registry
+            .mark_running(&lane_job)
+            .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
+        lane_registry.associate_gate(guard.request_id(), lane_job.clone());
+        guard.allow_cancel();
+        guard.expect_within(Duration::from_secs(600));
+        Ok(Some(guard))
+    };
+    let names: Vec<String> = identities
+        .iter()
+        .map(|identity| identity.computer.clone())
+        .collect();
+    let result = (|| {
+        let paths = runtime_paths(host)?;
+        shutdown::ensure_accepting_operations()?;
+        configure_computer_identities_in(&ProcessRunner, &paths, &identities, &lane)
+            .map_err(|error| error.to_string())
+    })();
+    let cancelled = cancellation.load(Ordering::SeqCst);
+    let finished = match &result {
+        Ok(()) => {
+            crate::jobs::finish_with_result(context.as_ref(), job_id, Value::Null, Audience::All)
+        }
+        Err(message) => {
+            notify_git_identity_failure(host, &names, message);
+            crate::jobs::finish_with_error(
+                context.as_ref(),
+                job_id,
+                if cancelled {
+                    silo_api::jobs::ErrorCode::Cancelled
+                } else {
+                    silo_api::jobs::ErrorCode::Internal
+                },
+                message.clone(),
+                Audience::All,
+            )
+        }
+    };
+    finished.map_err(|error| error.to_string())?;
+    result
+}
+
 pub fn notify_git_identity_failure(host: &dyn RuntimeHost, names: &[String], message: &str) {
     host.notify(git_identity_notice(names, message));
 }
@@ -3360,6 +3478,30 @@ pub fn computer_action_with_host(
     name: String,
     path: Option<String>,
 ) -> Result<ApplicationSource, BridgeError> {
+    computer_action_with_host_job(host, action, name, path, None, "computers.lifecycle")
+}
+
+/// Runs a lifecycle action under a job identity allocated by the canonical API dispatcher.
+/// The legacy desktop entry point above still allocates its own job identity.
+pub fn computer_action_with_host_and_job(
+    host: &dyn RuntimeHost,
+    action: String,
+    name: String,
+    path: Option<String>,
+    job_id: silo_api::jobs::JobId,
+    method: &str,
+) -> Result<ApplicationSource, BridgeError> {
+    computer_action_with_host_job(host, action, name, path, Some(job_id), method)
+}
+
+fn computer_action_with_host_job(
+    host: &dyn RuntimeHost,
+    action: String,
+    name: String,
+    path: Option<String>,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+    job_method: &str,
+) -> Result<ApplicationSource, BridgeError> {
     host.ensure_runtime_ready()?;
     if matches!(action.as_str(), "open-editor" | "open-terminal") {
         shutdown::ensure_accepting_operations()?;
@@ -3392,16 +3534,22 @@ pub fn computer_action_with_host(
             (None, None, LifecycleFailure::Failed, error.into())
         })?;
         let context = host.engine_context();
-        let accepted = crate::jobs::allocate(context.as_ref(), "computers.lifecycle").map_err(
-            |error| {
+        let accepted = match requested_job_id.clone() {
+            Some(job_id) => Ok(crate::jobs::Acceptance {
+                job_id,
+                created: true,
+                acknowledged: false,
+            }),
+            None => crate::jobs::allocate(context.as_ref(), job_method),
+        }
+        .map_err(|error| {
                 (
                     None,
                     Some(computer_id.clone()),
                     LifecycleFailure::Failed,
                     BridgeError::from(error.to_string()),
                 )
-            },
-        )?;
+            })?;
         let job_id = accepted.job_id;
         let base_label = lifecycle_label(&action, &name);
         let key = format!("computer:{computer_id}:{action}");
@@ -3794,7 +3942,7 @@ fn publish_creation_wait_with_context(
         context,
         "silo://computer-configuration-progress",
         &payload,
-        setup_progress_audience(),
+        setup_progress_audience(request_id),
     ) {
         eprintln!("silo-engine: could not persist setup wait progress: {error}");
     }
@@ -4367,26 +4515,35 @@ fn accept_setup_job(
             "This setup request ID is already in use.".to_owned()
         });
     }
-    let cancel_key = accepted.job_id.as_str().to_owned();
-    let job_id = accepted.job_id.clone();
+    accept_setup_job_for_id(context, accepted.job_id)
+}
+
+/// Attaches runtime cancellation and gate handling to a setup job accepted by a socket API
+/// caller. The caller has already persisted the canonical method and request-scoped id.
+fn accept_setup_job_for_id(
+    context: &dyn silo_engine::context::EngineContext,
+    job_id: silo_api::jobs::JobId,
+) -> Result<AcceptedSetupJob, String> {
+    let cancel_key = job_id.as_str().to_owned();
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancel_flag = cancelled.clone();
     context
         .job_registry()
         .map_err(|error| error.to_string())?
-        .register_cancel(job_id, crate::jobs::CancelRoute::SetupGate, move || {
-            let result = OPERATIONS
-                .cancel_existing_key(&cancel_key)
-                .map_err(|error| error.to_string());
-            if result.is_ok() {
-                cancel_flag.store(true, Ordering::SeqCst);
-            }
-            result
-        });
-    Ok(AcceptedSetupJob {
-        job_id: accepted.job_id,
-        cancelled,
-    })
+        .register_cancel(
+            job_id.clone(),
+            crate::jobs::CancelRoute::SetupGate,
+            move || {
+                let result = OPERATIONS
+                    .cancel_existing_key(&cancel_key)
+                    .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    cancel_flag.store(true, Ordering::SeqCst);
+                }
+                result
+            },
+        );
+    Ok(AcceptedSetupJob { job_id, cancelled })
 }
 
 fn finish_setup_job(
@@ -4395,14 +4552,20 @@ fn finish_setup_job(
     result: &Result<ApplicationSource, String>,
     cancelled: bool,
 ) -> Result<(), String> {
-    match result {
+    let request_id = job_id
+        .as_str()
+        .strip_prefix("setup:")
+        .unwrap_or_default()
+        .to_owned();
+    let audience = setup_progress_audience(&request_id);
+    let finished = match result {
         Ok(state) => {
             publish_linux_computers_changed(context, state);
             crate::jobs::finish_with_result(
                 context,
                 job_id,
                 serde_json::to_value(state).map_err(|error| error.to_string())?,
-                setup_progress_audience(),
+                audience,
             )
         }
         Err(message) => crate::jobs::finish_with_error(
@@ -4414,10 +4577,12 @@ fn finish_setup_job(
                 silo_api::jobs::ErrorCode::Internal
             },
             message.clone(),
-            setup_progress_audience(),
+            audience,
         ),
     }
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string());
+    release_setup_audience(&request_id);
+    finished
 }
 
 fn publish_linux_computers_changed(
@@ -4577,14 +4742,26 @@ pub fn retry_computer_configuration_with_host(
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<ApplicationSource, String> {
+    retry_computer_configuration_with_host_and_job(host, request_id, retry_computer, None)
+}
+
+pub fn retry_computer_configuration_with_host_and_job(
+    host: &dyn RuntimeHost,
+    request_id: Option<String>,
+    retry_computer: Option<String>,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<ApplicationSource, String> {
     host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
     let context = host.engine_context();
-    let accepted = accept_setup_job(
-        context.as_ref(),
-        &request_id,
-        "computers.configuration.retry",
-    )?;
+    let accepted = match job_id {
+        Some(job_id) => accept_setup_job_for_id(context.as_ref(), job_id)?,
+        None => accept_setup_job(
+            context.as_ref(),
+            &request_id,
+            "computers.configuration.retry",
+        )?,
+    };
     let failure_title = retry_computer.as_deref().map_or_else(
         || "Couldn\u{2019}t finish computer setup".to_string(),
         |name| format!("Couldn\u{2019}t finish setting up {name}"),
@@ -4660,14 +4837,27 @@ pub fn change_computer_configuration_with_host(
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<ApplicationSource, String> {
+    change_computer_configuration_with_host_and_job(host, change, request_id, retry_computer, None)
+}
+
+pub fn change_computer_configuration_with_host_and_job(
+    host: &dyn RuntimeHost,
+    change: ComputerConfigurationChange,
+    request_id: Option<String>,
+    retry_computer: Option<String>,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<ApplicationSource, String> {
     host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
     let context = host.engine_context();
-    let accepted = accept_setup_job(
-        context.as_ref(),
-        &request_id,
-        "computers.configuration.change",
-    )?;
+    let accepted = match job_id {
+        Some(job_id) => accept_setup_job_for_id(context.as_ref(), job_id)?,
+        None => accept_setup_job(
+            context.as_ref(),
+            &request_id,
+            "computers.configuration.change",
+        )?,
+    };
     let failure_title = change.failure_title();
     let deleted = change.deleted_ids();
     let result = (|| {
@@ -6697,6 +6887,47 @@ mod tests {
             "silo://computer-configuration-progress"
         );
         assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
+    }
+
+    #[test]
+    fn a_bound_setup_request_reaches_only_the_client_that_started_it() {
+        use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+        let context = RecordingContext::default();
+        let request = format!("bound-{}", uuid::Uuid::new_v4());
+        bind_setup_audience(&request, ClientId::new("socket-client"));
+        publish_creation_wait_with_context(
+            &context,
+            &request,
+            &crate::creation_inputs::Step::Image,
+        );
+        let published = context.published();
+        assert_eq!(published[0].0.name, "operations.job.progress");
+        assert_eq!(published[0].0.payload["jobId"], format!("setup:{request}"));
+        assert_eq!(
+            published[0].1,
+            Audience::Client(ClientId::new("socket-client"))
+        );
+
+        let job_id = silo_api::jobs::JobId::new(format!("setup:{request}")).unwrap();
+        finish_setup_job(
+            &context,
+            job_id,
+            &Err("The change failed.".to_owned()),
+            false,
+        )
+        .unwrap();
+        let published = context.published();
+        let finished = published
+            .iter()
+            .find(|(event, _)| event.name == "operations.job.finished")
+            .expect("the outcome is published");
+        assert_eq!(finished.1, Audience::Client(ClientId::new("socket-client")));
+        // The binding ends with the request: a later one falls back to the in-process client.
+        assert_eq!(
+            setup_progress_audience(&request),
+            Audience::Client(ClientId::new("main"))
+        );
     }
 
     #[test]

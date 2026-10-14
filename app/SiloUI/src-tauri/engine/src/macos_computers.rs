@@ -64,7 +64,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-pub use store::{Action, CreateRequest};
+pub use store::{Action, CreateRequest, ExpectedResources};
 use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
@@ -593,6 +593,36 @@ pub fn reopen_after_quit() {
 }
 
 /// Admits macOS computers again after an update did not go ahead.
+/// A macOS refusal a client can act on, with its own stable error code in the API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    NotRunning,
+    NeedsPersonalizing,
+    SetupIncomplete,
+    ScreenSharingUnavailable,
+    RunningLimit,
+}
+
+/// Recognises the refusals above in an engine message. The messages are the engine's own
+/// sentences, so the match is on their stable phrases and tested against the constants.
+pub fn classify_refusal(message: &str) -> Option<Refusal> {
+    if message.contains(store::NEEDS_PERSONALIZING) {
+        Some(Refusal::NeedsPersonalizing)
+    } else if message.contains(engine::LIMIT_EXCEEDED) {
+        Some(Refusal::RunningLimit)
+    } else if message.contains(remote_display::SHARING_UNAVAILABLE)
+        || message.contains("Screen Sharing accepted TCP")
+    {
+        Some(Refusal::ScreenSharingUnavailable)
+    } else if message.contains("Setup has not finished") || message.contains("still being set up") {
+        Some(Refusal::SetupIncomplete)
+    } else if message.contains("isn't running") || message.contains("is not running") {
+        Some(Refusal::NotRunning)
+    } else {
+        None
+    }
+}
+
 pub fn reopen_after_update() {
     closed().update = false;
 }
@@ -895,7 +925,14 @@ fn accept_macos_job(
 ) -> Result<AcceptedMacosJob, String> {
     let registry = context.job_registry()?;
     let accepted = crate::jobs::allocate(context, method).map_err(|error| error.to_string())?;
-    let job_id = accepted.job_id;
+    accept_macos_job_with_id(registry, accepted.job_id, gate)
+}
+
+fn accept_macos_job_with_id(
+    registry: Arc<crate::jobs::JobRegistry>,
+    job_id: silo_api::jobs::JobId,
+    gate: &'static runtime::operation_gate::OperationGate,
+) -> Result<AcceptedMacosJob, String> {
     let cancellation = Arc::new(AtomicBool::new(false));
     register_macos_job_cancel(&registry, job_id.clone(), cancellation.clone(), gate);
     Ok(AcceptedMacosJob {
@@ -969,14 +1006,43 @@ fn admit_macos_job_with_completion(
     label: &str,
     finish_on_error: bool,
 ) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
-    let guard = match job.gate.kind(kind).acquire_for_job(
+    let acquired = job.gate.kind(kind).acquire_for_job(
         scope,
         computer_name,
         label,
         Some(job.job_id.as_str().to_owned()),
         job.job_id.clone(),
         Some(job.cancellation.clone()),
-    ) {
+    );
+    finish_admission(context, job, acquired, finish_on_error)
+}
+
+/// Waits in the queue for a device-wide turn that deletes `ids`, linked to `job`.
+fn admit_macos_removal(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    ids: &[String],
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let acquired = job.gate.removing_for_job(
+        ids,
+        label,
+        job.job_id.clone(),
+        Some(job.cancellation.clone()),
+    );
+    finish_admission(context, job, acquired, true)
+}
+
+fn finish_admission(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    acquired: Result<
+        runtime::operation_gate::OperationGuard<'static>,
+        runtime::operation_gate::GateError,
+    >,
+    finish_on_error: bool,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let guard = match acquired {
         Ok(guard) => guard,
         Err(error) => {
             let message = error.to_string();
@@ -1457,7 +1523,21 @@ fn accept_loaded_lifecycle_job(
     id: &str,
     method: &str,
 ) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
-    let job = accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?;
+    accept_loaded_lifecycle_job_with_id(app, id, method, None)
+}
+
+fn accept_loaded_lifecycle_job_with_id(
+    app: &MacosContext,
+    id: &str,
+    method: &str,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
+    let job = match job_id {
+        Some(job_id) => {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)?
+        }
+        None => accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?,
+    };
     let prepared: Result<(PathBuf, String), String> = (|| {
         ensure_loaded(app)?;
         let data = app_data(app)?;
@@ -1481,6 +1561,16 @@ pub async fn create_macos_computer(
     blocking(move || create(&app, request)).await
 }
 
+/// Creates a macOS computer under a job id accepted by a canonical API caller.
+pub async fn create_macos_computer_with_job(
+    app: MacosContext,
+    request: CreateRequest,
+    job_id: silo_api::jobs::JobId,
+) -> Result<MacosComputer, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || create_with_job(&app, request, job_id)).await
+}
+
 pub async fn macos_computer_action(
     app: MacosContext,
     id: String,
@@ -1493,6 +1583,23 @@ pub async fn macos_computer_action(
         runtime::shutdown::ensure_accepting_operations()?;
     }
     blocking(move || perform(&app, &id, action)).await
+}
+
+/// Runs a macOS lifecycle operation under a job id accepted by a canonical API caller.
+pub async fn macos_computer_action_with_job(
+    app: MacosContext,
+    id: String,
+    action: Action,
+    job_id: silo_api::jobs::JobId,
+    method: &'static str,
+) -> Result<(), String> {
+    if matches!(
+        action,
+        Action::Start | Action::Setup | Action::ChangeResources { .. }
+    ) {
+        runtime::shutdown::ensure_accepting_operations()?;
+    }
+    blocking(move || perform_with_job(&app, &id, action, Some((job_id, method)))).await
 }
 
 pub async fn open_macos_display(app: MacosContext, id: String) -> Result<(), String> {
@@ -1687,21 +1794,21 @@ pub(crate) fn action_for_remote(
 }
 
 /// The sign-in for the screen of a running computer, for another device.
-pub(crate) fn display_session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
+pub fn display_session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::session(app, id)
 }
 
 /// A connection to the Screen Sharing port of a running computer, for the owner to relay.
-pub(crate) fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::TcpStream, String> {
+pub fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::TcpStream, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::connect(app, id)
 }
 
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
-pub(crate) fn resize_display(
+pub fn resize_display(
     app: &MacosContext,
     id: &str,
     width: u64,
@@ -1725,14 +1832,38 @@ fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, S
     create_with_support_check(app, request, require_supported)
 }
 
+fn create_with_job(
+    app: &MacosContext,
+    request: CreateRequest,
+    job_id: silo_api::jobs::JobId,
+) -> Result<MacosComputer, String> {
+    create_with_support_check_and_job(app, request, require_supported, Some(job_id))
+}
+
 fn create_with_support_check(
     app: &MacosContext,
     request: CreateRequest,
     support_check: impl FnOnce() -> Result<(), String>,
 ) -> Result<MacosComputer, String> {
+    create_with_support_check_and_job(app, request, support_check, None)
+}
+
+fn create_with_support_check_and_job(
+    app: &MacosContext,
+    request: CreateRequest,
+    support_check: impl FnOnce() -> Result<(), String>,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<MacosComputer, String> {
     support_check()?;
     let data = app_data(app)?;
-    create_after_acceptance(app, data, request, &runtime::OPERATIONS, create_workflow)
+    create_after_acceptance_with_job(
+        app,
+        data,
+        request,
+        &runtime::OPERATIONS,
+        create_workflow,
+        job_id,
+    )
 }
 
 fn create_after_acceptance(
@@ -1742,14 +1873,33 @@ fn create_after_acceptance(
     gate: &'static runtime::operation_gate::OperationGate,
     workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
 ) -> Result<MacosComputer, String> {
-    launch_macos_job(app.engine.as_ref(), "computers.create", gate, move |job| {
+    create_after_acceptance_with_job(app, data, request, gate, workflow, None)
+}
+
+fn create_after_acceptance_with_job(
+    app: &MacosContext,
+    data: PathBuf,
+    request: CreateRequest,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<MacosComputer, String> {
+    let launch = move |job| {
         let (sender, receiver) = std::sync::mpsc::channel();
         let app = app.clone();
         std::thread::spawn(move || create_job_worker(&app, data, request, job, sender, workflow));
         receiver
             .recv()
             .map_err(|_| "The macOS computer creation worker stopped unexpectedly.".to_owned())?
-    })
+    };
+    match requested_job_id {
+        Some(job_id) => {
+            let registry = app.engine.job_registry()?;
+            let job = accept_macos_job_with_id(registry, job_id, gate)?;
+            launch(job)
+        }
+        None => launch_macos_job(app.engine.as_ref(), "computers.create", gate, launch),
+    }
 }
 
 fn create_job_worker(
@@ -2197,31 +2347,128 @@ fn with_macos_computer_operation<T>(
 }
 
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
+    perform_with_job(app, id, action, None)
+}
+
+fn perform_with_job(
+    app: &MacosContext,
+    id: &str,
+    action: Action,
+    requested_job: Option<(silo_api::jobs::JobId, &'static str)>,
+) -> Result<(), String> {
     match action {
-        Action::Start => start(app, id),
-        Action::Stop => stop(app, id),
+        Action::Start => start_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
+        Action::Stop => stop_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
         Action::ForceStop => force_stop(app, id),
-        Action::Delete => {
-            ensure_loaded(app)?;
-            let (record, _) = computer(id)?;
-            let _guard = runtime::OPERATIONS
-                .removing(&[id.to_owned()], &format!("Deleting {}", record.name))
-                .map_err(|error| error.to_string())?;
-            delete(app, id)
-        }
-        Action::Setup => begin_setup(app, id),
+        Action::Delete => delete_action(app, id, requested_job.map(|(job_id, _)| job_id)),
+        Action::Setup => begin_setup_with_job(app, id, requested_job.map(|(job_id, _)| job_id)),
         Action::ChangeResources {
             cpus,
             memory_gib,
             expected,
-        } => with_macos_computer_operation(
+        } => change_resources_action(
             app,
             id,
-            runtime::operation_gate::OperationKind::ComputerConfiguration,
-            "Saving computer settings",
-            || change_resource_configuration(app, id, cpus, memory_gib, expected),
+            cpus,
+            memory_gib,
+            expected,
+            requested_job.map(|(job_id, _)| job_id),
         ),
     }
+}
+
+/// Deletes a computer. Under a canonical job the deletion waits in the queue as
+/// "Deleting <name>", can be cancelled while waiting, and ends the job when it is done.
+fn delete_action(
+    app: &MacosContext,
+    id: &str,
+    requested_job: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let job = requested_job
+        .map(|job_id| {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)
+        })
+        .transpose()?;
+    let result = (|| {
+        ensure_loaded(app).map_err(|message| (false, message))?;
+        let (record, _) = computer(id).map_err(|message| (false, message))?;
+        let label = format!("Deleting {}", record.name);
+        let ids = [id.to_owned()];
+        let _guard = match &job {
+            Some(job) => admit_macos_removal(app.engine.as_ref(), job, &ids, &label)
+                .map_err(|message| (true, message))?,
+            None => runtime::OPERATIONS
+                .removing(&ids, &label)
+                .map_err(|error| (false, error.to_string()))?,
+        };
+        delete(app, id).map_err(|message| (false, message))
+    })();
+    finish_job_after_work(app, id, job, result)
+}
+
+/// Changes a stopped computer's CPU and memory, queued like any other computer operation.
+fn change_resources_action(
+    app: &MacosContext,
+    id: &str,
+    cpus: u64,
+    memory_gib: u64,
+    expected: store::ExpectedResources,
+    requested_job: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let job = requested_job
+        .map(|job_id| {
+            accept_macos_job_with_id(app.engine.job_registry()?, job_id, &runtime::OPERATIONS)
+        })
+        .transpose()?;
+    let result = (|| {
+        ensure_loaded(app).map_err(|message| (false, message))?;
+        let (record, _) = computer(id).map_err(|message| (false, message))?;
+        let label = "Saving computer settings";
+        let _guard = match &job {
+            Some(job) => admit_macos_job(
+                app.engine.as_ref(),
+                job,
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+                Some(record.name.clone()),
+                label,
+            )
+            .map_err(|message| (true, message))?,
+            None => acquire_computer_operation(
+                &runtime::OPERATIONS,
+                id,
+                &record.name,
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                label,
+            )
+            .map_err(|message| (false, message))?,
+        };
+        change_resource_configuration(app, id, cpus, memory_gib, expected)
+            .map_err(|message| (false, message))
+    })();
+    finish_job_after_work(app, id, job, result)
+}
+
+/// Ends the job of a queued action. Admission failures already ended it (`true`).
+fn finish_job_after_work(
+    app: &MacosContext,
+    id: &str,
+    job: Option<AcceptedMacosJob>,
+    result: Result<(), (bool, String)>,
+) -> Result<(), String> {
+    let already_finished = matches!(&result, Err((true, _)));
+    let result = result.map_err(|(_, message)| message);
+    if let Some(job) = job {
+        if !already_finished {
+            finish_macos_job(
+                app.engine.as_ref(),
+                Some(id),
+                job.job_id,
+                lifecycle_job_outcome(result.clone()),
+            );
+        }
+    }
+    result
 }
 
 fn change_resource_configuration(
@@ -2377,8 +2624,17 @@ fn computer(id: &str) -> Result<(Record, State), String> {
 }
 
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
+    start_with_job(app, id, None)
+}
+
+fn start_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
     require_supported()?;
-    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "computers.start")?;
+    let (job, data, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "computers.start", requested_job_id)?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -2607,9 +2863,18 @@ fn start_machine(
 }
 
 fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
+    begin_setup_with_job(app, id, None)
+}
+
+fn begin_setup_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
     require_supported()?;
 
-    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "macos.setup.retry")?;
+    let (job, data, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "macos.setup.retry", requested_job_id)?;
     let (sender, receiver) = std::sync::mpsc::channel();
     let app = app.clone();
     let worker_id = id.to_owned();
@@ -2801,7 +3066,16 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.stop")?;
+    stop_with_job(app, id, None)
+}
+
+fn stop_with_job(
+    app: &MacosContext,
+    id: &str,
+    requested_job_id: Option<silo_api::jobs::JobId>,
+) -> Result<(), String> {
+    let (job, _, name) =
+        accept_loaded_lifecycle_job_with_id(app, id, "computers.stop", requested_job_id)?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -3969,6 +4243,31 @@ mod tests {
         EngineIdentity, EnginePaths, EngineRuntimeState, MainThread, PackageKind, ProcessControl,
     };
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn engine_refusals_are_classified_for_stable_api_codes() {
+        let cases = [
+            ("This computer isn't running.", Refusal::NotRunning),
+            (
+                "The computer is not running. Start it to show its screen.",
+                Refusal::NotRunning,
+            ),
+            (store::NEEDS_PERSONALIZING, Refusal::NeedsPersonalizing),
+            (engine::LIMIT_EXCEEDED, Refusal::RunningLimit),
+            (
+                remote_display::SHARING_UNAVAILABLE,
+                Refusal::ScreenSharingUnavailable,
+            ),
+            (
+                "Setup has not finished. The screen is available once the computer has been set up for computer use.",
+                Refusal::SetupIncomplete,
+            ),
+        ];
+        for (message, refusal) in cases {
+            assert_eq!(classify_refusal(message), Some(refusal), "{message}");
+        }
+        assert_eq!(classify_refusal("Stop the computer first."), None);
+    }
 
     struct JobTestContext {
         paths: silo_engine::EnginePaths,
@@ -5231,8 +5530,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
         let app = macos_context(context.clone());
-        let accepted = crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create")
-            .unwrap();
+        let accepted =
+            crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create").unwrap();
         context
             .job_registry()
             .unwrap()
@@ -5437,6 +5736,73 @@ mod tests {
             .unwrap();
         assert_eq!(
             result.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::Cancelled
+        );
+    }
+
+    #[test]
+    fn a_waiting_macos_delete_shows_its_job_and_cancels_before_removing_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let gate = isolated_operation_gate();
+        let _blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .acquire(
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Blocking test operation",
+                None,
+            )
+            .unwrap();
+        let accepted = accept_macos_job(context.as_ref(), "computers.delete", gate).unwrap();
+        let job_id = accepted.job_id.clone();
+        let removed = Arc::new(AtomicUsize::new(0));
+        let worker_context = context.clone();
+        let worker_removed = removed.clone();
+        let worker = std::thread::spawn(move || {
+            let admitted = admit_macos_removal(
+                worker_context.as_ref(),
+                &accepted,
+                &["computer-1".to_owned()],
+                "Deleting Mac",
+            );
+            if admitted.is_ok() {
+                worker_removed.fetch_add(1, Ordering::SeqCst);
+            }
+            admitted.map(drop)
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.job_id.as_ref() == Some(&job_id) && entry.label == "Deleting Mac")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the deletion did not enter the wait queue"
+            );
+            std::thread::yield_now();
+        }
+        assert!(gate.removal_queued("computer-1"));
+        context.job_registry().unwrap().cancel(&job_id).unwrap();
+
+        assert_eq!(
+            worker.join().unwrap().unwrap_err(),
+            "The operation was cancelled."
+        );
+        assert_eq!(removed.load(Ordering::SeqCst), 0);
+        let outcome = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap()
+            .outcome
+            .unwrap();
+        assert_eq!(
+            outcome.error.unwrap().code,
             silo_api::jobs::ErrorCode::Cancelled
         );
     }

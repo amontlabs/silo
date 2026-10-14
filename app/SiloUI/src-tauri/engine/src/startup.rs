@@ -13,6 +13,7 @@ use std::{
 pub struct StartupState {
     cancelled: AtomicBool,
     active: Mutex<()>,
+    last_pass: Mutex<Option<silo_api::methods::computers::LaunchPass>>,
 }
 
 impl StartupState {
@@ -28,6 +29,29 @@ impl StartupState {
         self.cancel();
         // Finish the current bounded start; do not launch the remaining selections.
         drop(self.active.lock());
+    }
+
+    pub fn last_pass(&self) -> Option<silo_api::methods::computers::LaunchPass> {
+        self.last_pass
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn record_pass(&self, failures: Vec<String>) {
+        let finished_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        *self
+            .last_pass
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(silo_api::methods::computers::LaunchPass {
+                finished_at,
+                failures,
+            });
     }
 }
 
@@ -160,6 +184,18 @@ fn settings_for_launch_with_macos_ids(
     Ok(settings)
 }
 
+/// The computers the launch pass would start now: the saved selection narrowed to computers
+/// that exist on this device (Linux from `metadata`, macOS from `macos_ids`).
+pub fn effective_selection(
+    settings: Map<String, Value>,
+    metadata: &Path,
+    macos_ids: &[String],
+) -> Result<Vec<String>, String> {
+    let settings =
+        settings_for_launch_with_macos_ids(settings, metadata, macos_ids, &HashSet::new())?;
+    Ok(selected_computers(&settings))
+}
+
 /// Launch continues after lifecycle recovery (D-23): actions that could not be
 /// resumed are reported but never stop update recovery or automatic start. Only
 /// when the saved actions could not be listed at all is automatic start withheld
@@ -281,6 +317,7 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
             ))
         });
     let failures = result.unwrap_or_else(|error| vec![error]);
+    state.record_pass(failures.clone());
     if !failures.is_empty() && !state.cancelled.load(Ordering::SeqCst) {
         services.notify_failure(
             "startup:launch",
@@ -316,6 +353,54 @@ mod tests {
     fn computer(id: &str, name: &str) -> Value {
         json!({"id":id, "name":name, "cpus":2, "maxCPUs":2,
             "memoryGiB":2, "maxMemoryGiB":2, "workspaceStorageGiB":10, "runtimeStorageGiB":10})
+    }
+
+    #[test]
+    fn the_effective_selection_keeps_both_kinds_and_drops_missing_computers() {
+        let directory = tempfile::tempdir().unwrap();
+        let metadata = directory.path().join("computers.json");
+        let linux = "00000000-0000-4000-8000-000000000001";
+        let macos = "00000000-0000-4000-8000-000000000002";
+        std::fs::write(
+            &metadata,
+            json!({"schemaVersion":1,"computers":[computer(linux, "dev")]}).to_string(),
+        )
+        .unwrap();
+        let settings = json!({
+            "onboardingComplete": true,
+            "startComputersAtLaunch": true,
+            "startupComputerIds": [macos, "gone", linux, macos]
+        });
+        let selection = effective_selection(
+            settings.as_object().unwrap().clone(),
+            &metadata,
+            &[macos.to_owned()],
+        )
+        .unwrap();
+        assert_eq!(selection, vec![macos, linux]);
+
+        let disabled = json!({
+            "onboardingComplete": true,
+            "startComputersAtLaunch": false,
+            "startupComputerIds": [linux]
+        });
+        assert!(
+            effective_selection(disabled.as_object().unwrap().clone(), &metadata, &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_last_launch_pass_is_kept_for_clients() {
+        let state = StartupState::default();
+        assert_eq!(state.last_pass(), None);
+        state.record_pass(vec!["dev could not start".to_owned()]);
+        let pass = state.last_pass().unwrap();
+        assert_eq!(pass.failures, vec!["dev could not start".to_owned()]);
+        assert!(pass.finished_at > 0);
+        state.record_pass(Vec::new());
+        assert!(state.last_pass().unwrap().failures.is_empty());
     }
 
     #[test]
