@@ -412,7 +412,9 @@ mod tests {
     async fn the_resize_sends_pixels_and_returns_the_applied_size() {
         let fake = FakeEngine::start(|_, _| Ok(json!({"widthPx": 1280, "heightPx": 800})));
         let (client, _) = connected_client(&fake).await;
-        let applied = display_resize(&client, DEVICE, COMPUTER, 1300, 900).await.unwrap();
+        let applied = display_resize(&client, DEVICE, COMPUTER, 1300, 900)
+            .await
+            .unwrap();
         assert_eq!(applied, json!({"widthPx": 1280, "heightPx": 800}));
         assert_eq!(
             fake.calls("macos.display.resize"),

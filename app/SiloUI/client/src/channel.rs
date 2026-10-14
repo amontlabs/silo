@@ -78,6 +78,11 @@ impl Channel {
         self.state_dir(home).join("engine.sock")
     }
 
+    /// The engine's private directory, `~/.silo/engine`: its update journal and `installer.lock`.
+    pub fn engine_directory(self, home: &Path) -> PathBuf {
+        self.state_dir(home).join("engine")
+    }
+
     /// The engine's owner record, `~/.silo/engine-owner.json`.
     pub fn engine_owner_record(self, home: &Path) -> PathBuf {
         self.state_dir(home).join("engine-owner.json")
@@ -108,6 +113,8 @@ mod tests {
         assert_eq!(d.launch_agent_plist(), "org.silo.dev.engine.plist");
         let home = Path::new("/h");
         assert_eq!(p.engine_socket(home), Path::new("/h/.silo/engine.sock"));
+        assert_eq!(p.engine_directory(home), Path::new("/h/.silo/engine"));
+        assert_eq!(d.engine_directory(home), Path::new("/h/.silo-dev/engine"));
         assert_eq!(d.engine_socket(home), Path::new("/h/.silo-dev/engine.sock"));
         assert_eq!(
             Channel::from_identifier("org.silo.preview.x"),
