@@ -444,6 +444,20 @@ pub(super) fn computer_ids(app_data: &Path) -> Vec<String> {
     ids
 }
 
+/// The `(id, name)` of every macOS computer folder on disk, in the case the record keeps,
+/// without needing the registry or a valid record.
+pub(super) fn identities(app_data: &Path) -> Vec<(String, String)> {
+    computer_ids(app_data)
+        .into_iter()
+        .filter_map(|id| {
+            let bytes = fs::read(root(app_data).join(&id).join("computer.json")).ok()?;
+            let record = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
+            let name = record.get("name")?.as_str()?.to_owned();
+            Some((id, name))
+        })
+        .collect()
+}
+
 /// The name of every macOS computer folder on disk, lowercased, without needing
 /// the registry or a valid record.
 pub(super) fn names(app_data: &Path) -> Vec<String> {
