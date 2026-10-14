@@ -1622,6 +1622,12 @@
     },
     "ComputerCreationSkipWaitParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requestId": {
           "type": "string"
         }
@@ -2150,6 +2156,12 @@
     },
     "DependencyReportParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requestId": {
           "type": "string"
         }
@@ -6719,7 +6731,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -8671,7 +8683,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -8687,7 +8699,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -14005,7 +14017,7 @@
     {
       "kind": "query",
       "name": "activity.setup.read",
-      "paramsType": "common::EmptyParams",
+      "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
     },
     {

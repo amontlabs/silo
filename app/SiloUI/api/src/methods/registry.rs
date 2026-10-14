@@ -45,7 +45,7 @@ pub struct MethodDescriptor {
 }
 
 define_registry! {
-    ActivitySetupRead => ("activity.setup.read", Query, common::EmptyParams, Vec<computers::ComputerConfigurationProgress>);
+    ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
     CheckpointsAbandonRestore => ("checkpoints.abandonRestore", Job, common::ComputerTargetParams, common::JobStartResult);
     CheckpointsCreate => ("checkpoints.create", Job, checkpoints::CheckpointCreateParams, common::JobStartResult);
     CheckpointsDelete => ("checkpoints.delete", Job, checkpoints::CheckpointTargetParams, common::JobStartResult);

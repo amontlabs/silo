@@ -655,7 +655,10 @@ mod tests {
             }
         });
         let status: DesktopStatus = serde_json::from_value(payload.clone()).unwrap();
-        assert_eq!(status.agent_tools.as_ref().unwrap().state, AgentToolsState::Missing);
+        assert_eq!(
+            status.agent_tools.as_ref().unwrap().state,
+            AgentToolsState::Missing
+        );
         assert_eq!(serde_json::to_value(status).unwrap(), payload);
     }
 
