@@ -180,6 +180,21 @@ pub enum ControlError {
     PeerClosed,
 }
 
+/// Reads one length-prefixed CA bundle from a private pipe, as the leaf issuer mode receives it.
+pub fn read_ca_input(reader: &mut impl Read) -> Result<CaInput, ControlError> {
+    let mut size_bytes = [0u8; 4];
+    reader
+        .read_exact(&mut size_bytes)
+        .map_err(|_| ControlError::Io)?;
+    let size = u32::from_be_bytes(size_bytes) as usize;
+    if size == 0 || size > MAX_MESSAGE_BYTES {
+        return Err(ControlError::InvalidLength);
+    }
+    let mut body = Zeroizing::new(vec![0u8; size]);
+    reader.read_exact(&mut body).map_err(|_| ControlError::Io)?;
+    serde_json::from_slice(&body).map_err(|_| ControlError::InvalidJson)
+}
+
 pub fn read_init(stream: &mut UnixStream) -> Result<InitRequest, ControlError> {
     let mut size_bytes = [0u8; 4];
     stream

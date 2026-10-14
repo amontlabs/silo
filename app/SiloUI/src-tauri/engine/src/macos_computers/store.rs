@@ -83,17 +83,25 @@ pub(super) struct SetupProgress {
     pub roots: bool,
     /// A copy of a template still has the template's password, keys and identity.
     pub needs_personalizing: bool,
+    /// The guest's network route, DNS and per-computer CA trust were staged and the
+    /// bootstrap identity was saved. Ordinary Start needs it, so a computer without it is
+    /// not set up, and Retry finishes it over a temporary Apple NAT boot.
+    pub proxy_bootstrap: bool,
 }
 
 impl SetupProgress {
-    pub(super) fn complete(self) -> bool {
+    /// Every guest step before the network bootstrap, which is staged last.
+    pub(super) fn guest_steps_complete(self) -> bool {
         self.account
             && self.sip
             && self.developer_tools
             && self.computer_use
             && self.clipboard
             && self.roots
-            && !self.needs_personalizing
+    }
+
+    pub(super) fn complete(self) -> bool {
+        self.guest_steps_complete() && !self.needs_personalizing && self.proxy_bootstrap
     }
 }
 
@@ -490,6 +498,11 @@ impl Layout {
         }
     }
 
+    /// The computer's id, which names its folder.
+    pub(super) fn id(&self) -> Option<&str> {
+        self.dir.file_name().and_then(|name| name.to_str())
+    }
+
     pub(super) fn with_access(mut self, access: PathBuf) -> Self {
         self.access = Some(access);
         self
@@ -875,6 +888,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record
     }
@@ -993,12 +1007,70 @@ mod tests {
             clipboard: true,
             roots: false,
             needs_personalizing: true,
+            proxy_bootstrap: false,
         };
         assert!(!setup.complete());
         setup.needs_personalizing = false;
-        assert!(!setup.complete());
+        assert!(
+            !setup.complete(),
+            "the guest steps and the bootstrap are missing"
+        );
         setup.roots = true;
+        assert!(
+            !setup.complete(),
+            "the network bootstrap is part of readiness"
+        );
+        setup.proxy_bootstrap = true;
         assert!(setup.complete());
+    }
+
+    /// Readiness and Retry admission follow the bootstrap: a computer whose guest steps all
+    /// finished but whose bootstrap did not is not set up, and Retry is admitted for it.
+    #[test]
+    fn an_unfinished_bootstrap_is_not_set_up_and_retry_is_admitted() {
+        let mut computer = record(&request());
+        computer.installed = true;
+        computer.setup = SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+            proxy_bootstrap: false,
+        };
+        computer.developer_tools_version = Some(super::super::developer_tools::version());
+        assert!(!computer.setup_complete());
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
+        assert!(setup_allowed(State::Failed, &computer).is_ok());
+        assert!(change_resources_blocked(&computer));
+        computer.setup.proxy_bootstrap = true;
+        assert!(computer.setup_complete());
+        assert!(setup_allowed(State::Stopped, &computer).is_err());
+        assert!(!change_resources_blocked(&computer));
+    }
+
+    fn change_resources_blocked(computer: &Record) -> bool {
+        let host = HostLimits {
+            cpus: 16,
+            memory_gib: 64,
+        };
+        change_resources(
+            computer,
+            State::Stopped,
+            false,
+            computer.cpus,
+            computer.memory_gib,
+            ExpectedResources {
+                cpus: computer.cpus,
+                memory_gib: computer.memory_gib,
+                disk_gib: computer.disk_gib,
+            },
+            host,
+            &[],
+        )
+        .is_err()
     }
 
     #[test]
@@ -1043,6 +1115,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         let layout = Layout::new(app_data.path(), &original.id);
         save(&layout, &original).unwrap();
@@ -1057,7 +1130,7 @@ mod tests {
             .remove("needsPersonalizing");
         fs::write(layout.record(), serde_json::to_vec(&json).unwrap()).unwrap();
         let loaded = &load_all(app_data.path())[0];
-        assert!(loaded.setup.complete());
+        assert!(loaded.setup.guest_steps_complete() && !loaded.setup.needs_personalizing);
         assert!(!loaded.pristine);
         assert_eq!(loaded.template, None);
     }
@@ -1190,6 +1263,8 @@ mod tests {
         computer.setup.developer_tools = true;
         computer.setup.roots = true;
         computer.developer_tools_version = Some(super::super::developer_tools::version());
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
+        computer.setup.proxy_bootstrap = true;
         assert!(setup_allowed(State::Stopped, &computer).is_err());
         assert!(start_allowed(State::SettingUp, &computer).is_err());
     }
@@ -1209,7 +1284,7 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "roots": false, "needsPersonalizing": false})
+            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "roots": false, "needsPersonalizing": false, "proxyBootstrap": false})
         );
 
         let mut old_setup = json.clone();
