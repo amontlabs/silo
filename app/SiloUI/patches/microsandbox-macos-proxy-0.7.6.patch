@@ -1,0 +1,1902 @@
+diff --git a/crates/network/lib/engine/netstack/backend.rs b/crates/network/lib/engine/netstack/backend.rs
+index 14d8525..4ca0e92 100644
+--- a/crates/network/lib/engine/netstack/backend.rs
++++ b/crates/network/lib/engine/netstack/backend.rs
+@@ -98,6 +98,7 @@ impl NetBackend for SmoltcpBackend {
+             // undo the TX pop and wait for write readiness that cannot signal
+             // tx_ring capacity. Treat overflow like a lossy NIC queue instead:
+             // drop the frame and let upper layers retransmit if needed.
++            self.shared.add_tx_ring_overflow();
+             tracing::debug!("dropping guest network frame because tx_ring is full");
+             return Ok(());
+         }
+@@ -201,6 +202,7 @@ mod tests {
+             .expect("overflow should not stall the virtio TX queue");
+ 
+         assert_eq!(shared.tx_bytes(), 0);
++        assert_eq!(shared.tx_ring_overflows(), 1);
+         assert_eq!(shared.tx_ring.pop(), Some(vec![0x11]));
+         assert_eq!(shared.tx_ring.pop(), None);
+     }
+diff --git a/crates/network/lib/engine/netstack/poll.rs b/crates/network/lib/engine/netstack/poll.rs
+index d06dde2..1b9a794 100644
+--- a/crates/network/lib/engine/netstack/poll.rs
++++ b/crates/network/lib/engine/netstack/poll.rs
+@@ -32,6 +32,7 @@ use crate::engine::dns::{
+ use crate::engine::tls::{proxy::TlsProxy, state::TlsState};
+ use crate::icmp::relay::IcmpRelay;
+ use crate::policy::{EgressEvaluation, HostnameSource, NetworkPolicy, Protocol};
++use crate::ports::publisher::PortReadyResult;
+ use crate::ports::{PortCommand, PortPublisher};
+ use crate::proxy::ResolvedOutboundProxy;
+ use crate::secrets::handle::SecretsHandle;
+@@ -247,6 +248,47 @@ pub fn smoltcp_poll_loop(
+     tokio_handle: tokio::runtime::Handle,
+     secrets: SecretsHandle,
+     outbound_proxy: Option<Arc<ResolvedOutboundProxy>>,
++) {
++    smoltcp_poll_loop_with_options(
++        shared,
++        config,
++        network_policy,
++        platform_policy,
++        dns_config,
++        tls_state,
++        published_ports,
++        port_commands,
++        strict,
++        max_tcp_connections,
++        max_udp_connections,
++        tcp_accept_queue_size,
++        tokio_handle,
++        secrets,
++        outbound_proxy,
++        false,
++        None,
++    );
++}
++
++#[allow(clippy::too_many_arguments)]
++pub(crate) fn smoltcp_poll_loop_with_options(
++    shared: Arc<SharedState>,
++    config: PollLoopConfig,
++    network_policy: NetworkPolicy,
++    platform_policy: Option<NetworkPolicy>,
++    dns_config: DnsConfig,
++    tls_state: Option<Arc<TlsState>>,
++    published_ports: Vec<PublishedPort>,
++    port_commands: mpsc::Receiver<PortCommand>,
++    strict: bool,
++    max_tcp_connections: Option<NonZeroUsize>,
++    max_udp_connections: Option<ConnectionLimit>,
++    tcp_accept_queue_size: TcpAcceptQueueSize,
++    tokio_handle: tokio::runtime::Handle,
++    secrets: SecretsHandle,
++    outbound_proxy: Option<Arc<ResolvedOutboundProxy>>,
++    close_sessions_on_secret_change: bool,
++    port_ready: Option<mpsc::SyncSender<PortReadyResult>>,
+ ) {
+     let mut device = SmoltcpDevice::new(shared.clone(), config.mtu);
+     let mut iface = create_interface(&mut device, &config);
+@@ -285,7 +327,7 @@ pub fn smoltcp_poll_loop(
+         config.gateway_mac,
+         config.guest_mac,
+     );
+-    let mut port_publisher = PortPublisher::new(
++    let mut port_publisher = PortPublisher::new_with_readiness(
+         &published_ports,
+         tcp_accept_queue_size,
+         config.guest_ipv4,
+@@ -297,6 +339,7 @@ pub fn smoltcp_poll_loop(
+         network_policy.clone(),
+         shared.clone(),
+         &tokio_handle,
++        port_ready,
+     );
+     let mut udp_relay = UdpRelay::new(
+         shared.clone(),
+@@ -589,18 +632,34 @@ pub fn smoltcp_poll_loop(
+                     conn.dst,
+                     connect_target.primary(),
+                 );
+-                let proxy = TlsProxy::new(
+-                    conn.dst,
+-                    connect_target,
+-                    conn.from_smoltcp,
+-                    conn.to_smoltcp,
+-                    shared.clone(),
+-                    tls_state.clone(),
+-                    network_policy.clone(),
+-                    strict,
+-                    conn.proxy_connect,
+-                    connection_outbound_proxy,
+-                );
++                let proxy = if close_sessions_on_secret_change {
++                    TlsProxy::new_with_secret_session(
++                        conn.dst,
++                        connect_target,
++                        conn.from_smoltcp,
++                        conn.to_smoltcp,
++                        shared.clone(),
++                        tls_state.clone(),
++                        network_policy.clone(),
++                        strict,
++                        conn.proxy_connect,
++                        connection_outbound_proxy,
++                        secrets.session(),
++                    )
++                } else {
++                    TlsProxy::new(
++                        conn.dst,
++                        connect_target,
++                        conn.from_smoltcp,
++                        conn.to_smoltcp,
++                        shared.clone(),
++                        tls_state.clone(),
++                        network_policy.clone(),
++                        strict,
++                        conn.proxy_connect,
++                        connection_outbound_proxy,
++                    )
++                };
+                 tokio_handle.spawn(proxy.run());
+                 continue;
+             }
+@@ -661,21 +720,41 @@ pub fn smoltcp_poll_loop(
+                 conn.dst,
+                 connect_target.primary(),
+             );
+-            let proxy = TcpProxy::new(
+-                conn.dst,
+-                connect_target,
+-                conn.from_smoltcp,
+-                conn.to_smoltcp,
+-                shared.clone(),
+-                network_policy.clone(),
+-                // Load the current snapshot per connection so live secret
+-                // updates apply to traffic the guest starts afterwards.
+-                secrets.load(),
+-                tls_state.clone(),
+-                strict,
+-                conn.proxy_connect,
+-                connection_outbound_proxy,
+-            );
++            let proxy = if close_sessions_on_secret_change {
++                // Register the connection and capture its snapshot atomically. The awaited
++                // update API cancels this generation and waits for this guard to drop.
++                let secret_session = secrets.session();
++                TcpProxy::new_with_secret_session(
++                    conn.dst,
++                    connect_target,
++                    conn.from_smoltcp,
++                    conn.to_smoltcp,
++                    shared.clone(),
++                    network_policy.clone(),
++                    secret_session.snapshot(),
++                    tls_state.clone(),
++                    strict,
++                    conn.proxy_connect,
++                    connection_outbound_proxy,
++                    secret_session,
++                )
++            } else {
++                TcpProxy::new(
++                    conn.dst,
++                    connect_target,
++                    conn.from_smoltcp,
++                    conn.to_smoltcp,
++                    shared.clone(),
++                    network_policy.clone(),
++                    // Load the current snapshot per connection so live secret
++                    // updates apply to traffic the guest starts afterwards.
++                    secrets.load(),
++                    tls_state.clone(),
++                    strict,
++                    conn.proxy_connect,
++                    connection_outbound_proxy,
++                )
++            };
+             tokio_handle.spawn(proxy.run());
+         }
+ 
+diff --git a/crates/network/lib/engine/netstack/shared.rs b/crates/network/lib/engine/netstack/shared.rs
+index a2f2718..ac856dc 100644
+--- a/crates/network/lib/engine/netstack/shared.rs
++++ b/crates/network/lib/engine/netstack/shared.rs
+@@ -94,6 +94,7 @@ pub struct SharedState {
+ pub struct NetworkMetrics {
+     tx_bytes: AtomicU64,
+     rx_bytes: AtomicU64,
++    tx_ring_overflows: AtomicU64,
+ }
+ 
+ /// Address family for resolved hostname entries.
+@@ -260,6 +261,13 @@ impl SharedState {
+             .fetch_add(bytes as u64, Ordering::Relaxed);
+     }
+ 
++    /// Increment the guest-to-runtime frame counter when the bounded TX ring is full.
++    pub(crate) fn add_tx_ring_overflow(&self) {
++        self.metrics
++            .tx_ring_overflows
++            .fetch_add(1, Ordering::Relaxed);
++    }
++
+     /// Push a runtime -> guest ethernet frame and update RX metrics on success.
+     pub(crate) fn push_rx_frame(&self, frame: Vec<u8>) -> bool {
+         let frame_len = frame.len();
+@@ -290,6 +298,11 @@ impl SharedState {
+     pub fn rx_bytes(&self) -> u64 {
+         self.metrics.rx_bytes.load(Ordering::Relaxed)
+     }
++
++    /// Number of guest frames dropped because the bounded TX ring was full.
++    pub fn tx_ring_overflows(&self) -> u64 {
++        self.metrics.tx_ring_overflows.load(Ordering::Relaxed)
++    }
+ }
+ 
+ impl Default for NetworkMetrics {
+@@ -297,6 +310,7 @@ impl Default for NetworkMetrics {
+         Self {
+             tx_bytes: AtomicU64::new(0),
+             rx_bytes: AtomicU64::new(0),
++            tx_ring_overflows: AtomicU64::new(0),
+         }
+     }
+ }
+diff --git a/crates/network/lib/engine/network.rs b/crates/network/lib/engine/network.rs
+index b536ef4..9158774 100644
+--- a/crates/network/lib/engine/network.rs
++++ b/crates/network/lib/engine/network.rs
+@@ -22,6 +22,7 @@ use microsandbox_types::{
+ use msb_krun::backends::net::NetBackend;
+ 
+ use crate::config::{ConnectionLimit, ResolvedNetworkConfig};
++use crate::engine::tls::ca::CertAuthority;
+ use crate::engine::tls::state::{TlsState, TlsStateError};
+ use crate::netstack::{
+     backend::SmoltcpBackend,
+@@ -31,7 +32,18 @@ use crate::netstack::{
+ use crate::policy::{NetworkPolicy, NetworkProfile};
+ use crate::ports::PortCommand;
+ pub use crate::ports::PortControlHandle;
+-use crate::secrets::handle::SecretsHandle;
++use crate::ports::publisher::PortReadyResult;
++pub use crate::ports::publisher::PublishedPortBinding;
++pub use crate::secrets::handle::SecretsHandle;
++
++/// Generate a fresh CA pair using the pinned network library's rcgen implementation.
++///
++/// The key is returned only to the caller for private host-side persistence. It is never stored
++/// in network logs or returned by `SmoltcpNetwork` readiness.
++pub fn generate_intercept_ca_pair() -> Result<(Vec<u8>, Vec<u8>), rcgen::Error> {
++    let ca = CertAuthority::try_generate()?;
++    Ok((ca.cert_pem(), ca.key_pem()))
++}
+ 
+ //--------------------------------------------------------------------------------------------------
+ // Constants
+@@ -138,6 +150,29 @@ pub enum NetworkInitError {
+     /// A stored network rate limiter has neither direction configured.
+     #[error("invalid network rate limiter: at least one of egress or ingress is required")]
+     EmptyNetworkRateLimiter,
++    /// IPv6 was disabled while an explicit IPv6 address or pool was configured.
++    #[error("IPv6 cannot be disabled while an IPv6 address or pool is configured")]
++    Ipv6DisabledWithAddress,
++}
++
++/// An initial published listener failed to bind before the network was ready.
++#[derive(Debug, thiserror::Error)]
++pub enum PortStartupError {
++    /// The network poll thread has already started.
++    #[error("network has already started")]
++    AlreadyStarted,
++    /// This readiness API only reserves listeners bound to host loopback.
++    #[error("published guest port {guest_port} is not bound to loopback")]
++    NonLoopbackBinding { guest_port: u16 },
++    /// A requested published listener failed to bind.
++    #[error("failed to bind published guest port {guest_port}: {reason}")]
++    Bind { guest_port: u16, reason: String },
++    /// The readiness deadline elapsed before every listener reported a bound socket.
++    #[error("timed out waiting for published ports")]
++    Timeout,
++    /// The network poll thread exited before every listener reported a bound socket.
++    #[error("published port readiness channel closed")]
++    ChannelClosed,
+ }
+ 
+ /// Handle for installing host-side termination behavior into the network stack.
+@@ -248,16 +283,23 @@ impl SmoltcpNetwork {
+             None => None,
+         };
+         let gateway_ipv4 = guest_ipv4.map(gateway_from_guest_ipv4);
+-        let guest_ipv6 = match config.interface.ipv6_address {
+-            Some(address) => Some(address),
+-            None if host_routes.ipv6 => Some(derive_guest_ipv6(
+-                config
+-                    .interface
+-                    .ipv6_pool
+-                    .unwrap_or_else(default_guest_ipv6_pool),
+-                slot,
+-            )?),
+-            None => None,
++        let guest_ipv6 = if config.interface.ipv6_enabled == Some(false) {
++            if config.interface.ipv6_address.is_some() || config.interface.ipv6_pool.is_some() {
++                return Err(NetworkInitError::Ipv6DisabledWithAddress);
++            }
++            None
++        } else {
++            match config.interface.ipv6_address {
++                Some(address) => Some(address),
++                None if host_routes.ipv6 => Some(derive_guest_ipv6(
++                    config
++                        .interface
++                        .ipv6_pool
++                        .unwrap_or_else(default_guest_ipv6_pool),
++                    slot,
++                )?),
++                None => None,
++            }
+         };
+         let gateway_ipv6 = guest_ipv6.map(gateway_from_guest_ipv6);
+ 
+@@ -378,6 +420,67 @@ impl SmoltcpNetwork {
+     /// Must be called before VM boot. Requires a tokio runtime handle for
+     /// spawning proxy tasks, DNS resolution, and published port listeners.
+     pub fn start(&mut self, tokio_handle: tokio::runtime::Handle) {
++        self.start_inner(tokio_handle, false, None);
++    }
++
++    /// Start the network and wait until every configured published listener owns a bound
++    /// loopback socket. Ephemeral host ports are returned from those still-open sockets; this
++    /// method never probes, releases, or rebinds a host port.
++    ///
++    /// This startup path also enables the generation close barrier for guest TCP proxy sessions.
++    /// The ordinary [`start`](Self::start) path retains its existing behavior.
++    pub fn start_and_wait_for_ports(
++        &mut self,
++        tokio_handle: tokio::runtime::Handle,
++        timeout: std::time::Duration,
++    ) -> Result<Vec<PublishedPortBinding>, PortStartupError> {
++        if self.poll_handle.is_some() {
++            return Err(PortStartupError::AlreadyStarted);
++        }
++        let requested = self.config.config().ports.clone();
++        if let Some(port) = requested.iter().find(|port| !port.host_bind.is_loopback()) {
++            return Err(PortStartupError::NonLoopbackBinding {
++                guest_port: port.guest_port,
++            });
++        }
++
++        let (ready_tx, ready_rx) = mpsc::sync_channel(requested.len());
++        self.start_inner(
++            tokio_handle,
++            true,
++            (!requested.is_empty()).then_some(ready_tx),
++        );
++
++        let deadline = std::time::Instant::now() + timeout;
++        let mut bindings = Vec::with_capacity(requested.len());
++        for _ in 0..requested.len() {
++            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
++            let result = ready_rx
++                .recv_timeout(remaining)
++                .map_err(|error| match error {
++                    mpsc::RecvTimeoutError::Timeout => PortStartupError::Timeout,
++                    mpsc::RecvTimeoutError::Disconnected => PortStartupError::ChannelClosed,
++                })?;
++            match result.binding {
++                Ok(binding) => bindings.push(binding),
++                Err(reason) => {
++                    return Err(PortStartupError::Bind {
++                        guest_port: result.guest_port,
++                        reason,
++                    });
++                }
++            }
++        }
++        bindings.sort_by_key(|binding| (binding.guest_port, binding.protocol as u8));
++        Ok(bindings)
++    }
++
++    fn start_inner(
++        &mut self,
++        tokio_handle: tokio::runtime::Handle,
++        close_sessions_on_secret_change: bool,
++        port_ready: Option<mpsc::SyncSender<PortReadyResult>>,
++    ) {
+         let shared = self.shared.clone();
+         let poll_config = PollLoopConfig {
+             gateway_mac: self.gateway_mac,
+@@ -409,7 +512,7 @@ impl SmoltcpNetwork {
+                     if let Some(gate) = activation_gate {
+                         gate.wait();
+                     }
+-                    poll::smoltcp_poll_loop(
++                    poll::smoltcp_poll_loop_with_options(
+                         shared,
+                         poll_config,
+                         network_policy,
+@@ -425,6 +528,8 @@ impl SmoltcpNetwork {
+                         tokio_handle,
+                         secrets,
+                         outbound_proxy,
++                        close_sessions_on_secret_change,
++                        port_ready,
+                     );
+                 })
+                 .expect("failed to spawn smoltcp poll thread"),
+@@ -569,6 +674,11 @@ impl SmoltcpNetwork {
+         }
+     }
+ 
++    /// Number of guest frames dropped because the bounded guest-to-runtime ring was full.
++    pub fn tx_ring_overflows(&self) -> u64 {
++        self.shared.tx_ring_overflows()
++    }
++
+     /// Live-swappable view of the secrets configuration. The runtime control
+     /// socket uses it to apply secret rotation, removal, and allowed-host
+     /// updates without restarting the sandbox.
+@@ -614,6 +724,11 @@ impl MetricsHandle {
+     pub fn rx_bytes(&self) -> u64 {
+         self.shared.rx_bytes()
+     }
++
++    /// Number of guest frames dropped because the bounded guest-to-runtime ring was full.
++    pub fn tx_ring_overflows(&self) -> u64 {
++        self.shared.tx_ring_overflows()
++    }
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -833,6 +948,28 @@ mod tests {
+         assert_eq!(source.gateway_mac, SmoltcpNetwork::default_gateway_mac(7));
+     }
+ 
++    #[test]
++    fn tx_ring_overflow_counter_is_readable_from_network_and_metrics_handle() {
++        let network = SmoltcpNetwork::build(
++            resolved(NetworkConfig::default()),
++            0,
++            DeploymentProfile::SingleTenant,
++            routes(true, false),
++        )
++        .unwrap();
++        let metrics = network.metrics_handle();
++
++        assert_eq!(network.tx_ring_overflows(), 0);
++        assert_eq!(metrics.tx_ring_overflows(), 0);
++
++        // The backend test proves a full ring increments this counter. This
++        // assertion covers the public observer surface without starting a VM.
++        network.shared.add_tx_ring_overflow();
++
++        assert_eq!(network.tx_ring_overflows(), 1);
++        assert_eq!(metrics.tx_ring_overflows(), 1);
++    }
++
+     #[test]
+     fn captured_gateway_rejects_unusable_ethernet_addresses() {
+         for mac in [[0; 6], [1, 2, 3, 4, 5, 6], derive_guest_mac(8)] {
+@@ -1184,6 +1321,52 @@ mod tests {
+         assert!(vars[3].1.contains("/64"));
+     }
+ 
++    #[test]
++    fn explicit_ipv6_disable_overrides_host_route() {
++        let mut config = NetworkConfig::default();
++        config.interface.ipv6_enabled = Some(false);
++        let net = SmoltcpNetwork::build(
++            resolved(config),
++            0,
++            DeploymentProfile::SingleTenant,
++            routes(true, true),
++        )
++        .unwrap();
++
++        assert!(net.guest_ipv6.is_none());
++        assert!(net.gateway_ipv6.is_none());
++        assert!(
++            !net.guest_env_vars()
++                .iter()
++                .any(|(key, _)| key == ENV_NET_IPV6)
++        );
++        assert!(net.guest_bootstrap_network().ipv6.is_none());
++    }
++
++    #[test]
++    fn explicit_ipv6_disable_rejects_ipv6_address_or_pool() {
++        let mut config = NetworkConfig::default();
++        config.interface.ipv6_enabled = Some(false);
++        config.interface.ipv6_address = Some("fd42:6d73:62::2".parse().unwrap());
++        assert!(matches!(
++            SmoltcpNetwork::build(
++                resolved(config),
++                0,
++                DeploymentProfile::SingleTenant,
++                routes(true, true),
++            ),
++            Err(NetworkInitError::Ipv6DisabledWithAddress)
++        ));
++    }
++
++    #[test]
++    fn public_ca_generation_returns_a_loadable_pair() {
++        let (cert_pem, key_pem) = generate_intercept_ca_pair().unwrap();
++        assert!(cert_pem.starts_with(b"-----BEGIN CERTIFICATE-----"));
++        assert!(key_pem.starts_with(b"-----BEGIN PRIVATE KEY-----"));
++        assert!(CertAuthority::load(&cert_pem, &key_pem).is_ok());
++    }
++
+     #[test]
+     fn guest_env_vars_omit_ipv6_without_host_route() {
+         let net = SmoltcpNetwork::build(
+diff --git a/crates/network/lib/engine/ports/publisher.rs b/crates/network/lib/engine/ports/publisher.rs
+index 59a9f6c..0541cb5 100644
+--- a/crates/network/lib/engine/ports/publisher.rs
++++ b/crates/network/lib/engine/ports/publisher.rs
+@@ -93,6 +93,23 @@ pub struct PortPublisher {
+     tcp_accept_queue_size: TcpAcceptQueueSize,
+ }
+ 
++/// Host socket ownership returned by the opt-in startup readiness API.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct PublishedPortBinding {
++    /// Host port actually bound by the owned listener. An input port of zero is resolved here.
++    pub host_port: u16,
++    /// Guest destination port.
++    pub guest_port: u16,
++    /// Listener transport.
++    pub protocol: PortProtocol,
++}
++
++/// One startup listener's bind result, sent from its task to `SmoltcpNetwork`.
++pub(crate) struct PortReadyResult {
++    pub(crate) guest_port: u16,
++    pub(crate) binding: Result<PublishedPortBinding, String>,
++}
++
+ /// Host-control command processed by the network poll thread.
+ pub enum PortCommand {
+     List(sync_mpsc::SyncSender<Result<Vec<PublishedPort>, String>>),
+@@ -292,6 +309,39 @@ impl PortPublisher {
+         policy: Arc<NetworkPolicy>,
+         shared: Arc<SharedState>,
+         tokio_handle: &tokio::runtime::Handle,
++    ) -> Self {
++        Self::new_with_readiness(
++            ports,
++            tcp_accept_queue_size,
++            guest_ipv4,
++            guest_ipv6,
++            gateway_ipv4,
++            gateway_ipv6,
++            gateway_mac,
++            guest_mac,
++            policy,
++            shared,
++            tokio_handle,
++            None,
++        )
++    }
++
++    /// Internal constructor used by the opt-in startup path to report listeners only after their
++    /// sockets are bound and still owned by their serving tasks.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn new_with_readiness(
++        ports: &[PublishedPort],
++        tcp_accept_queue_size: TcpAcceptQueueSize,
++        guest_ipv4: Option<Ipv4Addr>,
++        guest_ipv6: Option<Ipv6Addr>,
++        gateway_ipv4: Option<Ipv4Addr>,
++        gateway_ipv6: Option<Ipv6Addr>,
++        gateway_mac: [u8; 6],
++        guest_mac: [u8; 6],
++        policy: Arc<NetworkPolicy>,
++        shared: Arc<SharedState>,
++        tokio_handle: &tokio::runtime::Handle,
++        readiness: Option<sync_mpsc::SyncSender<PortReadyResult>>,
+     ) -> Self {
+         let (inbound_tx, inbound_rx) = mpsc::channel(64);
+         let udp_routes = Arc::new(Mutex::new(HashMap::new()));
+@@ -317,12 +367,21 @@ impl PortPublisher {
+                 policy,
+                 shared,
+                 tokio_handle,
++                readiness,
+             );
+         } else if !ports.is_empty() {
+             tracing::warn!(
+                 count = ports.len(),
+                 "skipping published port listeners: guest has no IPv4 or IPv6 address",
+             );
++            if let Some(readiness) = readiness {
++                for port in ports {
++                    let _ = readiness.send(PortReadyResult {
++                        guest_port: port.guest_port,
++                        binding: Err("guest has no IPv4 or IPv6 address".into()),
++                    });
++                }
++            }
+         }
+ 
+         Self {
+@@ -820,10 +879,12 @@ impl PortPublisher {
+         policy: Arc<NetworkPolicy>,
+         shared: Arc<SharedState>,
+         tokio_handle: &tokio::runtime::Handle,
++        readiness: Option<sync_mpsc::SyncSender<PortReadyResult>>,
+     ) {
+         for port in ports {
+             let bind_addr = SocketAddr::new(port.host_bind, port.host_port);
+             let guest_port = port.guest_port;
++            let port_readiness = readiness.as_ref().map(Clone::clone);
+ 
+             match port.protocol {
+                 PortProtocol::Tcp => {
+@@ -838,6 +899,7 @@ impl PortPublisher {
+                             tx,
+                             policy,
+                             shared,
++                            port_readiness,
+                         )
+                         .await
+                         {
+@@ -862,6 +924,14 @@ impl PortPublisher {
+                             guest_port,
+                             "skipping UDP published port: guest has no matching gateway/guest IP family",
+                         );
++                        if let Some(readiness) = port_readiness {
++                            let _ = readiness.send(PortReadyResult {
++                                guest_port,
++                                binding: Err(
++                                    "guest has no matching IPv4/IPv6 gateway address".into()
++                                ),
++                            });
++                        }
+                         continue;
+                     };
+ 
+@@ -893,6 +963,7 @@ impl PortPublisher {
+                             shared,
+                             EthernetAddress(gateway_mac),
+                             EthernetAddress(guest_mac),
++                            port_readiness,
+                         )
+                         .await
+                         {
+@@ -984,6 +1055,32 @@ fn bind_listener(
+     socket.listen(backlog.get())
+ }
+ 
++fn report_listener_ready(
++    readiness: Option<sync_mpsc::SyncSender<PortReadyResult>>,
++    guest_port: u16,
++    protocol: PortProtocol,
++    result: Result<SocketAddr, String>,
++) {
++    let Some(readiness) = readiness else {
++        return;
++    };
++    let binding = result.and_then(|address| {
++        if address.port() == 0 {
++            Err("listener reported an unassigned host port".to_string())
++        } else {
++            Ok(PublishedPortBinding {
++                host_port: address.port(),
++                guest_port,
++                protocol,
++            })
++        }
++    });
++    let _ = readiness.send(PortReadyResult {
++        guest_port,
++        binding,
++    });
++}
++
+ /// Listener task: accepts TCP connections on the host, runs each
+ /// through the network policy's ingress evaluator, and queues
+ /// allowed connections for the publisher's accept loop. Denied
+@@ -996,8 +1093,33 @@ async fn tcp_listener_task(
+     inbound_tx: mpsc::Sender<InboundConnection>,
+     policy: Arc<NetworkPolicy>,
+     shared: Arc<SharedState>,
++    readiness: Option<sync_mpsc::SyncSender<PortReadyResult>>,
+ ) -> std::io::Result<()> {
+-    let listener = bind_listener(bind_addr, backlog)?;
++    let listener = match bind_listener(bind_addr, backlog) {
++        Ok(listener) => listener,
++        Err(error) => {
++            report_listener_ready(
++                readiness,
++                guest_port,
++                PortProtocol::Tcp,
++                Err(error.to_string()),
++            );
++            return Err(error);
++        }
++    };
++    let bound = match listener.local_addr() {
++        Ok(bound) => bound,
++        Err(error) => {
++            report_listener_ready(
++                readiness,
++                guest_port,
++                PortProtocol::Tcp,
++                Err(error.to_string()),
++            );
++            return Err(error);
++        }
++    };
++    report_listener_ready(readiness, guest_port, PortProtocol::Tcp, Ok(bound));
+     log_published_port_listener("TCP", bind_addr, guest_port);
+ 
+     tcp_listener_loop(listener, guest_port, inbound_tx, policy, shared, None).await
+@@ -1067,8 +1189,33 @@ async fn udp_listener_task(
+     shared: Arc<SharedState>,
+     gateway_mac: EthernetAddress,
+     guest_mac: EthernetAddress,
++    readiness: Option<sync_mpsc::SyncSender<PortReadyResult>>,
+ ) -> std::io::Result<()> {
+-    let socket = UdpSocket::bind(bind_addr).await?;
++    let socket = match UdpSocket::bind(bind_addr).await {
++        Ok(socket) => socket,
++        Err(error) => {
++            report_listener_ready(
++                readiness,
++                guest_port,
++                PortProtocol::Udp,
++                Err(error.to_string()),
++            );
++            return Err(error);
++        }
++    };
++    let bound = match socket.local_addr() {
++        Ok(bound) => bound,
++        Err(error) => {
++            report_listener_ready(
++                readiness,
++                guest_port,
++                PortProtocol::Udp,
++                Err(error.to_string()),
++            );
++            return Err(error);
++        }
++    };
++    report_listener_ready(readiness, guest_port, PortProtocol::Udp, Ok(bound));
+     log_published_port_listener("UDP", bind_addr, guest_port);
+ 
+     let mut buf = vec![0u8; UDP_RELAY_BUF_SIZE];
+@@ -1455,6 +1602,53 @@ mod tests {
+         )
+     }
+ 
++    #[test]
++    fn readiness_reports_the_ephemeral_port_while_listener_owns_it() {
++        let runtime = tokio::runtime::Builder::new_multi_thread()
++            .worker_threads(2)
++            .enable_all()
++            .build()
++            .unwrap();
++        runtime.block_on(async {
++            let shared = Arc::new(SharedState::new(4));
++            let policy = Arc::new(NetworkPolicy::allow_all());
++            let (ready_tx, ready_rx) = sync_mpsc::sync_channel(1);
++            let publisher = PortPublisher::new_with_readiness(
++                &[PublishedPort {
++                    host_port: 0,
++                    guest_port: 22,
++                    protocol: PortProtocol::Tcp,
++                    host_bind: IpAddr::V4(Ipv4Addr::LOCALHOST),
++                }],
++                TcpAcceptQueueSize::default(),
++                Some(Ipv4Addr::new(172, 16, 0, 2)),
++                None,
++                Some(Ipv4Addr::new(172, 16, 0, 1)),
++                None,
++                [2, 0, 0, 0, 0, 1],
++                [2, 0, 0, 0, 0, 2],
++                policy,
++                shared,
++                &tokio::runtime::Handle::current(),
++                Some(ready_tx),
++            );
++            let ready = ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
++            let binding = ready.binding.unwrap();
++            assert_eq!(ready.guest_port, 22);
++            assert_eq!(binding.guest_port, 22);
++            assert_eq!(binding.protocol, PortProtocol::Tcp);
++            assert_ne!(binding.host_port, 0);
++            assert!(
++                std::net::TcpListener::bind(SocketAddr::new(
++                    IpAddr::V4(Ipv4Addr::LOCALHOST),
++                    binding.host_port,
++                ))
++                .is_err()
++            );
++            drop(publisher);
++        });
++    }
++
+     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn live_tcp_add_list_remove_binds_and_releases_ephemeral_port() {
+         let shared = Arc::new(SharedState::new(4));
+diff --git a/crates/network/lib/engine/secrets/handle.rs b/crates/network/lib/engine/secrets/handle.rs
+index 44a4c31..7d7f420 100644
+--- a/crates/network/lib/engine/secrets/handle.rs
++++ b/crates/network/lib/engine/secrets/handle.rs
+@@ -1,30 +1,55 @@
+ //! Live-swappable view of the active secrets configuration.
+ //!
+-//! The proxy layers load the current [`SecretsConfig`] snapshot when they build a per-connection
+-//! [`SecretsHandler`](super::handler::SecretsHandler), so swapping the snapshot here makes
+-//! rotation, removal, and allowed-host updates take effect for all future guest connections
+-//! without restarting the sandbox. Existing proxy connections close on policy changes.
++//! The legacy synchronous update methods keep their existing snapshot-swap contract. The
++//! awaited methods publish a new generation and wait until every TCP session using the previous
++//! generation has been cancelled and dropped.
+ 
+-use std::sync::{Arc, RwLock};
++use std::collections::HashMap;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Arc, Mutex};
+ 
+-use crate::secrets::config::{HostPattern, SecretsConfig};
++use crate::secrets::config::{HostPattern, SecretEntry, SecretSubstitution, SecretsConfig};
+ 
+ //--------------------------------------------------------------------------------------------------
+ // Types
+ //--------------------------------------------------------------------------------------------------
+ 
++struct SecretsState {
++    snapshot: Arc<SecretsConfig>,
++    generation: u64,
++    active_sessions: HashMap<u64, usize>,
++}
++
++struct SecretsShared {
++    state: Mutex<SecretsState>,
++    generation_changes: tokio::sync::watch::Sender<u64>,
++    drain_changes: tokio::sync::watch::Sender<u64>,
++    drain_generation: AtomicU64,
++    legacy_changes: tokio::sync::watch::Sender<()>,
++    update_lock: tokio::sync::Mutex<()>,
++}
++
+ /// Shared handle to the secrets configuration consumed by the network stack.
+ ///
+ /// Cloning is cheap; all clones observe the same swappable snapshot.
+ #[derive(Clone)]
+ pub struct SecretsHandle {
+-    inner: Arc<RwLock<Arc<SecretsConfig>>>,
+-    changes: tokio::sync::watch::Sender<()>,
++    shared: Arc<SecretsShared>,
++}
++
++/// A registered TCP session using one immutable secret-policy generation.
++///
++/// The session guard is held until its proxy task has been cancelled and its sockets have dropped.
++pub(crate) struct SecretsSession {
++    snapshot: Arc<SecretsConfig>,
++    generation: u64,
++    changes: tokio::sync::watch::Receiver<u64>,
++    shared: Arc<SecretsShared>,
+ }
+ 
+ /// A live secrets update that could not be applied.
+ ///
+-/// Errors carry secret identities only, never values.
++/// Errors carry secret identities only, never values or profiles.
+ #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+ pub enum SecretsUpdateError {
+     /// No secret with this name exists in the active configuration.
+@@ -40,6 +65,17 @@ pub enum SecretsUpdateError {
+         /// Secret identity (the guest environment variable name).
+         name: String,
+     },
++
++    /// The requested identity, placeholder, value, or host pattern is invalid.
++    #[error("secret {name}: invalid update")]
++    InvalidUpdate {
++        /// Secret identity; no secret value is included.
++        name: String,
++    },
++
++    /// The GitHub profile is not valid JSON.
++    #[error("invalid GitHub profile")]
++    InvalidGithubProfile,
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -49,41 +85,87 @@ pub enum SecretsUpdateError {
+ impl SecretsHandle {
+     /// Create a handle over the boot-time secrets configuration.
+     pub fn new(config: SecretsConfig) -> Self {
++        let (generation_changes, _) = tokio::sync::watch::channel(0);
++        let (drain_changes, _) = tokio::sync::watch::channel(0);
++        let (legacy_changes, _) = tokio::sync::watch::channel(());
+         Self {
+-            inner: Arc::new(RwLock::new(Arc::new(config))),
+-            changes: tokio::sync::watch::channel(()).0,
++            shared: Arc::new(SecretsShared {
++                state: Mutex::new(SecretsState {
++                    snapshot: Arc::new(config),
++                    generation: 0,
++                    active_sessions: HashMap::new(),
++                }),
++                generation_changes,
++                drain_changes,
++                drain_generation: AtomicU64::new(0),
++                legacy_changes,
++                update_lock: tokio::sync::Mutex::new(()),
++            }),
+         }
+     }
+ 
+     /// Subscribe before a connection loads its policy snapshot.
+     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<()> {
+-        self.changes.subscribe()
++        self.shared.legacy_changes.subscribe()
+     }
+ 
+     /// Load the current snapshot.
+     pub fn load(&self) -> Arc<SecretsConfig> {
+-        self.inner.read().expect("secrets lock poisoned").clone()
++        self.shared
++            .state
++            .lock()
++            .expect("secrets state lock poisoned")
++            .snapshot
++            .clone()
++    }
++
++    /// Atomically capture the current snapshot and register a session for its generation.
++    pub(crate) fn session(&self) -> SecretsSession {
++        let mut state = self
++            .shared
++            .state
++            .lock()
++            .expect("secrets state lock poisoned");
++        let generation = state.generation;
++        *state.active_sessions.entry(generation).or_default() += 1;
++        let snapshot = state.snapshot.clone();
++        let changes = self.shared.generation_changes.subscribe();
++        SecretsSession {
++            snapshot,
++            generation,
++            changes,
++            shared: self.shared.clone(),
++        }
+     }
+ 
+     /// Replace the value of an existing secret. The guest-visible placeholder
+     /// and host allow-list are unchanged.
+     pub fn rotate_value(&self, name: &str, value: String) -> Result<(), SecretsUpdateError> {
+-        self.update(name, |entry| {
+-            entry.value = zeroize::Zeroizing::new(value);
++        let mut value = zeroize::Zeroizing::new(value);
++        self.update_legacy(name, |entry| {
++            entry.value = zeroize::Zeroizing::new(std::mem::take(&mut *value));
+         })
+     }
+ 
+     /// Stop resolving and injecting a secret for future connections. Removing
+     /// an already-absent secret is a no-op: the goal state is reached.
+     pub fn remove(&self, name: &str) {
+-        let mut guard = self.inner.write().expect("secrets lock poisoned");
+-        if !guard.secrets.iter().any(|entry| entry.env_var == name) {
++        let mut state = self
++            .shared
++            .state
++            .lock()
++            .expect("secrets state lock poisoned");
++        if !state
++            .snapshot
++            .secrets
++            .iter()
++            .any(|entry| entry.env_var == name)
++        {
+             return;
+         }
+-        let mut config = (**guard).clone();
++        let mut config = (*state.snapshot).clone();
+         config.secrets.retain(|entry| entry.env_var != name);
+-        *guard = Arc::new(config);
+-        self.changes.send_replace(());
++        publish_legacy(&self.shared, &mut state, config);
+     }
+ 
+     /// Replace the allowed hosts of an existing secret.
+@@ -98,17 +180,223 @@ impl SecretsHandle {
+             });
+         }
+         let hosts: Vec<HostPattern> = hosts.iter().map(|host| HostPattern::parse(host)).collect();
+-        self.update(name, |entry| entry.allowed_hosts = hosts)
++        self.update_legacy(name, |entry| entry.allowed_hosts = hosts)
++    }
++
++    /// Add or replace one secret and wait until sessions using the old generation have closed.
++    ///
++    /// `allowed_hosts` is replaced in the same atomic generation as the value. `SILO_GITHUB` is
++    /// reserved for [`set_github_profile_and_wait`](Self::set_github_profile_and_wait).
++    pub async fn put_secret_and_wait(
++        &self,
++        name: &str,
++        value: String,
++        placeholder: String,
++        allowed_hosts: Vec<String>,
++    ) -> Result<(), SecretsUpdateError> {
++        let value = zeroize::Zeroizing::new(value);
++        validate_secret_name(name)?;
++        if value.is_empty() || value.contains('\0') || !valid_placeholder(&placeholder) {
++            return Err(invalid_update(name));
++        }
++        let hosts = parse_validated_hosts(name, &allowed_hosts)?;
++        let entry = SecretEntry {
++            env_var: name.to_string(),
++            value,
++            source: None,
++            placeholder,
++            allowed_hosts: hosts,
++            substitution: SecretSubstitution::default(),
++            passthrough_hosts: Vec::new(),
++            violation_action: None,
++            require_tls_identity: true,
++        };
++        self.update_and_wait(move |config| {
++            if let Some(current) = config.secrets.iter_mut().find(|item| item.env_var == name) {
++                *current = entry;
++            } else {
++                config.secrets.push(entry);
++            }
++            Ok(())
++        })
++        .await
++    }
++
++    /// Replace an existing secret value and wait for sessions using the old generation to close.
++    pub async fn rotate_value_and_wait(
++        &self,
++        name: &str,
++        value: String,
++    ) -> Result<(), SecretsUpdateError> {
++        let value = zeroize::Zeroizing::new(value);
++        validate_secret_name(name)?;
++        if value.is_empty() || value.contains('\0') {
++            return Err(invalid_update(name));
++        }
++        self.update_and_wait(move |config| {
++            let entry = config
++                .secrets
++                .iter_mut()
++                .find(|entry| entry.env_var == name)
++                .ok_or_else(|| SecretsUpdateError::UnknownSecret {
++                    name: name.to_string(),
++                })?;
++            entry.value = value;
++            Ok(())
++        })
++        .await
++    }
++
++    /// Remove a secret and wait for sessions using the old generation to close.
++    pub async fn remove_and_wait(&self, name: &str) -> Result<(), SecretsUpdateError> {
++        validate_secret_name(name)?;
++        self.update_and_wait(move |config| {
++            config.secrets.retain(|entry| entry.env_var != name);
++            Ok(())
++        })
++        .await
++    }
++
++    /// Replace the allow-list of an existing secret in one generation and wait for old sessions.
++    pub async fn set_allowed_hosts_and_wait(
++        &self,
++        name: &str,
++        allowed_hosts: &[String],
++    ) -> Result<(), SecretsUpdateError> {
++        if allowed_hosts.is_empty() {
++            return Err(SecretsUpdateError::MissingAllowedHosts {
++                name: name.to_string(),
++            });
++        }
++        let hosts = if name == "SILO_GITHUB" {
++            let requested = allowed_hosts
++                .iter()
++                .map(String::as_str)
++                .collect::<std::collections::HashSet<_>>();
++            if allowed_hosts.len() != 2
++                || requested != std::collections::HashSet::from(["github.com", "api.github.com"])
++            {
++                return Err(invalid_update(name));
++            }
++            allowed_hosts
++                .iter()
++                .map(|host| HostPattern::parse(host))
++                .collect()
++        } else {
++            validate_secret_name(name)?;
++            parse_validated_hosts(name, allowed_hosts)?
++        };
++        self.update_and_wait(move |config| {
++            let entry = config
++                .secrets
++                .iter_mut()
++                .find(|entry| entry.env_var == name)
++                .ok_or_else(|| SecretsUpdateError::UnknownSecret {
++                    name: name.to_string(),
++                })?;
++            entry.allowed_hosts = hosts;
++            Ok(())
++        })
++        .await
++    }
++
++    /// Atomically replace or remove the reserved GitHub runtime profile.
++    ///
++    /// The profile is stored as a zeroizing secret value and may only target the two
++    /// credential-bearing GitHub API hosts.
++    pub async fn set_github_profile_and_wait(
++        &self,
++        profile_json: Option<String>,
++    ) -> Result<(), SecretsUpdateError> {
++        let profile_json = profile_json.map(zeroize::Zeroizing::new);
++        if profile_json
++            .as_deref()
++            .is_some_and(|profile| profile.is_empty() || !valid_json(profile))
++        {
++            return Err(SecretsUpdateError::InvalidGithubProfile);
++        }
++        self.update_and_wait(move |config| {
++            config
++                .secrets
++                .retain(|entry| entry.env_var != "SILO_GITHUB");
++            if let Some(profile) = profile_json {
++                config.secrets.push(SecretEntry {
++                    env_var: "SILO_GITHUB".to_string(),
++                    value: profile,
++                    source: None,
++                    placeholder: "$MSB_SILO_GITHUB".to_string(),
++                    allowed_hosts: vec![
++                        HostPattern::parse("github.com"),
++                        HostPattern::parse("api.github.com"),
++                    ],
++                    substitution: SecretSubstitution::default(),
++                    passthrough_hosts: Vec::new(),
++                    violation_action: None,
++                    require_tls_identity: true,
++                });
++            }
++            Ok(())
++        })
++        .await
++    }
++
++    async fn update_and_wait(
++        &self,
++        mutate: impl FnOnce(&mut SecretsConfig) -> Result<(), SecretsUpdateError>,
++    ) -> Result<(), SecretsUpdateError> {
++        let _serial = self.shared.update_lock.lock().await;
++        // Subscribe before observing the active count so a final session drop cannot be missed.
++        let mut drained = self.shared.drain_changes.subscribe();
++        let old_generation = {
++            let mut state = self
++                .shared
++                .state
++                .lock()
++                .expect("secrets state lock poisoned");
++            let mut config = (*state.snapshot).clone();
++            mutate(&mut config)?;
++            let old_generation = state.generation;
++            state.generation = state.generation.wrapping_add(1);
++            state.snapshot = Arc::new(config);
++            self.shared
++                .generation_changes
++                .send_replace(state.generation);
++            self.shared.legacy_changes.send_replace(());
++            old_generation
++        };
++
++        loop {
++            let still_active = self
++                .shared
++                .state
++                .lock()
++                .expect("secrets state lock poisoned")
++                .active_sessions
++                .get(&old_generation)
++                .copied()
++                .unwrap_or_default()
++                != 0;
++            if !still_active {
++                return Ok(());
++            }
++            if drained.changed().await.is_err() {
++                return Ok(());
++            }
++        }
+     }
+ 
+     /// Swap in a new snapshot with `mutate` applied to the named secret.
+-    fn update(
++    fn update_legacy(
+         &self,
+         name: &str,
+-        mutate: impl FnOnce(&mut crate::secrets::config::SecretEntry),
++        mutate: impl FnOnce(&mut SecretEntry),
+     ) -> Result<(), SecretsUpdateError> {
+-        let mut guard = self.inner.write().expect("secrets lock poisoned");
+-        let mut config = (**guard).clone();
++        let mut state = self
++            .shared
++            .state
++            .lock()
++            .expect("secrets state lock poisoned");
++        let mut config = (*state.snapshot).clone();
+         let entry = config
+             .secrets
+             .iter_mut()
+@@ -117,9 +405,159 @@ impl SecretsHandle {
+                 name: name.to_string(),
+             })?;
+         mutate(entry);
+-        *guard = Arc::new(config);
+-        self.changes.send_replace(());
++        publish_legacy(&self.shared, &mut state, config);
++        Ok(())
++    }
++}
++
++impl SecretsSession {
++    /// Snapshot used by the TCP proxy task for this generation.
++    pub(crate) fn snapshot(&self) -> Arc<SecretsConfig> {
++        self.snapshot.clone()
++    }
++
++    /// Wait until this session's generation is revoked.
++    pub(crate) async fn changed(&mut self) -> Result<(), tokio::sync::watch::error::RecvError> {
++        self.changes.changed().await
++    }
++}
++
++impl Drop for SecretsSession {
++    fn drop(&mut self) {
++        let mut state = self
++            .shared
++            .state
++            .lock()
++            .expect("secrets state lock poisoned");
++        if let Some(active) = state.active_sessions.get_mut(&self.generation) {
++            *active -= 1;
++            if *active == 0 {
++                state.active_sessions.remove(&self.generation);
++            }
++        }
++        drop(state);
++        let tick = self
++            .shared
++            .drain_generation
++            .fetch_add(1, Ordering::SeqCst)
++            .wrapping_add(1);
++        self.shared.drain_changes.send_replace(tick);
++    }
++}
++
++fn publish_legacy(shared: &SecretsShared, state: &mut SecretsState, config: SecretsConfig) {
++    state.snapshot = Arc::new(config);
++    state.generation = state.generation.wrapping_add(1);
++    shared.generation_changes.send_replace(state.generation);
++    shared.legacy_changes.send_replace(());
++}
++
++fn validate_secret_name(name: &str) -> Result<(), SecretsUpdateError> {
++    let mut chars = name.chars();
++    let valid = matches!(chars.next(), Some(ch) if ch == '_' || ch.is_ascii_alphabetic())
++        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
++        && name.len() <= 128
++        && !reserved_secret_name(name);
++    if valid {
+         Ok(())
++    } else {
++        Err(invalid_update(name))
++    }
++}
++
++fn reserved_secret_name(name: &str) -> bool {
++    const RESERVED_NAMES: &[&str] = &[
++        "GH_TOKEN",
++        "GITHUB_TOKEN",
++        "PATH",
++        "HOME",
++        "SHELL",
++        "USER",
++        "LOGNAME",
++        "TMPDIR",
++        "TMP",
++        "TEMP",
++        "BASH_ENV",
++        "ENV",
++        "SHELLOPTS",
++        "BASHOPTS",
++        "IFS",
++        "CDPATH",
++        "GLOBIGNORE",
++        "HOSTNAME",
++        "HOSTALIASES",
++        "SSL_CERT_FILE",
++        "SSL_CERT_DIR",
++        "CURL_CA_BUNDLE",
++        "GIT_SSL_CAINFO",
++        "GIT_CONFIG_NOSYSTEM",
++        "HTTP_PROXY",
++        "HTTPS_PROXY",
++        "ALL_PROXY",
++        "NO_PROXY",
++        "SILO_GITHUB",
++    ];
++    const RESERVED_PREFIXES: &[&str] = &["DYLD_", "LD_", "SILO_", "MSB_", "RUST_"];
++    let upper = name.to_ascii_uppercase();
++    RESERVED_NAMES.contains(&upper.as_str())
++        || RESERVED_PREFIXES
++            .iter()
++            .any(|prefix| upper.starts_with(prefix))
++}
++
++fn valid_placeholder(value: &str) -> bool {
++    !value.is_empty()
++        && value.len() <= crate::secrets::config::MAX_SECRET_PLACEHOLDER_BYTES
++        && !value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
++}
++
++fn parse_validated_hosts(
++    name: &str,
++    hosts: &[String],
++) -> Result<Vec<HostPattern>, SecretsUpdateError> {
++    if hosts.is_empty() {
++        return Err(SecretsUpdateError::MissingAllowedHosts {
++            name: name.to_string(),
++        });
++    }
++    if hosts.iter().any(|host| !valid_host_pattern(host)) {
++        return Err(invalid_update(name));
++    }
++    Ok(hosts.iter().map(|host| HostPattern::parse(host)).collect())
++}
++
++fn valid_host_pattern(value: &str) -> bool {
++    if value == "*" {
++        return true;
++    }
++    let wildcard = value.starts_with("*.");
++    let host = value.strip_prefix("*.").unwrap_or(value);
++    if host.is_empty()
++        || host.len() > 253
++        || host.starts_with('.')
++        || host.ends_with('.')
++    {
++        return false;
++    }
++    let labels_valid = host.split('.').all(|label| {
++        !label.is_empty()
++            && label.len() <= 63
++            && label.as_bytes()[0].is_ascii_alphanumeric()
++            && label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
++            && label
++                .bytes()
++                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
++    });
++    labels_valid && (!wildcard || host.contains('.'))
++}
++
++fn valid_json(value: &str) -> bool {
++    serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok()
++}
++
++fn invalid_update(name: &str) -> SecretsUpdateError {
++    SecretsUpdateError::InvalidUpdate {
++        name: name.to_string(),
+     }
+ }
+ 
+@@ -130,7 +566,7 @@ impl SecretsHandle {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    use crate::secrets::config::{SecretEntry, SecretSubstitution};
++    use crate::secrets::config::{SecretSubstitution, SecretsConfig};
+ 
+     fn config_with_secret(name: &str, value: &str) -> SecretsConfig {
+         SecretsConfig {
+@@ -156,7 +592,6 @@ mod tests {
+ 
+         handle.rotate_value("API_KEY", "new".into()).unwrap();
+ 
+-        // The pre-rotation snapshot is untouched; new loads see the new value.
+         assert_eq!(before.secrets[0].value.as_str(), "old");
+         assert_eq!(handle.load().secrets[0].value.as_str(), "new");
+         assert_eq!(handle.load().secrets[0].placeholder, "$MSB_API_KEY");
+@@ -165,7 +600,6 @@ mod tests {
+     #[test]
+     fn rotate_unknown_secret_is_an_error() {
+         let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
+-
+         assert_eq!(
+             handle.rotate_value("MISSING", "new".into()),
+             Err(SecretsUpdateError::UnknownSecret {
+@@ -177,21 +611,17 @@ mod tests {
+     #[test]
+     fn remove_drops_entry_and_is_idempotent() {
+         let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
+-
+         handle.remove("API_KEY");
+         handle.remove("API_KEY");
+-
+         assert!(handle.load().secrets.is_empty());
+     }
+ 
+     #[test]
+     fn set_allowed_hosts_replaces_patterns() {
+         let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
+-
+         handle
+             .set_allowed_hosts("API_KEY", &["*.example.org".into(), "one.test".into()])
+             .unwrap();
+-
+         assert_eq!(
+             handle.load().secrets[0].allowed_hosts,
+             vec![
+@@ -204,7 +634,6 @@ mod tests {
+     #[test]
+     fn set_allowed_hosts_rejects_empty_list() {
+         let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
+-
+         assert_eq!(
+             handle.set_allowed_hosts("API_KEY", &[]),
+             Err(SecretsUpdateError::MissingAllowedHosts {
+@@ -215,7 +644,131 @@ mod tests {
+     }
+ 
+     #[tokio::test]
+-    async fn policy_change_notifies_existing_connections() {
++    async fn awaited_update_closes_old_generation_before_acknowledging() {
++        let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
++        let mut session = handle.session();
++        let update_handle = handle.clone();
++        let update = tokio::spawn(async move {
++            update_handle
++                .rotate_value_and_wait("API_KEY", "new".into())
++                .await
++        });
++
++        tokio::time::timeout(std::time::Duration::from_secs(1), session.changed())
++            .await
++            .expect("generation notification timed out")
++            .expect("generation sender closed");
++        assert!(!update.is_finished());
++        drop(session);
++        tokio::time::timeout(std::time::Duration::from_secs(1), update)
++            .await
++            .expect("update did not observe the close barrier")
++            .expect("update task panicked")
++            .unwrap();
++        assert_eq!(handle.load().secrets[0].value.as_str(), "new");
++    }
++
++    #[tokio::test]
++    async fn put_replaces_value_and_hosts_in_one_generation() {
++        let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
++        handle
++            .put_secret_and_wait(
++                "API_KEY",
++                "new".into(),
++                "$TOKEN".into(),
++                vec!["api.new.example".into()],
++            )
++            .await
++            .unwrap();
++        let config = handle.load();
++        assert_eq!(config.secrets.len(), 1);
++        assert_eq!(config.secrets[0].value.as_str(), "new");
++        assert_eq!(config.secrets[0].placeholder, "$TOKEN");
++        assert_eq!(
++            config.secrets[0].allowed_hosts,
++            vec![HostPattern::Exact("api.new.example".into())]
++        );
++    }
++
++    #[tokio::test]
++    async fn github_profile_is_reserved_and_has_fixed_hosts() {
++        let handle = SecretsHandle::new(SecretsConfig::default());
++        assert!(
++            handle
++                .put_secret_and_wait(
++                    "SILO_GITHUB",
++                    "profile".into(),
++                    "$MSB_SILO_GITHUB".into(),
++                    vec!["github.com".into()]
++                )
++                .await
++                .is_err()
++        );
++        handle
++            .set_github_profile_and_wait(Some(
++                r#"{"version":2,"personalToken":"synthetic"}"#.into(),
++            ))
++            .await
++            .unwrap();
++        let config = handle.load();
++        assert_eq!(config.secrets.len(), 1);
++        assert_eq!(config.secrets[0].env_var, "SILO_GITHUB");
++        assert_eq!(
++            config.secrets[0].value.as_str(),
++            r#"{"version":2,"personalToken":"synthetic"}"#
++        );
++        assert_eq!(config.secrets[0].allowed_hosts.len(), 2);
++    }
++
++    #[tokio::test]
++    async fn strict_updates_reject_bad_names_hosts_and_github_allowlists() {
++        let handle = SecretsHandle::new(SecretsConfig::default());
++        assert!(
++            handle
++                .put_secret_and_wait(
++                    "BAD-NAME",
++                    "value".into(),
++                    "$V".into(),
++                    vec!["api.test".into()]
++                )
++                .await
++                .is_err()
++        );
++        handle
++            .put_secret_and_wait("API_KEY", "value".into(), "$V".into(), vec!["*".into()])
++            .await
++            .unwrap();
++        assert_eq!(
++            handle.load().secrets[0].allowed_hosts,
++            vec![HostPattern::Any]
++        );
++        assert!(
++            handle
++                .put_secret_and_wait(
++                    "GH_TOKEN",
++                    "value".into(),
++                    "$V".into(),
++                    vec!["api.test".into()]
++                )
++                .await
++                .is_err()
++        );
++        assert!(
++            handle
++                .set_allowed_hosts_and_wait("SILO_GITHUB", &["*".into()])
++                .await
++                .is_err()
++        );
++        assert!(
++            handle
++                .set_github_profile_and_wait(Some("not json".into()))
++                .await
++                .is_err()
++        );
++    }
++
++    #[tokio::test]
++    async fn policy_change_notifies_legacy_subscribers() {
+         let handle = SecretsHandle::new(config_with_secret("API_KEY", "old"));
+         let mut before = handle.subscribe();
+         handle.rotate_value("API_KEY", "new".into()).unwrap();
+diff --git a/crates/network/lib/engine/tcp/proxy.rs b/crates/network/lib/engine/tcp/proxy.rs
+index a61eb5d..708556f 100644
+--- a/crates/network/lib/engine/tcp/proxy.rs
++++ b/crates/network/lib/engine/tcp/proxy.rs
+@@ -29,6 +29,7 @@ use crate::netstack::shared::SharedState;
+ use crate::policy::{EgressEvaluation, HostnameSource, NetworkPolicy, Protocol};
+ use crate::proxy::ResolvedOutboundProxy;
+ use crate::secrets::config::{SecretViolationAction, SecretsConfig};
++use crate::secrets::handle::SecretsSession;
+ use crate::secrets::handler::{
+     SecretsHandler, first_line_is_not_http_request, looks_like_http_request_prefix,
+ };
+@@ -81,6 +82,7 @@ pub(crate) struct TcpProxy {
+     strict: bool,
+     proxy_connect: Arc<ProxyConnectState>,
+     outbound_proxy: Option<Arc<ResolvedOutboundProxy>>,
++    secret_session: Option<SecretsSession>,
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -160,15 +162,64 @@ impl TcpProxy {
+             strict,
+             proxy_connect,
+             outbound_proxy,
++            secret_session: None,
+         }
+     }
+ 
++    /// Build a proxy tied to the secret-policy generation it captured.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn new_with_secret_session(
++        guest_dst: SocketAddr,
++        connect_target: UpstreamTcpTarget,
++        from_smoltcp: mpsc::Receiver<Bytes>,
++        to_smoltcp: mpsc::Sender<Bytes>,
++        shared: Arc<SharedState>,
++        network_policy: Arc<NetworkPolicy>,
++        secrets: Arc<SecretsConfig>,
++        tls_state: Option<Arc<TlsState>>,
++        strict: bool,
++        proxy_connect: Arc<ProxyConnectState>,
++        outbound_proxy: Option<Arc<ResolvedOutboundProxy>>,
++        secret_session: SecretsSession,
++    ) -> Self {
++        let mut proxy = Self::new(
++            guest_dst,
++            connect_target,
++            from_smoltcp,
++            to_smoltcp,
++            shared,
++            network_policy,
++            secrets,
++            tls_state,
++            strict,
++            proxy_connect,
++            outbound_proxy,
++        );
++        proxy.secret_session = Some(secret_session);
++        proxy
++    }
++
+     /// Run the TCP proxy task to completion.
+-    pub(crate) async fn run(self) {
++    pub(crate) async fn run(mut self) {
+         let guest_dst = self.guest_dst;
+         let connect_dst = self.connect_target.primary();
+ 
+-        if let Err(error) = self.try_run().await {
++        let result = if let Some(mut secret_session) = self.secret_session.take() {
++            let result = tokio::select! {
++                biased;
++                _ = secret_session.changed() => Err(io::Error::new(
++                    io::ErrorKind::PermissionDenied,
++                    "secret policy changed; connection closed",
++                )),
++                result = self.try_run() => result,
++            };
++            drop(secret_session);
++            result
++        } else {
++            self.try_run().await
++        };
++
++        if let Err(error) = result {
+             tracing::debug!(
+                 dst = %connect_dst,
+                 %guest_dst,
+@@ -192,6 +243,7 @@ impl TcpProxy {
+             strict,
+             proxy_connect,
+             outbound_proxy,
++            secret_session: _,
+         } = self;
+ 
+         // Mirror the SYN-time policy walk so only flows that actually reached a
+diff --git a/crates/network/lib/engine/tls/ca.rs b/crates/network/lib/engine/tls/ca.rs
+index c377f83..a173302 100644
+--- a/crates/network/lib/engine/tls/ca.rs
++++ b/crates/network/lib/engine/tls/ca.rs
+@@ -24,6 +24,12 @@ pub struct CertAuthority {
+ impl CertAuthority {
+     /// Generate a new self-signed CA.
+     pub fn generate() -> Self {
++        Self::try_generate().expect("failed to generate CA")
++    }
++
++    /// Generate a new self-signed CA and return generation errors to callers that need to fail
++    /// startup cleanly instead of panicking.
++    pub fn try_generate() -> Result<Self, rcgen::Error> {
+         let mut params = CertificateParams::default();
+         let mut dn = DistinguishedName::new();
+         dn.push(rcgen::DnType::CommonName, "microsandbox CA");
+@@ -35,20 +41,18 @@ impl CertAuthority {
+             rcgen::KeyUsagePurpose::CrlSign,
+         ];
+ 
+-        let key_pair = KeyPair::generate().expect("failed to generate CA key pair");
+-        let cert = params
+-            .self_signed(&key_pair)
+-            .expect("failed to self-sign CA certificate");
++        let key_pair = KeyPair::generate()?;
++        let cert = params.self_signed(&key_pair)?;
+ 
+         let cert_pem = cert.pem();
+         let cert_der = CertificateDer::from(cert.der().to_vec());
+         let issuer = Issuer::new(params, key_pair);
+ 
+-        Self {
++        Ok(Self {
+             issuer,
+             cert_der,
+             cert_pem,
+-        }
++        })
+     }
+ 
+     /// Load a CA from PEM-encoded certificate and private key bytes.
+diff --git a/crates/network/lib/engine/tls/proxy.rs b/crates/network/lib/engine/tls/proxy.rs
+index 902db78..08c953d 100644
+--- a/crates/network/lib/engine/tls/proxy.rs
++++ b/crates/network/lib/engine/tls/proxy.rs
+@@ -22,6 +22,7 @@ use crate::netstack::shared::SharedState;
+ use crate::policy::{EgressEvaluation, HostnameSource, NetworkPolicy, Protocol};
+ use crate::proxy::ResolvedOutboundProxy;
+ use crate::secrets::config::SecretViolationAction;
++use crate::secrets::handle::SecretsSession;
+ use crate::secrets::handler::SecretsHandler;
+ use crate::tcp::{connection::ProxyConnectState, upstream::UpstreamTcpTarget};
+ 
+@@ -59,6 +60,8 @@ pub(crate) struct TlsProxy {
+     via_connect: bool,
+     /// ClientHello bytes already consumed from the guest stream.
+     initial_buf: Vec<u8>,
++    /// Registered policy generation for an acknowledged close barrier.
++    secret_session: Option<SecretsSession>,
+ }
+ 
+ //--------------------------------------------------------------------------------------------------
+@@ -95,9 +98,41 @@ impl TlsProxy {
+             expected_sni: None,
+             via_connect: false,
+             initial_buf: Vec::new(),
++            secret_session: None,
+         }
+     }
+ 
++    /// Build a TLS proxy registered against one secret-policy generation.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn new_with_secret_session(
++        guest_dst: SocketAddr,
++        connect_target: UpstreamTcpTarget,
++        from_smoltcp: mpsc::Receiver<Bytes>,
++        to_smoltcp: mpsc::Sender<Bytes>,
++        shared: Arc<SharedState>,
++        tls_state: Arc<TlsState>,
++        network_policy: Arc<NetworkPolicy>,
++        strict: bool,
++        proxy_connect: Arc<ProxyConnectState>,
++        outbound_proxy: Option<Arc<ResolvedOutboundProxy>>,
++        secret_session: SecretsSession,
++    ) -> Self {
++        let mut proxy = Self::new(
++            guest_dst,
++            connect_target,
++            from_smoltcp,
++            to_smoltcp,
++            shared,
++            tls_state,
++            network_policy,
++            strict,
++            proxy_connect,
++            outbound_proxy,
++        );
++        proxy.secret_session = Some(secret_session);
++        proxy
++    }
++
+     /// Reuse an already connected upstream stream.
+     pub(crate) fn with_upstream(mut self, upstream_stream: TcpStream) -> Self {
+         self.upstream_stream = Some(upstream_stream);
+@@ -121,11 +156,26 @@ impl TlsProxy {
+     ///
+     /// See [`crate::tcp::proxy::spawn_tcp_proxy`] for the `proxy_connect`
+     /// contract.
+-    pub(crate) async fn run(self) {
++    pub(crate) async fn run(mut self) {
+         let guest_dst = self.guest_dst;
+         let connect_dst = self.connect_target.primary();
+ 
+-        if let Err(error) = self.try_run().await {
++        let result = if let Some(mut secret_session) = self.secret_session.take() {
++            let result = tokio::select! {
++                biased;
++                _ = secret_session.changed() => Err(io::Error::new(
++                    io::ErrorKind::PermissionDenied,
++                    "secret policy changed; connection closed",
++                )),
++                result = self.try_run() => result,
++            };
++            drop(secret_session);
++            result
++        } else {
++            self.try_run().await
++        };
++
++        if let Err(error) = result {
+             tracing::debug!(
+                 dst = %connect_dst,
+                 %guest_dst,
+@@ -152,6 +202,7 @@ impl TlsProxy {
+             expected_sni,
+             via_connect,
+             initial_buf,
++            secret_session: _,
+         } = self;
+         let connect_dst = connect_target.primary();
+ 
+diff --git a/crates/network/lib/model/config/types.rs b/crates/network/lib/model/config/types.rs
+index d74a4cf..0361d13 100644
+--- a/crates/network/lib/model/config/types.rs
++++ b/crates/network/lib/model/config/types.rs
+@@ -174,6 +174,11 @@ pub struct InterfaceOverrides {
+     /// Guest IPv6 pool. Default: derived from slot (fd42:6d73:62::/48 pool).
+     #[serde(default)]
+     pub ipv6_pool: Option<Ipv6Network>,
++
++    /// Whether the guest interface may use IPv6. `false` disables the family even when the host
++    /// has an IPv6 route; `None` preserves automatic detection.
++    #[serde(default)]
++    pub ipv6_enabled: Option<bool>,
+ }
+ 
+ /// DNS interception settings for the sandbox.
+@@ -460,6 +465,7 @@ mod tests {
+         config.interface.ipv4_address = Some("172.16.0.2".parse().unwrap());
+         config.interface.ipv4_pool = Some("172.16.0.0/12".parse().unwrap());
+         config.interface.mac = Some([0x02, 0, 0, 0, 0, 0x01]);
++        config.interface.ipv6_enabled = Some(false);
+         config.strict = true;
+ 
+         // The engine's real serialization of each subdocument.
+@@ -483,6 +489,7 @@ mod tests {
+         let back: InterfaceOverrides =
+             serde_json::from_value(serde_json::to_value(&wire_iface).unwrap()).unwrap();
+         assert_eq!(iface_json, serde_json::to_value(&back).unwrap());
++        assert_eq!(back.ipv6_enabled, Some(false));
+         let wire_config: microsandbox_types::NetworkSpec =
+             serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+         assert!(wire_config.strict);
+diff --git a/packages/microsandbox-types/rust/lib/domain.rs b/packages/microsandbox-types/rust/lib/domain.rs
+index 803988e..68fc9f9 100644
+--- a/packages/microsandbox-types/rust/lib/domain.rs
++++ b/packages/microsandbox-types/rust/lib/domain.rs
+@@ -3048,4 +3048,7 @@ pub struct InterfaceOverrides {
+     #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>))]
+     #[cfg_attr(feature = "ts", ts(type = "string | null"))]
+     pub ipv6_pool: Option<Ipv6Network>,
++    /// Whether the guest interface may use IPv6. `None` preserves automatic detection.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub ipv6_enabled: Option<bool>,
+ }
+
+diff --git a/crates/runtime/lib/runner/control/handler.rs b/crates/runtime/lib/runner/control/handler.rs
+--- a/crates/runtime/lib/runner/control/handler.rs
++++ b/crates/runtime/lib/runner/control/handler.rs
+@@ -391,5 +391,13 @@
+                 SecretsUpdateError::MissingAllowedHosts { .. } => ControlError::rejected(
+                     "invalid_secret_hosts",
+                     "at least one allowed host is required",
+                 ),
++                SecretsUpdateError::InvalidUpdate { .. } => ControlError::rejected(
++                    "invalid_secret_update",
++                    "the secret update is invalid",
++                ),
++                SecretsUpdateError::InvalidGithubProfile => ControlError::rejected(
++                    "invalid_github_profile",
++                    "the GitHub profile is invalid",
++                ),
+             };
+
+diff --git a/sdk/rust/lib/sandbox/builder.rs b/sdk/rust/lib/sandbox/builder.rs
+--- a/sdk/rust/lib/sandbox/builder.rs
++++ b/sdk/rust/lib/sandbox/builder.rs
+@@ -2311,6 +2311,7 @@
+         ipv4_pool: None,
+         ipv6_address: network.ipv6.map(|ipv6| ipv6.address),
+         ipv6_pool: None,
++        ipv6_enabled: None,
+     };
+     if config
+         .spec

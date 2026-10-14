@@ -131,6 +131,10 @@
     {
       "path": "patches/microsandbox-metrics-sampler-blocking-0.7.6.patch",
       "sha256": "791cfc43eef69cdd425887eba5471e0ff90789e671664d54335e5022d185f681"
+    },
+    {
+      "path": "patches/microsandbox-macos-proxy-0.7.6.patch",
+      "sha256": "9eda3fa0a64c124ba9c9077c146a7ee6457e7d65062eadca9755f8bc3517e6e4"
     }
   ]
 }

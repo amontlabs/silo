@@ -12,10 +12,22 @@ struct TauriGitHubRuntime {
 
 impl RuntimeAccess for TauriGitHubRuntime {
     fn scoped_cached_tokens(&self, computer: &str) -> Result<crate::runtime::ScopedTokens, String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            let mut tokens = crate::runtime::ScopedTokens::default();
+            tokens.extend(
+                crate::commands::macos_computers::proxy_scoped_cached_tokens(&self.app, computer)?,
+            );
+            return Ok(tokens);
+        }
         crate::runtime::scoped_cached_tokens(&crate::commands::runtime::host(&self.app), computer)
     }
 
     fn github_policy_is_cached(&self, computer: &str, profile: &Value) -> Result<bool, String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return crate::commands::macos_computers::proxy_github_policy_is_cached(
+                &self.app, computer, profile,
+            );
+        }
         crate::runtime::github_policy_is_cached(
             &crate::commands::runtime::host(&self.app),
             computer,
@@ -29,6 +41,11 @@ impl RuntimeAccess for TauriGitHubRuntime {
         revision: u64,
         profile: &Value,
     ) -> Result<(), String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return crate::commands::macos_computers::proxy_apply_github_policy(
+                &self.app, computer, revision, profile,
+            );
+        }
         crate::runtime::apply_github_policy(
             &crate::commands::runtime::host(&self.app),
             computer,
@@ -38,6 +55,11 @@ impl RuntimeAccess for TauriGitHubRuntime {
     }
 
     fn apply_github_identity(&self, computer: &str, identity: &Value) -> Result<(), String> {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return crate::commands::macos_computers::proxy_apply_github_identity(
+                &self.app, computer, identity,
+            );
+        }
         crate::runtime::apply_github_identity(
             &crate::commands::runtime::host(&self.app),
             computer,
@@ -46,11 +68,17 @@ impl RuntimeAccess for TauriGitHubRuntime {
     }
 
     fn is_pending_restore(&self, computer: &str) -> bool {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return crate::commands::macos_computers::proxy_is_pending_restore(&self.app, computer);
+        }
         runtime::runtime_paths(&crate::commands::runtime::host(&self.app))
             .is_ok_and(|paths| crate::runtime::is_pending_restore(&paths, computer))
     }
 
     fn is_device_removed(&self, computer: &str) -> bool {
+        if crate::commands::macos_computers::proxy_contains_name(&self.app, computer) {
+            return false;
+        }
         runtime::runtime_paths(&crate::commands::runtime::host(&self.app)).is_ok_and(|paths| {
             matches!(
                 crate::runtime::resolve_computer_id(&paths, computer),

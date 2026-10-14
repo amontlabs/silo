@@ -22,6 +22,14 @@ const prepared = await stageRuntime({
   fetchStream,
 })
 
+if (targetTriple === "aarch64-apple-darwin") {
+  const bootstrap = resolve(appRoot, "src-tauri/binaries/silo-network-bootstrap-aarch64-apple-darwin")
+  execFileSync("sh", [resolve(appRoot, "src-tauri/guest/macos/build-network-bootstrap.sh"), bootstrap], {
+    stdio: "inherit",
+  })
+  console.log("Prepared the macOS guest network bootstrap")
+}
+
 const git = await stageGitRuntime({
   appRoot,
   targetTriple,

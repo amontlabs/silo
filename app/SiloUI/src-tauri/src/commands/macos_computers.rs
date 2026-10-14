@@ -349,6 +349,73 @@ pub(crate) fn names(app: &AppHandle) -> Vec<String> {
     new_context(app).map_or_else(|_| Vec::new(), |context| engine::names(&context))
 }
 
+pub(crate) fn proxy_contains_name(app: &AppHandle, name: &str) -> bool {
+    new_context(app).is_ok_and(|context| engine::proxy_contains_name(&context, name))
+}
+
+pub(crate) fn proxy_validate_computers(
+    app: &AppHandle,
+    computers: &[String],
+) -> Result<(), String> {
+    engine::proxy_validate_computers(&new_context(app)?, computers)
+}
+
+pub(crate) fn proxy_apply_secrets(app: &AppHandle, computer: &str) -> Result<Vec<String>, String> {
+    engine::proxy_apply_secrets(&new_context(app)?, computer)
+}
+
+pub(crate) fn proxy_revoke_secret(
+    app: &AppHandle,
+    computer: &str,
+    name: &str,
+) -> Result<bool, String> {
+    engine::proxy_revoke_secret(&new_context(app)?, computer, name)
+}
+
+pub(crate) fn proxy_scoped_cached_tokens(
+    app: &AppHandle,
+    computer: &str,
+) -> Result<Vec<String>, String> {
+    engine::proxy_scoped_cached_tokens(&new_context(app)?, computer)
+}
+
+pub(crate) fn proxy_github_policy_is_cached(
+    app: &AppHandle,
+    computer: &str,
+    profile: &serde_json::Value,
+) -> Result<bool, String> {
+    engine::proxy_github_policy_is_cached(&new_context(app)?, computer, profile)
+}
+
+pub(crate) fn proxy_apply_github_policy(
+    app: &AppHandle,
+    computer: &str,
+    revision: u64,
+    profile: &serde_json::Value,
+) -> Result<(), String> {
+    engine::proxy_apply_github_policy(&new_context(app)?, computer, revision, profile)
+}
+
+pub(crate) fn proxy_apply_github_identity(
+    app: &AppHandle,
+    computer: &str,
+    identity: &serde_json::Value,
+) -> Result<(), String> {
+    engine::proxy_apply_github_identity(&new_context(app)?, computer, identity)
+}
+
+pub(crate) fn proxy_is_pending_restore(app: &AppHandle, computer: &str) -> bool {
+    new_context(app).is_ok_and(|context| engine::proxy_is_pending_restore(&context, computer))
+}
+
+pub(crate) fn begin_proxy_bootstrap_migration() {
+    engine::begin_proxy_bootstrap_migration();
+}
+
+pub(crate) fn migrate_proxy_bootstraps_at_launch(app: &AppHandle) -> Result<(), String> {
+    engine::migrate_proxy_bootstraps_at_launch(&new_context(app)?)
+}
+
 pub(crate) fn computer_ids(app: &AppHandle) -> Vec<String> {
     new_context(app).map_or_else(|_| Vec::new(), |context| engine::computer_ids(&context))
 }

@@ -114,6 +114,18 @@ pub struct PendingRevocation {
     pub(crate) name: String,
     pub(crate) computer: String,
 }
+
+impl PendingRevocation {
+    /// The affected environment variable name; never the credential value.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The computer that may still hold the revoked generation.
+    pub fn computer(&self) -> &str {
+        &self.computer
+    }
+}
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Document {
