@@ -516,6 +516,16 @@ async fn blocking_bridge<T: Send + 'static>(
         .map_err(HandlerContext::map_engine_error)
 }
 
+/// Every request to another device's engine goes through here. Tests answer for the
+/// devices they stub, so no SSH connection is needed to exercise the controller side.
+fn call_owner(device: &str, method: &str, params: Value) -> Result<Value, BridgeError> {
+    #[cfg(test)]
+    if let Some(reply) = tests::stubbed_owner(device, method, &params) {
+        return reply;
+    }
+    silo_engine::remote::call_remote_typed(device, method, params)
+}
+
 fn runtime_host() -> Result<&'static Arc<AccessRuntimeHost>, String> {
     RUNTIME_HOST
         .get()
@@ -802,8 +812,7 @@ async fn owner_method(
         Some(device) => {
             let routed = without_device(params);
             let reply = blocking_bridge(move || {
-                silo_engine::remote::call_remote_typed(&device, name, routed)
-                    .map(|value| (device, value))
+                call_owner(&device, name, routed).map(|value| (device, value))
             })
             .await?;
             controller_view(method, &reply.0, reply.1).map_err(failure)?
@@ -1312,18 +1321,14 @@ const OWNER_POLL: Duration = Duration::from_secs(2);
 const OWNER_POLL_FAILURES: u32 = 5;
 
 fn cancel_owner_job(device: &str, job: &str) {
-    let _ = silo_engine::remote::call_remote_typed(
-        device,
-        "operations.cancel",
-        json!({ "jobId": job }),
-    );
+    let _ = call_owner(device, "operations.cancel", json!({ "jobId": job }));
 }
 
 /// Controller side of `github.connect` for a device: the owner runs the sign-in as its
 /// own job; this engine reserves the callback port, carries the browser's callback to
 /// the owner, and mirrors the owner's outcome in a job of its own.
 fn start_remote_connect(ctx: &SilodContext, device: &str) -> Result<JobId, DispatchError> {
-    let reply = silo_engine::remote::call_remote_typed(device, "github.connect", json!({}))
+    let reply = call_owner(device, "github.connect", json!({}))
         .map_err(HandlerContext::map_engine_error)?;
     let owner_job = reply["jobId"]
         .as_str()
@@ -1382,13 +1387,9 @@ fn start_remote_connect(ctx: &SilodContext, device: &str) -> Result<JobId, Dispa
             job.clone(),
             silo_engine::jobs::CancelRoute::Github,
             move || {
-                silo_engine::remote::call_remote_typed(
-                    &device,
-                    "operations.cancel",
-                    json!({ "jobId": owner_job }),
-                )
-                .map(|_| ())
-                .map_err(|error| error.message)
+                call_owner(&device, "operations.cancel", json!({ "jobId": owner_job }))
+                    .map(|_| ())
+                    .map_err(|error| error.message)
             },
         );
     }
@@ -1534,11 +1535,7 @@ fn mirror_owner_connect(
     let mut failures = 0u32;
     let outcome = loop {
         thread::sleep(OWNER_POLL);
-        match silo_engine::remote::call_remote_typed(
-            device,
-            "operations.job.get",
-            json!({ "jobId": owner_job }),
-        ) {
+        match call_owner(device, "operations.job.get", json!({ "jobId": owner_job })) {
             Ok(Value::Null) => {
                 break Err((
                     ErrorCode::Internal,
@@ -1610,7 +1607,7 @@ fn mirror_owner_connect(
         }
     }
     if acknowledge {
-        let _ = silo_engine::remote::call_remote_typed(
+        let _ = call_owner(
             device,
             "operations.job.acknowledge",
             json!({ "jobId": owner_job }),
@@ -1671,8 +1668,11 @@ async fn push_start(
     let typed = context.decode_params::<push::PushStartParams>(params)?;
     uuid::Uuid::parse_str(&typed.operation_id)
         .map_err(|_| DispatchError::internal("Invalid push operation identity."))?;
-    let job_id = JobId::new(format!("push:{}", typed.operation_id)).map_err(serialization)?;
-    if let Some(device) = remote_target(context, typed.device_id.as_deref()) {
+    // The operation the host answers with is canonical: a push that was already running
+    // for this repository keeps its own identity, and a start that could not be prepared
+    // has none at all.
+    let (reply, accepted) = if let Some(device) = remote_target(context, typed.device_id.as_deref())
+    {
         // The owner runs and records the push; its job keeps the owner's identity.
         let request = json!({
             "computerId": typed.computer_id,
@@ -1681,27 +1681,54 @@ async fn push_start(
             "target": typed.target,
         });
         blocking_bridge(move || {
-            silo_engine::remote::call_remote_typed(&device, "repository.push.start", request)
+            let reply = call_owner(&device, "repository.push.start", request)?;
+            let job_id = push_job_name(&reply)?;
+            let job = call_owner(&device, "operations.job.get", json!({ "jobId": job_id }))?;
+            Ok((reply, !job.is_null()))
         })
-        .await?;
-        return to_output(JobStartResult { job_id });
+        .await?
+    } else {
+        let target = serde_json::to_value(&typed.target).map_err(serialization)?;
+        let engine = context.silod_context().clone();
+        blocking(move || {
+            let paths = local_paths()?;
+            let name = computer_name(&paths, &typed.computer_id)?;
+            let target = serde_json::from_value(target).map_err(|error| error.to_string())?;
+            // The operation's state reaches clients as job progress and `push.changed`.
+            let reply = silo_engine::host_push_operations::start_result(
+                &paths,
+                name,
+                typed.repository_path,
+                typed.operation_id,
+                target,
+            );
+            let job_id = JobId::new(push_job_name(&reply).map_err(|error| error.message)?)
+                .map_err(|error| error.to_string())?;
+            let accepted = silo_engine::jobs::get_at(&engine, &job_id, None)
+                .map_err(|error| error.to_string())?
+                .is_some();
+            Ok((reply, accepted))
+        })
+        .await?
+    };
+    if !accepted {
+        // Preparation failures never create a job; refuse instead of naming one.
+        let message = reply["message"]
+            .as_str()
+            .unwrap_or("The push could not be started.");
+        return Err(failure(message));
     }
-    let target = serde_json::to_value(&typed.target).map_err(serialization)?;
-    blocking(move || {
-        let paths = local_paths()?;
-        let name = computer_name(&paths, &typed.computer_id)?;
-        let target = serde_json::from_value(target).map_err(|error| error.to_string())?;
-        // The operation's state reaches clients as job progress and `push.changed`.
-        Ok(silo_engine::host_push_operations::start_result(
-            &paths,
-            name,
-            typed.repository_path,
-            typed.operation_id,
-            target,
-        ))
-    })
-    .await?;
+    let job_id = JobId::new(push_job_name(&reply).map_err(HandlerContext::map_engine_error)?)
+        .map_err(serialization)?;
     to_output(JobStartResult { job_id })
+}
+
+/// The job identity of the push operation a host reported.
+fn push_job_name(reply: &Value) -> Result<String, BridgeError> {
+    reply["operationId"]
+        .as_str()
+        .map(|id| format!("push:{id}"))
+        .ok_or_else(|| BridgeError::from("The push reply names no operation."))
 }
 
 async fn push_status(
@@ -1717,10 +1744,7 @@ async fn push_status(
                 "path": typed.repository_path,
                 "operationId": typed.operation_id,
             });
-            blocking_bridge(move || {
-                silo_engine::remote::call_remote_typed(&device, "repository.push.status", request)
-            })
-            .await?
+            blocking_bridge(move || call_owner(&device, "repository.push.status", request)).await?
         }
         None => {
             blocking(move || {
@@ -1751,10 +1775,7 @@ async fn push_dismiss(
     match remote_target(context, typed.device_id.as_deref()) {
         Some(device) => {
             let request = json!({ "computerId": typed.computer_id, "path": typed.repository_path });
-            blocking_bridge(move || {
-                silo_engine::remote::call_remote_typed(&device, "repository.dismiss", request)
-            })
-            .await?;
+            blocking_bridge(move || call_owner(&device, "repository.dismiss", request)).await?;
         }
         None => {
             blocking(move || {
@@ -2131,7 +2152,7 @@ async fn connections_keys_revoke(
         Some(device) => {
             let public_key = typed.public_key;
             blocking_bridge(move || {
-                silo_engine::remote::call_remote_typed(
+                call_owner(
                     &device,
                     "connections.keys.revoke",
                     json!({ "publicKey": public_key }),
@@ -2339,6 +2360,47 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Internal);
     }
 
+    type OwnerStub = Arc<dyn Fn(&str, &Value) -> Result<Value, BridgeError> + Send + Sync>;
+
+    /// Stand-ins for other devices' engines, by device id.
+    static OWNER_STUBS: Mutex<BTreeMap<String, OwnerStub>> = Mutex::new(BTreeMap::new());
+
+    pub(super) fn stubbed_owner(
+        device: &str,
+        method: &str,
+        params: &Value,
+    ) -> Option<Result<Value, BridgeError>> {
+        let stub = OWNER_STUBS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(device)
+            .cloned()?;
+        Some(stub(method, params))
+    }
+
+    /// Answers requests to `device` with `answer` until the guard drops.
+    struct StubOwner(String);
+
+    fn stub_owner(
+        device: &str,
+        answer: impl Fn(&str, &Value) -> Result<Value, BridgeError> + Send + Sync + 'static,
+    ) -> StubOwner {
+        OWNER_STUBS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(device.to_owned(), Arc::new(answer));
+        StubOwner(device.to_owned())
+    }
+
+    impl Drop for StubOwner {
+        fn drop(&mut self) {
+            OWNER_STUBS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&self.0);
+        }
+    }
+
     /// Worker threads that must fail to start, by name.
     static FAILING_SPAWNS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
@@ -2409,7 +2471,15 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .push(json!({"id": id, "name": "Remote Mac", "address": address}));
-        std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+        write_connections_config(&config);
+    }
+
+    /// Replaces the settings file atomically, so a concurrent read never sees half of it.
+    fn write_connections_config(config: &Value) {
+        let path = connections_config_path();
+        let temporary = path.with_extension("json.test");
+        std::fs::write(&temporary, serde_json::to_vec(config).unwrap()).unwrap();
+        std::fs::rename(temporary, path).unwrap();
     }
 
     fn saved_device_ids() -> Vec<String> {
@@ -2892,6 +2962,124 @@ mod tests {
         expect_invalid_params(MethodName::PushStart, json!({})).await;
     }
 
+    /// Push tests share the saved push journal of the fixture's home.
+    static PUSH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    fn push_journal() -> PathBuf {
+        fixture();
+        local_paths()
+            .unwrap()
+            .home
+            .join("repository-push-operations.json")
+    }
+
+    fn start_params(operation: &str, branch: &str) -> Value {
+        json!({
+            "computerId": COMPUTER,
+            "repositoryPath": "/work/repo",
+            "operationId": operation,
+            "target": {"repository": "owner/repo", "branch": branch, "commit": "0".repeat(40)},
+        })
+    }
+
+    fn job_exists(job: &str) -> bool {
+        let engine = fixture().context.clone();
+        silo_engine::jobs::get_at(engine.as_ref(), &JobId::new(job.to_owned()).unwrap(), None)
+            .unwrap()
+            .is_some()
+    }
+
+    #[tokio::test]
+    async fn push_start_refuses_a_start_that_was_never_prepared() {
+        let _push = PUSH_LOCK.lock().await;
+        let operation = "66666666-6666-4666-8666-666666666666";
+        let error = expect_error(MethodName::PushStart, start_params(operation, "-bad")).await;
+        assert_eq!(error.message, "Invalid branch for this push.");
+        assert!(!job_exists(&format!("push:{operation}")));
+
+        // A journal that cannot be read fails the start before any job exists.
+        std::fs::create_dir_all(push_journal()).unwrap();
+        let operation = "66666666-6666-4666-8666-666666666667";
+        let error = expect_error(MethodName::PushStart, start_params(operation, "main")).await;
+        std::fs::remove_dir_all(push_journal()).unwrap();
+        assert!(
+            error.message.contains("saved push operations"),
+            "{}",
+            error.message
+        );
+        assert!(!job_exists(&format!("push:{operation}")));
+    }
+
+    #[tokio::test]
+    async fn push_start_returns_the_job_of_the_push_already_running() {
+        let _push = PUSH_LOCK.lock().await;
+        let running = "66666666-6666-4666-8666-666666666668";
+        let requested = "66666666-6666-4666-8666-666666666669";
+        let journal = json!({
+            running: {
+                "session": "an earlier session",
+                "updated": 1,
+                "dismissed": false,
+                "operation": {
+                    "operationId": running,
+                    "computer": "dev",
+                    "repositoryPath": "/work/repo",
+                    "status": "pushing",
+                    "commitCount": 1,
+                    "target": {"repository": "owner/repo", "branch": "main", "commit": "0".repeat(40)},
+                },
+            },
+        });
+        std::fs::write(push_journal(), serde_json::to_vec(&journal).unwrap()).unwrap();
+        let started = call(MethodName::PushStart, start_params(requested, "main")).await;
+        std::fs::remove_file(push_journal()).unwrap();
+        let started = started.unwrap();
+        assert_eq!(started["jobId"], format!("push:{running}"));
+        assert!(job_exists(&format!("push:{running}")));
+        assert!(!job_exists(&format!("push:{requested}")));
+    }
+
+    #[tokio::test]
+    async fn a_remote_push_start_names_the_owners_job_or_refuses() {
+        let owner = "77777777-7777-4777-8777-77777777777a";
+        let running = "66666666-6666-4666-8666-66666666666a";
+        let requested = "66666666-6666-4666-8666-66666666666b";
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let seen = calls.clone();
+        let _owner = stub_owner(owner, move |method, params| {
+            seen.lock().unwrap().push(method.to_owned());
+            match method {
+                "repository.push.start" => Ok(json!({
+                    "operationId": if params["operationId"] == requested { running } else { requested },
+                    "status": "pushing", "computer": "dev", "repositoryPath": "/work/repo",
+                    "commitCount": 0,
+                })),
+                // Only the push that is already running has a job on the owner.
+                "operations.job.get" => Ok(if params["jobId"] == format!("push:{running}") {
+                    json!({"state": "waiting"})
+                } else {
+                    Value::Null
+                }),
+                other => panic!("unexpected owner request {other}"),
+            }
+        });
+        let mut params = start_params(requested, "main");
+        params["deviceId"] = json!(owner);
+        let started = call(MethodName::PushStart, params.clone()).await.unwrap();
+        assert_eq!(started["jobId"], format!("push:{running}"));
+
+        // The owner could not prepare it: the reply is a failed operation without a job.
+        let _refusing = stub_owner(owner, |method, _| match method {
+            "repository.push.start" => Ok(json!({
+                "operationId": "66666666-6666-4666-8666-66666666666c",
+                "status": "failed", "message": "Invalid commit for this push.",
+            })),
+            _ => Ok(Value::Null),
+        });
+        let error = expect_error(MethodName::PushStart, params).await;
+        assert_eq!(error.message, "Invalid commit for this push.");
+    }
+
     #[tokio::test]
     async fn network_methods_use_computer_identities() {
         let state = call(MethodName::NetworkState, json!({})).await.unwrap();
@@ -3150,7 +3338,7 @@ mod tests {
         let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         config["controllerKeys"] =
             json!({device: ["ssh-ed25519 AAAAdeleted Silo remote management"]});
-        std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        write_connections_config(&config);
         let directory = path.parent().unwrap().to_path_buf();
         let _ = std::fs::remove_file(directory.join("id_ed25519"));
         let _ = std::fs::remove_file(directory.join("id_ed25519.pub"));
@@ -3183,7 +3371,7 @@ mod tests {
             .retain(|saved| saved["id"] != device);
         config["removals"] = json!([]);
         config["controllerKeys"] = json!({});
-        std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+        write_connections_config(&config);
     }
 
     #[tokio::test]
