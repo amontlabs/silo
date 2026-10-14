@@ -1,18 +1,47 @@
 use serde_json::{Map, Value};
+use silo_engine::{Audience, Event};
 use std::{
     collections::HashSet,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
-use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default)]
 struct StartupState {
     cancelled: AtomicBool,
     active: Mutex<()>,
+}
+
+static STARTUP_STATE: OnceLock<StartupState> = OnceLock::new();
+
+fn state() -> &'static StartupState {
+    STARTUP_STATE.get_or_init(StartupState::default)
+}
+
+/// The result of resuming saved lifecycle actions, reduced to the values startup needs.
+#[derive(Default)]
+pub(crate) struct RecoveredActions {
+    pub(crate) keep_stopped: HashSet<String>,
+    pub(crate) failures: Vec<String>,
+}
+
+/// Host services used by the startup coordinator. Runtime and client adapters provide these
+/// operations so this module owns the startup policy without owning a UI framework handle.
+pub(crate) trait StartupServices: Send + Sync + 'static {
+    fn blocks_runtime_operations(&self) -> bool;
+    fn wait_for_recovery(&self) -> Result<(), String>;
+    fn prepare_runtime(&self);
+    fn recover_configuration(&self) -> Result<(), String>;
+    fn recover_lifecycle(&self) -> Result<RecoveredActions, String>;
+    fn recover_update(&self) -> Result<bool, String>;
+    fn current_launch_settings(&self) -> Result<(Map<String, Value>, PathBuf), String>;
+    fn start_at_launch(&self, id: &str) -> Result<(), String>;
+    fn update_recovery_failed(&self, message: String);
+    fn notify_failure(&self, key: &str, title: &str, body: &str);
+    fn show_integration_error(&self, message: String);
 }
 
 fn selected_computers(settings: &Map<String, Value>) -> Vec<String> {
@@ -108,7 +137,7 @@ fn settings_for_launch(
 /// when the saved actions could not be listed at all is automatic start withheld
 /// (`None`), since one of them may be an explicit stop.
 fn after_lifecycle_recovery(
-    result: Result<crate::runtime::lifecycle_recovery::Recovered, String>,
+    result: Result<RecoveredActions, String>,
 ) -> (Option<HashSet<String>>, Option<String>) {
     match result {
         Ok(recovered) => {
@@ -150,140 +179,95 @@ fn startup_failure_title(count: usize) -> String {
 }
 
 // Called once by native app setup, never by a webview mount, refresh or reopen.
-pub(crate) fn install(app: &AppHandle) {
-    app.manage(StartupState::default());
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<StartupState>();
-        let Ok(_active) = state.active.lock() else {
-            return;
-        };
-        if crate::runtime_migration::blocks_operations(&app) {
-            return;
-        }
-        if let Err(message) = crate::backup_controller::wait_for_recovery(&app) {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = crate::system_integrations::show_integration_error(
-                    app.clone(),
-                    window,
-                    message,
-                );
-            }
-            return;
-        }
-        if state.cancelled.load(Ordering::SeqCst) {
-            return;
-        }
-        // Runtimes converted by an earlier Silo still name the previous runtime's image
-        // files, so their computers stop booting once it is removed. Repair before any start.
-        if let Ok(paths) = crate::runtime::runtime_paths(&app) {
-            let storage = paths.storage_home.as_deref().unwrap_or(&paths.home);
-            if let Err(message) = crate::runtime::image_cache::repair(&storage.join("cache")) {
-                eprintln!("Image cache repair: {message}");
-            }
-            crate::preparation::start(&app, paths);
-        }
-        if let Err(message) = crate::runtime::configuration_recovery::recover(&app) {
-            crate::notifications::notify(
-                &app,
-                crate::notifications::failure(
-                    "startup:setup",
-                    "Computer setup couldn\u{2019}t resume",
-                    &message,
-                    None,
-                ),
-            );
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = crate::system_integrations::show_integration_error(
-                    app.clone(),
-                    window,
-                    format!(
-                        "{message}\n\nSaved setup progress was preserved. Relaunch Silo to retry."
-                    ),
-                );
-            }
+pub(crate) fn install(services: Arc<dyn StartupServices>) {
+    let state = state();
+    let Ok(_active) = state.active.lock() else {
+        return;
+    };
+    if services.blocks_runtime_operations() {
+        return;
+    }
+    if let Err(message) = services.wait_for_recovery() {
+        services.show_integration_error(message);
+        return;
+    }
+    if state.cancelled.load(Ordering::SeqCst) {
+        return;
+    }
+    // Runtime-image repair and preparation are provided by the host adapter because they
+    // still cross runtime-storage and client notification boundaries.
+    services.prepare_runtime();
+    if let Err(message) = services.recover_configuration() {
+        services.notify_failure(
+            "startup:setup",
+            "Computer setup couldn\u{2019}t resume",
+            &message,
+        );
+        services.show_integration_error(format!(
+            "{message}\n\nSaved setup progress was preserved. Relaunch Silo to retry."
+        ));
+        return;
+    }
+    let (recovered_stops, failure) = after_lifecycle_recovery(services.recover_lifecycle());
+    if let Some(message) = failure {
+        services.notify_failure(
+            "startup:actions",
+            "Computer actions couldn\u{2019}t resume",
+            &message,
+        );
+        services.show_integration_error(message);
+    }
+    match services.recover_update() {
+        Ok(true) => return, // Preserve the exact pre-update running set, even if empty.
+        Ok(false) => (),
+        Err(message) => {
+            services.update_recovery_failed(message);
             return;
         }
-        let (recovered_stops, failure) =
-            after_lifecycle_recovery(crate::runtime::lifecycle_recovery::recover(&app));
-        if let Some(message) = failure {
-            crate::notifications::notify(
-                &app,
-                crate::notifications::failure(
-                    "startup:actions",
-                    "Computer actions couldn\u{2019}t resume",
-                    &message,
-                    None,
-                ),
-            );
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = crate::system_integrations::show_integration_error(
-                    app.clone(),
-                    window,
-                    message,
-                );
-            }
-        }
-        match crate::runtime::update_recovery::recover(&app) {
-            Ok(true) => return, // Preserve the exact pre-update running set, even if empty.
-            Ok(false) => (),
-            Err(message) => {
-                crate::updates::recovery_failed(&app, message);
-                return;
-            }
-        }
-        let Some(recovered_stops) = recovered_stops else {
-            return;
-        };
-        let result = crate::settings::current_settings(&app).and_then(|settings| {
-            let paths = crate::runtime::runtime_paths(&app)?;
-            let settings = settings_for_launch(settings, &paths.metadata, &recovered_stops)?;
+    }
+    let Some(recovered_stops) = recovered_stops else {
+        return;
+    };
+    let result = services
+        .current_launch_settings()
+        .and_then(|(settings, metadata)| {
+            let settings = settings_for_launch(settings, &metadata, &recovered_stops)?;
             Ok(start_selected(&settings, &state.cancelled, |id| {
-                let result = crate::runtime::start_at_launch(&app, id);
-                let _ = app.emit("silo://application-state-changed", ());
+                let result = services.start_at_launch(id);
+                if let Some(context) = silo_engine::context::current() {
+                    context.publish(
+                        Event::new("silo://application-state-changed", Value::Null),
+                        Audience::All,
+                    );
+                }
                 result
             }))
         });
-        let failures = result.unwrap_or_else(|error| vec![error]);
-        if !failures.is_empty() && !state.cancelled.load(Ordering::SeqCst) {
-            crate::notifications::notify(
-                &app,
-                crate::notifications::failure(
-                    "startup:launch",
-                    &startup_failure_title(failures.len()),
-                    &failures.join(" "),
-                    None,
-                ),
-            );
-            if let Some(window) = app.get_webview_window("main") {
-                let message = format!("Some computers could not start automatically:\n\n{}\n\nOther selected computers may have started. Check their status and use Start to retry. Update the startup selection in Settings if needed.", failures.join("\n"));
-                let _ = crate::system_integrations::show_integration_error(
-                    app.clone(),
-                    window,
-                    message,
-                );
-            }
-        }
-    });
-}
-
-pub(crate) fn is_cancelled(app: &AppHandle) -> bool {
-    app.try_state::<StartupState>()
-        .is_some_and(|state| state.cancelled.load(Ordering::SeqCst))
-}
-
-pub(crate) fn cancel(app: &AppHandle) {
-    if let Some(state) = app.try_state::<StartupState>() {
-        state.cancelled.store(true, Ordering::SeqCst);
+    let failures = result.unwrap_or_else(|error| vec![error]);
+    if !failures.is_empty() && !state.cancelled.load(Ordering::SeqCst) {
+        services.notify_failure(
+            "startup:launch",
+            &startup_failure_title(failures.len()),
+            &failures.join(" "),
+        );
+        let message = format!("Some computers could not start automatically:\n\n{}\n\nOther selected computers may have started. Check their status and use Start to retry. Update the startup selection in Settings if needed.", failures.join("\n"));
+        services.show_integration_error(message);
     }
 }
 
-pub(crate) fn cancel_and_wait(app: &AppHandle) {
-    if let Some(state) = app.try_state::<StartupState>() {
-        state.cancelled.store(true, Ordering::SeqCst);
-        // Finish the current bounded start; do not launch the remaining selections.
-        drop(state.active.lock());
-    }
+pub(crate) fn is_cancelled<T>(_host: T) -> bool {
+    state().cancelled.load(Ordering::SeqCst)
+}
+
+pub(crate) fn cancel<T>(_host: T) {
+    state().cancelled.store(true, Ordering::SeqCst);
+}
+
+pub(crate) fn cancel_and_wait<T>(_host: T) {
+    let state = state();
+    state.cancelled.store(true, Ordering::SeqCst);
+    // Finish the current bounded start; do not launch the remaining selections.
+    drop(state.active.lock());
 }
 
 #[cfg(test)]
@@ -411,15 +395,14 @@ mod tests {
 
     #[test]
     fn failed_saved_actions_are_reported_without_stopping_launch() {
-        use crate::runtime::lifecycle_recovery::Recovered;
-        let (stops, failure) = after_lifecycle_recovery(Ok(Recovered {
+        let (stops, failure) = after_lifecycle_recovery(Ok(RecoveredActions {
             keep_stopped: HashSet::from(["stopped".to_owned()]),
             failures: vec!["dev: The computer was replaced.".into()],
         }));
         assert_eq!(stops, Some(HashSet::from(["stopped".to_owned()])));
         assert!(failure.unwrap().contains("dev: The computer was replaced."));
         assert_eq!(
-            after_lifecycle_recovery(Ok(Recovered::default())),
+            after_lifecycle_recovery(Ok(RecoveredActions::default())),
             (Some(HashSet::new()), None)
         );
         // Without the list of saved actions an explicit stop could be among them.
