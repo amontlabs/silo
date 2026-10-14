@@ -6688,12 +6688,15 @@ mod tests {
         );
 
         let published = context.published();
-        assert_eq!(published.len(), 1);
+        assert_eq!(published.len(), 2);
+        assert_eq!(published[0].0.name, "operations.job.progress");
+        assert_eq!(published[0].0.payload["jobId"], "setup:request");
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
         assert_eq!(
-            published[0].0.name,
+            published[1].0.name,
             "silo://computer-configuration-progress"
         );
-        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+        assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
     }
 
     #[test]

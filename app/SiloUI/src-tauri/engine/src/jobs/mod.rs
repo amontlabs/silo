@@ -154,7 +154,7 @@ pub fn publish_finished(
     Ok(())
 }
 
-fn retry_pending_outcomes(
+pub(crate) fn retry_pending_outcomes(
     context: &dyn EngineContext,
     registry: &JobRegistry,
 ) -> Result<(), RegistryError> {

@@ -1164,6 +1164,18 @@ fn ensure_checkpoint_retry_worker(app: MacosContext) {
 }
 
 fn retry_pending_checkpoint_completions(app: &MacosContext) {
+    let registry = match app.engine.job_registry() {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("silo-engine: could not open job registry for retry: {error}");
+            return;
+        }
+    };
+    if let Err(error) = crate::jobs::retry_pending_outcomes(app.engine.as_ref(), registry.as_ref())
+    {
+        eprintln!("silo-engine: could not retry pending job outcomes: {error}");
+        return;
+    }
     let pending = MACOS_PENDING_CHECKPOINT_JOBS
         .get_or_init(Default::default)
         .lock()
