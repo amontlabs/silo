@@ -209,17 +209,44 @@ pub(crate) fn start(
     // Persist before acknowledging or starting: retrying a lost reply never starts a second job.
     persist_claim(&journal, &jobs, &id, write)?;
     let paths = paths.clone();
-    tokio::spawn(async move {
-        let result =
-            host_push::push_repository(paths, computer.clone(), path.clone(), target.clone()).await;
-        let mut value = result.unwrap_or_else(|message| json!({"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message,"target":target}));
-        value["operationId"] = json!(id);
-        // The std lock and fsync'd journal write block; keep them off the async workers.
-        let _ = runtime::operation_gate::spawn_blocking(move || {
-            record_completion(&journal, &id, value)
-        })
-        .await;
-        publish_application_state_changed();
+    let failure_journal = journal.clone();
+    let failure_id = id.clone();
+    let failure_computer = computer.clone();
+    let failure_path = path.clone();
+    let failure_target = target.clone();
+    std::thread::spawn(move || {
+        let task = async move {
+            let result =
+                host_push::push_repository(paths, computer.clone(), path.clone(), target.clone())
+                    .await;
+            let mut value = result.unwrap_or_else(|message| json!({"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message,"target":target}));
+            value["operationId"] = json!(id);
+            // The std lock and fsync'd journal write block; keep them off the async workers.
+            let _ = runtime::operation_gate::spawn_blocking(move || {
+                record_completion(&journal, &id, value)
+            })
+            .await;
+            publish_application_state_changed();
+        };
+        match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime.block_on(task),
+            Err(_) => {
+                let mut value = json!({
+                    "computer": failure_computer,
+                    "repositoryPath": failure_path,
+                    "status": "failed",
+                    "commitCount": 0,
+                    "message": "Could not start the repository push.",
+                    "target": failure_target
+                });
+                value["operationId"] = json!(failure_id);
+                record_completion(&failure_journal, &failure_id, value);
+                publish_application_state_changed();
+            }
+        }
     });
     Ok(value)
 }

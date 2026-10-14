@@ -11,16 +11,11 @@ const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
 /// application handle.
 pub(crate) fn start_monitor(app: &AppHandle) {
     let app = app.clone();
-    tokio::spawn(async move {
-        loop {
-            let resolver_app = app.clone();
-            if let Ok(Ok(paths)) =
-                tokio::task::spawn_blocking(move || runtime::runtime_paths(&resolver_app)).await
-            {
-                let _ = tokio::task::spawn_blocking(move || ssh_access::monitor(&paths)).await;
-            }
-            tokio::time::sleep(MONITOR_INTERVAL).await;
+    std::thread::spawn(move || loop {
+        if let Ok(paths) = runtime::runtime_paths(&app) {
+            let _ = ssh_access::monitor(&paths);
         }
+        std::thread::sleep(MONITOR_INTERVAL);
     });
 }
 
