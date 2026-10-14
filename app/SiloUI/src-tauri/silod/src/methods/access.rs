@@ -2461,24 +2461,30 @@ mod tests {
         call(MethodName::ConnectionsStatus, json!({}))
             .await
             .unwrap();
-        let path = connections_config_path();
-        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        config["devices"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|device| device["id"] != id);
-        config["devices"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"id": id, "name": "Remote Mac", "address": address}));
-        write_connections_config(&config);
+        edit_connections_config(|config| {
+            config["devices"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|device| device["id"] != id);
+            config["devices"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id": id, "name": "Remote Mac", "address": address}));
+        });
     }
 
-    /// Replaces the settings file atomically, so a concurrent read never sees half of it.
-    fn write_connections_config(config: &Value) {
+    /// Edits the settings file one test at a time and replaces it atomically, so neither
+    /// a concurrent edit nor a concurrent read ever sees a lost or half-written file.
+    fn edit_connections_config(edit: impl FnOnce(&mut Value)) {
+        static EDIT: Mutex<()> = Mutex::new(());
+        let _edit = EDIT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let path = connections_config_path();
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        edit(&mut config);
         let temporary = path.with_extension("json.test");
-        std::fs::write(&temporary, serde_json::to_vec(config).unwrap()).unwrap();
+        std::fs::write(&temporary, serde_json::to_vec(&config).unwrap()).unwrap();
         std::fs::rename(temporary, path).unwrap();
     }
 
@@ -3030,7 +3036,8 @@ mod tests {
                 },
             },
         });
-        std::fs::write(push_journal(), serde_json::to_vec(&journal).unwrap()).unwrap();
+        std::fs::write(push_journal(), serde_json::to_vec(&journal).unwrap())
+            .unwrap_or_else(|error| panic!("{error}: {}", push_journal().display()));
         let started = call(MethodName::PushStart, start_params(requested, "main")).await;
         std::fs::remove_file(push_journal()).unwrap();
         let started = started.unwrap();
@@ -3135,6 +3142,8 @@ mod tests {
 
     #[tokio::test]
     async fn connections_status_list_and_enabled_state() {
+        // Turning Connections off rewrites the settings file other tests edit.
+        let _key = KEY_LOCK.lock().await;
         let status = call(MethodName::ConnectionsStatus, json!({}))
             .await
             .unwrap();
@@ -3155,6 +3164,8 @@ mod tests {
 
     #[tokio::test]
     async fn connections_health_is_a_side_effect_free_projection() {
+        // Removals rewrite the settings file; a save that overlaps one could be lost.
+        let _key = KEY_LOCK.lock().await;
         let device = "66666666-6666-4666-8666-666666666666";
         save_device(device, "ssh://user@127.0.0.1:9").await;
         let health = call(MethodName::ConnectionsDevicesHealth, json!({}))
@@ -3335,10 +3346,10 @@ mod tests {
         // The owner holds the public key recorded for this device; the private key is gone.
         save_device(device, "not an address").await;
         let path = connections_config_path();
-        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        config["controllerKeys"] =
-            json!({device: ["ssh-ed25519 AAAAdeleted Silo remote management"]});
-        write_connections_config(&config);
+        edit_connections_config(|config| {
+            config["controllerKeys"] =
+                json!({device: ["ssh-ed25519 AAAAdeleted Silo remote management"]});
+        });
         let directory = path.parent().unwrap().to_path_buf();
         let _ = std::fs::remove_file(directory.join("id_ed25519"));
         let _ = std::fs::remove_file(directory.join("id_ed25519.pub"));
@@ -3363,15 +3374,14 @@ mod tests {
     }
 
     fn config_without_device(device: &str) {
-        let path = connections_config_path();
-        let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        config["devices"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|saved| saved["id"] != device);
-        config["removals"] = json!([]);
-        config["controllerKeys"] = json!({});
-        write_connections_config(&config);
+        edit_connections_config(|config| {
+            config["devices"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|saved| saved["id"] != device);
+            config["removals"] = json!([]);
+            config["controllerKeys"] = json!({});
+        });
     }
 
     #[tokio::test]
