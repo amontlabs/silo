@@ -1,7 +1,8 @@
 //! Acknowledged push jobs belong to the host, not the SSH connection observing them.
+use crate::runtime::RuntimePaths;
 use crate::{
     host_push::{self, PushTarget},
-    remote, remote_access, runtime,
+    runtime,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,7 +14,6 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
 
 static LOCK: Mutex<()> = Mutex::new(());
 static SESSION: OnceLock<String> = OnceLock::new();
@@ -187,43 +187,49 @@ fn persist_claim(
     Ok(())
 }
 pub(crate) fn start(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: String,
     path: String,
     id: String,
     target: PushTarget,
 ) -> Result<Value, String> {
     target.validate()?;
-    let journal = runtime::runtime_paths(app)?
-        .home
-        .join("repository-push-operations.json");
+    let journal = paths.home.join("repository-push-operations.json");
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
     let mut jobs = read(&journal)?;
     let (mut value, created) = claim(&mut jobs, &id, &computer, &path, &target)?;
     if !created {
         return Ok(value);
     }
-    let planned = host_push::planned_count(app, &computer, &path);
+    let planned = host_push::planned_count(paths, &computer, &path);
     value["commitCount"] = json!(planned);
     if let Some(job) = jobs.get_mut(&id) {
         job.operation["commitCount"] = json!(planned);
     }
     // Persist before acknowledging or starting: retrying a lost reply never starts a second job.
     persist_claim(&journal, &jobs, &id, write)?;
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
+    let paths = paths.clone();
+    tokio::spawn(async move {
         let result =
-            host_push::push_repository(app.clone(), computer.clone(), path.clone(), target.clone())
-                .await;
+            host_push::push_repository(paths, computer.clone(), path.clone(), target.clone()).await;
         let mut value = result.unwrap_or_else(|message| json!({"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message,"target":target}));
         value["operationId"] = json!(id);
         // The std lock and fsync'd journal write block; keep them off the async workers.
-        let _ =
-            tauri::async_runtime::spawn_blocking(move || record_completion(&journal, &id, value))
-                .await;
-        let _ = app.emit("silo://application-state-changed", ());
+        let _ = runtime::operation_gate::spawn_blocking(move || {
+            record_completion(&journal, &id, value)
+        })
+        .await;
+        publish_application_state_changed();
     });
     Ok(value)
+}
+fn publish_application_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            silo_engine::context::Event::new("silo://application-state-changed", json!(null)),
+            silo_engine::context::Audience::All,
+        );
+    }
 }
 fn record_completion(journal: &Path, id: &str, value: Value) {
     let Ok(_guard) = LOCK.lock() else {
@@ -255,17 +261,13 @@ fn record_completion_locked(
     }
 }
 pub(crate) fn status(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: &str,
     path: &str,
     id: &str,
 ) -> Result<Value, String> {
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
-    let jobs = read(
-        &runtime::runtime_paths(app)?
-            .home
-            .join("repository-push-operations.json"),
-    )?;
+    let jobs = read(&paths.home.join("repository-push-operations.json"))?;
     let Some(job) = jobs.get(id) else {
         return Ok(Value::Null);
     };
@@ -274,10 +276,8 @@ pub(crate) fn status(
     }
     Ok(operation(job))
 }
-pub(crate) fn merge(app: &AppHandle, legacy: Vec<Value>) -> Result<Vec<Value>, String> {
-    let journal = runtime::runtime_paths(app)?
-        .home
-        .join("repository-push-operations.json");
+pub(crate) fn merge(paths: &RuntimePaths, legacy: Vec<Value>) -> Result<Vec<Value>, String> {
+    let journal = paths.home.join("repository-push-operations.json");
     Ok(merge_journal(&journal, legacy))
 }
 /// A damaged push journal must not hide the rest of the application state:
@@ -340,11 +340,9 @@ fn merge_journal(journal: &Path, legacy: Vec<Value>) -> Vec<Value> {
     );
     values
 }
-pub(crate) fn dismiss(app: &AppHandle, computer: &str, path: &str) -> Result<(), String> {
+pub(crate) fn dismiss(paths: &RuntimePaths, computer: &str, path: &str) -> Result<(), String> {
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
-    let journal = runtime::runtime_paths(app)?
-        .home
-        .join("repository-push-operations.json");
+    let journal = paths.home.join("repository-push-operations.json");
     let mut jobs = read(&journal)?;
     for job in jobs.values_mut().filter(|job| {
         job.operation["computer"] == computer && job.operation["repositoryPath"] == path
@@ -358,13 +356,13 @@ pub(crate) fn dismiss(app: &AppHandle, computer: &str, path: &str) -> Result<(),
 // Preparation failures are authoritative: no detached job was dispatched.
 // Return them as results so a caller can distinguish them from a lost SSH reply.
 pub(crate) fn start_result(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: String,
     path: String,
     id: String,
     target: PushTarget,
 ) -> Value {
-    start(app, computer.clone(), path.clone(), id.clone(), target).unwrap_or_else(|message| json!({"operationId":id,"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message}))
+    start(paths, computer.clone(), path.clone(), id.clone(), target).unwrap_or_else(|message| json!({"operationId":id,"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message}))
 }
 const UPDATE_CONTROLLER: &str = "Update Silo on the device you are pushing from, then push again.";
 /// A controller that sends no confirmed target predates bound pushes; this
@@ -387,72 +385,17 @@ fn remote_request(params: &Value) -> Result<(String, String, Option<PushTarget>)
     Ok((text("path")?, text("operationId")?, target))
 }
 pub(crate) fn start_remote(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: String,
     params: &Value,
 ) -> Result<Value, String> {
     let (path, id, target) = remote_request(params)?;
     Ok(match target {
-        Some(target) => start_result(app, computer, path, id, target),
+        Some(target) => start_result(paths, computer, path, id, target),
         None => {
             json!({"operationId":id,"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":UPDATE_CONTROLLER})
         }
     })
-}
-#[tauri::command]
-pub async fn start_repository_push(
-    app: AppHandle,
-    computer: String,
-    repository_path: String,
-    operation_id: String,
-    target: PushTarget,
-) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        target.validate()?;
-        if let Some((device, computer)) = remote_access::target(&computer)? {
-            match remote::call_remote(
-                &app,
-                &device,
-                "repository.push.start",
-                json!({"computerId":computer,"path":repository_path,"operationId":operation_id,"target":target}),
-            ) {
-                Err(message) if message == "This Silo version does not support that remote operation." => Ok(json!({"operationId":operation_id,"computer":computer,"repositoryPath":repository_path,"status":"failed","commitCount":0,"message":"Update Silo on the remote device before pushing."})),
-                result => result,
-            }
-        } else {
-            Ok(start_result(
-                &app,
-                computer,
-                repository_path,
-                operation_id,
-                target,
-            ))
-        }
-    })
-    .await
-    .map_err(|_| "Cannot start observing the push.".to_string())?
-}
-#[tauri::command]
-pub async fn repository_push_status(
-    app: AppHandle,
-    computer: String,
-    repository_path: String,
-    operation_id: String,
-) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some((device, computer)) = remote_access::target(&computer)? {
-            remote::call_remote(
-                &app,
-                &device,
-                "repository.push.status",
-                json!({"computerId":computer,"path":repository_path,"operationId":operation_id}),
-            )
-        } else {
-            status(&app, &computer, &repository_path, &operation_id)
-        }
-    })
-    .await
-    .map_err(|_| "Cannot read push status.".to_string())?
 }
 #[cfg(test)]
 mod tests {
