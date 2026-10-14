@@ -75,6 +75,8 @@ wire_struct! {
     GuestExecInputParams {
         job_id: crate::jobs::JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         data: Option<Vec<u8>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         close: Option<bool>,

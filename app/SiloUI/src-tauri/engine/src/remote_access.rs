@@ -71,6 +71,7 @@ const ACCESS_METHODS: &[&str] = &[
     "desktop.job",
     "guest.exec.start",
     "guest.exec.get",
+    "guest.exec.input",
     "github.state",
     "github.connect",
     "github.connect.reopen",
