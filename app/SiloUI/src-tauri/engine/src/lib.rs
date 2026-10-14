@@ -56,12 +56,11 @@ pub mod health_watch;
 pub mod log_export;
 #[path = "../../src/log_retention.rs"]
 pub mod log_retention;
-#[path = "../../src/macos_computers.rs"]
+#[path = "macos_computers.rs"]
 pub mod macos_computers_engine;
 pub use macos_computers_engine as macos_computers;
-#[path = "../../src/macos_display_gateway.rs"]
 pub mod macos_display_gateway;
-#[path = "../../src/macos_remote.rs"]
+#[path = "macos_remote.rs"]
 pub mod macos_remote_engine;
 #[path = "../../src/network.rs"]
 pub mod network;

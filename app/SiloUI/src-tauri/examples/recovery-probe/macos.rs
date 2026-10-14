@@ -3,9 +3,9 @@
 //! guest_screen modules.
 //! Usage: recovery-probe <computer dir> <output dir> [seconds] [keys: 1|0]
 #![allow(dead_code, unused_imports)]
-#[path = "../../src/macos_computers/guest_screen.rs"]
+#[path = "../../engine/src/macos_computers/guest_screen.rs"]
 mod guest_screen;
-#[path = "../../src/macos_computers/input.rs"]
+#[path = "../../engine/src/macos_computers/input.rs"]
 mod input;
 
 use block2::RcBlock;

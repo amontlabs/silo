@@ -4884,7 +4884,7 @@ mod dispatch_tests {
             method_literals(include_str!("remote_access.rs"))
                 .into_iter()
                 .chain(method_literals(include_str!("../engine/src/runtime/remote_ops.rs")))
-                .chain(method_literals(include_str!("macos_remote.rs")))
+                .chain(method_literals(include_str!("../engine/src/macos_remote.rs")))
                 .collect();
         for method in &served {
             assert!(

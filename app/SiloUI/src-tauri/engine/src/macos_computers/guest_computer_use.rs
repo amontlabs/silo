@@ -23,9 +23,9 @@ use std::{
     time::Duration,
 };
 
-const APP_LOCK: &str = include_str!("../../guest/macos/chatgpt-app-lock.json");
-const LCU_LOCK: &str = include_str!("../../guest/macos/lcu-lock.json");
-const SCRIPT: &str = include_str!("../../guest/macos/silo-computer-use.zsh");
+const APP_LOCK: &str = include_str!("../../../guest/macos/chatgpt-app-lock.json");
+const LCU_LOCK: &str = include_str!("../../../guest/macos/lcu-lock.json");
+const SCRIPT: &str = include_str!("../../../guest/macos/silo-computer-use.zsh");
 const SCRIPT_NAME: &str = "silo-computer-use.zsh";
 const PINNED_NAME: &str = "pinned.json";
 /// Where the files are staged in the guest. The script keeps its work folder inside it.
