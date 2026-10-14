@@ -204,16 +204,15 @@ fn is_restart_scheduled(error: tokio::task::JoinError) -> bool {
 }
 
 async fn serve_connection(
-    stream: UnixStream,
+    mut stream: UnixStream,
     dispatcher: Arc<Dispatcher>,
     _session_permit: OwnedSemaphorePermit,
     request_permits: Arc<Semaphore>,
     control_permits: Arc<Semaphore>,
 ) {
-    let (mut reader, mut writer) = stream.into_split();
     let first = match time::timeout(
         FIRST_HANDSHAKE_TIMEOUT,
-        read_json_frame::<_, Value>(&mut reader),
+        read_json_frame::<_, Value>(&mut stream),
     )
     .await
     {
@@ -233,7 +232,7 @@ async fn serve_connection(
     let first_prepared = match first_prepared {
         PreparedRequest::Close(response, reason) => {
             if let Some(response) = response {
-                let _ = write_initial_response(&mut writer, &response).await;
+                let _ = write_initial_response(&mut stream, &response).await;
             }
             eprintln!("silod: closed client before handshake: {reason}");
             return;
@@ -250,7 +249,7 @@ async fn serve_connection(
         silo_engine::desktop_viewer_api::open_client(client);
     }
     if let Some(response) = first_result.response {
-        if let Err(error) = write_initial_response(&mut writer, &response).await {
+        if let Err(error) = write_initial_response(&mut stream, &response).await {
             eprintln!("silod: handshake response failed: {error}");
             if let Some(client) = handshake_client {
                 silo_engine::desktop_viewer_api::close_client(&client);
@@ -261,6 +260,33 @@ async fn serve_connection(
     if first_result.close {
         return;
     }
+
+    // Inspect the first request after negotiation before starting the multiplexed session.
+    // guest.ssh turns the connection into raw bytes, so it is accepted only here, once.
+    let initial_request = match read_json_frame::<_, Value>(&mut stream).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("silod: client frame failed: {error}");
+            return;
+        }
+    };
+    if initial_request.get("method").and_then(Value::as_str) == Some("guest.ssh") {
+        let prepared = dispatcher.prepare(initial_request, &mut session);
+        let (response, opened) = dispatcher.execute_stream(prepared).await;
+        if let Some(response) = response {
+            if let Err(error) = write_initial_response(&mut stream, &response).await {
+                eprintln!("silod: guest stream response failed: {error}");
+                return;
+            }
+        }
+        if let Some(opened) = opened {
+            relay_guest_stream(stream, opened).await;
+        }
+        return;
+    }
+
+    let (mut reader, mut writer) = stream.into_split();
 
     let client_id = ClientId::new(
         session
@@ -276,6 +302,9 @@ async fn serve_connection(
     let event_byte_budget = Arc::new(Semaphore::new(MAX_PENDING_EVENT_BYTES));
     let outbound_order = Arc::new(tokio::sync::Mutex::new(()));
     let (frame_tx, mut frame_rx) = mpsc::channel(1);
+    if frame_tx.send(Ok(Some(initial_request))).await.is_err() {
+        return;
+    }
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_json_frame::<_, Value>(&mut reader).await;
@@ -669,6 +698,55 @@ async fn serve_connection(
     }
 }
 
+/// How often an open guest stream re-checks that it may continue.
+const GUEST_STREAM_CHECK_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Copies bytes both ways between the client and the guest until either side ends or the
+/// stream is no longer allowed (its forward was unpublished, or the computer stopped).
+async fn relay_guest_stream(mut client: UnixStream, opened: crate::dispatcher::OpenedStream) {
+    let crate::dispatcher::OpenedStream { stream, allowed } = opened;
+    if let Err(error) = stream.set_nonblocking(true) {
+        eprintln!("silod: guest stream setup failed: {error}");
+        return;
+    }
+    let mut guest = match tokio::net::TcpStream::from_std(stream) {
+        Ok(guest) => guest,
+        Err(error) => {
+            eprintln!("silod: guest stream setup failed: {error}");
+            return;
+        }
+    };
+    relay_while_allowed(&mut client, &mut guest, &*allowed).await;
+}
+
+async fn relay_while_allowed<A, B>(
+    client: &mut A,
+    guest: &mut B,
+    allowed: &(dyn Fn() -> bool + Send + Sync),
+) where
+    A: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    B: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let relay = tokio::io::copy_bidirectional(client, guest);
+    tokio::pin!(relay);
+    let mut check = time::interval(GUEST_STREAM_CHECK_INTERVAL);
+    loop {
+        tokio::select! {
+            result = &mut relay => {
+                if let Err(error) = result {
+                    eprintln!("silod: guest stream ended: {error}");
+                }
+                return;
+            }
+            _ = check.tick() => {
+                if !allowed() {
+                    return;
+                }
+            }
+        }
+    }
+}
+
 async fn write_initial_response<W>(
     writer: &mut W,
     response: &ResponseEnvelope<Value>,
@@ -1028,6 +1106,7 @@ mod tests {
     use super::*;
     use silo_engine::context::EngineContext;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
 
     struct MockPeerEuid(u32);
     impl PeerEuidProvider for MockPeerEuid {
@@ -1598,6 +1677,255 @@ mod tests {
         );
         drop(listener);
         assert!(!socket.exists());
+    }
+
+    /// A registry whose `guest.ssh` opens a loopback pair and shares the "allowed" flag with the
+    /// test, in place of a computer.
+    struct StreamRegistry {
+        guest: Mutex<Option<std::net::TcpStream>>,
+        allowed: Arc<std::sync::atomic::AtomicBool>,
+        calls: Mutex<Vec<Value>>,
+    }
+
+    impl crate::dispatcher::MethodRegistry for StreamRegistry {
+        fn descriptors(&self) -> &[silo_api::methods::MethodDescriptor] {
+            silo_api::methods::method_registry()
+        }
+
+        fn dispatch<'a>(
+            &'a self,
+            method: silo_api::methods::MethodName,
+            _params: Value,
+            _context: Arc<crate::context::SilodContext>,
+            _request: crate::dispatcher::RequestContext,
+        ) -> crate::dispatcher::HandlerFuture<'a> {
+            Box::pin(async move {
+                Err(crate::dispatcher::DispatchError::unsupported(
+                    crate::dispatcher::method_name(method),
+                ))
+            })
+        }
+
+        fn open_stream<'a>(
+            &'a self,
+            _method: silo_api::methods::MethodName,
+            params: Value,
+            _context: Arc<crate::context::SilodContext>,
+            _request: crate::dispatcher::RequestContext,
+        ) -> crate::dispatcher::StreamFuture<'a> {
+            Box::pin(async move {
+                self.calls.lock().unwrap().push(params);
+                let stream = self.guest.lock().unwrap().take().unwrap();
+                let allowed = self.allowed.clone();
+                Ok(crate::dispatcher::OpenedStream {
+                    stream,
+                    allowed: Box::new(move || allowed.load(std::sync::atomic::Ordering::Acquire)),
+                })
+            })
+        }
+    }
+
+    async fn handshaken_client(socket: &Path) -> UnixStream {
+        let mut client = UnixStream::connect(socket).await.unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "handshake",
+                "method": "engine.handshake",
+                "params": { "protocol": { "min": 6, "max": 6 } }
+            }),
+        )
+        .await
+        .unwrap();
+        let _: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        client
+    }
+
+    #[tokio::test]
+    async fn guest_ssh_is_a_one_shot_stream_after_the_canonical_handshake() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(test_context())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+        let mut client = UnixStream::connect(&socket).await.unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "handshake",
+                "method": "engine.handshake",
+                "params": { "protocol": { "min": 6, "max": 6 } }
+            }),
+        )
+        .await
+        .unwrap();
+        let handshake: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert!(handshake["result"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|method| method == "guest.ssh"));
+
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "stream",
+                "method": "guest.ssh",
+                "params": { "computerId": "not-a-uuid" }
+            }),
+        )
+        .await
+        .unwrap();
+        let refusal: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(refusal["id"], "stream");
+        assert_eq!(refusal["error"]["code"], "internal");
+        let mut byte = [0_u8; 1];
+        assert_eq!(
+            tokio::io::AsyncReadExt::read(&mut client, &mut byte)
+                .await
+                .unwrap(),
+            0
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn guest_ssh_is_rejected_after_a_regular_request() {
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::core(test_context())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+        let mut client = handshaken_client(&socket).await;
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({ "id": "state", "method": "engine.state", "params": {} }),
+        )
+        .await
+        .unwrap();
+        let _: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "late-stream",
+                "method": "guest.ssh",
+                "params": { "computerId": "not-a-uuid" }
+            }),
+        )
+        .await
+        .unwrap();
+        let refusal: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(refusal["id"], "late-stream");
+        assert_eq!(
+            refusal["error"]["message"],
+            "guest.ssh must be the first request after engine.handshake."
+        );
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn guest_stream_relays_bytes_and_ends_when_the_stream_is_revoked() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let guest_client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (guest_server, _) = listener.accept().unwrap();
+        let registry = Arc::new(StreamRegistry {
+            guest: Mutex::new(Some(guest_client)),
+            allowed: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            calls: Mutex::new(Vec::new()),
+        });
+        let allowed = registry.allowed.clone();
+        let root = tempfile::tempdir().unwrap();
+        let socket = root.path().join("engine.sock");
+        let euid = unsafe { libc::geteuid() };
+        let server = EngineServer::bind(
+            socket.clone(),
+            euid,
+            Arc::new(MockPeerEuid(euid)),
+            Arc::new(Dispatcher::new(registry.clone(), test_context())),
+        )
+        .unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let server_task = tokio::spawn(server.run(shutdown_rx));
+        let mut client = handshaken_client(&socket).await;
+        write_json_frame(
+            &mut client,
+            &serde_json::json!({
+                "id": "forward",
+                "method": "guest.ssh",
+                "params": {
+                    "computerId": "c690f54f-4cc9-4950-8782-30f21e89d18b",
+                    "purpose": "port",
+                    "port": 3000
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let accepted: Value = read_json_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(accepted["result"], serde_json::json!({}));
+        assert_eq!(registry.calls.lock().unwrap()[0]["port"], 3000);
+
+        client.write_all(b"ssh-in").await.unwrap();
+        let mut guest_server = tokio::net::TcpStream::from_std({
+            guest_server.set_nonblocking(true).unwrap();
+            guest_server
+        })
+        .unwrap();
+        let mut received = [0_u8; 6];
+        guest_server.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"ssh-in");
+
+        // Revocation ends the relay: the client observes the end of its stream.
+        allowed.store(false, std::sync::atomic::Ordering::Release);
+        let mut byte = [0_u8; 1];
+        let read = time::timeout(Duration::from_secs(5), client.read(&mut byte))
+            .await
+            .expect("a revoked stream must end");
+        assert!(matches!(read, Ok(0) | Err(_)));
+
+        let _ = shutdown_tx.send(());
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn relay_while_allowed_stops_when_the_check_turns_false() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (mut client, _client_peer) = tokio::io::duplex(64);
+        let (mut guest, _guest_peer) = tokio::io::duplex(64);
+        let allowed = Arc::new(AtomicBool::new(true));
+        let check = allowed.clone();
+        let relay = tokio::spawn(async move {
+            relay_while_allowed(&mut client, &mut guest, &move || {
+                check.load(Ordering::Acquire)
+            })
+            .await;
+        });
+        allowed.store(false, Ordering::Release);
+        time::timeout(Duration::from_secs(5), relay)
+            .await
+            .expect("the relay must observe revocation")
+            .unwrap();
     }
 
     fn test_context() -> Arc<crate::context::SilodContext> {

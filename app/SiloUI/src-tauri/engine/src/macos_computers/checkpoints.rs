@@ -79,6 +79,18 @@ pub(super) struct Meta {
     /// Bytes of the saved memory; the clones share their blocks with the computer.
     #[serde(default)]
     pub size_bytes: Option<u64>,
+    /// Resources selected when this checkpoint was captured. Older checkpoints
+    /// omit them and cannot be exported with a reproducible VM configuration.
+    #[serde(default)]
+    pub cpus: Option<u64>,
+    #[serde(default)]
+    pub memory_gib: Option<u64>,
+    #[serde(default)]
+    pub disk_gib: Option<u64>,
+    /// The Silo setup fingerprint installed on the captured disk. Older
+    /// checkpoints omit it and cannot produce a reproducible archive manifest.
+    #[serde(default)]
+    pub setup_fingerprint: Option<String>,
     /// The computer-use fingerprint the guest had when this was taken; a Restore or a fork
     /// gives it back to the computer. Missing (an older checkpoint) counts as stale.
     #[serde(default)]
@@ -372,6 +384,10 @@ pub(super) struct Subject<'a, M: Machine> {
     pub computer_use_version: Option<String>,
     pub developer_tools: bool,
     pub developer_tools_version: Option<String>,
+    pub cpus: u64,
+    pub memory_gib: u64,
+    pub disk_gib: u64,
+    pub setup_fingerprint: Option<String>,
 }
 
 // MARK: Create
@@ -462,6 +478,10 @@ fn build<M: Machine>(
         macos_version: subject.macos_version.clone(),
         host_build: host_build(),
         size_bytes,
+        cpus: Some(subject.cpus),
+        memory_gib: Some(subject.memory_gib),
+        disk_gib: Some(subject.disk_gib),
+        setup_fingerprint: subject.setup_fingerprint.clone(),
         computer_use_version: subject.computer_use_version.clone(),
         developer_tools: subject.developer_tools,
         developer_tools_version: subject.developer_tools_version.clone(),
@@ -930,6 +950,10 @@ mod tests {
             computer_use_version: Some("cu-1".into()),
             developer_tools: true,
             developer_tools_version: Some("tools-1".into()),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+            setup_fingerprint: Some("setup-1".into()),
         }
     }
 
