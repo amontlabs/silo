@@ -608,10 +608,8 @@ fn app_data(app: &MacosContext) -> Result<PathBuf, String> {
 fn settle_restore(layout: &Layout, mut record: Record) -> Record {
     match checkpoints::recover(layout) {
         Ok(Some(pending)) => {
-            // Without the checkpoint's record the guest's computer use is unknown: stale.
-            record.computer_use_version = checkpoints::find(layout, &pending.checkpoint_id)
-                .ok()
-                .and_then(|meta| meta.computer_use_version);
+            let metadata = checkpoints::find(layout, &pending.checkpoint_id).ok();
+            restore_checkpoint_metadata(&mut record, metadata.as_ref());
             record.pending_restore = Some(pending);
             record.pristine = false;
             if store::save(layout, &record).is_ok() {
@@ -622,6 +620,13 @@ fn settle_restore(layout: &Layout, mut record: Record) -> Record {
         Err(message) => eprintln!("A macOS computer's Restore could not be settled: {message}"),
     }
     record
+}
+
+fn restore_checkpoint_metadata(record: &mut Record, metadata: Option<&checkpoints::Meta>) {
+    // Missing metadata means the restored disk's computer use is unknown and must be updated.
+    record.computer_use_version = metadata.and_then(|meta| meta.computer_use_version.clone());
+    record.setup.developer_tools = metadata.is_some_and(|meta| meta.developer_tools);
+    record.developer_tools_version = metadata.and_then(|meta| meta.developer_tools_version.clone());
 }
 
 fn ensure_loaded(app: &MacosContext) -> Result<(), String> {
@@ -2299,6 +2304,8 @@ fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), Str
         running,
         macos_version: held.record.os_version(),
         computer_use_version: held.record.computer_use_version.clone(),
+        developer_tools: held.record.setup.developer_tools,
+        developer_tools_version: held.record.developer_tools_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -2334,6 +2341,8 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
         running,
         macos_version: held.record.os_version(),
         computer_use_version: held.record.computer_use_version.clone(),
+        developer_tools: held.record.setup.developer_tools,
+        developer_tools_version: held.record.developer_tools_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -2341,8 +2350,9 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
     let pending = restored?;
     let (mut record, _) = computer(id)?;
     record.pending_restore = Some(pending);
-    // The guest comes back with the computer use it had when the checkpoint was taken.
-    record.computer_use_version = target.computer_use_version.clone();
+    // Derive setup metadata from the restored disk, including older checkpoints with no tools
+    // metadata. The saved computer must never claim tools that are absent from its disk.
+    restore_checkpoint_metadata(&mut record, Some(&target));
     // The disk no longer is what the user left, and only what Start restores is the result.
     record.pristine = false;
     store::save(&layout, &record)?;
@@ -2939,6 +2949,34 @@ mod tests {
         assert_eq!(graceful_until(now, Some(now + FORCED_QUIT)), now);
         assert_eq!(graceful_until(now, Some(now + secs(1))), now);
         assert_eq!(graceful_until(now, Some(now)), now);
+    }
+
+    #[test]
+    fn restoring_a_pre_tools_checkpoint_clears_tools_readiness_and_fingerprint() {
+        let (mut registry, _) = registry_with(State::Stopped);
+        let record = &mut registry.entries[0].record;
+        record.setup.developer_tools = true;
+        record.developer_tools_version = Some("tools-current".into());
+        let target = checkpoints::Meta {
+            schema_version: 1,
+            id: "checkpoint".into(),
+            name: "Before tools".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            kind: checkpoints::Kind::Disk,
+            reason: checkpoints::Reason::Manual,
+            macos_version: None,
+            host_build: String::new(),
+            size_bytes: None,
+            computer_use_version: Some("cu-before".into()),
+            developer_tools: false,
+            developer_tools_version: None,
+        };
+
+        restore_checkpoint_metadata(record, Some(&target));
+
+        assert!(!record.setup.developer_tools);
+        assert_eq!(record.developer_tools_version, None);
+        assert_eq!(record.computer_use_version.as_deref(), Some("cu-before"));
     }
 
     #[test]
