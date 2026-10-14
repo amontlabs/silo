@@ -229,6 +229,12 @@ pub fn snapshot() -> PreparationStatus {
 
 fn publish_status(context: &dyn silo_engine::EngineContext, status: &PreparationStatus) {
     if let Ok(payload) = serde_json::to_value(status) {
+        // The canonical topic reaches every subscribed client (20 §4.3); the legacy event
+        // below stays on the main window until the Tauri client moves to the canonical one.
+        context.publish(
+            Event::new("preparation.changed", payload.clone()),
+            silo_engine::Audience::All,
+        );
         // window:main; the host adapter resolves this client id to the main window.
         silo_engine::context::publish_to_main_window(context, Event::new(STATUS_EVENT, payload));
     }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "status": "not-required",
+  "stage": "Ready",
+  "logs": [],
+  "migratedCount": 0,
+  "failedCount": 0,
+  "totalCount": 0,
+  "canContinue": false
+}

@@ -93,6 +93,28 @@ pub struct MigrationState {
     pub error: Option<String>,
 }
 
+/// `migration.changed`: the launch upgrade's state in its public shape.
+pub fn api_state(
+    controller: &Controller,
+) -> Result<silo_api::methods::migration::MigrationState, String> {
+    let value = serde_json::to_value(controller.snapshot()?).map_err(|error| error.to_string())?;
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+/// Tells every client the launch upgrade's state changed. The launch driver calls this from
+/// its progress callback, and again when it ends.
+pub fn publish_state(context: &dyn crate::EngineContext, controller: &Controller) {
+    match api_state(controller)
+        .and_then(|state| serde_json::to_value(state).map_err(|error| error.to_string()))
+    {
+        Ok(payload) => context.publish(
+            crate::Event::new("migration.changed", payload),
+            crate::Audience::All,
+        ),
+        Err(error) => eprintln!("Silo could not publish the migration state: {error}"),
+    }
+}
+
 pub struct Controller {
     app_data: PathBuf,
     path: PathBuf,
@@ -1051,6 +1073,29 @@ pub(crate) mod vocabulary_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publishing_the_state_uses_the_catalogue_topic_and_the_public_shape() {
+        use crate::context::{test_support::RecordingContext, Audience};
+        let directory = tempfile::tempdir().unwrap();
+        let context = RecordingContext::default();
+        let controller = Controller {
+            app_data: directory.path().into(),
+            path: directory.path().join(FILE),
+            state: Mutex::new(fresh("running", 2)),
+            writable: true,
+        };
+        publish_state(&context, &controller);
+        let published = context.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0.name, "migration.changed");
+        assert_eq!(published[0].1, Audience::All);
+        let state: silo_api::methods::migration::MigrationState =
+            serde_json::from_value(published[0].0.payload.clone()).unwrap();
+        assert_eq!(state.status, "running");
+        assert_eq!(state.total_count, 2);
+        assert_eq!(state, api_state(&controller).unwrap());
+    }
 
     #[test]
     fn migration_state_wait_does_not_block_the_async_executor() {
