@@ -595,7 +595,11 @@ async fn updates_set_automatic_checks(
 /// Starts the engine's lifecycle upkeep: installs the real platform, resumes computers a
 /// previous engine update saved before anything else advances them, and runs the engine
 /// update schedule on its own timer (95 A-26). Call once after the context is installed.
-pub fn start(context: Arc<SilodContext>) {
+///
+/// Returns the handle the launch pass waits on: it settles once the recovery thread has finished,
+/// and says whether an update's saved set was resumed (then the launch pass is skipped, so
+/// the running set stays exactly what it was before the update).
+pub fn start(context: Arc<SilodContext>) -> Arc<UpdateRecoveryOutcome> {
     // Launch migration (95 §3: no legacy support but this): the canonical settings have no
     // onboarding draft, so one a previous app version left in the file is dropped here and
     // never handled when settings are read or written.
@@ -604,17 +608,26 @@ pub fn start(context: Arc<SilodContext>) {
     {
         eprintln!("silod: could not migrate the settings at launch: {error}");
     }
+    let outcome = Arc::new(UpdateRecoveryOutcome::default());
     let state = update_state(context.as_ref());
     state.set_platform(Arc::new(ServicesPlatform::new(context.clone())));
     // Visible in `engine.state` from the first request, before the recovery thread runs.
     state.mark_recovery_pending(context.as_ref());
     let recovery_context = context.clone();
     let recovery_state = state.clone();
+    let settle = outcome.clone();
     let spawned = std::thread::Builder::new()
         .name("silod-update-recovery".into())
-        .spawn(move || recover_saved_computers(&recovery_context, &recovery_state));
+        .spawn(move || {
+            // A panic still settles the outcome, as "resumed": no launch pass runs over a
+            // recovery that did not finish.
+            let guard = SettleOnDrop(settle, true);
+            let resumed = recover_saved_computers(&recovery_context, &recovery_state);
+            guard.finish(resumed);
+        });
     if let Err(error) = spawned {
         eprintln!("silod: could not start update recovery: {error}");
+        outcome.settle(true);
     }
     let spawned = std::thread::Builder::new()
         .name("silod-update-schedule".into())
@@ -633,16 +646,77 @@ pub fn start(context: Arc<SilodContext>) {
     if let Err(error) = spawned {
         eprintln!("silod: could not start the update schedule: {error}");
     }
+    outcome
+}
+
+/// How the update recovery at engine start ended, for the launch pass to wait on.
+#[derive(Default)]
+pub struct UpdateRecoveryOutcome {
+    resumed: std::sync::Mutex<Option<bool>>,
+    settled: std::sync::Condvar,
+}
+
+impl UpdateRecoveryOutcome {
+    pub fn settle(&self, resumed: bool) {
+        *self
+            .resumed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(resumed);
+        self.settled.notify_all();
+    }
+
+    /// Blocks until the recovery finished. True when a saved set existed.
+    pub fn wait(&self) -> bool {
+        let mut resumed = self
+            .resumed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(resumed) = *resumed {
+                return resumed;
+            }
+            resumed = self
+                .settled
+                .wait(resumed)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    /// An outcome that is already settled, for hosts without an update recovery.
+    pub fn settled(resumed: bool) -> Arc<Self> {
+        let outcome = Arc::new(Self::default());
+        outcome.settle(resumed);
+        outcome
+    }
+}
+
+struct SettleOnDrop(Arc<UpdateRecoveryOutcome>, bool);
+
+impl SettleOnDrop {
+    fn finish(mut self, resumed: bool) {
+        self.1 = resumed;
+    }
+}
+
+impl Drop for SettleOnDrop {
+    fn drop(&mut self) {
+        self.0.settle(self.1);
+    }
 }
 
 /// Resumes the set a previous engine update saved, and reports what could not resume.
-fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>) {
+fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> bool {
     let result = state.recover(context.as_ref());
-    if matches!(result, Ok(None)) && state.watching_installer() {
-        // An installer still owns the saved set: this engine waits with admission closed.
+    // A saved set that an installer still owns counts as one: the launch pass must not start
+    // computers while it is held.
+    let deferred = matches!(result, Ok(None)) && state.watching_installer();
+    if deferred {
+        // This engine waits with admission closed, probing the installer's lock.
         spawn_watchdog(context.clone(), state.clone());
     }
+    let existed = deferred || !matches!(result, Ok(None));
     report_recovery(context, state, result);
+    existed
 }
 
 fn report_recovery(

@@ -68,7 +68,7 @@ pub(super) fn owns(method: MethodName) -> bool {
 /// controller is rebuilt per call so every call sees the same durable storage selection as
 /// the other silod domains.
 #[derive(Clone)]
-struct SilodRuntimeHost {
+pub(crate) struct SilodRuntimeHost {
     context: Arc<SilodContext>,
 }
 
@@ -79,7 +79,7 @@ impl SilodRuntimeHost {
         }
     }
 
-    fn for_engine(context: Arc<SilodContext>) -> Self {
+    pub(crate) fn for_engine(context: Arc<SilodContext>) -> Self {
         Self { context }
     }
 
@@ -87,7 +87,7 @@ impl SilodRuntimeHost {
         silo_engine::runtime_migration::Controller::new(self.context.paths().app_data.clone())
     }
 
-    fn macos_context(&self) -> MacosContext {
+    pub(crate) fn macos_context(&self) -> MacosContext {
         let engine: Arc<dyn EngineContext> = self.context.clone();
         MacosContext::new(
             engine,
@@ -257,8 +257,9 @@ pub fn install_health_watch(context: Arc<SilodContext>) {
     }));
 }
 
-/// The engine-owned VM window belongs to the display domain (95 A-21). The computers domain
-/// never opens a window, so asking this host for one is refused instead of pretending.
+/// The engine-owned VM window (95 A-21). A computer's own work, such as a setup that needs
+/// the installer screen, opens the same native window `display.show` does, through the
+/// display domain's main-thread runner and window table.
 struct SilodMacosHost {
     runtime: SilodRuntimeHost,
 }
@@ -266,15 +267,17 @@ struct SilodMacosHost {
 impl silo_engine::macos_computers::MacosHost for SilodMacosHost {
     fn show_display(
         &self,
-        _context: &MacosContext,
-        _id: &str,
-        _title: &str,
-        _toolbar: bool,
+        context: &MacosContext,
+        id: &str,
+        title: &str,
+        toolbar: bool,
     ) -> Result<(), String> {
-        Err("Use display.show to open a macOS computer's screen.".to_owned())
+        super::display::show_native_display(context, id, title, toolbar)
     }
 
-    fn close_display(&self, _id: &str) {}
+    fn close_display(&self, id: &str) {
+        super::display::close_native_display(id);
+    }
 
     fn linux_computer_names(&self) -> Vec<String> {
         silo_engine::runtime::computer_names(&self.runtime)

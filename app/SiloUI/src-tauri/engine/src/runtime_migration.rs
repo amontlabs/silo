@@ -115,6 +115,46 @@ pub fn publish_state(context: &dyn crate::EngineContext, controller: &Controller
     }
 }
 
+/// What the launch driver did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LaunchDrive {
+    /// No conversion was pending.
+    Nothing,
+    /// The conversion finished; the engine restarts to use the converted generation.
+    Converted,
+}
+
+/// Runs the conversion a previous scan left pending, once, at engine start. Every step the
+/// conversion reports and its end publish `migration.changed`; a failure is recorded so the
+/// state reads `failed` (never stuck `running`) and is returned. A panic in `convert` counts
+/// as a failure. `convert` receives the progress callback to call after each step.
+pub fn drive_pending(
+    context: &dyn crate::EngineContext,
+    controller: &Controller,
+    convert: impl FnOnce(&dyn Fn()) -> Result<(), String>,
+) -> Result<LaunchDrive, String> {
+    if controller.snapshot()?.status != "scanning" {
+        return Ok(LaunchDrive::Nothing);
+    }
+    controller.prepare_retry()?;
+    publish_state(context, controller);
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        convert(&|| publish_state(context, controller))
+    }))
+    .unwrap_or_else(|_| Err("Migration stopped unexpectedly. Retry the migration.".into()));
+    match outcome {
+        Ok(()) => {
+            publish_state(context, controller);
+            Ok(LaunchDrive::Converted)
+        }
+        Err(error) => {
+            let _ = controller.record_failure(error.clone());
+            publish_state(context, controller);
+            Err(error)
+        }
+    }
+}
+
 pub struct Controller {
     app_data: PathBuf,
     path: PathBuf,
@@ -1073,6 +1113,73 @@ pub(crate) mod vocabulary_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scanning_controller(directory: &Path) -> Controller {
+        Controller {
+            app_data: directory.into(),
+            path: directory.join(FILE),
+            state: Mutex::new(fresh("scanning", 2)),
+            writable: true,
+        }
+    }
+
+    fn published_statuses(context: &crate::context::test_support::RecordingContext) -> Vec<String> {
+        context
+            .published()
+            .iter()
+            .filter(|(event, _)| event.name == "migration.changed")
+            .map(|(event, _)| event.payload["status"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn the_launch_driver_publishes_each_step_and_the_end() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = crate::context::test_support::RecordingContext::default();
+        let controller = scanning_controller(directory.path());
+        let result = drive_pending(&context, &controller, |progress| {
+            progress();
+            Ok(())
+        });
+        assert_eq!(result, Ok(LaunchDrive::Converted));
+        assert_eq!(
+            published_statuses(&context),
+            ["running", "running", "running"]
+        );
+    }
+
+    #[test]
+    fn the_launch_driver_records_a_failure_and_a_panic_as_failed() {
+        for panics in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let context = crate::context::test_support::RecordingContext::default();
+            let controller = scanning_controller(directory.path());
+            let result = drive_pending(&context, &controller, |_| {
+                if panics {
+                    panic!("conversion crashed");
+                }
+                Err("disk full".into())
+            });
+            assert!(result.is_err());
+            assert_eq!(controller.snapshot().unwrap().status, "failed");
+            assert_eq!(published_statuses(&context).last().unwrap(), "failed");
+        }
+    }
+
+    #[test]
+    fn the_launch_driver_leaves_a_settled_migration_alone() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = crate::context::test_support::RecordingContext::default();
+        let controller = Controller {
+            app_data: directory.path().into(),
+            path: directory.path().join(FILE),
+            state: Mutex::new(fresh("complete", 2)),
+            writable: true,
+        };
+        let result = drive_pending(&context, &controller, |_| panic!("nothing is pending"));
+        assert_eq!(result, Ok(LaunchDrive::Nothing));
+        assert!(context.published().is_empty());
+    }
 
     #[test]
     fn publishing_the_state_uses_the_catalogue_topic_and_the_public_shape() {

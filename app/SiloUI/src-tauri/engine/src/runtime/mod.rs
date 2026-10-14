@@ -2887,6 +2887,23 @@ pub fn read_application_state_sync(
     Ok(source)
 }
 
+/// One engine-timer pass of expired-log cleanup (95 A-26), with no client reading state.
+/// It reads the computers like a state read does, then cleans the stopped ones that are due
+/// (at most hourly each, one pass at a time) on the calling thread. A busy gate postpones the
+/// pass: the next timer pass tries again.
+pub fn expire_stopped_logs(host: &dyn RuntimeHost) -> Result<(), String> {
+    host.ensure_runtime_ready()?;
+    shutdown::ensure_accepting_operations()?;
+    let paths = runtime_paths(host)?;
+    let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)
+        .map_err(|error| error.to_string())?;
+    let due = plan_log_cleanup(&paths, &mut source.computers, Instant::now());
+    if !due.is_empty() {
+        clean_expired_logs(&ProcessRunner, &paths, &OPERATIONS, &due);
+    }
+    Ok(())
+}
+
 /// Expired logs of a stopped computer are cleaned at most this often, off the state-read path.
 const LOG_CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 

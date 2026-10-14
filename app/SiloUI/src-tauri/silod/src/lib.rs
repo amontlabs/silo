@@ -4,6 +4,7 @@
 compile_error!("silod is a macOS-host engine process");
 
 pub mod app;
+pub mod app_delegate;
 pub mod code_signature;
 pub mod context;
 pub mod dispatcher;
@@ -15,6 +16,8 @@ pub mod ownership;
 pub mod paths;
 pub mod service;
 pub mod socket;
+pub mod startup;
+pub mod timers;
 
 pub fn entry(args: &[String]) -> Result<i32, String> {
     match args.get(1).map(String::as_str) {

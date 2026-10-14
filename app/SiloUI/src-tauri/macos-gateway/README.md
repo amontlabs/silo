@@ -34,8 +34,13 @@ length. That mode does not access inherited frame or control descriptors.
 The parent sends one `init` message with `version`, `slot`, `guest_ipv4`, `guest_mac`, required
 `dns_nameservers`, `loopback_ports`, and `ca:{cert_pem,key_pem}`; `mtu`, strict `policy`,
 `intercepted_ports`, initial `secrets`, and `github_profile_json` are optional. An empty
-`dns_nameservers` list leaves DNS discovery to MicroSandbox's
-macOS resolver integration, preserving VPN and split-DNS configuration. Empty credentials are
+`dns_nameservers` list leaves DNS to MicroSandbox's host resolver table: the primary resolver,
+each service's supplemental match domains, and `/etc/resolver/*`. A name goes to the resolver with
+the longest matching domain, otherwise to the primary one, and the table is re-read whenever the
+host's DNS configuration changes while the gateway runs. Only queries addressed to the gateway
+use it, so the guest still cannot choose its upstream. A UDP answer is limited to the EDNS buffer
+the guest advertised and to one datagram of `mtu`; a larger one is truncated (TC=1) so the
+guest retries over TCP. Empty credentials are
 valid when an adapter will apply them later.
 
 `loopback_ports` contains exactly two TCP entries: `{host_port:0,guest_port:22}` and
@@ -51,3 +56,11 @@ Revisioned update operations are `put_secret`, `rotate_secret`, `remove_secret`,
 `set_allowed_hosts`, and `set_github_profile`; the GitHub operation carries
 `profile_json:string|null`. The helper ACKs only after the close barrier completes, with
 `closed_previous_generation:true`. Invalid requests return generic error codes without values.
+
+## Trust-probe mode
+
+`--issue-trust-probe` reads one length-prefixed `{cert_pem,key_pem}` CA bundle on stdin and
+writes one length-prefixed `{leaf_pem}` response: a certificate for `TRUST_PROBE_HOST` signed by
+that CA, valid for a year, whose key is discarded. The guest bootstrap evaluates it with the
+system's trust settings, so readiness proves the CA is trusted, not merely present. Like
+`--generate-ca`, this mode does not access the inherited frame or control descriptors.

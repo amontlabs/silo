@@ -920,21 +920,38 @@ pub fn inspection_worker(
         .is_none()
         .then(|| register_inspection(&controller, request_id.clone()));
     let job_id = match accepted {
-        Some(accepted) => match start_backup_job(
-            &controller,
-            accepted,
-            CancelRoute::Inspection,
-            cancel_inspection_job,
-        ) {
-            Ok(job_id) => Some(job_id),
-            Err(error) => {
-                eprintln!("Silo could not register the archive inspection job: {error}");
-                if duplicate_error.is_none() {
-                    duplicate_error = Some(error.to_string());
+        Some(accepted) => {
+            let (context, accepted_id) = (accepted.context.clone(), accepted.job_id.clone());
+            match start_backup_job(
+                &controller,
+                accepted,
+                CancelRoute::Inspection,
+                cancel_inspection_job,
+            ) {
+                Ok(job_id) => Some(job_id),
+                Err(error) => {
+                    eprintln!("Silo could not register the archive inspection job: {error}");
+                    // The job was accepted durably but cannot start: finish it with the
+                    // failure instead of leaving it waiting, and release the registration.
+                    if let Err(finish_error) = jobs::finish_with_error(
+                        context.as_ref(),
+                        accepted_id,
+                        ErrorCode::Internal,
+                        error.to_string(),
+                        Audience::All,
+                    ) {
+                        eprintln!(
+                            "Silo could not finish the archive inspection job: {finish_error}"
+                        );
+                    }
+                    if duplicate_error.is_none() {
+                        finish_inspection(&controller, &request_id);
+                        duplicate_error = Some(error.to_string());
+                    }
+                    None
                 }
-                None
             }
-        },
+        }
         None => None,
     };
     move || {

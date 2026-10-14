@@ -34,8 +34,33 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        (Some(mode), None) if mode == OsStr::new("--issue-trust-probe") => {
+            if issue_trust_probe_mode().is_err() {
+                std::process::exit(1);
+            }
+        }
         _ => std::process::exit(64),
     }
+}
+
+/// Reads a length-prefixed CA bundle on stdin and writes a length-prefixed trust-probe leaf
+/// certificate on stdout. The leaf's key is never kept.
+fn issue_trust_probe_mode() -> Result<(), GatewayError> {
+    let ca = control::read_ca_input(&mut io::stdin().lock()).map_err(|_| GatewayError::Control)?;
+    let leaf = network::issue_trust_probe(&ca).map_err(|_| GatewayError::NetworkInit)?;
+    #[derive(Serialize)]
+    struct Probe<'a> {
+        leaf_pem: &'a str,
+    }
+    let body = serde_json::to_vec(&Probe { leaf_pem: &leaf }).map_err(|_| GatewayError::Control)?;
+    if body.is_empty() || body.len() > control::MAX_MESSAGE_BYTES {
+        return Err(GatewayError::Control);
+    }
+    io::stdout()
+        .write_all(&(body.len() as u32).to_be_bytes())
+        .and_then(|_| io::stdout().write_all(&body))
+        .and_then(|_| io::stdout().flush())
+        .map_err(|_| GatewayError::Control)
 }
 
 fn generate_ca_mode() -> Result<(), GatewayError> {
