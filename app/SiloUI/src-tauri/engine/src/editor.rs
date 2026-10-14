@@ -633,6 +633,26 @@ fn prepare_configuration(
     config: &Path,
     known_hosts: &Path,
 ) -> Result<String, String> {
+    let suffix = paths
+        .home
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(FAILED)?;
+    let alias = format!("silo-{suffix}-{name}");
+    prepare_configuration_as(paths, name, &alias, config, known_hosts, true)
+}
+
+/// Writes the client key, the computer's pinned host key and the SSH entry for `alias`.
+/// `keep_earlier_aliases` carries over the aliases an earlier runtime home gave a
+/// name-keyed entry; ID-keyed entries have none.
+fn prepare_configuration_as(
+    paths: &RuntimePaths,
+    name: &str,
+    alias: &str,
+    config: &Path,
+    known_hosts: &Path,
+    keep_earlier_aliases: bool,
+) -> Result<String, String> {
     let user = crate::working_account::inspect_user(paths, name)?;
     let _guard = files_lock();
     let root = paths.home.join("ssh");
@@ -654,21 +674,19 @@ fn prepare_configuration(
     private_directory(&host_root)?;
     let host_key = host_root.join("host_ed25519");
     key(&host_key)?;
-    let suffix = paths
-        .home
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(FAILED)?;
-    let alias = format!("silo-{suffix}-{name}");
     write_private(
-        &known_hosts,
+        known_hosts,
         format!("{alias} {}\n", public_key(&host_key)?).as_bytes(),
     )?;
     let proxy = local_proxy(paths, name)?;
-    let hosts = host_patterns(config, &alias, name);
-    let content = format!("Host {hosts}\n  HostName {alias}\n  User {user}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n  ForwardAgent no\n  ForwardX11 no\n  UserKnownHostsFile {}\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ProxyCommand {proxy}\n\nHost *\n", ssh_quote(&client)?, ssh_quote(&known_hosts)?);
-    write_private(&config, content.as_bytes())?;
-    Ok(alias)
+    let hosts = if keep_earlier_aliases {
+        host_patterns(config, alias, name)
+    } else {
+        alias.to_owned()
+    };
+    let content = format!("Host {hosts}\n  HostName {alias}\n  User {user}\n  IdentityFile {}\n  IdentitiesOnly yes\n  IdentityAgent none\n  ForwardAgent no\n  ForwardX11 no\n  UserKnownHostsFile {}\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ProxyCommand {proxy}\n\nHost *\n", ssh_quote(&client)?, ssh_quote(known_hosts)?);
+    write_private(config, content.as_bytes())?;
+    Ok(alias.to_owned())
 }
 
 /// The `Host` line of an entry: `alias`, then the aliases an earlier runtime home
@@ -1246,6 +1264,139 @@ pub fn prepare_remote(
     let _guard = files_lock();
     install_include(home, &include_line(root)?)?;
     Ok((alias, config))
+}
+
+/// A local Linux computer's SSH entry for external clients, keyed by its `computerId`.
+pub(crate) struct IdAlias {
+    pub alias: String,
+    pub user: &'static str,
+    pub config: PathBuf,
+    pub include: String,
+    pub include_installed: bool,
+}
+
+/// The host alias of a local computer: `silo[-dev]-<computerId>`. Only letters, digits and
+/// `-`, so it is safe in a deep link and never changes when the computer is renamed.
+pub(crate) fn id_alias(id: &str) -> String {
+    let prefix = crate::channel::current()
+        .remote_alias_prefix()
+        .trim_end_matches("-remote");
+    format!("{prefix}-{id}")
+}
+
+/// Writes (or rewrites) the ID-keyed entry for a local computer and, with
+/// `install_include`, makes it visible through the user's `~/.ssh/config`.
+///
+/// Without it the result reports whether the `Include` is already there; an installation that
+/// was requested and cannot be done is an error, never a quiet `false`.
+pub(crate) fn ensure_id_alias(
+    paths: &RuntimePaths,
+    user_home: &Path,
+    name: &str,
+    id: &str,
+    install_include: bool,
+) -> Result<IdAlias, String> {
+    runtime::validate_name(name).map_err(|error| error.to_string())?;
+    uuid::Uuid::parse_str(id).map_err(|_| "Invalid computer identity.")?;
+    let root = paths.home.join("ssh");
+    let config = root.join(format!("{id}.conf"));
+    let known_hosts = root.join(format!("{id}.known_hosts"));
+    let alias = id_alias(id);
+    prepare_configuration_as(paths, name, &alias, &config, &known_hosts, false)?;
+    let include = include_line(&root)?;
+    let _guard = files_lock();
+    let include_installed = if install_include {
+        self::install_include(user_home, &include)?;
+        true
+    } else {
+        user_config_has_line(user_home, &include)
+    };
+    Ok(IdAlias {
+        alias,
+        user: crate::working_account::USER,
+        config,
+        include,
+        include_installed,
+    })
+}
+
+/// Removes a computer's ID-keyed entry and its pinned host key. The shared `Include` goes
+/// only when no entry is left in the folder it names, and only if that file can be edited
+/// safely; a leftover line matches nothing and is harmless. Repeating it changes nothing.
+pub(crate) fn remove_id_alias(
+    paths: &RuntimePaths,
+    user_home: &Path,
+    id: &str,
+) -> Result<(), String> {
+    uuid::Uuid::parse_str(id).map_err(|_| "Invalid computer identity.")?;
+    let root = paths.home.join("ssh");
+    let _guard = files_lock();
+    for file in [format!("{id}.conf"), format!("{id}.known_hosts")] {
+        match fs::remove_file(root.join(file)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(FAILED.into()),
+        }
+    }
+    let entries_left = fs::read_dir(&root).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".conf"))
+    });
+    if !entries_left {
+        let _ = remove_include(user_home, &include_line(&root)?);
+    }
+    Ok(())
+}
+
+/// Removes `include` from the user's SSH configuration, following the same links
+/// `install_include` follows and refusing files it could not have written.
+fn remove_include(user_home: &Path, include: &str) -> Result<(), String> {
+    let link = user_home.join(".ssh");
+    let ssh_root = match fs::symlink_metadata(&link) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::canonicalize(&link).map_err(|_| FAILED)?
+        }
+        Ok(_) => link,
+        Err(_) => return Ok(()),
+    };
+    let config = ssh_root.join("config");
+    let target = match fs::symlink_metadata(&config) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::canonicalize(&config).map_err(|_| FAILED)?
+        }
+        Ok(_) => config,
+        Err(_) => return Ok(()),
+    };
+    let old = read_regular(&target)?;
+    if !has_line(&old, include) {
+        return Ok(());
+    }
+    if !fs::metadata(&target).is_ok_and(|metadata| metadata.is_file() && owned(&metadata)) {
+        return Err(FAILED.into());
+    }
+    let kept: Vec<&[u8]> = old
+        .split(|byte| *byte == b'\n')
+        .filter(|line| *line != include.as_bytes())
+        .collect();
+    replace_file(&target, &kept.join(&b'\n')).map_err(|_| FAILED.into())
+}
+
+/// Checks that `alias` reaches the computer without prompting. Never starts it.
+pub(crate) fn probe_alias(config: &Path, alias: &str) -> Result<(), String> {
+    let mut probe = Command::new("/usr/bin/ssh");
+    probe.args(["-F"]).arg(config).args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        alias,
+        "true",
+    ]);
+    run(&mut probe, Duration::from_secs(10)).map_err(|_| {
+        "Could not connect to this computer over SSH. Retry after checking that it is running."
+            .to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -1979,6 +2130,75 @@ mod tests {
         assert!(String::from_utf8(unrelated.stdout)
             .unwrap()
             .contains("serveraliveinterval 37\n"));
+    }
+
+    #[test]
+    fn id_keyed_aliases_keep_their_name_across_renames_and_removal_is_scoped_and_idempotent() {
+        const FIRST: &str = "00000000-0000-4000-8000-0000000000a1";
+        const SECOND: &str = "00000000-0000-4000-8000-0000000000a2";
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("user");
+        private_directory(&home.join(".ssh")).unwrap();
+        let existing = b"# personal settings\nServerAliveInterval 37\n";
+        fs::write(home.join(".ssh/config"), existing).unwrap();
+        let paths = RuntimePaths {
+            guest_image: crate::test_support::manifest_root().join("runtime/guest-image"),
+            executable: directory.path().join("msb"),
+            home: directory.path().join("runtime"),
+            storage_home: None,
+            library: directory.path().join("msb"),
+            metadata: directory.path().join("computers.json"),
+            volumes: directory.path().join("volumes"),
+        };
+        crate::working_account::test_runtime(&paths.executable);
+        let root = paths.home.join("ssh");
+
+        let first = ensure_id_alias(&paths, &home, "dev", FIRST, true).unwrap();
+        assert_eq!(first.alias, format!("silo-{FIRST}"));
+        assert_eq!(first.config, root.join(format!("{FIRST}.conf")));
+        assert!(first.include_installed);
+        assert!(first.include.starts_with("Include \""));
+        let config = fs::read(home.join(".ssh/config")).unwrap();
+        assert!(config.ends_with(existing));
+        // A rename changes the engine's computer name but not the alias, file or known host.
+        let again = ensure_id_alias(&paths, &home, "dev", FIRST, false).unwrap();
+        assert_eq!(
+            (again.alias.as_str(), again.include_installed),
+            (first.alias.as_str(), true)
+        );
+        assert_eq!(fs::read(home.join(".ssh/config")).unwrap(), config);
+        let details = Command::new("/usr/bin/ssh")
+            .arg("-G")
+            .arg("-F")
+            .arg(&first.config)
+            .arg(&first.alias)
+            .output()
+            .unwrap();
+        let text = String::from_utf8(details.stdout).unwrap();
+        assert!(text.contains("user silo\n") && text.contains("identityagent none"));
+        assert!(text.contains(&format!("{FIRST}.known_hosts")));
+
+        ensure_id_alias(&paths, &home, "dev", SECOND, true).unwrap();
+        remove_id_alias(&paths, &home, FIRST).unwrap();
+        assert!(!root.join(format!("{FIRST}.conf")).exists());
+        assert!(!root.join(format!("{FIRST}.known_hosts")).exists());
+        assert!(root.join(format!("{SECOND}.conf")).exists());
+        assert!(
+            fs::read(home.join(".ssh/config"))
+                .unwrap()
+                .ends_with(existing)
+                && has_line(&fs::read(home.join(".ssh/config")).unwrap(), &first.include),
+            "the shared Include stays while another alias uses it"
+        );
+        remove_id_alias(&paths, &home, SECOND).unwrap();
+        remove_id_alias(&paths, &home, SECOND).unwrap();
+        assert_eq!(fs::read(home.join(".ssh/config")).unwrap(), existing);
+
+        // Without installation the result only reports whether the line is there.
+        let uninstalled = ensure_id_alias(&paths, &home, "dev", FIRST, false).unwrap();
+        assert!(!uninstalled.include_installed);
+        assert_eq!(fs::read(home.join(".ssh/config")).unwrap(), existing);
+        assert!(ensure_id_alias(&paths, &home, "dev", "not-an-id", true).is_err());
     }
 
     /// A device after the storage migration: the editor entry `prepare` wrote for

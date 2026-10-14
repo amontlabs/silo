@@ -151,7 +151,9 @@ fn runtime_host(context: &HandlerContext) -> DisplayRuntimeHost {
     }
 }
 
-fn macos_context(context: &HandlerContext) -> silo_engine::macos_computers_engine::MacosContext {
+pub(super) fn macos_context(
+    context: &HandlerContext,
+) -> silo_engine::macos_computers_engine::MacosContext {
     let engine: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
     silo_engine::macos_computers_engine::MacosContext::new(engine, Arc::new(SilodMacosHost))
 }
