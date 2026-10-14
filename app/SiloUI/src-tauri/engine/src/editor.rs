@@ -49,17 +49,79 @@ fn require_openssh_at(ssh: &Path, keygen: &Path, purpose: &str) -> Result<(), St
 }
 
 pub fn validate_path(path: &str) -> Result<(), String> {
+    validate_path_in(
+        path,
+        "/workspace",
+        "Choose a folder inside /workspace with no control characters.",
+    )
+}
+
+fn validate_path_in(path: &str, root: &str, message: &str) -> Result<(), String> {
     if path.len() > 4096
         || path.bytes().any(|byte| byte.is_ascii_control())
-        || !(path == "/workspace"
-            || path.strip_prefix("/workspace/").is_some_and(|tail| {
+        || !(path == root
+            || path.strip_prefix(&format!("{root}/")).is_some_and(|tail| {
                 tail.split('/')
                     .all(|part| !part.is_empty() && part != "." && part != "..")
             }))
     {
-        return Err("Choose a folder inside /workspace with no control characters.".into());
+        return Err(message.into());
     }
     Ok(())
+}
+
+pub(crate) fn validate_macos_path(path: &str) -> Result<(), String> {
+    validate_path_in(
+        path,
+        "/Users/silo/workspace",
+        "Choose a folder inside /Users/silo/workspace with no control characters.",
+    )
+}
+
+fn remote_uri_for_root(alias: &str, path: &str, zed: bool, root: &str) -> Result<String, String> {
+    validate_path_in(path, root, "Choose a folder inside the computer workspace.")?;
+    let mut uri = reqwest::Url::parse(&if zed {
+        format!("ssh://{alias}/")
+    } else {
+        format!("vscode-remote://ssh-remote+{alias}/")
+    })
+    .map_err(|_| FAILED)?;
+    uri.path_segments_mut()
+        .map_err(|_| FAILED)?
+        .clear()
+        .extend(path.split('/').skip(1));
+    Ok(uri.into())
+}
+
+/// macOS guest variant: keep the shared editor handoff but validate paths against its
+/// provisioned workspace root rather than Linux's `/workspace`.
+pub(crate) fn macos_editor_launch(
+    command: &applications::launch::EditorCommand,
+    alias: &str,
+    path: &str,
+    user_home: &Path,
+) -> Result<Command, String> {
+    validate_macos_path(path)?;
+    let mut launch = Command::new(&command.program);
+    launch.args(&command.args);
+    if command.zed {
+        launch.arg(remote_uri_for_root(
+            alias,
+            path,
+            true,
+            "/Users/silo/workspace",
+        )?);
+    } else {
+        launch
+            .args(["--profile", crate::channel::current().vscode_profile()])
+            .arg(vscode_workspace_for_root(
+                &crate::channel::current().state_dir(user_home),
+                alias,
+                path,
+                "/Users/silo/workspace",
+            )?);
+    }
+    Ok(launch)
 }
 
 /// VS Code profile for every Silo computer window, so the settings below and
@@ -106,8 +168,17 @@ pub(crate) fn editor_launch(
 /// Writes `<channel home>/editor/<alias>/<path hash>/<folder>.code-workspace`, keeping
 /// any other workspace settings the user added and restoring Silo's own.
 fn vscode_workspace(silo_root: &Path, alias: &str, path: &str) -> Result<PathBuf, String> {
+    vscode_workspace_for_root(silo_root, alias, path, "/workspace")
+}
+
+fn vscode_workspace_for_root(
+    silo_root: &Path,
+    alias: &str,
+    path: &str,
+    root: &str,
+) -> Result<PathBuf, String> {
     use sha2::{Digest, Sha256};
-    validate_path(path)?;
+    validate_path_in(path, root, "Choose a folder inside the computer workspace.")?;
     if alias.is_empty()
         || !alias
             .bytes()
@@ -160,7 +231,8 @@ fn vscode_workspace(silo_root: &Path, alias: &str, path: &str) -> Result<PathBuf
     if !document.is_object() {
         return Err(invalid());
     }
-    document["folders"] = serde_json::json!([{ "uri": remote_uri(alias, path, false)? }]);
+    document["folders"] =
+        serde_json::json!([{ "uri": remote_uri_for_root(alias, path, false, root)? }]);
     document["remoteAuthority"] = serde_json::json!(format!("ssh-remote+{alias}"));
     if !document["settings"].is_object() {
         document["settings"] = serde_json::json!({});
@@ -174,18 +246,7 @@ fn vscode_workspace(silo_root: &Path, alias: &str, path: &str) -> Result<PathBuf
 }
 
 fn remote_uri(alias: &str, path: &str, zed: bool) -> Result<String, String> {
-    validate_path(path)?;
-    let mut uri = reqwest::Url::parse(&if zed {
-        format!("ssh://{alias}/")
-    } else {
-        format!("vscode-remote://ssh-remote+{alias}/")
-    })
-    .map_err(|_| FAILED)?;
-    uri.path_segments_mut()
-        .map_err(|_| FAILED)?
-        .clear()
-        .extend(path.split('/').skip(1));
-    Ok(uri.into())
+    remote_uri_for_root(alias, path, zed, "/workspace")
 }
 
 pub(crate) fn private_directory(path: &Path) -> Result<(), String> {
@@ -290,7 +351,7 @@ fn public_key_from_command(command: &mut Command, timeout: Duration) -> Result<S
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
-fn ssh_quote(path: &Path) -> Result<String, String> {
+pub(crate) fn ssh_quote(path: &Path) -> Result<String, String> {
     let text = path.to_str().ok_or(FAILED)?;
     if text.chars().any(char::is_control) {
         return Err(FAILED.into());
@@ -436,7 +497,7 @@ fn launch_editor(mut launch: Command, window: Duration) -> Result<(), String> {
 }
 
 /// The `Include` that makes the entries in `root` visible to the user's `ssh`.
-fn include_line(root: &Path) -> Result<String, String> {
+pub(crate) fn include_line(root: &Path) -> Result<String, String> {
     let mut pattern = String::new();
     for character in root.to_str().ok_or(FAILED)?.chars() {
         if matches!(character, '\\' | '[' | ']' | '?' | '*') {
@@ -472,7 +533,7 @@ fn has_line(contents: &[u8], line: &str) -> bool {
 /// dotfile managers (stow, chezmoi) are followed when they lead to a folder or
 /// file this account owns; otherwise, such as a read-only home-manager file,
 /// the user gets the exact line to add (G-11).
-fn install_include(user_home: &Path, include: &str) -> Result<(), String> {
+pub(crate) fn install_include(user_home: &Path, include: &str) -> Result<(), String> {
     let link = user_home.join(".ssh");
     let user_config = link.join("config");
     let manual = || manual_include(&user_config, include);
@@ -1001,7 +1062,7 @@ fn with_local_entry(contents: &str, paths: &RuntimePaths, name: &str) -> Option<
 }
 
 /// Whether the user's SSH configuration, read through any link, has this line.
-fn user_config_has_line(user_home: &Path, line: &str) -> bool {
+pub(crate) fn user_config_has_line(user_home: &Path, line: &str) -> bool {
     let path = user_home.join(".ssh/config");
     fs::metadata(&path)
         .ok()
@@ -1524,6 +1585,59 @@ mod tests {
             args: Vec::new(),
             zed: false,
         }
+    }
+
+    #[test]
+    fn macos_editor_paths_use_the_provisioned_workspace_root() {
+        validate_macos_path("/Users/silo/workspace/project").unwrap();
+        for path in [
+            "/workspace",
+            "/Users/silo/Downloads",
+            "/Users/silo/workspace/../Library",
+        ] {
+            assert!(validate_macos_path(path).is_err(), "{path}");
+        }
+        assert_eq!(
+            remote_uri_for_root(
+                "silo-id",
+                "/Users/silo/workspace/a b",
+                true,
+                "/Users/silo/workspace"
+            )
+            .unwrap(),
+            "ssh://silo-id/Users/silo/workspace/a%20b"
+        );
+    }
+
+    #[test]
+    fn macos_editor_command_returns_a_client_launch_and_workspace_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let command = applications::launch::EditorCommand {
+            program: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code".into(),
+            args: vec!["--new-window".into()],
+            zed: false,
+        };
+        let launch = macos_editor_launch(
+            &command,
+            "silo-e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f",
+            "/Users/silo/workspace/project",
+            directory.path(),
+        )
+        .unwrap();
+        assert_eq!(launch.get_program(), command.program);
+        let args: Vec<_> = launch
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[0], "--new-window");
+        assert_eq!(args[1], "--profile");
+        let workspace = Path::new(args.last().unwrap());
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(workspace).unwrap()).unwrap();
+        assert_eq!(
+            document["folders"][0]["uri"],
+            "vscode-remote://ssh-remote+silo-e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f/Users/silo/workspace/project"
+        );
     }
 
     #[test]

@@ -787,6 +787,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         // A record from before the fingerprint split is stale.

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashSet, future::Future, net::TcpStream, pin::Pin, sync::Arc};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -6,6 +6,7 @@ use silo_api::{
     jobs::ErrorCode,
     methods::{
         engine::{EngineState, EngineStateParams, EventsSubscribeParams, EventsUnsubscribeParams},
+        guest::{GuestSshParams, GuestSshPurpose},
         method_registry,
         notifications::NotificationsListParams,
         operations::{AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationsListParams},
@@ -33,6 +34,16 @@ pub struct HandlerOutput {
     pub event_barrier: Option<std::collections::HashMap<String, u64>>,
 }
 
+/// A raw duplex stream a stream method opened, with the check that tells the relay when the
+/// stream must end (its forward was unpublished, or the computer stopped or restarted).
+pub struct OpenedStream {
+    pub stream: TcpStream,
+    pub allowed: Box<dyn Fn() -> bool + Send + Sync>,
+}
+
+pub type StreamFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<OpenedStream, DispatchError>> + Send + 'a>>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestContext {
     pub client_id: String,
@@ -51,6 +62,13 @@ impl DispatchError {
         Self {
             code: ErrorCode::Internal,
             message: message.into(),
+        }
+    }
+
+    pub(crate) fn unsupported_message(message: &str) -> Self {
+        Self {
+            code: ErrorCode::UnsupportedRemoteOperation,
+            message: message.to_owned(),
         }
     }
 
@@ -94,6 +112,16 @@ pub trait MethodRegistry: Send + Sync {
         context: Arc<SilodContext>,
         request: RequestContext,
     ) -> HandlerFuture<'a>;
+
+    fn open_stream<'a>(
+        &'a self,
+        method: MethodName,
+        _params: Value,
+        _context: Arc<SilodContext>,
+        _request: RequestContext,
+    ) -> StreamFuture<'a> {
+        Box::pin(async move { Err(DispatchError::unsupported(method_name(method))) })
+    }
 }
 
 pub struct CoreMethodRegistry {
@@ -111,6 +139,7 @@ impl Default for CoreMethodRegistry {
                     descriptor.name,
                     "engine.handshake"
                         | "engine.state"
+                        | "guest.ssh"
                         | "events.subscribe"
                         | "events.unsubscribe"
                         | "notifications.list"
@@ -158,6 +187,9 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
                 MethodName::EngineHandshake => Err(DispatchError::internal(
                     "engine.handshake is handled by the session negotiator",
+                )),
+                MethodName::GuestSsh => Err(DispatchError::unsupported_message(
+                    "guest.ssh must be the first request after engine.handshake.",
                 )),
                 MethodName::EventsSubscribe => {
                     let params: EventsSubscribeParams = parse_params(params)?;
@@ -256,6 +288,47 @@ impl MethodRegistry for CoreMethodRegistry {
                 value,
                 event_barrier,
             })
+        })
+    }
+
+    fn open_stream<'a>(
+        &'a self,
+        method: MethodName,
+        params: Value,
+        context: Arc<SilodContext>,
+        _request: RequestContext,
+    ) -> StreamFuture<'a> {
+        Box::pin(async move {
+            if method != MethodName::GuestSsh {
+                return Err(DispatchError::unsupported(method_name(method)));
+            }
+            let params: GuestSshParams = serde_json::from_value(params)
+                .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))?;
+            // The stream is always SSH to the guest. A `port` purpose only labels the forward
+            // it carries, so that unpublishing the port can end it.
+            let label = match (params.purpose, params.port) {
+                (None, None) => None,
+                (Some(GuestSshPurpose::Port), Some(port)) if port != 0 => Some(port),
+                _ => return Err(DispatchError::internal("Invalid guest connection.")),
+            };
+            let app_data = context.paths().app_data.clone();
+            tokio::task::spawn_blocking(move || {
+                silo_engine::macos_computers_engine::open_guest_ssh_stream(
+                    &app_data,
+                    &params.computer_id,
+                    label,
+                )
+            })
+            .await
+            .map_err(|error| DispatchError::internal(error.to_string()))?
+            .map(|opened| {
+                let silo_engine::macos_computers_engine::GuestSshStream { stream, guard } = opened;
+                OpenedStream {
+                    stream,
+                    allowed: Box::new(move || guard.allowed()),
+                }
+            })
+            .map_err(DispatchError::internal)
         })
     }
 }
@@ -449,6 +522,36 @@ impl Dispatcher {
                     event_barrier,
                 }
             }
+        }
+    }
+
+    /// Runs a prepared stream method. The response is the success or error frame to write
+    /// first; the stream is present only on success.
+    pub async fn execute_stream(
+        &self,
+        prepared: PreparedRequest,
+    ) -> (Option<ResponseEnvelope<Value>>, Option<OpenedStream>) {
+        match prepared {
+            PreparedRequest::Invoke {
+                id,
+                method,
+                params,
+                request_context,
+            } => match self
+                .registry
+                .open_stream(method, params, self.context.clone(), request_context)
+                .await
+            {
+                Ok(opened) => (
+                    Some(success_response(id, serde_json::json!({}))),
+                    Some(opened),
+                ),
+                Err(error) => (Some(error_response(id, error.code, error.message)), None),
+            },
+            PreparedRequest::Reply(response) | PreparedRequest::Close(Some(response), _) => {
+                (Some(response), None)
+            }
+            PreparedRequest::Close(None, _) => (None, None),
         }
     }
 

@@ -53,6 +53,11 @@ use std::{
 /// capability interface and the installed `EngineContext`.
 pub trait RuntimeHost: Send + Sync {
     fn engine_context(&self) -> Arc<dyn EngineContext>;
+    /// The native macOS computer adapter when this process can manage VZ guests.
+    /// Backup/import uses it to capture or publish native disk generations.
+    fn macos_context(&self) -> Option<crate::macos_computers::MacosContext> {
+        None
+    }
     fn runtime_storage(&self) -> Result<PathBuf, String>;
     fn blocks_operations(&self) -> bool;
     fn bundled_tools_directory(&self) -> Result<PathBuf, String>;
