@@ -62,9 +62,13 @@ pub trait LocalAccess: Send + Sync {
 /// before request dispatch, like the other stream methods.
 pub(crate) const GITHUB_CALLBACK_STREAM: &str = "github.connect.callback";
 
+/// The stream that carries an owner's events to a controller (`remote_events`).
+pub const EVENTS_STREAM: &str = "events.subscribe";
+
 /// The methods the access domain serves on the owner. Their errors keep their canonical
 /// codes all the way to the controller; everything else reports plain messages.
 const ACCESS_METHODS: &[&str] = &[
+    "desktop.job",
     "github.state",
     "github.connect",
     "github.connect.reopen",

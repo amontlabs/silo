@@ -29,7 +29,10 @@ use silo_engine::{
     runtime::{self, RuntimeHost, RuntimePackageKind, RuntimePaths},
 };
 
-use crate::dispatcher::{method_name, DispatchError, HandlerOutput};
+use crate::{
+    context::SilodContext,
+    dispatcher::{method_name, DispatchError, HandlerOutput},
+};
 
 use super::{ownership::owns_prefix, HandlerContext};
 
@@ -374,38 +377,102 @@ async fn desktop_action(
     if params.device_id.is_none() && is_macos_computer(context, &params.computer_id).await? {
         return Err(macos_unsupported("desktop.action"));
     }
-    let local_id = context.silod_context().local_device().device_id.clone();
+    let action = desktop_action_name(params.action);
+    if let Some(device) = remote_device(context, params.device_id.as_deref()) {
+        return remote_desktop_job(device, params.computer_id, action).await;
+    }
     let host = runtime_host(context);
     start_job(context, "desktop.action", move |link| {
-        if let Some(device) = params
-            .device_id
-            .as_deref()
-            .filter(|device| *device != local_id)
-        {
-            let action = serde_json::to_value(params.action).map_err(|error| error.to_string())?;
-            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
-            return relay_remote(link, move || {
-                silo_engine::remote::call_remote(
-                    &device,
-                    "desktop.action",
-                    json!({"computerId": computer_id, "action": action}),
-                )
-            });
-        }
-        let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
-        let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        let action = desktop_action_name(params.action);
-        let status = silo_engine::desktop::local_for_job(
-            &paths,
-            &name,
-            Some(action),
-            Some(&params.computer_id),
-            Some(link),
-        )?;
-        runtime::publish_computers_changed(&host, &paths);
-        Ok(status)
+        run_desktop_action(&host, link, &params.computer_id, action)
     })
     .await
+}
+
+/// The device a request names when it is not this one.
+fn remote_device(context: &HandlerContext, device_id: Option<&str>) -> Option<String> {
+    device_id
+        .filter(|device| *device != context.silod_context().local_device().device_id)
+        .map(str::to_owned)
+}
+
+/// Runs a desktop action on one of this engine's own Linux computers inside `link`'s job.
+fn run_desktop_action(
+    host: &DisplayRuntimeHost,
+    link: &silo_engine::desktop::JobLink,
+    computer_id: &str,
+    action: &str,
+) -> Result<Value, String> {
+    let paths = runtime::runtime_paths(host).map_err(|error| error.to_string())?;
+    let name = runtime::remote_ops::local_computer_name_in(&paths, computer_id)?;
+    let status = silo_engine::desktop::local_for_job(
+        &paths,
+        &name,
+        Some(action),
+        Some(computer_id),
+        Some(link),
+    )?;
+    runtime::publish_computers_changed(host, &paths);
+    Ok(status)
+}
+
+/// A desktop action on another device is that device's own job: the owner starts it in its
+/// registry and answers with its job id, and the client follows, cancels and acknowledges it
+/// by `(deviceId, jobId)`. Nothing here stands in for it.
+async fn remote_desktop_job(
+    device: String,
+    computer_id: String,
+    action: &'static str,
+) -> Result<HandlerOutput, DispatchError> {
+    let reply = tokio::task::spawn_blocking(move || {
+        super::access::call_owner(
+            &device,
+            "desktop.job",
+            json!({"computerId": computer_id, "action": action}),
+        )
+    })
+    .await
+    .map_err(|error| DispatchError::internal(error.to_string()))?
+    .map_err(HandlerContext::map_engine_error)?;
+    let accepted: silo_api::methods::common::JobStartResult = serde_json::from_value(reply)
+        .map_err(|error| {
+            DispatchError::internal(format!(
+                "The other device returned an invalid desktop job: {error}"
+            ))
+        })?;
+    output(accepted)
+}
+
+/// Owner side of a controller's `desktop.job`: starts the action as a job of this engine
+/// and answers with the job's id. Cancelling it, from the controller or here, reaches the
+/// operation gate the same way for both.
+pub(crate) fn start_owner_desktop_job(
+    ctx: &SilodContext,
+    params: &Value,
+) -> Result<Value, DispatchError> {
+    let computer_id = params["computerId"]
+        .as_str()
+        .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        .ok_or_else(|| DispatchError::internal("Invalid computer identity."))?
+        .to_owned();
+    let action = match params["action"].as_str() {
+        Some(
+            action @ ("start" | "stop" | "restart" | "restart-streamer" | "update-streamer"
+            | "setup-lcu" | "setup-computer-use"),
+        ) => action.to_owned(),
+        _ => return Err(DispatchError::internal("Unsupported desktop action.")),
+    };
+    let host = DisplayRuntimeHost {
+        context: Arc::new(ctx.clone()),
+    };
+    let method = if action == "setup-computer-use" {
+        "computerUse.setup"
+    } else {
+        "desktop.action"
+    };
+    let accepted = spawn_job(ctx, method, move |link| {
+        run_desktop_action(&host, link, &computer_id, &action)
+    })?;
+    serde_json::to_value(accepted).map_err(|error| DispatchError::internal(error.to_string()))
 }
 
 fn desktop_action_name(action: DesktopAction) -> &'static str {
@@ -543,34 +610,12 @@ async fn computer_use_setup(
                 .into(),
         });
     }
-    let local_id = context.silod_context().local_device().device_id.clone();
+    if let Some(device) = remote_device(context, params.device_id.as_deref()) {
+        return remote_desktop_job(device, params.computer_id, "setup-computer-use").await;
+    }
     let host = runtime_host(context);
     start_job(context, "computerUse.setup", move |link| {
-        if let Some(device) = params
-            .device_id
-            .as_deref()
-            .filter(|device| *device != local_id)
-        {
-            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
-            return relay_remote(link, move || {
-                silo_engine::remote::call_remote(
-                    &device,
-                    "desktop.action",
-                    json!({"computerId": computer_id, "action": "setup-computer-use"}),
-                )
-            });
-        }
-        let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
-        let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        let status = silo_engine::desktop::local_for_job(
-            &paths,
-            &name,
-            Some("setup-computer-use"),
-            Some(&params.computer_id),
-            Some(link),
-        )?;
-        runtime::publish_computers_changed(&host, &paths);
-        Ok(status)
+        run_desktop_action(&host, link, &params.computer_id, "setup-computer-use")
     })
     .await
 }
@@ -1100,68 +1145,27 @@ async fn clipboard_write(
     Ok(output_value(Value::Null))
 }
 
-/// How often a relayed remote call looks at the job's cancellation flag.
-const REMOTE_CANCEL_POLL: Duration = Duration::from_millis(50);
-
-/// Runs a call to the computer's owner for a job. A job for a remote computer never enters
-/// this device's gate, so `operations.cancel` reaches it only through the job's flag: a
-/// cancellation before the call starts it never makes, and one while it runs ends the job
-/// as cancelled at once. The owner's bridge has no cancel method yet, so a request it has
-/// already accepted runs to its end there; its result is dropped.
-fn relay_remote(
-    link: &silo_engine::desktop::JobLink,
-    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
-) -> Result<Value, String> {
-    relay_cancellable(&link.cancellation, REMOTE_CANCEL_POLL, call, || {
-        link.registry
-            .mark_running(&link.job_id)
-            .map_err(|error| error.to_string())
-    })
-}
-
-fn relay_cancellable(
-    cancellation: &AtomicBool,
-    poll: Duration,
-    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
-    start: impl FnOnce() -> Result<(), String>,
-) -> Result<Value, String> {
-    let cancelled = || "The operation was cancelled.".to_owned();
-    if cancellation.load(Ordering::SeqCst) {
-        return Err(cancelled());
-    }
-    start()?;
-    let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .name("desktop-remote-relay".into())
-        .spawn(move || {
-            let _ = sender.send(call());
-        })
-        .map_err(|error| error.to_string())?;
-    loop {
-        match receiver.recv_timeout(poll) {
-            Ok(result) => return result,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                if cancellation.load(Ordering::SeqCst) {
-                    return Err(cancelled());
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("The remote action stopped unexpectedly.".to_owned());
-            }
-        }
-    }
-}
-
-/// Starts a durable job that runs `work` on a blocking thread and publishes its outcome.
+/// Starts a durable job that runs `work` on its own thread and publishes its outcome.
 /// `work` receives the job's link; it marks the job running when its queue turn arrives.
 async fn start_job(
     context: &HandlerContext,
     method: &'static str,
     work: impl FnOnce(&silo_engine::desktop::JobLink) -> Result<Value, String> + Send + 'static,
 ) -> Result<HandlerOutput, DispatchError> {
-    let accepted = context.start_job(method)?;
+    output(spawn_job(context.silod_context(), method, work)?)
+}
+
+/// The job behind [`start_job`], for callers that have no request (an owner serving a
+/// controller).
+fn spawn_job(
+    ctx: &SilodContext,
+    method: &'static str,
+    work: impl FnOnce(&silo_engine::desktop::JobLink) -> Result<Value, String> + Send + 'static,
+) -> Result<silo_api::methods::common::JobStartResult, DispatchError> {
+    let accepted =
+        silo_engine::jobs::allocate(ctx, method).map_err(HandlerContext::map_registry_error)?;
     let job_id = accepted.job_id.clone();
-    let registry = context.job_registry()?;
+    let registry = ctx.job_registry().map_err(DispatchError::internal)?;
     let cancellation = Arc::new(AtomicBool::new(false));
     let cancel_id = job_id.clone();
     let cancel_flag = cancellation.clone();
@@ -1169,11 +1173,9 @@ async fn start_job(
         job_id.clone(),
         silo_engine::jobs::CancelRoute::JobGate,
         move || {
-            // Before the gate admits the work (or when it never enters the gate, as for a
-            // remote computer) the request is recorded in the job's flag, which the gate
-            // admission and the remote relay both observe. That accepts the cancellation,
-            // so it is reported as accepted. Once the work holds a gate entry, the gate
-            // decides.
+            // Before the gate admits the work the request is recorded in the job's flag,
+            // which the gate admission observes. That accepts the cancellation, so it is
+            // reported as accepted. Once the work holds a gate entry, the gate decides.
             if !silo_engine::runtime::OPERATIONS.contains_job(&cancel_id) {
                 cancel_flag.store(true, Ordering::SeqCst);
             }
@@ -1182,38 +1184,58 @@ async fn start_job(
                 .map_err(|error| error.to_string())
         },
     );
-    let engine: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
+    let engine: Arc<dyn EngineContext> = Arc::new(ctx.clone());
     let link = silo_engine::desktop::JobLink {
         registry,
         job_id: job_id.clone(),
         cancellation,
     };
-    tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || work(&link))
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|result| result);
-        let finished = match result {
-            Ok(result) => JobFinished {
-                job_id: job_id.clone(),
-                result: Some(result),
-                error: None,
-                outcome_chunked: false,
-            },
-            Err(message) => JobFinished {
-                job_id: job_id.clone(),
-                result: None,
-                error: Some(ErrorObject {
-                    code: map_error(&message).code,
-                    message,
-                    diagnostics: None,
-                }),
-                outcome_chunked: false,
-            },
-        };
-        let _ = silo_engine::jobs::publish_finished(engine.as_ref(), finished, Audience::All);
-    });
-    output(accepted)
+    let running = std::thread::Builder::new()
+        .name("silod-desktop-job".into())
+        .spawn({
+            let (engine, job_id) = (engine.clone(), job_id.clone());
+            move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&link)))
+                    .unwrap_or_else(|_| Err("The desktop action stopped unexpectedly.".to_owned()));
+                let finished = match result {
+                    Ok(result) => JobFinished {
+                        job_id,
+                        result: Some(result),
+                        error: None,
+                        outcome_chunked: false,
+                    },
+                    Err(message) => JobFinished {
+                        job_id,
+                        result: None,
+                        error: Some(ErrorObject {
+                            code: map_error(&message).code,
+                            message,
+                            diagnostics: None,
+                        }),
+                        outcome_chunked: false,
+                    },
+                };
+                let _ =
+                    silo_engine::jobs::publish_finished(engine.as_ref(), finished, Audience::All);
+            }
+        });
+    if let Err(error) = running {
+        let _ = silo_engine::jobs::finish_with_error(
+            engine.as_ref(),
+            job_id,
+            ErrorCode::Internal,
+            "Could not start the desktop action.",
+            Audience::All,
+        );
+        return Err(DispatchError::internal(format!(
+            "Could not start the desktop action: {error}"
+        )));
+    }
+    Ok(accepted_result(accepted.job_id))
+}
+
+fn accepted_result(job_id: silo_api::jobs::JobId) -> silo_api::methods::common::JobStartResult {
+    silo_api::methods::common::JobStartResult { job_id }
 }
 
 /// The parts of showing a native window that do not need AppKit: the protocol with the main
@@ -1866,90 +1888,148 @@ mod tests {
         assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
     }
 
-    #[test]
-    fn a_relayed_remote_call_observes_the_cancellation_flag() {
-        let calls = Arc::new(AtomicBool::new(false));
-        let poll = Duration::from_millis(1);
-        // Cancelled before it starts: the call is never made.
-        let cancelled = AtomicBool::new(true);
-        let made = calls.clone();
-        let result = relay_cancellable(
-            &cancelled,
-            poll,
-            move || {
-                made.store(true, Ordering::SeqCst);
-                Ok(Value::Null)
-            },
-            || panic!("a cancelled job does not start"),
-        );
-        assert!(result.unwrap_err().contains("was cancelled"));
-        assert!(!calls.load(Ordering::SeqCst));
-        // A call that finishes returns its value.
-        let flag = AtomicBool::new(false);
-        let result = relay_cancellable(&flag, poll, || Ok(json!({"state": "running"})), || Ok(()));
-        assert_eq!(result.unwrap(), json!({"state": "running"}));
-        // Cancelled while the call is outstanding: the job ends at once, whatever the call
-        // does afterwards.
-        let (entered, inside) = std::sync::mpsc::channel();
-        let (release, released) = std::sync::mpsc::channel::<()>();
-        let flag = Arc::new(AtomicBool::new(false));
-        let waiter = {
-            let flag = flag.clone();
-            std::thread::spawn(move || {
-                relay_cancellable(
-                    &flag,
-                    poll,
-                    move || {
-                        entered.send(()).unwrap();
-                        let _ = released.recv();
-                        Ok(Value::Null)
-                    },
-                    || Ok(()),
-                )
-            })
-        };
-        inside.recv().unwrap();
-        flag.store(true, Ordering::SeqCst);
-        let result = waiter.join().unwrap();
-        assert!(result.unwrap_err().contains("was cancelled"));
-        release.send(()).unwrap();
-    }
+    const OWNER: &str = "99999999-9999-4999-8999-999999999901";
 
     #[tokio::test]
-    async fn a_remote_job_is_cancellable_and_ends_cancelled() {
+    async fn a_remote_desktop_action_is_the_owners_job_and_nothing_stands_in_for_it() {
         let fixture = fixture();
-        let mut events = watch_finished_jobs(&fixture);
-        let (entered, inside) = std::sync::mpsc::channel();
-        let (release, released) = std::sync::mpsc::channel::<()>();
-        let accepted = start_job(&fixture.context("a"), "desktop.action", move |link| {
-            relay_cancellable(
-                &link.cancellation,
-                Duration::from_millis(1),
-                move || {
-                    entered.send(()).unwrap();
-                    let _ = released.recv();
-                    Ok(Value::Null)
-                },
-                || Ok(()),
-            )
-        })
-        .await
-        .unwrap();
-        let job_id: silo_api::jobs::JobId =
-            serde_json::from_value(accepted.value["jobId"].clone()).unwrap();
-        tokio::task::spawn_blocking(move || inside.recv().unwrap())
-            .await
-            .unwrap();
-        fixture
+        let calls = Arc::new(std::sync::Mutex::new(Vec::<(String, Value)>::new()));
+        let seen = calls.clone();
+        let _owner = super::super::access::tests::stub_owner(OWNER, move |method, params| {
+            seen.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            Ok(json!({"jobId": "job:4242"}))
+        });
+        let computer = unknown();
+        let before = fixture
             .engine
             .job_registry()
             .unwrap()
-            .cancel(&job_id)
-            .expect("a remote job accepts cancellation");
+            .list_unacknowledged()
+            .unwrap();
+        let started = fixture
+            .call(
+                "a",
+                MethodName::DesktopAction,
+                json!({"computerId": computer, "action": "restart-streamer", "deviceId": OWNER}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(started, json!({"jobId": "job:4242"}));
+        let setup = fixture
+            .call(
+                "a",
+                MethodName::ComputerUseSetup,
+                json!({"computerId": computer, "deviceId": OWNER}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(setup, json!({"jobId": "job:4242"}));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                (
+                    "desktop.job".to_owned(),
+                    json!({"computerId": computer, "action": "restart-streamer"})
+                ),
+                (
+                    "desktop.job".to_owned(),
+                    json!({"computerId": computer, "action": "setup-computer-use"})
+                ),
+            ]
+        );
+        // This engine allocated no job of its own for either.
+        let after = fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .list_unacknowledged()
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[tokio::test]
+    async fn an_owner_that_answers_without_a_job_is_not_believed() {
+        let fixture = fixture();
+        let _owner = super::super::access::tests::stub_owner(
+            "99999999-9999-4999-8999-999999999902",
+            |_, _| Ok(json!({"state": "running"})),
+        );
+        let refused = fixture
+            .call(
+                "a",
+                MethodName::DesktopAction,
+                json!({"computerId": unknown(), "action": "start", "deviceId": "99999999-9999-4999-8999-999999999902"}),
+            )
+            .await;
+        let error = refused.err().expect("a reply without a job id is refused");
+        assert!(
+            error.message.contains("invalid desktop job"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[tokio::test]
+    async fn the_owner_runs_a_controllers_desktop_action_as_its_own_job() {
+        let fixture = fixture();
+        let mut events = watch_finished_jobs(&fixture);
+        let started = start_owner_desktop_job(
+            &fixture.engine,
+            &json!({"computerId": unknown(), "action": "restart-streamer"}),
+        )
+        .unwrap();
+        let job_id = started["jobId"].as_str().unwrap().to_owned();
+        assert!(job_id.starts_with("job:"));
+        let (finished, payload) = next_finished(&mut events).await;
+        assert_eq!(finished, job_id);
+        assert_eq!(payload["error"]["code"], "not_found", "{payload}");
+
+        // What the owner will not run is refused before a job exists.
+        for params in [
+            json!({"computerId": "not-a-uuid", "action": "start"}),
+            json!({"computerId": unknown(), "action": "format-disk"}),
+            json!({"computerId": unknown()}),
+        ] {
+            assert!(start_owner_desktop_job(&fixture.engine, &params).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_remote_job_by_its_owners_id_cancels_the_work_on_the_owner() {
+        use super::super::{
+            access::{owner_job_operation_for_tests, tests::stub_owner},
+            operations,
+        };
+        // This fixture's engine plays the owner: its job registry holds the work.
+        let fixture = fixture();
+        let owner_engine = fixture.engine.clone();
+        let mut events = watch_finished_jobs(&fixture);
+        let (job_id, running, release) = blocked_job(&fixture).await;
+        tokio::task::spawn_blocking(move || running.recv().unwrap())
+            .await
+            .unwrap();
+        // The controller reaches the owner only through the bridge; here the bridge calls the
+        // owner's handler for the request directly.
+        let device = "99999999-9999-4999-8999-999999999903";
+        let _bridge = stub_owner(device, move |method, params| {
+            owner_job_operation_for_tests(&owner_engine, method, params)
+        });
+        let controller = fixture.context("controller");
+        let cancelled = operations::handle(
+            MethodName::OperationsCancel,
+            &json!({"jobId": job_id, "deviceId": device}),
+            &controller,
+        )
+        .await
+        .expect("operations owns cancel")
+        .expect("the owner accepts the cancellation");
+        assert_eq!(cancelled.value, Value::Null);
+        release.send(()).unwrap();
         let (finished, payload) = next_finished(&mut events).await;
         assert_eq!(finished, job_id.as_str());
         assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
-        release.send(()).unwrap();
     }
 
     #[tokio::test]

@@ -35,7 +35,7 @@ use crate::{
 };
 
 /// The stream method's name on the bridge.
-pub const EVENTS_STREAM: &str = "events.subscribe";
+pub use crate::remote_access::EVENTS_STREAM;
 
 /// Event relays one owner serves at once, a share of its stream budget.
 pub const EVENT_RELAY_LIMIT: usize = 16;

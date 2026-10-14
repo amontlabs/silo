@@ -356,6 +356,8 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
     fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
+            "desktop.job" => super::display::start_owner_desktop_job(&self.0.context, params)
+                .map_err(bridge_error),
             "operations.list"
             | "operations.job.get"
             | "operations.cancel"
@@ -1285,8 +1287,9 @@ fn owner_job_operation(
 pub(crate) fn owner_job_operation_for_tests(
     ctx: &SilodContext,
     method: &str,
+    params: &Value,
 ) -> Result<Value, BridgeError> {
-    owner_job_operation(ctx, method, &json!({}))
+    owner_job_operation(ctx, method, params)
 }
 
 /// Owner side of a controller's `github.connect`: starts the job and, once its browser

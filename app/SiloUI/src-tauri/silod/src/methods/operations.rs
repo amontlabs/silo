@@ -379,6 +379,7 @@ mod tests {
         let queue = crate::methods::access::owner_job_operation_for_tests(
             fixture().context.as_ref(),
             "operations.list",
+            &json!({}),
         )
         .unwrap();
         assert!(queue["running"].is_array());
