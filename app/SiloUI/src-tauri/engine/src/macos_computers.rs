@@ -4803,20 +4803,28 @@ fn stop_with_job(
     Ok(())
 }
 
+/// Force stops a computer. It is a command (`computers.forceStop`): it takes its turn in
+/// the queue as "Force stopping Mac" but has no job, so nothing is left for a client to
+/// acknowledge, and the call returns once the stop was issued or refused.
 fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.forceStop")?;
-    let _operation = match admit_macos_job(
-        app.engine.as_ref(),
-        &job,
+    force_stop_with(app, id, || engine::force_stop(app, id))
+}
+
+fn force_stop_with(
+    app: &MacosContext,
+    id: &str,
+    issue: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    ensure_loaded(app)?;
+    let name = computer(id)?.0.name;
+    let _operation = acquire_computer_operation(
+        &runtime::OPERATIONS,
+        id,
+        &name,
         runtime::operation_gate::OperationKind::Lifecycle,
-        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
-        Some(name),
         "Force stopping Mac",
-    ) {
-        Ok(operation) => operation,
-        Err(message) => return Err(message),
-    };
-    let begin: Result<_, String> = (|| {
+    )?;
+    let before = {
         let mut computers = registry();
         let index = computers
             .entries
@@ -4840,34 +4848,14 @@ fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
             entry.since = Instant::now();
         }
         entry.detail = None;
-        track_macos_job(id, job.job_id.clone());
-        Ok(before)
-    })();
-    let before = match begin {
-        Ok(before) => before,
-        Err(message) => {
-            fail_macos_job(app.engine.as_ref(), &job, message.clone());
-            return Err(message);
-        }
+        before
     };
     emit(app);
-    if let Err(message) = engine::force_stop(app, id) {
+    if let Err(message) = issue() {
         registry().undo_force_stop(id, before);
         emit(app);
-        finish_macos_job(
-            app.engine.as_ref(),
-            Some(id),
-            job.job_id,
-            lifecycle_job_outcome(Err(message.clone())),
-        );
         return Err(message);
     }
-    finish_macos_job(
-        app.engine.as_ref(),
-        Some(id),
-        job.job_id,
-        lifecycle_job_outcome(Ok(())),
-    );
     Ok(())
 }
 
@@ -7144,6 +7132,60 @@ mod tests {
 
     fn registry_entries_empty() -> bool {
         registry().entries.is_empty()
+    }
+
+    #[test]
+    fn force_stop_is_a_command_that_leaves_no_job_behind() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let record = store::new_record(
+            &CreateRequest {
+                name: "stuck-mac".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            engine::random_mac(),
+        );
+        store::save(&Layout::new(&app_data(&app).unwrap(), &record.id), &record).unwrap();
+        ensure_loaded(&app).unwrap();
+        let jobs = context.job_registry().unwrap();
+
+        // A refused force stop: the computer is not running.
+        let refused = force_stop(&app, &record.id).unwrap_err();
+        assert_eq!(classify_refusal(&refused), Some(Refusal::NotRunning));
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+
+        // One the machine rejects: the state is restored and still no job exists.
+        registry().entry(&record.id).unwrap().state = State::Running;
+        let rejected = force_stop_with(&app, &record.id, || {
+            Err("The machine would not stop.".into())
+        })
+        .unwrap_err();
+        assert_eq!(rejected, "The machine would not stop.");
+        assert_eq!(registry().entry(&record.id).unwrap().state, State::Running);
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+
+        // An accepted one: the stop was issued, and the computer is on its way down.
+        force_stop_with(&app, &record.id, || Ok(())).unwrap();
+        assert_eq!(registry().entry(&record.id).unwrap().state, State::Stopping);
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+        assert!(!MACOS_JOBS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap()
+            .contains_key(&record.id));
+        assert!(runtime::OPERATIONS
+            .snapshot()
+            .running
+            .iter()
+            .all(|entry| entry.label != "Force stopping Mac"));
+        reset_macos_registry();
     }
 
     #[test]
