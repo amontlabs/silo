@@ -870,7 +870,11 @@ pub(super) fn complete_marked(
     }
     operation
 }
-pub(super) fn resume(controller: Arc<Controller>, journal: Journal) -> Result<(), String> {
+pub(super) fn resume(
+    controller: Arc<Controller>,
+    journal: Journal,
+    runtime: &tokio::runtime::Handle,
+) -> Result<(), String> {
     set_operation(&controller, journal.operation())?;
     if journal.terminal.is_some() {
         return Ok(());
@@ -923,7 +927,7 @@ pub(super) fn resume(controller: Arc<Controller>, journal: Journal) -> Result<()
         finish(&controller);
         publish(&controller);
     };
-    tokio::task::spawn_blocking(move || {
+    runtime.spawn_blocking(move || {
         if super::contain_worker_panic(&outer_controller, kind, &archive, target, work) {
             publish(&outer_controller);
         }
