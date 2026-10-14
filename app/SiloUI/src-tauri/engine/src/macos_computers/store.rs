@@ -59,6 +59,8 @@ pub struct ExpectedResources {
     pub cpus: u64,
     #[serde(rename = "memoryGiB")]
     pub memory_gib: u64,
+    #[serde(rename = "diskGiB")]
+    pub disk_gib: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,8 +279,11 @@ pub(super) fn change_resources(
     {
         return Err("Start the computer before changing its CPU or memory; a checkpoint's saved memory is waiting to resume.".into());
     }
-    if record.cpus != expected.cpus || record.memory_gib != expected.memory_gib {
-        return Err("The computer's CPU or memory settings changed while you were editing. Refresh and try again.".into());
+    if record.cpus != expected.cpus
+        || record.memory_gib != expected.memory_gib
+        || record.disk_gib != expected.disk_gib
+    {
+        return Err("The computer's CPU, memory or disk settings changed while you were editing. Refresh and try again.".into());
     }
     let request = CreateRequest {
         name: record.name.clone(),
@@ -676,7 +681,7 @@ mod tests {
                 "change-resources": {
                     "cpus": 8,
                     "memoryGiB": 16,
-                    "expected": { "cpus": 4, "memoryGiB": 8 }
+                    "expected": { "cpus": 4, "memoryGiB": 8, "diskGiB": 64 }
                 }
             }))
             .unwrap(),
@@ -686,6 +691,7 @@ mod tests {
                 expected: ExpectedResources {
                     cpus: 4,
                     memory_gib: 8,
+                    disk_gib: 64,
                 }
             }
         );
@@ -745,6 +751,7 @@ mod tests {
         let expected = ExpectedResources {
             cpus: original.cpus,
             memory_gib: original.memory_gib,
+            disk_gib: original.disk_gib,
         };
         let edited =
             change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[]).unwrap();
@@ -775,6 +782,7 @@ mod tests {
         let expected = ExpectedResources {
             cpus: original.cpus + 1,
             memory_gib: original.memory_gib,
+            disk_gib: original.disk_gib,
         };
         assert!(
             change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
@@ -793,6 +801,7 @@ mod tests {
         let expected = ExpectedResources {
             cpus: original.cpus,
             memory_gib: original.memory_gib,
+            disk_gib: original.disk_gib,
         };
         assert!(
             change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
@@ -823,6 +832,7 @@ mod tests {
         let expected = ExpectedResources {
             cpus: incomplete.cpus,
             memory_gib: incomplete.memory_gib,
+            disk_gib: incomplete.disk_gib,
         };
         assert!(change_resources(
             &incomplete,
@@ -1055,6 +1065,7 @@ mod tests {
             ExpectedResources {
                 cpus: computer.cpus,
                 memory_gib: computer.memory_gib,
+                disk_gib: computer.disk_gib,
             },
             host,
             &[],
