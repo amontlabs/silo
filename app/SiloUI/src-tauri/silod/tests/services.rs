@@ -13,9 +13,9 @@ use silo_engine::{
         EngineContext, EngineIdentity, EnginePaths, MainThread, PackageKind, ProcessControl,
     },
     engine_update::{
-        journal::{CaptureRef, ComputerKind, MacCapture},
-        HeldGuards, Platform, Reconciled, ResumeHeldError, RunningComputer, SaveAdapter,
-        SaveContext,
+        journal::{CaptureRef, ComputerKind, MacCapture, RuntimeIdentity},
+        HeldGuards, OriginalState, Platform, Reconciled, RestoreError, ResumeHeldError,
+        RunningComputer, SaveAdapter, SaveContext,
     },
 };
 use silod::{
@@ -67,6 +67,10 @@ impl SaveAdapter for Adapter {
         }])
     }
 
+    fn identity(&self, _: &RunningComputer) -> Result<RuntimeIdentity, String> {
+        Ok(RuntimeIdentity::default())
+    }
+
     fn check_support(&self, _: &RunningComputer) -> Result<(), String> {
         Ok(())
     }
@@ -100,7 +104,7 @@ impl SaveAdapter for Adapter {
     fn resume_held(
         &self,
         computer: &RunningComputer,
-        _: Option<&CaptureRef>,
+        _: &RuntimeIdentity,
     ) -> Result<(), ResumeHeldError> {
         self.0
              .0
@@ -110,7 +114,12 @@ impl SaveAdapter for Adapter {
         Ok(())
     }
 
-    fn release(&self, computer: &RunningComputer, _: &CaptureRef) -> Result<(), String> {
+    fn release(
+        &self,
+        computer: &RunningComputer,
+        _: &CaptureRef,
+        _: &RuntimeIdentity,
+    ) -> Result<(), String> {
         self.0
              .0
             .lock()
@@ -119,7 +128,11 @@ impl SaveAdapter for Adapter {
         Ok(())
     }
 
-    fn reconcile_unsaved(&self, _: &RunningComputer) -> Result<Reconciled, String> {
+    fn reconcile_unsaved(
+        &self,
+        _: &RunningComputer,
+        _: &RuntimeIdentity,
+    ) -> Result<Reconciled, String> {
         Ok(Reconciled::Lost("lost".into()))
     }
 
@@ -127,13 +140,29 @@ impl SaveAdapter for Adapter {
         &self,
         _: &RunningComputer,
         _: &CaptureRef,
+        _: &RuntimeIdentity,
         _: &str,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
-        arm()
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
+        Ok(arm(None)?)
     }
 
-    fn probe_armed(&self, _: &RunningComputer, _: &CaptureRef, _: &str) -> Result<bool, String> {
+    fn probe_original(
+        &self,
+        computer: &RunningComputer,
+        _: &RuntimeIdentity,
+    ) -> Result<OriginalState, String> {
+        Ok(OriginalState::Held)
+    }
+
+    fn probe_armed(
+        &self,
+        _: &RunningComputer,
+        _: &CaptureRef,
+        _: &RuntimeIdentity,
+        _: &str,
+        _: Option<&RuntimeIdentity>,
+    ) -> Result<bool, String> {
         Ok(true)
     }
 

@@ -14,8 +14,8 @@
 //!    journal's `resumeArmed` is written first. It never starts the computer cold.
 use super::*;
 use crate::engine_update::{
-    adapter::{Reconciled, ResumeHeldError, SaveAdapter, SaveContext},
-    journal::{CaptureRef, ComputerKind, LinuxCapture},
+    adapter::{OriginalState, Reconciled, RestoreError, ResumeHeldError, SaveAdapter, SaveContext},
+    journal::{CaptureRef, ComputerKind, LinuxCapture, RuntimeIdentity},
     RunningComputer,
 };
 
@@ -74,10 +74,14 @@ impl SaveAdapter for LinuxUpdateAdapter {
         })
     }
 
+    fn identity(&self, computer: &RunningComputer) -> Result<RuntimeIdentity, String> {
+        self.with_runtime(runtime_unavailable, |session| session.identity(computer))
+    }
+
     fn resume_held(
         &self,
         computer: &RunningComputer,
-        _capture: Option<&CaptureRef>,
+        original: &RuntimeIdentity,
     ) -> Result<(), ResumeHeldError> {
         match self.with_runtime(
             || {
@@ -85,25 +89,44 @@ impl SaveAdapter for LinuxUpdateAdapter {
                     "The runtime is unavailable.".into(),
                 )))
             },
-            |session| session.resume_held(computer),
+            |session| session.resume_held(computer, original),
         ) {
             Ok(outcome) => outcome,
             Err(why) => Err(ResumeHeldError::Failed(why)),
         }
     }
 
-    fn release(&self, computer: &RunningComputer, capture: &CaptureRef) -> Result<(), String> {
+    fn probe_original(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<OriginalState, String> {
+        self.with_runtime(runtime_unavailable, |session| {
+            session.probe_original(computer, original)
+        })
+    }
+
+    fn release(
+        &self,
+        computer: &RunningComputer,
+        capture: &CaptureRef,
+        original: &RuntimeIdentity,
+    ) -> Result<(), String> {
         let CaptureRef::Linux(capture) = capture else {
             return Err("The capture does not belong to a Linux computer.".into());
         };
         self.with_runtime(runtime_unavailable, |session| {
-            session.release(computer, capture)
+            session.release(computer, capture, original)
         })
     }
 
-    fn reconcile_unsaved(&self, computer: &RunningComputer) -> Result<Reconciled, String> {
+    fn reconcile_unsaved(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<Reconciled, String> {
         self.with_runtime(runtime_unavailable, |session| {
-            session.reconcile_unsaved(computer)
+            session.reconcile_unsaved(computer, original)
         })
     }
 
@@ -111,27 +134,36 @@ impl SaveAdapter for LinuxUpdateAdapter {
         &self,
         computer: &RunningComputer,
         capture: &CaptureRef,
+        original: &RuntimeIdentity,
         _attempt_id: &str,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
         let CaptureRef::Linux(capture) = capture else {
-            return Err("The capture does not belong to a Linux computer.".into());
+            return Err("The capture does not belong to a Linux computer."
+                .to_owned()
+                .into());
         };
-        self.with_runtime(runtime_unavailable, |session| {
-            session.restore(computer, capture, arm)
-        })
+        match self.with_runtime(runtime_unavailable, |session| {
+            Ok(session.restore(computer, capture, original, arm))
+        }) {
+            Ok(outcome) => outcome,
+            Err(why) => Err(RestoreError::Failed(why)),
+        }
     }
 
     fn probe_armed(
         &self,
         computer: &RunningComputer,
-        _capture: &CaptureRef,
+        capture: &CaptureRef,
+        original: &RuntimeIdentity,
         _attempt_id: &str,
+        expected: Option<&RuntimeIdentity>,
     ) -> Result<bool, String> {
+        let CaptureRef::Linux(capture) = capture else {
+            return Err("The capture does not belong to a Linux computer.".into());
+        };
         self.with_runtime(runtime_unavailable, |session| {
-            Ok(session
-                .observe(computer)?
-                .is_some_and(|inspected| inspected.status.eq_ignore_ascii_case("running")))
+            session.probe_armed(computer, capture, original, expected)
         })
     }
 
@@ -221,6 +253,32 @@ impl Session<'_> {
             Err(error) if is_missing_computer(&error) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
+    }
+
+    fn identity_of(inspected: &InspectedSandbox) -> RuntimeIdentity {
+        RuntimeIdentity {
+            owner: None,
+            generation: None,
+            instance: inspected.runtime_instance_id.clone(),
+        }
+    }
+
+    fn identity(&self, computer: &RunningComputer) -> Result<RuntimeIdentity, String> {
+        self.observe(computer)?
+            .map(|inspected| Self::identity_of(&inspected))
+            .ok_or_else(|| format!("{} is not in the runtime.", computer.name))
+    }
+
+    /// The runtime computer if it is exactly the run `original` names. A different run of
+    /// the same computer is not the original and is never touched on its behalf.
+    fn observe_original(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<Option<InspectedSandbox>, String> {
+        Ok(self
+            .observe(computer)?
+            .filter(|inspected| original.matches(&Self::identity_of(inspected))))
     }
 
     fn command(&self, args: &[&str], timeout: Duration) -> Result<CommandOutput, RuntimeError> {
@@ -366,6 +424,7 @@ impl Session<'_> {
             scope: "full".into(),
             network_policy,
             integrity_verified: true,
+            runtime_instance: before.runtime_instance_id.clone(),
         })
     }
 
@@ -383,10 +442,11 @@ impl Session<'_> {
     fn resume_held(
         &self,
         computer: &RunningComputer,
+        original: &RuntimeIdentity,
     ) -> Result<Result<(), ResumeHeldError>, String> {
-        Ok(match self.observe(computer)? {
+        Ok(match self.observe_original(computer, original)? {
             None => Err(ResumeHeldError::Gone(format!(
-                "{} is no longer in the runtime.",
+                "{} is no longer the held run in the runtime.",
                 computer.name
             ))),
             Some(inspected) => match inspected.status.to_ascii_lowercase().as_str() {
@@ -400,14 +460,35 @@ impl Session<'_> {
         })
     }
 
-    fn release(&self, computer: &RunningComputer, capture: &LinuxCapture) -> Result<(), String> {
+    fn probe_original(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<OriginalState, String> {
+        Ok(match self.observe_original(computer, original)? {
+            Some(inspected) if inspected.status.eq_ignore_ascii_case("running") => {
+                OriginalState::Running
+            }
+            Some(inspected) if inspected.status.eq_ignore_ascii_case("paused") => {
+                OriginalState::Held
+            }
+            _ => OriginalState::Gone,
+        })
+    }
+
+    fn release(
+        &self,
+        computer: &RunningComputer,
+        capture: &LinuxCapture,
+        original: &RuntimeIdentity,
+    ) -> Result<(), String> {
         if !self.snapshot_ready(&capture.group, &capture.member)? {
             return Err(format!(
                 "The saved state of {} is missing from the runtime.",
                 computer.name
             ));
         }
-        match self.observe(computer)? {
+        match self.observe_original(computer, original)? {
             Some(inspected) if inspected.status.eq_ignore_ascii_case("paused") => Ok(()),
             _ => Err(format!(
                 "{} is not held paused; the update would not preserve its run.",
@@ -416,8 +497,12 @@ impl Session<'_> {
         }
     }
 
-    fn reconcile_unsaved(&self, computer: &RunningComputer) -> Result<Reconciled, String> {
-        match self.observe(computer)? {
+    fn reconcile_unsaved(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<Reconciled, String> {
+        match self.observe_original(computer, original)? {
             Some(inspected) if inspected.status.eq_ignore_ascii_case("running") => {
                 Ok(Reconciled::Running)
             }
@@ -436,31 +521,40 @@ impl Session<'_> {
         &self,
         computer: &RunningComputer,
         capture: &LinuxCapture,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
+        original: &RuntimeIdentity,
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
         let observed = self.observe(computer)?;
-        match observed
-            .as_ref()
-            .map(|inspected| inspected.status.to_ascii_lowercase())
-        {
+        let Some(inspected) = observed else {
+            return self.restore_from_capture(computer, capture, arm);
+        };
+        let status = inspected.status.to_ascii_lowercase();
+        let identity = Self::identity_of(&inspected);
+        let ours = original.matches(&identity);
+        match status.as_str() {
             // The held generation survived the engine: resume exactly it.
-            Some(status) if status == "paused" => {
-                arm()?;
-                self.resume(computer)
+            "paused" if ours => {
+                arm(Some(&identity))?;
+                Ok(self.resume(computer)?)
             }
-            Some(status) if status == "running" => Ok(()),
-            Some(status) if matches!(status.as_str(), "stopped" | "created" | "crashed") => {
-                // Its runtime is gone. The capture is the only way back: replace the dead
-                // sandbox (its disks come from the snapshot) and restore with memory.
+            // Some other run, or the original resumed without the transaction arming it: the
+            // capture is not applied over a disk that run may have advanced.
+            "paused" | "running" => Err(RestoreError::Superseded(format!(
+                "{} is running again without being restored from the update. Its disk was kept and the saved state was not applied.",
+                computer.name
+            ))),
+            "stopped" | "created" | "crashed" => {
+                // Everything the restore needs is checked before the sandbox is removed: a
+                // missing capture or unreadable configuration must never cost the disk.
+                let plan = self.restore_plan(computer, capture)?;
                 self.command(&["remove", "--quiet", &computer.name], STOP_TIMEOUT)
                     .map_err(|error| error.to_string())?;
-                self.restore_from_capture(computer, capture, arm)
+                self.start_restore(computer, capture, plan, arm)
             }
-            Some(status) => Err(format!(
-                "{} is {status}; wait for it to settle, then retry.",
+            other => Err(RestoreError::Failed(format!(
+                "{} is {other}; wait for it to settle, then retry.",
                 computer.name
-            )),
-            None => self.restore_from_capture(computer, capture, arm),
+            ))),
         }
     }
 
@@ -470,8 +564,18 @@ impl Session<'_> {
         &self,
         computer: &RunningComputer,
         capture: &LinuxCapture,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
+        let plan = self.restore_plan(computer, capture)?;
+        self.start_restore(computer, capture, plan, arm)
+    }
+
+    /// Validates every input of a restore from the capture, changing nothing.
+    fn restore_plan(
+        &self,
+        computer: &RunningComputer,
+        capture: &LinuxCapture,
+    ) -> Result<RestorePlan, String> {
         if capture.scope != "full" || !capture.integrity_verified {
             return Err("The saved state is not a verified full capture; it was preserved.".into());
         }
@@ -482,8 +586,25 @@ impl Session<'_> {
             ));
         }
         let configuration = self.configuration(computer)?;
-        let mut record =
+        let record =
             checkpoints::load(self.paths, &computer.id).map_err(|error| error.to_string())?;
+        Ok(RestorePlan {
+            configuration,
+            record,
+        })
+    }
+
+    fn start_restore(
+        &self,
+        computer: &RunningComputer,
+        capture: &LinuxCapture,
+        plan: RestorePlan,
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
+        let RestorePlan {
+            configuration,
+            mut record,
+        } = plan;
         record.snapshot_group = Some(capture.group.clone());
         record.pending_checkpoint_restore = Some(checkpoints::PendingRestore {
             checkpoint_id: capture.member.clone(),
@@ -492,10 +613,50 @@ impl Session<'_> {
         });
         record.desired_network_policy = Some(capture.network_policy.clone());
         checkpoints::save(self.paths, &computer.id, &record).map_err(|error| error.to_string())?;
-        arm()?;
+        // The new run's instance is not known until it exists; the probe proves it later.
+        arm(None)?;
         checkpoints::start_pending(self.runner, self.paths, &configuration)
-            .map_err(|error| error.to_string())
+            .map_err(|error| RestoreError::Failed(error.to_string()))
     }
+
+    /// After a crash with the restore armed: whether the restored run executes now.
+    fn probe_armed(
+        &self,
+        computer: &RunningComputer,
+        capture: &LinuxCapture,
+        original: &RuntimeIdentity,
+        expected: Option<&RuntimeIdentity>,
+    ) -> Result<bool, String> {
+        let Some(inspected) = self.observe(computer)? else {
+            return Ok(false);
+        };
+        if !inspected.status.eq_ignore_ascii_case("running") {
+            return Ok(false);
+        }
+        let identity = Self::identity_of(&inspected);
+        Ok(match expected {
+            // The armed resume named the exact run it would execute.
+            Some(expected) => expected.matches(&identity),
+            // A restore from the capture creates a new run: it must be a different run than
+            // the original, and the capture must have been consumed by it.
+            None => {
+                identity.instance.is_some()
+                    && identity.instance != original.instance
+                    && checkpoints::load(self.paths, &computer.id).is_ok_and(|record| {
+                        record
+                            .pending_checkpoint_restore
+                            .as_ref()
+                            .is_none_or(|pending| pending.checkpoint_id != capture.member)
+                    })
+            }
+        })
+    }
+}
+
+/// What a restore from the capture needs, read before anything is removed.
+struct RestorePlan {
+    configuration: ComputerConfiguration,
+    record: checkpoints::Record,
 }
 
 #[cfg(test)]
@@ -593,9 +754,14 @@ mod tests {
     }
 
     fn inspect(status: &str) -> Respond {
+        inspect_run(status, "run-1")
+    }
+
+    fn inspect_run(status: &str, instance: &str) -> Respond {
         ok(json!({
             "name": "dev",
             "status": status,
+            "runtime_instance_id": instance,
             "config": {
                 "name": "dev",
                 "labels": {"silo.managed": "true", "silo.machine-id": ID},
@@ -614,6 +780,14 @@ mod tests {
             "group": "dev", "name": member, "scope": "full", "availability": "ready"
         }])
         .to_string())
+    }
+
+    fn original() -> RuntimeIdentity {
+        RuntimeIdentity {
+            owner: None,
+            generation: None,
+            instance: Some("run-1".into()),
+        }
     }
 
     fn setup(directory: &tempfile::TempDir) -> RuntimePaths {
@@ -648,6 +822,7 @@ mod tests {
             scope: "full".into(),
             network_policy: json!({"default_egress": "allow", "default_ingress": "deny", "rules": []}),
             integrity_verified: true,
+            runtime_instance: Some("run-1".into()),
         }
     }
 
@@ -797,14 +972,20 @@ mod tests {
             runner: &runner,
             paths: &paths,
         };
-        assert_eq!(session.resume_held(&computer()).unwrap(), Ok(()));
-        assert_eq!(session.resume_held(&computer()).unwrap(), Ok(()));
+        assert_eq!(
+            session.resume_held(&computer(), &original()).unwrap(),
+            Ok(())
+        );
+        assert_eq!(
+            session.resume_held(&computer(), &original()).unwrap(),
+            Ok(())
+        );
         assert!(matches!(
-            session.resume_held(&computer()).unwrap(),
+            session.resume_held(&computer(), &original()).unwrap(),
             Err(ResumeHeldError::Gone(_))
         ));
         assert!(matches!(
-            session.resume_held(&computer()).unwrap(),
+            session.resume_held(&computer(), &original()).unwrap(),
             Err(ResumeHeldError::Gone(_))
         ));
         runner.finished();
@@ -827,14 +1008,14 @@ mod tests {
             paths: &paths,
         };
         assert!(session
-            .release(&computer(), &capture)
+            .release(&computer(), &capture, &original())
             .unwrap_err()
             .contains("missing from the runtime"));
         assert!(session
-            .release(&computer(), &capture)
+            .release(&computer(), &capture, &original())
             .unwrap_err()
             .contains("not held paused"));
-        session.release(&computer(), &capture).unwrap();
+        session.release(&computer(), &capture, &original()).unwrap();
         runner.finished();
     }
 
@@ -853,7 +1034,8 @@ mod tests {
         };
         let mut armed = 0;
         session
-            .restore(&computer(), &capture(), &mut || {
+            .restore(&computer(), &capture(), &original(), &mut |identity| {
+                assert_eq!(identity, Some(&original()));
                 armed += 1;
                 Ok(())
             })
@@ -867,17 +1049,26 @@ mod tests {
     }
 
     #[test]
-    fn a_runtime_that_is_already_running_needs_no_arm() {
+    fn a_runtime_that_runs_without_the_transaction_is_never_settled_or_replayed() {
         let directory = tempfile::tempdir().unwrap();
         let paths = setup(&directory);
-        let runner = Script::new(vec![("inspect dev", inspect("Running"))]);
+        let runner = Script::new(vec![
+            ("inspect dev", inspect("Running")),
+            ("inspect dev", inspect_run("Paused", "run-2")),
+        ]);
         let session = Session {
             runner: &runner,
             paths: &paths,
         };
-        session
-            .restore(&computer(), &capture(), &mut || panic!("nothing executes"))
-            .unwrap();
+        for _ in 0..2 {
+            let error = session
+                .restore(&computer(), &capture(), &original(), &mut |_| {
+                    panic!("nothing executes")
+                })
+                .unwrap_err();
+            assert!(matches!(error, RestoreError::Superseded(_)), "{error:?}");
+        }
+        runner.finished();
     }
 
     #[test]
@@ -890,11 +1081,11 @@ mod tests {
             paths: &paths,
         };
         let error = session
-            .restore(&computer(), &capture(), &mut || {
+            .restore(&computer(), &capture(), &original(), &mut |_| {
                 Err("journal write failed".into())
             })
             .unwrap_err();
-        assert_eq!(error, "journal write failed");
+        assert_eq!(error, RestoreError::Failed("journal write failed".into()));
         runner.finished();
     }
 
@@ -936,12 +1127,16 @@ mod tests {
             paths: &paths,
         };
         let error = session
-            .restore(&computer(), &capture, &mut || {
+            .restore(&computer(), &capture, &original(), &mut |identity| {
+                assert_eq!(identity, None, "the new run is not known before it exists");
                 armed.store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             })
             .unwrap_err();
-        assert!(error.contains("synthetic restore failure"), "{error}");
+        assert!(
+            error.message().contains("synthetic restore failure"),
+            "{error:?}"
+        );
         assert!(
             restore_after_arm.load(std::sync::atomic::Ordering::SeqCst),
             "the journal was armed before the guest could execute"
@@ -977,9 +1172,14 @@ mod tests {
             paths: &paths,
         };
         let error = session
-            .restore(&computer(), &capture(), &mut || panic!("nothing may arm"))
+            .restore(&computer(), &capture(), &original(), &mut |_| {
+                panic!("nothing may arm")
+            })
             .unwrap_err();
-        assert!(error.contains("missing from the runtime"), "{error}");
+        assert!(
+            error.message().contains("missing from the runtime"),
+            "{error:?}"
+        );
         runner.finished();
     }
 
@@ -998,13 +1198,173 @@ mod tests {
             paths: &paths,
         };
         assert_eq!(
-            session.reconcile_unsaved(&computer()).unwrap(),
+            session.reconcile_unsaved(&computer(), &original()).unwrap(),
             Reconciled::Running
         );
         assert!(matches!(
-            session.reconcile_unsaved(&computer()).unwrap(),
+            session.reconcile_unsaved(&computer(), &original()).unwrap(),
             Reconciled::Lost(_)
         ));
+        runner.finished();
+    }
+
+    #[test]
+    fn a_crashed_sandbox_is_removed_only_after_the_recovery_inputs_validated() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = setup(&directory);
+        let capture = capture();
+        // Missing capture: nothing is removed.
+        let runner = Script::new(vec![
+            ("inspect dev", inspect("Crashed")),
+            ("snapshot list", ok("[]")),
+        ]);
+        let session = Session {
+            runner: &runner,
+            paths: &paths,
+        };
+        let error = session
+            .restore(&computer(), &capture, &original(), &mut |_| {
+                panic!("nothing may arm")
+            })
+            .unwrap_err();
+        assert!(
+            error.message().contains("missing from the runtime"),
+            "{error:?}"
+        );
+        assert!(
+            !runner.calls().iter().any(|call| call.starts_with("remove")),
+            "{:?}",
+            runner.calls()
+        );
+        runner.finished();
+        // Unreadable configuration: nothing is removed either.
+        fs::write(&paths.metadata, b"not json").unwrap();
+        let runner = Script::new(vec![
+            ("inspect dev", inspect("Crashed")),
+            ("snapshot list", listed(&capture.member)),
+        ]);
+        let session = Session {
+            runner: &runner,
+            paths: &paths,
+        };
+        assert!(session
+            .restore(&computer(), &capture, &original(), &mut |_| {
+                panic!("nothing may arm")
+            })
+            .is_err());
+        assert!(!runner.calls().iter().any(|call| call.starts_with("remove")));
+        runner.finished();
+        // A capture that is not a verified full capture is refused before any command.
+        let mut disk_only = capture.clone();
+        disk_only.integrity_verified = false;
+        let runner = Script::new(vec![("inspect dev", inspect("Crashed"))]);
+        let session = Session {
+            runner: &runner,
+            paths: &paths,
+        };
+        assert!(session
+            .restore(&computer(), &disk_only, &original(), &mut |_| {
+                panic!("nothing may arm")
+            })
+            .is_err());
+        runner.finished();
+    }
+
+    #[test]
+    fn only_the_journaled_run_is_resumed_probed_or_released() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = setup(&directory);
+        let capture = capture();
+        let runner = Script::new(vec![
+            // A replacement run of the same computer is not the original.
+            ("inspect dev", inspect_run("Paused", "run-2")),
+            ("inspect dev", inspect_run("Running", "run-2")),
+            ("inspect dev", inspect("Paused")),
+            ("inspect dev", inspect("Running")),
+            ("snapshot list", listed(&capture.member)),
+            ("inspect dev", inspect_run("Paused", "run-2")),
+        ]);
+        let session = Session {
+            runner: &runner,
+            paths: &paths,
+        };
+        assert!(matches!(
+            session.resume_held(&computer(), &original()).unwrap(),
+            Err(ResumeHeldError::Gone(_))
+        ));
+        assert_eq!(
+            session.probe_original(&computer(), &original()).unwrap(),
+            OriginalState::Gone
+        );
+        assert_eq!(
+            session.probe_original(&computer(), &original()).unwrap(),
+            OriginalState::Held
+        );
+        assert_eq!(
+            session.probe_original(&computer(), &original()).unwrap(),
+            OriginalState::Running
+        );
+        assert!(session
+            .release(&computer(), &capture, &original())
+            .unwrap_err()
+            .contains("not held paused"));
+        runner.finished();
+    }
+
+    #[test]
+    fn an_armed_restore_is_proved_by_its_own_run_and_never_by_a_replacement() {
+        let _state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = setup(&directory);
+        let capture = capture();
+        let named = RuntimeIdentity {
+            owner: None,
+            generation: None,
+            instance: Some("run-1".into()),
+        };
+        let runner = Script::new(vec![
+            ("inspect dev", inspect("Running")),
+            ("inspect dev", inspect_run("Running", "run-9")),
+            ("inspect dev", missing()),
+            // Restored from the capture: a new run, with the capture consumed.
+            ("inspect dev", inspect_run("Running", "run-2")),
+            ("inspect dev", inspect("Running")),
+            ("inspect dev", inspect_run("Running", "run-2")),
+        ]);
+        let session = Session {
+            runner: &runner,
+            paths: &paths,
+        };
+        // Named when armed: exactly that run.
+        assert!(session
+            .probe_armed(&computer(), &capture, &original(), Some(&named))
+            .unwrap());
+        assert!(!session
+            .probe_armed(&computer(), &capture, &original(), Some(&named))
+            .unwrap());
+        assert!(!session
+            .probe_armed(&computer(), &capture, &original(), Some(&named))
+            .unwrap());
+        // Not named (restored from the capture): a different run than the original, and the
+        // capture must have been consumed.
+        let mut record = checkpoints::load(&paths, ID).unwrap();
+        record.pending_checkpoint_restore = Some(checkpoints::PendingRestore {
+            checkpoint_id: capture.member.clone(),
+            source_computer: capture.group.clone(),
+            state: "full".into(),
+        });
+        checkpoints::save(&paths, ID, &record).unwrap();
+        assert!(!session
+            .probe_armed(&computer(), &capture, &original(), None)
+            .unwrap());
+        record.pending_checkpoint_restore = None;
+        checkpoints::save(&paths, ID, &record).unwrap();
+        assert!(!session
+            .probe_armed(&computer(), &capture, &original(), None)
+            .unwrap());
+        assert!(session
+            .probe_armed(&computer(), &capture, &original(), None)
+            .unwrap());
         runner.finished();
     }
 }

@@ -4981,20 +4981,37 @@ fn state_after_failed_start(released: Result<(), String>) -> (State, Option<Stri
 /// computer: once something else has moved the computer on (the machine ended and a later Start
 /// began), the machine is not this Start's to stop.
 fn ensure_released(app: &MacosContext, id: &str, attempt: u64) -> Result<(), String> {
+    release_machine(
+        || {
+            let guard = {
+                let id = id.to_string();
+                move || registry().start_is_current(&id, attempt)
+            };
+            engine::force_stop_if(app, id, guard)
+        },
+        |generation| engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT),
+        || std::thread::sleep(Duration::from_millis(250)),
+    )
+}
+
+/// The retry loop of [`ensure_released`] over its three effects: ask the framework to stop the
+/// machine (`Ok(None)`: there is none, or it is no longer this Start's), wait for the framework
+/// to release it, and pause after a refused stop.
+fn release_machine(
+    mut stop: impl FnMut() -> Result<Option<u64>, String>,
+    mut released: impl FnMut(u64) -> bool,
+    mut backoff: impl FnMut(),
+) -> Result<(), String> {
     for _ in 0..5 {
-        let guard = {
-            let id = id.to_string();
-            move || registry().start_is_current(&id, attempt)
-        };
-        match engine::force_stop_if(app, id, guard) {
+        match stop() {
             // No machine, or no longer this Start's.
             Ok(None) => return Ok(()),
             Ok(Some(generation)) => {
-                if engine::wait_until_released(app, id, generation, FORCED_STOP_WAIT) {
+                if released(generation) {
                     return Ok(());
                 }
             }
-            Err(_) => std::thread::sleep(Duration::from_millis(250)),
+            Err(_) => backoff(),
         }
     }
     Err("The computer could not be stopped after it failed to start. Use Force stop.".into())
@@ -9565,6 +9582,64 @@ mod tests {
         .is_err());
         let (mut registry, id) = registry_with(state);
         assert_eq!(registry.begin_force_stop(&id), Ok(State::Stopping));
+    }
+
+    #[test]
+    fn a_failed_update_restore_reports_stopped_only_when_the_machine_was_proved_released() {
+        use update_save::settle_failed_restore;
+        // The restore began: the computer is starting under attempt 1.
+        let starting = || {
+            let (mut registry, id) = registry_with(State::Stopped);
+            registry.entries[0].state = State::Starting;
+            (registry, id)
+        };
+        let (mut registry, id) = starting();
+        settle_failed_restore(&mut registry, &id, 1, Ok(()));
+        assert_eq!(registry.entries[0].state, State::Stopped);
+        // A framework that refused to stop keeps the computer busy and open to Force stop.
+        let (mut registry, id) = starting();
+        settle_failed_restore(&mut registry, &id, 1, Err("still held".into()));
+        assert_eq!(registry.entries[0].state, State::Stopping);
+        assert_eq!(registry.entries[0].detail.as_deref(), Some("still held"));
+        assert!(is_busy(registry.entries[0].state));
+        // A restore that something else already moved on is not touched.
+        let (mut registry, id) = starting();
+        settle_failed_restore(&mut registry, &id, 2, Err("late".into()));
+        assert_eq!(registry.entries[0].state, State::Starting);
+    }
+
+    #[test]
+    fn a_release_is_proved_by_the_framework_not_assumed() {
+        // Refused stops: the loop gives up with the machine held, never `Ok`.
+        let mut backoffs = 0;
+        let refused = release_machine(
+            || Err("This computer can't be force stopped right now.".into()),
+            |_| panic!("nothing to wait for"),
+            || backoffs += 1,
+        );
+        assert!(refused.unwrap_err().contains("Force stop"));
+        assert_eq!(backoffs, 5);
+        // A delayed release: each stop is followed by a wait that the framework answers late.
+        let mut waits = Vec::new();
+        let mut stops = 0;
+        let delayed = release_machine(
+            || {
+                stops += 1;
+                Ok(Some(7))
+            },
+            |generation| {
+                waits.push(generation);
+                waits.len() == 3
+            },
+            || panic!("no stop was refused"),
+        );
+        assert_eq!(delayed, Ok(()));
+        assert_eq!((stops, waits), (3, vec![7, 7, 7]));
+        // Never released within the attempts: still an error.
+        let never = release_machine(|| Ok(Some(7)), |_| false, || {});
+        assert!(never.is_err());
+        // No machine (or no longer this Start's): nothing is held.
+        assert_eq!(release_machine(|| Ok(None), |_| false, || {}), Ok(()));
     }
 
     #[test]
