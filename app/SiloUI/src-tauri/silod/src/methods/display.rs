@@ -369,25 +369,27 @@ async fn desktop_action(
             .filter(|device| *device != local_id)
         {
             let action = serde_json::to_value(params.action).map_err(|error| error.to_string())?;
-            link.registry
-                .mark_running(&link.job_id)
-                .map_err(|error| error.to_string())?;
-            return silo_engine::remote::call_remote(
-                device,
-                "desktop.action",
-                json!({"computerId": params.computer_id, "action": action}),
-            );
+            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
+            return relay_remote(link, move || {
+                silo_engine::remote::call_remote(
+                    &device,
+                    "desktop.action",
+                    json!({"computerId": computer_id, "action": action}),
+                )
+            });
         }
         let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
         let action = desktop_action_name(params.action);
-        silo_engine::desktop::local_for_job(
+        let status = silo_engine::desktop::local_for_job(
             &paths,
             &name,
             Some(action),
             Some(&params.computer_id),
             Some(link),
-        )
+        )?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok(status)
     })
     .await
 }
@@ -492,13 +494,17 @@ async fn computer_use_approval(
         );
     }
     let paths = local_runtime_paths(context).await?;
+    let host = runtime_host(context);
     let mode = match params.mode {
         ApprovalMode::Ask => "ask",
         ApprovalMode::Auto => "auto",
     };
     let result = tokio::task::spawn_blocking(move || {
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        silo_engine::desktop::local_approval(&paths, &name, mode, Some(&params.computer_id))
+        let state =
+            silo_engine::desktop::local_approval(&paths, &name, mode, Some(&params.computer_id))?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok::<_, String>(state)
     })
     .await
     .map_err(|error| DispatchError::internal(error.to_string()))?
@@ -531,24 +537,26 @@ async fn computer_use_setup(
             .as_deref()
             .filter(|device| *device != local_id)
         {
-            link.registry
-                .mark_running(&link.job_id)
-                .map_err(|error| error.to_string())?;
-            return silo_engine::remote::call_remote(
-                device,
-                "desktop.action",
-                json!({"computerId": params.computer_id, "action": "setup-computer-use"}),
-            );
+            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
+            return relay_remote(link, move || {
+                silo_engine::remote::call_remote(
+                    &device,
+                    "desktop.action",
+                    json!({"computerId": computer_id, "action": "setup-computer-use"}),
+                )
+            });
         }
         let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        silo_engine::desktop::local_for_job(
+        let status = silo_engine::desktop::local_for_job(
             &paths,
             &name,
             Some("setup-computer-use"),
             Some(&params.computer_id),
             Some(link),
-        )
+        )?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok(status)
     })
     .await
 }
@@ -1059,6 +1067,58 @@ async fn clipboard_write(
     Ok(output_value(Value::Null))
 }
 
+/// How often a relayed remote call looks at the job's cancellation flag.
+const REMOTE_CANCEL_POLL: Duration = Duration::from_millis(50);
+
+/// Runs a call to the computer's owner for a job. A job for a remote computer never enters
+/// this device's gate, so `operations.cancel` reaches it only through the job's flag: a
+/// cancellation before the call starts it never makes, and one while it runs ends the job
+/// as cancelled at once. The owner's bridge has no cancel method yet, so a request it has
+/// already accepted runs to its end there; its result is dropped.
+fn relay_remote(
+    link: &silo_engine::desktop::JobLink,
+    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
+) -> Result<Value, String> {
+    relay_cancellable(&link.cancellation, REMOTE_CANCEL_POLL, call, || {
+        link.registry
+            .mark_running(&link.job_id)
+            .map_err(|error| error.to_string())
+    })
+}
+
+fn relay_cancellable(
+    cancellation: &AtomicBool,
+    poll: Duration,
+    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
+    start: impl FnOnce() -> Result<(), String>,
+) -> Result<Value, String> {
+    let cancelled = || "The operation was cancelled.".to_owned();
+    if cancellation.load(Ordering::SeqCst) {
+        return Err(cancelled());
+    }
+    start()?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("desktop-remote-relay".into())
+        .spawn(move || {
+            let _ = sender.send(call());
+        })
+        .map_err(|error| error.to_string())?;
+    loop {
+        match receiver.recv_timeout(poll) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if cancellation.load(Ordering::SeqCst) {
+                    return Err(cancelled());
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("The remote action stopped unexpectedly.".to_owned());
+            }
+        }
+    }
+}
+
 /// Starts a durable job that runs `work` on a blocking thread and publishes its outcome.
 /// `work` receives the job's link; it marks the job running when its queue turn arrives.
 async fn start_job(
@@ -1076,14 +1136,17 @@ async fn start_job(
         job_id.clone(),
         silo_engine::jobs::CancelRoute::JobGate,
         move || {
-            if silo_engine::runtime::OPERATIONS.contains_job(&cancel_id) {
-                silo_engine::runtime::OPERATIONS
-                    .cancel_job(&cancel_id)
-                    .map_err(|error| error.to_string())
-            } else {
+            // Before the gate admits the work (or when it never enters the gate, as for a
+            // remote computer) the request is recorded in the job's flag, which the gate
+            // admission and the remote relay both observe. That accepts the cancellation,
+            // so it is reported as accepted. Once the work holds a gate entry, the gate
+            // decides.
+            if !silo_engine::runtime::OPERATIONS.contains_job(&cancel_id) {
                 cancel_flag.store(true, Ordering::SeqCst);
-                Err("This operation can't be cancelled.".to_owned())
             }
+            silo_engine::runtime::OPERATIONS
+                .cancel_job(&cancel_id)
+                .map_err(|error| error.to_string())
         },
     );
     let engine: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
@@ -1485,20 +1548,24 @@ mod tests {
             self.directory.path().join("data")
         }
 
-        async fn call(
-            &self,
-            client: &str,
-            method: MethodName,
-            params: Value,
-        ) -> Result<Value, DispatchError> {
-            let context = HandlerContext::new(
+        fn context(&self, client: &str) -> HandlerContext {
+            HandlerContext::new(
                 self.engine.clone(),
                 RequestContext {
                     client_id: client.into(),
                     protocol: 6,
                     client: None,
                 },
-            );
+            )
+        }
+
+        async fn call(
+            &self,
+            client: &str,
+            method: MethodName,
+            params: Value,
+        ) -> Result<Value, DispatchError> {
+            let context = self.context(client);
             handle(method, &params, &context)
                 .await
                 .expect("the display module owns this method")
@@ -1681,6 +1748,167 @@ mod tests {
             fixture.finished_error(started).await,
             Some(ErrorCode::NotFound)
         );
+    }
+
+    /// Starts a job whose work waits for `release`, and reports on `started` that it runs.
+    async fn blocked_job(
+        fixture: &Fixture,
+    ) -> (
+        silo_api::jobs::JobId,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (started, running) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let accepted = start_job(&fixture.context("a"), "desktop.action", move |link| {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+            if link.cancellation.load(Ordering::SeqCst) {
+                Err("The operation was cancelled.".to_owned())
+            } else {
+                Ok(Value::Null)
+            }
+        })
+        .await
+        .unwrap();
+        let job_id = serde_json::from_value(accepted.value["jobId"].clone()).unwrap();
+        (job_id, running, release)
+    }
+
+    /// The error code of the next finished job.
+    async fn next_finished(events: &mut silo_engine::events::EventReceiver) -> (String, Value) {
+        let Some(EventDelivery::Event(event)) =
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap()
+        else {
+            panic!("expected a job event");
+        };
+        assert_eq!(event.event.name, "operations.job.finished");
+        let payload = event.event.payload;
+        (payload["jobId"].as_str().unwrap().to_owned(), payload)
+    }
+
+    fn watch_finished_jobs(fixture: &Fixture) -> silo_engine::events::EventReceiver {
+        let watcher = silo_engine::context::ClientId::new("job-watcher");
+        let events = fixture.engine.connect_event_stream(watcher.clone());
+        let subscription = fixture
+            .engine
+            .subscribe_events(&watcher, vec!["operations.job.finished".into()])
+            .unwrap();
+        fixture
+            .engine
+            .activate_events(&watcher, &subscription)
+            .unwrap();
+        events
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_job_that_has_not_been_admitted_is_accepted_and_ends_it_cancelled() {
+        let fixture = fixture();
+        let mut events = watch_finished_jobs(&fixture);
+        let (job_id, running, release) = blocked_job(&fixture).await;
+        tokio::task::spawn_blocking(move || running.recv().unwrap())
+            .await
+            .unwrap();
+        // The work is not in the gate (it may never enter it): the request is accepted, not
+        // reported as refused while it takes effect.
+        fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .expect("the cancellation is accepted");
+        release.send(()).unwrap();
+        let (finished, payload) = next_finished(&mut events).await;
+        assert_eq!(finished, job_id.as_str());
+        assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
+    }
+
+    #[test]
+    fn a_relayed_remote_call_observes_the_cancellation_flag() {
+        let calls = Arc::new(AtomicBool::new(false));
+        let poll = Duration::from_millis(1);
+        // Cancelled before it starts: the call is never made.
+        let cancelled = AtomicBool::new(true);
+        let made = calls.clone();
+        let result = relay_cancellable(
+            &cancelled,
+            poll,
+            move || {
+                made.store(true, Ordering::SeqCst);
+                Ok(Value::Null)
+            },
+            || panic!("a cancelled job does not start"),
+        );
+        assert!(result.unwrap_err().contains("was cancelled"));
+        assert!(!calls.load(Ordering::SeqCst));
+        // A call that finishes returns its value.
+        let flag = AtomicBool::new(false);
+        let result = relay_cancellable(&flag, poll, || Ok(json!({"state": "running"})), || Ok(()));
+        assert_eq!(result.unwrap(), json!({"state": "running"}));
+        // Cancelled while the call is outstanding: the job ends at once, whatever the call
+        // does afterwards.
+        let (entered, inside) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let flag = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let flag = flag.clone();
+            std::thread::spawn(move || {
+                relay_cancellable(
+                    &flag,
+                    poll,
+                    move || {
+                        entered.send(()).unwrap();
+                        let _ = released.recv();
+                        Ok(Value::Null)
+                    },
+                    || Ok(()),
+                )
+            })
+        };
+        inside.recv().unwrap();
+        flag.store(true, Ordering::SeqCst);
+        let result = waiter.join().unwrap();
+        assert!(result.unwrap_err().contains("was cancelled"));
+        release.send(()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_remote_job_is_cancellable_and_ends_cancelled() {
+        let fixture = fixture();
+        let mut events = watch_finished_jobs(&fixture);
+        let (entered, inside) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let accepted = start_job(&fixture.context("a"), "desktop.action", move |link| {
+            relay_cancellable(
+                &link.cancellation,
+                Duration::from_millis(1),
+                move || {
+                    entered.send(()).unwrap();
+                    let _ = released.recv();
+                    Ok(Value::Null)
+                },
+                || Ok(()),
+            )
+        })
+        .await
+        .unwrap();
+        let job_id: silo_api::jobs::JobId =
+            serde_json::from_value(accepted.value["jobId"].clone()).unwrap();
+        tokio::task::spawn_blocking(move || inside.recv().unwrap())
+            .await
+            .unwrap();
+        fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .expect("a remote job accepts cancellation");
+        let (finished, payload) = next_finished(&mut events).await;
+        assert_eq!(finished, job_id.as_str());
+        assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
+        release.send(()).unwrap();
     }
 
     #[tokio::test]
