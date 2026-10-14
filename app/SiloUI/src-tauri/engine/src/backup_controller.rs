@@ -258,6 +258,8 @@ struct ViewState {
     journal_error: Option<String>,
     destination: Option<PathBuf>,
     operation: Option<Operation>,
+    /// The operation whose cancellation token is stored beside it in this view state.
+    operation_id: Option<String>,
     cancellation: Option<backup::Cancellation>,
     /// The export file check behind the import review, by request id (E-27).
     inspection: Option<(String, backup::Cancellation)>,
@@ -321,6 +323,7 @@ pub fn install(
             journal_error,
             destination,
             operation: None,
+            operation_id: None,
             cancellation: None,
             inspection: None,
         }),
@@ -351,8 +354,8 @@ pub fn reconcile_jobs_before_serving(context: &dyn EngineContext) -> Result<(), 
     let Some((operation_id, result)) = retained else {
         return Ok(());
     };
-    let job_id = JobId::new(format!("exports:{operation_id}"))
-        .map_err(|error| error.to_string())?;
+    let job_id =
+        JobId::new(format!("exports:{operation_id}")).map_err(|error| error.to_string())?;
     let registry = context.job_registry()?;
     if registry
         .get(&job_id)
@@ -673,10 +676,7 @@ impl std::fmt::Display for BackupJobRegistrationError {
 }
 
 fn cancel_backup_job(controller: &Controller, operation_id: &str) -> Result<(), String> {
-    if recovery::token(controller)?.as_deref() != Some(operation_id) {
-        return Err("not_found".to_owned());
-    }
-    cancel_operation(controller)
+    cancel_operation_for(controller, Some(operation_id))
 }
 
 fn cancel_inspection_job(controller: &Controller, request_id: &str) -> Result<(), String> {
@@ -1008,6 +1008,7 @@ fn set_operation(controller: &Controller, operation: Operation) -> Result<(), St
 fn finish(controller: &Controller) {
     if let Ok(mut view) = controller.view.lock() {
         view.cancellation = None;
+        view.operation_id = None;
     }
     controller.busy.store(false, Ordering::Release);
 }
@@ -1169,6 +1170,7 @@ fn claim_export(
         // strand them, so recover a poisoned view instead (E-44).
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     view.cancellation = Some(cancellation.clone());
+    view.operation_id = Some(operation_id.clone());
     let phase = match checkpoint_name {
         Some(name) => Phase {
             title: format!("Using checkpoint \u{201c}{name}\u{201d}"),
@@ -1238,6 +1240,7 @@ fn contain_worker_panic(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     view.operation = Some(failure);
     view.cancellation = None;
+    view.operation_id = None;
     drop(view);
     controller.busy.store(false, Ordering::Release);
     true
@@ -1875,6 +1878,7 @@ pub fn begin_import(
             // strand them, so recover a poisoned view instead (E-44).
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         view.cancellation = Some(cancellation.clone());
+        view.operation_id = Some(operation_id.clone());
         view.operation = Some(Operation::Running {
             operation: "restore",
             archive: archive.clone(),
@@ -2241,10 +2245,22 @@ fn save_import_metadata(
 }
 
 pub fn cancel_operation(controller: &Controller) -> Result<(), String> {
+    cancel_operation_for(controller, None)
+}
+
+fn cancel_operation_for(
+    controller: &Controller,
+    expected_operation_id: Option<&str>,
+) -> Result<(), String> {
     let operation_id = {
         let view = controller.view.lock().map_err(|_| {
             "Export and import status could not be read. Relaunch Silo and retry.".to_string()
         })?;
+        if expected_operation_id
+            .is_some_and(|expected| view.operation_id.as_deref() != Some(expected))
+        {
+            return Err("not_found".to_owned());
+        }
         if matches!(
             view.operation,
             Some(Operation::Running {
@@ -2262,7 +2278,9 @@ pub fn cancel_operation(controller: &Controller) -> Result<(), String> {
             .as_ref()
             .ok_or("No export or import is running.")?
             .cancel();
-        recovery::token(controller).ok().flatten()
+        view.operation_id
+            .clone()
+            .or_else(|| recovery::token(controller).ok().flatten())
     };
     if let Some(operation_id) = operation_id {
         let _ = recovery::cancel(controller, &operation_id);
@@ -2540,6 +2558,7 @@ mod tests {
                 journal_error: None,
                 destination: Some(PathBuf::from("/backups")),
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),
@@ -2745,12 +2764,39 @@ mod tests {
         )
         .unwrap();
         let cancellation = backup::Cancellation::default();
-        controller.view.lock().unwrap().cancellation = Some(cancellation.clone());
+        let operation_id = recovery::token(&controller).unwrap();
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation_id = operation_id;
+            view.cancellation = Some(cancellation.clone());
+        }
         // Make every later journal write fail.
         fs::remove_dir_all(&storage).unwrap();
         fs::write(&storage, b"not a directory").unwrap();
         cancel_operation(&controller).unwrap();
         assert!(cancellation.cancelled());
+    }
+
+    #[test]
+    fn a_stale_export_cancel_cannot_cancel_the_successor_token() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let controller = history_controller(directory.path().join("backup-history.json"));
+        recovery::begin(
+            &controller,
+            recovery::Journal::restore(completed_archive(), "first".into(), None),
+        )
+        .unwrap();
+        let old_operation_id = recovery::token(&controller).unwrap().unwrap();
+        let successor = running_import(&controller);
+        // This is the state after a new operation replaced the in-memory token while a
+        // cancellation request still carries the previous journal identity.
+        controller.view.lock().unwrap().operation_id = Some("successor-operation".into());
+
+        let error = cancel_backup_job(&controller, &old_operation_id).unwrap_err();
+
+        assert_eq!(error, "not_found");
+        assert!(!successor.cancelled());
     }
 
     #[test]
@@ -4584,6 +4630,7 @@ mod tests {
                 journal_error: None,
                 destination: None,
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),
@@ -5108,6 +5155,7 @@ mod tests {
                 journal_error: None,
                 destination: None,
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),
@@ -5255,6 +5303,7 @@ mod tests {
                 journal_error: None,
                 destination: None,
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),
@@ -5392,6 +5441,7 @@ mod tests {
                 journal_error: None,
                 destination: None,
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),
@@ -5745,6 +5795,7 @@ mod tests {
                 journal_error: None,
                 destination: None,
                 operation: None,
+                operation_id: None,
                 cancellation: None,
                 inspection: None,
             }),

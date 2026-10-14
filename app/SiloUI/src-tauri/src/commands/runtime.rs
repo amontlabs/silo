@@ -78,7 +78,8 @@ impl RuntimeHost for TauriRuntimeHost {
     }
 
     fn notify(&self, notice: crate::notifications::Notice) {
-        publish_engine_notice(&notice);
+        let context = silo_engine::context::current();
+        publish_engine_notice(&notice, context.as_deref());
     }
 
     fn clear_computer_notices(&self, computer_ids: &[String]) {
@@ -122,13 +123,17 @@ impl RuntimeHost for TauriRuntimeHost {
         if let Some(notice) =
             crate::notifications::lifecycle_notice(action, name, computer, elapsed, outcome)
         {
-            publish_engine_notice(&notice);
+            let context = silo_engine::context::current();
+            publish_engine_notice(&notice, context.as_deref());
         }
     }
 }
 
-fn publish_engine_notice(notice: &crate::notifications::Notice) {
-    let Some(context) = silo_engine::context::current() else {
+fn publish_engine_notice(
+    notice: &crate::notifications::Notice,
+    context: Option<&dyn EngineContext>,
+) {
+    let Some(context) = context else {
         return;
     };
     let payload = match serde_json::to_value(notice) {
@@ -141,7 +146,7 @@ fn publish_engine_notice(notice: &crate::notifications::Notice) {
     match serde_json::from_value::<silo_api::methods::notifications::Notice>(payload.clone()) {
         Ok(api_notice) => {
             if let Err(error) = silo_engine::notices::retain(
-                context.as_ref(),
+                context,
                 &api_notice,
                 silo_engine::context::Audience::All,
             ) {
@@ -150,7 +155,7 @@ fn publish_engine_notice(notice: &crate::notifications::Notice) {
         }
         Err(error) => eprintln!("Silo could not map a notice to the API contract: {error}"),
     }
-    // Keep the existing Silo UI toast until its client switches to the engine API.
+    // Keep the existing in-app toast event until the frontend switches to engine notices.
     context.publish(
         silo_engine::context::Event::new(crate::notifications::NOTICE_EVENT, payload),
         silo_engine::context::Audience::All,
@@ -348,6 +353,52 @@ pub async fn change_computer_configuration(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use silo_engine::context::{
+        EngineIdentity, EnginePaths, EngineRuntimeState, Event, MainThread, PackageKind,
+        ProcessControl,
+    };
+    use std::sync::Mutex;
+
+    struct NoticeTestContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published: Mutex<Vec<(Event, silo_engine::context::Audience)>>,
+    }
+
+    impl EngineContext for NoticeTestContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, audience: silo_engine::context::Audience) {
+            self.published.lock().unwrap().push((event, audience));
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for NoticeTestContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("notice test must not restart the process")
+        }
+    }
 
     #[test]
     fn launcher_worker_failure_keeps_the_launcher_error() {
@@ -357,5 +408,51 @@ mod tests {
                 "The application launcher failed."
             );
         }
+    }
+
+    #[test]
+    fn engine_notice_retains_api_notice_and_preserves_the_tauri_toast_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = NoticeTestContext {
+            paths: EnginePaths {
+                app_data: directory.path().to_path_buf(),
+                ..EnginePaths::default()
+            },
+            identity: EngineIdentity {
+                channel: silo_engine::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+            published: Mutex::new(Vec::new()),
+        };
+        let notice = crate::notifications::Notice {
+            category: crate::notifications::Category::Failures,
+            key: "lifecycle:dev".into(),
+            title: "Couldn’t start dev".into(),
+            body: "The framework rejected the start.".into(),
+            computer: None,
+        };
+        publish_engine_notice(&notice, Some(&context));
+
+        let events = context.published.lock().unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|(event, _)| event.name.as_str())
+                .collect::<Vec<_>>(),
+            ["notifications.notice", crate::notifications::NOTICE_EVENT]
+        );
+        for (_, audience) in events.iter() {
+            assert_eq!(audience, &silo_engine::context::Audience::All);
+        }
+        let legacy_payload = serde_json::to_value(&notice).unwrap();
+        assert_eq!(events[1].0.payload, legacy_payload);
+        let retained = silo_engine::notices::list(&context).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&retained[0]).unwrap(),
+            serde_json::to_value(&notice).unwrap()
+        );
     }
 }

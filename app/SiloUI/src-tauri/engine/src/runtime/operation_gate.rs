@@ -705,14 +705,9 @@ impl OperationGate {
     ) -> Result<OperationGuard<'_>, GateError> {
         REMOVES.with(|removes| *removes.borrow_mut() = ids.to_vec());
         let key = job_id.as_str().to_owned();
-        let guard = self.kind(OperationKind::ComputerConfiguration).acquire_for_job(
-            Scope::Device,
-            None,
-            label,
-            Some(key),
-            job_id,
-            cancellation,
-        );
+        let guard = self
+            .kind(OperationKind::ComputerConfiguration)
+            .acquire_for_job(Scope::Device, None, label, Some(key), job_id, cancellation);
         REMOVES.with(|removes| removes.borrow_mut().clear());
         guard
     }
@@ -1266,6 +1261,33 @@ impl OperationGate {
         self.notify();
     }
 
+    /// Atomically narrow a running device-wide operation to one computer. The same request
+    /// and job keep ownership, while waiters for unrelated computers can proceed. Both scopes
+    /// are touched so observers invalidate reads made before the inventory registration.
+    fn narrow_running_to_computer(&self, request_id: u64, id: &str, name: &str) -> bool {
+        let mut state = self.lock();
+        let Some(index) = state
+            .running
+            .iter()
+            .position(|entry| entry.id == request_id)
+        else {
+            return false;
+        };
+        if state.running[index].scope != Scope::Device {
+            return false;
+        }
+
+        let hidden = state.running[index].hidden;
+        let computer_scope = Scope::Computer { id: id.to_owned() };
+        state.touch(&Scope::Device, hidden);
+        state.touch(&computer_scope, hidden);
+        state.running[index].scope = computer_scope;
+        state.running[index].computer_name = Some(name.to_owned());
+        drop(state);
+        self.notify();
+        true
+    }
+
     /// Mark a running operation cancellable and record it in the queue. Used by
     /// `OperationGuard::allow_cancel`.
     fn mark_cancellable(&self, id: u64) {
@@ -1388,6 +1410,12 @@ pub struct OperationGuard<'a> {
 impl OperationGuard<'_> {
     pub fn request_id(&self) -> u64 {
         self.id
+    }
+
+    /// Narrow this running device-wide operation to one computer without releasing its
+    /// admission or changing its durable job ownership.
+    pub fn narrow_to_computer(&self, id: &str, name: &str) -> bool {
+        self.gate.narrow_running_to_computer(self.id, id, name)
     }
 
     /// Allow the user to cancel this operation while it runs. The work must observe
