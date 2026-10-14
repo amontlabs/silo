@@ -58,7 +58,7 @@ use silo_engine::{Audience, EngineContext, Event};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex, Once,
     },
     time::{Duration, Instant},
@@ -1626,13 +1626,67 @@ fn change_resource_configuration(
 
 /// Starts a local macOS computer for the launch coordinator. Returns false when `id` belongs
 /// to another runtime, so the caller can fall through to the Linux start path.
-pub fn start_at_launch(app: &MacosContext, id: &str) -> Result<bool, String> {
+pub fn start_at_launch(
+    app: &MacosContext,
+    id: &str,
+    cancelled: &AtomicBool,
+) -> Result<bool, String> {
     ensure_loaded(app)?;
-    if !registry().entries.iter().any(|entry| entry.record.id == id) {
+    let Some(record) = registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| entry.record.clone())
+    else {
         return Ok(false);
+    };
+    let started = launch_start_after_queue(
+        &runtime::OPERATIONS,
+        id,
+        &record.name,
+        cancelled,
+        || runtime::shutdown::ensure_accepting_operations().is_ok() && admission().is_ok(),
+        || start(app, id),
+    )?;
+    Ok(started.is_some())
+}
+
+fn launch_start_after_queue<T>(
+    gate: &runtime::operation_gate::OperationGate,
+    id: &str,
+    name: &str,
+    cancelled: &AtomicBool,
+    accepting: impl Fn() -> bool,
+    start: impl FnOnce() -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    let label = format!("Starting {name}");
+    let keep_waiting = || !cancelled.load(Ordering::SeqCst) && accepting();
+    let guard = gate
+        .kind(runtime::operation_gate::OperationKind::Lifecycle)
+        .acquire_while(
+            runtime::operation_gate::Scope::Computer { id: id.into() },
+            Some(name.to_owned()),
+            &label,
+            &keep_waiting,
+        );
+    let _guard = match guard {
+        Ok(guard) => guard,
+        Err(runtime::operation_gate::GateError::Cancelled)
+            if cancelled.load(Ordering::SeqCst) || !accepting() =>
+        {
+            return Ok(None);
+        }
+        Err(runtime::operation_gate::GateError::Abandoned)
+            if cancelled.load(Ordering::SeqCst) || !accepting() =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    if cancelled.load(Ordering::SeqCst) || !accepting() {
+        return Ok(None);
     }
-    perform(app, id, Action::Start)?;
-    Ok(true)
+    start().map(Some)
 }
 
 /// The stored macOS computer IDs available to the launch settings.
@@ -3580,6 +3634,55 @@ mod tests {
             &record,
             &developer_tools::version()
         ));
+    }
+
+    #[test]
+    fn a_queued_launch_start_skips_boot_after_startup_cancel_or_quit() {
+        for cancel_startup in [true, false] {
+            let gate: &'static runtime::operation_gate::OperationGate =
+                Box::leak(Box::new(runtime::operation_gate::OperationGate::new()));
+            let blocker = gate.computer("mac-id", "Mac", "Blocking computer operation").unwrap();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let accepting = Arc::new(AtomicBool::new(true));
+            let started = Arc::new(AtomicBool::new(false));
+            let worker_cancelled = cancelled.clone();
+            let worker_accepting = accepting.clone();
+            let worker_started = started.clone();
+            let (send, receive) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let result = launch_start_after_queue(
+                    gate,
+                    "mac-id",
+                    "Mac",
+                    &worker_cancelled,
+                    || worker_accepting.load(Ordering::SeqCst),
+                    || {
+                        worker_started.store(true, Ordering::SeqCst);
+                        Ok(())
+                    },
+                );
+                send.send(result).unwrap();
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while gate.snapshot().waiting.is_empty() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(!gate.snapshot().waiting.is_empty(), "launch Start did not queue");
+            if cancel_startup {
+                cancelled.store(true, Ordering::SeqCst);
+            } else {
+                accepting.store(false, Ordering::SeqCst);
+            }
+            let result_before_release = receive.recv_timeout(Duration::from_secs(1));
+            let finished_early = result_before_release.is_ok();
+            drop(blocker);
+            let result = result_before_release
+                .unwrap_or_else(|_| receive.recv_timeout(Duration::from_secs(5)).unwrap());
+            worker.join().unwrap();
+            assert!(finished_early, "launch wait ignored cancellation");
+            assert_eq!(result.unwrap(), None);
+            assert!(!started.load(Ordering::SeqCst));
+        }
     }
 
     fn finish(

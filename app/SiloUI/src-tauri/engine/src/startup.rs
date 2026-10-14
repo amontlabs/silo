@@ -56,7 +56,7 @@ pub trait StartupServices: Send + Sync + 'static {
     fn macos_computer_ids(&self) -> Vec<String> {
         Vec::new()
     }
-    fn start_at_launch(&self, id: &str) -> Result<(), String>;
+    fn start_at_launch(&self, id: &str, cancelled: &AtomicBool) -> Result<(), String>;
     fn update_recovery_failed(&self, message: String);
     fn notify_failure(&self, key: &str, title: &str, body: &str);
     fn show_integration_error(&self, message: String);
@@ -185,14 +185,14 @@ fn after_lifecycle_recovery(
 fn start_selected(
     settings: &Map<String, Value>,
     cancelled: &AtomicBool,
-    mut start: impl FnMut(&str) -> Result<(), String>,
+    mut start: impl FnMut(&str, &AtomicBool) -> Result<(), String>,
 ) -> Vec<String> {
     let mut failures = Vec::new();
     for id in selected_computers(settings) {
         if cancelled.load(Ordering::SeqCst) {
             break;
         }
-        if let Err(error) = start(&id) {
+        if let Err(error) = start(&id, cancelled) {
             failures.push(error);
         }
     }
@@ -265,8 +265,8 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
                 &macos_ids,
                 &recovered_stops,
             )?;
-            Ok(start_selected(&settings, &state.cancelled, |id| {
-                let result = services.start_at_launch(id);
+            Ok(start_selected(&settings, &state.cancelled, |id, cancelled| {
+                let result = services.start_at_launch(id, cancelled);
                 if let Some(context) = silo_engine::context::current() {
                     context.publish(
                         Event::new("silo://application-state-changed", Value::Null),
@@ -333,7 +333,7 @@ mod tests {
         )
         .unwrap();
         let mut started = Vec::new();
-        let failures = start_selected(&resolved, &AtomicBool::new(false), |id| {
+        let failures = start_selected(&resolved, &AtomicBool::new(false), |id, _cancelled| {
             started.push(id.to_owned());
             Ok(())
         });
@@ -514,7 +514,7 @@ mod tests {
         let settings = json!({"onboardingComplete":true,"startComputersAtLaunch":true,"startupComputerIds":["first","second","third"]});
         let cancelled = AtomicBool::new(false);
         let mut calls = Vec::new();
-        let failures = start_selected(settings.as_object().unwrap(), &cancelled, |id| {
+        let failures = start_selected(settings.as_object().unwrap(), &cancelled, |id, _cancelled| {
             calls.push(id.to_owned());
             if id == "first" {
                 Err("First failed".into())
