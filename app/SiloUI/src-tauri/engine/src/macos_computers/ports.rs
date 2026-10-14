@@ -339,7 +339,7 @@ fn tunnel_command(
             "-o",
             "ExitOnForwardFailure=yes",
             "-o",
-            "ClearAllForwardings=yes",
+            "ClearAllForwardings=no",
             "-o",
             "ConnectTimeout=5",
             "-o",
@@ -855,10 +855,18 @@ mod tests {
     }
 
     #[test]
-    fn ssh_publisher_forwards_only_from_host_loopback_and_fails_when_forwarding_fails() {
+    fn ssh_publisher_overrides_alias_forwarding_suppression_for_loopback_only() {
+        let alias = "silo-c690f54f-4cc9-4950-8782-30f21e89d18b";
+        let config = tempfile::tempdir().unwrap();
+        let config_path = config.path().join("macos-guest.conf");
+        std::fs::write(
+            &config_path,
+            format!("Host {alias}\n  ClearAllForwardings yes\n"),
+        )
+        .unwrap();
         let command = tunnel_command(
-            Path::new("/tmp/macos-guest.conf"),
-            "silo-c690f54f-4cc9-4950-8782-30f21e89d18b",
+            &config_path,
+            alias,
             &("c690f54f-4cc9-4950-8782-30f21e89d18b".into(), 8080),
             TunnelTarget {
                 host_port: 49152,
@@ -870,12 +878,32 @@ mod tests {
             .get_args()
             .map(|argument| argument.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(args[0..2], ["-F", "/tmp/macos-guest.conf"]);
+        assert_eq!(args[0], "-F");
+        assert_eq!(args[1], config_path.to_str().unwrap());
         assert!(args.contains(&"-N".into()));
         assert!(args.contains(&"ExitOnForwardFailure=yes".into()));
-        assert!(args.contains(&"ClearAllForwardings=yes".into()));
+        assert!(args.contains(&"ClearAllForwardings=no".into()));
         assert!(args.contains(&"127.0.0.1:49152:[::1]:8080".into()));
-        assert!(args.contains(&"silo-c690f54f-4cc9-4950-8782-30f21e89d18b".into()));
+        assert!(args.contains(&alias.into()));
+
+        let resolved = Command::new(command.get_program())
+            .arg("-G")
+            .args(command.get_args())
+            .output()
+            .expect("run OpenSSH config resolution without connecting");
+        assert!(
+            resolved.status.success(),
+            "OpenSSH config resolution failed: {}",
+            String::from_utf8_lossy(&resolved.stderr)
+        );
+        let resolved = String::from_utf8_lossy(&resolved.stdout);
+        assert!(resolved.lines().any(|line| line == "clearallforwardings no"));
+        assert!(
+            resolved
+                .lines()
+                .any(|line| line == "localforward [127.0.0.1]:49152 [::1]:8080"),
+            "OpenSSH dropped the requested loopback forward:\n{resolved}"
+        );
     }
 
     #[test]
