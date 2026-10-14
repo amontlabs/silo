@@ -64,6 +64,7 @@ pub enum RegistryErrorKind {
     Internal,
     Storage,
     NotCancellable,
+    Conflict,
 }
 
 impl RegistryError {
@@ -90,6 +91,13 @@ impl RegistryError {
 
     pub(super) fn serialization(error: serde_json::Error) -> Self {
         Self::invalid(format!("Could not encode the job registry value: {error}"))
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            kind: RegistryErrorKind::Conflict,
+            message: message.into(),
+        }
     }
 
     pub fn message(&self) -> &str {
@@ -495,7 +503,7 @@ impl JobRegistry {
                 return if previous == outcome {
                     Ok(false)
                 } else {
-                    Err(RegistryError::invalid(format!(
+                    Err(RegistryError::conflict(format!(
                         "Job {job_id} already has a different terminal outcome."
                     )))
                 };

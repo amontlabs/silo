@@ -541,7 +541,8 @@ fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, Dispat
 fn registry_error(error: silo_engine::jobs::RegistryError) -> DispatchError {
     let message = error.to_string();
     let code = match error.kind() {
-        silo_engine::jobs::RegistryErrorKind::NotCancellable => ErrorCode::Internal,
+        silo_engine::jobs::RegistryErrorKind::NotCancellable
+        | silo_engine::jobs::RegistryErrorKind::Conflict => ErrorCode::Internal,
         silo_engine::jobs::RegistryErrorKind::Storage
         | silo_engine::jobs::RegistryErrorKind::Internal => {
             if message == "not_found" {
