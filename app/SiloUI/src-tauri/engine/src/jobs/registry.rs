@@ -1098,6 +1098,7 @@ mod tests {
             job_id,
             result: Some(result),
             error: None,
+            outcome_chunked: false,
         }
     }
 

@@ -251,6 +251,7 @@ pub(crate) fn start(
                             job_id: acceptance.job_id,
                             result: Some(value.clone()),
                             error: None,
+                            outcome_chunked: false,
                         },
                         silo_engine::context::Audience::All,
                     );
@@ -264,6 +265,7 @@ pub(crate) fn start(
                         job_id: acceptance.job_id,
                         result: Some(value.clone()),
                         error: None,
+                        outcome_chunked: false,
                     },
                     silo_engine::context::Audience::All,
                 );
@@ -307,6 +309,7 @@ pub(crate) fn start(
                     job_id: acceptance.job_id,
                     result: Some(value.clone()),
                     error: None,
+                    outcome_chunked: false,
                 },
                 silo_engine::context::Audience::All,
             );
@@ -518,6 +521,7 @@ pub fn reconcile_jobs_before_serving(
                 job_id,
                 result: Some(value),
                 error: None,
+                outcome_chunked: false,
             },
             silo_engine::context::Audience::All,
         )

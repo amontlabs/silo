@@ -256,6 +256,13 @@ pub struct JobFinished {
     pub result: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<crate::transport::ErrorObject>,
+    /// The complete outcome is retained and available through `operations.job.get` chunks.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub outcome_chunked: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]

@@ -5255,6 +5255,10 @@
         "jobId": {
           "$ref": "#/$defs/JobId"
         },
+        "outcomeChunked": {
+          "description": "The complete outcome is retained and available through `operations.job.get` chunks.",
+          "type": "boolean"
+        },
         "result": true
       },
       "required": [

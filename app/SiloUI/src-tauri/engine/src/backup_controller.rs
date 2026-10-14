@@ -367,6 +367,7 @@ pub fn reconcile_jobs_before_serving(context: &dyn EngineContext) -> Result<(), 
             job_id,
             result: Some(result),
             error: None,
+            outcome_chunked: false,
         },
         Audience::All,
     )
@@ -569,6 +570,7 @@ fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
                     job_id,
                     result: Some(serialized),
                     error: None,
+                    outcome_chunked: false,
                 },
                 Audience::All,
             ) {

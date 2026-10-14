@@ -892,6 +892,7 @@ fn publish_checkpoint_completion(
             job_id: job_id.clone(),
             result: Some(serde_json::Value::Null),
             error: None,
+            outcome_chunked: false,
         },
         Err(message) => silo_api::jobs::JobFinished {
             job_id: job_id.clone(),
@@ -901,6 +902,7 @@ fn publish_checkpoint_completion(
                 message: message.clone(),
                 diagnostics: None,
             }),
+            outcome_chunked: false,
         },
     };
     MACOS_PENDING_CHECKPOINT_JOBS
