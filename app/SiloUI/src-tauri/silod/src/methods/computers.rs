@@ -1022,27 +1022,28 @@ async fn begin_create(
             require_local_device(context, device_id.as_deref())?;
             let request: silo_engine::macos_computers::CreateRequest =
                 serde_json::from_value(encode(request)?).map_err(invalid)?;
-            let job = context.start_job("computers.create")?;
-            let job_id = job.job_id.clone();
-            let created = silo_engine::macos_computers::create_macos_computer_with_job(
+            // A refused request is an error and leaves no job: the job is allocated after
+            // the last synchronous refusal, and the answer comes back as soon as the
+            // preparing row exists. The work waits for its turn in the background.
+            let engine = host.context.clone();
+            let (row, job_id) = silo_engine::macos_computers::create_macos_computer_accepting(
                 host.macos_context(),
                 request,
-                job_id.clone(),
+                move || {
+                    silo_engine::jobs::allocate(engine.as_ref(), "computers.create")
+                        .map(|accepted| accepted.job_id)
+                        .map_err(|error| error.to_string())
+                },
             )
-            .await;
-            // A refused request ends the job with its reason; the job id is still the answer,
-            // as for Linux, and the row is absent.
-            let computer = match created {
-                Ok(row) => {
-                    let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
-                    serde_json::from_value(value["computers"][0].clone()).ok()
-                }
-                Err(message) => {
-                    finish_job_error(&host.context, job_id.clone(), message);
-                    None
-                }
-            };
-            Ok(plain(encode(ComputerCreateResult { job_id, computer })?))
+            .await
+            .map_err(invalid)?;
+            let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
+            let computer = serde_json::from_value(value["computers"][0].clone())
+                .map_err(|error| DispatchError::internal(error.to_string()))?;
+            Ok(plain(encode(ComputerCreateResult {
+                job_id,
+                computer: Some(computer),
+            })?))
         }
     }
 }
@@ -2037,9 +2038,9 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn creating_a_macos_computer_that_is_refused_ends_its_job_with_the_reason() {
-        let mut f = fixture();
-        let result = f
+    async fn creating_a_macos_computer_that_is_refused_is_refused_at_once_and_leaves_no_job() {
+        let f = fixture();
+        let error = f
             .call(
                 MethodName::ComputersCreate,
                 json!({
@@ -2048,12 +2049,11 @@ pub(crate) mod tests {
                 }),
             )
             .await
-            .unwrap();
-        let created: ComputerCreateResult = serde_json::from_value(result).unwrap();
-        assert!(created.computer.is_none());
-        let finished = f.next_event("operations.job.finished").await;
-        assert_eq!(finished["jobId"], created.job_id.as_str());
-        assert!(finished["error"]["message"].is_string());
+            .unwrap_err();
+        assert!(!error.message.is_empty());
+        // Not a job that ends with a reason: no job was ever accepted.
+        let registry = f.context.silod_context().job_registry().unwrap();
+        assert!(registry.list_unacknowledged().unwrap().is_empty());
     }
 
     #[tokio::test]
