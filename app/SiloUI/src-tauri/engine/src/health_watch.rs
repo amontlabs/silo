@@ -48,6 +48,15 @@ struct Baseline {
     generation: u64,
 }
 
+/// A computer that changed state with nobody asking, as clients are told (10 §12.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnexpectedChange {
+    pub computer_id: String,
+    pub name: String,
+    /// The state it is in now: `running`, `stopped`, `starting` or `failed`.
+    pub state: String,
+}
+
 #[derive(Default)]
 struct HealthState {
     baselines: HashMap<String, Baseline>,
@@ -55,6 +64,8 @@ struct HealthState {
     failures: u32,
     reported_unavailable: bool,
     any_running: bool,
+    /// The changes of the latest reading, taken by the watch after it observes.
+    changes: Vec<UnexpectedChange>,
 }
 
 impl HealthState {
@@ -119,6 +130,14 @@ impl HealthState {
         }
         self.baselines.retain(|id, _| present.contains(id));
         changed.sort_by(|a, b| a.name.cmp(&b.name));
+        self.changes = changed
+            .iter()
+            .map(|computer| UnexpectedChange {
+                computer_id: computer.id.clone(),
+                name: computer.name.clone(),
+                state: computer.state.to_ascii_lowercase(),
+            })
+            .collect();
         if changed.len() > MAX_INDIVIDUAL_NOTICES {
             let body = changed
                 .iter()
@@ -243,6 +262,8 @@ pub trait HealthWatchServices: Send + Sync + 'static {
     fn observe(&self) -> Reading;
     fn wait_for_computer_exit(&self, name: &str) -> bool;
     fn notify(&self, notice: Notice);
+    /// Tells clients about one unexpected change, as `computers.unexpectedChange`.
+    fn unexpected_change(&self, _change: UnexpectedChange) {}
 }
 
 /// Produces the host adapter used by the health watch. Implementations live in
@@ -255,7 +276,7 @@ pub fn install<H: HealthWatchHost>(host: &H) {
     install_services(host.services());
 }
 
-pub(crate) fn install_services(services: Arc<dyn HealthWatchServices>) {
+pub fn install_services(services: Arc<dyn HealthWatchServices>) {
     std::thread::spawn(move || {
         let mut health = HealthState::default();
         let waiters = ExitWaiters::default();
@@ -275,7 +296,12 @@ pub(crate) fn install_services(services: Arc<dyn HealthWatchServices>) {
                     || OPERATIONS.signal_activity(),
                 );
             }
-            for notice in health.observe(reading) {
+            health.changes.clear();
+            let notices = health.observe(reading);
+            for change in std::mem::take(&mut health.changes) {
+                services.unexpected_change(change);
+            }
+            for notice in notices {
                 services.notify(notice);
             }
             let woken = OPERATIONS.wait_for_activity(seen, health.poll_interval()) != seen;
@@ -315,6 +341,34 @@ mod tests {
                 computer("b", "Stopped", 0, true)
             ]))
             .is_empty());
+    }
+
+    #[test]
+    fn an_unexpected_change_carries_the_new_state_for_clients() {
+        let mut state = HealthState::default();
+        state.observe(reading(vec![
+            computer("a", "Running", 0, true),
+            computer("b", "Running", 0, true),
+        ]));
+        state.observe(reading(vec![
+            computer("a", "Stopped", 0, true),
+            computer("b", "Failed", 0, true),
+        ]));
+        assert_eq!(
+            state.changes,
+            vec![
+                UnexpectedChange {
+                    computer_id: "a".into(),
+                    name: "A".into(),
+                    state: "stopped".into()
+                },
+                UnexpectedChange {
+                    computer_id: "b".into(),
+                    name: "B".into(),
+                    state: "failed".into()
+                },
+            ]
+        );
     }
 
     #[test]

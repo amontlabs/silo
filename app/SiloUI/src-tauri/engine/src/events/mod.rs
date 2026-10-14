@@ -319,6 +319,48 @@ impl EventBus {
         self.publish_with_fanout_hook(event, audience, || {})
     }
 
+    /// Whether `client_id` still holds subscription `subscription` (it is gone after
+    /// `events.unsubscribe` or when the client disconnects).
+    pub fn has_subscription(&self, client_id: &ClientId, subscription: &str) -> bool {
+        self.find_subscriber(client_id).is_ok_and(|subscriber| {
+            let state = subscriber
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            !state.closed
+                && state
+                    .subscriptions
+                    .get(subscription)
+                    .is_some_and(|subscription| !subscription.closing)
+        })
+    }
+
+    /// Delivers `event` to one subscription of one client, whatever its selectors, with the
+    /// subscription's next sequence number. Used by parameterized subscriptions such as
+    /// `guest.files.watch`, whose events belong to the subscription that asked for them.
+    /// Returns false when the subscription no longer exists.
+    pub fn publish_to_subscription(
+        &self,
+        client_id: &ClientId,
+        subscription: &str,
+        event: Event,
+    ) -> bool {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.next_engine_seq = state.next_engine_seq.saturating_add(1);
+        let engine_seq = state.next_engine_seq;
+        let Some(subscriber) = state
+            .subscribers
+            .get(client_id.as_str())
+            .and_then(Weak::upgrade)
+        else {
+            return false;
+        };
+        subscriber.publish_matching(engine_seq, &event, &self.device_id, Some(subscription))
+    }
+
     fn publish_with_fanout_hook(
         &self,
         event: Event,
@@ -408,6 +450,18 @@ impl EventReceiver {
 
 impl Subscriber {
     fn publish(&self, engine_seq: u64, event: &Event, device_id: &str) {
+        self.publish_matching(engine_seq, event, device_id, None);
+    }
+
+    /// Fans `event` out to the subscriptions whose selectors match it, or only to `only`
+    /// when given. Returns whether `only` (when given) exists.
+    fn publish_matching(
+        &self,
+        engine_seq: u64,
+        event: &Event,
+        device_id: &str,
+        only: Option<&str>,
+    ) -> bool {
         let payload_bytes =
             serde_json::to_vec(&event.payload).map_or(usize::MAX, |value| value.len());
         let mut state = self
@@ -415,19 +469,21 @@ impl Subscriber {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.closed {
-            return;
+            return false;
         }
         let matching = state
             .subscriptions
             .iter()
-            .filter_map(|(id, subscription)| {
-                subscription
+            .filter_map(|(id, subscription)| match only {
+                Some(only) => (id == only && !subscription.closing).then(|| id.clone()),
+                None => subscription
                     .selectors
                     .iter()
                     .any(|selector| selector_matches(selector, &event.name))
-                    .then(|| id.clone())
+                    .then(|| id.clone()),
             })
             .collect::<Vec<_>>();
+        let found = !matching.is_empty();
         for id in matching {
             let prepared = {
                 let Some(subscription) = state.subscriptions.get_mut(&id) else {
@@ -479,7 +535,7 @@ impl Subscriber {
                 state.closed = true;
                 drop(state);
                 self.notify.notify_waiters();
-                return;
+                return found;
             }
             let delivery = SequencedEvent {
                 subscription: id.clone(),
@@ -505,6 +561,7 @@ impl Subscriber {
         }
         drop(state);
         self.notify.notify_one();
+        found
     }
 }
 
@@ -701,6 +758,43 @@ mod tests {
         };
         assert_eq!(engine_sequences(&first_order), vec![1, 2]);
         assert_eq!(engine_sequences(&second_order), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn a_targeted_event_reaches_only_its_subscription_with_that_sequence() {
+        let bus = EventBus::default();
+        let client = client();
+        let mut receiver = bus.connect(client.clone());
+        let first = bus
+            .subscribe(&client, vec!["guest.files.changed".to_owned()])
+            .unwrap();
+        let second = bus
+            .subscribe(&client, vec!["guest.files.changed".to_owned()])
+            .unwrap();
+        bus.activate(&client, &first).unwrap();
+        bus.activate(&client, &second).unwrap();
+        assert!(bus.has_subscription(&client, &first));
+        assert!(!bus.has_subscription(&client, "never-created"));
+        assert!(!bus.has_subscription(&ClientId::new("client-b"), &first));
+        let event = Event::new(
+            "guest.files.changed",
+            serde_json::json!({"subscriptionId": second, "path": "/forms"}),
+        );
+        assert!(bus.publish_to_subscription(&client, &second, event.clone()));
+        let Some(EventDelivery::Event(delivered)) = receiver.recv().await else {
+            panic!("expected the targeted event");
+        };
+        assert_eq!(
+            (delivered.subscription.as_str(), delivered.seq),
+            (second.as_str(), 1)
+        );
+        assert!(receiver.subscriber.state.lock().unwrap().queue.is_empty());
+        assert!(!bus.publish_to_subscription(&client, "missing", event.clone()));
+        assert!(!bus.publish_to_subscription(&ClientId::new("client-b"), &second, event));
+        bus.unsubscribe(&client, &first);
+        assert!(!bus.has_subscription(&client, &first));
+        bus.disconnect(&client);
+        assert!(!bus.has_subscription(&client, &second));
     }
 
     #[test]
