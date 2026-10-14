@@ -47,7 +47,7 @@ as the previous boot's (boots are nearly deterministic) made PulseAudio exit wit
 computer use reported "The Linux desktop was not running". Reproduced on the first
 restart of a built-in computer; intermittent on restart and on import.
 
-## Selkies settings, screen size and recipe 4
+## Selkies settings, screen size and recipes 4 and 5
 
 `launch_selkies_streamer` in `guest/desktop-service.py` starts Selkies 2.0.0 with
 these settings. Syntax is from `src/selkies/settings.py` at tag 2.0.0: a bool is on
@@ -124,10 +124,10 @@ assumption. In a very large window (a fullscreen Retina viewer asking for about 
 viewer detects the smaller
 realized resolution and shows a slightly scaled picture fitted to the window.
 
-**Recipe 4.** `recipeVersion` in `desktop-streamer-lock.json` is 4. The service
-accepts receipts 1, 2, 3 and 4. An older receipt is a runnable desktop with an
+**Recipe 4 and 5.** `recipeVersion` in `desktop-streamer-lock.json` is 5. The service
+accepts receipts 1 to 5. An older receipt is a runnable desktop with an
 optional update (a rerun of `setup-desktop.sh install` on such a computer first applies
-both Selkies patches, so the new flags never meet unpatched Selkies): the helper reports `updateAvailable` and leaves `updateRequired`
+the three Selkies patches, so the new flags never meet unpatched Selkies): the helper reports `updateAvailable` and leaves `updateRequired`
 false. `updateRequired` is only for a receipt the service cannot run (invalid or
 unknown revision), where Start is replaced by "Update desktop".
 
@@ -159,18 +159,60 @@ showing "Update desktop" alone, and a viewer that predates it ignores
 as the primary action and shows "Update desktop" beside it with a note about
 clipboard, sound control and window-sized screen (a Kasm desktop gets the same
 secondary button). Choosing it runs `setup-desktop.sh update-streamer`. This is the
-recipe 1, 2 or 3 to 4 path: it reinstalls the pinned Selkies package, applies the
-web client and display scaling patches, keeps the viewer credentials, rewrites the
-receipt as recipe 4 and installs the new service (with the device-pixel and
+recipe 1 to 4 to 5 path: it reinstalls the pinned Selkies package, applies the
+web client, display scaling and multi-client patches, keeps the viewer credentials, rewrites the
+receipt as recipe 5 and installs the new service (with the device-pixel and
 damage-gated flags above). It
 does not rebuild the computer, touch files or restart a running desktop (it
 refuses to run while the session is up). It needs network access for the pinned
 package download, even on a v4 image that already contains it. New computers get
-recipe 4 from the install or preinstalled-image path, where the guest image check
-also requires that both patches apply. Packages are unchanged, so
-no guest image bump is needed; `xrandr` (`x11-xserver-utils`) is not listed in
+recipe 5 from the install or preinstalled-image path, where the guest image check
+also requires that all three patches apply. Packages are unchanged, so
+no guest image bump is needed (the image carries the unpatched upstream package; every patch
+is applied inside the computer); `xrandr` (`x11-xserver-utils`) is not listed in
 `desktop-packages.txt`; it is expected through `xfce4-session`'s dependencies and
 must be confirmed on a live v4 computer.
+
+## Several viewers of one computer (recipe 5)
+
+Two clients (Silo and Fjord, or two Fjord windows) can each keep a viewer of the same Linux
+computer. The engine already gives every client its own proxy, tunnel, cookie and Selkies
+WebSocket (A-28); the streamer used to undo that. Probe B-21 measured it, and the pinned
+`websockets_mode.py` shows why: a page whose first `SETTINGS` names the `primary` display
+while another page holds it sends the holder `KILL ...` and closes it with `Superseded by
+new client`, which the web client reads as final (no auto-reconnect). Selkies' own answer is
+the shared viewer (`?role=viewer`, the `#shared` link, or a viewer token under secure mode): any number
+of them, each with its own bounded video relay, but read-only (no keyboard, mouse, clipboard
+write, resize or audio control) and only on a page built for it. A second Selkies process per
+client was rejected: every process would run its own encoder, clipboard monitor, cursor capture
+and RandR resizer against the one X screen.
+
+`guest/patch-selkies-multiclient.py` (source-hash guarded like the other two, applied after
+the display scaling patch to `selkies/websockets_mode.py`) keeps the page and decides on the
+server:
+
+| Situation | Behavior |
+|---|---|
+| First page of a session | Holds the primary display as before: its `SETTINGS` size the screen and set the encoder, and its acknowledgements pace the encoder. |
+| Another page asks for the held display | It becomes a peer: it joins through the shared-viewer path (per-client bounded relay, keyframe throttle, pause on a hidden tab, no microphone) and receives the same stream, resolution broadcasts and clipboard replies addressed to it. It may send keyboard, mouse and clipboard messages, `START_AUDIO` / `STOP_AUDIO`, and size (`r,`) and density (`s,`) requests, which address the one primary display: the screen is shared, requests run through the existing serialized reconfigure and the last accepted one wins, and every page adapts to the realized size as the web client already does for a resolution it did not request (the engine's "Reset screen" works from any viewer). Encoder, frame rate, bitrate and `cmd` messages from a peer are dropped quietly: those stay with the holder. |
+| The holder leaves, or a reload overlaps its predecessor | The oldest peer takes the display at once (no restart, fresh acknowledgement state) and from then on sizes the screen. Without a peer the display is torn down after the 3 s reconnect grace, as before. |
+| Audio | On and off is per page. A page that stops audio stops receiving it; the capture ends when no page that wants it is left. |
+| Open at the same moment | The per-address reconnect debounce (500 ms) is off: every page reaches the guest from its own loopback through the engine's tunnels. |
+
+The display patch learns the multi-client hash as an already-patched state (`later` in its
+`MODULES` entry), so the idempotent re-runs at every repair and image check still pass. The
+three-patch install script (`SILO_SELKIES_MULTICLIENT_PATCH_SOURCE`) is sent as one `sh -c`
+argument and must stay below Linux's 128 KiB per-argument limit; a unit test in
+`engine/src/desktop.rs` fails before it gets there.
+
+Tests: `app/SiloUI/scripts/test_selkies_multiclient_patch.py` applies the patch to the pinned
+2.0.0 sources and drives the real patched `ws_handler` with fake sockets (admission, three
+pages, input gating, alternating resizes, handover, reload overlap, audio, cleanup). It needs the checkout of
+Selkies 2.0.0 the other patch tests use and the pure-Python dependencies of Selkies, and skips
+without them. Not covered, because it needs a running guest: real H.264 frames to two WebKit
+pages, concurrent resize, clipboard round trips and audio playback. Qualify those live (B-21)
+before advertising independent viewers: open two viewers on a recipe 5 computer, close each in
+turn, alternate window resizes and mute/unmute from each.
 
 ## Guest image v4: the desktop is part of the computer
 

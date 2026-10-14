@@ -262,9 +262,6 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         | "reduceMotion"
         | "computerUseAutoApproval"
         | "notificationsEnabled"
-        | "notifyHealth"
-        | "notifyActions"
-        | "notifyBackup"
         | "notifyFailures"
         | "notifyChanges"
         | "notifyCompletions"
@@ -1180,7 +1177,7 @@ mod tests {
             "startComputersAtLaunch": false, "startupComputerIds": [],
             "terminal": "iTerm", "editor": "Cursor", "browser": "Firefox",
             "reduceMotion": true, "notificationsEnabled": false,
-            "notifyHealth": true, "notifyActions": false, "notifyBackup": true,
+            "notifyFailures": true, "notifyChanges": false, "notifyCompletions": true,
             "alphaNoticeDismissed": true,
             "editorIncludeNoticeDismissed": "Include \"/home/user/.silo/bbbbbbbbbbbb/ssh/*.conf\""
         });

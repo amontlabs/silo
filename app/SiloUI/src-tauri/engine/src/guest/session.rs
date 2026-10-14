@@ -26,7 +26,7 @@ use std::{
     io::Write,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc, Arc, Mutex, OnceLock,
+        mpsc, Arc, Condvar, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant},
@@ -40,7 +40,13 @@ const MAX_PENDING_INPUT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_FINISHED_SESSIONS: usize = 64;
 const FINISHED_RETENTION: Duration = Duration::from_secs(3600);
 /// How long a cancelled run's host process may linger after the guest tree is gone.
+#[cfg(not(test))]
 const HOST_EXIT_GRACE: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const HOST_EXIT_GRACE: Duration = Duration::from_millis(300);
+
+/// The method whose accepted jobs are exec jobs.
+pub const EXEC_METHOD: &str = "guest.exec.start";
 
 pub use silo_api::methods::guest::GuestExecState as ExecState;
 
@@ -216,6 +222,10 @@ struct Session {
     /// Set once the host process has ended.
     host_exited: AtomicBool,
     cancelled_at: Mutex<Option<Instant>>,
+    /// Why ending the guest process tree failed after a cancellation, once known.
+    stop_failure: Mutex<Option<String>>,
+    /// Set (with a wake-up) when the cancellation's attempt to end the tree has finished.
+    stop_finished: (Mutex<bool>, Condvar),
     input: Mutex<Option<mpsc::Sender<Input>>>,
     pending_input: Arc<AtomicUsize>,
     child: Mutex<Option<Arc<Mutex<std::process::Child>>>>,
@@ -243,6 +253,8 @@ impl Session {
             cancel: AtomicBool::new(false),
             host_exited: AtomicBool::new(false),
             cancelled_at: Mutex::new(None),
+            stop_failure: Mutex::new(None),
+            stop_finished: (Mutex::new(false), Condvar::new()),
             input: Mutex::new(None),
             pending_input: Arc::new(AtomicUsize::new(0)),
             child: Mutex::new(None),
@@ -291,7 +303,14 @@ impl Session {
         if let Ok(payload) = serde_json::to_value(&event) {
             context.publish(Event::new("guest.exec.output", payload), Audience::All);
         }
-        if self.retain > 0 && data.len() <= self.retain {
+        if data.len() > self.retain {
+            // A chunk the budget cannot hold is not kept, and neither is anything before it:
+            // the replay is always a contiguous run of the newest chunks, and
+            // `firstRetainedSeq` says where it starts (one past this chunk, until a later
+            // chunk fits).
+            progress.ring.clear();
+            progress.ring_bytes = 0;
+        } else {
             progress.ring_bytes += data.len();
             progress.ring.push_back(Chunk { seq, stream, data });
             while progress.ring_bytes > self.retain || progress.ring.len() > MAX_RETAINED_CHUNKS {
@@ -304,7 +323,7 @@ impl Session {
     }
 
     fn request_cancel(self: &Arc<Self>) {
-        if self.cancel.swap(true, Ordering::SeqCst) {
+        if self.progress().finished_at.is_some() || self.cancel.swap(true, Ordering::SeqCst) {
             return;
         }
         *self
@@ -314,7 +333,16 @@ impl Session {
         let session = self.clone();
         thread::spawn(move || {
             // The guest tree first: SIGTERM, a grace period, SIGKILL, confirmed gone.
-            let _ = terminate(&session.target, session.root, &session.token);
+            let failure = match terminate(&session.target, session.root, &session.token) {
+                Ok(true) => None,
+                Ok(false) => Some("Some of its processes are still running.".to_owned()),
+                Err(error) => Some(error.message),
+            };
+            *session
+                .stop_failure
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+            session.mark_stop_finished();
             // The host process ends with the guest command; if it lingers, end it too.
             let deadline = Instant::now() + HOST_EXIT_GRACE;
             while !session.host_exited.load(Ordering::SeqCst) && Instant::now() < deadline {
@@ -324,6 +352,33 @@ impl Session {
                 session.kill_host();
             }
         });
+    }
+
+    fn mark_stop_finished(&self) {
+        let (finished, wake) = &self.stop_finished;
+        *finished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        wake.notify_all();
+    }
+
+    /// Waits for the cancellation's attempt to end the guest tree and returns why it failed,
+    /// if it did. The attempt is bounded by the control commands' own timeouts.
+    fn stop_failure(&self) -> Option<String> {
+        let (finished, wake) = &self.stop_finished;
+        let mut done = finished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while !*done {
+            done = wake
+                .wait(done)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        drop(done);
+        self.stop_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn kill_host(&self) {
@@ -424,13 +479,23 @@ fn wait_for_exit(
             Err(error) => break Err(error),
         }
     };
-    join_readers(readers, session.cancel.load(Ordering::SeqCst));
+    drain_readers(readers, &session.cancel);
     session
         .input
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
     let cancelled = session.cancel.load(Ordering::SeqCst);
+    if cancelled {
+        if let Some(reason) = session.stop_failure() {
+            session.finish_failed(
+                &*context,
+                ErrorCode::Internal,
+                &format!("The command could not be stopped in the computer. {reason}"),
+            );
+            return;
+        }
+    }
     let status = match status {
         Ok(status) => status,
         Err(error) => {
@@ -454,45 +519,48 @@ fn wait_for_exit(
         }
         return;
     };
-    if !cancelled {
-        let stderr_head = String::from_utf8_lossy(
-            &session
-                .stderr_head
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
-        .into_owned();
-        if let Some(error) = session.target.channel_error(code, &stderr_head) {
-            session.finish_failed(&*context, error.code, &error.message);
-            return;
-        }
-    }
-    let (exit_code, signal) =
-        exec::settle_exit(&session.target, session.root, &session.token, code);
+    let stderr_head = String::from_utf8_lossy(
+        &session
+            .stderr_head
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+    .into_owned();
+    let settled = exec::settle_exit(
+        &session.target,
+        session.root,
+        &session.token,
+        code,
+        &stderr_head,
+    );
     if cancelled {
+        let (exit_code, signal) = settled.unwrap_or((None, None));
         session.finish_cancelled(&*context, exit_code, signal);
-    } else {
-        session.finish_exited(&*context, exit_code, signal);
+        return;
+    }
+    match settled {
+        Ok((exit_code, signal)) => session.finish_exited(&*context, exit_code, signal),
+        Err(error) => session.finish_failed(&*context, error.code, &error.message),
     }
 }
 
-/// Waits for the output readers to reach end-of-file. After a cancellation a descendant of the
-/// command that outlived it could hold the pipes open, so the wait is bounded.
-fn join_readers(readers: Vec<thread::JoinHandle<()>>, bounded: bool) {
-    if !bounded {
-        for reader in readers {
-            let _ = reader.join();
+/// Waits for the output readers to reach end-of-file. A descendant of the command that
+/// outlived it could hold the pipes open, so once a cancellation is requested (at any point
+/// of the wait) the wait ends shortly after and the readers are left to finish on their own.
+fn drain_readers(readers: Vec<thread::JoinHandle<()>>, cancel: &AtomicBool) {
+    let mut cancelled_at: Option<Instant> = None;
+    while !readers.iter().all(thread::JoinHandle::is_finished) {
+        if cancel.load(Ordering::SeqCst) {
+            let since = *cancelled_at.get_or_insert_with(Instant::now);
+            if since.elapsed() >= process::CLEANUP_GRACE {
+                return;
+            }
         }
-        return;
+        thread::sleep(Duration::from_millis(5));
     }
-    let (done, finished) = mpsc::channel();
-    thread::spawn(move || {
-        for reader in readers {
-            let _ = reader.join();
-        }
-        let _ = done.send(());
-    });
-    let _ = finished.recv_timeout(Duration::from_secs(2));
+    for reader in readers {
+        let _ = reader.join();
+    }
 }
 
 fn sessions() -> std::sync::MutexGuard<'static, HashMap<JobId, Arc<Session>>> {
@@ -594,6 +662,15 @@ pub fn exec_get(
     let lookup = crate::jobs::get_at(context, job_id, None)
         .map_err(|error| GuestError::internal(error.to_string()))?
         .ok_or_else(|| GuestError::not_found("The exec job was not found."))?;
+    // Only jobs started by `guest.exec.start` are exec jobs; another domain's job is not one.
+    let method = context
+        .job_registry()
+        .map_err(GuestError::internal)?
+        .method_of(job_id)
+        .map_err(|error| GuestError::internal(error.to_string()))?;
+    if method.as_deref() != Some(EXEC_METHOD) {
+        return Err(GuestError::not_found("The exec job was not found."));
+    }
     let session = sessions().get(job_id).cloned();
     if let Some(session) = session {
         let progress = session.progress();
@@ -903,5 +980,189 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.code, ErrorCode::NotRunning);
+    }
+
+    /// The pid a script wrote into `file`, once it is complete.
+    fn wait_for_pid(file: &std::path::Path) -> i32 {
+        loop {
+            if let Some(pid) = std::fs::read_to_string(file)
+                .ok()
+                .filter(|text| text.ends_with('\n'))
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            thread::yield_now();
+        }
+    }
+
+    fn process_exists(pid: i32) -> bool {
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn cancelling_ends_descendants_that_outlive_a_command_that_exited_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = RecordingContext::new(directory.path());
+        let file = directory.path().join("descendant");
+        // The command ends at once; its background process keeps the output pipes open, so
+        // the job is still running when the cancellation arrives.
+        let script = format!("sleep 300 & echo $! > '{}'; exit 0", file.display());
+        let job = start(directory.path(), &context, request(&["sh", "-c", &script]));
+        let pid = wait_for_pid(&file);
+        assert!(process_exists(pid));
+        assert_eq!(
+            crate::jobs::get_at(&*context, &job, None)
+                .unwrap()
+                .unwrap()
+                .state,
+            silo_api::jobs::JobState::Running
+        );
+        context.job_registry().unwrap().cancel(&job).unwrap();
+        let finished = context.wait_finished(&job);
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            ErrorCode::Cancelled
+        );
+        assert!(
+            !process_exists(pid),
+            "the descendant must be gone once the cancellation is confirmed"
+        );
+    }
+
+    #[test]
+    fn a_cancellation_that_could_not_end_the_tree_is_a_failure_not_a_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = test_support::runtime_with_exec_prelude(
+            directory.path(),
+            // Every guest control command (`perl … -- kill …`) fails, as if the guest were
+            // unreachable at that moment.
+            r#"for word in "$@"; do [ "$word" = kill ] && exit 1; done"#,
+        );
+        let target =
+            crate::guest::resolve(Ok(paths), directory.path(), test_support::COMPUTER_ID).unwrap();
+        let context = RecordingContext::new(directory.path());
+        let file = directory.path().join("survivor");
+        let script = format!("sleep 300 & echo $! > '{}'; wait", file.display());
+        let prepared = StartedExec::prepare(&target, &request(&["sh", "-c", &script])).unwrap();
+        let accepted =
+            crate::jobs::accept_domain_id(&*context, "job", "2000001", "guest.exec.start").unwrap();
+        let job = accepted.job_id.clone();
+        prepared.launch(context.clone(), accepted.job_id).unwrap();
+        let pid = wait_for_pid(&file);
+        context.job_registry().unwrap().cancel(&job).unwrap();
+        let finished = context.wait_finished(&job);
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        let error = finished.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, ErrorCode::Internal);
+        assert!(
+            error.message.contains("could not be stopped"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            exec_get(&*context, &job, None).unwrap().state,
+            ExecState::Lost
+        );
+    }
+
+    #[test]
+    fn cancelling_after_the_command_exited_but_before_its_output_ended_finishes_the_job() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = RecordingContext::new(directory.path());
+        let file = directory.path().join("daemon");
+        // A process in its own session keeps both output pipes open after the command ended,
+        // outside the process group a cancellation ends.
+        let script = format!(
+            "perl -e 'use POSIX; if (fork() == 0) {{ POSIX::setsid(); open(F, \">\", \"{file}\"); print F \"$$\\n\"; close F; exec \"sleep\", \"300\"; }}'",
+            file = file.display()
+        );
+        let job = start(directory.path(), &context, request(&["sh", "-c", &script]));
+        let pid = wait_for_pid(&file);
+        context.job_registry().unwrap().cancel(&job).unwrap();
+        let finished = context.wait_finished(&job);
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            ErrorCode::Cancelled
+        );
+    }
+
+    fn session_with_budget(
+        directory: &std::path::Path,
+        retain: usize,
+    ) -> (Arc<RecordingContext>, Session) {
+        let context = RecordingContext::new(directory);
+        let session = Session::new(
+            JobId::new("job:7777").unwrap(),
+            test_support::target(directory),
+            "token".into(),
+            false,
+            retain,
+            false,
+        );
+        (context, session)
+    }
+
+    fn retained(session: &Session) -> (Vec<u64>, u64) {
+        let progress = session.progress();
+        (
+            progress.ring.iter().map(|chunk| chunk.seq).collect(),
+            progress.ring.front().map_or(progress.next_seq, |c| c.seq),
+        )
+    }
+
+    #[test]
+    fn an_oversized_chunk_clears_the_replay_so_it_stays_a_contiguous_suffix() {
+        let directory = tempfile::tempdir().unwrap();
+        let (context, session) = session_with_budget(directory.path(), 10);
+        let put = |len: usize| session.output(&*context, StreamKind::Stdout, vec![b'x'; len]);
+        put(4); // seq 1
+        put(4); // seq 2
+        assert_eq!(retained(&session), (vec![1, 2], 1));
+        put(20); // seq 3, larger than the whole budget
+        assert_eq!(
+            retained(&session),
+            (vec![], 4),
+            "nothing older than the oversized chunk may remain"
+        );
+        put(3); // seq 4
+        put(3); // seq 5
+        assert_eq!(retained(&session), (vec![4, 5], 4));
+        put(11); // seq 6, an oversized final chunk
+        assert_eq!(retained(&session), (vec![], 7));
+    }
+
+    #[test]
+    fn only_exec_jobs_answer_exec_get_and_acknowledging_drops_the_replay() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = RecordingContext::new(directory.path());
+        // Another domain's finished job is not an exec job.
+        let other = crate::jobs::accept_domain_id(&*context, "transfer", "t1", "files.upload")
+            .unwrap()
+            .job_id;
+        crate::jobs::finish_with_result(
+            &*context,
+            other.clone(),
+            serde_json::json!({"status": "done"}),
+            Audience::All,
+        )
+        .unwrap();
+        assert_eq!(
+            exec_get(&*context, &other, None).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        // An exec job keeps its replay until it is acknowledged.
+        let job = start(directory.path(), &context, request(&["echo", "hi"]));
+        context.wait_finished(&job);
+        assert!(sessions().contains_key(&job));
+        forget_finished(&job);
+        assert!(!sessions().contains_key(&job));
+        // A running job keeps its session.
+        let running = start(directory.path(), &context, request(&["sleep", "300"]));
+        forget_finished(&running);
+        assert!(sessions().contains_key(&running));
+        cancel_exec(&running).unwrap();
+        context.wait_finished(&running);
     }
 }
