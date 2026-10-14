@@ -9,10 +9,12 @@ use silo_api::{
         method_registry, MethodDescriptor, MethodName,
     },
     transport::{
-        ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult, ProtocolRange,
-        RequestEnvelope, ResponseEnvelope, PROTOCOL_VERSION,
+        ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult,
+        IncompatibleVersionDiagnostics, ProtocolRange, RequestEnvelope, ResponseEnvelope,
+        PROTOCOL_VERSION,
     },
 };
+use silo_engine::context::EngineContext;
 use uuid::Uuid;
 
 use crate::context::SilodContext;
@@ -330,19 +332,21 @@ impl Dispatcher {
             || params.protocol.min > params.protocol.max
             || overlap_min > overlap_max
         {
-            let app_version = params
-                .client
-                .as_ref()
-                .map(|client| client.version.as_str())
-                .unwrap_or("unknown");
+            let diagnostics = IncompatibleVersionDiagnostics {
+                engine_protocol_range: supported,
+                client_protocol_range: params.protocol,
+                engine_app_version: self.context.identity().version.clone(),
+                client_app_version: params
+                    .client
+                    .as_ref()
+                    .map(|client| client.version.clone()),
+            };
             return PreparedRequest::Close(
-                Some(error_response(
+                Some(error_response_with_diagnostics(
                     raw.id,
                     ErrorCode::IncompatibleVersion,
-                    format!(
-                        "No common protocol version; engine={}..={} client={}..={} appVersion={app_version}",
-                        supported.min, supported.max, params.protocol.min, params.protocol.max
-                    ),
+                    "No common protocol version".to_owned(),
+                    Some(diagnostics),
                 )),
                 "Incompatible protocol range".to_owned(),
             );
@@ -428,9 +432,22 @@ fn success_response(id: String, result: Value) -> ResponseEnvelope<Value> {
 }
 
 fn error_response(id: String, code: ErrorCode, message: String) -> ResponseEnvelope<Value> {
+    error_response_with_diagnostics(id, code, message, None)
+}
+
+fn error_response_with_diagnostics(
+    id: String,
+    code: ErrorCode,
+    message: String,
+    diagnostics: Option<IncompatibleVersionDiagnostics>,
+) -> ResponseEnvelope<Value> {
     ResponseEnvelope::Error {
         id,
-        error: ErrorObject { code, message },
+        error: ErrorObject {
+            code,
+            message,
+            diagnostics,
+        },
     }
 }
 
@@ -548,6 +565,37 @@ mod tests {
             Some(ResponseEnvelope::Error { error, .. })
                 if error.code == ErrorCode::IncompatibleVersion
         ));
+    }
+
+    #[tokio::test]
+    async fn incompatible_handshake_reports_distinct_engine_and_client_diagnostics() {
+        let dispatcher = dispatcher();
+        let mut session = SessionState::default();
+        let request = serde_json::json!({
+            "id": "incompatible",
+            "method": "engine.handshake",
+            "params": {
+                "protocol": { "min": 5, "max": 5 },
+                "client": { "name": "Fjord", "version": "9.8.7" }
+            }
+        });
+        let reply = dispatcher
+            .execute(dispatcher.prepare(request, &mut session))
+            .await;
+        let value = serde_json::to_value(reply.response.unwrap()).unwrap();
+
+        assert!(reply.close);
+        assert_eq!(
+            value["error"]["diagnostics"]["engineProtocolRange"],
+            serde_json::json!({ "min": PROTOCOL_VERSION, "max": PROTOCOL_VERSION })
+        );
+        assert_eq!(
+            value["error"]["diagnostics"]["clientProtocolRange"],
+            serde_json::json!({ "min": 5, "max": 5 })
+        );
+        assert_eq!(value["error"]["diagnostics"]["engineAppVersion"], "0.1.0");
+        assert_eq!(value["error"]["diagnostics"]["clientAppVersion"], "9.8.7");
+        assert!(value["error"].get("appVersion").is_none());
     }
 
     #[tokio::test]
