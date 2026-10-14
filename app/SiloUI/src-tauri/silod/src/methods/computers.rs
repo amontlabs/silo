@@ -424,8 +424,7 @@ fn new_request_id(request_id: Option<String>) -> Result<String, DispatchError> {
     Ok(request_id)
 }
 
-/// Accepts the job `setup:<requestId>` and directs its progress and outcome to the client
-/// that asked (10 `computers.configuration.change`).
+/// Accepts the job `setup:<requestId>`.
 fn accept_setup_job(
     context: &HandlerContext,
     method: &str,
@@ -445,10 +444,21 @@ fn accept_setup_job(
             .to_owned(),
         });
     }
-    silo_engine::runtime::bind_setup_audience(request_id, context.client_id().clone());
     Ok(JobStartResult {
         job_id: accepted.job_id,
     })
+}
+
+/// A Linux setup job, whose progress and outcome go only to the client that asked
+/// (10 `computers.configuration.change`).
+fn accept_linux_setup_job(
+    context: &HandlerContext,
+    method: &str,
+    request_id: &str,
+) -> Result<JobStartResult, DispatchError> {
+    let job = accept_setup_job(context, method, request_id)?;
+    silo_engine::runtime::bind_setup_audience(request_id, context.client_id().clone());
+    Ok(job)
 }
 
 /// A fallback for failures before the engine accepted its work. After acceptance the engine
@@ -926,7 +936,7 @@ async fn begin_configuration_change(
         .transpose()?;
     let change = linux_change(params.change)?;
     let request_id = new_request_id(params.request_id)?;
-    let job = accept_setup_job(context, "computers.configuration.change", &request_id)?;
+    let job = accept_linux_setup_job(context, "computers.configuration.change", &request_id)?;
     run_linux_change(&host, job.job_id.clone(), request_id, change, retry_name);
     job_output(job)
 }
@@ -943,7 +953,7 @@ async fn begin_configuration_retry(
         .map(|id| linux_name_for_id(&host, id))
         .transpose()?;
     let request_id = new_request_id(params.request_id)?;
-    let job = accept_setup_job(context, "computers.configuration.retry", &request_id)?;
+    let job = accept_linux_setup_job(context, "computers.configuration.retry", &request_id)?;
     let worker = host.clone();
     let job_id = job.job_id.clone();
     let worker_job = job_id.clone();
@@ -973,7 +983,7 @@ async fn begin_create(
             require_local_device(context, device_id.as_deref())?;
             let configuration = serde_json::from_value(encode(configuration)?).map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
-            let job = accept_setup_job(context, "computers.create", &request_id)?;
+            let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
                 configuration,
                 expected: None,
@@ -1039,7 +1049,7 @@ async fn begin_delete(
                 expected: serde_json::from_value(encode(expected)?).map_err(invalid)?,
             };
             let request_id = new_request_id(params.request_id)?;
-            let job = accept_setup_job(context, "computers.delete", &request_id)?;
+            let job = accept_linux_setup_job(context, "computers.delete", &request_id)?;
             run_linux_change(&host, job.job_id.clone(), request_id, change, None);
             job_output(job)
         }
