@@ -4,6 +4,7 @@ pub(crate) mod dependencies;
 pub(crate) mod desktop_bridge;
 pub(crate) mod desktop_viewer_bench;
 pub(crate) mod desktop_viewer_media;
+pub(crate) mod notifications;
 pub(crate) mod preparation;
 pub(crate) mod system_integrations;
 pub(crate) mod viewer_clipboard;

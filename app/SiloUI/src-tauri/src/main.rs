@@ -239,8 +239,8 @@ fn main() {
             commands::system_integrations::read_system_integrations,
             commands::system_integrations::set_login_item,
             commands::system_integrations::request_notification_authorization,
-            notifications::deliver_notice,
-            notifications::clear_computer_notices,
+            commands::notifications::deliver_notice,
+            commands::notifications::clear_computer_notices,
             commands::system_integrations::open_integration_settings,
             commands::system_integrations::show_integration_error,
             editor::read_editor_include_notice,
@@ -340,7 +340,7 @@ fn main() {
                 window.show()?;
                 #[cfg(target_os = "macos")]
                 titlebar::install(&window)?;
-                notifications::install(app.handle());
+                commands::notifications::install(app.handle());
                 updates::install(app.handle())?;
                 ssh_access::start_monitor(app.handle());
                 editor::refresh_transports(app.handle());

@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use tauri::{AppHandle, Emitter};
 
 use crate::system_integrations::NotificationDelivery;
 
@@ -116,28 +115,6 @@ pub(crate) fn enabled(settings: &Map<String, Value>, category: Category) -> bool
         }
 }
 
-pub(crate) fn install(app: &AppHandle) {
-    crate::system_integrations::install_notifications(app);
-    crate::health_watch::install(app);
-}
-
-/// A notice with no other UI owner: in-app toast and, when unfocused, a system notification.
-pub(crate) fn notify(app: &AppHandle, notice: Notice) {
-    let _ = app.emit(NOTICE_EVENT, &notice);
-    notify_native(app, notice);
-}
-
-/// A system notification only, for notices whose toast another owner already shows.
-/// Delivery runs off the calling thread and never changes the caller's result.
-pub(crate) fn notify_native(app: &AppHandle, notice: Notice) {
-    let pending = DELIVERED
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .prepare(notice);
-    let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || deliver(&app, pending));
-}
-
 /// Submitted and queued notification keys by computer id, so deletion withdraws both.
 #[derive(Default)]
 struct DeliveredIndex {
@@ -170,7 +147,7 @@ struct NoticeGate {
     cleared_through: AtomicU64,
 }
 
-struct PendingDelivery {
+pub(crate) struct PendingDelivery {
     notice: Notice,
     gate: Arc<NoticeGate>,
     revision: u64,
@@ -220,7 +197,7 @@ impl PendingDelivery {
         self.revision <= self.gate.cleared_through.load(Ordering::SeqCst)
     }
 
-    fn deliver(
+    pub(crate) fn deliver(
         self,
         allowed: impl FnOnce(&Notice) -> bool,
         send: impl FnOnce(&Notice) -> Result<NotificationDelivery, String>,
@@ -255,12 +232,28 @@ impl PendingDelivery {
     }
 }
 
-struct PendingWithdrawal {
+static DELIVERED: LazyLock<Mutex<DeliveredIndex>> = LazyLock::new(Default::default);
+
+pub(crate) fn prepare_delivery(notice: Notice) -> PendingDelivery {
+    DELIVERED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .prepare(notice)
+}
+
+pub(crate) fn withdraw_computer(computer_id: &str) -> PendingWithdrawal {
+    DELIVERED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .withdraw(computer_id)
+}
+
+pub(crate) struct PendingWithdrawal {
     notices: Vec<(String, Arc<NoticeGate>, u64)>,
 }
 
 impl PendingWithdrawal {
-    fn clear(self, mut clear: impl FnMut(&[String])) {
+    pub(crate) fn clear(self, mut clear: impl FnMut(&[String])) {
         for (key, gate, revision) in self.notices {
             let submitted = gate
                 .submitted
@@ -274,54 +267,7 @@ impl PendingWithdrawal {
     }
 }
 
-static DELIVERED: LazyLock<Mutex<DeliveredIndex>> = LazyLock::new(Default::default);
-
-/// Remove delivered system notifications about one computer (for example, after deletion).
-/// Runs off the calling thread; failures are ignored.
-pub(crate) fn clear_computer(_app: &AppHandle, computer_id: &str) {
-    let pending = DELIVERED
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .withdraw(computer_id);
-    tauri::async_runtime::spawn_blocking(move || {
-        pending.clear(crate::system_integrations::clear_notifications);
-    });
-}
-
-fn main_window_focused(app: &AppHandle) -> bool {
-    use tauri::Manager;
-    app.get_webview_window("main").is_some_and(|window| {
-        window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false)
-    })
-}
-
-fn deliver(app: &AppHandle, pending: PendingDelivery) {
-    // A delivery failure must not change the result of the computer/backup operation.
-    pending.deliver(
-        |notice| {
-            if main_window_focused(app) {
-                return false;
-            }
-            let Ok(settings) = crate::settings::current_settings(app) else {
-                return false;
-            };
-            enabled(&settings, notice.category)
-        },
-        crate::system_integrations::deliver_notification,
-        crate::system_integrations::clear_notifications,
-    );
-}
-
-/// Frontend mirror of a toast it already shows. System notification only.
-#[tauri::command]
-pub(crate) fn deliver_notice(app: AppHandle, notice: Notice) {
-    notify_native(&app, notice);
-}
-
-#[tauri::command]
-pub(crate) fn clear_computer_notices(app: AppHandle, computer_id: String) {
-    clear_computer(&app, &computer_id);
-}
+pub(crate) use crate::commands::notifications::{clear_computer, notify, notify_native};
 
 /// Longest body shown in a system notification. Full detail stays in the app.
 const BODY_LIMIT: usize = 200;
