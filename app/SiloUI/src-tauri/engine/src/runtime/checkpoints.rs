@@ -180,6 +180,13 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
     }
     let record: Record = serde_json::from_slice(&bytes)
         .map_err(|_| error("Checkpoint history is invalid; it was preserved."))?;
+    validate(&record)?;
+    Ok(record)
+}
+
+/// Whether a parsed history is internally consistent. `load` refuses an inconsistent one and
+/// the launch upgrade never writes one.
+fn validate(record: &Record) -> Result<(), RuntimeError> {
     if record.version != RECORD_VERSION
         || record
             .snapshot_group
@@ -230,7 +237,7 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
             "Checkpoint environment is invalid; it was preserved.",
         ));
     }
-    Ok(record)
+    Ok(())
 }
 
 fn valid_native_id(id: &str) -> bool {
@@ -869,6 +876,17 @@ pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
         mark(value.get_mut("inflightCheckpoint"));
         mark(value.pointer_mut("/restoreJournal/recoveryCheckpoint"));
         value["version"] = Value::from(RECORD_VERSION);
+        // A history that does not validate once converted keeps its original bytes and is
+        // reported; it is never rewritten into a form `load` would refuse.
+        if !serde_json::from_value::<Record>(value.clone())
+            .is_ok_and(|record| validate(&record).is_ok())
+        {
+            eprintln!(
+                "silo-engine: left damaged checkpoint history untouched: {}",
+                path.display()
+            );
+            continue;
+        }
         let mut file = tempfile::NamedTempFile::new_in(&directory)
             .map_err(|_| "Checkpoint history could not be saved for upgrade.".to_owned())?;
         serde_json::to_writer(&mut file, &value)

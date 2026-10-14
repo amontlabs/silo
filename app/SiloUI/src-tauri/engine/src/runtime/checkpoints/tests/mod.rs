@@ -4417,6 +4417,34 @@ fn the_launch_upgrade_makes_every_old_record_manual_and_keeps_the_rest() {
 }
 
 #[test]
+fn the_launch_upgrade_leaves_structurally_invalid_histories_untouched() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let storage = directory.path();
+    fs::create_dir_all(storage.join("checkpoints")).unwrap();
+    let mut write = |id: &str, change: &dyn Fn(&mut Value)| {
+        let mut value = layout_one_record();
+        change(&mut value);
+        let file = storage.join("checkpoints").join(format!("{id}.json"));
+        fs::write(&file, value.to_string()).unwrap();
+        (file, value.to_string())
+    };
+    let cases = [
+        write(ID, &|v| v["checkpoints"][0]["reason"] = "bogus".into()),
+        write(FORK_ID, &|v| {
+            v["checkpoints"][0].as_object_mut().unwrap().remove("name");
+        }),
+        write(&uuid::Uuid::new_v4().to_string(), &|v| {
+            v["checkpoints"][0]["scope"] = "nope".into();
+        }),
+    ];
+    assert_eq!(upgrade_records(storage), Ok(0));
+    for (file, original) in cases {
+        assert_eq!(fs::read_to_string(file).unwrap(), original);
+    }
+}
+
+#[test]
 fn a_computer_without_a_history_folder_has_nothing_to_upgrade() {
     let directory = tempfile::tempdir().unwrap();
     assert_eq!(upgrade_records(directory.path()), Ok(0));
