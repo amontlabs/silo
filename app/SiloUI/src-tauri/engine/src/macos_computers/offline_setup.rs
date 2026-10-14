@@ -327,6 +327,17 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
         ("private/etc/kcpassword", true),
         (LAUNCHD_DISABLED, true),
         ("private/var/db/com.apple.xpc.launchd/disabled.migrated", true),
+        ("Users/silo/.ssh/authorized_keys", false),
+        ("Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist", true),
+        ("Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist", true),
+        (
+            "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+            true,
+        ),
+        (
+            "Library/Application Support/Silo/developer-tools-receipt.json",
+            true,
+        ),
     ] {
         validate_import_data_path(root, Path::new(relative), allow_missing)?;
     }
@@ -342,7 +353,38 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
     );
     write_plist(&user, &path, 0o600, true, Format::Binary)?;
     configure_autologin(root, &account.password)?;
+    remove_import_managed_file(root, "Users/silo/.ssh/authorized_keys")?;
+    for relative in [
+        "Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist",
+        "Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist",
+        "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+        "Library/Application Support/Silo/developer-tools-receipt.json",
+    ] {
+        remove_import_managed_file(root, relative)?;
+    }
+    disable_import_screen_sharing(root)?;
     enable_ssh(root)
+}
+
+/// Prevent the copied guest's Silo automation and key from running before the new
+/// computer has completed Retry setup. The setup scripts install fresh copies.
+fn remove_import_managed_file(root: &Path, relative: &str) -> Result<(), String> {
+    let path = validate_import_data_path(root, Path::new(relative), true)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(fs_error("clear inherited Silo setup state", &error)),
+    }
+}
+
+/// Screen Sharing is a guest service enabled by Silo's Computer Use setup. Keep
+/// the cloned service disabled on the first boot; setup will grant and enable it
+/// again after the imported identity has been finalized.
+fn disable_import_screen_sharing(root: &Path) -> Result<(), String> {
+    let path = root.join(LAUNCHD_DISABLED);
+    let mut disabled = read_plist_if_present(&path)?;
+    disabled.insert("com.apple.screensharing".into(), Value::Boolean(true));
+    write_plist(&disabled, &path, 0o644, path.exists(), Format::Xml)
 }
 
 /// Reject links in the mounted, archive-derived Data volume before privileged
@@ -352,7 +394,7 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
 fn validate_import_data_path(
     root: &Path,
     relative: &Path,
-    allow_missing_leaf: bool,
+    allow_missing: bool,
 ) -> Result<PathBuf, String> {
     use std::path::Component;
 
@@ -381,11 +423,9 @@ fn validate_import_data_path(
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
             Err(error)
-                if leaf
-                    && allow_missing_leaf
-                    && error.kind() == std::io::ErrorKind::NotFound =>
+                if allow_missing && error.kind() == std::io::ErrorKind::NotFound =>
             {
-                return Ok(path);
+                return Ok(root.join(relative));
             }
             Err(error) => {
                 return Err(fs_error("inspect the imported computer's account files", &error));
@@ -408,6 +448,8 @@ fn validate_import_account_identity(user: &Dictionary) -> Result<(), String> {
         || required_import_account_field(user, "uid")? != UID
         || required_import_account_field(user, "gid")? != GID
         || required_import_account_field(user, "home")? != "/Users/silo"
+        || required_import_account_field(user, "authentication_authority")?
+            != ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>"
     {
         return Err("Silo could not verify the imported computer's managed account identity.".into());
     }
@@ -794,7 +836,7 @@ pub(super) fn setup_inputs() -> String {
     format!(
         "{SETUP_REVISION}\n{}\n{}\n{}",
         finalization_script(""),
-        import_finalization_script(""),
+        import_finalization_script("", ""),
         sudoers()
     )
 }
@@ -810,20 +852,27 @@ pub(super) fn sudoers() -> String {
 /// plus the ownership the host cannot set while it edits the volume offline and
 /// the installation of the sudoers entry.
 pub(super) fn finalization_script(public_key: &str) -> String {
-    finalization_script_with_host_key_rotation(public_key, false)
+    finalization_script_with_host_key_rotation(public_key, None, false)
 }
 
 /// Root finalization for an imported disk. It installs this computer's key and
 /// replaces the source disk's SSH host keys without needing source credentials.
-pub(super) fn import_finalization_script(public_key: &str) -> String {
-    finalization_script_with_host_key_rotation(public_key, true)
+pub(super) fn import_finalization_script(public_key: &str, computer_name: &str) -> String {
+    finalization_script_with_host_key_rotation(public_key, Some(computer_name), true)
 }
 
 fn finalization_script_with_host_key_rotation(
     public_key: &str,
+    computer_name: Option<&str>,
     rotate_host_keys: bool,
 ) -> String {
     let authorized_key = super::guest_access::shell_quote(public_key.trim());
+    let identity_reset = computer_name.map_or_else(String::new, |name| {
+        let name = super::guest_access::shell_quote(name);
+        format!(
+            "/usr/sbin/scutil --set ComputerName {name}\n/usr/sbin/scutil --set LocalHostName {name}\n/usr/sbin/scutil --set HostName {name}\n/usr/bin/find /Users/{USER}/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {{}} + 2>/dev/null || true\n"
+        )
+    });
     let sudoers_entry = sudoers();
     let sudoers_entry = sudoers_entry.trim_end();
     let rotate_host_keys = if rotate_host_keys {
@@ -845,6 +894,7 @@ fn finalization_script_with_host_key_rotation(
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeSiriSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTouchIDSetup -bool true
 /usr/bin/defaults write /Library/Preferences/com.apple.SetupAssistant DidSeeTrueToneSetup -bool true
+{identity_reset}
 /usr/sbin/chown root:wheel /etc/kcpassword
 /bin/chmod 600 /etc/kcpassword
 /usr/sbin/chown root:wheel /var/db/dslocal/nodes/Default/users/{USER}.plist 2>/dev/null || true
@@ -1161,12 +1211,16 @@ mod tests {
 
     #[test]
     fn import_finalization_installs_its_key_and_rotates_guest_host_keys() {
-        let script = import_finalization_script("ssh-ed25519 AAAA imported-device");
+        let script = import_finalization_script("ssh-ed25519 AAAA imported-device", "new-computer");
         assert!(script.contains(
             "printf '%s\\n' 'ssh-ed25519 AAAA imported-device' > /Users/silo/.ssh/authorized_keys"
         ));
         assert!(script.contains("/bin/rm -f /etc/ssh/ssh_host_*\n/usr/bin/ssh-keygen -A"));
         assert!(script.contains("launchctl enable system/com.openssh.sshd"));
+        assert!(script.contains("scutil --set ComputerName 'new-computer'"));
+        assert!(script.contains("scutil --set LocalHostName 'new-computer'"));
+        assert!(script.contains("scutil --set HostName 'new-computer'"));
+        assert!(script.contains("find /Users/silo/Library/Keychains -mindepth 1 -maxdepth 1"));
         assert!(!script.contains("source-password"));
         assert!(!script.contains("source-key"));
     }
@@ -1368,9 +1422,36 @@ mod tests {
         )
         .unwrap();
 
-        let home = root.path().join("Users/silo/Documents");
-        fs::create_dir_all(&home).unwrap();
-        fs::write(home.join("original.txt"), b"archive home marker").unwrap();
+        let home = root.path().join("Users/silo");
+        fs::create_dir_all(home.join("Documents")).unwrap();
+        fs::write(home.join("Documents/original.txt"), b"archive home marker").unwrap();
+        fs::create_dir_all(home.join(".ssh")).unwrap();
+        fs::write(home.join(".ssh/authorized_keys"), b"ssh-ed25519 AAAA source-device\n")
+            .unwrap();
+        fs::create_dir_all(home.join("Library/LaunchAgents")).unwrap();
+        fs::write(
+            home.join("Library/LaunchAgents/org.silo.computer-use-reconcile.plist"),
+            b"source reconcile agent",
+        )
+        .unwrap();
+        fs::write(
+            home.join("Library/LaunchAgents/org.silo.guest-recorder.plist"),
+            b"source recorder agent",
+        )
+        .unwrap();
+        fs::create_dir_all(home.join("Library/Application Support/Silo")).unwrap();
+        fs::write(
+            home.join("Library/Application Support/Silo/computer-use-receipt.json"),
+            b"source computer-use receipt",
+        )
+        .unwrap();
+        let shared_support = root.path().join("Library/Application Support/Silo");
+        fs::create_dir_all(&shared_support).unwrap();
+        fs::write(
+            shared_support.join("developer-tools-receipt.json"),
+            b"source developer-tools receipt",
+        )
+        .unwrap();
 
         let preferences = root.path().join("Library/Preferences");
         fs::create_dir_all(&preferences).unwrap();
@@ -1525,10 +1606,40 @@ mod tests {
         );
         let disabled = read_plist(&root.path().join(LAUNCHD_DISABLED)).unwrap();
         assert_eq!(disabled["com.openssh.sshd"].as_boolean(), Some(false));
+        assert_eq!(disabled["com.apple.screensharing"].as_boolean(), Some(true));
         assert!(root
             .path()
             .join("private/var/db/com.apple.xpc.launchd/disabled.migrated")
             .is_file());
+        for relative in [
+            "Users/silo/.ssh/authorized_keys",
+            "Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist",
+            "Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist",
+            "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+            "Library/Application Support/Silo/developer-tools-receipt.json",
+        ] {
+            assert!(!root.path().join(relative).exists(), "{relative}");
+        }
+    }
+
+    #[test]
+    fn import_rekey_rejects_a_symlinked_authorized_keys_path_before_writing() {
+        let (root, _, old_hash) = imported_volume();
+        let external = tempfile::tempdir().unwrap();
+        let external_keys = external.path().join("authorized_keys");
+        fs::write(&external_keys, b"keep outside data").unwrap();
+        let ssh_dir = root.path().join("Users/silo/.ssh");
+        fs::remove_dir_all(&ssh_dir).unwrap();
+        std::os::unix::fs::symlink(external.path(), &ssh_dir).unwrap();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+
+        assert!(error.contains("safely access"), "{error}");
+        assert_eq!(read_plist(&user_path).unwrap()["ShadowHashData"], old_hash);
+        assert_eq!(fs::read(external_keys).unwrap(), b"keep outside data");
     }
 
     #[test]
@@ -1595,6 +1706,25 @@ mod tests {
             .unwrap(),
             old_login
         );
+    }
+
+    #[test]
+    fn import_rekey_refuses_an_unmanaged_authentication_authority_before_writing() {
+        let (root, _, old_hash) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let mut user = read_plist(&user_path).unwrap();
+        user.insert(
+            "authentication_authority".into(),
+            string_list(";LocalCachedUser;"),
+        );
+        write_plist(&user, &user_path, 0o600, true, Format::Binary).unwrap();
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+
+        assert!(error.contains("managed account identity"), "{error}");
+        assert_eq!(read_plist(&user_path).unwrap()["ShadowHashData"], old_hash);
     }
 
     #[test]
@@ -1669,5 +1799,16 @@ mod tests {
             }),
         )
         .unwrap();
+    }
+
+    /// Rekeys a disposable APFS clone of an installed computer's disk. Run with
+    /// `SILO_IMPORT_REKEY_DISK=<copy of disk.img> cargo test import_rekey_on_a_real_disk -- --ignored`.
+    #[test]
+    #[ignore = "needs a disposable copy of an installed computer's disk"]
+    fn import_rekey_on_a_real_disk() {
+        let disk = std::env::var("SILO_IMPORT_REKEY_DISK").expect("SILO_IMPORT_REKEY_DISK");
+        let mut imported_account = account();
+        imported_account.password = "disposable-import-rekey-passphrase".into();
+        run_import_rekey(Path::new(&disk), &imported_account).unwrap();
     }
 }

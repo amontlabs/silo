@@ -61,6 +61,7 @@ mod templates;
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
 pub(crate) use remote_display::DisplaySession;
+use sha2::{Digest, Sha256};
 use serde::Serialize;
 use silo_engine::{Audience, EngineContext, Event};
 use std::{
@@ -246,7 +247,7 @@ impl Entry {
             display_open: self.display_open,
             installed: self.record.installed,
             setup_complete: self.record.setup_complete(),
-            needs_personalizing: self.record.setup.needs_personalizing,
+            needs_personalizing: self.record.setup.needs_personalizing || self.record.imported,
             checkpoints: self
                 .checkpoints
                 .iter()
@@ -1091,6 +1092,565 @@ pub fn names(app: &MacosContext) -> Vec<String> {
     app_data(app)
         .map(|data| store::names(&data))
         .unwrap_or_default()
+}
+
+/// Whether a selected transfer name belongs to the Apple Virtualization runtime.
+pub(crate) fn owns_name(app: &MacosContext, name: &str) -> bool {
+    names(app).iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+/// Resolve a checkpoint title for the export review phase.
+pub(crate) fn checkpoint_name(
+    app: &MacosContext,
+    computer: &str,
+    checkpoint_id: &str,
+) -> Result<String, String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let record = registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.name.eq_ignore_ascii_case(computer))
+        .map(|entry| entry.record.clone())
+        .ok_or_else(|| format!("Computer '{computer}' is not managed by Silo."))?;
+    checkpoints::find(&Layout::new(&app_data(app)?, &record.id), checkpoint_id)
+        .map(|meta| meta.name)
+}
+
+/// Capture one or more Apple Virtualization computers and write their format-4
+/// component archive. Running sources are paused only while immutable copies are
+/// made; the computer operation slot is released before compression starts.
+pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
+    app: &MacosContext,
+    service: &crate::backup::BackupService<R>,
+    destination: &std::path::Path,
+    names: &[String],
+    checkpoint_id: Option<&str>,
+    cancellation: &crate::backup::Cancellation,
+    token: Option<&str>,
+) -> Result<crate::backup::BackupResult, String> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    if names.is_empty() || (checkpoint_id.is_some() && names.len() != 1) {
+        return Err(if checkpoint_id.is_some() {
+            "Exporting from a checkpoint supports one computer at a time.".into()
+        } else {
+            "Choose at least one computer to export.".into()
+        });
+    }
+    let data = app_data(app)?;
+    std::fs::create_dir_all(store::root(&data))
+        .map_err(|error| store::io_error("prepare the macOS export", &error))?;
+    let mut sources = Vec::with_capacity(names.len());
+    let mut captures = Vec::with_capacity(names.len());
+    for name in names {
+        if cancellation.cancelled() {
+            return Err(crate::backup::BackupError::Cancelled.to_string());
+        }
+        let record = registry()
+            .entries
+            .iter()
+            .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
+            .map(|entry| entry.record.clone())
+            .ok_or_else(|| format!("Computer '{name}' is not managed by Silo."))?;
+        let held = begin_operation(app, &record.id, checkpoints::OperationKind::Capture)?;
+        let record = held.record.clone();
+        let layout = Layout::new(&data, &record.id);
+        let capture = tempfile::Builder::new()
+            .prefix("silo-macos-export-")
+            .tempdir_in(store::root(&data))
+            .map_err(|error| store::io_error("prepare the macOS export", &error))?;
+        let mut source_kind = crate::backup::MacosArchiveSourceKind::WholeComputer;
+        let mut saved_memory = false;
+        let mut source_cpus = held.record.cpus;
+        let mut source_memory_gib = held.record.memory_gib;
+        let mut source_disk_gib = held.record.disk_gib;
+        let mut source_setup_fingerprint = held.record.setup_version.clone();
+        let mut source_computer_use_fingerprint = held.record.computer_use_version.clone();
+        let mut source_guest = held.record.restore_image.clone();
+        let mut source_host_build = checkpoints::host_build();
+
+        if let Some(checkpoint_id) = checkpoint_id {
+            let meta = checkpoints::find(&layout, checkpoint_id)?;
+            source_cpus = meta.cpus.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_memory_gib = meta.memory_gib.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_disk_gib = meta.disk_gib.ok_or_else(|| {
+                "This checkpoint predates saved VM resources and cannot be exported. Create a new checkpoint and export it again.".to_string()
+            })?;
+            source_setup_fingerprint = meta.setup_fingerprint.clone();
+            source_computer_use_fingerprint = meta.computer_use_version.clone();
+            source_host_build = meta.host_build.clone();
+            source_guest = meta.macos_version.as_deref().and_then(parse_macos_version);
+            if source_guest.is_none() {
+                return Err("This checkpoint predates saved macOS version details and cannot be exported.".into());
+            }
+            saved_memory = meta.kind == checkpoints::Kind::Memory;
+            source_kind = crate::backup::MacosArchiveSourceKind::Checkpoint {
+                id: meta.id.clone(),
+                name: meta.name,
+                kind: match meta.kind {
+                    checkpoints::Kind::Disk => crate::backup::MacosCheckpointKind::Disk,
+                    checkpoints::Kind::Memory => crate::backup::MacosCheckpointKind::Memory,
+                },
+            };
+            clone_archive_component(
+                &checkpoints::dir(&layout, checkpoint_id).join("disk.img"),
+                &capture.path().join("disk.img"),
+            )?;
+            clone_archive_component(
+                &checkpoints::dir(&layout, checkpoint_id).join("auxiliary-storage.img"),
+                &capture.path().join("auxiliary-storage.img"),
+            )?;
+            clone_archive_component(&layout.hardware_model(), &capture.path().join("hardware-model.bin"))?;
+            clone_archive_component(&layout.machine_identifier(), &capture.path().join("machine-identifier.bin"))?;
+            if saved_memory {
+                let expected = meta.size_bytes.ok_or_else(|| {
+                    "This memory checkpoint has no saved size and cannot be exported.".to_string()
+                })?;
+                let state = checkpoints::state_file(&layout, checkpoint_id);
+                if std::fs::metadata(&state).map(|metadata| metadata.len()).ok() != Some(expected) {
+                    return Err("This checkpoint's saved memory is incomplete and cannot be exported.".into());
+                }
+                clone_archive_component(&state, &capture.path().join("state.vzvmsave"))?;
+            }
+        } else {
+            let copy = || -> Result<(), String> {
+                if cancellation.cancelled() {
+                    return Err("The operation was cancelled.".into());
+                }
+                clone_archive_component(&layout.disk(), &capture.path().join("disk.img"))?;
+                clone_archive_component(
+                    &layout.auxiliary_storage(),
+                    &capture.path().join("auxiliary-storage.img"),
+                )?;
+                clone_archive_component(
+                    &layout.hardware_model(),
+                    &capture.path().join("hardware-model.bin"),
+                )?;
+                clone_archive_component(
+                    &layout.machine_identifier(),
+                    &capture.path().join("machine-identifier.bin"),
+                )
+            };
+            if held.state == State::Running {
+                engine::memory_support(app, &record.id)?;
+                let _space = reserve_for_memory(&data, &held.record, true)?;
+                let machine = LiveMachine {
+                    app,
+                    id: &record.id,
+                    cancel: &held.cancel,
+                };
+                checkpoints::Machine::save_running(
+                    &machine,
+                    &capture.path().join("state.vzvmsave"),
+                    &mut || copy(),
+                )?;
+                saved_memory = true;
+            } else {
+                copy()?;
+            }
+        }
+
+        let guest = source_guest.take().ok_or_else(|| {
+            "This computer has no saved macOS restore image details and cannot be exported.".to_string()
+        })?;
+        let setup_fingerprint = source_setup_fingerprint.ok_or_else(|| {
+            "This computer has no setup fingerprint. Use Retry setup before exporting it.".to_string()
+        })?;
+        let computer_use_fingerprint = source_computer_use_fingerprint.ok_or_else(|| {
+            "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
+        })?;
+        let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
+        let memory = if saved_memory {
+            if source_host_build.is_empty() {
+                return Err("This memory checkpoint has no host build and cannot be exported.".into());
+            }
+            let state = capture.path().join("state.vzvmsave");
+            let size = std::fs::metadata(&state)
+                .map_err(|error| store::io_error("inspect saved memory", &error))?
+                .len();
+            crate::backup::MacosArchiveMemory::Saved {
+                host_build: source_host_build.clone(),
+                configuration_digest: crate::backup::memory_configuration_digest(
+                    source_cpus,
+                    source_memory_gib,
+                    source_disk_gib,
+                    &hardware_model_digest,
+                )?,
+                size,
+                sha256: digest_file(&state)?,
+            }
+        } else {
+            crate::backup::MacosArchiveMemory::None
+        };
+        let config = crate::backup::MacosArchiveConfig {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: record.id.clone(),
+            source_name: name.clone(),
+            cpus: source_cpus,
+            memory_gib: source_memory_gib,
+            disk_gib: source_disk_gib,
+            guest_version: guest.version,
+            guest_build: guest.build,
+            host_build: checkpoints::host_build(),
+            hardware_model_digest,
+            setup_fingerprint,
+            computer_use_fingerprint,
+            source: source_kind,
+            memory,
+        };
+        let mut components = vec![
+            (crate::backup::MacosComponentRole::Disk, "disk.img"),
+            (crate::backup::MacosComponentRole::Auxiliary, "auxiliary-storage.img"),
+            (crate::backup::MacosComponentRole::HardwareModel, "hardware-model.bin"),
+            (crate::backup::MacosComponentRole::MachineIdentifier, "machine-identifier.bin"),
+        ];
+        if saved_memory {
+            components.push((crate::backup::MacosComponentRole::Memory, "state.vzvmsave"));
+        }
+        sources.push(crate::backup::MacosArchiveSource {
+            name: name.clone(),
+            runtime_config: config,
+            // AVF computers use a strict runtime configuration and no MicroSandbox row.
+            computer_configuration: serde_json::json!({}),
+            components: components
+                .into_iter()
+                .map(|(role, file)| crate::backup::MacosArchiveComponentInput {
+                    role,
+                    path: capture.path().join(file),
+                })
+                .collect(),
+        });
+        captures.push(capture);
+        drop(held);
+    }
+    let result = service
+        .create_macos_archive(destination, sources, cancellation, token)
+        .map_err(|error| error.to_string());
+    drop(captures);
+    result
+}
+
+fn parse_macos_version(value: &str) -> Option<store::RestoreImageInfo> {
+    let (version, build) = value.rsplit_once(" (")?;
+    let build = build.strip_suffix(')')?;
+    (!version.is_empty() && !build.is_empty()).then(|| store::RestoreImageInfo {
+        version: version.into(),
+        build: build.into(),
+    })
+}
+
+pub(crate) fn archive_memory_warning(
+    source_name: &str,
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Option<String> {
+    match &config.memory {
+        crate::backup::MacosArchiveMemory::Saved { host_build, .. }
+            if host_build != &checkpoints::host_build() => Some(format!(
+                "{source_name} has saved memory from macOS build {host_build}. It cannot be reused on this Mac; import starts from the computer's disk."
+            )),
+        crate::backup::MacosArchiveMemory::Saved { .. } => Some(format!(
+            "{source_name} has saved memory. Import verifies it but starts the new computer from its disk."
+        )),
+        _ => None,
+    }
+}
+
+pub(crate) fn supports_archive_guest_build(build: &str) -> Result<bool, String> {
+    developer_tools::supports_guest_build(build)
+}
+
+fn clone_archive_component(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    templates::clone_file(from, to).map_err(|error| error.message())
+}
+
+fn digest_file(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| store::io_error("read an archive component", &error))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 128 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| store::io_error("read an archive component", &error))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("sha256:{}", hex_sha256(&digest.finalize())))
+}
+
+fn hex_sha256(digest: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let byte = *byte;
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+/// Import a fully verified Apple Virtualization archive as a stopped computer.
+/// The caller journals `id` before entering this function, so relaunch recovery
+/// can remove only this import's deterministic staging folder.
+#[derive(Debug)]
+pub(crate) enum MacosArchiveImportError {
+    Cancelled,
+    Failed(String),
+}
+
+impl From<String> for MacosArchiveImportError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<&str> for MacosArchiveImportError {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
+}
+
+impl From<crate::backup::BackupError> for MacosArchiveImportError {
+    fn from(error: crate::backup::BackupError) -> Self {
+        match error {
+            crate::backup::BackupError::Cancelled => Self::Cancelled,
+            error => Self::Failed(error.to_string()),
+        }
+    }
+}
+
+pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
+    app: &MacosContext,
+    service: &crate::backup::BackupService<R>,
+    archive: &std::path::Path,
+    source_name: Option<&str>,
+    new_name: &str,
+    id: &str,
+    cancellation: &crate::backup::Cancellation,
+    before_publish: &dyn Fn() -> Result<(), String>,
+) -> Result<String, MacosArchiveImportError> {
+    require_supported()?;
+    ensure_loaded(app)?;
+    let id = uuid::Uuid::parse_str(id)
+        .map_err(|_| "The imported computer identity is invalid.")?
+        .to_string();
+    let data = app_data(app)?;
+    let root = store::root(&data);
+    std::fs::create_dir_all(&root)
+        .map_err(|error| store::io_error("prepare the macOS import", &error))?;
+    let stage = root.join(format!(".partial-import-{id}"));
+    let final_dir = root.join(&id);
+    remove_archive_import_folder(&stage)?;
+    if std::fs::symlink_metadata(&final_dir).is_ok() {
+        return Err("The imported computer identity already exists. Choose the export file again and retry.".into());
+    }
+
+    let new_name = new_name.trim();
+    let requested = source_name.unwrap_or_default();
+    let taken = || {
+        let mut names = names(app);
+        names.extend(app.linux_computer_names());
+        names
+    };
+    let _reservation = crate::computer_names::reserve(&[new_name.to_string()], &taken)?;
+    let existing = {
+        let registry = registry();
+        registry.entries.iter().map(|entry| entry.record.clone()).collect::<Vec<_>>()
+    };
+    let mut builder = std::fs::DirBuilder::new();
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    builder.mode(0o700);
+    builder
+        .create(&stage)
+        .map_err(|error| store::io_error("create the macOS import staging folder", &error))?;
+
+    let prepared = match service.extract_macos_components(
+        archive,
+        (!requested.is_empty()).then_some(requested),
+        &[
+            crate::backup::MacosComponentRole::Disk,
+            crate::backup::MacosComponentRole::Auxiliary,
+            crate::backup::MacosComponentRole::HardwareModel,
+            crate::backup::MacosComponentRole::MachineIdentifier,
+        ],
+        &stage,
+        cancellation,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let _ = remove_archive_import_folder(&stage);
+            return Err(error.into());
+        }
+    };
+    if source_name.is_some_and(|name| name != prepared.source_name)
+        || prepared.config.source_name != prepared.source_name
+        || prepared.config.architecture != "aarch64"
+        || prepared.config.payload_version != 1
+        || uuid::Uuid::parse_str(&prepared.config.source_computer_id).is_err()
+        || prepared.computer_configuration != serde_json::json!({})
+    {
+        drop(prepared);
+        let _ = remove_archive_import_folder(&stage);
+        return Err("The selected computer identity does not match the verified export file.".into());
+    }
+    if !developer_tools::supports_guest_build(&prepared.config.guest_build)? {
+        let build = prepared.config.guest_build.clone();
+        drop(prepared);
+        let _ = remove_archive_import_folder(&stage);
+        return Err(format!(
+            "The export uses macOS build {build}, which this Silo version cannot finish setting up."
+        )
+        .into());
+    }
+    let imported_source_name = prepared.source_name.clone();
+    let request = CreateRequest {
+        name: new_name.trim().to_string(),
+        cpus: prepared.config.cpus,
+        memory_gib: prepared.config.memory_gib,
+        disk_gib: prepared.config.disk_gib,
+    };
+    if let Err(error) = store::validate_request(
+        &request,
+        engine::host_limits(),
+        &existing,
+        store::MIN_DISK_GIB,
+    ) {
+        drop(prepared);
+        let _ = remove_archive_import_folder(&stage);
+        return Err(error.into());
+    }
+    let stage_layout = Layout {
+        dir: stage.clone(),
+        access: None,
+    };
+    for (role, destination) in [
+        (crate::backup::MacosComponentRole::Disk, stage_layout.disk()),
+        (crate::backup::MacosComponentRole::Auxiliary, stage_layout.auxiliary_storage()),
+        (
+            crate::backup::MacosComponentRole::HardwareModel,
+            stage_layout.hardware_model(),
+        ),
+    ] {
+        let source = prepared
+            .component_paths
+            .get(&role)
+            .ok_or_else(|| format!("The export is missing its {role:?} component."))?;
+        std::fs::rename(source, destination)
+            .map_err(|error| store::io_error("stage an imported macOS component", &error))?;
+    }
+    // The source machine identifier is verified with every other component but
+    // is never installed on the new computer.
+    let machine_identifier = engine::new_machine_identifier();
+    std::fs::write(stage_layout.machine_identifier(), machine_identifier)
+        .map_err(|error| store::io_error("save the imported computer identity", &error))?;
+    let actual_hardware_digest = digest_file(&stage_layout.hardware_model())?;
+    if actual_hardware_digest != prepared.config.hardware_model_digest {
+        drop(prepared);
+        let _ = remove_archive_import_folder(&stage);
+        return Err("The hardware model does not match the verified export metadata.".into());
+    }
+
+    let account = guest_access::ensure_account(&stage_layout)?;
+    offline_setup::run_import_rekey(&stage_layout.disk(), &account)?;
+    let mut record = store::new_record(&request, engine::random_mac());
+    record.id = id.clone();
+    record.installed = true;
+    record.restore_image = Some(store::RestoreImageInfo {
+        version: prepared.config.guest_version.clone(),
+        build: prepared.config.guest_build.clone(),
+    });
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: false,
+        computer_use: false,
+        clipboard: false,
+        roots: false,
+        needs_personalizing: true,
+    };
+    record.developer_tools_version = None;
+    record.pristine = false;
+    record.template = None;
+    record.setup_version = None;
+    record.computer_use_version = None;
+    record.computer_use_approval = Some(crate::computer_use::initial_approval());
+    record.pending_restore = None;
+    record.inherited_access = false;
+    record.imported = true;
+    engine::validate_archive_configuration(app, &record, &stage_layout)?;
+    store::save(&stage_layout, &record)?;
+    std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| store::io_error("protect the macOS import staging folder", &error))?;
+    store::sync_dir(&stage).map_err(|error| store::io_error("save the macOS import", &error))?;
+    drop(prepared);
+    if let Err(message) = before_publish() {
+        remove_archive_import_folder(&stage)?;
+        return Err(if cancellation.cancelled() {
+            MacosArchiveImportError::Cancelled
+        } else {
+            MacosArchiveImportError::Failed(message)
+        });
+    }
+    std::fs::rename(&stage, &final_dir)
+        .map_err(|error| store::io_error("publish the imported computer", &error))?;
+    store::sync_dir(&root).map_err(|error| store::io_error("save the imported computer", &error))?;
+    {
+        let mut registry = registry();
+        if registry.entries.iter().any(|entry| entry.record.id == id) {
+            return Err("The imported computer was saved and needs recovery. Relaunch Silo to finish.".into());
+        }
+        registry.entries.push(Entry::new(
+            record,
+            State::Stopped,
+            Some(store::NEEDS_PERSONALIZING.into()),
+        ));
+    }
+    emit(app);
+    Ok(imported_source_name)
+}
+
+/// Settle a journaled archive import. Returns true only when the final record
+/// proves that its atomic directory rename committed.
+pub(crate) fn recover_archive_import(app: &MacosContext, id: &str) -> Result<bool, String> {
+    let id = uuid::Uuid::parse_str(id)
+        .map_err(|_| "The imported computer identity is invalid.")?
+        .to_string();
+    let data = app_data(app)?;
+    let root = store::root(&data);
+    let stage = root.join(format!(".partial-import-{id}"));
+    let final_dir = root.join(&id);
+    let committed = match store::read_record(&Layout::new(&data, &id)) {
+        Ok(record) if record.id == id => true,
+        _ => false,
+    };
+    if committed {
+        remove_archive_import_folder(&stage)?;
+        return Ok(true);
+    }
+    remove_archive_import_folder(&stage)?;
+    remove_archive_import_folder(&final_dir)?;
+    Ok(false)
+}
+
+fn remove_archive_import_folder(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            std::fs::remove_dir_all(path)
+                .map_err(|error| store::io_error("remove an incomplete macOS import", &error))
+        }
+        Ok(_) => Err("Silo could not verify ownership of the macOS import folder.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(store::io_error("inspect the macOS import folder", &error)),
+    }
 }
 
 /// Browse one macOS computer's `/Users/silo/workspace` through guest SFTP access tooling.
@@ -2540,6 +3100,10 @@ fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), Str
         computer_use_version: held.record.computer_use_version.clone(),
         developer_tools: held.record.setup.developer_tools,
         developer_tools_version: held.record.developer_tools_version.clone(),
+        cpus: held.record.cpus,
+        memory_gib: held.record.memory_gib,
+        disk_gib: held.record.disk_gib,
+        setup_fingerprint: held.record.setup_version.clone(),
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
@@ -2577,6 +3141,10 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
         computer_use_version: held.record.computer_use_version.clone(),
         developer_tools: held.record.setup.developer_tools,
         developer_tools_version: held.record.developer_tools_version.clone(),
+        cpus: held.record.cpus,
+        memory_gib: held.record.memory_gib,
+        disk_gib: held.record.disk_gib,
+        setup_fingerprint: held.record.setup_version.clone(),
     };
     let restored = checkpoints::restore(&subject, checkpoint_id);
     // The recovery checkpoint exists whether or not the rest succeeded.
@@ -3144,6 +3712,307 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
 mod tests {
     use super::*;
 
+    struct ProbeEngineContext {
+        paths: silo_engine::EnginePaths,
+        identity: silo_engine::EngineIdentity,
+        runtime_state: Arc<silo_engine::EngineRuntimeState>,
+    }
+
+    impl silo_engine::EngineContext for ProbeEngineContext {
+        fn paths(&self) -> &silo_engine::EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &silo_engine::EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<silo_engine::EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: Event, _audience: Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn silo_engine::MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn silo_engine::ProcessControl {
+            self
+        }
+    }
+
+    impl silo_engine::ProcessControl for ProbeEngineContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("the live probe context cannot restart")
+        }
+    }
+
+    struct ProbeMacosHost;
+
+    impl MacosHost for ProbeMacosHost {
+        fn show_display(
+            &self,
+            _context: &MacosContext,
+            _id: &str,
+            _title: &str,
+            _toolbar: bool,
+        ) -> Result<(), String> {
+            Err("The live probe does not open a display.".into())
+        }
+
+        fn close_display(&self, _id: &str) {}
+
+        fn linux_computer_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    struct ProbeCleanup {
+        context: MacosContext,
+        computer_id: String,
+        guest_port: Option<u16>,
+        guest_pid: Option<u32>,
+        port_config: PathBuf,
+        original_port_config: Option<(Vec<u8>, std::fs::Permissions)>,
+    }
+
+    impl Drop for ProbeCleanup {
+        fn drop(&mut self) {
+            if let (Some(port), Some(pid)) = (self.guest_port, self.guest_pid) {
+                if let Ok(alias) = ensure_ssh_alias(&self.context, &self.computer_id, None, Some(false)) {
+                    let _ = probe_ssh_command(
+                        &alias.config_path,
+                        &alias.alias,
+                        &format!("kill -TERM {pid}"),
+                    );
+                }
+                let _ = remove_network_port(&self.context, &self.computer_id, port);
+            }
+            let _ = remove_ssh_alias(&self.context, &self.computer_id);
+            match &self.original_port_config {
+                Some((bytes, permissions)) => {
+                    if let Some(parent) = self.port_config.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if std::fs::write(&self.port_config, bytes).is_ok() {
+                        let _ = std::fs::set_permissions(&self.port_config, permissions.clone());
+                    }
+                }
+                None => {
+                    let _ = std::fs::remove_file(&self.port_config);
+                }
+            }
+            ssh_alias::set_proxy_helper_for_test(None);
+        }
+    }
+
+    fn probe_ssh_command(config: &str, alias: &str, remote_command: &str) -> std::process::Output {
+        let mut command = std::process::Command::new("/usr/bin/ssh");
+        crate::applications::launch::sanitize_child(&mut command)
+            .args(["-F", config, "-o", "BatchMode=yes", alias, remote_command])
+            .output()
+            .expect("launch the disposable guest SSH command")
+    }
+
+    #[test]
+    #[ignore = "opt-in live probe; requires one running disposable Silo Dev macOS computer"]
+    fn live_probe_files_ports_and_local_ssh_alias() {
+        let computer_id = std::env::var("SILO_MACOS_LIVE_PROBE_ID")
+            .expect("set the disposable macOS computer UUID");
+        let app_data = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_APP_DATA")
+                .expect("set the Silo Dev application data path"),
+        );
+        let helper = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_HELPER")
+                .expect("set the disposable Dev engine helper path"),
+        );
+        let home = PathBuf::from(
+            std::env::var_os("SILO_MACOS_LIVE_PROBE_HOME").expect("set the host home path"),
+        );
+        uuid::Uuid::parse_str(&computer_id).expect("the probe computer id is a UUID");
+        silo_engine::channel::init(silo_engine::channel::DEVELOPMENT_IDENTIFIER);
+
+        let context = Arc::new(ProbeEngineContext {
+            paths: silo_engine::EnginePaths {
+                app_data: app_data.clone(),
+                app_config: app_data.clone(),
+                app_cache: app_data.clone(),
+                app_log: app_data.clone(),
+                resources: PathBuf::new(),
+                home,
+            },
+            identity: silo_engine::EngineIdentity {
+                channel: silo_engine::channel::Channel::Development,
+                version: env!("CARGO_PKG_VERSION").into(),
+                package_kind: silo_engine::PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(silo_engine::EngineRuntimeState::default()),
+        });
+        let context = MacosContext::new(context, Arc::new(ProbeMacosHost));
+        ssh_alias::set_proxy_helper_for_test(Some(helper));
+        let layout = Layout::new(&app_data, &computer_id);
+        let record = store::read_record(&layout).expect("read the disposable computer record");
+        assert!(record.setup.roots, "the guest must have workspace roots");
+        assert!(record.setup_complete(), "the guest must be set up before probing");
+
+        {
+            let mut registry = registry();
+            assert!(!registry.loaded, "run this focused probe in a fresh test process");
+            registry.entries = vec![Entry::new(record, State::Running, None)];
+            registry.loaded = true;
+        }
+
+        let port_config = app_data.join("network/macos-ports.json");
+        let original_port_config = std::fs::read(&port_config)
+            .ok()
+            .map(|bytes| {
+                let permissions = std::fs::metadata(&port_config)
+                    .expect("read port config permissions")
+                    .permissions();
+                (bytes, permissions)
+            });
+        let mut cleanup = ProbeCleanup {
+            context: context.clone(),
+            computer_id: computer_id.clone(),
+            guest_port: None,
+            guest_pid: None,
+            port_config,
+            original_port_config,
+        };
+
+        let files = list_directory(
+            &context,
+            "p3-macos-parity-2b-live".into(),
+            computer_id.clone(),
+            files::WORKSPACE.into(),
+            0,
+            None,
+        )
+        .expect("list the live guest workspace");
+        eprintln!(
+            "live_files entries={} next_page={}",
+            files.entries.len(),
+            files.next_offset.is_some()
+        );
+
+        let alias = ensure_ssh_alias(&context, &computer_id, None, Some(false))
+            .expect("ensure and probe the local-engine SSH alias");
+        eprintln!("live_alias alias={} include_not_changed=true", alias.alias);
+
+        let before_ports = read_network_state(&context).expect("read live guest listeners");
+        let initial = before_ports
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .expect("find the disposable computer in network state");
+        let guest_port = (49152..=49215)
+            .find(|port| !initial.ports.iter().any(|candidate| candidate.port == *port))
+            .expect("find an unused disposable guest port");
+        cleanup.guest_port = Some(guest_port);
+        let start = probe_ssh_command(
+            &alias.config_path,
+            &alias.alias,
+            &format!(
+                "(/usr/bin/nohup /usr/bin/nc -lk 127.0.0.1 {guest_port} >/dev/null 2>&1 </dev/null & echo $!)"
+            ),
+        );
+        assert!(
+            start.status.success(),
+            "start the disposable guest listener: {}",
+            String::from_utf8_lossy(&start.stderr)
+        );
+        cleanup.guest_pid = String::from_utf8_lossy(&start.stdout)
+            .split_whitespace()
+            .find_map(|value| value.parse::<u32>().ok());
+        assert!(cleanup.guest_pid.is_some(), "capture the listener PID");
+
+        let listeners = read_network_state(&context).expect("discover the live guest listener");
+        let observed = listeners
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .expect("find the disposable computer after listener discovery");
+        assert!(
+            observed.ports.iter().any(|port| port.port == guest_port),
+            "lsof should report the disposable guest listener"
+        );
+
+        let published = publish_network_port(&context, &computer_id, guest_port, None, Some("http".into()))
+            .expect("publish the live guest listener through SSH");
+        let published = published
+            .computers
+            .iter()
+            .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
+            .and_then(|computer| computer.ports.iter().find(|port| port.port == guest_port))
+            .expect("find the published guest port");
+        assert_eq!(published.state, silo_api::methods::network::PublishedPortState::Reachable);
+        let host_port = published.host_port.expect("published port has a host endpoint");
+        let socket = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], host_port)),
+            Duration::from_secs(3),
+        )
+        .expect("connect through the published loopback tunnel");
+        drop(socket);
+        eprintln!("live_port guest={guest_port} host={host_port} state=reachable");
+
+        if std::env::var("SILO_MACOS_LIVE_PROBE_SHUTDOWN").as_deref() == Ok("1") {
+            let shutdown = probe_ssh_command(
+                &alias.config_path,
+                &alias.alias,
+                "sudo -n /sbin/shutdown -h now",
+            );
+            let shutdown_stderr = String::from_utf8_lossy(&shutdown.stderr);
+            assert!(shutdown.status.success() || shutdown_stderr.contains("closed by remote host"),
+                "gracefully shut down the disposable guest: {shutdown_stderr}");
+            eprintln!(
+                "live_guest_shutdown=ssh_exit_{}",
+                shutdown.status.code().unwrap_or(-1),
+            );
+        }
+    }
+
+    #[test]
+    fn saved_memory_import_warning_says_import_starts_from_disk() {
+        let config = crate::backup::MacosArchiveConfiguration {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: "e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f".into(),
+            source_name: "Source".into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+            guest_version: "26.6.2".into(),
+            guest_build: "25G83".into(),
+            host_build: checkpoints::host_build(),
+            hardware_model_digest: "0".repeat(64),
+            setup_fingerprint: "setup-1".into(),
+            computer_use_fingerprint: "computer-use-1".into(),
+            source: crate::backup::MacosArchiveSourceKind::WholeComputer,
+            memory: crate::backup::MacosArchiveMemory::Saved {
+                host_build: checkpoints::host_build(),
+                configuration_digest: crate::backup::memory_configuration_digest(
+                    4,
+                    8,
+                    64,
+                    &format!("sha256:{}", "0".repeat(64)),
+                )
+                .unwrap(),
+                size: 1,
+                sha256: "2".repeat(64),
+            },
+            components: Vec::new(),
+        };
+
+        let warning = archive_memory_warning("Source", &config).unwrap();
+
+        assert!(warning.contains("Import verifies it"));
+        assert!(warning.contains("starts the new computer from its disk"));
+    }
+
     #[test]
     fn stop_shuts_down_inside_the_guest_only_once_setup_is_complete() {
         assert_eq!(stop_plan(true), StopPlan::Shutdown);
@@ -3202,6 +4071,10 @@ mod tests {
             macos_version: None,
             host_build: String::new(),
             size_bytes: None,
+            cpus: None,
+            memory_gib: None,
+            disk_gib: None,
+            setup_fingerprint: None,
             computer_use_version: Some("cu-before".into()),
             developer_tools: false,
             developer_tools_version: None,

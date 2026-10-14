@@ -112,6 +112,8 @@ pub struct ArchiveInspectionResult {
     valid: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 /// `backup-history.json`. Older builds also listed completed exports here; no
@@ -511,13 +513,14 @@ pub fn inspection_worker(
     // Register before dispatch so cancellation and replacement also cover queued work.
     let cancellation = register_inspection(&controller, request_id.clone());
     move || {
-        let inspected = controller.service.inspect_archive(&path, &cancellation);
+        let inspected = inspect_archive(&controller.service, &path, &cancellation);
         finish_inspection(&controller, &request_id);
         match inspected {
-            Ok(inspection) => Ok(ArchiveInspectionResult {
-                archive: archive_from(&path, &inspection),
+            Ok((archive, warnings)) => Ok(ArchiveInspectionResult {
+                archive,
                 valid: true,
                 reason: None,
+                warnings,
             }),
             Err(error) => Ok(ArchiveInspectionResult {
                 archive: Archive {
@@ -539,7 +542,45 @@ pub fn inspection_worker(
                 },
                 valid: false,
                 reason: Some(error.to_string()),
+                warnings: Vec::new(),
             }),
+        }
+    }
+}
+
+fn inspect_archive(
+    service: &backup::BackupService,
+    path: &Path,
+    cancellation: &backup::Cancellation,
+) -> Result<(Archive, Vec<String>), backup::BackupError> {
+    match service.detect_archive_kind(path, cancellation)? {
+        backup::ArchiveRuntimeKind::MicroSandbox => service
+            .inspect_archive(path, cancellation)
+            .map(|inspection| (archive_from(path, &inspection), Vec::new())),
+        backup::ArchiveRuntimeKind::AppleVirtualization => {
+            let rows = service.describe_macos_archive(path, cancellation)?;
+            for (name, config, _) in &rows {
+                if !crate::macos_computers::supports_archive_guest_build(&config.guest_build)
+                    .map_err(backup::BackupError::InvalidRequest)?
+                {
+                    return Err(backup::BackupError::InvalidArchive(format!(
+                        "{name} uses macOS build {}, which this Silo version cannot finish setting up.",
+                        config.guest_build
+                    )));
+                }
+            }
+            let warnings = rows
+                .iter()
+                .filter_map(|(name, config, _)| {
+                    crate::macos_computers::archive_memory_warning(name, config)
+                })
+                .collect();
+            let inspection = backup::ArchiveInspection {
+                created_at_ms: 0,
+                size_bytes: fs::metadata(path).map_err(backup::BackupError::Io)?.len(),
+                computers: rows.into_iter().map(|(name, _, _)| name).collect(),
+            };
+            Ok((archive_from(path, &inspection), warnings))
         }
     }
 }
@@ -701,22 +742,34 @@ pub fn begin_export(
         let [computer] = computers.as_slice() else {
             return Err("Choose exactly one computer to export from a checkpoint.".into());
         };
-        let paths = runtime::runtime_paths(controller.runtime_host()?)?;
-        let metadata =
-            runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
-        let configuration = metadata
-            .computers
-            .iter()
-            .find(|configuration| configuration.name() == computer)
-            .ok_or_else(|| {
-                format!(
-                    "Computer '{computer}' is not managed by Silo. Choose a Silo computer to export."
-                )
-            })?;
-        let (_group, _member, _scope, name) =
-            runtime::checkpoints::export_source(&paths, configuration.id(), checkpoint_id)
-                .map_err(|error| error.to_string())?;
-        Some(name)
+        let host = controller.runtime_host()?;
+        if let Some(context) = host
+            .macos_context()
+            .filter(|context| crate::macos_computers::owns_name(context, computer))
+        {
+            Some(crate::macos_computers::checkpoint_name(
+                &context,
+                computer,
+                checkpoint_id,
+            )?)
+        } else {
+            let paths = runtime::runtime_paths(host)?;
+            let metadata =
+                runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
+            let configuration = metadata
+                .computers
+                .iter()
+                .find(|configuration| configuration.name() == computer)
+                .ok_or_else(|| {
+                    format!(
+                        "Computer '{computer}' is not managed by Silo. Choose a Silo computer to export."
+                    )
+                })?;
+            let (_group, _member, _scope, name) =
+                runtime::checkpoints::export_source(&paths, configuration.id(), checkpoint_id)
+                    .map_err(|error| error.to_string())?;
+            Some(name)
+        }
     } else {
         None
     };
@@ -984,6 +1037,17 @@ impl From<backup::BackupError> for TransferError {
     }
 }
 
+impl From<crate::macos_computers::MacosArchiveImportError> for TransferError {
+    fn from(error: crate::macos_computers::MacosArchiveImportError) -> Self {
+        match error {
+            crate::macos_computers::MacosArchiveImportError::Cancelled => Self::cancelled(),
+            crate::macos_computers::MacosArchiveImportError::Failed(message) => {
+                Self::from(message).after_unpacking()
+            }
+        }
+    }
+}
+
 impl From<runtime::operation_gate::GateError> for TransferError {
     fn from(error: runtime::operation_gate::GateError) -> Self {
         match error {
@@ -1169,6 +1233,33 @@ fn backup_at_paths(
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
+    if let Some(context) = controller.runtime_host()?.macos_context() {
+        let macos_count = names
+            .iter()
+            .filter(|name| crate::macos_computers::owns_name(&context, name))
+            .count();
+        if macos_count != 0 {
+            if macos_count != names.len() {
+                return Err("A single export cannot mix MicroSandbox and Apple Virtualization computers yet.".into());
+            }
+            let token = recovery::token(controller)?;
+            let result = crate::macos_computers::create_archive(
+                &context,
+                &controller.service,
+                archive_path,
+                names,
+                checkpoint_id,
+                cancellation,
+                token.as_deref(),
+            )?;
+            let inspection = backup::ArchiveInspection {
+                created_at_ms: result.created_at_ms,
+                size_bytes: result.size_bytes,
+                computers: result.computers,
+            };
+            return Ok(archive_from(&result.destination, &inspection));
+        }
+    }
     let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
     if names.is_empty() {
         return Err("Choose at least one computer to export.".into());
@@ -1559,21 +1650,36 @@ fn run_restore(
     let started = std::time::Instant::now();
     let mut archive = archive;
     let result = (|| {
-        // The review already hashed the whole file and the import verifies
-        // the selected payload as it unpacks, so read only the manifest (E-26).
-        let inspection = controller.service.describe_archive(&path, &cancellation)?;
-        let selected = select_archive_source(&inspection.computers, source_name.as_deref())?;
-        archive = archive_from(&path, &inspection);
-        if let Ok(mut view) = controller.view.lock() {
-            if let Some(Operation::Running {
-                archive: current, ..
-            }) = view.operation.as_mut()
-            {
-                *current = archive.clone();
+        match controller.service.detect_archive_kind(&path, &cancellation)? {
+            backup::ArchiveRuntimeKind::AppleVirtualization => {
+                let selected = restore_macos_work(
+                    &controller,
+                    &path,
+                    source_name.as_deref(),
+                    &new_name,
+                    &cancellation,
+                )?;
+                archive.computers = vec![selected.clone()];
+                Ok::<_, TransferError>(selected)
+            }
+            backup::ArchiveRuntimeKind::MicroSandbox => {
+                // The review already hashed the whole file and the import verifies
+                // the selected payload as it unpacks, so read only the manifest (E-26).
+                let inspection = controller.service.describe_archive(&path, &cancellation)?;
+                let selected = select_archive_source(&inspection.computers, source_name.as_deref())?;
+                archive = archive_from(&path, &inspection);
+                if let Ok(mut view) = controller.view.lock() {
+                    if let Some(Operation::Running {
+                        archive: current, ..
+                    }) = view.operation.as_mut()
+                    {
+                        *current = archive.clone();
+                    }
+                }
+                restore_work(&controller, &path, &selected, &new_name, &cancellation)?;
+                Ok::<_, TransferError>(selected)
             }
         }
-        restore_work(&controller, &path, &selected, &new_name, &cancellation)?;
-        Ok::<_, TransferError>(selected)
     })();
     let operation = match result {
         Ok(_) => Operation::Result {
@@ -1593,6 +1699,62 @@ fn run_restore(
     let _ = set_operation(&controller, operation);
     finish(&controller);
     publish(&controller);
+}
+
+fn restore_macos_work(
+    controller: &Controller,
+    archive: &Path,
+    source_name: Option<&str>,
+    new_name: &str,
+    cancellation: &backup::Cancellation,
+) -> Result<String, TransferError> {
+    let progress = |title: &str| {
+        advance_restore_phase(controller, title);
+        publish(controller);
+    };
+    progress("Preparing macOS import");
+    let _guard = mutation_guard(
+        cancellation,
+        runtime::operation_gate::OperationKind::Import,
+        "Importing macOS computer",
+        false,
+        &|| progress(QUEUED_PHASE),
+    )?;
+    let context = controller
+        .runtime_host()?
+        .macos_context()
+        .ok_or("Apple Virtualization import is unavailable on this Mac.")?;
+    let identity = uuid::Uuid::new_v4().to_string();
+    recovery::save_macos_restore_identity(controller, &identity, source_name)?;
+    progress("Rekeying imported account");
+    let before_publish = || enter_commit(controller, cancellation).map_err(|error| error.message);
+    match crate::macos_computers::import_archive(
+        &context,
+        &controller.service,
+        archive,
+        source_name,
+        new_name,
+        &identity,
+        cancellation,
+        &before_publish,
+    ) {
+        Ok(source) => Ok(source),
+        Err(error) => {
+            let failure = TransferError::from(error);
+            let message = failure.message.clone();
+            match crate::macos_computers::recover_archive_import(&context, &identity) {
+                Ok(true) => Err(TransferError::from(message).uncertain_import()),
+                Ok(false) => {
+                    recovery::clear_restore_identity(controller).map_err(|cleanup| {
+                        TransferError::from(format!("{message} {cleanup}")).uncertain_import()
+                    })?;
+                    Err(failure)
+                }
+                Err(cleanup) => Err(TransferError::from(format!("{message} {cleanup}"))
+                    .uncertain_import()),
+            }
+        }
+    }
 }
 
 fn select_archive_source(names: &[String], selected: Option<&str>) -> Result<String, String> {
@@ -3746,6 +3908,25 @@ mod tests {
                 "{detail}"
             );
         }
+    }
+
+    #[test]
+    fn macos_archive_cancellation_is_distinct_from_import_failure() {
+        let cancelled = TransferError::from(
+            crate::macos_computers::MacosArchiveImportError::Cancelled,
+        );
+        assert!(cancelled.cancelled);
+        assert!(cancelled.message.is_empty());
+
+        let failed = TransferError::from(
+            crate::macos_computers::MacosArchiveImportError::Failed("bad component".into()),
+        );
+        assert!(!failed.cancelled);
+        assert!(failed.message.contains("bad component"));
+        assert!(failed
+            .detail
+            .unwrap()
+            .contains("may still use disk space"));
     }
 
     fn running_import(controller: &Controller) -> backup::Cancellation {

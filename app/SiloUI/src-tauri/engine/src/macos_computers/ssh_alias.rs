@@ -15,6 +15,9 @@ const SSH: &str = "/usr/bin/ssh";
 const FAILED: &str = "Could not prepare the SSH connection.";
 static LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(test)]
+static PROXY_HELPER_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -42,12 +45,30 @@ fn known_hosts(layout: &super::store::Layout) -> PathBuf {
 }
 
 fn proxy_helper() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(helper) = crate::sync::lock_or_recover(
+        &PROXY_HELPER_OVERRIDE,
+        "SSH proxy helper test override",
+    )
+    .clone()
+    {
+        if !launch::executable_file(&helper) {
+            return Err("The Silo engine SSH helper is unavailable. Update Silo and retry.".into());
+        }
+        return Ok(helper);
+    }
     let executable = std::env::current_exe().map_err(|_| FAILED)?;
     let helper = executable.parent().ok_or(FAILED)?.join("silod");
     if !launch::executable_file(&helper) {
         return Err("The Silo engine SSH helper is unavailable. Update Silo and retry.".into());
     }
     Ok(helper)
+}
+
+#[cfg(test)]
+pub(super) fn set_proxy_helper_for_test(helper: Option<PathBuf>) {
+    *crate::sync::lock_or_recover(&PROXY_HELPER_OVERRIDE, "SSH proxy helper test override") =
+        helper;
 }
 
 fn shell_quote(value: &str) -> String {

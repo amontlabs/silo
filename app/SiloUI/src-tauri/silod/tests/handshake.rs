@@ -91,7 +91,9 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
                 && result["deviceId"] == "fixture-device"
                 && result["protocol"] == 6
                 && result["clientId"].as_str().is_some()
-                && result["capabilities"] == serde_json::json!(["engine.handshake", "engine.state"])
+                && result["capabilities"] == serde_json::json!(
+                    ["engine.handshake", "engine.state", "guest.ssh"]
+                )
     ));
 
     write_json_frame(

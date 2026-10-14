@@ -141,6 +141,10 @@ pub(super) struct Record {
     /// are in `inherited-access/` until its personalization has replaced them.
     #[serde(default)]
     pub inherited_access: bool,
+    /// An archive import has rekeyed the account offline and still needs its
+    /// first password-authenticated personalization boot.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 impl Record {
@@ -161,7 +165,7 @@ impl Record {
 
     /// Readiness shown to the user and used by operations that require a current setup.
     pub(super) fn setup_complete(&self) -> bool {
-        self.setup.complete() && !self.developer_tools_stale()
+        self.setup.complete() && !self.developer_tools_stale() && !self.imported
     }
 
     pub(super) fn os_version(&self) -> Option<String> {
@@ -298,6 +302,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         computer_use_approval: None,
         pending_restore: None,
         inherited_access: false,
+        imported: false,
     }
 }
 
@@ -336,7 +341,7 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
         return Err(INTERRUPTED_INSTALL.into());
     }
     // Until then it still has its template's password and keys.
-    if record.setup.needs_personalizing {
+    if record.setup.needs_personalizing || record.imported {
         return Err(NEEDS_PERSONALIZING.into());
     }
     match state {
@@ -1059,6 +1064,24 @@ mod tests {
         );
         assert!(start_allowed(State::Failed, &computer).is_err());
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
+    }
+
+    #[test]
+    fn an_archive_import_stays_unavailable_until_retry_setup_finishes() {
+        let mut imported = finished();
+        imported.imported = true;
+        assert!(!imported.setup_complete());
+        assert_eq!(
+            start_allowed(State::Stopped, &imported),
+            Err(NEEDS_PERSONALIZING.into())
+        );
+        assert_eq!(setup_allowed(State::Stopped, &imported), Ok(()));
+        imported.imported = false;
+        assert!(imported.setup_complete());
+        assert_eq!(
+            setup_allowed(State::Stopped, &imported),
+            Err("This computer is already set up.".into())
+        );
     }
 
     #[test]

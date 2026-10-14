@@ -18,10 +18,10 @@ use std::{
 
 mod macos_archive;
 pub(crate) use macos_archive::{
-    ArchiveRuntimeKind, MacosArchiveComponent, MacosArchiveComponentInput,
+    ArchiveRuntimeKind, MacosArchiveComponentInput,
     MacosArchiveConfiguration, MacosArchiveConfig, MacosArchiveMemory,
     MacosArchiveSource, MacosArchiveSourceKind, MacosCheckpointKind,
-    MacosComponentRole, PreparedMacosArchive,
+    MacosComponentRole, memory_configuration_digest,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";

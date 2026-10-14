@@ -606,6 +606,31 @@ fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifi
     .ok_or_else(|| "The computer's identity is damaged. Delete it and create it again.".into())
 }
 
+/// Validate an imported VM's model, auxiliary storage, disk, identity, resources
+/// and Virtualization.framework configuration before the computer is published.
+pub(super) fn validate_archive_configuration(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<(), String> {
+    let model = read(&layout.hardware_model(), "hardware model")?;
+    let identifier = read(&layout.machine_identifier(), "identity")?;
+    let (app, record, layout) = (app.clone(), record.clone(), layout.clone());
+    on_main(&app.clone(), move |_| {
+        let identifier = machine_identifier_from(&identifier)?;
+        // SAFETY: This runs on the main thread and the auxiliary storage is a
+        // staged regular file created by the archive import path.
+        let auxiliary = unsafe {
+            VZMacAuxiliaryStorage::initWithURL(
+                VZMacAuxiliaryStorage::alloc(),
+                &nsurl(&layout.auxiliary_storage()),
+            )
+        };
+        configuration(&record, &layout, &model, &auxiliary, &identifier)?;
+        Ok(())
+    })?
+}
+
 /// Creates the machine for `configuration` and keeps it in the main-thread slots.
 fn register(
     mtm: MainThreadMarker,

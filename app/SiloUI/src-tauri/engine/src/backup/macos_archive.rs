@@ -714,7 +714,39 @@ fn validate_config_base(config: &MacosArchiveConfig, row_name: &str) -> Result<(
     }
     validate_source(&config.source)?;
     validate_memory(&config.memory)?;
+    if let MacosArchiveMemory::Saved {
+        configuration_digest,
+        ..
+    } = &config.memory
+    {
+        let expected = memory_configuration_digest(
+            config.cpus,
+            config.memory_gib,
+            config.disk_gib,
+            &config.hardware_model_digest,
+        )?;
+        if configuration_digest != &expected {
+            return Err("saved memory configuration digest does not match its archived computer".into());
+        }
+    }
     Ok(())
+}
+
+pub(crate) fn memory_configuration_digest(
+    cpus: u64,
+    memory_gib: u64,
+    disk_gib: u64,
+    hardware_model_digest: &str,
+) -> Result<String, String> {
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "architecture": "aarch64",
+        "cpus": cpus,
+        "memoryGiB": memory_gib,
+        "diskGiB": disk_gib,
+        "hardwareModelDigest": hardware_model_digest,
+    }))
+    .map_err(|error| error.to_string())?;
+    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
 fn validate_configuration(config: &MacosArchiveConfiguration, row_name: &str) -> Result<(), BackupError> {
@@ -1328,6 +1360,48 @@ mod tests {
                 },
             ],
         }
+    }
+
+    fn valid_memory_config() -> MacosArchiveConfiguration {
+        let mut config = valid_config();
+        config.memory = MacosArchiveMemory::Saved {
+            host_build: "25G83".into(),
+            configuration_digest: memory_configuration_digest(
+                config.cpus,
+                config.memory_gib,
+                config.disk_gib,
+                &config.hardware_model_digest,
+            )
+            .unwrap(),
+            size: 6,
+            sha256: digest(b"memory"),
+        };
+        config.components.push(MacosArchiveComponent {
+            role: MacosComponentRole::Memory,
+            logical_length: 6,
+            stored_length: 10,
+            sha256: digest(b"memory"),
+        });
+        config
+    }
+
+    #[test]
+    fn saved_memory_configuration_digest_must_match_archived_resources_and_model() {
+        let valid = valid_memory_config();
+        validate_configuration(&valid, &valid.source_name).unwrap();
+
+        let mut invalid = valid;
+        if let MacosArchiveMemory::Saved {
+            configuration_digest,
+            ..
+        } = &mut invalid.memory
+        {
+            *configuration_digest = format!("sha256:{}", "1".repeat(64));
+        }
+        assert!(validate_config_base(&invalid.source_config(), &invalid.source_name)
+            .unwrap_err()
+            .contains("configuration digest"));
+        assert!(validate_configuration(&invalid, &invalid.source_name).is_err());
     }
 
     #[test]
