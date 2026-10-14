@@ -2649,7 +2649,11 @@ pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), Stri
                 ));
                 continue;
             }
-            if record.pending_restore.as_ref().is_some_and(|restore| restore.memory) {
+            if record
+                .pending_restore
+                .as_ref()
+                .is_some_and(|restore| restore.memory)
+            {
                 failures.push(format!(
                     "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
                     record.name
@@ -5581,8 +5585,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
         let app = macos_context(context.clone());
-        let accepted = crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create")
-            .unwrap();
+        let accepted =
+            crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create").unwrap();
         context
             .job_registry()
             .unwrap()
