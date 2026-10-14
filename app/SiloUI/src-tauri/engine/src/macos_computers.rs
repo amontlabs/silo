@@ -2252,10 +2252,10 @@ fn close_display(app: &MacosContext, id: &str) {
 pub fn attach_display(
     context: &MacosContext,
     id: &str,
-    native_window: usize,
+    resolve_native_window: impl FnOnce() -> Result<usize, String> + Send + 'static,
     toolbar: bool,
 ) -> Result<(), String> {
-    engine::attach_display(context, id, native_window, toolbar)
+    engine::attach_display(context, id, resolve_native_window, toolbar)
 }
 
 /// Called by the host when its display window closes.

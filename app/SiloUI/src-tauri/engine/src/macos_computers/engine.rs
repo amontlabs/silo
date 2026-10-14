@@ -1450,16 +1450,19 @@ pub(super) fn set_display_subtitle(app: &MacosContext, id: &str, text: &str) {
 pub(super) fn attach_display(
     app: &MacosContext,
     id: &str,
-    native_window: usize,
+    resolve_native_window: impl FnOnce() -> Result<usize, String> + Send + 'static,
     toolbar: bool,
 ) -> Result<(), String> {
-    let (id, native_window, handle) = (id.to_string(), native_window, app.clone());
+    let (id, handle) = (id.to_string(), app.clone());
     on_main(app, move |mtm| {
         SLOTS.with(|slots| {
             let mut slots = slots.borrow_mut();
             let slot = slots.get_mut(&id).ok_or("This computer isn't running.")?;
-            // SAFETY: The host keeps the NSWindow alive until this main-thread attachment
-            // completes and calls `detach_display` before destroying it.
+            // Resolve on the AppKit queue, immediately before attachment. The Tauri adapter
+            // rechecks that the window still belongs to the app and has not been replaced.
+            let native_window = resolve_native_window()?;
+            // SAFETY: The adapter resolves this pointer on the AppKit queue and it is used
+            // immediately in this closure, without crossing a scheduling boundary.
             let native = unsafe { &*(native_window as *mut NSWindow) };
             if toolbar {
                 install_toolbar(mtm, &handle, &id, native);

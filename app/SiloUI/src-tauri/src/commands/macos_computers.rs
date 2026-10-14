@@ -5,6 +5,36 @@ use engine::{MacosContext, MacosHost};
 use std::{path::PathBuf, sync::Arc, time::Instant};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 
+const DISPLAY_WINDOW_ERROR: &str = "Silo could not open the display.";
+
+fn confirmed_display_window(original: usize, current: usize) -> Result<usize, String> {
+    if original != 0 && original == current {
+        Ok(current)
+    } else {
+        Err(DISPLAY_WINDOW_ERROR.to_string())
+    }
+}
+
+fn current_display_window(
+    app: &AppHandle,
+    label: &str,
+    created: &tauri::WebviewWindow,
+) -> Result<usize, String> {
+    let current = app
+        .get_webview_window(label)
+        .ok_or_else(|| DISPLAY_WINDOW_ERROR.to_string())?;
+    if created.label() != label || current.label() != label {
+        return Err(DISPLAY_WINDOW_ERROR.to_string());
+    }
+    let original = created
+        .ns_window()
+        .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())? as usize;
+    let current = current
+        .ns_window()
+        .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())? as usize;
+    confirmed_display_window(original, current)
+}
+
 struct TauriMacosHost {
     app: AppHandle,
 }
@@ -42,11 +72,15 @@ impl MacosHost for TauriMacosHost {
             }
         });
 
-        let native_window = display
-            .ns_window()
-            .map_err(|_| "Silo could not open the display.".to_string())?
-            as usize;
-        if let Err(message) = engine::attach_display(&context, id, native_window, toolbar) {
+        let (app, label, created) = (self.app.clone(), label.clone(), display.clone());
+        // `engine::attach_display` invokes this resolver in the same AppKit closure that
+        // attaches the view, so no NSWindow address survives a scheduling boundary.
+        if let Err(message) = engine::attach_display(
+            &context,
+            id,
+            move || current_display_window(&app, &label, &created),
+            toolbar,
+        ) {
             let _ = display.destroy();
             return Err(message);
         }
@@ -82,6 +116,24 @@ fn require_main(window: &Window) -> Result<(), String> {
         Ok(())
     } else {
         Err("Manage macOS computers from the main Silo window.".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_attachment_rejects_a_closed_or_replaced_window() {
+        assert_eq!(
+            confirmed_display_window(0x10, 0),
+            Err(DISPLAY_WINDOW_ERROR.to_string())
+        );
+        assert_eq!(
+            confirmed_display_window(0x10, 0x20),
+            Err(DISPLAY_WINDOW_ERROR.to_string())
+        );
+        assert_eq!(confirmed_display_window(0x10, 0x10), Ok(0x10));
     }
 }
 
