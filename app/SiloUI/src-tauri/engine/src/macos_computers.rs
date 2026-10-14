@@ -1141,7 +1141,7 @@ fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, c
     ) {
         Ok(guard) => guard,
         Err(runtime::operation_gate::GateError::Cancelled) => {
-            cancel.store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+            creation_queue_cancelled(cancel);
             end_workflow(app, &id, &layout, Err(Stop::Cancelled));
             return;
         }
@@ -1156,6 +1156,12 @@ fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, c
     };
     let result = run_creation(app, data, record, &layout, cancel);
     end_workflow(app, &id, &layout, result);
+}
+
+/// A queued Create can be cancelled without deleting the saved computer. Only Delete
+/// sets `CANCEL_AND_REMOVE`; Quit aborts the worker while keeping the incomplete record.
+fn creation_queue_cancelled(cancel: &AtomicU8) {
+    request_abort(cancel);
 }
 
 /// Provisions an installed computer again, resuming at the first unfinished step.
@@ -3449,6 +3455,30 @@ mod tests {
             .store(ABORT_AND_KEEP, Ordering::SeqCst);
         let mut registry = registry;
         assert!(registry.creation_continues(&id));
+    }
+
+    #[test]
+    fn cancelling_a_queued_creation_keeps_its_folder_record_and_inventory_row() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut registry, id) = registry_with(State::Downloading);
+        let layout = Layout::new(data.path(), &id);
+        let record = registry.entries[0].record.clone();
+        store::save(&layout, &record).unwrap();
+
+        // This is the cancellation branch used by create_workflow after its queue wait.
+        creation_queue_cancelled(&registry.entries[0].cancel);
+        let finish = registry.finish_workflow(&id, Err(Stop::Cancelled));
+        if matches!(&finish, Finish::Remove) {
+            store::remove(&layout).unwrap();
+            registry.finish_cancelled(&id, Ok(()));
+        }
+
+        assert!(matches!(finish, Finish::Kept));
+        assert!(layout.record().exists());
+        assert_eq!(store::load_all(data.path()), [record]);
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.entries[0].row().id, id);
+        assert_eq!(registry.entries[0].state, State::Failed);
     }
 
     #[test]
