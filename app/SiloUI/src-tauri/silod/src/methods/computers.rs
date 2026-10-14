@@ -582,7 +582,9 @@ async fn read_computers(
         .await
         .map_err(invalid)?;
     let result: ComputersListResult = serde_json::from_value(json!({
-        "linux": with_kind(encode(linux)?, "linux"),
+        "linux": linux
+            .to_canonical_value()
+            .map_err(|error| DispatchError::internal(error.to_string()))?,
         "macos": with_kind(encode(macos)?, "macos"),
     }))
     .map_err(|error| DispatchError::internal(error.to_string()))?;
@@ -600,8 +602,12 @@ async fn read_shell(
     let source: ApplicationSource = tokio::task::spawn_blocking(move || {
         let state = silo_engine::runtime::read_application_shell_with_host(&host, params.error)
             .map_err(invalid)?;
-        serde_json::from_value(with_kind(encode(state)?, "linux"))
-            .map_err(|error| DispatchError::internal(error.to_string()))
+        serde_json::from_value(
+            state
+                .to_canonical_value()
+                .map_err(|error| DispatchError::internal(error.to_string()))?,
+        )
+        .map_err(|error| DispatchError::internal(error.to_string()))
     })
     .await
     .map_err(join_failure)??;
@@ -864,8 +870,12 @@ async fn dismiss_error(
         let _ = registry.acknowledge(&internal);
     }
     let state = state.map_err(HandlerContext::map_engine_error)?;
-    let source: ApplicationSource = serde_json::from_value(with_kind(encode(state)?, "linux"))
-        .map_err(|error| DispatchError::internal(error.to_string()))?;
+    let source: ApplicationSource = serde_json::from_value(
+        state
+            .to_canonical_value()
+            .map_err(|error| DispatchError::internal(error.to_string()))?,
+    )
+    .map_err(|error| DispatchError::internal(error.to_string()))?;
     Ok(plain(encode(source)?))
 }
 

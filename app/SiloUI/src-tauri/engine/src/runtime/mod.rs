@@ -690,6 +690,20 @@ pub struct ApplicationSource {
     device_capacity: Option<DeviceCapacity>,
 }
 
+impl ApplicationSource {
+    /// The one canonical encoding of this state for clients: reads, job results and the
+    /// `computers.changed` event all use it, so a Linux row always carries its `kind`.
+    pub fn to_canonical_value(&self) -> Result<Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        if let Some(computers) = value.get_mut("computers").and_then(Value::as_array_mut) {
+            for computer in computers {
+                computer["kind"] = Value::String("linux".to_owned());
+            }
+        }
+        Ok(value)
+    }
+}
+
 /// The device limits `validate_device_ceiling` enforces, so editors can clamp defaults and
 /// presets instead of offering ceilings Silo will reject.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -3736,7 +3750,8 @@ fn computer_action_with_host_job(
     };
     match result {
         Ok((job_id, computer_id, state, handed_off)) => {
-            let state_value = serde_json::to_value(&state)
+            let state_value = state
+                .to_canonical_value()
                 .map_err(|error| BridgeError::from(error.to_string()))?;
             publish_linux_computers_changed(host.engine_context().as_ref(), &state);
             crate::jobs::finish_with_result(
@@ -4568,7 +4583,9 @@ fn finish_setup_job(
             crate::jobs::finish_with_result(
                 context,
                 job_id,
-                serde_json::to_value(state).map_err(|error| error.to_string())?,
+                state
+                    .to_canonical_value()
+                    .map_err(|error| error.to_string())?,
                 audience,
             )
         }
@@ -4613,7 +4630,7 @@ fn publish_linux_computers_changed(
     context: &dyn silo_engine::context::EngineContext,
     state: &ApplicationSource,
 ) {
-    let Ok(linux) = serde_json::to_value(state) else {
+    let Ok(linux) = state.to_canonical_value() else {
         return;
     };
     context.publish(
@@ -6952,6 +6969,44 @@ mod tests {
             setup_progress_audience(&request),
             Audience::Client(ClientId::new("main"))
         );
+    }
+
+    #[test]
+    fn job_results_and_events_carry_the_linux_row_discriminator() {
+        use silo_engine::context::test_support::RecordingContext;
+
+        let state = ApplicationSource {
+            runtime_repair: None,
+            computers: vec![unread_computer(tests::computer())],
+            activities: Vec::new(),
+            computer_configuration_operation: None,
+            repository_push_operations: Vec::new(),
+            github: Value::Null,
+            secrets: Vec::new(),
+            device_capacity: None,
+        };
+        let context = RecordingContext::default();
+        let request = format!("kinds-{}", uuid::Uuid::new_v4());
+        let job_id = silo_api::jobs::JobId::new(format!("setup:{request}")).unwrap();
+        finish_setup_job(&context, job_id, &Ok(state.clone()), false).unwrap();
+        publish_linux_computers_changed(&context, &state);
+
+        let published = context.published();
+        let finished = published
+            .iter()
+            .find(|(event, _)| event.name == "operations.job.finished")
+            .expect("the outcome is published");
+        let changed = published
+            .iter()
+            .find(|(event, _)| event.name == "computers.changed")
+            .expect("the change is published");
+        // Both deserialize into the canonical types, which require `kind` on every row.
+        let result: silo_api::methods::computers::ApplicationSource =
+            serde_json::from_value(finished.0.payload["result"].clone()).unwrap();
+        let event: silo_api::methods::computers::ApplicationSource =
+            serde_json::from_value(changed.0.payload["linux"].clone()).unwrap();
+        assert_eq!(result.computers.len(), 1);
+        assert_eq!(result, event);
     }
 
     #[test]
