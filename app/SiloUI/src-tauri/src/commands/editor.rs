@@ -1,4 +1,6 @@
+use crate::engine_client::{Engine, EngineClient, EngineError};
 use crate::{applications, editor, remote_access, runtime};
+use serde_json::json;
 use std::path::Path;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -66,44 +68,61 @@ pub(crate) fn run_transport(args: &[String]) -> Result<(), String> {
     Err(format!("Could not start the computer connection: {error}"))
 }
 
-#[tauri::command]
-pub(crate) async fn read_editor_include_notice(
-    app: AppHandle,
-    window: WebviewWindow,
-) -> Result<Option<String>, String> {
-    if window.label() != "main" {
-        return Err("Only the main window can read the editor connection notice.".into());
-    }
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|_| "Could not prepare the editor connection.")?;
-    tokio::task::spawn_blocking(move || editor::read_editor_include_notice(&home))
-        .await
-        .map_err(|_| "Could not prepare the editor connection.".to_owned())?
+/// The line this device's SSH configuration is missing for editors, if any.
+pub(crate) async fn include_notice(engine: &EngineClient) -> Result<Option<String>, EngineError> {
+    let notice = engine.call("editor.includeNotice", json!({})).await?;
+    Ok(notice.as_str().map(str::to_owned))
 }
 
-/// Preserve the startup repair and AppImage refresh as background work.
-pub(crate) fn refresh_transports(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let path = app.path();
-        let Ok(home) = path.home_dir() else {
-            return;
-        };
-        let app_data = path.app_data_dir().unwrap_or_default();
-        let paths = runtime::runtime_paths(&crate::commands::runtime::host(&app)).ok();
-        let failures = editor::refresh_transports(paths.as_ref(), &app_data, &home);
-        if !failures.is_empty() {
-            crate::commands::notifications::notify(
-                &app,
-                crate::notifications::failure(
-                    "startup:editor-connections",
-                    "Editor connections need attention",
-                    &failures.join(" "),
-                    None,
-                ),
-            );
-        }
-    });
+#[tauri::command]
+pub(crate) async fn read_editor_include_notice(
+    engine: Engine<'_>,
+    window: WebviewWindow,
+) -> Result<Option<String>, EngineError> {
+    if window.label() != "main" {
+        return Err(EngineError::internal(
+            "Only the main window can read the editor connection notice.",
+        ));
+    }
+    include_notice(&engine).await
+}
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::Value;
+
+    #[tokio::test]
+    async fn the_include_notice_is_the_engines_text_or_nothing() {
+        let notice =
+            std::sync::Arc::new(std::sync::Mutex::new(json!("Add Include to ~/.ssh/config")));
+        let current = notice.clone();
+        let fake = FakeEngine::start(move |method, _| match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "editor.includeNotice" => Ok(current.lock().unwrap().clone()),
+            "engine.state" => Ok(Value::Null),
+            _ => Ok(Value::Null),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(
+            include_notice(&engine).await.unwrap().as_deref(),
+            Some("Add Include to ~/.ssh/config")
+        );
+        *notice.lock().unwrap() = Value::Null;
+        assert_eq!(include_notice(&engine).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_engine_method_is_typed() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "editor.includeNotice" => Err(("unsupported_remote_operation", "Not here.".into())),
+            _ => Ok(json!({"subscription": "sub"})),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(
+            include_notice(&engine).await.unwrap_err().code,
+            "unsupported_remote_operation"
+        );
+    }
 }
