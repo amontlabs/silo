@@ -35,7 +35,24 @@ pub trait LocalAccess: Send + Sync {
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String>;
     fn chatgpt_status(&self) -> Result<Value, String>;
     fn chatgpt_retry(&self) -> Result<Value, String>;
+
+    /// Access-domain methods remain owner-side because credentials and secret values
+    /// belong to the selected owner. The silod adapter translates canonical IDs at the
+    /// runtime boundary and publishes the corresponding canonical state events.
+    fn access_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, String> {
+        Err("This Silo version does not support that remote operation.".into())
+    }
+
+    /// Opens the TCP connection a `github.connect.callback` stream carries: the active
+    /// connect job's loopback callback listener, and nothing else.
+    fn github_callback_stream(&self, _params: &Value) -> Result<std::net::TcpStream, String> {
+        Err("This Silo version does not support that remote operation.".into())
+    }
 }
+
+/// The raw stream that carries one GitHub sign-in callback between engines. It is served
+/// before request dispatch, like the other stream methods.
+pub(crate) const GITHUB_CALLBACK_STREAM: &str = "github.connect.callback";
 
 pub(crate) fn dispatch(
     paths: &runtime::RuntimePaths,
@@ -45,6 +62,31 @@ pub(crate) fn dispatch(
     local: &dyn LocalAccess,
 ) -> Result<Value, String> {
     match method {
+        "github.state"
+        | "github.connect"
+        | "github.connect.reopen"
+        | "github.repositories.manage"
+        | "github.repositories.refresh"
+        | "github.disconnect"
+        | "github.access.set"
+        | "github.configuration.save"
+        | "github.configuration.retry"
+        | "github.personalToken.save"
+        | "github.personalToken.remove"
+        | "secrets.list"
+        | "secrets.save"
+        | "secrets.remove"
+        | "secrets.retry"
+        | "operations.job.get"
+        | "operations.cancel"
+        | "operations.job.acknowledge" => local.access_dispatch(method, params),
+        "connections.keys.revoke" => {
+            let public_key = params["publicKey"]
+                .as_str()
+                .ok_or("Missing Connections public key.")?;
+            crate::remote::revoke_connections_key(public_key)?;
+            Ok(Value::Null)
+        }
         "desktop.connect" => local.desktop_connection(
             &computer_name(paths, params)?,
             string(params, "computerId")?,

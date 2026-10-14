@@ -114,6 +114,17 @@ pub struct PendingRevocation {
     pub(crate) name: String,
     pub(crate) computer: String,
 }
+impl PendingRevocation {
+    /// The computer (by name) whose guest may still hold this removed secret.
+    pub fn computer(&self) -> &str {
+        &self.computer
+    }
+
+    /// The environment-variable name of the removed secret.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Document {
@@ -810,6 +821,12 @@ pub async fn read_secrets_state() -> Result<Vec<Value>, String> {
     tokio::task::spawn_blocking(move || snapshot_from(path))
         .await
         .map_err(|_| "Secret settings could not be read.".to_string())?
+}
+
+/// Synchronous owner-side snapshot for the SSH bridge worker, which does not run on
+/// silod's async socket executor.
+pub fn read_secrets_state_sync() -> Result<Vec<Value>, String> {
+    snapshot()
 }
 
 pub fn save_secret<G>(

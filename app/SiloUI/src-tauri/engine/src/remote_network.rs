@@ -331,6 +331,7 @@ fn project_ports(
         }
         let name = row["computer"].as_str().unwrap_or("").to_owned();
         row["host"] = json!(crate::network::computer_host(&name, &computer));
+        row["computerName"] = json!(name);
         row["computer"] = json!(format!("silo-remote:{device}:{computer}"));
         for port in row["ports"]
             .as_array_mut()

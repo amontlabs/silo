@@ -1,5 +1,6 @@
 //! App-lifetime Connections. SSH only transports framed requests to the running owner.
 use crate::bridge_error::{BridgeError, ErrorCode, LEGACY_INCOMPATIBLE};
+use crate::context::Event;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -13,7 +14,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 #[path = "remote/operations.rs"]
 mod operations;
@@ -270,6 +271,22 @@ const METHODS: &[(&str, Access)] = &[
     ("desktop.action", Access::Change),
     ("chatgpt.status", Access::Read),
     ("chatgpt.retry", Access::Change),
+    ("github.state", Access::Read),
+    ("github.connect", Access::Change),
+    ("github.connect.callback", Access::Stream),
+    ("github.connect.reopen", Access::Read),
+    ("github.repositories.manage", Access::Read),
+    ("github.repositories.refresh", Access::Change),
+    ("github.disconnect", Access::Change),
+    ("github.access.set", Access::Change),
+    ("github.configuration.save", Access::Change),
+    ("github.configuration.retry", Access::Change),
+    ("github.personalToken.save", Access::Change),
+    ("github.personalToken.remove", Access::Change),
+    ("secrets.list", Access::Read),
+    ("secrets.save", Access::Change),
+    ("secrets.remove", Access::Change),
+    ("secrets.retry", Access::Change),
     ("computerUse.approval", Access::Change),
     ("ssh.access.state", Access::Read),
     ("ssh.access.connection", Access::Change),
@@ -280,6 +297,10 @@ const METHODS: &[(&str, Access)] = &[
     ("network.state", Access::Read),
     ("network.publish", Access::Change),
     ("network.unpublish", Access::Change),
+    ("connections.keys.revoke", Access::Change),
+    ("operations.job.get", Access::Read),
+    ("operations.cancel", Access::Change),
+    ("operations.job.acknowledge", Access::Change),
     ("repository.push.status", Access::Read),
     ("repository.push.start", Access::Change),
     ("repository.push", Access::Change),
@@ -475,7 +496,7 @@ pub async fn remove_device(device_id: String) -> Result<(), String> {
         config.devices.retain(|h| h.id != device_id);
         save_config(&config)?;
         drop(_guard);
-        poll_succeeded(&device_id);
+        clear_device_health(&device_id);
         crate::remote_network::close_device(&device_id);
         crate::desktop_viewer::close_device(&device_id);
         if let Some(context) = silo_engine::context::current() {
@@ -485,6 +506,51 @@ pub async fn remove_device(device_id: String) -> Result<(), String> {
     })
     .await
     .map_err(|_| "Could not remove the device.".to_string())?
+}
+
+/// Public part of this channel's Connections identity for owner-side key revocation.
+pub fn connections_public_key() -> Result<Option<String>, String> {
+    let key = directory()?.join("id_ed25519");
+    if !key.exists() {
+        return Ok(None);
+    }
+    crate::editor::key(&key)?;
+    crate::editor::public_key(&key).map(Some)
+}
+
+/// Removes only this channel's restricted Connections line for `public_key`.
+/// An absent line is a successful retry; unrelated entries sharing the blob remain.
+pub fn revoke_connections_key(public_key: &str) -> Result<(), String> {
+    revoke_connections_key_in(&current_home()?.join(".ssh/authorized_keys"), public_key)
+}
+fn revoke_connections_key_in(path: &Path, public_key: &str) -> Result<(), String> {
+    let expected = authorized_key_line(public_key)?;
+    let changed = rewrite_authorized_keys_file(path, |contents| {
+        let mut removed = false;
+        let rewritten = contents
+            .split_inclusive('\n')
+            .filter(|line| {
+                if line.trim() == expected {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<String>();
+        removed.then_some(rewritten)
+    })?;
+    if !changed {
+        let contents = match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        };
+        if contents.lines().any(|line| line.trim() == expected) {
+            return Err("The matching Silo SSH key is in an externally managed authorized_keys file and cannot be revoked safely.".into());
+        }
+    }
+    Ok(())
 }
 fn validate_address(address: &str) -> Result<(), String> {
     let invalid = || {
@@ -1262,6 +1328,19 @@ pub fn call_remote_typed(
     method: &str,
     params: Value,
 ) -> Result<Value, BridgeError> {
+    let result = exchange_with_device(device_id, method, params);
+    if result.is_ok() {
+        // A reply from the owner is an observation of it, whatever the method was.
+        poll_succeeded(device_id);
+    }
+    result
+}
+
+fn exchange_with_device(
+    device_id: &str,
+    method: &str,
+    params: Value,
+) -> Result<Value, BridgeError> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let device = {
         let _guard = config_lock();
@@ -1479,7 +1558,7 @@ pub async fn device_snapshot(
         );
         match &result {
             Ok(_) => poll_succeeded(&device_id),
-            Err(error) if error.code == ErrorCode::UpdateInProgress => {}
+            Err(error) if error.code == ErrorCode::UpdateInProgress => poll_busy(&device_id),
             Err(error) => close_after_failed_poll(&device_id, error),
         }
         result
@@ -1492,6 +1571,9 @@ struct Health {
     failures: u32,
     last_error: String,
     at: Instant,
+    connected: bool,
+    busy: bool,
+    last_success_at: Option<SystemTime>,
 }
 static HEALTH: Mutex<std::collections::BTreeMap<String, Health>> =
     Mutex::new(std::collections::BTreeMap::new());
@@ -1524,7 +1606,34 @@ fn revoked(error: &BridgeError) -> bool {
         .any(|marker| error.message.starts_with(marker))
 }
 pub(crate) fn poll_succeeded(device: &str) {
-    crate::sync::lock_or_recover(&HEALTH, "remote device health").remove(device);
+    /// A reply that changes nothing but `lastSeen` is published at most this often.
+    const REFRESH_PUBLISH: Duration = Duration::from_secs(60);
+    let mut health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+    let entry = health.entry(device.to_owned()).or_insert(Health {
+        failures: 0,
+        last_error: String::new(),
+        at: Instant::now(),
+        connected: false,
+        busy: false,
+        last_success_at: None,
+    });
+    let changed = !entry.connected
+        || entry.busy
+        || !entry.last_error.is_empty()
+        || entry
+            .last_success_at
+            .and_then(|at| at.elapsed().ok())
+            .is_none_or(|age| age >= REFRESH_PUBLISH);
+    entry.failures = 0;
+    entry.last_error.clear();
+    entry.at = Instant::now();
+    entry.connected = true;
+    entry.busy = false;
+    entry.last_success_at = Some(SystemTime::now());
+    drop(health);
+    if changed {
+        publish_device_health_changed();
+    }
 }
 pub(crate) fn poll_failed(device: &str, error: &BridgeError) -> PollFailure {
     let mut health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
@@ -1532,16 +1641,96 @@ pub(crate) fn poll_failed(device: &str, error: &BridgeError) -> PollFailure {
         failures: 0,
         last_error: String::new(),
         at: Instant::now(),
+        connected: false,
+        busy: false,
+        last_success_at: None,
     });
     entry.failures += 1;
     entry.last_error = error.message.clone();
     entry.at = Instant::now();
-    if revoked(error) {
+    entry.connected = false;
+    entry.busy = false;
+    let failure = if revoked(error) {
         PollFailure::Revoked
     } else if entry.failures >= CLOSE_AFTER_FAILURES {
         PollFailure::Disconnected
     } else {
         PollFailure::Transient
+    };
+    drop(health);
+    publish_device_health_changed();
+    failure
+}
+
+/// Records owner admission pressure without treating it as a failed connection.
+pub fn poll_busy(device: &str) {
+    let mut health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+    let entry = health.entry(device.to_owned()).or_insert(Health {
+        failures: 0,
+        last_error: String::new(),
+        at: Instant::now(),
+        connected: false,
+        busy: true,
+        last_success_at: None,
+    });
+    entry.busy = true;
+    entry.last_error = "The other device is busy.".into();
+    drop(health);
+    publish_device_health_changed();
+}
+
+fn clear_device_health(device: &str) {
+    crate::sync::lock_or_recover(&HEALTH, "remote device health").remove(device);
+    publish_device_health_changed();
+}
+
+/// Side-effect-free public health projection. It never opens SSH or probes a device.
+pub fn device_health() -> Result<silo_api::methods::connections::DeviceHealthResult, String> {
+    let devices = saved_devices()?;
+    let health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+    let devices = devices
+        .into_iter()
+        .map(|device| {
+            let observed = health.get(&device.id);
+            let last_seen =
+                observed
+                    .and_then(|entry| entry.last_success_at)
+                    .and_then(|timestamp| {
+                        time::OffsetDateTime::from(timestamp)
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .ok()
+                    });
+            silo_api::methods::connections::DeviceHealth {
+                device_id: device.id,
+                connected: observed.is_some_and(|entry| entry.connected),
+                busy: observed.is_some_and(|entry| entry.busy),
+                error: observed.and_then(|entry| {
+                    (!entry.last_error.is_empty()).then(|| entry.last_error.clone())
+                }),
+                last_seen,
+            }
+        })
+        .collect();
+    Ok(silo_api::methods::connections::DeviceHealthResult { devices })
+}
+
+/// Publishes the complete device-health projection after the saved devices changed.
+pub fn publish_device_health() {
+    publish_device_health_changed();
+}
+
+fn publish_device_health_changed() {
+    let Some(context) = silo_engine::context::current() else {
+        return;
+    };
+    let Ok(state) = device_health() else {
+        return;
+    };
+    if let Ok(payload) = serde_json::to_value(state) {
+        context.publish(
+            Event::new("connections.devices.changed", payload),
+            silo_engine::context::Audience::All,
+        );
     }
 }
 /// The last error of a device that failed repeatedly just now, so reads can answer at
@@ -2067,6 +2256,23 @@ fn listen() -> Result<(), String> {
                                 |params| {
                                     crate::macos_remote_engine::open_display_stream(&macos, params)
                                 },
+                                || {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
+                        if request["method"] == crate::remote_access::GITHUB_CALLBACK_STREAM {
+                            // Only the active connect job's loopback listener is reachable.
+                            authorize(&request)?;
+                            serve_display_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |params| local_access.github_callback_stream(params),
                                 || {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
                                         && crate::runtime::shutdown::ensure_accepting_operations()
@@ -5021,12 +5227,26 @@ mod dispatch_tests {
                 "runtime.delete",
                 "desktop.action",
                 "chatgpt.retry",
+                "github.connect",
+                "github.repositories.refresh",
+                "github.disconnect",
+                "github.access.set",
+                "github.configuration.save",
+                "github.configuration.retry",
+                "github.personalToken.save",
+                "github.personalToken.remove",
+                "secrets.save",
+                "secrets.remove",
+                "secrets.retry",
                 "computerUse.approval",
                 "ssh.access.connection",
                 "ssh.access.save",
                 "guest.prepare",
                 "network.publish",
                 "network.unpublish",
+                "connections.keys.revoke",
+                "operations.cancel",
+                "operations.job.acknowledge",
                 "repository.push.start",
                 "repository.push",
                 "repository.dismiss",
@@ -5050,7 +5270,11 @@ mod dispatch_tests {
         );
         assert_eq!(
             methods(Access::Stream),
-            ["guest.ssh", "macos.display.stream"]
+            [
+                "github.connect.callback",
+                "guest.ssh",
+                "macos.display.stream"
+            ]
         );
         let served: std::collections::BTreeSet<String> =
             method_literals(include_str!("remote_access.rs"))
@@ -5834,3 +6058,123 @@ mod config_io_limit_tests {
 #[cfg(test)]
 #[path = "remote/display_stream_tests.rs"]
 mod display_stream_tests;
+
+#[cfg(test)]
+mod key_revocation_tests {
+    use super::*;
+
+    const BLOB: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIOwn0K1FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEF";
+
+    fn public_key() -> String {
+        format!("ssh-ed25519 {BLOB} {}", silo_key_comment())
+    }
+
+    fn silo_line() -> String {
+        authorized_key_line(&public_key()).unwrap()
+    }
+
+    fn keys_file(contents: &str) -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("authorized_keys");
+        fs::write(&path, contents).unwrap();
+        (directory, path)
+    }
+
+    #[test]
+    fn revocation_removes_every_matching_restricted_line_and_nothing_else() {
+        let unrelated = format!("ssh-ed25519 {BLOB} someone@laptop\n");
+        let other = "ssh-ed25519 AAAAOTHERKEY other@host\n";
+        let (_directory, path) = keys_file(&format!(
+            "{other}{line}\n{unrelated}# kept comment\n{line}",
+            line = silo_line()
+        ));
+        revoke_connections_key_in(&path, &public_key()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("{other}{unrelated}# kept comment\n")
+        );
+    }
+
+    #[test]
+    fn revoking_an_absent_key_or_file_is_a_successful_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        revoke_connections_key_in(&directory.path().join("missing"), &public_key()).unwrap();
+        let (_directory, path) = keys_file("ssh-ed25519 AAAAOTHERKEY other@host");
+        revoke_connections_key_in(&path, &public_key()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "ssh-ed25519 AAAAOTHERKEY other@host"
+        );
+        revoke_connections_key_in(&path, &public_key()).unwrap();
+    }
+
+    #[test]
+    fn an_externally_managed_file_with_the_key_is_refused_visibly() {
+        let directory = tempfile::tempdir().unwrap();
+        let managed = directory.path().join("managed");
+        fs::write(&managed, format!("{}\n", silo_line())).unwrap();
+        let link = directory.path().join("authorized_keys");
+        std::os::unix::fs::symlink(&managed, &link).unwrap();
+        let error = revoke_connections_key_in(&link, &public_key()).unwrap_err();
+        assert!(error.contains("externally managed"), "{error}");
+        assert!(fs::read_to_string(&managed).unwrap().contains(BLOB));
+
+        let clean = directory.path().join("clean");
+        fs::write(&clean, "ssh-ed25519 AAAAOTHERKEY other@host\n").unwrap();
+        let clean_link = directory.path().join("clean_link");
+        std::os::unix::fs::symlink(&clean, &clean_link).unwrap();
+        revoke_connections_key_in(&clean_link, &public_key()).unwrap();
+    }
+
+    #[test]
+    fn a_malformed_public_key_is_refused_before_touching_the_file() {
+        let (_directory, path) = keys_file(&format!("{}\n", silo_line()));
+        assert!(revoke_connections_key_in(&path, "not a key").is_err());
+        assert!(fs::read_to_string(&path).unwrap().contains(BLOB));
+    }
+
+    #[test]
+    fn device_health_distinguishes_busy_from_failed_and_never_probes() {
+        let busy = "00000000-0000-4000-8000-0000000000b1";
+        poll_busy(busy);
+        let health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+        let entry = health.get(busy).unwrap();
+        assert!(entry.busy && !entry.connected && entry.failures == 0);
+        assert_eq!(entry.last_success_at, None);
+    }
+
+    #[test]
+    fn health_follows_replies_and_failures_without_losing_the_last_success() {
+        let device = "00000000-0000-4000-8000-0000000000c1";
+        let snapshot = || {
+            let health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+            let entry = health.get(device).unwrap();
+            (
+                entry.connected,
+                entry.busy,
+                entry.failures,
+                entry.last_error.clone(),
+                entry.last_success_at,
+            )
+        };
+        let failure = BridgeError::from("The other device did not answer.");
+        assert_eq!(poll_failed(device, &failure), PollFailure::Transient);
+        assert_eq!(snapshot(), (false, false, 1, failure.message.clone(), None));
+
+        poll_succeeded(device);
+        let (connected, busy, failures, error, seen) = snapshot();
+        assert!(connected && !busy && failures == 0 && error.is_empty());
+        let seen = seen.expect("a reply records when the device was last seen");
+
+        poll_busy(device);
+        let (connected, busy, _, error, kept) = snapshot();
+        // Busy is reachable but unavailable: not a failure, and not a loss of contact.
+        assert!(connected && busy && error == "The other device is busy.");
+        assert_eq!(kept, Some(seen));
+
+        assert_eq!(poll_failed(device, &failure), PollFailure::Transient);
+        let (connected, busy, failures, _, kept) = snapshot();
+        assert!(!connected && !busy && failures == 1);
+        assert_eq!(kept, Some(seen));
+    }
+}
