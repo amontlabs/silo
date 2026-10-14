@@ -43,6 +43,14 @@ pub trait LocalAccess: Send + Sync {
         Err(BridgeError::unsupported())
     }
 
+    /// Subscribes to this engine's own events for a controller's `events.subscribe` stream.
+    fn open_event_stream(
+        &self,
+        _selectors: Vec<String>,
+    ) -> Result<Box<dyn crate::remote_events::EventSource>, String> {
+        Err("This Silo version does not support that remote operation.".into())
+    }
+
     /// Opens the TCP connection a `github.connect.callback` stream carries: the active
     /// connect job's loopback callback listener, and nothing else.
     fn github_callback_stream(&self, _params: &Value) -> Result<std::net::TcpStream, String> {

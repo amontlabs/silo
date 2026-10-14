@@ -138,6 +138,9 @@ pub enum PackageKind {
 pub struct Event {
     pub name: String,
     pub payload: serde_json::Value,
+    /// The engine the event came from when it is not this one: a controller re-publishes
+    /// an owner's events with the owner's device id (95 A-3/A-4). `None` is this engine.
+    pub device_id: Option<String>,
 }
 
 impl Event {
@@ -145,6 +148,20 @@ impl Event {
         Self {
             name: name.into(),
             payload,
+            device_id: None,
+        }
+    }
+
+    /// An event relayed from the engine of `device_id`.
+    pub fn from_device(
+        device_id: impl Into<String>,
+        name: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            payload,
+            device_id: Some(device_id.into()),
         }
     }
 }

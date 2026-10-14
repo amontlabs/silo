@@ -305,6 +305,7 @@ const METHODS: &[(&str, Access)] = &[
     ("github.state", Access::Read),
     ("github.connect", Access::Change),
     ("github.connect.callback", Access::Stream),
+    ("events.subscribe", Access::Stream),
     ("github.connect.reopen", Access::Read),
     ("github.repositories.manage", Access::Read),
     ("github.repositories.refresh", Access::Change),
@@ -961,6 +962,15 @@ fn read_socket_frame(socket: &mut UnixStream, timeout: Duration) -> Result<Value
     })
 }
 
+/// Reads one frame of a stream method after its reply (the relayed event stream).
+pub(crate) fn read_stream_frame(reader: impl Read) -> Result<Value, String> {
+    read_frame(reader)
+}
+/// Writes one frame of a stream method after its reply, flushed at once.
+pub(crate) fn write_stream_frame(mut writer: impl Write, value: &Value) -> Result<(), String> {
+    write_frame(&mut writer, value)?;
+    writer.flush().map_err(|error| error.to_string())
+}
 fn read_frame(mut reader: impl Read) -> Result<Value, String> {
     let mut len = [0; 4];
     reader.read_exact(&mut len).map_err(|_|"The remote Silo connection ended. Check that Silo is running and Connections are turned on.".to_string())?;
@@ -2493,6 +2503,9 @@ pub fn open_bridge_stream(
     if let Err(failure) = decode_reply(&reply) {
         return Err(name_version_mismatch(failure.error(), &device.name));
     }
+    // The owner accepted a stream: that is an observation of it, as any reply is.
+    poll_succeeded(device_id);
+    note_controller_key(device_id);
     Ok(BridgeStream {
         child,
         input,
@@ -2651,6 +2664,22 @@ fn listen() -> Result<(), String> {
                                 &request["params"],
                                 |params| local_access.github_callback_stream(params),
                                 || {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
+                        if request["method"] == crate::remote_events::EVENTS_STREAM {
+                            authorize(&request)?;
+                            serve_event_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |selectors| local_access.open_event_stream(selectors),
+                                &|| {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
                                         && crate::runtime::shutdown::ensure_accepting_operations()
                                             .is_ok()
@@ -2880,7 +2909,7 @@ fn changes_allowed() -> bool {
         && crate::runtime::shutdown::ensure_accepting_operations().is_ok()
 }
 /// True until the peer closes its end of `stream` (the bridge closes it when its controller leaves).
-fn connection_open(stream: &UnixStream) -> bool {
+pub fn connection_open(stream: &UnixStream) -> bool {
     use std::os::fd::AsRawFd;
     let mut byte = 0u8;
     // SAFETY: peeks at most one byte into a local buffer without blocking.
@@ -3421,6 +3450,64 @@ fn serve_guest_stream(
     })?;
     Ok(())
 }
+/// Event relays being served, against their own limit inside the stream budget.
+static EVENT_RELAYS: Budget = Budget::new(crate::remote_events::EVENT_RELAY_LIMIT);
+const _: () = assert!(crate::remote_events::EVENT_RELAY_LIMIT < STREAM_LIMIT);
+/// Serves one controller's `events.subscribe`: the owner's own events, until the controller
+/// leaves. It takes a stream permit and one of the event-relay slots, and says so plainly
+/// when either is full.
+fn serve_event_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(Vec<String>) -> Result<Box<dyn crate::remote_events::EventSource>, String>,
+    allowed: &dyn Fn() -> bool,
+) -> Result<(), BridgeError> {
+    serve_event_stream_with(
+        stream,
+        permit,
+        streams,
+        &EVENT_RELAYS,
+        params,
+        open,
+        allowed,
+        crate::remote_events::HEARTBEAT,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn serve_event_stream_with(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    relays: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(Vec<String>) -> Result<Box<dyn crate::remote_events::EventSource>, String>,
+    allowed: &dyn Fn() -> bool,
+    heartbeat: Duration,
+) -> Result<(), BridgeError> {
+    let selectors = crate::remote_events::parse_selectors(params)?;
+    let _relay = relays.acquire().ok_or(
+        "This device is already relaying events to as many controllers as it can. Try again later.",
+    )?;
+    let _stream_permit = admit_stream(permit, streams)?;
+    let source = open(selectors)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    let peer = stream.try_clone().map_err(|e| e.to_string())?;
+    crate::remote_events::serve(
+        &mut *stream,
+        source,
+        &|| connection_open(&peer),
+        allowed,
+        heartbeat,
+    );
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    Ok(())
+}
 /// Opens and relays one `macos.display.stream`: the guest's Screen Sharing connection,
 /// opened by `open`, spliced to the controller's bridge until either side ends.
 fn serve_display_stream(
@@ -3615,6 +3702,104 @@ mod stream_tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap()
+    }
+    struct ScriptedEvents(std::collections::VecDeque<crate::remote_events::EventPoll>);
+    impl crate::remote_events::EventSource for ScriptedEvents {
+        fn next(&mut self, _wait: Duration) -> crate::remote_events::EventPoll {
+            self.0
+                .pop_front()
+                .unwrap_or(crate::remote_events::EventPoll::Ended)
+        }
+    }
+    #[test]
+    fn an_event_stream_replies_then_carries_events_within_both_budgets() {
+        static MANAGEMENT: Budget = Budget::new(4);
+        static STREAMS: Budget = Budget::new(2);
+        static RELAYS: Budget = Budget::new(1);
+        let envelope = json!({"event": "settings.changed", "seq": 1, "payload": {}});
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = MANAGEMENT.acquire();
+        let sent = envelope.clone();
+        let worker = thread::spawn(move || {
+            serve_event_stream_with(
+                &mut server,
+                &mut permit,
+                &STREAMS,
+                &RELAYS,
+                &json!({"events": ["settings.changed"]}),
+                |selectors| {
+                    assert_eq!(selectors, ["settings.changed"]);
+                    Ok(Box::new(ScriptedEvents(
+                        [crate::remote_events::EventPoll::Event(sent)].into(),
+                    )))
+                },
+                &|| true,
+                Duration::from_secs(60),
+            )
+        });
+        let mut reader = std::io::BufReader::new(&mut client);
+        assert_eq!(read_frame(&mut reader).unwrap()["result"], json!({}));
+        assert_eq!(
+            crate::remote_events::read_relay_frame(&mut reader).unwrap(),
+            crate::remote_events::RelayFrame::Event(envelope)
+        );
+        worker.join().unwrap().unwrap();
+        // Both permits are back once the stream ended.
+        assert!(RELAYS.acquire().is_some());
+        assert!(STREAMS.acquire().is_some());
+    }
+    #[test]
+    fn an_event_stream_is_refused_when_the_relay_limit_or_the_stream_budget_is_full() {
+        static MANAGEMENT: Budget = Budget::new(4);
+        static STREAMS: Budget = Budget::new(3);
+        static RELAYS: Budget = Budget::new(1);
+        let _held = RELAYS.acquire().unwrap();
+        let (_client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = MANAGEMENT.acquire();
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &STREAMS,
+            &RELAYS,
+            &json!({"events": ["settings.changed"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("relaying events"), "{refused:?}");
+        // The management permit stays with the refused connection so it can say why.
+        assert!(permit.is_some());
+
+        static FULL_STREAMS: Budget = Budget::new(0);
+        static OTHER_RELAYS: Budget = Budget::new(1);
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &FULL_STREAMS,
+            &OTHER_RELAYS,
+            &json!({"events": ["settings.changed"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("too many active Silo streams"));
+        // The relay slot was given back, not leaked.
+        assert!(OTHER_RELAYS.acquire().is_some());
+        // Unknown or client-scoped events are refused before anything is taken.
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &STREAMS,
+            &OTHER_RELAYS,
+            &json!({"events": ["guest.exec.output"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("not relayed"));
     }
     #[test]
     fn streams_at_capacity_leave_management_connections_admissible() {
@@ -5707,6 +5892,7 @@ mod dispatch_tests {
             methods(Access::Stream),
             [
                 "github.connect.callback",
+                "events.subscribe",
                 "guest.ssh",
                 "macos.display.stream"
             ]
