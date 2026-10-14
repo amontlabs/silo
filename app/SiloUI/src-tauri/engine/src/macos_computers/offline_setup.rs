@@ -448,12 +448,73 @@ fn validate_import_account_identity(user: &Dictionary) -> Result<(), String> {
         || required_import_account_field(user, "uid")? != UID
         || required_import_account_field(user, "gid")? != GID
         || required_import_account_field(user, "home")? != "/Users/silo"
-        || required_import_account_field(user, "authentication_authority")?
-            != ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>"
     {
         return Err("Silo could not verify the imported computer's managed account identity.".into());
     }
+    validate_import_authentication_authorities(user)?;
     Ok(())
+}
+
+/// macOS augments Silo's initial ShadowHash authority after first boot. Accept
+/// the two observed password-hash variants and the matching local Kerberos and
+/// SecureToken entries, while rejecting any authority Silo did not create or
+/// observe. The entries are preserved as macOS-owned account metadata.
+fn validate_import_authentication_authorities(user: &Dictionary) -> Result<(), String> {
+    const SINGLE_HASH: &str = ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>";
+    const MACOS_HASH: &str =
+        ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2,SRP-RFC5054-4096-SHA512-PBKDF2>";
+    const SECURE_TOKEN: &str = ";SecureToken;";
+
+    let invalid = || {
+        Err("Silo could not verify the imported computer's managed account identity.".into())
+    };
+    let authorities = user
+        .get("authentication_authority")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            "Silo could not verify the imported computer's managed account identity.".to_string()
+        })?;
+    let Some(Value::String(shadow_hash)) = authorities.first() else {
+        return invalid();
+    };
+    if shadow_hash != SINGLE_HASH && shadow_hash != MACOS_HASH {
+        return invalid();
+    }
+
+    let mut saw_kerberos = false;
+    let mut saw_secure_token = false;
+    for authority in &authorities[1..] {
+        let Some(authority) = authority.as_string() else {
+            return invalid();
+        };
+        match authority {
+            SECURE_TOKEN if !saw_secure_token => saw_secure_token = true,
+            SECURE_TOKEN => return invalid(),
+            _ if !saw_kerberos && is_silo_local_kerberos_authority(authority) => {
+                saw_kerberos = true
+            }
+            _ => return invalid(),
+        }
+    }
+    Ok(())
+}
+
+fn is_silo_local_kerberos_authority(authority: &str) -> bool {
+    let Some(body) = authority.strip_prefix(";Kerberosv5;;silo@LKDC:SHA1.") else {
+        return false;
+    };
+    let Some((principal_hash, realm)) = body.split_once(';') else {
+        return false;
+    };
+    let Some(realm_hash) = realm
+        .strip_prefix("LKDC:SHA1.")
+        .and_then(|value| value.strip_suffix(';'))
+    else {
+        return false;
+    };
+    principal_hash.len() == 40
+        && principal_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && realm_hash == principal_hash
 }
 
 fn required_import_account_field<'a>(user: &'a Dictionary, name: &str) -> Result<&'a str, String> {
@@ -1623,6 +1684,37 @@ mod tests {
     }
 
     #[test]
+    fn import_rekey_preserves_macos_added_account_authorities() {
+        let (root, _, _) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let mut user = read_plist(&user_path).unwrap();
+        let authorities = Value::Array(vec![
+            Value::String(
+                ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2,SRP-RFC5054-4096-SHA512-PBKDF2>"
+                    .into(),
+            ),
+            Value::String(
+                ";Kerberosv5;;silo@LKDC:SHA1.00112233445566778899AABBCCDDEEFF00112233;LKDC:SHA1.00112233445566778899AABBCCDDEEFF00112233;"
+                    .into(),
+            ),
+            Value::String(";SecureToken;".into()),
+        ]);
+        user.insert("authentication_authority".into(), authorities.clone());
+        write_plist(&user, &user_path, 0o600, true, Format::Binary).unwrap();
+
+        let mut new_account = account();
+        new_account.password = "new-import-password".into();
+        rekey_import_data_volume(root.path(), &new_account).unwrap();
+
+        assert_eq!(
+            read_plist(&user_path).unwrap()["authentication_authority"],
+            authorities
+        );
+    }
+
+    #[test]
     fn import_rekey_rejects_a_symlinked_authorized_keys_path_before_writing() {
         let (root, _, old_hash) = imported_volume();
         let external = tempfile::tempdir().unwrap();
@@ -1718,6 +1810,28 @@ mod tests {
         user.insert(
             "authentication_authority".into(),
             string_list(";LocalCachedUser;"),
+        );
+        write_plist(&user, &user_path, 0o600, true, Format::Binary).unwrap();
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+
+        assert!(error.contains("managed account identity"), "{error}");
+        assert_eq!(read_plist(&user_path).unwrap()["ShadowHashData"], old_hash);
+    }
+
+    #[test]
+    fn import_rekey_refuses_an_unrecognized_additional_authority_before_writing() {
+        let (root, _, old_hash) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let mut user = read_plist(&user_path).unwrap();
+        user.insert(
+            "authentication_authority".into(),
+            Value::Array(vec![
+                Value::String(";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>".into()),
+                Value::String(";LocalCachedUser;".into()),
+            ]),
         );
         write_plist(&user, &user_path, 0o600, true, Format::Binary).unwrap();
 
