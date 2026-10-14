@@ -167,12 +167,12 @@ fn main() {
             commands::macos_remote_viewer::macos_display_resize,
             app_menu::set_app_menu_state,
             app_menu::show_app_menu,
-            updates::get_update_state,
-            updates::check_for_update,
-            updates::download_update,
-            updates::install_update,
-            updates::set_update_automatic_checks,
-            updates::open_update_release,
+            commands::updates::get_update_state,
+            commands::updates::check_for_update,
+            commands::updates::download_update,
+            commands::updates::install_update,
+            commands::updates::set_update_automatic_checks,
+            commands::updates::open_update_release,
             status_panel::open_main,
             status_panel::take_main_route,
             status_panel::hide_status,
@@ -327,7 +327,7 @@ fn main() {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if matches!(event, WindowEvent::Focused(true)) {
-                        updates::focused(&handle);
+                        commands::updates::focused(&handle);
                     }
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
@@ -346,7 +346,7 @@ fn main() {
                 #[cfg(target_os = "macos")]
                 titlebar::install(&window)?;
                 commands::notifications::install(app.handle());
-                updates::install(app.handle())?;
+                commands::updates::install(app.handle())?;
                 commands::ssh_access::start_monitor(app.handle());
                 commands::editor::refresh_transports(app.handle());
                 commands::runtime_storage::start_monitor(app.handle());

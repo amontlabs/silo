@@ -37,5 +37,6 @@ pub(crate) mod system_integrations;
 pub(crate) mod system_shutdown;
 pub(crate) mod terminal;
 pub(crate) mod transfer;
+pub(crate) mod updates;
 pub(crate) mod viewer_clipboard;
 pub(crate) mod viewer_shortcuts;

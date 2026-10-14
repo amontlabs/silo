@@ -54,7 +54,7 @@ impl StartupServices for TauriStartupServices {
     }
 
     fn update_recovery_failed(&self, message: String) {
-        crate::updates::recovery_failed(&self.app, message);
+        crate::commands::updates::recovery_failed(&self.app, message);
     }
 
     fn notify_failure(&self, key: &str, title: &str, body: &str) {
