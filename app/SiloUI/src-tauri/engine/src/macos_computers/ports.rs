@@ -930,7 +930,7 @@ pub(super) fn publish(
         "Publishing a port",
         || {
             let (_, state) = super::computer(computer_id)?;
-            let mut config = read_configuration(app)?;
+            let config = read_configuration(app)?;
             let active_for_computer = config
                 .mappings
                 .iter()
