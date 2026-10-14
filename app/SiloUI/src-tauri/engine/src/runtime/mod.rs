@@ -23,6 +23,7 @@ mod secrets_runtime;
 pub mod shutdown;
 pub mod storage;
 pub mod update_recovery;
+pub mod update_save;
 /// Process-wide ordered admission for work that changes computer runtime state.
 pub static OPERATIONS: operation_gate::OperationGate = operation_gate::OperationGate::new();
 use crate::bridge_error::{BridgeError, ErrorCode};
