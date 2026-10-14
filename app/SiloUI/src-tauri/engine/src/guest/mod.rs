@@ -14,6 +14,7 @@
 mod commands;
 mod exec;
 mod files;
+pub mod macos;
 mod process;
 mod session;
 mod ssh_alias;

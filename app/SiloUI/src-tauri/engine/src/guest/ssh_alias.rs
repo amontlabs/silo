@@ -9,7 +9,6 @@ use super::{
     target::Target,
     GuestError,
 };
-use silo_api::jobs::ErrorCode;
 use std::{path::Path, time::Duration};
 
 /// What `guest.sshAlias.ensure` asks for.
@@ -32,18 +31,14 @@ pub struct AliasOutcome {
     pub include_installed: bool,
 }
 
-const PENDING_PARITY: &str =
-    "SSH aliases for macOS computers arrive with the macOS access work (pending parity-2).";
+const MACOS_ADAPTER: &str = "SSH aliases for macOS computers are written by guest::macos.";
 
 fn linux<'a>(
     target: &'a Target,
 ) -> Result<(&'a crate::runtime::RuntimePaths, &'a str, &'a str), GuestError> {
     match target {
         Target::Linux { paths, id, name } => Ok((paths, id, name)),
-        Target::Macos(_) => Err(GuestError::new(
-            ErrorCode::UnsupportedRemoteOperation,
-            PENDING_PARITY,
-        )),
+        Target::Macos(_) => Err(GuestError::internal(MACOS_ADAPTER)),
     }
 }
 
@@ -117,6 +112,7 @@ pub fn remove_alias(target: &Target, user_home: &Path) -> Result<(), GuestError>
 mod tests {
     use super::*;
     use crate::guest::test_support;
+    use silo_api::jobs::ErrorCode;
 
     #[test]
     fn invalid_folders_and_missing_folders_are_refused_before_anything_is_written() {

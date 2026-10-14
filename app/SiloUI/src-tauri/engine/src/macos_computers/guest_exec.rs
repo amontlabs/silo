@@ -59,6 +59,12 @@ impl GuestSsh {
         }
     }
 
+    /// The address a controller reaches the guest's SSH port at (the proxy listener once the
+    /// guest has one, else the NAT lease).
+    pub fn address(&self) -> Result<std::net::IpAddr, String> {
+        guest_access::endpoint(&self.record, 22).map(|endpoint| endpoint.ip())
+    }
+
     /// The program and arguments that log in with the computer's key and run `command`
     /// (one shell command line) in the guest.
     pub fn invocation(&self, command: &str) -> Result<(String, Vec<String>), String> {

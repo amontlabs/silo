@@ -590,16 +590,17 @@ async fn ssh_alias_ensure(
     let params: GuestSshAliasEnsureParams = context.decode_params(params)?;
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
+    let macos = super::display::macos_context(context);
     let outcome = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
-        guest::ensure_alias(
-            &target,
-            &user_home(&engine),
-            &guest::AliasEnsure {
-                install_include: params.install_include.unwrap_or(true),
-                path: params.path,
-            },
-        )
+        let request = guest::AliasEnsure {
+            install_include: params.install_include.unwrap_or(true),
+            path: params.path,
+        };
+        match target {
+            Target::Macos(_) => guest::macos::ensure_alias(&macos, &target, &request),
+            Target::Linux { .. } => guest::ensure_alias(&target, &user_home(&engine), &request),
+        }
     })
     .await?;
     output(GuestSshAliasEnsureResult {
@@ -619,9 +620,13 @@ async fn ssh_alias_remove(
     let params: GuestSshAliasRemoveParams = context.decode_params(params)?;
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
+    let macos = super::display::macos_context(context);
     blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
-        guest::remove_alias(&target, &user_home(&engine))
+        match target {
+            Target::Macos(_) => guest::macos::remove_alias(&macos, &target),
+            Target::Linux { .. } => guest::remove_alias(&target, &user_home(&engine)),
+        }
     })
     .await?;
     output(Value::Null)
@@ -630,16 +635,24 @@ async fn ssh_alias_remove(
 // ---------------------------------------------------------------------------------------
 // files.* (the Files page)
 
-fn linux_computer(target: &Target, what: &str) -> Result<(RuntimePaths, String), GuestError> {
+/// The Linux computer a transfer or listing runs against, or `None` for a macOS computer,
+/// which goes through the macOS access adapters instead.
+fn linux_computer(target: &Target) -> Option<(RuntimePaths, String)> {
     match target {
-        Target::Linux { paths, name, .. } => Ok((paths.clone(), name.clone())),
-        Target::Macos(_) => Err(GuestError::new(
-            ErrorCode::UnsupportedRemoteOperation,
-            format!(
-                "{what} for macOS computers arrives with the macOS access work (pending parity-2)."
-            ),
-        )),
+        Target::Linux { paths, name, .. } => Some((paths.clone(), name.clone())),
+        Target::Macos(_) => None,
     }
+}
+
+/// The page-cache owner of a macOS folder listing: this connection's client id.
+fn listing_caller(context: &HandlerContext) -> String {
+    context
+        .client_id()
+        .as_str()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(128)
+        .collect::<String>()
 }
 
 async fn files_list(
@@ -651,16 +664,27 @@ async fn files_list(
     let offset = usize::try_from(params.offset)
         .map_err(|_| DispatchError::internal("Invalid folder request."))?;
     let engine = engine_of(context);
+    let macos = super::display::macos_context(context);
+    let caller = listing_caller(context);
     let page = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
-        let (paths, name) = linux_computer(&target, "The Files page")?;
-        Ok(silo_engine::files::list_computer_directory(
-            &paths,
-            name,
-            params.path,
-            offset,
-            params.snapshot_id,
-        )?)
+        match linux_computer(&target) {
+            Some((paths, name)) => Ok(silo_engine::files::list_computer_directory(
+                &paths,
+                name,
+                params.path,
+                offset,
+                params.snapshot_id,
+            )?),
+            None => Ok(silo_engine::macos_computers::list_directory(
+                &macos,
+                caller,
+                params.computer_id,
+                params.path,
+                offset,
+                params.snapshot_id,
+            )?),
+        }
     })
     .await?;
     // The Files page and the wire share one paging shape.
@@ -778,25 +802,38 @@ async fn files_upload(
         let (engine, computer_id) = (engine.clone(), params.computer_id.clone());
         blocking(move || resolve(&engine, &computer_id)).await?
     };
-    let (runtime, name) = linux_computer(&target, "File transfers").map_err(guest_error)?;
+    let linux = linux_computer(&target);
+    let macos = super::display::macos_context(context);
     let job_id = JobId::new(format!("transfer:{}", params.transfer_id))
         .map_err(|error| DispatchError::internal(error.to_string()))?;
-    let (transfer, directory) = (params.transfer_id, params.directory);
+    let (transfer, directory, computer_id) =
+        (params.transfer_id, params.directory, params.computer_id);
     run_transfer(engine, job_id, move || {
         let selection = silo_engine::transfer::issue_upload_selection(&owner, paths);
         let token = serde_json::to_value(&selection)
             .ok()
             .and_then(|value| value["token"].as_str().map(str::to_owned))
             .ok_or("Could not prepare the upload.")?;
-        silo_engine::transfer::upload_files(
-            Some(&runtime),
-            owner,
-            transfer,
-            name,
-            directory,
-            token,
-            conflict,
-        )
+        match linux {
+            Some((runtime, name)) => silo_engine::transfer::upload_files(
+                Some(&runtime),
+                owner,
+                transfer,
+                name,
+                directory,
+                token,
+                conflict,
+            ),
+            None => silo_engine::macos_computers::upload_files(
+                &macos,
+                owner,
+                transfer,
+                computer_id,
+                directory,
+                token,
+                conflict,
+            ),
+        }
         .map(|_| ())
     })
     .await
@@ -823,14 +860,26 @@ async fn files_download(
         let (engine, computer_id) = (engine.clone(), params.computer_id.clone());
         blocking(move || resolve(&engine, &computer_id)).await?
     };
-    let (runtime, name) = linux_computer(&target, "File transfers").map_err(guest_error)?;
+    let linux = linux_computer(&target);
+    let macos = super::display::macos_context(context);
     let job_id = JobId::new(format!("transfer:{}", params.transfer_id))
         .map_err(|error| DispatchError::internal(error.to_string()))?;
     let downloads = user_home(&engine).join("Downloads");
-    let (transfer, path, destination) = (params.transfer_id, params.path, params.destination);
+    let (transfer, path, destination, computer_id) = (
+        params.transfer_id,
+        params.path,
+        params.destination,
+        params.computer_id,
+    );
     run_transfer(engine, job_id, move || {
-        let (session, file_name) =
-            silo_engine::transfer::prepare_download(Some(&runtime), transfer, name, path)?;
+        let (session, file_name) = match linux {
+            Some((runtime, name)) => {
+                silo_engine::transfer::prepare_download(Some(&runtime), transfer, name, path)?
+            }
+            None => {
+                silo_engine::macos_computers::prepare_download(&macos, transfer, computer_id, path)?
+            }
+        };
         let destination = destination
             .map(PathBuf::from)
             .unwrap_or_else(|| downloads.join(file_name));
@@ -849,9 +898,13 @@ async fn terminal_command(
     let params: TerminalCommandParams = context.decode_params(params)?;
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
+    let macos = super::display::macos_context(context);
     let argv = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
-        guest::terminal_command(&target)
+        match target {
+            Target::Macos(_) => guest::macos::terminal_command(&macos, &target),
+            Target::Linux { .. } => guest::terminal_command(&target),
+        }
     })
     .await?;
     output(CommandResult { argv })
@@ -864,15 +917,21 @@ async fn editor_command(
     let params: EditorCommandParams = context.decode_params(params)?;
     local_device(context, params.device_id.as_deref())?;
     let engine = engine_of(context);
+    let macos = super::display::macos_context(context);
     let argv = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
         let settings = silo_engine::settings::current_settings()?;
-        guest::editor_command(
-            &target,
-            &user_home(&engine),
-            params.path.as_deref(),
-            &settings,
-        )
+        match target {
+            Target::Macos(_) => {
+                guest::macos::editor_command(&macos, &target, params.path.as_deref(), &settings)
+            }
+            Target::Linux { .. } => guest::editor_command(
+                &target,
+                &user_home(&engine),
+                params.path.as_deref(),
+                &settings,
+            ),
+        }
     })
     .await?;
     output(CommandResult { argv })
@@ -1683,6 +1742,94 @@ exit 2
         match run_transfer(fixture.engine.clone(), job_id, || Ok(())).await {
             Err(error) => assert_eq!(error.code, ErrorCode::Busy),
             Ok(_) => panic!("a transfer ID in use must be refused"),
+        }
+    }
+
+    /// A running macOS computer in the shared inventory whose access material does not exist,
+    /// so every adapter stops at its login with a message only the macOS adapters produce.
+    fn running_macos_computer(fixture: &Fixture) -> String {
+        silo_engine::macos_computers_engine::install_test_computer(
+            &fixture.engine.paths().app_data,
+            "mac-fixture",
+            silo_engine::macos_computers_engine::TestComputerState::Running,
+            silo_engine::computer_use::Approval::Ask,
+        )
+    }
+
+    #[tokio::test]
+    async fn macos_computers_reach_the_macos_adapters_for_every_access_method() {
+        const NO_ACCESS: &str = "This computer's access is missing.";
+        let fixture = Fixture::new();
+        let id = running_macos_computer(&fixture);
+        let folder = "/Users/silo/workspace";
+        let key =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOchaFYV1PlX7OWxqxGXrnZTgG+EqFVeLNIJn42NJJxA";
+        let calls = [
+            (MethodName::GuestSshAliasEnsure, json!({"computerId": id})),
+            (MethodName::TerminalCommand, json!({"computerId": id})),
+            (
+                MethodName::FilesList,
+                json!({"computerId": id, "path": folder, "offset": 0}),
+            ),
+            (
+                MethodName::FilesUpload,
+                json!({
+                    "transferId": "mac-up", "computerId": id, "directory": folder,
+                    "conflict": "ask", "paths": ["/tmp/a"]
+                }),
+            ),
+            (
+                MethodName::FilesDownload,
+                json!({
+                    "transferId": "mac-down", "computerId": id,
+                    "path": format!("{folder}/a")
+                }),
+            ),
+            (
+                MethodName::GuestPrepare,
+                json!({
+                    "computerId": id, "publicKey": key, "path": folder,
+                    "accountProtocol": 1
+                }),
+            ),
+        ];
+        for (method, params) in calls {
+            let error = fixture.call(method, params).await.unwrap_err();
+            assert_eq!(error.message, NO_ACCESS, "{method:?}");
+            assert!(!error.message.contains("pending parity-2"));
+        }
+        // Removing an alias that was never written is a no-op, like on Linux.
+        assert!(fixture
+            .ok(MethodName::GuestSshAliasRemove, json!({"computerId": id}))
+            .await
+            .is_null());
+        // Folders outside the macOS workspace are refused before the guest is asked.
+        let error = fixture
+            .call(
+                MethodName::FilesList,
+                json!({"computerId": id, "path": "/workspace", "offset": 0}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.message, "Invalid folder request.");
+    }
+
+    #[tokio::test]
+    async fn a_stopped_macos_computer_is_not_started_by_the_access_methods() {
+        let fixture = Fixture::new();
+        let id = silo_engine::macos_computers_engine::install_test_computer(
+            &fixture.engine.paths().app_data,
+            "mac-stopped",
+            silo_engine::macos_computers_engine::TestComputerState::Stopped,
+            silo_engine::computer_use::Approval::Ask,
+        );
+        for (method, params) in [
+            (MethodName::TerminalCommand, json!({"computerId": id})),
+            (MethodName::GuestSshAliasEnsure, json!({"computerId": id})),
+        ] {
+            let error = fixture.call(method, params).await.unwrap_err();
+            assert_eq!(error.message, "Start this computer first.", "{method:?}");
+            assert_eq!(error.code, ErrorCode::NotRunning);
         }
     }
 
