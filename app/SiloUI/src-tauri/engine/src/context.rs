@@ -113,6 +113,14 @@ pub trait MainThread: Send + Sync {
     fn run(&self, work: Box<dyn FnOnce() + Send>) -> Result<(), String>;
 }
 
+/// Runs one host closure through the main-thread runner.
+pub fn dispatch_to_main_thread(
+    main_thread: &dyn MainThread,
+    work: Box<dyn FnOnce() + Send>,
+) -> Result<(), String> {
+    main_thread.run(work)
+}
+
 pub trait ProcessControl: Send + Sync {
     fn exit(&self, code: i32);
     fn restart(&self) -> !;
@@ -187,6 +195,74 @@ mod tests {
 }
 
 static CONTEXT: OnceLock<Arc<dyn EngineContext>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::sync::Mutex;
+
+    pub(crate) struct RecordingContext {
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published: Mutex<Vec<(Event, Audience)>>,
+    }
+
+    impl Default for RecordingContext {
+        fn default() -> Self {
+            Self {
+                paths: EnginePaths::default(),
+                identity: EngineIdentity {
+                    channel: crate::channel::Channel::Production,
+                    version: "0.0.0-test".into(),
+                    package_kind: PackageKind::Other,
+                },
+                runtime_state: Arc::new(EngineRuntimeState::default()),
+                published: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl RecordingContext {
+        pub(crate) fn published(&self) -> Vec<(Event, Audience)> {
+            self.published.lock().unwrap().clone()
+        }
+    }
+
+    impl EngineContext for RecordingContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, audience: Audience) {
+            self.published.lock().unwrap().push((event, audience));
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for RecordingContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("test context cannot restart")
+        }
+    }
+}
 
 /// Installs the host's context once, at startup. Engine code reads it with [`current`].
 pub fn install(context: Arc<dyn EngineContext>) -> Result<(), String> {

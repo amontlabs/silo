@@ -444,7 +444,7 @@ pub(crate) async fn complete_settings_flush(
 
 #[cfg(test)]
 mod tests {
-    use super::{require_main, run_before, settings_change};
+    use super::{require_main, run_before, settings_change, SETTINGS_CHANGE_LOCK};
     use std::{
         sync::{
             atomic::{AtomicUsize, Ordering},
@@ -487,6 +487,10 @@ mod tests {
 
         let second_revision = applied_revision.clone();
         let second = thread::spawn(move || {
+            assert!(matches!(
+                SETTINGS_CHANGE_LOCK.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            ));
             second_attempted_tx.send(()).unwrap();
             settings_change(
                 || {
@@ -497,10 +501,10 @@ mod tests {
             )
             .unwrap();
         });
-        second_attempted_rx.recv().unwrap();
-        assert!(second_mutated_rx
-            .recv_timeout(Duration::from_millis(50))
-            .is_err());
+        second_attempted_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("second thread did not observe the settings lock");
+        assert!(second_mutated_rx.try_recv().is_err());
 
         release_first_tx.send(()).unwrap();
         first.join().unwrap();

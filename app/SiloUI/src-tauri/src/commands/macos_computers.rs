@@ -15,24 +15,50 @@ fn confirmed_display_window(original: usize, current: usize) -> Result<usize, St
     }
 }
 
+type NativeWindowLookup = Box<dyn FnOnce() -> Result<usize, String>>;
+
+fn resolve_display_window(
+    label: &str,
+    created_label: &str,
+    created_window: impl FnOnce() -> Result<usize, String>,
+    lookup_current: impl FnOnce(&str) -> Option<(String, NativeWindowLookup)>,
+) -> Result<usize, String> {
+    let (current_label, current_window) =
+        lookup_current(label).ok_or_else(|| DISPLAY_WINDOW_ERROR.to_string())?;
+    if created_label != label || current_label != label {
+        return Err(DISPLAY_WINDOW_ERROR.to_string());
+    }
+    let original = created_window().map_err(|_| DISPLAY_WINDOW_ERROR.to_string())?;
+    let current = current_window().map_err(|_| DISPLAY_WINDOW_ERROR.to_string())?;
+    confirmed_display_window(original, current)
+}
+
 fn current_display_window(
     app: &AppHandle,
     label: &str,
     created: &tauri::WebviewWindow,
 ) -> Result<usize, String> {
-    let current = app
-        .get_webview_window(label)
-        .ok_or_else(|| DISPLAY_WINDOW_ERROR.to_string())?;
-    if created.label() != label || current.label() != label {
-        return Err(DISPLAY_WINDOW_ERROR.to_string());
-    }
-    let original = created
-        .ns_window()
-        .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())? as usize;
-    let current = current
-        .ns_window()
-        .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())? as usize;
-    confirmed_display_window(original, current)
+    resolve_display_window(
+        label,
+        created.label(),
+        || {
+            created
+                .ns_window()
+                .map(|window| window as usize)
+                .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())
+        },
+        |label| {
+            let current = app.get_webview_window(label)?;
+            let current_label = current.label().to_owned();
+            let native_window = Box::new(move || {
+                current
+                    .ns_window()
+                    .map(|window| window as usize)
+                    .map_err(|_| DISPLAY_WINDOW_ERROR.to_string())
+            });
+            Some((current_label, native_window))
+        },
+    )
 }
 
 struct TauriMacosHost {
@@ -122,6 +148,79 @@ fn require_main(window: &Window) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+        thread::ThreadId,
+    };
+
+    #[derive(Default)]
+    struct RecordingMainThread {
+        running: AtomicBool,
+        calls: AtomicUsize,
+        thread: Mutex<Option<ThreadId>>,
+    }
+
+    impl silo_engine::MainThread for RecordingMainThread {
+        fn run(&self, work: Box<dyn FnOnce() + Send>) -> Result<(), String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.thread.lock().unwrap() = Some(std::thread::current().id());
+            self.running.store(true, Ordering::SeqCst);
+            work();
+            self.running.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn current_window_lookup_and_validation_run_on_the_main_thread_runner() {
+        let runner = Arc::new(RecordingMainThread::default());
+        let runner_for_work = runner.clone();
+        let lookup_thread = Arc::new(Mutex::new(None));
+        let thread_for_lookup = lookup_thread.clone();
+        let result = Arc::new(Mutex::new(None));
+        let result_for_work = result.clone();
+
+        silo_engine::context::dispatch_to_main_thread(
+            runner.as_ref(),
+            Box::new(move || {
+                let runner_for_created = runner_for_work.clone();
+                let created_window = move || {
+                    assert!(runner_for_created.running.load(Ordering::SeqCst));
+                    *thread_for_lookup.lock().unwrap() = Some(std::thread::current().id());
+                    Ok(0x10)
+                };
+                let runner_for_current = runner_for_work.clone();
+                let lookup_current = move |label: &str| {
+                    assert!(runner_for_current.running.load(Ordering::SeqCst));
+                    (label == "display").then(|| {
+                        let runner_for_ns_window = runner_for_current.clone();
+                        let native_window = Box::new(move || {
+                            assert!(runner_for_ns_window.running.load(Ordering::SeqCst));
+                            Ok(0x10usize)
+                        });
+                        ("display".to_owned(), native_window as NativeWindowLookup)
+                    })
+                };
+                *result_for_work.lock().unwrap() = Some(resolve_display_window(
+                    "display",
+                    "display",
+                    created_window,
+                    lookup_current,
+                ));
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(runner.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(*result.lock().unwrap(), Some(Ok(0x10)));
+        assert_eq!(
+            *lookup_thread.lock().unwrap(),
+            *runner.thread.lock().unwrap()
+        );
+    }
 
     #[test]
     fn display_attachment_rejects_a_closed_or_replaced_window() {

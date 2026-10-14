@@ -161,18 +161,21 @@ pub(super) fn on_main<T: Send + 'static>(
     let main_thread = app
         .main_thread()
         .ok_or_else(|| "Silo could not reach its main thread.".to_string())?;
-    main_thread.run(Box::new(move || {
-        {
-            let mut phase = worker_phase.lock().unwrap_or_else(|p| p.into_inner());
-            if *phase == Phase::Abandoned {
-                return;
+    silo_engine::context::dispatch_to_main_thread(
+        main_thread,
+        Box::new(move || {
+            {
+                let mut phase = worker_phase.lock().unwrap_or_else(|p| p.into_inner());
+                if *phase == Phase::Abandoned {
+                    return;
+                }
+                *phase = Phase::Running;
             }
-            *phase = Phase::Running;
-        }
-        if let Some(mtm) = MainThreadMarker::new() {
-            let _ = send.send(work(mtm));
-        }
-    }))?;
+            if let Some(mtm) = MainThreadMarker::new() {
+                let _ = send.send(work(mtm));
+            }
+        }),
+    )?;
     match receive.recv_timeout(MAIN_THREAD_WAIT) {
         Ok(result) => Ok(result),
         Err(_) => {
@@ -203,11 +206,14 @@ fn on_main_patient<T: Send + 'static>(
     let main_thread = app
         .main_thread()
         .ok_or_else(|| "Silo could not reach its main thread.".to_string())?;
-    main_thread.run(Box::new(move || {
-        if let Some(mtm) = MainThreadMarker::new() {
-            let _ = send.send(work(mtm));
-        }
-    }))?;
+    silo_engine::context::dispatch_to_main_thread(
+        main_thread,
+        Box::new(move || {
+            if let Some(mtm) = MainThreadMarker::new() {
+                let _ = send.send(work(mtm));
+            }
+        }),
+    )?;
     receive
         .recv()
         .map_err(|_| "Silo's main thread did not respond.".to_string())
@@ -218,6 +224,63 @@ enum Phase {
     Pending,
     Running,
     Abandoned,
+}
+
+#[cfg(test)]
+mod main_thread_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::thread::ThreadId;
+
+    #[derive(Default)]
+    struct RecordingMainThread {
+        running: AtomicBool,
+        calls: AtomicUsize,
+        thread: Mutex<Option<ThreadId>>,
+    }
+
+    impl silo_engine::MainThread for RecordingMainThread {
+        fn run(&self, work: Box<dyn FnOnce() + Send>) -> Result<(), String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.thread.lock().unwrap() = Some(std::thread::current().id());
+            self.running.store(true, Ordering::SeqCst);
+            work();
+            self.running.store(false, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn display_window_lookup_and_validation_run_on_the_main_thread_runner() {
+        let main_thread = Arc::new(RecordingMainThread::default());
+        let lookup_thread = Arc::new(Mutex::new(None));
+        let runner = main_thread.clone();
+        let looked_up = lookup_thread.clone();
+
+        silo_engine::context::dispatch_to_main_thread(
+            main_thread.as_ref(),
+            Box::new(move || {
+                let resolve_and_validate = || {
+                    assert!(runner.running.load(Ordering::SeqCst));
+                    *looked_up.lock().unwrap() = Some(std::thread::current().id());
+                    let created_window = Some(0x10usize);
+                    let current_window = Some(0x10usize);
+                    let original = created_window.expect("created window exists");
+                    let current = current_window.expect("current window exists");
+                    (original == current).then_some(current)
+                };
+
+                assert_eq!(resolve_and_validate(), Some(0x10));
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(main_thread.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *lookup_thread.lock().unwrap(),
+            *main_thread.thread.lock().unwrap()
+        );
+    }
 }
 
 // MARK: Host support

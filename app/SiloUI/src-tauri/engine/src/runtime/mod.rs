@@ -124,9 +124,11 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
         .publish(Event::new(name, payload), Audience::All);
 }
 
-fn publish_main_window_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
-    let context = host.engine_context();
-    silo_engine::context::publish_to_main_window(context.as_ref(), Event::new(name, payload));
+fn publish_configuration_progress(context: &dyn EngineContext, payload: Value) {
+    silo_engine::context::publish_to_main_window(
+        context,
+        Event::new("silo://computer-configuration-progress", payload),
+    );
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
@@ -3593,7 +3595,11 @@ fn computer_progress(
 
 /// Shows what a creation is waiting for before it takes the operation gate. These events
 /// are for the creation toast only; they are not part of the setup journal.
-pub fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::Step) {
+fn publish_creation_wait_with_context(
+    context: &dyn EngineContext,
+    request_id: &str,
+    step: &crate::creation_inputs::Step,
+) {
     use crate::creation_inputs::{ChatGpt, Step};
     let event = match step {
         Step::Image => computer_progress(request_id, "computer-image-wait", "", 0),
@@ -3611,14 +3617,18 @@ pub fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::St
         }
         Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
+    silo_engine::context::publish_to_main_window(
+        context,
+        silo_engine::context::Event::new(
+            "silo://computer-configuration-progress",
+            serde_json::to_value(event).unwrap_or(Value::Null),
+        ),
+    );
+}
+
+pub fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::Step) {
     if let Some(context) = silo_engine::context::current() {
-        silo_engine::context::publish_to_main_window(
-            context.as_ref(),
-            silo_engine::context::Event::new(
-                "silo://computer-configuration-progress",
-                serde_json::to_value(event).unwrap_or(Value::Null),
-            ),
-        );
+        publish_creation_wait_with_context(context.as_ref(), request_id, step);
     }
 }
 
@@ -4208,16 +4218,13 @@ fn apply_configuration_with_progress(
             .back()
             .filter(|entry| entry.step == "activity-storage-warning")
         {
-            // window:main
-            publish_main_window_event(
-                host,
-                "silo://computer-configuration-progress",
+            publish_configuration_progress(
+                host.engine_context().as_ref(),
                 serde_json::to_value(warning).unwrap_or(Value::Null),
             );
         }
-        publish_main_window_event(
-            host,
-            "silo://computer-configuration-progress",
+        publish_configuration_progress(
+            host.engine_context().as_ref(),
             serde_json::to_value(&event).unwrap_or(Value::Null),
         );
     };
@@ -6356,6 +6363,51 @@ pub fn write_metadata(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn creation_wait_progress_targets_only_the_main_client() {
+        use crate::creation_inputs::{ChatGpt, Step};
+        use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+        let context = RecordingContext::default();
+        publish_creation_wait_with_context(
+            &context,
+            "request",
+            &Step::ChatGpt(ChatGpt::Downloading {
+                received: 5,
+                total: 10,
+            }),
+        );
+
+        let published = context.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(
+            published[0].0.name,
+            "silo://computer-configuration-progress"
+        );
+        assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+    }
+
+    #[test]
+    fn configuration_warning_and_progress_target_only_the_main_client() {
+        use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+        let context = RecordingContext::default();
+        for step in ["activity-storage-warning", "computer-configuration"] {
+            let progress = computer_progress("request", step, "computer", 42);
+            publish_configuration_progress(&context, serde_json::to_value(progress).unwrap());
+        }
+
+        let published = context.published();
+        assert_eq!(published.len(), 2);
+        assert!(published.iter().all(|(event, audience)| {
+            event.name == "silo://computer-configuration-progress"
+                && *audience == Audience::Client(ClientId::new("main"))
+        }));
+        assert_eq!(published[0].0.payload["step"], "activity-storage-warning");
+        assert_eq!(published[1].0.payload["step"], "computer-configuration");
+    }
 
     #[test]
     fn the_migrated_inventory_and_setup_history_load() {
@@ -6377,8 +6429,6 @@ mod tests {
             .all(|event| event.phase == "computers" && event.computer == "dev"));
         assert_eq!(events[0].step, "computer-image-import");
     }
-    use super::*;
-
     #[test]
     fn metadata_large_input_memory_is_bounded() {
         const PROBE: &str = "SILO_TEST_METADATA_MEMORY_PROBE";

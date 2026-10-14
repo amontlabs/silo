@@ -227,15 +227,16 @@ pub fn snapshot() -> PreparationStatus {
     }
 }
 
+fn publish_status(context: &dyn silo_engine::EngineContext, status: &PreparationStatus) {
+    if let Ok(payload) = serde_json::to_value(status) {
+        // window:main; the host adapter resolves this client id to the main window.
+        silo_engine::context::publish_to_main_window(context, Event::new(STATUS_EVENT, payload));
+    }
+}
+
 fn emit() {
     if let Some(context) = silo_engine::context::current() {
-        if let Ok(payload) = serde_json::to_value(snapshot()) {
-            // window:main; the host adapter resolves this client id to the main window.
-            silo_engine::context::publish_to_main_window(
-                context.as_ref(),
-                Event::new(STATUS_EVENT, payload),
-            );
-        }
+        publish_status(context.as_ref(), &snapshot());
     }
 }
 

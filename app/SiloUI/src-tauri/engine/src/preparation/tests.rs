@@ -654,3 +654,21 @@ fn download_progress_is_a_percentage() {
     assert_eq!(percent(300, 200), 100);
     assert_eq!(percent(5, 0), 0);
 }
+
+#[test]
+fn preparation_status_publication_targets_only_the_main_client() {
+    use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+    let context = RecordingContext::default();
+    let status = PreparationStatus {
+        image: PreparationTask::new(TaskState::Running),
+        lcu: PreparationTask::new(TaskState::Pending),
+    };
+
+    publish_status(&context, &status);
+
+    let published = context.published();
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].0.name, STATUS_EVENT);
+    assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+}
