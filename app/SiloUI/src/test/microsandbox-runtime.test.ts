@@ -1,7 +1,7 @@
 import { Readable } from "node:stream"
 import { execFileSync, type ExecFileSyncOptions } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -205,6 +205,8 @@ describe("bundled MicroSandbox release staging", () => {
       await mkdir(join(appRoot, "patches"), { recursive: true })
       await writeFile(join(appRoot, patch.path), await readFile(join(process.cwd(), patch.path)))
     }
+    // The compiled runtime also bundles the macOS gateway, which the build reads from the app root.
+    await cp(join(process.cwd(), "src-tauri/macos-gateway"), join(appRoot, "src-tauri/macos-gateway"), { recursive: true })
     const fetchStream = async (url: string) => {
       if (url === sourceArtifact.url) return Readable.from([source])
       if (url.endsWith(`/${selected.executableAsset}`)) return Readable.from([releaseExecutable])
@@ -223,9 +225,14 @@ describe("bundled MicroSandbox release staging", () => {
       if (command === "/usr/bin/git") return ""
       if (command === "cargo" && args.includes("fetch")) return ""
       if (command === "cargo") {
-        compilations += 1
         const output = join(String(options.env?.CARGO_TARGET_DIR), targetTriple, "release")
         mkdirSync(output, { recursive: true })
+        if (args.includes("silo-macos-gateway")) {
+          // The gateway is built separately from the runtime and does not embed the agent.
+          writeFileSync(join(output, "silo-macos-gateway"), Buffer.from("compiled gateway"))
+          return ""
+        }
+        compilations += 1
         const embeddedAgent = readFileSync(join(String(options.cwd), "build/agentd"))
         writeFileSync(join(output, "msb"), Buffer.concat([Buffer.from("compiled runtime:"), embeddedAgent]))
         return ""
