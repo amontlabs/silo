@@ -162,67 +162,93 @@ impl MethodRegistry for CoreMethodRegistry {
         Box::pin(async move {
             let mut event_barrier = None;
             let result: Result<Value, DispatchError> = async {
-            match method {
-                MethodName::EngineState => {
-                    serde_json::from_value::<EngineStateParams>(params).map_err(|error| {
-                        DispatchError::internal(format!("Invalid params: {error}"))
-                    })?;
-                    let state: EngineState = context.engine_state();
-                    serde_json::to_value(state)
-                        .map_err(|error| DispatchError::internal(error.to_string()))
-                }
-                MethodName::EngineHandshake => Err(DispatchError::internal(
-                    "engine.handshake is handled by the session negotiator",
-                )),
-                MethodName::GuestSsh => Err(DispatchError::unsupported_message(
-                    "guest.ssh must be the first request after engine.handshake.",
-                )),
-                MethodName::EventsSubscribe => {
-                    let params: EventsSubscribeParams = parse_params(params)?;
-                    if let Some(device_ids) = &params.device_ids {
-                        if device_ids.iter().any(|id| id != &context.local_device().device_id) {
-                            return Err(DispatchError {
-                                code: ErrorCode::UnsupportedRemoteOperation,
-                                message: "This engine does not relay subscriptions to remote devices."
-                                    .to_owned(),
-                            });
-                        }
+                match method {
+                    MethodName::EngineState => {
+                        serde_json::from_value::<EngineStateParams>(params).map_err(|error| {
+                            DispatchError::internal(format!("Invalid params: {error}"))
+                        })?;
+                        let state: EngineState = context.engine_state();
+                        serde_json::to_value(state)
+                            .map_err(|error| DispatchError::internal(error.to_string()))
                     }
-                    let client_id = silo_engine::context::ClientId::new(request.client_id.clone());
-                    let subscription = context
-                        .subscribe_events(&client_id, params.events)
-                        .map_err(DispatchError::internal)?;
-                    serde_json::to_value(silo_api::methods::engine::EventsSubscribeResult {
-                        subscription,
-                    })
-                    .map_err(|error| DispatchError::internal(error.to_string()))
-                }
-                MethodName::EventsUnsubscribe => {
-                    let params: EventsUnsubscribeParams = parse_params(params)?;
-                    event_barrier = Some(context.unsubscribe_events(
-                        &silo_engine::context::ClientId::new(request.client_id.clone()),
-                        &params.subscription,
-                    ));
-                    Ok(Value::Null)
-                }
-                MethodName::NotificationsList => {
-                    let _: NotificationsListParams = parse_params(params)?;
-                    let snapshot = context
-                        .notifications_snapshot(&silo_engine::context::ClientId::new(
-                            request.client_id.clone(),
-                        ))
-                        .map_err(DispatchError::internal)?;
-                    event_barrier = Some(snapshot.event_barrier);
-                    serde_json::to_value(snapshot.notices)
+                    MethodName::EngineHandshake => Err(DispatchError::internal(
+                        "engine.handshake is handled by the session negotiator",
+                    )),
+                    MethodName::GuestSsh => Err(DispatchError::unsupported_message(
+                        "guest.ssh must be the first request after engine.handshake.",
+                    )),
+                    MethodName::EventsSubscribe => {
+                        let params: EventsSubscribeParams = parse_params(params)?;
+                        let local = context.local_device().device_id.clone();
+                        let remote: Vec<String> = params
+                            .device_ids
+                            .iter()
+                            .flatten()
+                            .filter(|id| **id != local)
+                            .cloned()
+                            .collect();
+                        if !remote.is_empty() {
+                            // Only a device this one is connected to can be relayed.
+                            let saved =
+                                tokio::task::spawn_blocking(silo_engine::remote::saved_devices)
+                                    .await
+                                    .map_err(|error| DispatchError::internal(error.to_string()))?
+                                    .map_err(DispatchError::internal)?;
+                            if let Some(unknown) = remote
+                                .iter()
+                                .find(|id| !saved.iter().any(|device| &device.id == *id))
+                            {
+                                return Err(DispatchError {
+                                    code: ErrorCode::NotFound,
+                                    message: format!(
+                                        "Device {unknown} is not connected to this engine."
+                                    ),
+                                });
+                            }
+                        }
+                        let client_id =
+                            silo_engine::context::ClientId::new(request.client_id.clone());
+                        let subscription = context
+                            .subscribe_events_from(
+                                &client_id,
+                                params.events,
+                                params.device_ids.filter(|ids| !ids.is_empty()),
+                            )
+                            .map_err(DispatchError::internal)?;
+                        for device in &remote {
+                            context.relays().ensure(device);
+                        }
+                        serde_json::to_value(silo_api::methods::engine::EventsSubscribeResult {
+                            subscription,
+                        })
                         .map_err(|error| DispatchError::internal(error.to_string()))
+                    }
+                    MethodName::EventsUnsubscribe => {
+                        let params: EventsUnsubscribeParams = parse_params(params)?;
+                        event_barrier = Some(context.unsubscribe_events(
+                            &silo_engine::context::ClientId::new(request.client_id.clone()),
+                            &params.subscription,
+                        ));
+                        Ok(Value::Null)
+                    }
+                    MethodName::NotificationsList => {
+                        let _: NotificationsListParams = parse_params(params)?;
+                        let snapshot = context
+                            .notifications_snapshot(&silo_engine::context::ClientId::new(
+                                request.client_id.clone(),
+                            ))
+                            .map_err(DispatchError::internal)?;
+                        event_barrier = Some(snapshot.event_barrier);
+                        serde_json::to_value(snapshot.notices)
+                            .map_err(|error| DispatchError::internal(error.to_string()))
+                    }
+                    _ => {
+                        let handler_context = HandlerContext::new(context.clone(), request.clone());
+                        let output = methods::dispatch(&handler_context, method, &params).await?;
+                        event_barrier = output.event_barrier;
+                        Ok(output.value)
+                    }
                 }
-                _ => {
-                    let handler_context = HandlerContext::new(context.clone(), request.clone());
-                    let output = methods::dispatch(&handler_context, method, &params).await?;
-                    event_barrier = output.event_barrier;
-                    Ok(output.value)
-                }
-            }
             }
             .await;
             result.map(|value| HandlerOutput {

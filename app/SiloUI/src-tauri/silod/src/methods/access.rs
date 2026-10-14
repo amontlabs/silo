@@ -366,6 +366,19 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         }
     }
 
+    fn open_event_stream(
+        &self,
+        selectors: Vec<String>,
+    ) -> Result<Box<dyn silo_engine::remote_events::EventSource>, String> {
+        let context = &self.0.context;
+        silo_engine::remote_events::BusSource::open(
+            context.event_bus(),
+            &context.local_device().device_id,
+            selectors,
+        )
+        .map(|source| Box::new(source) as Box<dyn silo_engine::remote_events::EventSource>)
+    }
+
     fn github_callback_stream(&self, params: &Value) -> Result<TcpStream, String> {
         let job_id = params["jobId"]
             .as_str()
@@ -2177,6 +2190,8 @@ async fn connections_devices_remove(
         .await
         .map_err(HandlerContext::map_engine_error)?;
     close_callback_route(&device);
+    // Sessions that listened to the removed device end; its relay stops with them.
+    context.event_bus().raise_gap_for_device(&device);
     Ok(output(Value::Null))
 }
 
@@ -3564,6 +3579,104 @@ pub(crate) mod tests {
             failure("The sign-in was not cancelled by anyone.").code,
             ErrorCode::Internal
         );
+    }
+
+    /// Counts the opens of an owner stream and never connects.
+    struct UnreachableOwner(std::sync::atomic::AtomicUsize);
+
+    impl crate::relay::OwnerLink for UnreachableOwner {
+        fn open(
+            &self,
+            _device: &str,
+            _selectors: &[String],
+            _cancelled: &dyn Fn() -> bool,
+        ) -> Result<crate::relay::OwnerStream, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err("The owner is unreachable in this test.".to_owned())
+        }
+    }
+
+    #[tokio::test]
+    async fn events_subscribe_relays_saved_devices_only_and_ends_with_the_device() {
+        use crate::dispatcher::{CoreMethodRegistry, MethodRegistry};
+        let _key = KEY_LOCK.lock().await;
+        let device = "77777777-7777-4777-8777-777777777771";
+        save_device(device, "owner.example").await;
+        let link = Arc::new(UnreachableOwner(Default::default()));
+        let engine = Arc::new((*fixture().context).clone().with_relay_link(
+            link.clone(),
+            crate::relay::RelayTiming {
+                tick: Duration::from_millis(5),
+                stall: Duration::from_millis(100),
+                backoff_initial: Duration::from_millis(5),
+                backoff_max: Duration::from_millis(10),
+                stable_after: Duration::from_secs(60),
+            },
+        ));
+        let local = engine.local_device().device_id.clone();
+        let client = silo_engine::context::ClientId::new("subscriber");
+        let mut events = engine.connect_event_stream(client.clone());
+        let registry = CoreMethodRegistry::default();
+        let subscribe = |params: Value| {
+            let request = RequestContext {
+                client_id: "subscriber".to_owned(),
+                protocol: 6,
+                client: None,
+            };
+            registry.dispatch(MethodName::EventsSubscribe, params, engine.clone(), request)
+        };
+
+        // Without deviceIds, with this engine's own id, and with an empty list: no relay.
+        for params in [
+            json!({"events": ["computers.changed"]}),
+            json!({"events": ["computers.changed"], "deviceIds": [local]}),
+            json!({"events": ["computers.changed"], "deviceIds": []}),
+        ] {
+            subscribe(params).await.unwrap();
+        }
+        assert!(engine.relays().active().is_empty());
+
+        // A device this engine is not connected to cannot be relayed.
+        let error = subscribe(json!({"events": ["computers.changed"], "deviceIds": ["44444444-4444-4444-8444-444444444444"]}))
+            .await
+            .err()
+            .expect("an unknown device is refused");
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert!(engine.relays().active().is_empty());
+
+        // A saved device is relayed: its stream is tried (and retried while unreachable).
+        let result =
+            subscribe(json!({"events": ["computers.changed"], "deviceIds": [device, local]}))
+                .await
+                .unwrap();
+        assert!(result.value["subscription"].is_string());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while link.0.load(Ordering::SeqCst) < 3 {
+            assert!(Instant::now() < deadline, "the relay never retried");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(engine.relays().active(), [device]);
+
+        // Removing the device ends the sessions that listened to it, and the relay stops.
+        engine.event_bus().raise_gap_for_device(device);
+        assert!(matches!(
+            events.recv().await,
+            Some(silo_engine::events::EventDelivery::Gap(_))
+        ));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !engine.relays().active().is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "the relay outlived its subscribers"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        edit_connections_config(|config| {
+            config["devices"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|saved| saved["id"] != device);
+        });
     }
 
     #[tokio::test]
