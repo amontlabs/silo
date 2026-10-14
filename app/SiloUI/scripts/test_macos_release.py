@@ -256,7 +256,7 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
                     module.main()
             self.assertEqual([name for name, *_ in calls], ['embed', 'sign', 'verify', 'verify_engine'])
             _, args, kwargs = calls[0]
-            self.assertEqual(args[1], root / 'silod')
+            self.assertEqual(args[1], (root / 'silod').resolve())
             self.assertEqual((kwargs['identifier'], kwargs['build']), ('org.silo.preview', 'silo-abc'))
 
     def test_the_release_workflow_builds_silod_and_passes_it_to_the_packager(self):
