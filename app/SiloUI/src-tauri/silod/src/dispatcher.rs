@@ -219,9 +219,13 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
                 MethodName::NotificationsList => {
                     let _: NotificationsListParams = parse_params(params)?;
-                    let notices = silo_engine::notices::list(context.as_ref())
+                    let snapshot = context
+                        .notifications_snapshot(&silo_engine::context::ClientId::new(
+                            request.client_id.clone(),
+                        ))
                         .map_err(DispatchError::internal)?;
-                    serde_json::to_value(notices)
+                    event_barrier = Some(snapshot.event_barrier);
+                    serde_json::to_value(snapshot.notices)
                         .map_err(|error| DispatchError::internal(error.to_string()))
                 }
                 _ => Err(DispatchError::unsupported(method_name(method))),

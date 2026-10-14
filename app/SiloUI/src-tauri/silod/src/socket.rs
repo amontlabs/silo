@@ -14,10 +14,14 @@ use std::{
 };
 
 use serde_json::Value;
-use silo_api::{events::EventEnvelope, transport::ResponseEnvelope};
+use silo_api::{
+    events::EventEnvelope,
+    jobs::ErrorCode,
+    transport::{ErrorObject, ResponseEnvelope},
+};
 use silo_engine::{
-        context::ClientId,
-        events::{EventDelivery, SequencedEvent},
+    context::ClientId,
+    events::{BacklogReservation, EventDelivery, SequencedEvent},
 };
 use tokio::{
     io::AsyncWriteExt,
@@ -253,9 +257,7 @@ async fn serve_connection(
             .expect("handshake populated client id")
             .to_owned(),
     );
-    let mut event_stream = dispatcher
-        .context()
-        .connect_event_stream(client_id.clone());
+    let mut event_stream = dispatcher.context().connect_event_stream(client_id.clone());
 
     let (reply_tx, mut reply_rx) = mpsc::channel::<OutboundReply>(MAX_PENDING_REPLIES);
     let reply_byte_budget = Arc::new(Semaphore::new(MAX_PENDING_REPLY_BYTES));
@@ -279,10 +281,9 @@ async fn serve_connection(
         let mut deferred_events = VecDeque::<OutboundEvent>::new();
         let mut written_event_seq = HashMap::<String, u64>::new();
         loop {
-            let mut selected = if pending_reply
-                .as_ref()
-                .is_some_and(|reply| barrier_satisfied(reply.event_barrier.as_ref(), &written_event_seq))
-            {
+            let mut selected = if pending_reply.as_ref().is_some_and(|reply| {
+                barrier_satisfied(reply.event_barrier.as_ref(), &written_event_seq)
+            }) {
                 pending_reply.take().map(OutboundFrame::Reply)
             } else {
                 let eligible = deferred_events.iter().position(|event| {
@@ -331,29 +332,28 @@ async fn serve_connection(
             let Some(selected) = selected else {
                 continue;
             };
-            let (bytes, byte_permit, ack, event_progress) = match selected {
+            let (bytes, byte_permit, ack, event_progress, _backlog_reservation) = match selected {
                 OutboundFrame::Reply(reply) => {
-                    (reply.bytes, reply.byte_permit, reply.ack, None)
+                    (reply.bytes, reply.byte_permit, reply.ack, None, None)
                 }
                 OutboundFrame::Event(event) => (
                     event.bytes,
                     event.byte_permit,
                     None,
                     Some((event.subscription, event.seq)),
+                    event.backlog_reservation,
                 ),
             };
-            let result = match time::timeout(
-                REPLY_WRITE_TIMEOUT,
-                write_frame_bytes(&mut writer, &bytes),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "engine.sock client did not accept a frame within 30 seconds",
-                )),
-            };
+            let result =
+                match time::timeout(REPLY_WRITE_TIMEOUT, write_frame_bytes(&mut writer, &bytes))
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "engine.sock client did not accept a frame within 30 seconds",
+                    )),
+                };
             if let Some(ack) = ack {
                 let _ = ack.send(
                     result
@@ -386,6 +386,7 @@ async fn serve_connection(
                     Some(EventDelivery::Event(event)) => {
                         let subscription = event.subscription.clone();
                         let seq = event.seq;
+                        let backlog_reservation = event.backlog_reservation.clone();
                         let frame = match event_frame(event, &dispatcher.context().local_device().device_id) {
                             Ok(frame) => frame,
                             Err(error) => {
@@ -395,7 +396,16 @@ async fn serve_connection(
                             }
                         };
                         let _outbound_guard = outbound_order.lock().await;
-                        if enqueue_event(&event_tx, &event_byte_budget, frame, subscription, seq).is_err() {
+                        if enqueue_event(
+                            &event_tx,
+                            &event_byte_budget,
+                            frame,
+                            subscription,
+                            seq,
+                            backlog_reservation,
+                        )
+                        .is_err()
+                        {
                             close_after_reply = true;
                             immediate_disconnect = true;
                             break;
@@ -501,11 +511,7 @@ async fn serve_connection(
                 let reply_tx = reply_tx.clone();
                 let reply_byte_budget = reply_byte_budget.clone();
                 let context = dispatcher.context();
-                let ordered_response = matches!(
-                    method,
-                    silo_api::methods::MethodName::OperationsList
-                        | silo_api::methods::MethodName::EventsUnsubscribe
-                );
+                let ordered_response = is_ordered_response(method);
                 let outbound_order = outbound_order.clone();
                 let ordered_reply_tx = reply_tx.clone();
                 let ordered_reply_budget = reply_byte_budget.clone();
@@ -515,7 +521,9 @@ async fn serve_connection(
                         {
                             Ok(reserved_reply) => Some(reserved_reply),
                             Err(error) => {
-                                eprintln!("silod: could not reserve ordered reply capacity: {error}");
+                                eprintln!(
+                                    "silod: could not reserve ordered reply capacity: {error}"
+                                );
                                 drop((session_permit, request_permit));
                                 return;
                             }
@@ -523,11 +531,7 @@ async fn serve_connection(
                     } else {
                         None
                     };
-                    let _outbound_guard = if ordered_response {
-                        Some(outbound_order.lock_owned().await)
-                    } else {
-                        None
-                    };
+                    let _outbound_guard = ordered_response_guard(method, &outbound_order).await;
                     let invoke = PreparedRequest::Invoke {
                         id,
                         method,
@@ -537,11 +541,15 @@ async fn serve_connection(
                     let result = dispatcher.execute(invoke).await;
                     let queued = if let Some(response) = result.response {
                         if let Some(reserved_reply) = reserved_reply {
-                            reserved_reply
-                                .enqueue(response, None, result.event_barrier)
-                                .is_ok()
+                            match reserved_reply.enqueue(response, None, result.event_barrier) {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    eprintln!("silod: could not enqueue ordered reply: {error}");
+                                    false
+                                }
+                            }
                         } else {
-                            enqueue_response(
+                            match enqueue_response(
                                 &reply_tx,
                                 &reply_byte_budget,
                                 response,
@@ -549,17 +557,21 @@ async fn serve_connection(
                                 result.event_barrier,
                             )
                             .await
-                            .is_ok()
+                            {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    eprintln!("silod: could not enqueue engine reply: {error}");
+                                    false
+                                }
+                            }
                         }
                     } else {
                         true
                     };
                     if queued {
                         if let Some((client_id, subscription)) = result.activate_subscription {
-                            let _ = context.activate_events(
-                                &ClientId::new(client_id),
-                                &subscription,
-                            );
+                            let _ =
+                                context.activate_events(&ClientId::new(client_id), &subscription);
                         }
                     }
                     drop((session_permit, request_permit));
@@ -668,6 +680,7 @@ struct OutboundEvent {
     byte_permit: OwnedSemaphorePermit,
     subscription: String,
     seq: u64,
+    backlog_reservation: Option<BacklogReservation>,
 }
 
 struct ReservedReply {
@@ -682,13 +695,7 @@ impl ReservedReply {
         ack: Option<oneshot::Sender<Result<(), String>>>,
         event_barrier: Option<HashMap<String, u64>>,
     ) -> Result<(), String> {
-        let bytes = serde_json::to_vec(&response).map_err(|error| error.to_string())?;
-        if bytes.is_empty() || bytes.len() > crate::framing::MAX_FRAME_BYTES {
-            return Err(format!(
-                "reply frame length {} exceeds the frame limit",
-                bytes.len()
-            ));
-        }
+        let bytes = encode_response(&response)?;
         let byte_permit = self
             .byte_capacity
             .split(bytes.len())
@@ -738,13 +745,7 @@ async fn enqueue_response(
     ack: Option<oneshot::Sender<Result<(), String>>>,
     event_barrier: Option<HashMap<String, u64>>,
 ) -> Result<(), String> {
-    let bytes = serde_json::to_vec(&response).map_err(|error| error.to_string())?;
-    if bytes.is_empty() || bytes.len() > crate::framing::MAX_FRAME_BYTES {
-        return Err(format!(
-            "reply frame length {} exceeds the frame limit",
-            bytes.len()
-        ));
-    }
+    let bytes = encode_response(&response)?;
     let byte_count = u32::try_from(bytes.len()).map_err(|error| error.to_string())?;
     let byte_permit = byte_budget
         .clone()
@@ -753,10 +754,10 @@ async fn enqueue_response(
         .map_err(|error| error.to_string())?;
     sender
         .send(OutboundReply {
-        bytes,
-        byte_permit,
-        ack,
-        event_barrier,
+            bytes,
+            byte_permit,
+            ack,
+            event_barrier,
         })
         .await
         .map_err(|error| error.to_string())
@@ -788,10 +789,14 @@ fn enqueue_event(
     frame: Value,
     subscription: String,
     seq: u64,
+    backlog_reservation: BacklogReservation,
 ) -> Result<(), String> {
     let bytes = serde_json::to_vec(&frame).map_err(|error| error.to_string())?;
     if bytes.is_empty() || bytes.len() > crate::framing::MAX_FRAME_BYTES {
-        return Err(format!("event frame length {} exceeds the frame limit", bytes.len()));
+        return Err(format!(
+            "event frame length {} exceeds the frame limit",
+            bytes.len()
+        ));
     }
     let byte_count = u32::try_from(bytes.len()).map_err(|error| error.to_string())?;
     let byte_permit = byte_budget
@@ -804,8 +809,66 @@ fn enqueue_event(
             byte_permit,
             subscription,
             seq,
+            backlog_reservation: Some(backlog_reservation),
         })
         .map_err(|error| error.to_string())
+}
+
+fn is_ordered_response(method: silo_api::methods::MethodName) -> bool {
+    matches!(
+        method,
+        silo_api::methods::MethodName::EventsSubscribe
+            | silo_api::methods::MethodName::EventsUnsubscribe
+            | silo_api::methods::MethodName::NotificationsList
+            | silo_api::methods::MethodName::OperationsList
+    )
+}
+
+async fn ordered_response_guard(
+    method: silo_api::methods::MethodName,
+    outbound_order: &Arc<tokio::sync::Mutex<()>>,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    if is_ordered_response(method) {
+        Some(outbound_order.clone().lock_owned().await)
+    } else {
+        None
+    }
+}
+
+fn encode_response(response: &ResponseEnvelope<Value>) -> Result<Vec<u8>, String> {
+    let response_bytes = match serde_json::to_vec(response) {
+        Ok(bytes) if !bytes.is_empty() && bytes.len() <= crate::framing::MAX_FRAME_BYTES => {
+            return Ok(bytes);
+        }
+        Ok(bytes) => format!(
+            "response frame length {} exceeds the {} byte limit",
+            bytes.len(),
+            crate::framing::MAX_FRAME_BYTES
+        ),
+        Err(error) => format!("response serialization failed: {error}"),
+    };
+    let id = match response {
+        ResponseEnvelope::Success { id, .. } | ResponseEnvelope::Error { id, .. } => id.clone(),
+    };
+    let fallback: ResponseEnvelope<Value> = ResponseEnvelope::Error {
+        id,
+        error: ErrorObject {
+            code: ErrorCode::OutputTooLarge,
+            message: "The response exceeds the 4 MiB engine frame limit.".to_owned(),
+            diagnostics: None,
+        },
+    };
+    let bytes = serde_json::to_vec(&fallback).map_err(|error| {
+        format!("could not encode bounded response after {response_bytes}: {error}")
+    })?;
+    if bytes.is_empty() || bytes.len() > crate::framing::MAX_FRAME_BYTES {
+        return Err(format!(
+            "bounded response frame length {} exceeds the frame limit",
+            bytes.len()
+        ));
+    }
+    eprintln!("silod: replaced unframeable engine reply: {response_bytes}");
+    Ok(bytes)
 }
 
 fn barrier_satisfied(
@@ -813,9 +876,9 @@ fn barrier_satisfied(
     written: &HashMap<String, u64>,
 ) -> bool {
     barrier.is_none_or(|barrier| {
-        barrier
-            .iter()
-            .all(|(subscription, required)| written.get(subscription).copied().unwrap_or(0) >= *required)
+        barrier.iter().all(|(subscription, required)| {
+            written.get(subscription).copied().unwrap_or(0) >= *required
+        })
     })
 }
 
@@ -969,12 +1032,14 @@ mod tests {
             byte_permit: budget.clone().try_acquire_owned().unwrap(),
             subscription: "operations-subscription".to_owned(),
             seq: 4,
+            backlog_reservation: None,
         };
         let later = OutboundEvent {
             bytes: Vec::new(),
             byte_permit: budget.clone().try_acquire_owned().unwrap(),
             subscription: "operations-subscription".to_owned(),
             seq: 5,
+            backlog_reservation: None,
         };
         assert!(event_precedes_barrier(&earlier, Some(&barrier)));
         assert!(!event_precedes_barrier(&later, Some(&barrier)));
@@ -983,6 +1048,246 @@ mod tests {
             Some(&barrier),
             &HashMap::from([("operations-subscription".to_owned(), 4)])
         ));
+    }
+
+    #[tokio::test]
+    async fn subscribe_reply_queues_before_concurrent_event_fanout_and_activation() {
+        assert!(is_ordered_response(
+            silo_api::methods::MethodName::EventsUnsubscribe
+        ));
+        assert!(is_ordered_response(
+            silo_api::methods::MethodName::OperationsList
+        ));
+        assert!(is_ordered_response(
+            silo_api::methods::MethodName::NotificationsList
+        ));
+        assert!(!is_ordered_response(
+            silo_api::methods::MethodName::OperationsJobGet
+        ));
+
+        let bus = silo_engine::events::EventBus::default();
+        let client_id = ClientId::new("subscribe-order-test");
+        let mut event_stream = bus.connect(client_id.clone());
+        let existing_subscription = bus
+            .subscribe(&client_id, vec!["computers.changed".to_owned()])
+            .unwrap();
+        bus.activate(&client_id, &existing_subscription).unwrap();
+
+        let (reply_sender, mut reply_receiver) = mpsc::channel(1);
+        let reply_budget = Arc::new(Semaphore::new(MAX_PENDING_REPLY_BYTES));
+        let reserved_reply = reserve_ordered_reply(&reply_sender, &reply_budget)
+            .await
+            .unwrap();
+        let outbound_order = Arc::new(tokio::sync::Mutex::new(()));
+        let request_guard = ordered_response_guard(
+            silo_api::methods::MethodName::EventsSubscribe,
+            &outbound_order,
+        )
+        .await;
+        let pending_subscription = bus
+            .subscribe(&client_id, vec!["notifications.*".to_owned()])
+            .unwrap();
+
+        let (event_sender, mut event_receiver) = mpsc::channel(1);
+        let event_budget = Arc::new(Semaphore::new(MAX_PENDING_EVENT_BYTES));
+        let order = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let (event_ready_sender, event_ready_receiver) = oneshot::channel();
+        let (event_enqueued_sender, event_enqueued_receiver) = oneshot::channel();
+        let mut event_enqueued_receiver = Some(event_enqueued_receiver);
+        let (event_pump_release_sender, event_pump_release_receiver) = oneshot::channel();
+        let event_order = outbound_order.clone();
+        let event_log = order.clone();
+        let event_task = tokio::spawn(async move {
+            let EventDelivery::Event(event) = event_stream.recv().await.unwrap() else {
+                panic!("expected the existing subscription event");
+            };
+            let subscription = event.subscription.clone();
+            let seq = event.seq;
+            let backlog_reservation = event.backlog_reservation.clone();
+            let frame = event_frame(event, "test-device").unwrap();
+            event_ready_sender.send(()).unwrap();
+
+            let _outbound_guard = event_order.lock_owned().await;
+            enqueue_event(
+                &event_sender,
+                &event_budget,
+                frame,
+                subscription,
+                seq,
+                backlog_reservation,
+            )
+            .unwrap();
+            drop(_outbound_guard);
+            event_log.lock().await.push("event");
+            event_enqueued_sender.send(()).unwrap();
+            event_pump_release_receiver.await.unwrap();
+        });
+
+        bus.publish(
+            silo_engine::context::Event::new(
+                "computers.changed",
+                serde_json::json!({"revision": 1}),
+            ),
+            silo_engine::context::Audience::All,
+        );
+        event_ready_receiver.await.unwrap();
+        let event_can_run_before_reply = request_guard.is_none();
+        if event_can_run_before_reply {
+            // Model the regression interleaving: with no shared ordering
+            // guard, let the event pump take the queue first.
+            event_enqueued_receiver.take().unwrap().await.unwrap();
+        }
+
+        reserved_reply
+            .enqueue(
+                ResponseEnvelope::Success {
+                    id: "subscribe".to_owned(),
+                    result: serde_json::json!({"subscription": pending_subscription}),
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        order.lock().await.push("reply");
+        bus.activate(&client_id, &pending_subscription).unwrap();
+        drop(request_guard);
+        event_pump_release_sender.send(()).unwrap();
+        if !event_can_run_before_reply {
+            event_enqueued_receiver.take().unwrap().await.unwrap();
+        }
+        event_task.await.unwrap();
+
+        assert_eq!(*order.lock().await, vec!["reply", "event"]);
+        let reply = reply_receiver.recv().await.unwrap();
+        let response: ResponseEnvelope<Value> = serde_json::from_slice(&reply.bytes).unwrap();
+        assert!(matches!(response, ResponseEnvelope::Success { id, .. } if id == "subscribe"));
+        let event = event_receiver.recv().await.unwrap();
+        assert_eq!(event.subscription, existing_subscription);
+    }
+
+    #[tokio::test]
+    async fn oversized_job_get_enqueues_a_bounded_error_reply() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let byte_budget = Arc::new(Semaphore::new(MAX_PENDING_REPLY_BYTES));
+        let response = ResponseEnvelope::Success {
+            id: "large-job-get".to_owned(),
+            result: serde_json::json!({
+                "jobId": "job:1",
+                "outcome": {"value": "x".repeat(crate::framing::MAX_FRAME_BYTES)},
+            }),
+        };
+
+        enqueue_response(&sender, &byte_budget, response, None, None)
+            .await
+            .unwrap();
+        let queued = receiver.recv().await.unwrap();
+
+        assert!(queued.bytes.len() <= crate::framing::MAX_FRAME_BYTES);
+        let response: ResponseEnvelope<Value> = serde_json::from_slice(&queued.bytes).unwrap();
+        assert!(matches!(
+            response,
+            ResponseEnvelope::Error { id, error }
+                if id == "large-job-get"
+                    && error.code == ErrorCode::OutputTooLarge
+                    && error.message == "The response exceeds the 4 MiB engine frame limit."
+        ));
+    }
+
+    #[tokio::test]
+    async fn one_mib_outcome_chunk_remains_a_successful_readable_reply() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let byte_budget = Arc::new(Semaphore::new(MAX_PENDING_REPLY_BYTES));
+        let chunk = "x".repeat(1024 * 1024);
+        let response = ResponseEnvelope::Success {
+            id: "chunked-job-get".to_owned(),
+            result: serde_json::json!({
+                "jobId": "job:1",
+                "outcomeChunk": {
+                    "data": chunk,
+                    "totalBytes": 2 * 1024 * 1024,
+                    "offsetBytes": 0,
+                    "nextOffsetBytes": 1024 * 1024,
+                },
+            }),
+        };
+
+        enqueue_response(&sender, &byte_budget, response, None, None)
+            .await
+            .unwrap();
+        let queued = receiver.recv().await.unwrap();
+
+        assert!(queued.bytes.len() <= crate::framing::MAX_FRAME_BYTES);
+        let decoded: Value = serde_json::from_slice(&queued.bytes).unwrap();
+        assert_eq!(decoded["id"], "chunked-job-get");
+        assert_eq!(
+            decoded["result"]["outcomeChunk"]["data"]
+                .as_str()
+                .unwrap()
+                .len(),
+            1024 * 1024
+        );
+        assert_eq!(decoded["result"]["outcomeChunk"]["offsetBytes"], 0);
+    }
+
+    #[tokio::test]
+    async fn socket_event_queue_keeps_the_shared_backlog_reservation() {
+        let bus = silo_engine::events::EventBus::default();
+        let client_id = ClientId::new("socket-backlog-test");
+        let mut receiver = bus.connect(client_id.clone());
+        let subscription = bus
+            .subscribe(&client_id, vec!["computers.changed".to_owned()])
+            .unwrap();
+        bus.activate(&client_id, &subscription).unwrap();
+        bus.publish(
+            silo_engine::context::Event::new(
+                "computers.changed",
+                serde_json::json!({"revision": 0}),
+            ),
+            silo_engine::context::Audience::All,
+        );
+
+        let silo_engine::events::EventDelivery::Event(event) = receiver.recv().await.unwrap()
+        else {
+            panic!("expected the first queued event");
+        };
+        let subscription = event.subscription.clone();
+        let sequence = event.seq;
+        let backlog_reservation = event.backlog_reservation.clone();
+        let frame = event_frame(event, "test-device").unwrap();
+        let (sender, mut socket_queue) = mpsc::channel(1);
+        let byte_budget = Arc::new(Semaphore::new(MAX_PENDING_EVENT_BYTES));
+        enqueue_event(
+            &sender,
+            &byte_budget,
+            frame,
+            subscription,
+            sequence,
+            backlog_reservation,
+        )
+        .unwrap();
+        let outbound = socket_queue.recv().await.unwrap();
+
+        for revision in 1..silo_engine::events::MAX_EVENTS_PER_SUBSCRIPTION {
+            bus.publish(
+                silo_engine::context::Event::new(
+                    "computers.changed",
+                    serde_json::json!({"revision": revision}),
+                ),
+                silo_engine::context::Audience::All,
+            );
+        }
+        bus.publish(
+            silo_engine::context::Event::new(
+                "computers.changed",
+                serde_json::json!({
+                    "revision": silo_engine::events::MAX_EVENTS_PER_SUBSCRIPTION
+                }),
+            ),
+            silo_engine::context::Audience::All,
+        );
+
+        assert!(matches!(receiver.recv().await, Some(EventDelivery::Gap(_))));
+        drop(outbound);
     }
 
     #[test]
@@ -1058,27 +1363,27 @@ mod tests {
         )
         .await
         .unwrap();
-        let event: Value = tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let event: Value =
+            tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(event["event"], "operations.queue.changed");
-        let response: Value = tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        let response: Value =
+            tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(response["id"], "queue");
         assert!(response["result"]["running"].is_array());
-        let close_error: Value = tokio::time::timeout(
-            Duration::from_secs(2),
-            read_json_frame(&mut client),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        let close_error: Value =
+            tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(close_error["id"], "queue");
         assert!(close_error["error"]["message"]
             .as_str()
@@ -1196,14 +1501,12 @@ mod tests {
             ),
             silo_engine::context::Audience::All,
         );
-        let event: Value = tokio::time::timeout(
-            Duration::from_secs(2),
-            read_json_frame(&mut client),
-        )
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        let event: Value =
+            tokio::time::timeout(Duration::from_secs(2), read_json_frame(&mut client))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(event["event"], "operations.job.finished");
         assert_eq!(event["subscription"], subscription);
         assert_eq!(event["deviceId"], "test-device");
