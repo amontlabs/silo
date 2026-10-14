@@ -4301,6 +4301,12 @@
     },
     "GuestExecGetParams": {
       "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "jobId": {
           "$ref": "#/$defs/JobId"
         },
