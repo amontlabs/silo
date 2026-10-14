@@ -172,6 +172,29 @@ async fn access_methods_work_over_the_engine_socket() {
         )
         .await;
 
+    // Events from a device this engine is not connected to cannot be relayed. (A saved device
+    // would start an SSH stream to its address, so this test names none.)
+    let unknown = client
+        .error(
+            "events.subscribe",
+            json!({
+                "events": ["secrets.changed"],
+                "deviceIds": ["88888888-8888-4888-8888-888888888888"],
+            }),
+        )
+        .await;
+    assert_eq!(unknown["code"], "not_found");
+    // This engine's own id is always a valid target.
+    client
+        .ok(
+            "events.subscribe",
+            json!({
+                "events": ["secrets.changed"],
+                "deviceIds": ["55555555-5555-4555-8555-555555555555"],
+            }),
+        )
+        .await;
+
     // Connections: this engine's status, no devices yet, and a side-effect-free health read.
     let status = client.ok("connections.status", json!({})).await;
     assert!(status["deviceId"].as_str().is_some_and(|id| !id.is_empty()));
