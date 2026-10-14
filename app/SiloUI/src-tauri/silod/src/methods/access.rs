@@ -1007,14 +1007,83 @@ fn github_mutation(method: &str, params: &Value, paths: &RuntimePaths) -> Result
 // GitHub sign-in: the owner's job, and the controller's callback route
 // ---------------------------------------------------------------------------
 
-/// The connect job this engine is running as an owner, if any. It is the only job whose
-/// loopback listener a `github.connect.callback` stream may reach.
-static ACTIVE_CONNECT: Mutex<Option<JobId>> = Mutex::new(None);
+/// The sign-in this engine is running, if any. GitHub's flow is one at a time (05 §4.2):
+/// admission takes the slot atomically, and the job, the generation and the callback
+/// listener all belong to that one flow until it ends. Only the active job's loopback
+/// listener may be reached by a `github.connect.callback` stream, and only the active
+/// job may cancel the engine's shared cancellation state.
+static CONNECT_SLOT: Mutex<ConnectSlot> = Mutex::new(ConnectSlot::Idle);
 
-fn active_connect() -> std::sync::MutexGuard<'static, Option<JobId>> {
-    ACTIVE_CONNECT
+enum ConnectSlot {
+    Idle,
+    /// Admitted; the job is being allocated.
+    Admitting,
+    Active {
+        job_id: JobId,
+        generation: u64,
+    },
+}
+
+fn connect_slot() -> std::sync::MutexGuard<'static, ConnectSlot> {
+    CONNECT_SLOT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Holds the connect slot; dropping it frees the slot.
+struct ConnectAdmission;
+
+impl ConnectAdmission {
+    fn admit() -> Result<Self, DispatchError> {
+        let mut slot = connect_slot();
+        if !matches!(*slot, ConnectSlot::Idle) {
+            return Err(DispatchError {
+                code: ErrorCode::Busy,
+                message: "A GitHub sign-in is already in progress. Finish or cancel it first."
+                    .to_owned(),
+            });
+        }
+        *slot = ConnectSlot::Admitting;
+        Ok(Self)
+    }
+
+    fn activate(&self, job_id: JobId, generation: u64) {
+        *connect_slot() = ConnectSlot::Active { job_id, generation };
+    }
+}
+
+impl Drop for ConnectAdmission {
+    fn drop(&mut self) {
+        *connect_slot() = ConnectSlot::Idle;
+    }
+}
+
+/// Whether `job_id` is the flow that currently holds the slot.
+fn is_active_connect(job_id: &str) -> bool {
+    matches!(&*connect_slot(), ConnectSlot::Active { job_id: active, .. } if active.as_str() == job_id)
+}
+
+/// Cancels the engine's GitHub flow on behalf of `job`, which is a no-op unless `job` is
+/// still the flow that owns it: a finished job must never cancel a later sign-in.
+fn cancel_connect_for(job: &JobId) -> Result<(), String> {
+    if is_active_connect(job.as_str()) {
+        silo_engine::github::cancel_connection().map(|_| ())
+    } else {
+        Ok(())
+    }
+}
+
+/// Starts a named worker thread. Tests make a chosen name fail to start, to prove the
+/// caller unwinds everything it created.
+fn spawn_named(name: &'static str, work: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+    #[cfg(test)]
+    if tests::spawn_fails(name) {
+        return Err(std::io::Error::other("thread start refused by the test"));
+    }
+    thread::Builder::new()
+        .name(name.to_owned())
+        .spawn(work)
+        .map(|_| ())
 }
 
 /// How long the owner waits for its browser link before it reports the job without one.
@@ -1030,7 +1099,10 @@ async fn github_connect(
         Some(device) => tokio::task::spawn_blocking(move || start_remote_connect(&engine, &device))
             .await
             .map_err(|_| DispatchError::internal("The remote operation could not finish."))??,
-        None => start_local_connect(&engine)?,
+        // Allocation reads SQLite and the credential lock can span Keychain access.
+        None => tokio::task::spawn_blocking(move || start_local_connect(&engine))
+            .await
+            .map_err(|_| DispatchError::internal("The access operation could not finish."))??,
     };
     to_output(JobStartResult { job_id })
 }
@@ -1038,31 +1110,31 @@ async fn github_connect(
 /// Starts this engine's own GitHub sign-in as a durable job. The client opens
 /// `pendingAuthorizationUrl`; the engine never launches a browser.
 fn start_local_connect(ctx: &SilodContext) -> Result<JobId, DispatchError> {
+    #[cfg(test)]
+    tests::note_blocking_work("github.connect");
+    let admission = ConnectAdmission::admit()?;
     let accepted = silo_engine::jobs::allocate(ctx, "github.connect")
         .map_err(HandlerContext::map_registry_error)?;
     let job_id = accepted.job_id;
     let registry = ctx.job_registry().map_err(DispatchError::internal)?;
     let generation = silo_engine::github::prepare_connect();
+    admission.activate(job_id.clone(), generation);
+    let cancel_job = job_id.clone();
     registry.register_cancel(
         job_id.clone(),
         silo_engine::jobs::CancelRoute::Github,
-        || silo_engine::github::cancel_connection().map(|_| ()),
+        move || cancel_connect_for(&cancel_job),
     );
-    *active_connect() = Some(job_id.clone());
     let engine = ctx.clone();
     let running = job_id.clone();
-    let spawned = thread::Builder::new()
-        .name("silod-github-connect".to_owned())
-        .spawn(move || {
-            let result = silo_engine::github::connect(generation, |_| Ok(()));
-            finish_connect(&engine, running.clone(), result);
-            let mut active = active_connect();
-            if active.as_ref() == Some(&running) {
-                *active = None;
-            }
-        });
+    let spawned = spawn_named("silod-github-connect", move || {
+        let result = silo_engine::github::connect(generation, |_| Ok(()));
+        // The flow is over: free the slot before the outcome is published, so a client
+        // that reacts to the finished job can start the next sign-in at once.
+        drop(admission);
+        finish_connect(&engine, running, result);
+    });
     if let Err(error) = spawned {
-        *active_connect() = None;
         let _ = silo_engine::jobs::finish_with_error(
             ctx,
             job_id,
@@ -1176,10 +1248,7 @@ fn start_owner_connect(ctx: &SilodContext) -> Result<Value, String> {
 /// Opens the TCP connection a `github.connect.callback` stream carries: this engine's
 /// own listener for `job_id`, and only while that job is the active connect.
 fn callback_listener_for(job_id: &str) -> Result<TcpStream, String> {
-    let permitted = active_connect()
-        .as_ref()
-        .is_some_and(|active| active.as_str() == job_id);
-    if !permitted {
+    if !is_active_connect(job_id) {
         return Err("No GitHub connection is waiting for this callback.".to_owned());
     }
     let url = silo_engine::github::authorization_url()?;
@@ -2270,6 +2339,52 @@ mod tests {
         assert_eq!(error.code, ErrorCode::Internal);
     }
 
+    /// Worker threads that must fail to start, by name.
+    static FAILING_SPAWNS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+    pub(super) fn spawn_fails(name: &str) -> bool {
+        FAILING_SPAWNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&name)
+    }
+
+    /// Makes `name` fail to start until the guard drops.
+    struct FailSpawn(&'static str);
+
+    impl FailSpawn {
+        fn new(name: &'static str) -> Self {
+            FAILING_SPAWNS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(name);
+            Self(name)
+        }
+    }
+
+    impl Drop for FailSpawn {
+        fn drop(&mut self) {
+            FAILING_SPAWNS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|name| *name != self.0);
+        }
+    }
+
+    /// The threads that ran blocking work, by label.
+    static BLOCKING_WORK: Mutex<Vec<(&'static str, std::thread::ThreadId)>> =
+        Mutex::new(Vec::new());
+
+    pub(super) fn note_blocking_work(label: &'static str) {
+        BLOCKING_WORK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((label, std::thread::current().id()));
+    }
+
+    /// Tests that run or cancel this engine's GitHub sign-in must not overlap.
+    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// Tests that create or remove this engine's Connections key must not overlap.
     static KEY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -2453,6 +2568,7 @@ mod tests {
 
     #[tokio::test]
     async fn github_connect_runs_as_a_job_whose_callback_only_the_active_job_reaches() {
+        let _flow = CONNECT_LOCK.lock().await;
         expect_invalid_params(MethodName::GitHubConnect, json!({"deviceId": []})).await;
         expect_routed_to_unknown_device(MethodName::GitHubConnect, json!({})).await;
         assert!(callback_listener_for("job:999999").is_err());
@@ -2518,6 +2634,70 @@ mod tests {
         );
         assert!(callback_listener_for(&job_id).is_err());
         engine.job_registry().unwrap().acknowledge(&parsed).unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_github_sign_in_runs_at_a_time_and_only_it_can_cancel_or_receive_callbacks() {
+        let _flow = CONNECT_LOCK.lock().await;
+        let first = JobId::new("job:7001".to_owned()).unwrap();
+        let admission = ConnectAdmission::admit().unwrap();
+        // While the first flow is being admitted, a second one is refused outright.
+        let early = expect_error(MethodName::GitHubConnect, json!({})).await;
+        assert_eq!(early.code, ErrorCode::Busy);
+        admission.activate(first.clone(), 5);
+
+        // It does not overwrite the active identity, allocate a job or reach the engine.
+        let second = expect_error(MethodName::GitHubConnect, json!({})).await;
+        assert_eq!(second.code, ErrorCode::Busy);
+        assert!(second.message.contains("already in progress"));
+        assert!(is_active_connect("job:7001"));
+        assert!(!is_active_connect("job:7002"));
+        assert!(callback_listener_for("job:7002").is_err());
+
+        // A job that is not the active flow cannot cancel the shared flow; the active one can.
+        let generation = silo_engine::github::prepare_connect();
+        cancel_connect_for(&JobId::new("job:7002".to_owned()).unwrap()).unwrap();
+        assert_eq!(silo_engine::github::prepare_connect(), generation);
+        cancel_connect_for(&first).unwrap();
+        assert_ne!(silo_engine::github::prepare_connect(), generation);
+
+        // Ending the flow frees the slot for the next one.
+        drop(admission);
+        assert!(!is_active_connect("job:7001"));
+        drop(ConnectAdmission::admit().unwrap());
+    }
+
+    #[tokio::test]
+    async fn starting_a_local_sign_in_does_not_block_an_async_worker() {
+        let _flow = CONNECT_LOCK.lock().await;
+        let _refused = FailSpawn::new("silod-github-connect");
+        BLOCKING_WORK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        // This runtime has one thread, this one: storage and credential access that ran
+        // inline would run here and stall every other request.
+        let _ = call(MethodName::GitHubConnect, json!({})).await;
+        let ran_on: Vec<_> = BLOCKING_WORK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|(label, _)| *label == "github.connect")
+            .map(|(_, thread)| *thread)
+            .collect();
+        assert!(!ran_on.is_empty());
+        assert!(ran_on
+            .iter()
+            .all(|thread| *thread != std::thread::current().id()));
+    }
+
+    #[tokio::test]
+    async fn a_connect_thread_that_cannot_start_frees_the_slot_and_finishes_its_job() {
+        let _flow = CONNECT_LOCK.lock().await;
+        let _refused = FailSpawn::new("silod-github-connect");
+        let error = expect_error(MethodName::GitHubConnect, json!({})).await;
+        assert!(error.message.contains("Could not start GitHub connect"));
+        drop(ConnectAdmission::admit().unwrap());
     }
 
     #[tokio::test]
