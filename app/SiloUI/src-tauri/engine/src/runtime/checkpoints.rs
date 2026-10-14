@@ -937,6 +937,7 @@ pub fn create_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
     shutdown::ensure_accepting_operations()?;
@@ -1059,6 +1060,34 @@ fn prune_automatic_with(
             // checkpoint the runtime says something still needs.
             eprintln!("Silo kept an older automatic checkpoint: {error}");
         }
+    }
+}
+
+thread_local! {
+    /// What the current job worker does once the queue admits its operation, before the
+    /// operation changes anything: it marks the durable job running.
+    static ADMISSION: std::cell::RefCell<Option<Box<dyn FnOnce() -> Result<(), String>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `work` with `on_admitted` armed for the checkpoint operation it starts. The first
+/// admission of a `*_for_job` operation on this thread runs it; a failure refuses the
+/// operation, so a job never reports running without having been admitted.
+pub(crate) fn with_admission<T>(
+    on_admitted: impl FnOnce() -> Result<(), String> + 'static,
+    work: impl FnOnce() -> T,
+) -> T {
+    ADMISSION.with(|hook| *hook.borrow_mut() = Some(Box::new(on_admitted)));
+    let result = work();
+    ADMISSION.with(|hook| hook.borrow_mut().take());
+    result
+}
+
+/// Called right after the queue admits a job-owned operation.
+fn admitted() -> Result<(), String> {
+    match ADMISSION.with(|hook| hook.borrow_mut().take()) {
+        Some(on_admitted) => on_admitted(),
+        None => Ok(()),
     }
 }
 
@@ -1996,6 +2025,7 @@ fn fork_in_lanes(
         } else {
             gate.computer(computer_id, &computer_name, "Forking checkpoint")?
         };
+        admitted().map_err(RuntimeError::Unavailable)?;
         // Fork is not cancellable; flag it slow after the capture window.
         guard.expect_within(Duration::from_secs(10 * 60));
         shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
@@ -2500,6 +2530,7 @@ pub fn restore_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(RESTORE_EXPECTED_DURATION);
     shutdown::ensure_accepting_operations()?;
     restore_with(&ProcessRunner, paths, computer_id, checkpoint_id)
@@ -2803,6 +2834,7 @@ pub fn abandon_restore_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
     abandon_restore_with(&ProcessRunner, paths, computer_id).map_err(|error| error.to_string())
@@ -3087,6 +3119,7 @@ pub fn delete_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
     delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
