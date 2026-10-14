@@ -76,8 +76,8 @@ jobs:
         run: python3 scripts/dependency-cache-benchmark.py build --role producer --target "$RUNTIME_TARGET" --metadata "$RUNNER_TEMP/metadata.json" --messages "$RUNNER_TEMP/cargo-messages.jsonl" --report "$RUNNER_TEMP/control.json"
       - name: Export and audit only reviewed public dependencies
         run: |
-          python3 scripts/measure-command.py dependency-export -- python3 scripts/cargo-dependency-cache.py export --metadata "$RUNNER_TEMP/metadata.json" --messages "$RUNNER_TEMP/cargo-messages.jsonl" --lockfile src-tauri/Cargo.lock --context "$RUNNER_TEMP/context.json" --target "$RUNTIME_TARGET" --target-dir "$CARGO_TARGET_DIR" --cargo-home "$CARGO_HOME" --cache-dir "$RUNNER_TEMP/dependency-cache" --forbid "$SILO_GITHUB_CLIENT_SECRET" --report "$RUNNER_TEMP/export-audit.json"
-          python3 scripts/cargo-dependency-cache.py audit --metadata "$RUNNER_TEMP/metadata.json" --lockfile src-tauri/Cargo.lock --context "$RUNNER_TEMP/context.json" --target "$RUNTIME_TARGET" --target-dir "$CARGO_TARGET_DIR" --cargo-home "$CARGO_HOME" --cache-dir "$RUNNER_TEMP/dependency-cache" --forbid "$SILO_GITHUB_CLIENT_SECRET"
+          python3 scripts/measure-command.py dependency-export -- python3 scripts/cargo-dependency-cache.py export --metadata "$RUNNER_TEMP/metadata.json" --messages "$RUNNER_TEMP/cargo-messages.jsonl" --lockfile Cargo.lock --context "$RUNNER_TEMP/context.json" --target "$RUNTIME_TARGET" --target-dir "$CARGO_TARGET_DIR" --cargo-home "$CARGO_HOME" --cache-dir "$RUNNER_TEMP/dependency-cache" --forbid "$SILO_GITHUB_CLIENT_SECRET" --report "$RUNNER_TEMP/export-audit.json"
+          python3 scripts/cargo-dependency-cache.py audit --metadata "$RUNNER_TEMP/metadata.json" --lockfile Cargo.lock --context "$RUNNER_TEMP/context.json" --target "$RUNTIME_TARGET" --target-dir "$CARGO_TARGET_DIR" --cargo-home "$CARGO_HOME" --cache-dir "$RUNNER_TEMP/dependency-cache" --forbid "$SILO_GITHUB_CLIENT_SECRET"
       - name: Archive audited public dependencies only
         id: archive
         run: |

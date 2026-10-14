@@ -49,7 +49,7 @@ def prepare(args):
             raw['environmentHashes'][name] = hashlib.sha256(value.encode()).hexdigest()
     raw.update(targetDir=str(target_dir), cargoHome=str(cargo_home))
     semantic = module('cargo-dependency-identity').semantic_inputs(
-        json.loads(metadata_path.read_text()), tomllib.loads((app / 'src-tauri/Cargo.lock').read_text()),
+        json.loads(metadata_path.read_text()), tomllib.loads((app / 'Cargo.lock').read_text()),
         tomllib.loads((app / 'src-tauri/Cargo.toml').read_text()),
         json.loads((app / 'src-tauri/tauri.conf.json').read_text()), raw)
     semantic['identityMode'] = 'semantic-root-version-v1'
@@ -64,7 +64,7 @@ def prepare(args):
 def cache_command(args, command):
     target_dir, cargo_home = paths(args.app_root.resolve())
     return [sys.executable, str(args.app_root / 'scripts/cargo-dependency-cache.py'), command,
-            '--metadata', str(args.state / 'metadata.json'), '--lockfile', str(args.app_root / 'src-tauri/Cargo.lock'),
+            '--metadata', str(args.state / 'metadata.json'), '--lockfile', str(args.app_root / 'Cargo.lock'),
             '--context', str(args.state / 'context.json'), '--target', args.target,
             '--target-dir', str(target_dir), '--cargo-home', str(cargo_home), '--cache-dir', str(args.state / 'cache')]
 

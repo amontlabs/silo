@@ -30,7 +30,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         (self.app / 'package.json').write_text(json.dumps({'version': '0.2.3'}))
         (self.app / 'package-lock.json').write_text(json.dumps({'version': '0.2.3', 'packages': {'': {'version': '0.2.3'}}}))
         (self.app / 'src-tauri/Cargo.toml').write_text('[package]\nversion = "0.2.3"\n')
-        (self.app / 'src-tauri/Cargo.lock').write_text('[[package]]\nname = "silo-ui"\nversion = "0.2.3"\n')
+        (self.app / 'Cargo.lock').write_text('[[package]]\nname = "silo-ui"\nversion = "0.2.3"\n')
         (self.root / 'docs/releases').mkdir(parents=True)
         self.notes = self.root / 'docs/releases/0.2.3.md'
         self.notes.write_text('User-facing release notes')
@@ -59,7 +59,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_stable_draft_requires_opt_in_before_platform_builds(self):
         for path in [self.app / 'package.json', self.app / 'package-lock.json',
-                     self.app / 'src-tauri/Cargo.toml', self.app / 'src-tauri/Cargo.lock']:
+                     self.app / 'src-tauri/Cargo.toml', self.app / 'Cargo.lock']:
             path.write_text(path.read_text().replace('0.2.3', '1.0.0'))
         self.notes.rename(self.notes.with_name('1.0.0.md'))
         result = self.run_gate(ref='refs/tags/v1.0.0')

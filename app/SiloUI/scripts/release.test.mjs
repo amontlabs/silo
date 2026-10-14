@@ -9,7 +9,7 @@ import { syncRelease, versionRelease } from "./sync-release.mjs"
 import { release } from "./release.mjs"
 
 const source = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const metadata = ["package.json", "package-lock.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]
+const metadata = ["package.json", "package-lock.json", "src-tauri/Cargo.toml", "Cargo.lock"]
 const read = path => readFileSync(path, "utf8")
 function fixture(t) {
   const repo = mkdtempSync(join(tmpdir(), "silo-release-test-"))
@@ -61,7 +61,7 @@ test("real Changesets versions a private app, consumes notes, and syncs desktop 
   for (const [name, entry] of Object.entries(originalLock.packages)) {
     if (name !== "") assert.deepEqual(lock.packages[name], entry)
   }
-  for (const file of ["src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]) {
+  for (const file of ["src-tauri/Cargo.toml", "Cargo.lock"]) {
     assert.equal(after[file], before[file].replace(`name = "silo-ui"\nversion = "${oldVersion}"`, `name = "silo-ui"\nversion = "${expected}"`))
   }
   const notes = read(resolve(root, "../../docs/releases", `${expected}.md`))
@@ -85,7 +85,7 @@ for (const [name, mutate, error] of [
   ["invalid stable version", root => { const pkg = JSON.parse(read(join(root, "package.json"))); pkg.version = "0.98.7-beta.1"; writeFileSync(join(root, "package.json"), JSON.stringify(pkg)) }, /stable version/],
   ["missing changelog version", root => writeFileSync(join(root, "CHANGELOG.md"), "## 0.1.0\n\nOld notes.\n"), /No changelog/],
   ["empty notes", root => writeFileSync(join(root, "CHANGELOG.md"), "## 0.98.7\n\n"), /empty/],
-  ["malformed Rust metadata", root => writeFileSync(join(root, "src-tauri/Cargo.lock"), '[[package]]\nname = "other"\nversion = "1.0.0"\n'), /exactly one/],
+  ["malformed Rust metadata", root => writeFileSync(join(root, "Cargo.lock"), '[[package]]\nname = "other"\nversion = "1.0.0"\n'), /exactly one/],
   ["malformed npm lock", root => writeFileSync(join(root, "package-lock.json"), "{}"), /lockfile/],
   ["conflicting existing notes", root => { const path = resolve(root, "../../docs/releases/0.98.7.md"); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, "Reviewed notes\n") }, /different notes/],
 ]) {
@@ -131,7 +131,7 @@ for (const [name, prepareInputs, error] of [
     mkdirSync(dirname(notes), { recursive: true })
     writeFileSync(notes, "Stale notes\n")
   }, /already exists before/],
-  ["malformed Rust metadata", root => { pendingChangeset(root, "patch"); writeFileSync(join(root, "src-tauri/Cargo.lock"), '[[package]]\nname = "other"\nversion = "1.0.0"\n') }, /exactly one/],
+  ["malformed Rust metadata", root => { pendingChangeset(root, "patch"); writeFileSync(join(root, "Cargo.lock"), '[[package]]\nname = "other"\nversion = "1.0.0"\n') }, /exactly one/],
   ["no pending changesets", () => {}, /No pending silo-ui changesets/],
 ]) {
   test(`release:version refuses ${name} before Changesets consumes anything`, t => {

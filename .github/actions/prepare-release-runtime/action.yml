@@ -88,7 +88,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         restore-keys: silo-cargo-downloads-v1-${{ inputs.runner }}-${{ inputs.target }}-
-        key: silo-cargo-downloads-v1-${{ inputs.runner }}-${{ inputs.target }}-${{ hashFiles('app/SiloUI/src-tauri/Cargo.lock', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch') }}
+        key: silo-cargo-downloads-v1-${{ inputs.runner }}-${{ inputs.target }}-${{ hashFiles('app/SiloUI/Cargo.lock', 'app/SiloUI/scripts/microsandbox-runtime.mjs', 'app/SiloUI/patches/microsandbox-*.patch') }}
         path: |
           ~/.cargo/registry/index
           ~/.cargo/registry/cache

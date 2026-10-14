@@ -170,7 +170,7 @@ def restore(args):
     try:
         extract(args.archive, args.cache_dir, args.sha256)
         command = [sys.executable, str(args.app_root / 'scripts/cargo-dependency-cache.py'), 'restore',
-                   '--metadata', str(args.metadata), '--lockfile', str(args.app_root / 'src-tauri/Cargo.lock'),
+                   '--metadata', str(args.metadata), '--lockfile', str(args.app_root / 'Cargo.lock'),
                    '--context', str(args.context), '--target', args.target, '--target-dir', str(args.target_dir),
                    '--cargo-home', str(args.cargo_home), '--cache-dir', str(args.cache_dir), '--report', str(args.audit_report),
                    '--forbid', PRODUCER, '--forbid', CONSUMER]

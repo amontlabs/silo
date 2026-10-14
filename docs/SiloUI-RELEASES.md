@@ -50,7 +50,7 @@ npm run release:version
 below 1.0.0, no existing `docs/releases/VERSION.md`, and version metadata our
 adapter can update. A failed check changes nothing. Changesets then updates
 `package.json` and `CHANGELOG.md` and consumes the pending notes. Our adapter updates `package-lock.json`,
-`src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` to the same version without
+`src-tauri/Cargo.toml`, and the workspace `Cargo.lock` to the same version without
 changing dependencies. It exports the new changelog entry to
 `docs/releases/VERSION.md`, which becomes the app update notes. The GitHub
 release page shows download links first, then those notes with the full change

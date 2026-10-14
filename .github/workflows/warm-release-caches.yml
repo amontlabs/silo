@@ -14,7 +14,7 @@ on:
       - 'app/SiloUI/patches/microsandbox-*.patch'
       - 'app/SiloUI/runtime-inputs.json'
       - 'app/SiloUI/scripts/preflight.mjs'
-      - 'app/SiloUI/src-tauri/Cargo.lock'
+      - 'app/SiloUI/Cargo.lock'
       - 'app/SiloUI/src-tauri/Cargo.toml'
       - 'app/SiloUI/src-tauri/tauri.conf.json'
       - 'app/SiloUI/src-tauri/vendor/**'

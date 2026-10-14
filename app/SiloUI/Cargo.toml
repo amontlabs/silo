@@ -1,0 +1,10 @@
+[workspace]
+members = ["api", "src-tauri", "src-tauri/engine"]
+default-members = ["api", "src-tauri", "src-tauri/engine"]
+resolver = "2"
+
+[patch.crates-io]
+tauri-plugin-updater = { path = "src-tauri/vendor/tauri-plugin-updater" }
+
+[profile.dev.package.sha2]
+opt-level = 3

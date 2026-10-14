@@ -42,7 +42,7 @@ function mirroredMetadata(root, version) {
   return {
     lock,
     cargo: replaceVersion(read("src-tauri/Cargo.toml"), /^\[package\]\n[\s\S]*?(?=^\[|(?![\s\S]))/gm),
-    cargoLock: replaceVersion(read("src-tauri/Cargo.lock"), /^\[\[package\]\]\n[\s\S]*?(?=^\[\[package\]\]|(?![\s\S]))/gm),
+    cargoLock: replaceVersion(read("Cargo.lock"), /^\[\[package\]\]\n[\s\S]*?(?=^\[\[package\]\]|(?![\s\S]))/gm),
   }
 }
 
@@ -70,7 +70,7 @@ export function syncRelease(root = app, { allowStable = false } = {}) {
   // Validate every input before writing any mirrored file.
   writeFileSync(resolve(root, "package-lock.json"), JSON.stringify(lock, null, 2) + "\n")
   writeFileSync(resolve(root, "src-tauri/Cargo.toml"), cargo)
-  writeFileSync(resolve(root, "src-tauri/Cargo.lock"), cargoLock)
+  writeFileSync(resolve(root, "Cargo.lock"), cargoLock)
   mkdirSync(dirname(notesPath), { recursive: true })
   writeFileSync(notesPath, content)
   return version
