@@ -348,8 +348,7 @@ fn remote_device(context: &HandlerContext, device_id: Option<&str>) -> Option<St
 
 /// A command on another device's computer is a job of that device: it runs there, its
 /// output stays there for `guest.exec.get`, and the client follows it by `(deviceId, jobId)`.
-/// Its stdin cannot stay open: `guest.exec.input` names a job only, not the device that owns
-/// it.
+/// `guest.exec.input` names the device too, so a remote command can keep stdin open.
 async fn remote_exec<T: serde::de::DeserializeOwned + Serialize + Send + 'static>(
     device: String,
     method: &'static str,
@@ -357,11 +356,6 @@ async fn remote_exec<T: serde::de::DeserializeOwned + Serialize + Send + 'static
 ) -> Result<HandlerOutput, DispatchError> {
     let mut request =
         serde_json::to_value(params).map_err(|error| DispatchError::internal(error.to_string()))?;
-    if method == "guest.exec.start" && request["stdinOpen"] == true {
-        return Err(DispatchError::unsupported_message(
-            "A command on another device cannot keep stdin open: guest.exec.input names the job but not its device.",
-        ));
-    }
     if let Some(object) = request.as_object_mut() {
         object.remove("deviceId");
     }
@@ -411,9 +405,21 @@ async fn guest_exec_input(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: GuestExecInputParams = context.decode_params(params)?;
-    guest::exec_input(&params.job_id, params.data, params.close.unwrap_or(false))
-        .map_err(guest_error)?;
+    if let Some(device) = remote_device(context, params.device_id.as_deref()) {
+        return remote_exec::<Value>(device, "guest.exec.input", &params).await;
+    }
+    exec_input_owner(&params)?;
     output(Value::Null)
+}
+
+/// Feeds or closes the stdin of a job of this engine, for a local caller or a controller.
+pub(crate) fn exec_input_owner(params: &GuestExecInputParams) -> Result<(), DispatchError> {
+    guest::exec_input(
+        &params.job_id,
+        params.data.clone(),
+        params.close.unwrap_or(false),
+    )
+    .map_err(guest_error)
 }
 
 async fn guest_exec_get(
@@ -1292,20 +1298,44 @@ exit 2
     }
 
     #[tokio::test]
-    async fn a_command_on_another_device_cannot_keep_stdin_open() {
+    async fn a_command_on_another_device_keeps_stdin_open_and_takes_input_there() {
         let fixture = Fixture::new();
-        assert_eq!(
-            fixture
-                .code(
-                    MethodName::GuestExecStart,
-                    json!({
-                        "computerId": COMPUTER, "deviceId": "another-device", "argv": ["cat"],
-                        "stdinOpen": true, "retainOutputBytes": 1024,
-                    }),
-                )
-                .await,
-            ErrorCode::UnsupportedRemoteOperation
-        );
+        let device = "99999999-9999-4999-8999-999999999912";
+        let seen = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let log = seen.clone();
+        let _owner = super::super::access::tests::stub_owner(device, move |method, params| {
+            log.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            match method {
+                "guest.exec.start" => Ok(json!({"jobId": "job:41"})),
+                "guest.exec.input" => Ok(Value::Null),
+                other => panic!("unexpected owner request {other}"),
+            }
+        });
+        let started = fixture
+            .ok(
+                MethodName::GuestExecStart,
+                json!({
+                    "computerId": COMPUTER, "deviceId": device, "argv": ["cat"],
+                    "stdinOpen": true, "retainOutputBytes": 1024,
+                }),
+            )
+            .await;
+        assert_eq!(started, json!({"jobId": "job:41"}));
+        fixture
+            .ok(
+                MethodName::GuestExecInput,
+                json!({"jobId": "job:41", "deviceId": device, "data": [104, 105], "close": true}),
+            )
+            .await;
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].1["stdinOpen"], true);
+        assert_eq!(seen[1].0, "guest.exec.input");
+        // The owner is told what to feed, not which device was meant.
+        assert!(seen[1].1.get("deviceId").is_none());
+        assert_eq!(seen[1].1["jobId"], "job:41");
+        assert_eq!(seen[1].1["close"], true);
     }
 
     #[tokio::test]
