@@ -9,6 +9,11 @@ pub mod display;
 pub mod guest;
 pub mod services;
 
+/// The macOS computer inventory is process-global. Tests that seed or reset it hold this
+/// lock for their whole run, so one module's reset never removes another module's computer.
+#[cfg(test)]
+pub(crate) static MACOS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;

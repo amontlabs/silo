@@ -23,7 +23,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: u32 = 1;
+/// Layout 2 stores the policy kind next to the capture kind. Layout 1 had no policy kind;
+/// the launch upgrade (`upgrade_records`) is the only code that still reads it.
+pub(super) const SCHEMA_VERSION: u32 = 2;
+const PREVIOUS_SCHEMA_VERSION: u32 = 1;
 const META: &str = "checkpoint.json";
 const DISK: &str = "disk.img";
 const AUXILIARY_STORAGE: &str = "auxiliary-storage.img";
@@ -60,6 +63,13 @@ pub(super) enum Reason {
     BeforeRestore,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum PolicyKind {
+    Manual,
+    Automatic,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Meta {
@@ -69,6 +79,8 @@ pub(super) struct Meta {
     pub created_at: String,
     pub kind: Kind,
     pub reason: Reason,
+    /// Whether the user made the checkpoint or an unattended run did.
+    pub policy_kind: PolicyKind,
     /// The macOS the computer had, as `Record::os_version` words it.
     #[serde(default)]
     pub macos_version: Option<String>,
@@ -113,6 +125,7 @@ pub(crate) struct Summary {
     /// `full` includes memory, `disk` does not: the words the Linux checkpoint list uses.
     scope: &'static str,
     reason: Reason,
+    kind: PolicyKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
 }
@@ -128,6 +141,7 @@ impl Meta {
                 Kind::Disk => "disk",
             },
             reason: self.reason,
+            kind: self.policy_kind,
             size_bytes: self.size_bytes,
         }
     }
@@ -274,7 +288,19 @@ pub(super) fn find(layout: &Layout, id: &str) -> Result<Meta, String> {
         .ok_or_else(|| "This checkpoint no longer exists.".to_string())
 }
 
-/// Removes what an interrupted run left: partial folders and folders without a readable record.
+/// Whether a folder's record is a readable layout-1 record that the launch upgrade has not
+/// converted yet. It is not garbage: it is a user's checkpoint.
+fn is_previous_layout(dir: &Path) -> bool {
+    fs::read(dir.join(META))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|value| {
+            value.get("schemaVersion") == Some(&serde_json::Value::from(PREVIOUS_SCHEMA_VERSION))
+        })
+}
+
+/// Removes what an interrupted run left: partial folders and folders without a readable
+/// record. A record of the previous layout is kept for the launch upgrade to convert.
 pub(super) fn sweep(layout: &Layout) {
     let Ok(entries) = fs::read_dir(root(layout)) else {
         return;
@@ -282,10 +308,48 @@ pub(super) fn sweep(layout: &Layout) {
     for entry in entries.flatten() {
         let path = entry.path();
         let partial = entry.file_name().to_string_lossy().starts_with(PARTIAL);
-        if path.is_dir() && (partial || read_meta(&path).is_none()) {
+        if path.is_dir() && (partial || (read_meta(&path).is_none() && !is_previous_layout(&path)))
+        {
             let _ = fs::remove_dir_all(&path);
         }
     }
+}
+
+/// The one-time launch upgrade of one computer's checkpoint records from layout 1 to 2:
+/// each gains `policyKind: "manual"` (it predates automatic checkpoints) and keeps its
+/// capture kind, reason, dates and files. A record that is not layout 1 is left as it is.
+/// Returns how many were converted.
+pub(super) fn upgrade_records(layout: &Layout) -> Result<usize, String> {
+    let Ok(entries) = fs::read_dir(root(layout)) else {
+        return Ok(0);
+    };
+    let mut converted = 0;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() || !is_previous_layout(&dir) {
+            continue;
+        }
+        let bytes = fs::read(dir.join(META))
+            .map_err(|error| store::io_error("read the checkpoint for upgrade", &error))?;
+        let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        value["schemaVersion"] = serde_json::Value::from(SCHEMA_VERSION);
+        value["policyKind"] = serde_json::Value::from("manual");
+        let mut file = tempfile::NamedTempFile::new_in(&dir)
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        file.write_all(&serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?)
+            .and_then(|()| file.as_file().sync_all())
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        fs::set_permissions(file.path(), fs::Permissions::from_mode(0o600))
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        file.persist(dir.join(META))
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error.error))?;
+        store::sync_dir(&dir)
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        converted += 1;
+    }
+    Ok(converted)
 }
 
 /// Deletes one checkpoint. The record goes first, so a checkpoint cut short is never listed.
@@ -399,6 +463,15 @@ pub(super) fn create<M: Machine>(
     name: &str,
     reason: Reason,
 ) -> Result<Meta, String> {
+    create_with_policy(subject, name, reason, PolicyKind::Manual)
+}
+
+pub(super) fn create_with_policy<M: Machine>(
+    subject: &Subject<'_, M>,
+    name: &str,
+    reason: Reason,
+    policy_kind: PolicyKind,
+) -> Result<Meta, String> {
     let name = validate_name(name)?;
     let machine = subject.machine;
     let layout = subject.layout;
@@ -409,7 +482,7 @@ pub(super) fn create<M: Machine>(
     }
     let id = uuid::Uuid::new_v4().to_string();
     let partial = partial_dir(layout, &id);
-    let outcome = build(subject, &partial, &id, name, reason);
+    let outcome = build(subject, &partial, &id, name, reason, policy_kind);
     match outcome {
         Ok(meta) => {
             fs::rename(&partial, dir(layout, &id)).map_err(|error| {
@@ -443,6 +516,7 @@ fn build<M: Machine>(
     id: &str,
     name: String,
     reason: Reason,
+    policy_kind: PolicyKind,
 ) -> Result<Meta, String> {
     let machine = subject.machine;
     private_dir(partial)?;
@@ -475,6 +549,7 @@ fn build<M: Machine>(
             Kind::Disk
         },
         reason,
+        policy_kind,
         macos_version: subject.macos_version.clone(),
         host_build: host_build(),
         size_bytes,
@@ -736,6 +811,46 @@ pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String>
         // the computer from starting, until someone can look at it.
         Err(_) => Err(UNREADABLE_JOURNAL.into()),
     }
+}
+
+/// What an explicit abandon of an unfinished Restore found and did.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Abandon {
+    /// The journal was still staging: the staged files and the journal are gone and the
+    /// computer keeps its original files and every recovery checkpoint.
+    Discarded,
+    /// The journal was swapping, so the files are already the checkpoint's. The roll-forward
+    /// is finished; the caller saves this pending Restore before refusing the abandon.
+    AlreadyReplaced(PendingRestore),
+}
+
+/// Abandons a Restore at the same safety boundary as Linux: it succeeds only while the
+/// computer's original files still exist. A swapping journal is rolled forward, never back;
+/// an unreadable journal keeps every file; a pending Restore that is already settled and no
+/// journal at all are refused with their own messages.
+pub(super) fn abandon_restore(
+    layout: &Layout,
+    name: &str,
+    pending: Option<&PendingRestore>,
+) -> Result<Abandon, String> {
+    match read_back(layout) {
+        Readback::Absent if pending.is_some() => Err(already_replaced(name)),
+        Readback::Absent => Err(format!("{name} has no unfinished Restore.")),
+        Readback::Unknown => Err(UNREADABLE_JOURNAL.into()),
+        Readback::Phase(Phase::Staging) => {
+            remove_staged(layout);
+            finish_restore(layout);
+            Ok(Abandon::Discarded)
+        }
+        Readback::Phase(Phase::Swapping) => match recover(layout)? {
+            Some(pending) => Ok(Abandon::AlreadyReplaced(pending)),
+            None => Err(format!("{name} has no unfinished Restore.")),
+        },
+    }
+}
+
+pub(super) fn already_replaced(name: &str) -> String {
+    format!("{name} was already replaced by this Restore. Start {name} to finish it, or Restore another checkpoint.")
 }
 
 /// Ends the journal once the record names the Restore the files already carry out.
@@ -1531,5 +1646,132 @@ mod tests {
         assert_eq!(json["scope"], "disk");
         assert_eq!(json["reason"], "before-restore");
         assert!(json.get("sizeBytes").is_none());
+    }
+
+    #[test]
+    fn abandoning_a_staging_restore_discards_it_and_keeps_the_original_files() {
+        let (_data, layout, _) = interrupted("staging");
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Ok(Abandon::Discarded)
+        );
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert_eq!(fs::read(layout.auxiliary_storage()).unwrap(), b"aux-v2");
+        assert!(!restore_unfinished(&layout));
+        assert!(staged(&layout)
+            .iter()
+            .all(|(_, temporary)| !temporary.exists()));
+    }
+
+    #[test]
+    fn abandoning_a_swapping_restore_rolls_forward_and_refuses_to_undo_it() {
+        let (_data, layout, meta) = interrupted("swapping");
+        let Ok(Abandon::AlreadyReplaced(pending)) = abandon_restore(&layout, "dev", None) else {
+            panic!("a swapping journal is rolled forward");
+        };
+        assert_eq!(pending.checkpoint_id, meta.id);
+        // The files are now the checkpoint's: nothing was rolled back.
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
+        assert!(restore_unfinished(&layout));
+    }
+
+    #[test]
+    fn abandoning_an_unreadable_journal_keeps_every_file_and_refuses() {
+        let (_data, layout, _) = interrupted("swapping");
+        fs::write(journal_path(&layout), b"{").unwrap();
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Err(UNREADABLE_JOURNAL.to_string())
+        );
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert!(restore_unfinished(&layout));
+    }
+
+    #[test]
+    fn abandoning_without_a_journal_names_what_is_missing_or_already_settled() {
+        let (_data, layout) = computer();
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Err("dev has no unfinished Restore.".to_string())
+        );
+        let settled = PendingRestore {
+            checkpoint_id: "x".into(),
+            memory: false,
+        };
+        assert_eq!(
+            abandon_restore(&layout, "dev", Some(&settled)),
+            Err(already_replaced("dev"))
+        );
+        assert!(already_replaced("dev").contains("Start dev to finish it"));
+    }
+
+    #[test]
+    fn the_policy_kind_is_stored_and_shown_next_to_the_capture_reason() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let automatic = create_with_policy(
+            &subject(&layout, &machine, false),
+            "Before run: tests, deleted automatically",
+            Reason::Manual,
+            PolicyKind::Automatic,
+        )
+        .unwrap();
+        assert_eq!(list(&layout), [automatic.clone()]);
+        let summary = serde_json::to_value(automatic.summary()).unwrap();
+        assert_eq!(summary["kind"], "automatic");
+        assert_eq!(summary["reason"], "manual");
+        // The capture kind stays the memory/disk fact; the policy kind is separate.
+        assert_eq!(automatic.kind, Kind::Disk);
+        let manual = create(&subject(&layout, &machine, false), "Mine", Reason::Manual).unwrap();
+        assert_eq!(manual.policy_kind, PolicyKind::Manual);
+    }
+
+    fn write_layout_one(layout: &Layout, meta: &Meta) {
+        let dir = dir(layout, &meta.id);
+        let mut value = serde_json::to_value(meta).unwrap();
+        value["schemaVersion"] = serde_json::Value::from(PREVIOUS_SCHEMA_VERSION);
+        value.as_object_mut().unwrap().remove("policyKind");
+        fs::write(dir.join(META), serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_unconverted_record_is_neither_listed_nor_swept_and_the_upgrade_converts_it() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let old = create(
+            &subject(&layout, &machine, true),
+            "Old",
+            Reason::BeforeRestore,
+        )
+        .unwrap();
+        write_layout_one(&layout, &old);
+        let garbage = root(&layout).join("garbage");
+        fs::create_dir_all(&garbage).unwrap();
+        fs::write(garbage.join(META), b"{").unwrap();
+
+        // The current code reads only the current layout.
+        assert!(list(&layout).is_empty());
+        // The sweep removes garbage but must not take the old record for it.
+        sweep(&layout);
+        assert!(!garbage.exists());
+        assert!(dir(&layout, &old.id).join(STATE).exists());
+
+        assert_eq!(upgrade_records(&layout), Ok(1));
+        let converted = find(&layout, &old.id).unwrap();
+        assert_eq!(converted.policy_kind, PolicyKind::Manual);
+        assert_eq!(converted.schema_version, SCHEMA_VERSION);
+        // Everything else is as it was made.
+        assert_eq!(converted.reason, Reason::BeforeRestore);
+        assert_eq!(converted.kind, Kind::Memory);
+        assert_eq!(converted.created_at, old.created_at);
+        assert_eq!(converted.size_bytes, old.size_bytes);
+        let mode = fs::metadata(dir(&layout, &old.id).join(META))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        // Idempotent.
+        assert_eq!(upgrade_records(&layout), Ok(0));
     }
 }

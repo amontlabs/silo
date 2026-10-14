@@ -1516,6 +1516,7 @@ mod tests {
     }
 
     struct Fixture {
+        _registry: std::sync::MutexGuard<'static, ()>,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
         _gate: crate::methods::ProcessGateLease,
@@ -1523,6 +1524,9 @@ mod tests {
 
     fn fixture() -> Fixture {
         let gate = crate::methods::process_gate_lock();
+        let registry = crate::methods::MACOS_REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let engine = Arc::new(SilodContext::new(
@@ -1545,6 +1549,7 @@ mod tests {
             Arc::new(NoProcess),
         ));
         Fixture {
+            _registry: registry,
             directory,
             engine,
             _gate: gate,

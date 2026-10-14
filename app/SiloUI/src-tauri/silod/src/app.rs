@@ -128,6 +128,9 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    // Checkpoint records written before automatic checkpoints existed become manual ones,
+    // once, before anything reads them.
+    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
     // Resumes computers a previous engine update saved, before anything else advances them,
     // and starts the engine's own update schedule.
     crate::methods::services::start(context.clone());
