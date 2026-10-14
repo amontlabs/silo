@@ -10,7 +10,6 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
 
 static NETWORK_LOCK: Mutex<()> = Mutex::new(());
 const FAILED: &str = "Could not read network services. Try again.";
@@ -729,7 +728,7 @@ fn reconcile_computers(config: &Configuration) -> BTreeSet<String> {
 /// Reconcile the affected computer's forwards on a background thread, skipping it when
 /// that computer is busy, so a read can return immediately while repair converges. Each
 /// computer is repaired under its own gate guard.
-fn schedule_network_reconcile(app: &AppHandle, config: &Configuration) {
+fn schedule_network_reconcile(paths: RuntimePaths, config: &Configuration) {
     let computers = reconcile_computers(config);
     if computers.is_empty() {
         return;
@@ -739,7 +738,6 @@ fn schedule_network_reconcile(app: &AppHandle, config: &Configuration) {
     if RUNNING.swap(true, std::sync::atomic::Ordering::AcqRel) {
         return;
     }
-    let app = app.clone();
     std::thread::spawn(move || {
         struct Done;
         impl Drop for Done {
@@ -748,9 +746,6 @@ fn schedule_network_reconcile(app: &AppHandle, config: &Configuration) {
             }
         }
         let _done = Done;
-        let Ok(paths) = runtime::runtime_paths(&app) else {
-            return;
-        };
         if runtime::shutdown::ensure_accepting_operations().is_err() {
             return;
         }
@@ -806,7 +801,7 @@ fn state_with(paths: &RuntimePaths, config: &Configuration) -> Result<State, Str
 /// Apply one computer's just-saved intent under the caller's computer gate and return the new
 /// state, with any failure from that repair shown on the computer's ports. Every window is
 /// told to refresh even when the repair could not run, because the intent was saved.
-fn apply_saved(app: &AppHandle, paths: &RuntimePaths, computer: &str) -> Result<State, String> {
+fn apply_saved(paths: &RuntimePaths, computer: &str) -> Result<State, String> {
     let result = reconcile_forwarding(paths, computer).and_then(|failures| {
         let config = read_config(paths)?;
         let mut state = state_with(paths, &config)?;
@@ -819,155 +814,133 @@ fn apply_saved(app: &AppHandle, paths: &RuntimePaths, computer: &str) -> Result<
         }
         Ok(state)
     });
-    let _ = app.emit("silo://network-state-changed", ());
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            silo_engine::context::Event::new("silo://network-state-changed", json!(null)),
+            silo_engine::context::Audience::All,
+        );
+    }
     result
 }
 
-#[tauri::command]
-pub(crate) async fn read_network_state(app: AppHandle) -> Result<State, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        // Observation only: never take the operation gate and never publish or
-        // remove a forward, so a read cannot wait behind a long operation. Any
-        // forward that drifted from its saved intent is repaired in the background.
-        let paths = runtime::runtime_paths(&app).map_err(|_| FAILED)?;
-        let config = read_config(&paths)?;
-        let state = state_with(&paths, &config);
-        schedule_network_reconcile(&app, &config);
-        state
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+pub(crate) fn read_network_state(paths: &RuntimePaths) -> Result<State, String> {
+    // Observation only: never take the operation gate and never publish or
+    // remove a forward, so a read cannot wait behind a long operation. Any
+    // forward that drifted from its saved intent is repaired in the background.
+    let config = read_config(paths)?;
+    let state = state_with(paths, &config);
+    schedule_network_reconcile(paths.clone(), &config);
+    state
 }
-#[tauri::command]
-pub(crate) async fn save_network_port(
-    app: AppHandle,
+pub(crate) fn save_network_port(
+    paths: &RuntimePaths,
     computer: String,
     port: u16,
     host_port: Option<u16>,
     scheme: Option<String>,
 ) -> Result<State, String> {
-    runtime::operation_gate::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let paths = runtime::runtime_paths(&app).map_err(|_| FAILED)?;
-        // Publishing a port changes this computer's shared host forwarding; wait its turn
-        // for that computer. NETWORK_LOCK stays the short data lock around the saved table.
-        let computer_id =
-            runtime::resolve_computer_id(&paths, &computer).map_err(|e| e.to_string())?;
-        let _gate = runtime::OPERATIONS
-            .kind(runtime::operation_gate::OperationKind::PortPublish)
-            .computer(
-                &computer_id,
-                &computer,
-                &format!("Publishing a port on {computer}"),
-            )
-            .map_err(|e| e.to_string())?;
-        runtime::shutdown::ensure_accepting_operations()?;
-        configured_computer(&paths, &computer)?;
-        let mapping = Mapping {
-            computer: computer.clone(),
-            port,
-            host_port,
-            scheme,
-            enabled: true,
-        };
-        validate(&mapping)?;
+    let _update = crate::updates::operation_guard()?;
+    // Publishing a port changes this computer's shared host forwarding; wait its turn
+    // for that computer. NETWORK_LOCK stays the short data lock around the saved table.
+    let computer_id = runtime::resolve_computer_id(paths, &computer).map_err(|e| e.to_string())?;
+    let _gate = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::PortPublish)
+        .computer(
+            &computer_id,
+            &computer,
+            &format!("Publishing a port on {computer}"),
+        )
+        .map_err(|e| e.to_string())?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    configured_computer(paths, &computer)?;
+    let mapping = Mapping {
+        computer: computer.clone(),
+        port,
+        host_port,
+        scheme,
+        enabled: true,
+    };
+    validate(&mapping)?;
+    {
+        let _guard = network_lock();
+        let mut config = read_config(paths)?;
+        if config
+            .mappings
+            .iter()
+            .filter(|m| m.computer == computer && m.enabled && m.port != port)
+            .count()
+            >= LIMIT
         {
-            let _guard = network_lock();
-            let mut config = read_config(&paths)?;
-            if config
-                .mappings
-                .iter()
-                .filter(|m| m.computer == computer && m.enabled && m.port != port)
-                .count()
-                >= LIMIT
-            {
-                return Err("This computer already has 128 published ports.".into());
-            }
-            config
-                .mappings
-                .retain(|m| m.computer != computer || m.port != port);
-            config.mappings.push(mapping);
-            if config.mappings.len() > 4096 {
-                return Err("Too many saved ports. Remove an unused port first.".into());
-            }
-            write_config(&paths, &config)?;
+            return Err("This computer already has 128 published ports.".into());
         }
-        apply_saved(&app, &paths, &computer)
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+        config
+            .mappings
+            .retain(|m| m.computer != computer || m.port != port);
+        config.mappings.push(mapping);
+        if config.mappings.len() > 4096 {
+            return Err("Too many saved ports. Remove an unused port first.".into());
+        }
+        write_config(paths, &config)?;
+    }
+    apply_saved(paths, &computer)
 }
-#[tauri::command]
-pub(crate) async fn remove_network_port(
-    app: AppHandle,
+pub(crate) fn remove_network_port(
+    paths: &RuntimePaths,
     computer: String,
     port: u16,
 ) -> Result<State, String> {
-    runtime::operation_gate::spawn_blocking(move || {
-        let _update = crate::updates::operation_guard()?;
-        let paths = runtime::runtime_paths(&app).map_err(|_| FAILED)?;
-        // Removing a port changes this computer's shared host forwarding; wait its turn
-        // for that computer. NETWORK_LOCK stays the short data lock around the saved table.
-        let computer_id =
-            runtime::resolve_computer_id(&paths, &computer).map_err(|e| e.to_string())?;
-        let _gate = runtime::OPERATIONS
-            .kind(runtime::operation_gate::OperationKind::PortRemove)
-            .computer(
-                &computer_id,
-                &computer,
-                &format!("Removing a port on {computer}"),
-            )
-            .map_err(|e| e.to_string())?;
-        runtime::shutdown::ensure_accepting_operations()?;
-        configured_computer(&paths, &computer)?;
+    let _update = crate::updates::operation_guard()?;
+    // Removing a port changes this computer's shared host forwarding; wait its turn
+    // for that computer. NETWORK_LOCK stays the short data lock around the saved table.
+    let computer_id = runtime::resolve_computer_id(paths, &computer).map_err(|e| e.to_string())?;
+    let _gate = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::PortRemove)
+        .computer(
+            &computer_id,
+            &computer,
+            &format!("Removing a port on {computer}"),
+        )
+        .map_err(|e| e.to_string())?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    configured_computer(paths, &computer)?;
+    {
+        let _guard = network_lock();
+        let mut config = read_config(paths)?;
+        // Persist removal intent before touching the live listener. Failed removals
+        // remain visible and reconcile on retry/relaunch, never silently reopen.
+        if let Some(mapping) = config
+            .mappings
+            .iter_mut()
+            .find(|m| m.computer == computer && m.port == port)
         {
-            let _guard = network_lock();
-            let mut config = read_config(&paths)?;
-            // Persist removal intent before touching the live listener. Failed removals
-            // remain visible and reconcile on retry/relaunch, never silently reopen.
-            if let Some(mapping) = config
-                .mappings
-                .iter_mut()
-                .find(|m| m.computer == computer && m.port == port)
-            {
-                mapping.enabled = false;
-            }
-            write_config(&paths, &config)?;
+            mapping.enabled = false;
         }
-        // Other devices forward the port through guest streams, not this listener.
-        crate::remote::revoke_port_streams(&computer_id, port);
-        apply_saved(&app, &paths, &computer)
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+        write_config(paths, &config)?;
+    }
+    // Other devices forward the port through guest streams, not this listener.
+    crate::remote::revoke_port_streams(&computer_id, port);
+    apply_saved(paths, &computer)
 }
-#[tauri::command]
-pub(crate) async fn open_network_port(
-    app: AppHandle,
+pub(crate) fn network_port_url(
+    paths: &RuntimePaths,
     computer: String,
     port: u16,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app).map_err(|_| FAILED)?;
-        // Opening an already-reachable endpoint only observes; it takes no gate.
-        let state = observe(&paths, &computer, &read_config(&paths)?, &BTreeMap::new());
-        let endpoint = state
-            .ports
-            .iter()
-            .find(|p| p.port == port && p.configured && p.state == "reachable")
-            .ok_or("This service is not reachable.")?;
-        let scheme = endpoint
-            .scheme
-            .as_deref()
-            .ok_or("This TCP service is not configured as a website.")?;
-        let host_port = endpoint.host_port.ok_or("This service is not reachable.")?;
-        let computer_id =
-            runtime::resolve_computer_id(&paths, &computer).map_err(|e| e.to_string())?;
-        let host = computer_host(&computer, &computer_id);
-        crate::applications::open_browser(&app, &website_url(scheme, Some(&host), host_port))
-    })
-    .await
-    .map_err(|_| FAILED.to_string())?
+) -> Result<String, String> {
+    // Opening an already-reachable endpoint only observes; it takes no gate.
+    let state = observe(paths, &computer, &read_config(paths)?, &BTreeMap::new());
+    let endpoint = state
+        .ports
+        .iter()
+        .find(|p| p.port == port && p.configured && p.state == "reachable")
+        .ok_or("This service is not reachable.")?;
+    let scheme = endpoint
+        .scheme
+        .as_deref()
+        .ok_or("This TCP service is not configured as a website.")?;
+    let host_port = endpoint.host_port.ok_or("This service is not reachable.")?;
+    let computer_id = runtime::resolve_computer_id(paths, &computer).map_err(|e| e.to_string())?;
+    let host = computer_host(&computer, &computer_id);
+    Ok(website_url(scheme, Some(&host), host_port))
 }
 
 // Called after successful starts, including launch-at-login and temporary starts.

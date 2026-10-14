@@ -1,5 +1,5 @@
 //! Read-only, bounded directory snapshots. Pagination never combines two scans.
-use crate::runtime::{ensure_managed, run_msb, runtime_paths, ProcessRunner};
+use crate::runtime::{ensure_managed, run_msb, ProcessRunner, RuntimePaths};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -9,7 +9,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::AppHandle;
 
 const PAGE_SIZE: usize = 200;
 const MAX_ENTRIES: usize = 20_000;
@@ -136,9 +135,8 @@ fn page(entries: &[Entry], offset: usize, snapshot_id: &str) -> Result<Directory
         snapshot_id: snapshot_id.into(),
     })
 }
-#[tauri::command]
-pub(crate) async fn list_computer_directory(
-    app: AppHandle,
+pub(crate) fn list_computer_directory(
+    paths: &RuntimePaths,
     computer: String,
     path: String,
     offset: usize,
@@ -147,21 +145,8 @@ pub(crate) async fn list_computer_directory(
     if !valid_path(&path) || offset > MAX_ENTRIES || offset % PAGE_SIZE != 0 {
         return Err("Invalid folder request.".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some((device, computer)) = crate::remote_access::target(&computer)? {
-            let value = crate::remote::call_remote(
-                &app,
-                &device,
-                "files.list",
-                serde_json::json!({
-                    "computerId": computer, "path": path, "offset": offset, "snapshotId": snapshot_id,
-                }),
-            )?;
-            return serde_json::from_value(value)
-                .map_err(|_| "The remote device returned an invalid folder listing.".into());
-        }
+    {
         crate::runtime::validate_name(&computer).map_err(|error| error.to_string())?;
-        let paths = runtime_paths(&app).map_err(|_| FAILED.to_owned())?;
         let metadata =
             crate::runtime::read_metadata(&paths.metadata).map_err(|_| FAILED.to_owned())?;
         let computer_id = metadata
@@ -171,7 +156,7 @@ pub(crate) async fn list_computer_directory(
             .ok_or("Computer no longer exists.")?
             .id()
             .to_owned();
-        let state = match crate::runtime::observe_computer(&ProcessRunner, &paths, &computer)
+        let state = match crate::runtime::observe_computer(&ProcessRunner, paths, &computer)
             .map_err(|_| FAILED.to_owned())?
         {
             crate::runtime::ComputerRuntime::Absent => {
@@ -197,7 +182,7 @@ pub(crate) async fn list_computer_directory(
             );
         }
         let output = run_msb(
-            &paths,
+            paths,
             &[
                 "exec".into(),
                 computer.clone(),
@@ -260,9 +245,7 @@ pub(crate) async fn list_computer_directory(
             },
         );
         Ok(result)
-    })
-    .await
-    .map_err(|_| FAILED.to_owned())?
+    }
 }
 
 #[cfg(test)]
