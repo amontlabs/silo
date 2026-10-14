@@ -667,8 +667,17 @@ fn preparation_status_publication_targets_only_the_main_client() {
 
     publish_status(&context, &status);
 
+    // Every client gets the canonical topic; only the main window gets the legacy event.
     let published = context.published();
-    assert_eq!(published.len(), 1);
-    assert_eq!(published[0].0.name, STATUS_EVENT);
-    assert_eq!(published[0].1, Audience::Client(ClientId::new("main")));
+    assert_eq!(published.len(), 2);
+    assert_eq!(published[0].0.name, "preparation.changed");
+    assert_eq!(published[0].1, Audience::All);
+    let public: silo_api::methods::preparation::PreparationStatus =
+        serde_json::from_value(published[0].0.payload.clone()).unwrap();
+    assert_eq!(
+        public.image.state,
+        silo_api::methods::preparation::PreparationTaskState::Running
+    );
+    assert_eq!(published[1].0.name, STATUS_EVENT);
+    assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
 }

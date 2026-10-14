@@ -153,7 +153,9 @@ fn runtime_host(context: &HandlerContext) -> DisplayRuntimeHost {
     }
 }
 
-fn macos_context(context: &HandlerContext) -> silo_engine::macos_computers_engine::MacosContext {
+pub(super) fn macos_context(
+    context: &HandlerContext,
+) -> silo_engine::macos_computers_engine::MacosContext {
     let engine: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
     silo_engine::macos_computers_engine::MacosContext::new(engine, Arc::new(SilodMacosHost))
 }
@@ -1535,11 +1537,15 @@ mod tests {
     }
 
     struct Fixture {
+        _registry: std::sync::MutexGuard<'static, ()>,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
     }
 
     fn fixture() -> Fixture {
+        let registry = crate::methods::MACOS_REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let engine = Arc::new(SilodContext::new(
@@ -1561,7 +1567,11 @@ mod tests {
             Arc::new(NoMain),
             Arc::new(NoProcess),
         ));
-        Fixture { directory, engine }
+        Fixture {
+            _registry: registry,
+            directory,
+            engine,
+        }
     }
 
     impl Fixture {

@@ -584,6 +584,21 @@ fn run_as(
     )
 }
 
+/// The `ssh` program and arguments that run `command` as `silo` with the computer's key.
+/// The caller runs it, so it can stream bytes and stop it.
+pub(super) fn ssh_invocation(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+) -> Result<(String, Vec<String>), String> {
+    let account = account(layout)?;
+    let address = endpoint(record, 22)?;
+    Ok((
+        SSH.to_owned(),
+        ssh_args(layout, record, &account, address, command, Auth::Key),
+    ))
+}
+
 /// Copies `local` to `remote` in the guest.
 // Used by the installers that copy files into the guest.
 #[allow(dead_code)]
