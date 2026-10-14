@@ -169,6 +169,20 @@ fn retry_pending_outcomes(
     Ok(())
 }
 
+/// Retries retained terminal writes before returning a job snapshot. This gives
+/// `operations.job.get` a production retry path after a transient storage error
+/// and keeps callers from observing a stale waiting state while an outcome is
+/// held in memory.
+pub fn get_at(
+    context: &dyn EngineContext,
+    job_id: &JobId,
+    offset_bytes: Option<u64>,
+) -> Result<Option<silo_api::jobs::JobLookupResult>, RegistryError> {
+    let registry = context.job_registry()?;
+    retry_pending_outcomes(context, registry.as_ref())?;
+    registry.get_at(job_id, offset_bytes)
+}
+
 /// Persists a terminal value from a domain journal during restart reconciliation,
 /// replacing only the generic interrupted outcome if one was recorded at open.
 pub fn reconcile_finished(
@@ -257,7 +271,8 @@ fn progress_job_id(progress: &JobProgress) -> JobId {
 mod tests {
     use super::*;
     use crate::context::{
-        EngineIdentity, EnginePaths, EngineRuntimeState, MainThread, PackageKind, ProcessControl,
+        EngineIdentity, EnginePaths, EngineRuntimeState, Event, MainThread, PackageKind,
+        ProcessControl,
     };
     use std::sync::{Arc, Mutex};
 
@@ -320,6 +335,52 @@ mod tests {
         }
     }
 
+    struct RegistryGetContext {
+        registry: Arc<JobRegistry>,
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published: Mutex<Vec<Event>>,
+    }
+
+    impl EngineContext for RegistryGetContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, _audience: Audience) {
+            self.published.lock().unwrap().push(event);
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+
+        fn job_registry(&self) -> Result<Arc<JobRegistry>, String> {
+            Ok(self.registry.clone())
+        }
+    }
+
+    impl ProcessControl for RegistryGetContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("registry get test must not restart the process")
+        }
+    }
+
     #[test]
     fn oversized_job_completion_events_reference_the_chunked_durable_outcome() {
         let directory = tempfile::tempdir().unwrap();
@@ -327,9 +388,7 @@ mod tests {
         let job_id = JobId::new("job:1").unwrap();
         let registry = context.job_registry().unwrap();
         registry.accept(job_id.clone(), "guest.exec.start").unwrap();
-        let result = serde_json::Value::String(
-            "x".repeat(MAX_INLINE_JOB_OUTCOME_BYTES + 4096),
-        );
+        let result = serde_json::Value::String("x".repeat(MAX_INLINE_JOB_OUTCOME_BYTES + 4096));
 
         publish_finished(
             &context,
@@ -368,5 +427,64 @@ mod tests {
             serde_json::from_slice(&stored_outcome).unwrap();
         assert_eq!(outcome.result, Some(result));
         assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn get_retries_a_pending_outcome_before_reading_and_publishes_it() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = Arc::new(JobRegistry::open(temporary.path()).unwrap());
+        let context = RegistryGetContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+            published: Mutex::new(Vec::new()),
+        };
+        let job_id = JobId::new("transfer:get-retry").unwrap();
+        registry.accept(job_id.clone(), "files.upload").unwrap();
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'transfer:get-retry' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+        let completion = JobFinished {
+            job_id: job_id.clone(),
+            result: Some(serde_json::json!({"status":"uploaded"})),
+            error: None,
+            outcome_chunked: false,
+        };
+        assert_eq!(
+            publish_finished(&context, completion.clone(), Audience::All)
+                .unwrap_err()
+                .kind(),
+            RegistryErrorKind::Storage
+        );
+        assert_eq!(
+            get_at(&context, &job_id, None).unwrap_err().kind(),
+            RegistryErrorKind::Storage,
+            "get must surface a failed retry instead of returning stale state"
+        );
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+
+        let record = get_at(&context, &job_id, None).unwrap().unwrap();
+        assert_eq!(record.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            record.outcome.unwrap().result,
+            completion.result,
+            "get must retry and return the retained completed result"
+        );
+        let published = context.published.lock().unwrap();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].name, "operations.job.finished");
     }
 }

@@ -295,6 +295,23 @@ impl JobRegistry {
         audience: Audience,
     ) -> Result<bool, RegistryError> {
         let _admission = self.lock_admission();
+        if let Some(pending) = self
+            .pending_outcomes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&finished.job_id)
+            .cloned()
+        {
+            if pending.finished != *finished {
+                return Err(RegistryError::invalid(format!(
+                    "Job {} already has a different pending terminal outcome.",
+                    finished.job_id
+                )));
+            }
+            return Err(RegistryError::storage(
+                "A completed job outcome is still pending persistence.",
+            ));
+        }
         match self.persist_finish(&finished.job_id, finished) {
             Ok(committed) => {
                 self.pending_outcomes
@@ -445,8 +462,8 @@ impl JobRegistry {
     }
 
     /// Reconciles a terminal result from an authoritative domain journal after restart.
-    /// A previously committed terminal result remains immutable; this only replaces the
-    /// generic interruption written for an unfinished job.
+    /// Only generic restart placeholders tagged during startup recovery are replaceable;
+    /// previously committed domain outcomes remain immutable.
     pub fn reconcile_interrupted(
         &self,
         job_id: &JobId,
@@ -602,6 +619,8 @@ impl JobRegistry {
     }
 
     pub fn acknowledge(&self, job_id: &JobId) -> Result<(), RegistryError> {
+        let _admission = self.lock_admission();
+        self.ensure_admission_open()?;
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let state: Option<String> = transaction
@@ -921,12 +940,7 @@ fn configure_database(connection: &Connection) -> Result<(), RegistryError> {
 }
 
 fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
-    let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 3 {
-        return Err(RegistryError::invalid(format!(
-            "Job registry schema {version} is newer than this engine supports."
-        )));
-    }
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 0 {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
@@ -956,38 +970,19 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), RegistryError> {
              PRAGMA user_version=3;",
         )?;
         transaction.commit()?;
-        version = 3;
+        return Ok(());
     }
-    if version == 1 {
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            "ALTER TABLE jobs ADD COLUMN discovery_bytes INTEGER NOT NULL DEFAULT 0;",
-        )?;
-        let job_ids = {
-            let mut statement = transaction.prepare("SELECT job_id FROM jobs")?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        for job_id in job_ids {
-            let discovery_bytes = job_id_json_bytes(&job_id)?;
-            transaction.execute(
-                "UPDATE jobs SET discovery_bytes = ?2 WHERE job_id = ?1",
-                params![job_id, discovery_bytes],
-            )?;
-        }
-        transaction.execute_batch("PRAGMA user_version=2;")?;
-        transaction.commit()?;
-        version = 2;
+    if version == 3 {
+        return Ok(());
     }
-    if version == 2 {
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
-            "ALTER TABLE jobs ADD COLUMN recovery_placeholder INTEGER NOT NULL DEFAULT 0 \
-             CHECK(recovery_placeholder IN (0,1)); PRAGMA user_version=3;",
-        )?;
-        transaction.commit()?;
+    if version > 3 {
+        return Err(RegistryError::invalid(format!(
+            "Job registry schema {version} is newer than this engine supports."
+        )));
     }
-    Ok(())
+    Err(RegistryError::invalid(format!(
+        "Job registry schema {version} is not supported."
+    )))
 }
 
 fn next_value(transaction: &rusqlite::Transaction<'_>, key: &str) -> Result<i64, RegistryError> {
@@ -1175,7 +1170,7 @@ mod tests {
     }
 
     #[test]
-    fn domain_journal_replaces_the_not_started_placeholder_for_a_waiting_push() {
+    fn startup_tags_and_reconciles_a_push_claimed_before_a_crash() {
         let temporary = tempfile::tempdir().unwrap();
         let job_id = JobId::new("push:operation-waiting").unwrap();
         {
@@ -1186,6 +1181,16 @@ mod tests {
         let restarted = JobRegistry::open(temporary.path()).unwrap();
         let placeholder = restarted.get(&job_id).unwrap().unwrap();
         assert_eq!(placeholder.state, JobState::Finished);
+        let is_reconcilable: bool = restarted
+            .lock_connection()
+            .unwrap()
+            .query_row(
+                "SELECT recovery_placeholder FROM jobs WHERE job_id = ?1",
+                [job_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(is_reconcilable);
         let error = placeholder.outcome.unwrap().error.unwrap();
         assert_eq!(error.code, ErrorCode::Cancelled);
         assert_eq!(error.message, NOT_STARTED_MESSAGE);
@@ -1207,6 +1212,110 @@ mod tests {
         assert!(!restarted
             .reconcile_interrupted(&job_id, &recovered)
             .unwrap());
+    }
+
+    #[test]
+    fn unsupported_registry_schema_is_rejected_without_migration() {
+        let temporary = tempfile::tempdir().unwrap();
+        let database_path = temporary.path().join("registry.sqlite3");
+        {
+            let connection = Connection::open(&database_path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE jobs (
+                         job_id TEXT PRIMARY KEY,
+                         method TEXT NOT NULL,
+                         state TEXT NOT NULL CHECK(state IN ('waiting','running','finished','acknowledged')),
+                         progress_json TEXT,
+                         outcome_json TEXT,
+                         discovery_bytes INTEGER NOT NULL,
+                         accepted_order INTEGER NOT NULL UNIQUE,
+                         accepted_at_ms INTEGER NOT NULL,
+                         started_at_ms INTEGER,
+                         finished_at_ms INTEGER,
+                         requester_client_id TEXT
+                     );
+                     CREATE TABLE notices (
+                         key TEXT PRIMARY KEY,
+                         computer_id TEXT,
+                         notice_json TEXT NOT NULL,
+                         updated_order INTEGER NOT NULL
+                     );
+                     CREATE TABLE registry_meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+                     INSERT INTO jobs(job_id, method, state, outcome_json, discovery_bytes, accepted_order, accepted_at_ms, finished_at_ms)
+                         VALUES ('push:legacy-row', 'push.start', 'finished', '{\"result\":{\"kept\":true}}', 18, 7, 101, 202);
+                     INSERT INTO notices(key, computer_id, notice_json, updated_order)
+                         VALUES ('notice:legacy', 'computer-1', '{\"key\":\"notice:legacy\"}', 9);
+                     INSERT INTO registry_meta(key, value) VALUES
+                         ('next_job_id', 42), ('accepted_order', 7), ('notice_order', 9);
+                     PRAGMA user_version=2;",
+                )
+                .unwrap();
+        }
+
+        let error = match JobRegistry::open(temporary.path()) {
+            Ok(_) => panic!("an unsupported registry schema must not be migrated"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("schema 2 is not supported"));
+
+        let connection = Connection::open(database_path).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+        let job: (String, String, String, Option<String>, i64, i64, i64, Option<i64>) = connection
+            .query_row(
+                "SELECT job_id, method, state, outcome_json, discovery_bytes, accepted_order, accepted_at_ms, finished_at_ms
+                 FROM jobs WHERE job_id = 'push:legacy-row'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            job,
+            (
+                "push:legacy-row".to_owned(),
+                "push.start".to_owned(),
+                "finished".to_owned(),
+                Some("{\"result\":{\"kept\":true}}".to_owned()),
+                18,
+                7,
+                101,
+                Some(202),
+            )
+        );
+        let notice: (String, String, String, i64) = connection
+            .query_row(
+                "SELECT key, computer_id, notice_json, updated_order FROM notices WHERE key = 'notice:legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            notice,
+            (
+                "notice:legacy".to_owned(),
+                "computer-1".to_owned(),
+                "{\"key\":\"notice:legacy\"}".to_owned(),
+                9,
+            )
+        );
+        let metadata: Vec<(String, i64)> = connection
+            .prepare("SELECT key, value FROM registry_meta ORDER BY key")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            metadata,
+            vec![
+                ("accepted_order".to_owned(), 7),
+                ("next_job_id".to_owned(), 42),
+                ("notice_order".to_owned(), 9),
+            ]
+        );
     }
 
     #[test]
@@ -1258,6 +1367,115 @@ mod tests {
         assert_eq!(retained.outcome.unwrap().result, completion.result);
         assert!(registry.retry_pending_outcome().unwrap().is_none());
         assert!(registry.allocate("computers.create").unwrap().created);
+    }
+
+    #[test]
+    fn acknowledgement_is_rejected_while_another_outcome_is_pending() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let pending_id = JobId::new("transfer:pending-outcome").unwrap();
+        let retained_id = JobId::new("transfer:retained-outcome").unwrap();
+        registry.accept(pending_id.clone(), "files.upload").unwrap();
+        registry
+            .accept(retained_id.clone(), "files.upload")
+            .unwrap();
+        let retained = finished(
+            retained_id.clone(),
+            serde_json::json!({"status":"already-saved"}),
+        );
+        assert!(registry.finish(&retained_id, &retained).unwrap());
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'transfer:pending-outcome' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+        let pending = finished(
+            pending_id.clone(),
+            serde_json::json!({"status":"pending-save"}),
+        );
+        assert_eq!(
+            registry.finish(&pending_id, &pending).unwrap_err().kind(),
+            RegistryErrorKind::Storage
+        );
+
+        assert_eq!(
+            registry.acknowledge(&retained_id).unwrap_err().kind(),
+            RegistryErrorKind::Storage
+        );
+        let preserved = registry.get(&retained_id).unwrap().unwrap();
+        assert_eq!(preserved.state, JobState::Finished);
+        assert_eq!(preserved.outcome.unwrap().result, retained.result);
+
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+        assert_eq!(
+            registry.retry_pending_outcome().unwrap().unwrap().finished,
+            pending
+        );
+        assert_eq!(
+            registry.get(&retained_id).unwrap().unwrap().state,
+            JobState::Finished
+        );
+    }
+
+    #[test]
+    fn a_later_conflicting_finish_cannot_replace_a_retained_completion() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = JobRegistry::open(temporary.path()).unwrap();
+        let job_id = JobId::new("transfer:first-pending-outcome").unwrap();
+        registry.accept(job_id.clone(), "files.upload").unwrap();
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'transfer:first-pending-outcome' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+
+        let first = finished(job_id.clone(), serde_json::json!({"status":"first"}));
+        assert_eq!(
+            registry
+                .finish_with_audience(&first, Audience::All)
+                .unwrap_err()
+                .kind(),
+            RegistryErrorKind::Storage
+        );
+        registry
+            .lock_connection()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+
+        let conflicting = finished(job_id.clone(), serde_json::json!({"status":"second"}));
+        let error = registry
+            .finish_with_audience(&conflicting, Audience::All)
+            .unwrap_err();
+        assert_eq!(error.kind(), RegistryErrorKind::Internal);
+        assert!(error
+            .message()
+            .contains("different pending terminal outcome"));
+
+        let retried = registry.retry_pending_outcome().unwrap().unwrap();
+        assert_eq!(retried.finished, first);
+        assert_eq!(
+            registry
+                .get(&job_id)
+                .unwrap()
+                .unwrap()
+                .outcome
+                .unwrap()
+                .result,
+            first.result
+        );
     }
 
     #[test]

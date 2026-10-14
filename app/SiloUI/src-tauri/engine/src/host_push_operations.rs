@@ -496,11 +496,51 @@ pub fn reconcile_jobs_before_serving(
     context: &dyn silo_engine::EngineContext,
     runtime_home: &Path,
 ) -> Result<(), String> {
-    let jobs = {
-        let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
-        read(&runtime_home.join("repository-push-operations.json"))?
+    let journal = runtime_home.join("repository-push-operations.json");
+    let journal_result = match LOCK.lock() {
+        Ok(_guard) => read(&journal),
+        Err(_) => Err("Push state unavailable.".to_owned()),
     };
     let registry = context.job_registry()?;
+    let jobs = match journal_result {
+        Ok(jobs) => jobs,
+        Err(error) => {
+            eprintln!(
+                "Push recovery journal could not be read; retained push outcomes will be marked unknown: {error}"
+            );
+            let retained = match registry.list_unacknowledged() {
+                Ok(jobs) => jobs,
+                Err(error) => {
+                    eprintln!("Could not enumerate retained push outcomes during startup recovery: {error}");
+                    return Ok(());
+                }
+            };
+            for job_id in retained {
+                if job_id.space() != silo_api::jobs::JobSpace::Push {
+                    continue;
+                }
+                let finished = silo_api::jobs::JobFinished {
+                    job_id: job_id.clone(),
+                    result: None,
+                    error: Some(silo_api::transport::ErrorObject {
+                        code: silo_api::jobs::ErrorCode::Internal,
+                        message: "The push outcome is unknown because the saved push journal could not be read."
+                            .to_owned(),
+                        diagnostics: None,
+                    }),
+                    outcome_chunked: false,
+                };
+                if let Err(error) = silo_engine::jobs::reconcile_finished(
+                    context,
+                    finished,
+                    silo_engine::context::Audience::All,
+                ) {
+                    eprintln!("Could not reconcile retained push job {job_id} during startup recovery: {error}");
+                }
+            }
+            return Ok(());
+        }
+    };
     for job in jobs.values() {
         let value = operation(job);
         let Some(operation_id) = value["operationId"].as_str() else {
@@ -872,6 +912,44 @@ mod tests {
         let outcome = retained.outcome.unwrap();
         assert_eq!(outcome.result.unwrap()["status"], "unknown");
         assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn an_unreadable_push_journal_records_uncertainty_without_blocking_startup() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let job_id = silo_api::jobs::JobId::new("push:corrupt-journal").unwrap();
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        fs::create_dir_all(&runtime_home).unwrap();
+        fs::write(
+            runtime_home.join("repository-push-operations.json"),
+            b"{not valid JSON",
+        )
+        .unwrap();
+
+        assert!(reconcile_jobs_before_serving(&context, &runtime_home).is_ok());
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        let error = retained.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
+        assert!(error.message.contains("unknown"));
+        assert!(error.message.contains("journal could not be read"));
     }
     #[test]
     fn lost_acknowledgement_and_concurrent_clicks_share_one_job() {
