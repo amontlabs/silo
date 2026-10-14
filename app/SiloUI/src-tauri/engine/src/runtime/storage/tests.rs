@@ -1115,7 +1115,7 @@ fn malformed_known_maintenance_fields_still_preserve_the_file() {
 }
 
 #[test]
-fn legacy_record_keeps_last_success_when_history_is_introduced() {
+fn a_record_without_history_is_read_as_it_is_and_not_converted_here() {
     let _test_state = crate::test_support::global_state();
     let (_dir, paths, configuration, _) = fixture();
     let path = record_path(&paths, configuration.id());
@@ -1125,13 +1125,12 @@ fn legacy_record_keeps_last_success_when_history_is_introduced() {
         r#"{"lastTrimAt":100,"lastAttemptAt":100,"lastReclaimedBytes":2048,"lastError":null}"#,
     )
     .unwrap();
+    // The launch conversion (`runtime_migration`) gives such a record its history entry;
+    // a read never rewrites or reinterprets what is saved.
     let record = load(&paths, configuration.id()).unwrap();
-    assert_eq!(record.history.len(), 1);
-    assert_eq!(record.history[0].at, 100);
-    assert_eq!(record.history[0].reclaimed_bytes, Some(2048));
-    assert_eq!(record.history[0].trigger, "legacy");
-    save(&paths, configuration.id(), &record).unwrap();
-    assert_eq!(load(&paths, configuration.id()).unwrap().history.len(), 1);
+    assert!(record.history.is_empty());
+    assert_eq!(record.last_trim_at, Some(100));
+    assert_eq!(record.last_reclaimed_bytes, Some(2048));
 }
 
 fn parsed(status: &str, instance: Option<Value>) -> InspectedSandbox {

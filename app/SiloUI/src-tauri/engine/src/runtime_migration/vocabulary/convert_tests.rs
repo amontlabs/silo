@@ -89,3 +89,34 @@ fn only_the_setup_steps_a_build_wrote_are_renamed() {
         ["computer-image-wait", "workspace-unknown", "image-ready"]
     );
 }
+
+#[test]
+fn legacy_reclaim_history_becomes_manual_and_converts_to_itself() {
+    let (value, changed) = converted(
+        storage_maintenance,
+        json!({"history": [{"at": 1, "trigger": "legacy", "reclaimedBytes": 2, "error": null}]}),
+    );
+    assert!(changed);
+    assert_eq!(value["history"][0]["trigger"], "manual");
+    assert_eq!(value["history"][0]["reclaimedBytes"], 2);
+    let (again, changed) = converted(storage_maintenance, value.clone());
+    assert!(!changed);
+    assert_eq!(again, value);
+
+    // A last trim without history is shown as one manual reclaim; no trim shows none.
+    let (value, _) = converted(
+        storage_maintenance,
+        json!({"lastTrimAt": 9, "lastReclaimedBytes": 4}),
+    );
+    assert_eq!(
+        value["history"],
+        json!([{"at": 9, "trigger": "manual", "reclaimedBytes": 4, "error": null}])
+    );
+    let (value, changed) = converted(storage_maintenance, json!({"lastTrimAt": null}));
+    assert!(!changed);
+    assert_eq!(value, json!({"lastTrimAt": null}));
+    assert_eq!(
+        storage_maintenance(&mut json!({"history": 3})),
+        Err(Unexpected)
+    );
+}

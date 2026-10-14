@@ -684,7 +684,10 @@ pub fn classify_refusal(message: &str) -> Option<Refusal> {
         || message.contains("Screen Sharing accepted TCP")
     {
         Some(Refusal::ScreenSharingUnavailable)
-    } else if message.contains("Setup has not finished") || message.contains("still being set up") {
+    } else if message.contains("Setup has not finished")
+        || message.contains("still being set up")
+        || message.contains(store::SETUP_UNFINISHED_FOR_RESOURCES)
+    {
         Some(Refusal::SetupIncomplete)
     } else if message.contains("isn't running") || message.contains("is not running") {
         Some(Refusal::NotRunning)
@@ -1872,14 +1875,35 @@ pub async fn create_macos_computer(
     blocking(move || create(&app, request)).await
 }
 
-/// Creates a macOS computer under a job id accepted by a canonical API caller.
-pub async fn create_macos_computer_with_job(
+/// Creates a macOS computer for a canonical API caller (`computers.create`). The request is
+/// validated and the preparing row is recorded before anything waits: a refusal is
+/// returned at once and leaves no job, and `allocate_job` runs only after validation
+/// passed. The work itself then queues for its device turn on its own thread, as
+/// "Creating <name>", and can be cancelled while it waits.
+pub async fn create_macos_computer_accepting(
     app: MacosContext,
     request: CreateRequest,
-    job_id: silo_api::jobs::JobId,
-) -> Result<MacosComputer, String> {
+    allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String> + Send + 'static,
+) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || create_with_job(&app, request, job_id)).await
+    blocking(move || {
+        create_accepting(
+            &app,
+            request,
+            require_supported,
+            allocate_job,
+            &runtime::OPERATIONS,
+            create_workflow,
+            |work| {
+                std::thread::Builder::new()
+                    .name("silo-macos-create".to_owned())
+                    .spawn(work)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            },
+        )
+    })
+    .await
 }
 
 pub async fn macos_computer_action(
@@ -3683,38 +3707,14 @@ fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, S
     create_with_support_check(app, request, require_supported)
 }
 
-fn create_with_job(
-    app: &MacosContext,
-    request: CreateRequest,
-    job_id: silo_api::jobs::JobId,
-) -> Result<MacosComputer, String> {
-    create_with_support_check_and_job(app, request, require_supported, Some(job_id))
-}
-
 fn create_with_support_check(
     app: &MacosContext,
     request: CreateRequest,
     support_check: impl FnOnce() -> Result<(), String>,
 ) -> Result<MacosComputer, String> {
-    create_with_support_check_and_job(app, request, support_check, None)
-}
-
-fn create_with_support_check_and_job(
-    app: &MacosContext,
-    request: CreateRequest,
-    support_check: impl FnOnce() -> Result<(), String>,
-    job_id: Option<silo_api::jobs::JobId>,
-) -> Result<MacosComputer, String> {
     support_check()?;
     let data = app_data(app)?;
-    create_after_acceptance_with_job(
-        app,
-        data,
-        request,
-        &runtime::OPERATIONS,
-        create_workflow,
-        job_id,
-    )
+    create_after_acceptance(app, data, request, &runtime::OPERATIONS, create_workflow)
 }
 
 fn create_after_acceptance(
@@ -3724,17 +3724,6 @@ fn create_after_acceptance(
     gate: &'static runtime::operation_gate::OperationGate,
     workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
 ) -> Result<MacosComputer, String> {
-    create_after_acceptance_with_job(app, data, request, gate, workflow, None)
-}
-
-fn create_after_acceptance_with_job(
-    app: &MacosContext,
-    data: PathBuf,
-    request: CreateRequest,
-    gate: &'static runtime::operation_gate::OperationGate,
-    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
-    requested_job_id: Option<silo_api::jobs::JobId>,
-) -> Result<MacosComputer, String> {
     let launch = move |job| {
         let (sender, receiver) = std::sync::mpsc::channel();
         let app = app.clone();
@@ -3743,14 +3732,121 @@ fn create_after_acceptance_with_job(
             .recv()
             .map_err(|_| "The macOS computer creation worker stopped unexpectedly.".to_owned())?
     };
-    match requested_job_id {
-        Some(job_id) => {
-            let registry = app.engine.job_registry()?;
-            let job = accept_macos_job_with_id(registry, job_id, gate)?;
-            launch(job)
-        }
-        None => launch_macos_job(app.engine.as_ref(), "computers.create", gate, launch),
+    launch_macos_job(app.engine.as_ref(), "computers.create", gate, launch)
+}
+
+/// Accepts a creation without waiting for its turn. Phase one runs on the caller's
+/// thread: the support check, the validation, the job (through `allocate_job`, after
+/// the last refusal) and the preparing row. Phase two, handed to `spawn`, waits for the
+/// device turn and then runs `workflow`.
+fn create_accepting(
+    app: &MacosContext,
+    request: CreateRequest,
+    support_check: impl FnOnce() -> Result<(), String>,
+    allocate_job: impl FnOnce() -> Result<silo_api::jobs::JobId, String>,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+) -> Result<(MacosComputer, silo_api::jobs::JobId), String> {
+    support_check()?;
+    let data = app_data(app)?;
+    let admitted = admission()?;
+    ensure_loaded(app)?;
+    let reservation =
+        crate::computer_names::reserve(&[request.name.clone()], &|| app.linux_computer_names())?;
+    let mut computers = registry();
+    let existing: Vec<Record> = computers
+        .entries
+        .iter()
+        .map(|entry| entry.record.clone())
+        .collect();
+    computers.refresh_template(&data);
+    let min_disk = computers.min_disk_gib;
+    store::validate_request(&request, engine::host_limits(), &existing, min_disk)?;
+
+    // Nothing can refuse the request synchronously any more: it becomes a job.
+    let job_id = allocate_job()?;
+    let registry_handle = app.engine.job_registry()?;
+    let job = accept_macos_job_with_id(registry_handle.clone(), job_id.clone(), gate)?;
+    let record = store::new_record(&request, engine::random_mac());
+    if let Err(message) = store::save(&Layout::new(&data, &record.id), &record) {
+        abandon_macos_job(app.engine.as_ref(), &job, &message);
+        return Err(message);
     }
+    let entry = Entry::new(record.clone(), State::Preparing, None);
+    let cancel = entry.cancel.clone();
+    let row = entry.row();
+    computers.entries.push(entry);
+    track_macos_job(&record.id, job_id.clone());
+    drop(computers);
+    drop(reservation);
+    drop(admitted);
+    emit(app);
+
+    let worker_app = app.clone();
+    let work: Box<dyn FnOnce() + Send> =
+        Box::new(move || create_admitted_work(&worker_app, data, record, job, cancel, workflow));
+    if let Err(message) = spawn(work) {
+        // No thread will wait for the turn: end the preparing computer and its job.
+        let message = format!("Could not start the computer creation: {message}");
+        let layout = Layout::new(&app_data(app)?, &row.id);
+        end_workflow(app, &row.id, &layout, Err(Stop::Failed(message)));
+    }
+    Ok((row, job_id))
+}
+
+/// Ends a job that was accepted but never got a computer: its outcome is the reason, and
+/// nobody is left holding an unacknowledged result for a request that was refused.
+fn abandon_macos_job(context: &dyn EngineContext, job: &AcceptedMacosJob, message: &str) {
+    fail_macos_job(context, job, message.to_owned());
+    let _ = job.registry.acknowledge(&job.job_id);
+}
+
+/// Phase two of an accepted creation: waits for the device turn, narrows it to the new
+/// computer and runs the provisioning. A cancellation while it waits ends the work before
+/// the installer starts and keeps the incomplete computer, like any cancelled creation.
+fn create_admitted_work(
+    app: &MacosContext,
+    data: PathBuf,
+    record: Record,
+    job: AcceptedMacosJob,
+    cancel: Arc<AtomicU8>,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8),
+) {
+    let layout = Layout::new(&data, &record.id);
+    let operation = match admit_macos_job_with_completion(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::ComputerConfiguration,
+        runtime::operation_gate::Scope::Device,
+        None,
+        &format!("Creating {}", record.name),
+        false,
+    ) {
+        Ok(operation) => operation,
+        Err(message) => {
+            let stop = if job.cancellation.load(Ordering::SeqCst) {
+                creation_queue_cancelled(&cancel);
+                Stop::Cancelled
+            } else {
+                Stop::Failed(message)
+            };
+            end_workflow(app, &record.id, &layout, Err(stop));
+            return;
+        }
+    };
+    if !operation.narrow_to_computer(&record.id, &record.name) {
+        end_workflow(
+            app,
+            &record.id,
+            &layout,
+            Err(Stop::Failed(
+                "Could not narrow the computer creation operation scope.".to_owned(),
+            )),
+        );
+        return;
+    }
+    workflow(app, &data, record, &cancel);
 }
 
 fn create_job_worker(
@@ -5295,20 +5391,28 @@ fn stop_with_job(
     Ok(())
 }
 
+/// Force stops a computer. It is a command (`computers.forceStop`): it takes its turn in
+/// the queue as "Force stopping Mac" but has no job, so nothing is left for a client to
+/// acknowledge, and the call returns once the stop was issued or refused.
 fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.forceStop")?;
-    let _operation = match admit_macos_job(
-        app.engine.as_ref(),
-        &job,
+    force_stop_with(app, id, || engine::force_stop(app, id))
+}
+
+fn force_stop_with(
+    app: &MacosContext,
+    id: &str,
+    issue: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    ensure_loaded(app)?;
+    let name = computer(id)?.0.name;
+    let _operation = acquire_computer_operation(
+        &runtime::OPERATIONS,
+        id,
+        &name,
         runtime::operation_gate::OperationKind::Lifecycle,
-        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
-        Some(name),
         "Force stopping Mac",
-    ) {
-        Ok(operation) => operation,
-        Err(message) => return Err(message),
-    };
-    let begin: Result<_, String> = (|| {
+    )?;
+    let before = {
         let mut computers = registry();
         let index = computers
             .entries
@@ -5332,34 +5436,14 @@ fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
             entry.since = Instant::now();
         }
         entry.detail = None;
-        track_macos_job(id, job.job_id.clone());
-        Ok(before)
-    })();
-    let before = match begin {
-        Ok(before) => before,
-        Err(message) => {
-            fail_macos_job(app.engine.as_ref(), &job, message.clone());
-            return Err(message);
-        }
+        before
     };
     emit(app);
-    if let Err(message) = engine::force_stop(app, id) {
+    if let Err(message) = issue() {
         registry().undo_force_stop(id, before);
         emit(app);
-        finish_macos_job(
-            app.engine.as_ref(),
-            Some(id),
-            job.job_id,
-            lifecycle_job_outcome(Err(message.clone())),
-        );
         return Err(message);
     }
-    finish_macos_job(
-        app.engine.as_ref(),
-        Some(id),
-        job.job_id,
-        lifecycle_job_outcome(Ok(())),
-    );
     Ok(())
 }
 
@@ -6607,6 +6691,38 @@ mod tests {
         for (message, refusal) in cases {
             assert_eq!(classify_refusal(message), Some(refusal), "{message}");
         }
+        // The resource edit's own refusal, as the store produces it.
+        let unfinished = store::change_resources(
+            &store::new_record(
+                &CreateRequest {
+                    name: "half-done".into(),
+                    cpus: 2,
+                    memory_gib: 4,
+                    disk_gib: 64,
+                },
+                engine::random_mac(),
+            ),
+            State::Stopped,
+            false,
+            2,
+            4,
+            ExpectedResources {
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            engine::host_limits(),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_refusal(&unfinished),
+            Some(Refusal::SetupIncomplete)
+        );
+        assert_eq!(
+            job_error_code(&unfinished),
+            silo_api::jobs::ErrorCode::SetupIncomplete
+        );
         assert_eq!(classify_refusal("Stop the computer first."), None);
         assert_eq!(
             job_error_code("This computer isn't running."),
@@ -7592,6 +7708,302 @@ mod tests {
         same_job.join().unwrap();
         unrelated_job.join().unwrap();
         assert!(gate.is_idle());
+    }
+
+    fn reset_macos_registry() {
+        let mut computers = registry();
+        computers.entries.clear();
+        computers.loaded = false;
+        computers.template = None;
+        computers.min_disk_gib = store::MIN_DISK_GIB;
+    }
+
+    type Work = Box<dyn FnOnce() + Send>;
+
+    /// Waits (by yielding, never sleeping) until `job_id` queues in `gate`.
+    fn wait_until_queued(
+        gate: &'static runtime::operation_gate::OperationGate,
+        job_id: &silo_api::jobs::JobId,
+    ) {
+        for _ in 0..5_000_000 {
+            if gate
+                .snapshot()
+                .waiting
+                .iter()
+                .any(|entry| entry.job_id.as_ref() == Some(job_id))
+            {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("the creation never queued for its turn");
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn accept_creation(
+        app: &MacosContext,
+        context: &Arc<JobTestContext>,
+        gate: &'static runtime::operation_gate::OperationGate,
+        name: &str,
+        workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+    ) -> Result<
+        (
+            MacosComputer,
+            silo_api::jobs::JobId,
+            std::sync::mpsc::Receiver<Work>,
+        ),
+        String,
+    > {
+        let (work_tx, work_rx) = std::sync::mpsc::channel::<Work>();
+        let registry = context.job_registry().unwrap();
+        let (row, job_id) = create_accepting(
+            app,
+            CreateRequest {
+                name: name.into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            || Ok(()),
+            move || {
+                registry
+                    .allocate("computers.create")
+                    .map(|accepted| accepted.job_id)
+                    .map_err(|error| error.to_string())
+            },
+            gate,
+            workflow,
+            // Phase two is handed to the test, which decides when its thread starts.
+            move |work| work_tx.send(work).map_err(|error| error.to_string()),
+        )?;
+        Ok((row, job_id, work_rx))
+    }
+
+    #[test]
+    fn an_accepted_creation_answers_before_its_turn_and_a_queued_cancel_stops_the_installer() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        // The device is busy with other work for the whole test.
+        let held = gate
+            .kind(runtime::operation_gate::OperationKind::ComputerConfiguration)
+            .acquire(
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Busy elsewhere",
+                None,
+            )
+            .unwrap();
+        let installer_started = Arc::new(AtomicBool::new(false));
+        let started = installer_started.clone();
+
+        // This returns while the device is held: the row and the job exist at once.
+        let (row, job_id, work) =
+            accept_creation(&app, &context, gate, "queued-mac", move |_, _, _, _| {
+                started.store(true, Ordering::SeqCst);
+            })
+            .unwrap();
+        let row = serde_json::to_value(&row).unwrap();
+        assert_eq!(row["state"], "preparing");
+        let registry = context.job_registry().unwrap();
+        let accepted = registry.get(&job_id).unwrap().unwrap();
+        assert_ne!(accepted.state, silo_api::jobs::JobState::Finished);
+        assert!(gate.snapshot().waiting.is_empty(), "nothing waits yet");
+
+        // The queued work waits as "Creating <name>"; cancelling it ends the job before
+        // the installer starts, and the incomplete computer is kept for a retry.
+        let worker = std::thread::spawn(work.recv().unwrap());
+        wait_until_queued(gate, &job_id);
+        assert!(gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Creating queued-mac"));
+        registry.cancel(&job_id).unwrap();
+        worker.join().unwrap();
+        assert!(!installer_started.load(Ordering::SeqCst));
+        let finished = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::Cancelled
+        );
+        let kept = registry_row(row["id"].as_str().unwrap());
+        assert_eq!(kept["state"], "failed");
+        drop(held);
+        reset_macos_registry();
+    }
+
+    fn registry_row(id: &str) -> serde_json::Value {
+        let computers = registry();
+        let entry = computers.entries.iter().find(|entry| entry.record.id == id);
+        serde_json::to_value(entry.expect("the computer is kept").row()).unwrap()
+    }
+
+    #[test]
+    fn an_accepted_creation_starts_its_installer_only_after_the_device_turn() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let held = gate
+            .kind(runtime::operation_gate::OperationKind::ComputerConfiguration)
+            .acquire(
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Busy elsewhere",
+                None,
+            )
+            .unwrap();
+        let (turn_tx, turn_rx) = std::sync::mpsc::channel();
+        let (row, job_id, work) = accept_creation(
+            &app,
+            &context,
+            gate,
+            "turn-mac",
+            move |app, data, record, _| {
+                turn_tx.send(record.id.clone()).unwrap();
+                end_workflow(
+                    app,
+                    &record.id,
+                    &Layout::new(data, &record.id),
+                    Err(Stop::Failed("test workflow stopped".into())),
+                );
+            },
+        )
+        .unwrap();
+        let worker = std::thread::spawn(work.recv().unwrap());
+        wait_until_queued(gate, &job_id);
+        assert!(turn_rx.try_recv().is_err(), "the installer must wait");
+        drop(held);
+        assert_eq!(turn_rx.recv().unwrap(), row.id);
+        worker.join().unwrap();
+        reset_macos_registry();
+    }
+
+    #[test]
+    fn a_refused_creation_request_leaves_no_job_and_no_computer() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let allocated = Arc::new(AtomicBool::new(false));
+        let flag = allocated.clone();
+        let refused = create_accepting(
+            &app,
+            CreateRequest {
+                name: "Not A Valid Name".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            || Ok(()),
+            move || {
+                flag.store(true, Ordering::SeqCst);
+                Err("a job must not be allocated".to_owned())
+            },
+            gate,
+            |_, _, _, _| panic!("a refused request provisions nothing"),
+            |_| panic!("a refused request starts no worker"),
+        );
+        assert!(refused.is_err());
+        assert!(!allocated.load(Ordering::SeqCst));
+        let registry = context.job_registry().unwrap();
+        assert!(registry.list_unacknowledged().unwrap().is_empty());
+        assert!(registry_entries_empty());
+        assert!(store::load_all(&app_data(&app).unwrap()).is_empty());
+
+        // The platform refusal comes first too.
+        let unsupported = create_accepting(
+            &app,
+            CreateRequest {
+                name: "fine-name".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            || Err("This Mac cannot run macOS computers.".to_owned()),
+            || panic!("no job for an unsupported host"),
+            gate,
+            |_, _, _, _| panic!("nothing runs"),
+            |_| panic!("no worker"),
+        );
+        assert_eq!(
+            unsupported.unwrap_err(),
+            "This Mac cannot run macOS computers."
+        );
+        reset_macos_registry();
+    }
+
+    fn registry_entries_empty() -> bool {
+        registry().entries.is_empty()
+    }
+
+    #[test]
+    fn force_stop_is_a_command_that_leaves_no_job_behind() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        reset_macos_registry();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let record = store::new_record(
+            &CreateRequest {
+                name: "stuck-mac".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            engine::random_mac(),
+        );
+        store::save(&Layout::new(&app_data(&app).unwrap(), &record.id), &record).unwrap();
+        ensure_loaded(&app).unwrap();
+        let jobs = context.job_registry().unwrap();
+
+        // A refused force stop: the computer is not running.
+        let refused = force_stop(&app, &record.id).unwrap_err();
+        assert_eq!(classify_refusal(&refused), Some(Refusal::NotRunning));
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+
+        // One the machine rejects: the state is restored and still no job exists.
+        registry().entry(&record.id).unwrap().state = State::Running;
+        let rejected = force_stop_with(&app, &record.id, || {
+            Err("The machine would not stop.".into())
+        })
+        .unwrap_err();
+        assert_eq!(rejected, "The machine would not stop.");
+        assert_eq!(registry().entry(&record.id).unwrap().state, State::Running);
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+
+        // An accepted one: the stop was issued, and the computer is on its way down.
+        force_stop_with(&app, &record.id, || Ok(())).unwrap();
+        assert_eq!(registry().entry(&record.id).unwrap().state, State::Stopping);
+        assert!(jobs.list_unacknowledged().unwrap().is_empty());
+        assert!(!MACOS_JOBS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap()
+            .contains_key(&record.id));
+        assert!(runtime::OPERATIONS
+            .snapshot()
+            .running
+            .iter()
+            .all(|entry| entry.label != "Force stopping Mac"));
+        reset_macos_registry();
     }
 
     #[test]

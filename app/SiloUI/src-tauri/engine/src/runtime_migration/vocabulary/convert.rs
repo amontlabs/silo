@@ -275,6 +275,46 @@ pub(super) fn checkpoint_record(value: &mut Value) -> Converted {
     Ok(changed)
 }
 
+/// `storage-maintenance/<id>.json`. History written before the trigger catalogue existed is
+/// tagged `legacy`, and a record with a last trim but no history shows it as one entry:
+/// both become manual reclaims that keep their amount and time (95 §3).
+pub(super) fn storage_maintenance(value: &mut Value) -> Converted {
+    let map = object(value)?;
+    let mut changed = false;
+    if let Some(history) = map.get_mut("history") {
+        changed |= entries(history, |entry| {
+            if entry.get("trigger") == Some(&Value::String("legacy".into())) {
+                entry.insert("trigger".into(), Value::String("manual".into()));
+                return Ok(true);
+            }
+            Ok(false)
+        })?;
+    }
+    let has_history = map
+        .get("history")
+        .and_then(Value::as_array)
+        .is_some_and(|history| !history.is_empty());
+    if !has_history {
+        if let Some(at) = map.get("lastTrimAt").and_then(Value::as_u64) {
+            let reclaimed = map
+                .get("lastReclaimedBytes")
+                .cloned()
+                .unwrap_or(Value::Null);
+            map.insert(
+                "history".into(),
+                serde_json::json!([{
+                    "at": at,
+                    "trigger": "manual",
+                    "reclaimedBytes": reclaimed,
+                    "error": null,
+                }]),
+            );
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 /// `update-resume.json`.
 pub(super) fn update_resume(value: &mut Value) -> Converted {
     Ok(rename(object(value)?, "machines", "computers"))
