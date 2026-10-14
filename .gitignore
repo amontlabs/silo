@@ -22,3 +22,6 @@ smithers.db-wal
 
 # Vite dependency caches
 .vite/
+
+# Job registry files that engine tests create under their working directory
+app/SiloUI/src-tauri/engine/engine/

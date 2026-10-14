@@ -139,7 +139,11 @@ impl Provision<'_> {
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
         let developer_tools_version = developer_tools::version();
         if record.setup.needs_personalizing {
-            self.personalize(record)?;
+            if record.imported {
+                self.personalize_import(record)?;
+            } else {
+                self.personalize(record)?;
+            }
         }
         // The account step leaves the language Recovery uses set.
         let mut language_ready = false;
@@ -172,6 +176,10 @@ impl Provision<'_> {
             self.check()?;
         }
         if setup_finished(record, &developer_tools_version) {
+            if record.imported {
+                record.imported = false;
+                self.mark(record, |_| {})?;
+            }
             return Ok(());
         }
         self.say("Starting macOS")?;
@@ -215,6 +223,24 @@ impl Provision<'_> {
             guest_clipboard::install(self.app, &self.id)?;
             self.mark(record, |setup| setup.clipboard = true)?;
         }
+        if !record.setup.roots {
+            self.say("Creating workspace folders")?;
+            let (layout, current) = layout_and_record(self.app, &self.id)?;
+            let output = guest_access::run(
+                &layout,
+                &current,
+                "mkdir -p /Users/silo/workspace /Users/silo/Downloads && test -d /Users/silo/workspace && test -d /Users/silo/Downloads",
+                None,
+                GUEST_COMMAND,
+            )?;
+            self.log_command("workspace folders", &output);
+            if output.status != 0 {
+                return Err(Stop::Failed(
+                    "Silo could not create the computer's workspace folders.".into(),
+                ));
+            }
+            self.mark(record, |setup| setup.roots = true)?;
+        }
         // A copy of a template made with another computer use brings it up to date here,
         // before the computer is handed over.
         if record.setup.computer_use && record.computer_use_stale() {
@@ -237,7 +263,12 @@ impl Provision<'_> {
             // retry runs this step again over the temporary NAT boot.
             self.mark(record, |setup| setup.proxy_bootstrap = true)?;
         }
-        self.shut_down()
+        self.shut_down()?;
+        if record.imported {
+            record.imported = false;
+            self.mark(record, |_| {})?;
+        }
+        Ok(())
     }
 
     /// The account, its automatic login and SSH: a first boot so macOS writes its
@@ -408,6 +439,35 @@ impl Provision<'_> {
         let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
         // The computer is usable and complete; the message stays as its failure detail.
         shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
+    }
+
+    /// An imported disk has already had its managed password hash changed offline.
+    /// Its first setup boot accepts that password, installs this computer's new
+    /// host key and authorization, then proves key login before any other setup runs.
+    fn personalize_import(&self, record: &mut Record) -> Result<(), Stop> {
+        let account = guest_access::account(self.layout)?;
+        if let Some(log) = &self.log {
+            log.hide(&account.password);
+        }
+        self.say("Personalizing the imported computer")?;
+        boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
+        finalize_import_guest(self.layout, record, &account, self.log.as_ref())
+            .map_err(Stop::Failed)?;
+        let output = guest_access::run(
+            self.layout,
+            record,
+            "/usr/bin/sudo -n true",
+            None,
+            GUEST_COMMAND,
+        )?;
+        self.log_command("imported key login with sudo -n", &output);
+        if output.status != 0 {
+            return Err(Stop::Failed(
+                "Silo could not log in to the imported computer with its new key.".into(),
+            ));
+        }
+        self.shut_down()?;
+        self.mark(record, |setup| setup.needs_personalizing = false)
     }
 
     /// Waits until the guest answers a login with the template's key or its own.
@@ -647,6 +707,7 @@ fn setup_summary(setup: &SetupProgress) -> String {
         (setup.developer_tools, "developer tools"),
         (setup.computer_use, "computer use"),
         (setup.clipboard, "clipboard"),
+        (setup.roots, "workspace folders"),
         (!setup.needs_personalizing, "personalized"),
     ]
     .into_iter()
@@ -676,6 +737,7 @@ fn setup_finished(record: &Record, developer_tools_version: &str) -> bool {
         && !developer_tools_outdated(record, developer_tools_version)
         && record.setup.computer_use
         && record.setup.clipboard
+        && record.setup.roots
         && !record.computer_use_stale()
         && record.setup.proxy_bootstrap
 }
@@ -765,6 +827,54 @@ fn finalize_guest(
     Ok(())
 }
 
+/// Imported finalization can rotate the guest's SSH host keys before its result
+/// reaches the owner. Clear any previous pin before each retry's password boot
+/// so `accept-new` can learn the key from the current disk state.
+fn boot_import_with_host_key_reset(
+    layout: &Layout,
+    boot: impl FnOnce() -> Result<(), Stop>,
+) -> Result<(), Stop> {
+    guest_access::reset_host_keys(layout)?;
+    boot()
+}
+
+/// Finish a rekeyed archive import using the new password once, then verify the
+/// newly installed device key. The source key is never read or used.
+fn finalize_import_guest(
+    layout: &Layout,
+    record: &Record,
+    account: &guest_access::GuestAccount,
+    log: Option<&SetupLog>,
+) -> Result<(), String> {
+    let public_key = guest_access::public_key(account)?;
+    let script = base64_encode(
+        offline_setup::import_finalization_script(&public_key, &record.name).as_bytes(),
+    );
+    let command =
+        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
+    let password = format!("{}\n", account.password);
+    let output = guest_access::run_with_password(
+        layout,
+        record,
+        &command,
+        Some(password.as_bytes()),
+        GUEST_COMMAND,
+    )?;
+    if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
+        if let Some(log) = log {
+            log.command(
+                "import account script",
+                output.status,
+                &output.stdout,
+                &output.stderr,
+            );
+        }
+        return Err(finalization_failure(output.status));
+    }
+    guest_access::reset_host_keys(layout)?;
+    Ok(())
+}
+
 /// A one-sentence reason for a failed account script; the details go to the log.
 fn finalization_failure(status: i32) -> String {
     if status == offline_setup::PREBOOT_FAILED {
@@ -822,6 +932,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
             proxy_bootstrap: false,
         };
@@ -840,12 +951,18 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: true,
             proxy_bootstrap: false,
         };
         assert!(complete.guest_steps_complete());
         assert!(!SetupProgress {
             developer_tools: false,
+            ..complete
+        }
+        .guest_steps_complete());
+        assert!(!SetupProgress {
+            roots: false,
             ..complete
         }
         .guest_steps_complete());
@@ -897,7 +1014,45 @@ mod tests {
         setup.account = true;
         setup.sip = true;
         setup.developer_tools = true;
-        assert_eq!(setup_summary(&setup), "account, sip, developer tools done");
+        setup.roots = true;
+        assert_eq!(
+            setup_summary(&setup),
+            "account, sip, developer tools, workspace folders done"
+        );
+    }
+
+    #[test]
+    fn imported_password_boot_forgets_the_previous_host_key_before_retrying() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = Layout {
+            dir: temp.path().to_path_buf(),
+            access: None,
+        };
+        let known_hosts = layout.dir.join("guest-access/known_hosts");
+        std::fs::create_dir_all(known_hosts.parent().unwrap()).unwrap();
+        std::fs::write(&known_hosts, b"inherited guest host key").unwrap();
+
+        let first_boot = boot_import_with_host_key_reset(&layout, || {
+            assert!(
+                !known_hosts.exists(),
+                "the inherited key must not pin this boot"
+            );
+            std::fs::write(&known_hosts, b"host key learned from the guest").unwrap();
+            Ok(())
+        });
+        assert!(first_boot.is_ok());
+        assert!(known_hosts.is_file());
+
+        let result = boot_import_with_host_key_reset(&layout, || {
+            assert!(
+                !known_hosts.exists(),
+                "a retry must discard a stale pin first"
+            );
+            Err(Stop::Failed("simulated interrupted finalization".into()))
+        });
+        assert!(
+            matches!(result, Err(Stop::Failed(message)) if message == "simulated interrupted finalization")
+        );
     }
 
     #[test]

@@ -94,7 +94,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     if (!result) { setReview(null); return }
     if (!result.valid) { setReview({ kind: "invalid", reason: result.reason ?? "This export file could not be validated." }); return }
     const base = result.archive.computers[0] || "computer"
-    setReview({ kind: "review", archive: result.archive, sourceName: base, newName: `${base}-imported` })
+    setReview({ kind: "review", archive: result.archive, sourceName: base, newName: `${base}-imported`, warnings: result.warnings })
   }
 
   // Reflect the authoritative operation as a single toast, keyed by a stable id.

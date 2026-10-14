@@ -615,6 +615,44 @@ fn read(path: &Path, what: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|error| store::io_error(&format!("read the {what}"), &error))
 }
 
+fn read_hardware_model(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)
+        .map_err(|error| store::io_error("read the hardware model", &error))?;
+    let mut bytes = Vec::new();
+    file.take(crate::backup::MAX_HARDWARE_MODEL_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| store::io_error("read the hardware model", &error))?;
+    if bytes.len() as u64 > crate::backup::MAX_HARDWARE_MODEL_BYTES {
+        return Err("The computer's hardware model exceeds the supported size limit.".into());
+    }
+    Ok(bytes)
+}
+
+/// Whether this Mac can run an archived computer's hardware model. Reads at most the allowed
+/// number of bytes; the file is a verified component of an archive.
+pub(super) fn validate_hardware_model_file(path: &Path) -> Result<(), String> {
+    let bytes = read_hardware_model(path)?;
+    validate_hardware_model(&bytes)
+}
+
+fn validate_hardware_model(bytes: &[u8]) -> Result<(), String> {
+    // SAFETY: Initializes a framework object from data; the object is not retained.
+    let model = unsafe {
+        VZMacHardwareModel::initWithDataRepresentation(
+            VZMacHardwareModel::alloc(),
+            &NSData::with_bytes(bytes),
+        )
+    }
+    .ok_or("The computer's hardware model is damaged.")?;
+    // SAFETY: A read-only query on a valid model.
+    if unsafe { !model.isSupported() } {
+        return Err("This Mac can no longer run this computer's macOS.".into());
+    }
+    Ok(())
+}
+
 fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifier>, String> {
     // SAFETY: Initializes a framework object from data.
     unsafe {
@@ -624,6 +662,31 @@ fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifi
         )
     }
     .ok_or_else(|| "The computer's identity is damaged. Delete it and create it again.".into())
+}
+
+/// Validate an imported VM's model, auxiliary storage, disk, identity, resources
+/// and Virtualization.framework configuration before the computer is published.
+pub(super) fn validate_archive_configuration(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<(), String> {
+    let model = read_hardware_model(&layout.hardware_model())?;
+    let identifier = read(&layout.machine_identifier(), "identity")?;
+    let (app, record, layout) = (app.clone(), record.clone(), layout.clone());
+    on_main(&app.clone(), move |_| {
+        let identifier = machine_identifier_from(&identifier)?;
+        // SAFETY: This runs on the main thread and the auxiliary storage is a
+        // staged regular file created by the archive import path.
+        let auxiliary = unsafe {
+            VZMacAuxiliaryStorage::initWithURL(
+                VZMacAuxiliaryStorage::alloc(),
+                &nsurl(&layout.auxiliary_storage()),
+            )
+        };
+        configuration(&record, &layout, &model, &auxiliary, &identifier, None)?;
+        Ok(())
+    })?
 }
 
 /// Creates the machine for `configuration` and keeps it in the main-thread slots.
@@ -1046,7 +1109,7 @@ fn start_machine_once(
     layout: &Layout,
     boot: &Boot,
 ) -> Result<u64, BootFailure> {
-    let model = read(&layout.hardware_model(), "hardware model").map_err(BootFailure::Setup)?;
+    let model = read_hardware_model(&layout.hardware_model()).map_err(BootFailure::Setup)?;
     let identifier = read(&layout.machine_identifier(), "identity").map_err(BootFailure::Setup)?;
     let gateway = match boot {
         Boot::Normal | Boot::State(_) => {
@@ -2198,6 +2261,41 @@ mod tests {
         let host = host_limits();
         assert!(host.cpus >= 1);
         assert!(host.memory_gib >= 4);
+    }
+
+    #[test]
+    fn archive_hardware_model_validation_is_bounded_and_rejects_unreadable_models() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hardware-model.bin");
+        std::fs::write(
+            &path,
+            vec![0_u8; crate::backup::MAX_HARDWARE_MODEL_BYTES as usize + 1],
+        )
+        .unwrap();
+        let error = validate_hardware_model_file(&path).unwrap_err();
+        assert!(
+            error.contains("exceeds the supported size limit"),
+            "{error}"
+        );
+
+        std::fs::write(&path, b"not a hardware model").unwrap();
+        let error = validate_hardware_model_file(&path).unwrap_err();
+        assert!(error.contains("hardware model is damaged"), "{error}");
+        assert!(validate_hardware_model_file(&temp.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn hardware_model_reader_rejects_data_above_its_allocation_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hardware-model.bin");
+        std::fs::write(
+            &path,
+            vec![0_u8; crate::backup::MAX_HARDWARE_MODEL_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let error = read_hardware_model(&path).unwrap_err();
+        assert!(error.contains("hardware model exceeds the supported size limit"));
     }
 
     #[test]

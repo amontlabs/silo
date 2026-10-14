@@ -77,6 +77,8 @@ pub(super) struct SetupProgress {
     pub developer_tools: bool,
     pub computer_use: bool,
     pub clipboard: bool,
+    /// `/Users/silo/workspace` and `/Users/silo/Downloads` were created for Files/SFTP.
+    pub roots: bool,
     /// A copy of a template still has the template's password, keys and identity.
     pub needs_personalizing: bool,
     /// The guest's network route, DNS and per-computer CA trust were staged and the
@@ -88,7 +90,12 @@ pub(super) struct SetupProgress {
 impl SetupProgress {
     /// Every guest step before the network bootstrap, which is staged last.
     pub(super) fn guest_steps_complete(self) -> bool {
-        self.account && self.sip && self.developer_tools && self.computer_use && self.clipboard
+        self.account
+            && self.sip
+            && self.developer_tools
+            && self.computer_use
+            && self.clipboard
+            && self.roots
     }
 
     pub(super) fn complete(self) -> bool {
@@ -146,6 +153,10 @@ pub(super) struct Record {
     /// are in `inherited-access/` until its personalization has replaced them.
     #[serde(default)]
     pub inherited_access: bool,
+    /// An archive import has rekeyed the account offline and still needs its
+    /// first password-authenticated personalization boot.
+    #[serde(default)]
+    pub imported: bool,
 }
 
 impl Record {
@@ -166,7 +177,7 @@ impl Record {
 
     /// Readiness shown to the user and used by operations that require a current setup.
     pub(super) fn setup_complete(&self) -> bool {
-        self.setup.complete() && !self.developer_tools_stale()
+        self.setup.complete() && !self.developer_tools_stale() && !self.imported
     }
 
     pub(super) fn os_version(&self) -> Option<String> {
@@ -306,6 +317,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         computer_use_desired_approval: None,
         pending_restore: None,
         inherited_access: false,
+        imported: false,
     }
 }
 
@@ -344,7 +356,7 @@ pub(super) fn start_allowed(state: State, record: &Record) -> Result<(), String>
         return Err(INTERRUPTED_INSTALL.into());
     }
     // Until then it still has its template's password and keys.
-    if record.setup.needs_personalizing {
+    if record.setup.needs_personalizing || record.imported {
         return Err(NEEDS_PERSONALIZING.into());
     }
     match state {
@@ -850,6 +862,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
             proxy_bootstrap: true,
         };
@@ -968,11 +981,17 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: false,
             needs_personalizing: true,
             proxy_bootstrap: false,
         };
         assert!(!setup.complete());
         setup.needs_personalizing = false;
+        assert!(
+            !setup.complete(),
+            "the guest steps and the bootstrap are missing"
+        );
+        setup.roots = true;
         assert!(
             !setup.complete(),
             "the network bootstrap is part of readiness"
@@ -993,6 +1012,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
             proxy_bootstrap: false,
         };
@@ -1068,6 +1088,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
             proxy_bootstrap: true,
         };
@@ -1181,6 +1202,24 @@ mod tests {
     }
 
     #[test]
+    fn an_archive_import_stays_unavailable_until_retry_setup_finishes() {
+        let mut imported = finished();
+        imported.imported = true;
+        assert!(!imported.setup_complete());
+        assert_eq!(
+            start_allowed(State::Stopped, &imported),
+            Err(NEEDS_PERSONALIZING.into())
+        );
+        assert_eq!(setup_allowed(State::Stopped, &imported), Ok(()));
+        imported.imported = false;
+        assert!(imported.setup_complete());
+        assert_eq!(
+            setup_allowed(State::Stopped, &imported),
+            Err("This computer is already set up.".into())
+        );
+    }
+
+    #[test]
     fn setup_runs_on_an_idle_installed_computer_with_steps_left() {
         let mut computer = record(&request());
         assert!(setup_allowed(State::Stopped, &computer).is_err());
@@ -1197,6 +1236,7 @@ mod tests {
         computer.setup.clipboard = true;
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.developer_tools = true;
+        computer.setup.roots = true;
         computer.developer_tools_version = Some(super::super::developer_tools::version());
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.proxy_bootstrap = true;
@@ -1219,7 +1259,7 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "needsPersonalizing": false, "proxyBootstrap": false})
+            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "roots": false, "needsPersonalizing": false, "proxyBootstrap": false})
         );
 
         let mut old_setup = json.clone();
@@ -1227,10 +1267,12 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("developerTools");
+        old_setup["setup"].as_object_mut().unwrap().remove("roots");
         fs::write(layout.record(), serde_json::to_vec(&old_setup).unwrap()).unwrap();
         let old_with_setup: Record =
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert!(!old_with_setup.setup.developer_tools);
+        assert!(!old_with_setup.setup.roots);
 
         let mut old = json;
         old.as_object_mut().unwrap().remove("setup");
