@@ -1,45 +1,57 @@
-use tauri::Manager;
+//! The dependency report is the engine's: it probes the host `silod` runs on.
+use crate::engine_client::{Engine, EngineClient, EngineError};
+use serde_json::{json, Value};
 
-use crate::dependencies::{self, DependencyReport, ProbePaths};
+pub(crate) async fn report(
+    engine: &EngineClient,
+    request_id: String,
+) -> Result<Value, EngineError> {
+    engine
+        .call("device.dependencies", json!({"requestId": request_id}))
+        .await
+}
 
 #[tauri::command]
 pub(crate) async fn read_dependencies(
-    app: tauri::AppHandle,
+    engine: Engine<'_>,
     request_id: String,
-) -> Result<DependencyReport, String> {
-    eprintln!("dependency check request: {request_id}");
-    dependencies::validate_request_id(&request_id)?;
+) -> Result<Value, String> {
+    report(&engine, request_id).await.map_err(String::from)
+}
 
-    let executable_dir = crate::commands::bundled_tools::directory(&app)?;
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("Silo resource directory is unavailable: {error}"))?;
-    #[cfg(target_os = "macos")]
-    let frameworks_dir = executable_dir
-        .parent()
-        .map(|contents| contents.join("Frameworks"));
-    #[cfg(not(target_os = "macos"))]
-    let frameworks_dir = None;
-    #[cfg(target_os = "linux")]
-    let runtime_library = Some(crate::runtime::bundled_runtime_library(
-        &executable_dir.join("msb"),
-        &resource_dir,
-        tauri::utils::platform::bundle_type(),
-    ));
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
 
-    tokio::task::spawn_blocking(move || {
-        dependencies::read_report(
-            request_id,
-            ProbePaths {
-                executable_dir,
-                resource_dir,
-                frameworks_dir,
-                #[cfg(target_os = "linux")]
-                runtime_library,
-            },
-        )
-    })
-    .await
-    .map_err(|error| format!("Dependency checks could not run: {error}"))
+    #[tokio::test]
+    async fn the_report_is_requested_by_id() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "device.dependencies" => Ok(json!({"requestId": "r1", "checks": []})),
+            _ => Ok(Value::Null),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(
+            report(&engine, "r1".into()).await.unwrap()["requestId"],
+            "r1"
+        );
+        assert_eq!(
+            fake.calls("device.dependencies"),
+            vec![json!({"requestId": "r1"})]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_request_id_is_the_engines_error() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "device.dependencies" => Err(("internal", "Invalid request ID.".into())),
+            _ => Ok(json!({"subscription": "sub"})),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        assert_eq!(
+            report(&engine, "".into()).await.unwrap_err().message,
+            "Invalid request ID."
+        );
+    }
 }

@@ -13,6 +13,8 @@ serde_json = "1"
 
 [dependencies]
 silo-api = { path = "../api" }
+silo-client = { path = "../client" }
+semver = "1"
 silo-engine = { path = "engine" }
 tauri = { version = "2.11.3", features = ["macos-private-api", "image-png", "unstable"] }
 serde = { version = "1", features = ["derive"] }
@@ -25,26 +27,8 @@ tauri-plugin-dialog = "2.7"
 tauri-plugin-single-instance = "~2.4.5"
 tauri-plugin-opener = "~2.5.5"
 tauri-plugin-updater = "=2.11.0"
-tokio = { version = "1", features = ["sync", "time", "macros", "signal"] }
-base64 = "0.22"
-libc = "0.2"
-microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-image" }
-microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-utils" }
+tokio = { version = "1", features = ["sync", "time", "macros", "signal", "net", "rt"] }
 sha2 = "0.10"
-# PBKDF2-HMAC-SHA512 for the macOS guest account (the RustCrypto pbkdf2 crate is not in the lock file; both are already locked through other dependencies).
-hmac = "0.12"
-# Reads and writes the guest's property lists. Already locked through Tauri.
-plist = "1"
-flate2 = "1"
-tar = "0.4"
-# Already locked through microsandbox-image; used to pre-scan imported snapshot archives.
-zstd = { version = "0.14", default-features = false }
-time = { version = "0.3", features = ["parsing", "formatting"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
-keyring = { version = "3.6", features = ["apple-native", "sync-secret-service", "crypto-rust"] }
-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2.11.3", features = ["tray-icon"] }
@@ -55,17 +39,18 @@ objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSettings", "UNUserNotificationCenter", "block2"] }
 block2 = "0.6"
 
-# Apple Virtualization.framework bindings for macOS computers (Zlib OR Apache-2.0 OR MIT).
-[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
-objc2-virtualization = "0.3.2"
-
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3.6"
 # logind delay inhibitor for graceful shutdown (F-20). Already in the graph through ksni.
 zbus = "5"
-gio = "0.18"
 gtk = "0.18"
 
+# The two engine probes under examples/ (desktop-viewer-probe, recovery-probe) compile engine
+# modules in place; the app itself does not use these.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dev-dependencies]
+objc2-virtualization = "0.3.2"
+
 [dev-dependencies]
-silo-engine = { path = "engine", features = ["test-support"] }
+base64 = "0.22"
+libc = "0.2"
 tauri = { version = "2.11.3", features = ["test"] }

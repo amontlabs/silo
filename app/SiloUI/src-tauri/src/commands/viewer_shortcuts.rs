@@ -1,5 +1,6 @@
 //! Native window hooks for desktop viewer Paste and Copy shortcuts.
-use crate::{viewer_clipboard::Action, viewer_shortcuts::*};
+use crate::viewer_shortcuts::*;
+use silo_api::methods::clipboard::ClipboardAction as Action;
 use tauri::AppHandle;
 
 /// Starts a shortcut's transfer for one viewer on a worker thread; the bridge waits for the
@@ -20,7 +21,7 @@ pub(crate) fn run_focused(app: &AppHandle, shortcut: Shortcut) {
         .webview_windows()
         .into_iter()
         .find(|(label, window)| {
-            crate::desktop_viewer::is_viewer_label(label) && window.is_focused().unwrap_or(false)
+            crate::commands::desktop_viewer::is_shell(label) && window.is_focused().unwrap_or(false)
         })
         .map(|(label, _)| label);
     if let Some(label) = focused {

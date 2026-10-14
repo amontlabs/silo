@@ -59,11 +59,7 @@ pub(crate) fn exit(app: &AppHandle) {
     if macos::reply(app, true) {
         return;
     }
-    if let Some(context) = silo_engine::context::current() {
-        context.process().exit(0);
-    } else {
-        app.exit(0);
-    }
+    app.exit(0);
 }
 
 /// The user cancelled Quit or it failed: tell AppKit Silo keeps running.

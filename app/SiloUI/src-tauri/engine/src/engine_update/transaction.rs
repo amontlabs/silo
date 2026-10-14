@@ -7,7 +7,10 @@
 use std::{cell::Cell, cell::RefCell, path::Path};
 
 use super::{
-    adapter::{Reconciled, ResumeHeldError, RunningComputer, SaveAdapter, SaveContext},
+    adapter::{
+        OriginalState, Reconciled, RestoreError, ResumeHeldError, RunningComputer, SaveAdapter,
+        SaveContext,
+    },
     journal::{
         CaptureRef, ComputerKind, ComputerPhase, Journal, SavedComputer, Store, TransactionPhase,
     },
@@ -141,19 +144,32 @@ impl Coordinator<'_> {
                     )
                 })?;
         }
+        // Which run each computer is, so every later resume or probe requires exactly it.
+        let mut originals = Vec::with_capacity(plan.len());
+        for computer in &plan {
+            originals.push(self.adapter(computer.kind)?.identity(computer).map_err(|why| {
+                format!(
+                    "{} can't be saved for the update ({why}). Nothing was paused and no computer stopped.",
+                    computer.name
+                )
+            })?);
+        }
         let journal = Journal::new(
             request.transaction_id.clone(),
             request.prepare_job_id,
             request.source_engine_version,
             request.host_build,
             plan.iter()
-                .map(|computer| SavedComputer {
+                .zip(originals)
+                .map(|(computer, original)| SavedComputer {
                     id: computer.id.clone(),
                     name: computer.name.clone(),
                     kind: computer.kind,
                     phase: ComputerPhase::Planned,
+                    original,
                     capture: None,
                     restore_attempt_id: None,
+                    active_restore: None,
                     retryable: true,
                     last_error: None,
                 })
@@ -206,15 +222,17 @@ impl Coordinator<'_> {
             let entry = session.entry(index);
             let outcome = match entry.phase {
                 ComputerPhase::Planned => Ok(()),
-                ComputerPhase::Capturing | ComputerPhase::Saved => {
-                    self.adapter(entry.kind).and_then(|adapter| {
-                        adapter
-                            .resume_held(&running_computer(&entry), entry.capture.as_ref())
-                            .map_err(|error| match error {
-                                ResumeHeldError::Gone(why) | ResumeHeldError::Failed(why) => why,
-                            })
+                ComputerPhase::Capturing
+                | ComputerPhase::Saved
+                | ComputerPhase::ResumingOriginal => self
+                    .adapter(entry.kind)
+                    .map_err(ResumeHeldError::Failed)
+                    .and_then(|adapter| {
+                        self.resume_original(session, index, adapter, &running_computer(&entry))
                     })
-                }
+                    .map_err(|error| match error {
+                        ResumeHeldError::Gone(why) | ResumeHeldError::Failed(why) => why,
+                    }),
                 _ => continue,
             };
             match outcome {
@@ -223,10 +241,9 @@ impl Coordinator<'_> {
                 }
                 Err(why) => {
                     failures.push(entry.name.clone());
-                    let _ = session.update(index, |entry| {
-                        entry.phase = ComputerPhase::Failed;
-                        entry.last_error = Some(why);
-                    });
+                    // The entry stays `ResumingOriginal` when the resume was armed: it may have
+                    // executed, so it is probed and never restored from its capture.
+                    let _ = session.update(index, |entry| entry.last_error = Some(why));
                 }
             }
         }
@@ -240,6 +257,28 @@ impl Coordinator<'_> {
                 failures.join(", ")
             )
         }
+    }
+
+    /// Resumes the original held generation. The armed transition is durable before the guest
+    /// can execute again, including for a resume of the original generation: a crash after it
+    /// is probed, never replayed from the capture over the disk the guest advanced.
+    fn resume_original(
+        &self,
+        session: &Session<'_>,
+        index: usize,
+        adapter: &dyn SaveAdapter,
+        computer: &RunningComputer,
+    ) -> Result<(), ResumeHeldError> {
+        let original = session.entry(index).original;
+        session
+            .update(index, |entry| entry.phase = ComputerPhase::ResumingOriginal)
+            .map_err(|why| {
+                ResumeHeldError::Failed(format!(
+                    "{} was not resumed because the update journal failed: {why}",
+                    computer.name
+                ))
+            })?;
+        adapter.resume_held(computer, &original)
     }
 
     /// Removes the artifacts of settled captures and clears the journal.
@@ -282,6 +321,15 @@ impl Coordinator<'_> {
         let Some(journal) = self.store.load()? else {
             return Err(NOT_PREPARED.into());
         };
+        if journal.phase == TransactionPhase::Released
+            && journal
+                .computers
+                .iter()
+                .all(|entry| entry.phase == ComputerPhase::Released)
+        {
+            // Already released by an earlier call: the installer may repeat the request.
+            return Ok(());
+        }
         let releasing = matches!(
             journal.phase,
             TransactionPhase::Prepared | TransactionPhase::Releasing
@@ -302,7 +350,7 @@ impl Coordinator<'_> {
             }
             let capture = entry.capture.clone().expect("checked above");
             self.adapter(entry.kind)?
-                .release(&running_computer(&entry), &capture)
+                .release(&running_computer(&entry), &capture, &entry.original)
                 .map_err(|why| format!("{} could not be released: {why}", entry.name))?;
             session.update(index, |entry| entry.phase = ComputerPhase::Released)?;
         }
@@ -333,6 +381,9 @@ impl Coordinator<'_> {
                 Action::AlreadyLost => Settled::Lost(entry.last_error.clone().unwrap_or_default()),
                 Action::Reconcile => self.reconcile(session, index, adapter, &computer),
                 Action::Probe => self.probe(session, index, adapter, &computer, &entry),
+                Action::ProbeOriginal => {
+                    self.settle_original(session, index, adapter, &computer, &entry)
+                }
                 Action::ResumeHeld => self.abort_held(session, index, adapter, &computer, &entry),
                 Action::Restore => self.restore(session, index, adapter, &computer, &entry),
             };
@@ -350,8 +401,9 @@ impl Coordinator<'_> {
         Ok(recovery)
     }
 
-    /// Abort in the process that still holds the original generation: resume it, falling
-    /// back to the capture when the runtime is already gone.
+    /// Abort: resume the original generation wherever it still exists (this process holds it,
+    /// or a detached runtime survived), falling back to the capture only when that run is
+    /// gone. A run that is already executing is left alone.
     fn abort_held(
         &self,
         session: &Session<'_>,
@@ -360,29 +412,86 @@ impl Coordinator<'_> {
         computer: &RunningComputer,
         entry: &SavedComputer,
     ) -> Settled {
-        match adapter.resume_held(computer, entry.capture.as_ref()) {
+        match adapter.probe_original(computer, &entry.original) {
+            Err(why) => Settled::Failed(why),
+            Ok(OriginalState::Running) => {
+                let _ = session.update(index, |entry| entry.phase = ComputerPhase::Resumed);
+                Settled::Resumed
+            }
+            Ok(OriginalState::Held) => {
+                self.resume_original_entry(session, index, adapter, computer)
+            }
+            // Nothing of the original remains and (before an armed resume) it never advanced
+            // the disk, so the capture is the way back.
+            Ok(OriginalState::Gone)
+                if entry.capture.is_some() && entry.phase != ComputerPhase::ResumingOriginal =>
+            {
+                self.restore(session, index, adapter, computer, entry)
+            }
+            Ok(OriginalState::Gone) => self.original_gone(session, index, computer),
+        }
+    }
+
+    /// After a crash with an original resume armed (or a failed resume that may have run).
+    fn settle_original(
+        &self,
+        session: &Session<'_>,
+        index: usize,
+        adapter: &dyn SaveAdapter,
+        computer: &RunningComputer,
+        entry: &SavedComputer,
+    ) -> Settled {
+        match adapter.probe_original(computer, &entry.original) {
+            Err(why) => Settled::Failed(why),
+            Ok(OriginalState::Running) => {
+                let _ = session.update(index, |entry| entry.phase = ComputerPhase::Resumed);
+                Settled::Resumed
+            }
+            Ok(OriginalState::Held) => {
+                self.resume_original_entry(session, index, adapter, computer)
+            }
+            Ok(OriginalState::Gone) => self.original_gone(session, index, computer),
+        }
+    }
+
+    fn resume_original_entry(
+        &self,
+        session: &Session<'_>,
+        index: usize,
+        adapter: &dyn SaveAdapter,
+        computer: &RunningComputer,
+    ) -> Settled {
+        match self.resume_original(session, index, adapter, computer) {
             Ok(()) => {
                 let _ = session.update(index, |entry| entry.phase = ComputerPhase::Resumed);
                 Settled::Resumed
             }
-            Err(ResumeHeldError::Gone(_)) if entry.capture.is_some() => {
-                self.restore(session, index, adapter, computer, entry)
-            }
-            Err(ResumeHeldError::Gone(why)) => {
-                let _ = session.update(index, |entry| {
-                    entry.phase = ComputerPhase::Lost;
-                    entry.last_error = Some(why.clone());
-                });
-                Settled::Lost(why)
-            }
+            Err(ResumeHeldError::Gone(_)) => self.original_gone(session, index, computer),
             Err(ResumeHeldError::Failed(why)) => {
-                let _ = session.update(index, |entry| {
-                    entry.phase = ComputerPhase::Failed;
-                    entry.last_error = Some(why.clone());
-                });
+                // Armed: the guest may have executed. It is probed again, never restored.
+                let _ = session.update(index, |entry| entry.last_error = Some(why.clone()));
                 Settled::Failed(why)
             }
         }
+    }
+
+    fn original_gone(
+        &self,
+        session: &Session<'_>,
+        index: usize,
+        computer: &RunningComputer,
+    ) -> Settled {
+        // The guest may have run before the run ended. Replaying the capture over the disk it
+        // advanced would corrupt it, so the computer is reported instead.
+        let why = format!(
+            "{} was resuming when Silo stopped and its saved state can no longer be used safely. Its disk was kept; start it again.",
+            computer.name
+        );
+        let _ = session.update(index, |entry| {
+            entry.phase = ComputerPhase::Lost;
+            entry.last_error = Some(why.clone());
+        });
+        Settled::Lost(why)
     }
 
     fn reconcile(
@@ -392,7 +501,7 @@ impl Coordinator<'_> {
         adapter: &dyn SaveAdapter,
         computer: &RunningComputer,
     ) -> Settled {
-        match adapter.reconcile_unsaved(computer) {
+        match adapter.reconcile_unsaved(computer, &session.entry(index).original) {
             Ok(Reconciled::Running) => {
                 let _ = session.update(index, |entry| entry.phase = ComputerPhase::Resumed);
                 Settled::Resumed
@@ -424,7 +533,13 @@ impl Coordinator<'_> {
             });
             return Settled::Lost(why.into());
         };
-        match adapter.probe_armed(computer, capture, attempt) {
+        match adapter.probe_armed(
+            computer,
+            capture,
+            &entry.original,
+            attempt,
+            entry.active_restore.as_ref(),
+        ) {
             Ok(true) => {
                 let _ = session.update(index, |entry| entry.phase = ComputerPhase::Resumed);
                 Settled::Resumed
@@ -462,17 +577,27 @@ impl Coordinator<'_> {
         if let Err(why) = session.update(index, |entry| {
             entry.phase = ComputerPhase::Restoring;
             entry.restore_attempt_id = Some(attempt.clone());
+            entry.active_restore = None;
             entry.retryable = true;
             entry.last_error = None;
         }) {
             return Settled::Failed(why);
         }
         let armed = Cell::new(false);
-        let result = adapter.restore(computer, &capture, &attempt, &mut || {
-            session.update(index, |entry| entry.phase = ComputerPhase::ResumeArmed)?;
-            armed.set(true);
-            Ok(())
-        });
+        let result = adapter.restore(
+            computer,
+            &capture,
+            &entry.original,
+            &attempt,
+            &mut |identity| {
+                session.update(index, |entry| {
+                    entry.phase = ComputerPhase::ResumeArmed;
+                    entry.active_restore = identity.cloned();
+                })?;
+                armed.set(true);
+                Ok(())
+            },
+        );
         match result {
             Ok(()) => {
                 if let Err(why) =
@@ -486,14 +611,23 @@ impl Coordinator<'_> {
                 }
                 Settled::Resumed
             }
-            Err(why) if !armed.get() => {
+            Err(RestoreError::Superseded(why)) => {
+                // A run the update did not start owns the computer: its disk is its own and
+                // the capture is neither replayed nor settled on its behalf.
+                let _ = session.update(index, |entry| {
+                    entry.phase = ComputerPhase::Lost;
+                    entry.last_error = Some(why.clone());
+                });
+                Settled::Lost(why)
+            }
+            Err(RestoreError::Failed(why)) if !armed.get() => {
                 let _ = session.update(index, |entry| {
                     entry.phase = ComputerPhase::Failed;
                     entry.last_error = Some(why.clone());
                 });
                 Settled::Failed(why)
             }
-            Err(why) => {
+            Err(RestoreError::Failed(why)) => {
                 let why =
                     format!("{why} The restored computer may be running; its state is uncertain.");
                 let _ = session.update(index, |entry| {
@@ -526,6 +660,8 @@ enum Action {
     Reconcile,
     /// A restore was armed or its outcome is unknown: find out whether the guest runs.
     Probe,
+    /// An original resume was armed: find out whether that exact run executes.
+    ProbeOriginal,
     /// The same process still owns the held generation: resume it.
     ResumeHeld,
     /// Bring the computer back from its capture.
@@ -538,8 +674,11 @@ fn action(entry: &SavedComputer, mode: Mode) -> Action {
         (P::Resumed, _) => Action::AlreadyResumed,
         (P::Lost, _) => Action::AlreadyLost,
         (P::ResumeArmed, _) => Action::Probe,
+        (P::ResumingOriginal, _) => Action::ProbeOriginal,
         (P::Failed, _) if !entry.retryable => Action::Probe,
-        (P::Planned | P::Capturing | P::Saved, Mode::Abort) => Action::ResumeHeld,
+        // An abort resumes the original wherever it still lives; a release that already
+        // happened does not make the machine this process still owns any less resumable.
+        (P::Planned | P::Capturing | P::Saved | P::Released, Mode::Abort) => Action::ResumeHeld,
         (P::Failed, Mode::Abort) if entry.restore_attempt_id.is_none() => Action::ResumeHeld,
         (P::Planned | P::Capturing, Mode::Recover) => Action::Reconcile,
         (P::Failed, Mode::Recover) if entry.capture.is_none() => Action::Reconcile,

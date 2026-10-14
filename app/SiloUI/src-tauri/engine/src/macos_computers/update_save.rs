@@ -15,8 +15,8 @@
 //!   `arm` before the resume. It never boots from the disk: a refused memory is an error.
 use super::*;
 use crate::engine_update::{
-    adapter::{Reconciled, ResumeHeldError, SaveAdapter, SaveContext},
-    journal::{CaptureRef, ComputerKind, MacCapture},
+    adapter::{OriginalState, Reconciled, RestoreError, ResumeHeldError, SaveAdapter, SaveContext},
+    journal::{boot_id, CaptureRef, ComputerKind, MacCapture, RuntimeIdentity},
     RunningComputer,
 };
 use std::{
@@ -56,7 +56,7 @@ impl MacosUpdateAdapter {
         let record = begin_hold(&self.app, &computer.id)?;
         let directory = layout.dir.join(SAVES).join(context.transaction_id);
         let result = (|| {
-            private_directory(&directory)?;
+            private_directory(&layout.dir, &directory)?;
             engine::memory_support(&self.app, &computer.id)?;
             // Memory is written in full; the disk clones share blocks until either side changes.
             let _space = templates::reserve_space(&data, record.memory_gib * GIB)?;
@@ -111,13 +111,23 @@ impl SaveAdapter for MacosUpdateAdapter {
         self.capture(computer, context).map(CaptureRef::Macos)
     }
 
+    fn identity(&self, computer: &RunningComputer) -> Result<RuntimeIdentity, String> {
+        engine::machine_samples(&self.app)?
+            .iter()
+            .find(|sample| sample.id == computer.id)
+            .map(|sample| machine_identity(sample.generation))
+            .ok_or_else(|| format!("{} is not running.", computer.name))
+    }
+
     fn resume_held(
         &self,
         computer: &RunningComputer,
-        _capture: Option<&CaptureRef>,
+        original: &RuntimeIdentity,
     ) -> Result<(), ResumeHeldError> {
         let samples = engine::machine_samples(&self.app).map_err(ResumeHeldError::Failed)?;
-        let Some(sample) = samples.iter().find(|sample| sample.id == computer.id) else {
+        let Some(sample) = samples.iter().find(|sample| {
+            sample.id == computer.id && original.matches(&machine_identity(sample.generation))
+        }) else {
             return Err(ResumeHeldError::Gone(format!(
                 "{} is no longer held by Silo.",
                 computer.name
@@ -139,7 +149,21 @@ impl SaveAdapter for MacosUpdateAdapter {
         Ok(())
     }
 
-    fn release(&self, computer: &RunningComputer, capture: &CaptureRef) -> Result<(), String> {
+    fn probe_original(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<OriginalState, String> {
+        let samples = engine::machine_samples(&self.app)?;
+        Ok(classify_original(&samples, &computer.id, original))
+    }
+
+    fn release(
+        &self,
+        computer: &RunningComputer,
+        capture: &CaptureRef,
+        original: &RuntimeIdentity,
+    ) -> Result<(), String> {
         let CaptureRef::Macos(capture) = capture else {
             return Err("The capture does not belong to a macOS computer.".into());
         };
@@ -149,6 +173,7 @@ impl SaveAdapter for MacosUpdateAdapter {
             sample.id == computer.id
                 && sample.state == engine::MachineState::Paused
                 && sample.generation == capture.source_generation
+                && original.matches(&machine_identity(sample.generation))
         });
         if !held {
             return Err(format!(
@@ -162,9 +187,17 @@ impl SaveAdapter for MacosUpdateAdapter {
         Ok(())
     }
 
-    fn reconcile_unsaved(&self, computer: &RunningComputer) -> Result<Reconciled, String> {
+    fn reconcile_unsaved(
+        &self,
+        computer: &RunningComputer,
+        original: &RuntimeIdentity,
+    ) -> Result<Reconciled, String> {
         let samples = engine::machine_samples(&self.app)?;
-        match samples.iter().find(|sample| sample.id == computer.id) {
+        let sample = samples
+            .iter()
+            .find(|sample| sample.id == computer.id)
+            .filter(|sample| original.matches(&machine_identity(sample.generation)));
+        match sample {
             Some(sample) if sample.state == engine::MachineState::Running => {
                 Ok(Reconciled::Running)
             }
@@ -184,13 +217,26 @@ impl SaveAdapter for MacosUpdateAdapter {
         &self,
         computer: &RunningComputer,
         capture: &CaptureRef,
+        _original: &RuntimeIdentity,
         _attempt_id: &str,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
         let CaptureRef::Macos(capture) = capture else {
-            return Err("The capture does not belong to a macOS computer.".into());
+            return Err("The capture does not belong to a macOS computer."
+                .to_owned()
+                .into());
         };
         ensure_loaded(&self.app)?;
+        // A machine that runs now is not one this transaction restored: its disk is its own.
+        if engine::machine_samples(&self.app)?
+            .iter()
+            .any(|sample| sample.id == computer.id)
+        {
+            return Err(RestoreError::Superseded(format!(
+                "{} is running again without being restored from the update. Its disk was kept and the saved state was not applied.",
+                computer.name
+            )));
+        }
         let layout = self.layout(&computer.id)?;
         verify_capture(&layout, capture)?;
         let current_build = checkpoints::host_build();
@@ -200,27 +246,39 @@ impl SaveAdapter for MacosUpdateAdapter {
             return Err(format!(
                 "This Mac was updated (macOS build {} to {}) after {} was saved, so its memory can't be restored. The saved state was kept.",
                 capture.host_build, current_build, computer.name
-            ));
+            )
+            .into());
         }
         let (record, attempt) = begin_restore(&self.app, &computer.id)?;
         let restored = restore_machine(&self.app, &record, &layout, capture, attempt, arm);
         if restored.is_err() {
-            let mut registry = registry();
-            registry.settle_failed_start(&computer.id, attempt, Ok(()));
-            drop(registry);
+            // Storage is released only when the framework says so: a machine that refused to
+            // stop keeps the computer `stopping` (busy, open to Force stop), never `stopped`.
+            let released = ensure_released(&self.app, &computer.id, attempt);
+            settle_failed_restore(&mut registry(), &computer.id, attempt, released);
             emit(&self.app);
         }
-        restored
+        restored.map_err(RestoreError::Failed)
     }
 
     fn probe_armed(
         &self,
         computer: &RunningComputer,
         _capture: &CaptureRef,
+        _original: &RuntimeIdentity,
         _attempt_id: &str,
+        expected: Option<&RuntimeIdentity>,
     ) -> Result<bool, String> {
+        // The armed restore named its machine before the guest could execute; without that
+        // identity (or in another process, where the machine died with its owner) the
+        // attempt cannot be proved running.
+        let Some(expected) = expected else {
+            return Ok(false);
+        };
         Ok(engine::machine_samples(&self.app)?.iter().any(|sample| {
-            sample.id == computer.id && sample.state == engine::MachineState::Running
+            sample.id == computer.id
+                && sample.state == engine::MachineState::Running
+                && expected.matches(&machine_identity(sample.generation))
         }))
     }
 
@@ -248,6 +306,43 @@ impl SaveAdapter for MacosUpdateAdapter {
             )
         })
     }
+}
+
+/// The identity of the machine of `generation` in this engine process.
+fn machine_identity(generation: u64) -> RuntimeIdentity {
+    RuntimeIdentity {
+        owner: Some(boot_id().to_owned()),
+        generation: Some(generation),
+        instance: None,
+    }
+}
+
+/// Where the original machine stands: only the exact run (same process, same generation)
+/// counts, and a paused one can still be resumed.
+fn classify_original(
+    samples: &[engine::Sample],
+    id: &str,
+    original: &RuntimeIdentity,
+) -> OriginalState {
+    match samples
+        .iter()
+        .find(|sample| sample.id == id && original.matches(&machine_identity(sample.generation)))
+    {
+        Some(sample) if sample.state == engine::MachineState::Running => OriginalState::Running,
+        Some(sample) if sample.state == engine::MachineState::Paused => OriginalState::Held,
+        _ => OriginalState::Gone,
+    }
+}
+
+/// Settles a restore that failed after `begin_restore`: stopped only once the machine is
+/// proved released, otherwise `stopping` with the reason.
+pub(super) fn settle_failed_restore(
+    registry: &mut Registry,
+    id: &str,
+    attempt: u64,
+    released: Result<(), String>,
+) {
+    registry.settle_failed_start(id, attempt, released);
 }
 
 /// Closes admission of new macOS work for the update. Running computers are allowed (they are
@@ -346,7 +441,7 @@ fn restore_machine(
     layout: &Layout,
     capture: &MacCapture,
     attempt: u64,
-    arm: &mut dyn FnMut() -> Result<(), String>,
+    arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
 ) -> Result<(), String> {
     offline_setup::ensure_detached(&layout.disk())?;
     replace_live_files(layout, capture)?;
@@ -362,7 +457,7 @@ fn restore_machine(
     };
     // The restored machine is paused. The journal says the guest is about to execute before
     // the first instruction runs.
-    if let Err(message) = arm() {
+    if let Err(message) = arm(Some(&machine_identity(generation))) {
         let _ = engine::force_stop_generation(app, &record.id, generation);
         return Err(message);
     }
@@ -385,11 +480,56 @@ fn restore_machine(
     Ok(())
 }
 
-fn private_directory(path: &Path) -> Result<(), String> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)
+/// What creating a durable directory chain does to the filesystem; tests substitute a recorder.
+trait DirOps {
+    fn exists(&self, path: &Path) -> bool;
+    fn create(&self, path: &Path) -> std::io::Result<()>;
+    fn sync(&self, path: &Path) -> std::io::Result<()>;
+}
+
+struct RealDirOps;
+
+impl DirOps for RealDirOps {
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+
+    fn create(&self, path: &Path) -> std::io::Result<()> {
+        match fs::DirBuilder::new().mode(0o700).create(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            other => other,
+        }
+    }
+
+    fn sync(&self, path: &Path) -> std::io::Result<()> {
+        store::sync_dir(path)
+    }
+}
+
+/// Creates `path` below `base` (an existing, durable directory) privately, and makes every
+/// level durable: each directory is created if missing, synced, and then its parent is synced,
+/// so a power loss cannot keep the journal's reference to a capture while losing the
+/// directories that lead to it. Levels that already exist are synced again, so a retry after a
+/// failed sync completes what the failed attempt did not.
+fn create_durable_directory(ops: &dyn DirOps, base: &Path, path: &Path) -> std::io::Result<()> {
+    let relative = path.strip_prefix(base).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path outside its base")
+    })?;
+    let mut current = base.to_path_buf();
+    for component in relative.components() {
+        let parent = current.clone();
+        current.push(component);
+        if !ops.exists(&current) {
+            ops.create(&current)?;
+        }
+        ops.sync(&current)?;
+        ops.sync(&parent)?;
+    }
+    Ok(())
+}
+
+fn private_directory(base: &Path, path: &Path) -> Result<(), String> {
+    create_durable_directory(&RealDirOps, base, path)
         .map_err(|error| store::io_error("save the computer for the update", &error))
 }
 
@@ -572,7 +712,7 @@ mod tests {
 
     fn capture_in(layout: &Layout) -> MacCapture {
         let directory = layout.dir.join(SAVES).join("tx-1");
-        private_directory(&directory).unwrap();
+        private_directory(&layout.dir, &directory).unwrap();
         fs::write(directory.join(checkpoints::STATE), b"memory").unwrap();
         fs::write(directory.join(DISK), b"captured disk").unwrap();
         fs::write(directory.join(AUXILIARY), b"captured auxiliary").unwrap();
@@ -651,5 +791,123 @@ mod tests {
         assert!(!layout.dir.join("disk.img.restoring").exists());
         // The capture itself is untouched.
         assert_eq!(fs::read(&capture.disk).unwrap(), b"captured disk");
+    }
+
+    use std::{collections::BTreeSet, sync::Mutex};
+
+    /// A filesystem that records what is done to it and can fail at any step.
+    struct Recorder {
+        directories: Mutex<BTreeSet<PathBuf>>,
+        events: Mutex<Vec<String>>,
+        fail_at: Mutex<Option<usize>>,
+    }
+
+    impl Recorder {
+        fn new(existing: &[&str]) -> Self {
+            Self {
+                directories: Mutex::new(existing.iter().map(PathBuf::from).collect()),
+                events: Mutex::new(Vec::new()),
+                fail_at: Mutex::new(None),
+            }
+        }
+
+        fn step(&self, event: String) -> std::io::Result<()> {
+            let mut events = self.events.lock().unwrap();
+            events.push(event);
+            if *self.fail_at.lock().unwrap() == Some(events.len()) {
+                events.pop();
+                return Err(std::io::Error::other("injected"));
+            }
+            Ok(())
+        }
+
+        fn events(&self) -> Vec<String> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    impl DirOps for Recorder {
+        fn exists(&self, path: &Path) -> bool {
+            self.directories.lock().unwrap().contains(path)
+        }
+
+        fn create(&self, path: &Path) -> std::io::Result<()> {
+            self.step(format!("create {}", path.display()))?;
+            self.directories.lock().unwrap().insert(path.to_path_buf());
+            Ok(())
+        }
+
+        fn sync(&self, path: &Path) -> std::io::Result<()> {
+            self.step(format!("sync {}", path.display()))
+        }
+    }
+
+    #[test]
+    fn every_new_ancestor_of_a_capture_is_created_then_synced_then_its_parent_is() {
+        let ops = Recorder::new(&["/data", "/data/c"]);
+        create_durable_directory(
+            &ops,
+            Path::new("/data/c"),
+            Path::new("/data/c/update-saves/tx"),
+        )
+        .unwrap();
+        assert_eq!(
+            ops.events(),
+            [
+                "create /data/c/update-saves",
+                "sync /data/c/update-saves",
+                "sync /data/c",
+                "create /data/c/update-saves/tx",
+                "sync /data/c/update-saves/tx",
+                "sync /data/c/update-saves",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failure_at_any_filesystem_step_fails_the_capture_and_a_retry_completes_the_syncs() {
+        let steps = {
+            let ops = Recorder::new(&["/data/c"]);
+            create_durable_directory(&ops, Path::new("/data/c"), Path::new("/data/c/a/b")).unwrap();
+            ops.events().len()
+        };
+        assert_eq!(steps, 6);
+        for failing in 1..=steps {
+            let ops = Recorder::new(&["/data/c"]);
+            *ops.fail_at.lock().unwrap() = Some(failing);
+            let error =
+                create_durable_directory(&ops, Path::new("/data/c"), Path::new("/data/c/a/b"));
+            assert!(error.is_err(), "step {failing}");
+            // Nothing later ran: a capture is never recorded over a path that is not durable.
+            assert_eq!(ops.events().len(), failing - 1, "step {failing}");
+            // The retry sees directories that already exist and still syncs every level, so
+            // the entry that was created but never synced becomes durable.
+            *ops.fail_at.lock().unwrap() = None;
+            let before = ops.events().len();
+            create_durable_directory(&ops, Path::new("/data/c"), Path::new("/data/c/a/b")).unwrap();
+            let retried = ops.events()[before..].to_vec();
+            for needed in ["sync /data/c/a", "sync /data/c", "sync /data/c/a/b"] {
+                assert!(
+                    retried.iter().any(|event| event == needed),
+                    "step {failing}: {retried:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_real_filesystem_chain_is_private_and_a_path_outside_its_base_is_refused() {
+        let data = tempfile::tempdir().unwrap();
+        let base = data.path().join("computer");
+        fs::create_dir_all(&base).unwrap();
+        let path = base.join("update-saves").join("tx");
+        private_directory(&base, &path).unwrap();
+        private_directory(&base, &path).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(private_directory(&base, &data.path().join("elsewhere")).is_err());
     }
 }

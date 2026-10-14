@@ -141,6 +141,15 @@ impl SettingsStore {
         Ok(self.snapshot())
     }
 
+    /// Drops an onboarding draft the engine host does not serve (95 A-5).
+    fn discard_draft(&mut self) -> Result<Snapshot, String> {
+        if !self.snapshot.onboarding_draft.is_null() {
+            self.snapshot.onboarding_draft = Value::Null;
+            self.changed();
+        }
+        Ok(self.snapshot())
+    }
+
     fn import_theme(&mut self, theme: String) -> Result<Snapshot, String> {
         if valid_setting("theme", &Value::String(theme.clone())) != Some(true) {
             return Err("Invalid legacy theme".into());
@@ -815,6 +824,13 @@ pub fn update_draft(draft: Value) -> Result<Snapshot, String> {
     change(state.settings(), |store| store.update_draft(draft))
 }
 
+/// Launch migration for an engine host whose settings have no onboarding draft: removes a
+/// draft an earlier app version stored, once, before the first request is served.
+pub fn discard_onboarding_draft() -> Result<(), String> {
+    let state = runtime_state()?;
+    change(state.settings(), |store| store.discard_draft()).map(|_| ())
+}
+
 pub fn import_legacy_theme(theme: String) -> Result<Snapshot, String> {
     let state = runtime_state()?;
     change(state.settings(), |store| {
@@ -1420,6 +1436,24 @@ mod tests {
         assert_eq!(event.payload["revision"], snapshot.revision);
         assert_eq!(event.payload["settings"], json!(snapshot.settings));
         assert_eq!(snapshot.onboarding_draft, unfinished_draft());
+    }
+
+    #[test]
+    fn the_launch_migration_drops_a_stored_draft_once_and_persists_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut store = SettingsStore::load(Some(path.clone()));
+        store.update_draft(unfinished_draft()).unwrap();
+        let revision = store.snapshot().revision;
+        let migrated = store.discard_draft().unwrap();
+        assert!(migrated.onboarding_draft.is_null());
+        assert_eq!(migrated.revision, revision + 1);
+        assert!(SettingsStore::load(Some(path))
+            .snapshot()
+            .onboarding_draft
+            .is_null());
+        // Nothing to drop: no write, no new revision.
+        assert_eq!(store.discard_draft().unwrap().revision, revision + 1);
     }
 
     fn unfinished_draft() -> Value {

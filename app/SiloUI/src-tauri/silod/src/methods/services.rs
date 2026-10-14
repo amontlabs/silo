@@ -154,7 +154,9 @@ fn publish_settings(
 fn canonical_settings_snapshot(
     snapshot: silo_engine::settings::Snapshot,
 ) -> Result<SettingsSnapshot, DispatchError> {
-    let value = serde_json::to_value(snapshot)
+    // The same projection every public settings event uses: no draft ever reaches the
+    // canonical shape, so a draft the engine still holds can't fail a write that succeeded.
+    let value = serde_json::to_value(silo_engine::settings::public_snapshot(&snapshot))
         .map_err(|error| DispatchError::internal(error.to_string()))?;
     serde_json::from_value(value).map_err(|error| {
         DispatchError::internal(format!("The settings snapshot is invalid: {error}"))
@@ -355,7 +357,7 @@ fn engine_update_prepare(
     let started = match context.start_job("engine.update.prepare") {
         Ok(started) => started,
         Err(error) => {
-            state.prepare_failed();
+            state.prepare_failed(context.engine_context());
             return Err(error);
         }
     };
@@ -391,6 +393,7 @@ fn run_prepare(context: &Arc<SilodContext>, state: &Arc<UpdateState>, job: JobId
         Ok((hold, computers)) => {
             // Admission stays closed from here until shutdown or abort: the state keeps the hold.
             state.prepared(job.clone(), hold);
+            spawn_watchdog(context.clone(), state.clone());
             let result = EngineUpdatePrepareFinishedResult {
                 resuming: computers
                     .into_iter()
@@ -406,7 +409,9 @@ fn run_prepare(context: &Arc<SilodContext>, state: &Arc<UpdateState>, job: JobId
             }
         }
         Err(message) => {
-            state.prepare_failed();
+            // A rollback that could not resume everything leaves its journal: the update stays
+            // pending and those computers stay reserved until abort or the next start.
+            state.prepare_failed(context.as_ref());
             let code = if message.starts_with("Wait ") {
                 ErrorCode::Busy
             } else {
@@ -595,6 +600,14 @@ async fn updates_set_automatic_checks(
 /// and says whether an update's saved set was resumed (then the launch pass is skipped, so
 /// the running set stays exactly what it was before the update).
 pub fn start(context: Arc<SilodContext>) -> Arc<UpdateRecoveryOutcome> {
+    // Launch migration (95 §3: no legacy support but this): the canonical settings have no
+    // onboarding draft, so one a previous app version left in the file is dropped here and
+    // never handled when settings are read or written.
+    if let Err(error) = silo_engine::settings::current_settings()
+        .and_then(|_| silo_engine::settings::discard_onboarding_draft())
+    {
+        eprintln!("silod: could not migrate the settings at launch: {error}");
+    }
     let outcome = Arc::new(UpdateRecoveryOutcome::default());
     let state = update_state(context.as_ref());
     state.set_platform(Arc::new(ServicesPlatform::new(context.clone())));
@@ -693,8 +706,26 @@ impl Drop for SettleOnDrop {
 
 /// Resumes the set a previous engine update saved, and reports what could not resume.
 fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> bool {
-    let failure = match state.recover(context.as_ref()) {
-        Ok(None) => return false,
+    let result = state.recover(context.as_ref());
+    // A saved set that an installer still owns counts as one: the launch pass must not start
+    // computers while it is held.
+    let deferred = matches!(result, Ok(None)) && state.watching_installer();
+    if deferred {
+        // This engine waits with admission closed, probing the installer's lock.
+        spawn_watchdog(context.clone(), state.clone());
+    }
+    let existed = deferred || !matches!(result, Ok(None));
+    report_recovery(context, state, result);
+    existed
+}
+
+fn report_recovery(
+    context: &Arc<SilodContext>,
+    state: &Arc<UpdateState>,
+    result: Result<Option<engine_update::Recovery>, String>,
+) {
+    let failure = match result {
+        Ok(None) => return,
         Ok(Some(recovery)) => {
             let mut notes: Vec<String> = recovery
                 .failed
@@ -721,7 +752,34 @@ fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>
             publish_updates(context.as_ref(), &snapshot);
         }
     }
-    true
+}
+
+/// While an update is held for the installer, probes the installer's lock every
+/// [`installer::PROBE_INTERVAL`]; a coordinator that stays gone for
+/// [`installer::ABANDONED_AFTER`] has the update aborted (or a deferred set restored).
+fn spawn_watchdog(context: Arc<SilodContext>, state: Arc<UpdateState>) {
+    let spawned = std::thread::Builder::new()
+        .name("silod-update-watchdog".into())
+        .spawn(move || {
+            while state.watching_installer() {
+                std::thread::sleep(engine_update::installer::PROBE_INTERVAL);
+                let present = engine_update::installer::coordinator_present(
+                    &engine_update::engine_directory(context.as_ref()),
+                );
+                match state.watchdog_tick(context.as_ref(), present, std::time::Instant::now()) {
+                    engine_update::WatchdogOutcome::Recovered(result) => {
+                        report_recovery(&context, &state, result)
+                    }
+                    engine_update::WatchdogOutcome::Aborted(Err(message)) => {
+                        eprintln!("silod: the abandoned update could not be aborted: {message}");
+                    }
+                    _ => {}
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("silod: could not start the update watchdog: {error}");
+    }
 }
 
 #[cfg(test)]
