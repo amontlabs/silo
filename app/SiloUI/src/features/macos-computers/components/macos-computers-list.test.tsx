@@ -110,6 +110,62 @@ it("starts, shows the screen of and stops a computer", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Start xcode-build" })).toBeVisible())
 })
 
+it("edits CPU and memory on a stopped computer for the next start", async () => {
+  const backend = backendFor(macosComputerFixtures)
+  const user = userEvent.setup()
+  renderSection(backend)
+  await user.click(await screen.findByRole("button", { name: "More actions for xcode-build" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit CPU and memory for xcode-build" }))
+  expect(screen.getByText("Changes apply the next time this computer starts.")).toBeVisible()
+  await user.clear(screen.getByRole("spinbutton", { name: "CPUs" }))
+  await user.type(screen.getByRole("spinbutton", { name: "CPUs" }), "8")
+  await user.clear(screen.getByRole("spinbutton", { name: "Memory (GiB)" }))
+  await user.type(screen.getByRole("spinbutton", { name: "Memory (GiB)" }), "24")
+  await user.click(popoverButton("Save"))
+  await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-stopped", {
+    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16 } },
+  }))
+  await waitFor(() => expect(row("xcode-build")).toHaveTextContent("8 CPUs · 24 GiB memory · 128 GiB disk"))
+})
+
+it("keeps the edit form's expected resources when a newer computer snapshot arrives", async () => {
+  let emit: (state: unknown) => void = () => {}
+  const computer = macosComputerFixtures.find(candidate => candidate.id === "mac-stopped")!
+  const base = backendFor([computer])
+  const backend = { ...base, listen: async (handler: (state: unknown) => void) => { emit = handler; return () => {} } }
+  const user = userEvent.setup()
+  renderSection(backend)
+  await loaded()
+  await user.click(screen.getByRole("button", { name: "More actions for xcode-build" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit CPU and memory for xcode-build" }))
+
+  act(() => emit({
+    supported: true,
+    unsupportedReason: null,
+    computers: [{ ...computer, cpus: 10, memoryGiB: 32 }],
+    template: null,
+    minDiskGiB: 32,
+  }))
+  await user.clear(screen.getByRole("spinbutton", { name: "CPUs" }))
+  await user.type(screen.getByRole("spinbutton", { name: "CPUs" }), "8")
+  await user.clear(screen.getByRole("spinbutton", { name: "Memory (GiB)" }))
+  await user.type(screen.getByRole("spinbutton", { name: "Memory (GiB)" }), "24")
+  await user.click(popoverButton("Save"))
+
+  await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-stopped", {
+    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16 } },
+  }))
+})
+
+it("disables CPU and memory editing while a checkpoint memory restore is pending", async () => {
+  const computer = { ...macosComputerFixtures.find(candidate => candidate.id === "mac-stopped")!, pendingRestore: { checkpointId: "restore-1", memory: true } }
+  renderSection(backendFor([computer]))
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole("button", { name: "More actions for xcode-build" }))
+  expect(screen.getByRole("menuitem", { name: "Edit CPU and memory for xcode-build" })).toHaveAttribute("aria-disabled", "true")
+  expect(screen.getByLabelText("Finish restoring saved memory before changing CPU or memory.")).toBeInTheDocument()
+})
+
 it("force stops from the menu", async () => {
   const backend = backendFor(macosComputerFixtures)
   const user = userEvent.setup()
@@ -454,6 +510,9 @@ it("invokes the native commands with the contract's payloads", async () => {
   await nativeMacosComputersBackend.read()
   await nativeMacosComputersBackend.create({ name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 })
   await nativeMacosComputersBackend.action("a", "force-stop")
+  await nativeMacosComputersBackend.action("a", { "change-resources": {
+    cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+  } })
   await nativeMacosComputersBackend.openDisplay("a")
   await nativeMacosComputersBackend.clipboard("a", "copy-from")
   await nativeMacosComputersBackend.deleteTemplate()
@@ -465,6 +524,9 @@ it("invokes the native commands with the contract's payloads", async () => {
     ["read_macos_computers", {}],
     ["create_macos_computer", { request: { name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 } }],
     ["macos_computer_action", { id: "a", action: "force-stop" }],
+    ["macos_computer_action", { id: "a", action: { "change-resources": {
+      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+    } } }],
     ["open_macos_display", { id: "a" }],
     ["macos_computer_clipboard", { id: "a", direction: "copy-from" }],
     ["delete_macos_template", {}],

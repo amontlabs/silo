@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { ApplicationSource } from "@/features/application/model/application-source"
 import { defaultStartupComputerIds, startupComputerCandidates } from "@/features/application/model/startup-computers"
+import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { ApplicationPreferenceFields } from "@/features/preferences/components/application-preference-fields"
 import { SettingsSaveNotice } from "@/features/preferences/components/settings-save-notice"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
@@ -49,14 +50,19 @@ export function GeneralPage({
   const { theme, setTheme } = useTheme()
   const { settings, store, updateSettings } = useSettings()
   const integrations = useSystemIntegrations()
+  const macos = useMacosComputers()
   const { startComputersAtLaunch: startAtLaunch } = settings
   const startupComputers = new Set(settings.startupComputerIds)
+  const startupOptions = [
+    ...startupComputerCandidates(source.computers).map(({ configuration }) => ({ value: configuration.id, label: configuration.name })),
+    ...(macos?.snapshot.state?.computers ?? []).map(computer => ({ value: computer.id, label: computer.name })),
+  ]
 
   useLayoutEffect(() => {
     store.updateDefaults({
-      startupComputerIds: source.preferences.startupComputerIds ?? defaultStartupComputerIds(source.computers),
+      startupComputerIds: source.preferences.startupComputerIds ?? defaultStartupComputerIds(source.computers, macos?.snapshot.state?.computers),
     })
-  }, [store, source.computers, source.preferences.startupComputerIds])
+  }, [store, source.computers, source.preferences.startupComputerIds, macos?.snapshot.state?.computers])
 
   return (
     <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-5 sm:px-6 sm:py-6">
@@ -97,7 +103,7 @@ export function GeneralPage({
             {startAtLaunch && (
               <ListRowDetails label="Computers to start at launch" className="gap-2">
                 <FilterCombobox
-                  options={startupComputerCandidates(source.computers).map(({ configuration }) => ({ value: configuration.id, label: configuration.name }))}
+                  options={startupOptions}
                   selectedValues={startupComputers}
                   onChange={(selected) => { void updateSettings({ startupComputerIds: [...selected] }) }}
                   label="Startup computers"

@@ -36,7 +36,7 @@ pub(super) enum State {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", rename_all_fields = "camelCase")]
 pub enum Action {
     Start,
     Stop,
@@ -44,6 +44,21 @@ pub enum Action {
     Delete,
     /// Runs the provisioning steps that have not finished.
     Setup,
+    /// Changes CPU and memory on a stopped computer; the next Start applies them.
+    ChangeResources {
+        cpus: u64,
+        #[serde(rename = "memoryGiB")]
+        memory_gib: u64,
+        expected: ExpectedResources,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedResources {
+    pub cpus: u64,
+    #[serde(rename = "memoryGiB")]
+    pub memory_gib: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +73,8 @@ pub(super) struct RestoreImageInfo {
 pub(super) struct SetupProgress {
     pub account: bool,
     pub sip: bool,
+    /// Apple command-line tools, Git and Git LFS were verified in the guest.
+    pub developer_tools: bool,
     pub computer_use: bool,
     pub clipboard: bool,
     /// A copy of a template still has the template's password, keys and identity.
@@ -66,7 +83,12 @@ pub(super) struct SetupProgress {
 
 impl SetupProgress {
     pub(super) fn complete(self) -> bool {
-        self.account && self.sip && self.computer_use && self.clipboard && !self.needs_personalizing
+        self.account
+            && self.sip
+            && self.developer_tools
+            && self.computer_use
+            && self.clipboard
+            && !self.needs_personalizing
     }
 }
 
@@ -87,6 +109,9 @@ pub(super) struct Record {
     pub installed: bool,
     #[serde(default)]
     pub setup: SetupProgress,
+    /// Fingerprint of the Apple Command Line Tools and pinned Git/LFS/gh setup on disk.
+    #[serde(default)]
+    pub developer_tools_version: Option<String>,
     /// Installed here and not started by the user since its setup: the only kind of
     /// computer a template may be made from.
     #[serde(default)]
@@ -124,6 +149,15 @@ impl Record {
             .unwrap_or_else(crate::computer_use::initial_approval);
         self.computer_use_version.as_deref()
             != Some(super::templates::computer_use_version_for(approval).as_str())
+    }
+
+    pub(super) fn developer_tools_stale(&self) -> bool {
+        self.developer_tools_version.as_deref() != Some(super::developer_tools::version().as_str())
+    }
+
+    /// Readiness shown to the user and used by operations that require a current setup.
+    pub(super) fn setup_complete(&self) -> bool {
+        self.setup.complete() && !self.developer_tools_stale()
     }
 
     pub(super) fn os_version(&self) -> Option<String> {
@@ -195,6 +229,50 @@ pub(super) fn validate_request(
     Ok(())
 }
 
+pub(super) fn change_resources(
+    record: &Record,
+    state: State,
+    restore_unfinished: bool,
+    cpus: u64,
+    memory_gib: u64,
+    expected: ExpectedResources,
+    host: HostLimits,
+    other_records: &[Record],
+) -> Result<Record, String> {
+    if state != State::Stopped {
+        return Err("Stop the computer before changing its CPU or memory.".into());
+    }
+    if !record.installed || !record.setup_complete() {
+        return Err("Finish setting up the computer before changing its CPU or memory.".into());
+    }
+    if restore_unfinished {
+        return Err(
+            "Restart Silo to finish the interrupted Restore before changing CPU or memory.".into(),
+        );
+    }
+    if record
+        .pending_restore
+        .as_ref()
+        .is_some_and(|pending| pending.memory)
+    {
+        return Err("Start the computer before changing its CPU or memory; a checkpoint's saved memory is waiting to resume.".into());
+    }
+    if record.cpus != expected.cpus || record.memory_gib != expected.memory_gib {
+        return Err("The computer's CPU or memory settings changed while you were editing. Refresh and try again.".into());
+    }
+    let request = CreateRequest {
+        name: record.name.clone(),
+        cpus,
+        memory_gib,
+        disk_gib: record.disk_gib,
+    };
+    validate_request(&request, host, other_records, MIN_DISK_GIB)?;
+    let mut updated = record.clone();
+    updated.cpus = cpus;
+    updated.memory_gib = memory_gib;
+    Ok(updated)
+}
+
 pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record {
     Record {
         schema_version: SCHEMA_VERSION,
@@ -210,6 +288,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         restore_image: None,
         installed: false,
         setup: SetupProgress::default(),
+        developer_tools_version: None,
         pristine: true,
         template: None,
         setup_version: None,
@@ -289,7 +368,7 @@ pub(super) fn checkpoint_allowed(
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if !record.setup.complete() {
+    if !record.setup_complete() {
         return Err(super::checkpoints::NOT_READY.into());
     }
     match state {
@@ -313,7 +392,7 @@ pub(super) fn setup_allowed(state: State, record: &Record) -> Result<(), String>
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if record.setup.complete() {
+    if record.setup_complete() {
         return Err("This computer is already set up.".into());
     }
     match state {
@@ -405,18 +484,66 @@ impl Layout {
 }
 
 pub(super) fn save(layout: &Layout, record: &Record) -> Result<(), String> {
+    save_with_sync(layout, record, sync_dir)
+}
+
+pub(super) fn read_record(layout: &Layout) -> Result<Record, String> {
+    let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+}
+
+pub(super) fn save_with_sync(
+    layout: &Layout,
+    record: &Record,
+    mut sync: impl FnMut(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     fs::create_dir_all(&layout.dir).map_err(|error| io_error("create the computer", &error))?;
     let json = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
-    let mut file = tempfile::NamedTempFile::new_in(&layout.dir)
-        .map_err(|error| io_error("save the computer", &error))?;
-    std::io::Write::write_all(&mut file, &json)
-        .map_err(|error| io_error("save the computer", &error))?;
-    file.as_file()
-        .sync_all()
-        .map_err(|error| io_error("save the computer", &error))?;
-    file.persist(layout.record())
-        .map_err(|error| io_error("save the computer", &error.error))?;
-    sync_dir(&layout.dir).map_err(|error| io_error("save the computer", &error))
+    let previous = match fs::read(layout.record()) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(io_error("read the computer before saving", &error)),
+    };
+    match write_record(layout, &json, &mut sync) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let original = io_error("save the computer", &error);
+            let rollback = match previous {
+                Some(bytes) => write_record(layout, &bytes, &mut sync),
+                None => remove_record(layout, &mut sync),
+            };
+            match rollback {
+                Ok(()) => Err(original),
+                Err(rollback) => Err(format!(
+                    "{original} The previous computer record could not be restored: {}",
+                    io_error("restore the computer record", &rollback)
+                )),
+            }
+        }
+    }
+}
+
+fn write_record(
+    layout: &Layout,
+    bytes: &[u8],
+    sync: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut file = tempfile::NamedTempFile::new_in(&layout.dir)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(layout.record()).map_err(|error| error.error)?;
+    sync(&layout.dir)
+}
+
+fn remove_record(
+    layout: &Layout,
+    sync: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match fs::remove_file(layout.record()) {
+        Ok(()) => sync(&layout.dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Makes the entries of a folder (a rename, a new or removed file) durable.
@@ -498,6 +625,32 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_action_strings_remain_valid_and_resource_edits_use_camel_case_fields() {
+        assert_eq!(
+            serde_json::from_str::<Action>("\"start\"").unwrap(),
+            Action::Start
+        );
+        assert_eq!(
+            serde_json::from_value::<Action>(serde_json::json!({
+                "change-resources": {
+                    "cpus": 8,
+                    "memoryGiB": 16,
+                    "expected": { "cpus": 4, "memoryGiB": 8 }
+                }
+            }))
+            .unwrap(),
+            Action::ChangeResources {
+                cpus: 8,
+                memory_gib: 16,
+                expected: ExpectedResources {
+                    cpus: 4,
+                    memory_gib: 8,
+                }
+            }
+        );
+    }
+
+    #[test]
     fn rejects_names_the_linux_rule_rejects() {
         for name in ["", "Mac", "1mac", "mac_one", &"a".repeat(33)] {
             let request = CreateRequest {
@@ -545,12 +698,141 @@ mod tests {
         assert_eq!(validate_request(&edge, HOST, &[], 0), Ok(()));
     }
 
+    #[test]
+    fn resource_edits_are_stopped_cpu_memory_only_and_wait_for_the_next_start() {
+        let original = finished();
+        let expected = ExpectedResources {
+            cpus: original.cpus,
+            memory_gib: original.memory_gib,
+        };
+        let edited =
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[]).unwrap();
+        assert_eq!(edited.cpus, 8);
+        assert_eq!(edited.memory_gib, 16);
+        assert_eq!(edited.disk_gib, original.disk_gib);
+        assert!(
+            change_resources(&original, State::Running, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("Stop the computer")
+        );
+        assert!(change_resources(
+            &original,
+            State::Starting,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn resource_edits_reject_a_stale_expected_configuration_after_queue_admission() {
+        let original = finished();
+        let expected = ExpectedResources {
+            cpus: original.cpus + 1,
+            memory_gib: original.memory_gib,
+        };
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("settings changed")
+        );
+    }
+
+    #[test]
+    fn resource_edits_refuse_memory_pending_restore_and_host_overages() {
+        let mut original = finished();
+        original.pending_restore = Some(super::super::checkpoints::PendingRestore {
+            checkpoint_id: "checkpoint-1".into(),
+            memory: true,
+        });
+        let expected = ExpectedResources {
+            cpus: original.cpus,
+            memory_gib: original.memory_gib,
+        };
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 16, expected, HOST, &[])
+                .unwrap_err()
+                .contains("saved memory")
+        );
+        original.pending_restore.as_mut().unwrap().memory = false;
+        assert!(change_resources(
+            &original,
+            State::Stopped,
+            false,
+            11,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .is_err());
+        assert!(
+            change_resources(&original, State::Stopped, false, 8, 29, expected, HOST, &[]).is_err()
+        );
+    }
+
+    #[test]
+    fn resource_edits_require_completed_setup_and_no_unfinished_restore() {
+        let mut incomplete = finished();
+        incomplete.setup.developer_tools = false;
+        let expected = ExpectedResources {
+            cpus: incomplete.cpus,
+            memory_gib: incomplete.memory_gib,
+        };
+        assert!(change_resources(
+            &incomplete,
+            State::Stopped,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("Finish setting up"));
+
+        let mut uninstalled = finished();
+        uninstalled.installed = false;
+        assert!(change_resources(
+            &uninstalled,
+            State::Stopped,
+            false,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("Finish setting up"));
+
+        assert!(change_resources(
+            &finished(),
+            State::Stopped,
+            true,
+            8,
+            16,
+            expected,
+            HOST,
+            &[]
+        )
+        .unwrap_err()
+        .contains("interrupted Restore"));
+    }
+
     fn finished() -> Record {
         let mut record = record(&request());
         record.installed = true;
+        record.developer_tools_version = Some(super::super::developer_tools::version());
         record.setup = SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
@@ -667,6 +949,7 @@ mod tests {
         let mut setup = SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: true,
@@ -713,6 +996,7 @@ mod tests {
         original.setup = SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
@@ -841,6 +1125,9 @@ mod tests {
         computer.setup.computer_use = true;
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.clipboard = true;
+        assert!(setup_allowed(State::Stopped, &computer).is_ok());
+        computer.setup.developer_tools = true;
+        computer.developer_tools_version = Some(super::super::developer_tools::version());
         assert!(setup_allowed(State::Stopped, &computer).is_err());
         assert!(start_allowed(State::SettingUp, &computer).is_err());
     }
@@ -860,8 +1147,18 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "computerUse": false, "clipboard": false, "needsPersonalizing": false})
+            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "needsPersonalizing": false})
         );
+
+        let mut old_setup = json.clone();
+        old_setup["setup"]
+            .as_object_mut()
+            .unwrap()
+            .remove("developerTools");
+        fs::write(layout.record(), serde_json::to_vec(&old_setup).unwrap()).unwrap();
+        let old_with_setup: Record =
+            serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
+        assert!(!old_with_setup.setup.developer_tools);
 
         let mut old = json;
         old.as_object_mut().unwrap().remove("setup");

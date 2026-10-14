@@ -12,7 +12,7 @@
 //!
 //! Nothing here touches Virtualization.framework, so it runs on every platform.
 use super::{
-    guest_access, guest_computer_use, offline_setup,
+    developer_tools, guest_access, guest_computer_use, offline_setup,
     store::{self, Layout, Record},
 };
 use serde::{Deserialize, Serialize};
@@ -96,10 +96,13 @@ impl Template {
 /// use (the account and its automatic login, SSH, the recovery step). A template made
 /// under a different base is never copied; a computer's base is fixed when its setup ends.
 pub(super) fn setup_version() -> String {
-    hash_inputs([
-        offline_setup::setup_inputs().as_str(),
-        &SETUP_REVISION.to_string(),
-    ])
+    let offline = offline_setup::setup_inputs();
+    let revision = SETUP_REVISION.to_string();
+    hash_inputs(
+        std::iter::once(offline.as_str())
+            .chain(developer_tools::setup_inputs())
+            .chain(std::iter::once(revision.as_str())),
+    )
 }
 
 /// The computer-use fingerprint of a computer set up with `approval`: the pinned ChatGPT
@@ -392,7 +395,7 @@ fn remove_partials(app_data: &Path) -> Result<(), String> {
 pub(super) fn eligible(record: &Record) -> bool {
     record.installed
         && record.setup_version.is_some()
-        && record.setup.complete()
+        && record.setup_complete()
         && record.pristine
         && record.template.is_none()
         && record.restore_image.is_some()
@@ -411,7 +414,7 @@ pub(super) fn refreshes(app_data: &Path, record: &Record) -> bool {
         return false;
     };
     record.installed
-        && record.setup.complete()
+        && record.setup_complete()
         && !record.inherited_access
         && !record.computer_use_stale()
         && list(app_data).iter().any(|template| {
@@ -736,10 +739,12 @@ mod tests {
         record.setup = SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
         };
+        record.developer_tools_version = Some(super::developer_tools::version());
         let layout = Layout::new(data.path(), &record.id);
         fs::create_dir_all(&layout.dir).unwrap();
         fs::write(layout.disk(), vec![7u8; 4096]).unwrap();
@@ -870,11 +875,16 @@ mod tests {
         );
         assert_eq!(computer_use_version_for(Approval::Ask).len(), 16);
         // The base names no computer-use input.
-        let base = hash_inputs([
-            offline_setup::setup_inputs().as_str(),
-            &SETUP_REVISION.to_string(),
-        ]);
+        let revision = SETUP_REVISION.to_string();
+        let base = hash_inputs(
+            std::iter::once(offline_setup::setup_inputs().as_str())
+                .chain(developer_tools::setup_inputs())
+                .chain(std::iter::once(revision.as_str())),
+        );
         assert_eq!(setup_version(), base);
+        let without_developer_tools =
+            hash_inputs([offline_setup::setup_inputs().as_str(), revision.as_str()]);
+        assert_ne!(setup_version(), without_developer_tools);
         // A template made before the split has no computer-use part.
         let json = serde_json::to_value(meta("25G83", "a", "2026-10-01")).unwrap();
         let mut old = json.clone();

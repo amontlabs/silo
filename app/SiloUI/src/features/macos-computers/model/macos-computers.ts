@@ -79,7 +79,13 @@ export interface MacosComputerRequest {
   diskGiB: number
 }
 
-export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "setup"
+export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "setup" | {
+  "change-resources": {
+    cpus: number
+    memoryGiB: number
+    expected: { cpus: number; memoryGiB: number }
+  }
+}
 
 /** Which way an explicit clipboard transfer goes: this Mac to the computer, or back. */
 export type MacosClipboardDirection = "paste-into" | "copy-from"

@@ -26,7 +26,14 @@ use std::{
 const APP_LOCK: &str = include_str!("../../../guest/macos/chatgpt-app-lock.json");
 const LCU_LOCK: &str = include_str!("../../../guest/macos/lcu-lock.json");
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-computer-use.zsh");
+const RECORDER_SOURCE: &str = include_str!("../../../guest/macos/SiloGuestRecorder.swift");
+const RECORDER_INFO: &str = include_str!("../../../guest/macos/SiloGuestRecorder-Info.plist");
+const RECORDER_AGENT: &str =
+    include_str!("../../../guest/macos/SiloGuestRecorder-LaunchAgent.plist");
 const SCRIPT_NAME: &str = "silo-computer-use.zsh";
+const RECORDER_SOURCE_NAME: &str = "SiloGuestRecorder.swift";
+const RECORDER_INFO_NAME: &str = "SiloGuestRecorder-Info.plist";
+const RECORDER_AGENT_NAME: &str = "SiloGuestRecorder-LaunchAgent.plist";
 const PINNED_NAME: &str = "pinned.json";
 /// Where the files are staged in the guest. The script keeps its work folder inside it.
 const STAGE: &str = "/private/tmp/silo-computer-use";
@@ -304,8 +311,15 @@ impl Pins {
 }
 
 /// The pinned archives and the script, which decide what a computer holds after setup.
-pub(super) fn setup_inputs() -> [&'static str; 3] {
-    [APP_LOCK, LCU_LOCK, SCRIPT]
+pub(super) fn setup_inputs() -> [&'static str; 6] {
+    [
+        APP_LOCK,
+        LCU_LOCK,
+        SCRIPT,
+        RECORDER_SOURCE,
+        RECORDER_INFO,
+        RECORDER_AGENT,
+    ]
 }
 
 /// How a run reports progress and learns that it must end. Setup of a new computer ties both
@@ -601,10 +615,22 @@ fn stage(
         .map_err(|error| super::store::io_error("prepare computer use", &error))?;
     let script = local.path().join(SCRIPT_NAME);
     let pinned = local.path().join(PINNED_NAME);
+    let recorder_source = local.path().join(RECORDER_SOURCE_NAME);
+    let recorder_info = local.path().join(RECORDER_INFO_NAME);
+    let recorder_agent = local.path().join(RECORDER_AGENT_NAME);
     fs::write(&script, SCRIPT)
         .and_then(|()| fs::write(&pinned, pins.pinned_json()))
+        .and_then(|()| fs::write(&recorder_source, RECORDER_SOURCE))
+        .and_then(|()| fs::write(&recorder_info, RECORDER_INFO))
+        .and_then(|()| fs::write(&recorder_agent, RECORDER_AGENT))
         .map_err(|error| super::store::io_error("prepare computer use", &error))?;
-    for (file, name) in [(&script, SCRIPT_NAME), (&pinned, PINNED_NAME)] {
+    for (file, name) in [
+        (&script, SCRIPT_NAME),
+        (&pinned, PINNED_NAME),
+        (&recorder_source, RECORDER_SOURCE_NAME),
+        (&recorder_info, RECORDER_INFO_NAME),
+        (&recorder_agent, RECORDER_AGENT_NAME),
+    ] {
         access::copy_cancellable(
             layout,
             record,
@@ -710,6 +736,33 @@ mod tests {
     }
 
     #[test]
+    fn recorder_code_and_its_aqua_agent_are_part_of_computer_use_setup() {
+        let inputs = setup_inputs();
+        assert!(inputs[3].contains("SCRecordingOutput"));
+        assert!(inputs[4].contains("org.silo.guest-recorder"));
+        assert!(inputs[5].contains("<string>Aqua</string>"));
+        assert!(SCRIPT.contains("grant_recorder"));
+        assert!(SCRIPT.contains("kTCCServiceScreenCapture"));
+        assert!(SCRIPT.contains("ScreenCaptureApprovals"));
+        assert!(SCRIPT.contains("if ! launchctl print \"gui/$(id -u)\""));
+        assert!(SCRIPT.contains("the guest recorder loads at the next Aqua login"));
+    }
+
+    #[test]
+    fn screen_sharing_is_enabled_and_readiness_handles_socket_activation_and_rfb() {
+        assert!(SCRIPT.contains("SHARING_JOB=system/com.apple.screensharing"));
+        assert!(SCRIPT.contains("launchctl enable $SHARING_JOB"));
+        assert!(SCRIPT.contains("launchctl bootstrap system \"$SHARING_PLIST\""));
+        assert!(SCRIPT.contains("RFB 003\\.[0-9]{3}"));
+        assert!(SCRIPT.contains("launchd state: $state"));
+        assert!(!SCRIPT.contains("[[ $state == running ]]"));
+        let loaded = SCRIPT.find("if state=$(").unwrap();
+        let greeting = SCRIPT.find("greeting=$(").unwrap();
+        assert!(loaded < greeting, "the loaded launchd job is checked first");
+        assert!(SCRIPT.contains("nc -w 1 127.0.0.1 5900"));
+    }
+
+    #[test]
     fn an_update_is_wanted_for_a_complete_computer_without_the_current_fingerprint() {
         use super::super::store::{CreateRequest, SetupProgress};
         let mut record = store::new_record(
@@ -725,6 +778,7 @@ mod tests {
         record.setup = SetupProgress {
             account: true,
             sip: true,
+            developer_tools: true,
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
