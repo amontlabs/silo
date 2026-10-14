@@ -67,6 +67,9 @@ mod ssh_stream;
 mod store;
 #[path = "macos_computers/templates.rs"]
 mod templates;
+#[path = "macos_computers/update_save.rs"]
+mod update_save;
+pub use update_save::{close_for_save, MacosUpdateAdapter};
 
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
@@ -3307,9 +3310,22 @@ pub fn upload_files(
     selection: String,
     conflict: crate::transfer::ConflictPolicy,
 ) -> Result<crate::transfer::UploadOutcome, String> {
-    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
-    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
-    revalidate_transfer_target(&computer_id, generation)?;
+    // The job comes first: waiting for the computer's turn and probing the alias can take
+    // longer than a caller waits for the job to exist.
+    let tracked = crate::transfer::begin_transfer_job(&transfer_id, "files.upload")?;
+    let ready =
+        acquire_transfer_operation(app, &computer_id).and_then(|(operation, generation)| {
+            let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+            revalidate_transfer_target(&computer_id, generation)?;
+            Ok((operation, connection))
+        });
+    let (operation, connection) = match ready {
+        Ok(ready) => ready,
+        Err(message) => {
+            crate::transfer::fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
     crate::transfer::upload_files_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -3321,6 +3337,7 @@ pub fn upload_files(
         selection,
         conflict,
         Some(operation),
+        tracked,
     )
 }
 
@@ -3330,9 +3347,20 @@ pub fn prepare_download(
     computer_id: String,
     path: String,
 ) -> Result<(crate::transfer::DownloadSession, String), String> {
-    let (operation, generation) = acquire_transfer_operation(app, &computer_id)?;
-    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
-    revalidate_transfer_target(&computer_id, generation)?;
+    let tracked = crate::transfer::begin_transfer_job(&transfer_id, "files.download")?;
+    let ready =
+        acquire_transfer_operation(app, &computer_id).and_then(|(operation, generation)| {
+            let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+            revalidate_transfer_target(&computer_id, generation)?;
+            Ok((operation, connection))
+        });
+    let (operation, connection) = match ready {
+        Ok(ready) => ready,
+        Err(message) => {
+            crate::transfer::fail_transfer_job(tracked, &transfer_id, &message)?;
+            return Err(message);
+        }
+    };
     crate::transfer::prepare_download_with_transport(
         PathBuf::from(connection.config_path),
         connection.alias,
@@ -3341,6 +3369,7 @@ pub fn prepare_download(
         computer_id,
         path,
         Some(operation),
+        tracked,
     )
 }
 

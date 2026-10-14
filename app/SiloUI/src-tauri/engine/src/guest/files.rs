@@ -165,8 +165,16 @@ fn path_lock(computer: &str, path: &str) -> Lock {
 /// `Replace::Never` and `Replace::IfSha256(None)` commit with a hard link, which fails if
 /// anything exists at the path; they are race-free against every writer. `IfSha256(Some)`
 /// compares inside the guest immediately before the rename and re-checks the file's identity
-/// (device, inode, size, mtime), which engine writers serialize completely; a writer outside
-/// the engine could still slip in between that last check and the rename.
+/// (device, inode, size, mtime).
+///
+/// Writers take turns inside the guest: every write holds an exclusive `flock` on the
+/// destination's resolved parent folder (so `/d/f`, `/d/./f`, `/d/../d/f` and a symlinked
+/// route to `/d` all share one lock), checks that the folder is still the one it locked, and
+/// commits through the resolved path. That makes the compare-and-replace exact against every
+/// writer that goes through this helper, whichever path spelling it used. A program that does
+/// not take that lock (an ordinary editor, a build) is not stopped by it: it can still slip a
+/// change in between the helper's last check and its rename, which no path-based commit can
+/// close.
 pub fn write(target: &Target, request: &WriteRequest) -> Result<FileWrite, GuestError> {
     check_path(&request.path)?;
     if request.path.ends_with('/') {
@@ -643,5 +651,113 @@ mod tests {
         let error = read(&target, "/tmp/x", None, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::NotRunning);
         assert_eq!(error.message, "Start dev first.");
+    }
+
+    #[test]
+    fn path_aliases_of_one_file_share_one_compare_and_replace_turn() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let folder = directory.path().join("config");
+        std::fs::create_dir(&folder).unwrap();
+        std::os::unix::fs::symlink(&folder, directory.path().join("link")).unwrap();
+        let file = folder.join("settings.json");
+        put(&target, &file, b"v1", Replace::Always).unwrap();
+        let root = directory.path().to_string_lossy().into_owned();
+        let aliases = [
+            format!("{root}/config/settings.json"),
+            format!("{root}/config/./settings.json"),
+            format!("{root}/config/../config/settings.json"),
+            format!("{root}/link/settings.json"),
+        ];
+        for round in 0..6 {
+            std::fs::write(&file, b"v1").unwrap();
+            let barrier = std::sync::Barrier::new(8);
+            let results: Vec<_> = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..8)
+                    .map(|index| {
+                        let (target, barrier) = (&target, &barrier);
+                        let path = aliases[index % aliases.len()].clone();
+                        scope.spawn(move || {
+                            barrier.wait();
+                            write(
+                                target,
+                                &WriteRequest {
+                                    path,
+                                    data: format!("writer-{index}").into_bytes(),
+                                    mode: 0o640,
+                                    create_parents: false,
+                                    replace: Replace::IfSha256(Some(sha(b"v1"))),
+                                },
+                            )
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect()
+            });
+            let winners = results.iter().filter(|result| result.is_ok()).count();
+            assert_eq!(winners, 1, "round {round}: {results:?}");
+            assert!(results
+                .iter()
+                .filter_map(|result| result.as_ref().err())
+                .all(|error| error.code == ErrorCode::Changed));
+        }
+    }
+
+    #[test]
+    fn a_write_waits_for_the_folder_lock_whatever_path_it_names() {
+        use std::io::{BufRead, Write};
+        use std::process::{Command, Stdio};
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let folder = directory.path().join("shared");
+        std::fs::create_dir(&folder).unwrap();
+        // Another cooperating writer holds the folder's lock.
+        let mut holder = Command::new("perl")
+            .args([
+                "-e",
+                r#"open(D, "<", $ARGV[0]) or die; flock(D, 2) or die; $| = 1; print "locked\n"; <STDIN>;"#,
+                "--",
+            ])
+            .arg(&folder)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(holder.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "locked");
+        let aliased = format!("{}/./settings.json", folder.display());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let result = write(
+                    &target,
+                    &WriteRequest {
+                        path: aliased.clone(),
+                        data: b"later".to_vec(),
+                        mode: 0o640,
+                        create_parents: false,
+                        replace: Replace::Always,
+                    },
+                );
+                sender.send(result).unwrap();
+            });
+            // While the lock is held the write cannot finish (a negative check: it can only
+            // pass wrongly, never fail wrongly).
+            assert!(receiver.recv_timeout(Duration::from_millis(400)).is_err());
+            assert!(!folder.join("settings.json").exists());
+            holder.stdin.take().unwrap().write_all(b"\n").unwrap();
+            holder.wait().unwrap();
+            receiver.recv().unwrap().unwrap();
+        });
+        assert_eq!(
+            std::fs::read(folder.join("settings.json")).unwrap(),
+            b"later"
+        );
     }
 }

@@ -1383,17 +1383,19 @@ fn publish_progress(progress: &Progress) {
     publish_event(PROGRESS_EVENT, serde_json::json!(progress));
 }
 
-fn begin_transfer_job(
+/// An accepted transfer job: its context, id and cancellation flag.
+pub(crate) type TrackedTransfer = (
+    std::sync::Arc<dyn silo_engine::context::EngineContext>,
+    silo_api::jobs::JobId,
+    Arc<AtomicBool>,
+);
+
+/// Accepts the transfer's job. The caller that waits before it can transfer (a queue, a
+/// login) calls this first, so the client always has a job to follow and cancel.
+pub(crate) fn begin_transfer_job(
     transfer_id: &str,
     method: &'static str,
-) -> Result<
-    Option<(
-        std::sync::Arc<dyn silo_engine::context::EngineContext>,
-        silo_api::jobs::JobId,
-        Arc<AtomicBool>,
-    )>,
-    String,
-> {
+) -> Result<Option<TrackedTransfer>, String> {
     let Some(context) = silo_engine::context::current() else {
         return Ok(None);
     };
@@ -1434,6 +1436,19 @@ fn begin_transfer_job(
         return Err(error.to_string());
     }
     Ok(Some((context, accepted.job_id, cancel)))
+}
+
+/// Ends a transfer job that failed before it could transfer anything.
+pub(crate) fn fail_transfer_job(
+    tracked: Option<TrackedTransfer>,
+    transfer_id: &str,
+    message: &str,
+) -> Result<(), String> {
+    let Some((context, job_id, cancel)) = tracked else {
+        return Ok(());
+    };
+    clear_transfer_reservation(transfer_id, &cancel);
+    finish_transfer_job::<serde_json::Value>(context.as_ref(), job_id, &Err(message.to_owned()))
 }
 
 fn clear_transfer_reservation(transfer_id: &str, cancel: &Arc<AtomicBool>) {
@@ -1569,8 +1584,8 @@ pub(crate) fn upload_files_with_transport(
     selection: String,
     conflict: ConflictPolicy,
     operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+    tracked: Option<TrackedTransfer>,
 ) -> Result<UploadOutcome, String> {
-    let tracked = begin_transfer_job(&transfer_id, "files.upload")?;
     let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
     let outcome = crate::runtime::shutdown::ensure_accepting_operations()
         .and_then(|()| Sftp::new(config, alias))
@@ -1698,8 +1713,8 @@ pub(crate) fn prepare_download_with_transport(
     computer: String,
     path: String,
     operation: Option<crate::runtime::operation_gate::OperationGuard<'static>>,
+    tracked: Option<TrackedTransfer>,
 ) -> Result<(DownloadSession, String), String> {
-    let tracked = begin_transfer_job(&transfer_id, "files.download")?;
     let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
     let result = crate::runtime::shutdown::ensure_accepting_operations()
         .and_then(|()| Sftp::new(config, alias))

@@ -90,6 +90,7 @@ pub struct EngineRuntimeState {
     shutdown: Arc<crate::settings::ShutdownState>,
     quit_confirmation: Arc<crate::settings::QuitConfirmation>,
     startup: Arc<crate::startup::StartupState>,
+    update: Arc<crate::engine_update::UpdateState>,
 }
 
 impl EngineRuntimeState {
@@ -107,6 +108,11 @@ impl EngineRuntimeState {
 
     pub fn startup(&self) -> &Arc<crate::startup::StartupState> {
         &self.startup
+    }
+
+    /// Shutdown, update preparation and the engine's update schedule (05 §6).
+    pub fn update(&self) -> &Arc<crate::engine_update::UpdateState> {
+        &self.update
     }
 }
 

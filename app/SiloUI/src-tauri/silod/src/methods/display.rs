@@ -1541,9 +1541,11 @@ mod tests {
         _gate_jobs: std::sync::MutexGuard<'static, ()>,
         directory: tempfile::TempDir,
         engine: Arc<SilodContext>,
+        _gate: crate::methods::ProcessGateLease,
     }
 
     fn fixture() -> Fixture {
+        let gate = crate::methods::process_gate_lock();
         let registry = crate::methods::MACOS_REGISTRY_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1573,6 +1575,7 @@ mod tests {
             _gate_jobs: crate::serialize_gate_jobs(),
             directory,
             engine,
+            _gate: gate,
         }
     }
 
