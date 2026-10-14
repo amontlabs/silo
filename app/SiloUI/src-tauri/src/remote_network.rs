@@ -9,6 +9,7 @@
 use crate::bridge_error::{BridgeError, ErrorCode};
 use crate::{remote, runtime};
 use serde_json::{json, Value};
+use silo_engine::{Audience, Event};
 use std::{
     collections::{HashMap, HashSet},
     net::TcpListener,
@@ -17,7 +18,6 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter};
 
 /// Saved device id, computer id, guest port.
 type Key = (String, String, u16);
@@ -151,14 +151,14 @@ const DEVICE_STATE_MAX_AGE: Duration = Duration::from_secs(2);
 
 /// Network state of this device for a controller, with stable computer ids. Several
 /// controllers polling at once share one read (see `cached`).
-pub(crate) fn device_state(app: &AppHandle) -> Result<Value, String> {
+pub(crate) fn device_state(paths: &runtime::RuntimePaths) -> Result<Value, String> {
     cached(&DEVICE_STATE, DEVICE_STATE_MAX_AGE, || {
-        read_device_state(app)
+        read_device_state(paths)
     })
 }
 /// A fresh read after a change on this device; later polls reuse it.
-pub(crate) fn fresh_device_state(app: &AppHandle) -> Result<Value, String> {
-    cached(&DEVICE_STATE, Duration::ZERO, || read_device_state(app))
+pub(crate) fn fresh_device_state(paths: &runtime::RuntimePaths) -> Result<Value, String> {
+    cached(&DEVICE_STATE, Duration::ZERO, || read_device_state(paths))
 }
 static DEVICE_STATE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 /// Returns the stored value while younger than `max_age`, else computes and stores it. The
@@ -188,10 +188,9 @@ fn read_device_computer_ids(metadata: &Path) -> Result<HashMap<String, String>, 
         .collect())
 }
 
-fn read_device_state(app: &AppHandle) -> Result<Value, String> {
-    let paths = runtime::runtime_paths(app)?;
+fn read_device_state(paths: &runtime::RuntimePaths) -> Result<Value, String> {
     let before = read_device_computer_ids(&paths.metadata)?;
-    let state = tauri::async_runtime::block_on(crate::network::read_network_state(app.clone()))?;
+    let state = crate::network::read_network_state(paths)?;
     let value = serde_json::to_value(state).map_err(|e| e.to_string())?;
     let after = read_device_computer_ids(&paths.metadata)?;
     project_host_ports(value, &before, &after)
@@ -218,14 +217,14 @@ fn project_host_ports(
     Ok(value)
 }
 
-fn read(app: &AppHandle, device: &str) -> Result<Value, BridgeError> {
+fn read(device: &str) -> Result<Value, BridgeError> {
     // A device that just failed repeatedly is answered at once; its snapshot poll
     // (or this read, shortly) tries again.
     if let Some(error) = remote::offline(device) {
         return Err(error.into());
     }
     let observation = tunnels().observe(device);
-    let value = match remote::call_remote_typed(app, device, "network.state", json!({})) {
+    let value = match remote::call_remote_typed(device, "network.state", json!({})) {
         Ok(value) => {
             remote::poll_succeeded(device);
             value
@@ -245,7 +244,7 @@ fn read(app: &AppHandle, device: &str) -> Result<Value, BridgeError> {
     } = projection;
     drop(closed);
     for request in reconnect {
-        reconnect_in_background(app.clone(), request);
+        reconnect_in_background(request);
     }
     Ok(value)
 }
@@ -508,14 +507,9 @@ fn control_ready(
     result
 }
 
-fn open_guest_tunnel(
-    app: &AppHandle,
-    key: &Key,
-    local: Option<u16>,
-    owner_endpoint: u16,
-) -> Result<Tunnel, String> {
+fn open_guest_tunnel(key: &Key, local: Option<u16>, owner_endpoint: u16) -> Result<Tunnel, String> {
     let (alias, config, address) =
-        crate::editor::prepare_remote_network_private(app, &key.0, &key.1, key.2)?;
+        crate::editor::prepare_remote_network_private(&key.0, &key.1, key.2)?;
     open_tunnel(
         |local, socket| {
             remote::guest_tunnel_commands(&config, &alias, local, address, key.2, socket)
@@ -526,11 +520,10 @@ fn open_guest_tunnel(
     )
 }
 
-fn reconnect_in_background(app: AppHandle, request: Arc<Reconnect>) {
+fn reconnect_in_background(request: Arc<Reconnect>) {
     std::thread::spawn(move || {
         let opened = runtime::shutdown::ensure_accepting_operations().and_then(|()| {
             open_guest_tunnel(
-                &app,
                 &request.key,
                 Some(request.intent.local_port),
                 request.remote_port,
@@ -538,8 +531,17 @@ fn reconnect_in_background(app: AppHandle, request: Arc<Reconnect>) {
         });
         let unused = finish_reconnect(&request, opened);
         drop(unused);
-        let _ = app.emit("silo://network-state-changed", ());
+        publish_network_state_changed();
     });
+}
+
+fn publish_network_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            Event::new("silo://network-state-changed", Value::Null),
+            Audience::All,
+        );
+    }
 }
 
 fn finish_reconnect(request: &Arc<Reconnect>, opened: Result<Tunnel, String>) -> Option<Tunnel> {
@@ -647,51 +649,43 @@ fn finish_save(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn remote_network_state(app: AppHandle, device_id: String) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || read(&app, &device_id))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) fn remote_network_state(device_id: &str) -> Result<Value, BridgeError> {
+    read(device_id)
 }
-#[tauri::command]
-pub async fn remote_save_network_port(
-    app: AppHandle,
+pub(crate) fn remote_save_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
     host_port: Option<u16>,
     scheme: Option<String>,
 ) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if port == 0
-            || host_port == Some(0)
-            || !matches!(scheme.as_deref(), None | Some("http" | "https"))
-        {
-            return Err("Invalid port configuration.".into());
-        }
-        let pending = PendingSave::new((device_id.clone(), computer_id.clone(), port))?;
-        let state = remote::call_remote_typed(
-            &app,
-            &device_id,
-            "network.publish",
-            json!({"computerId":computer_id,"port":port,"scheme":scheme}),
+    if port == 0
+        || host_port == Some(0)
+        || !matches!(scheme.as_deref(), None | Some("http" | "https"))
+    {
+        return Err("Invalid port configuration.".into());
+    }
+    let pending = PendingSave::new((device_id.clone(), computer_id.clone(), port))?;
+    let state = remote::call_remote_typed(
+        &device_id,
+        "network.publish",
+        json!({"computerId":computer_id,"port":port,"scheme":scheme}),
+    )?;
+    let endpoint = state["computers"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["computerId"] == computer_id))
+        .and_then(|r| r["ports"].as_array())
+        .and_then(|ports| ports.iter().find(|p| p["port"] == port))
+        .and_then(|p| p["hostPort"].as_u64())
+        .and_then(|p| u16::try_from(p).ok())
+        .ok_or(
+            "The remote computer port is not available yet. Check the computer service and retry.",
         )?;
-        let endpoint = state["computers"]
-            .as_array()
-            .and_then(|rows| rows.iter().find(|r| r["computerId"] == computer_id))
-            .and_then(|r| r["ports"].as_array())
-            .and_then(|ports| ports.iter().find(|p| p["port"] == port))
-            .and_then(|p| p["hostPort"].as_u64())
-            .and_then(|p| u16::try_from(p).ok())
-            .ok_or("The remote computer port is not available yet. Check the computer service and retry.")?;
-        let key = (device_id.clone(), computer_id, port);
-        finish_save(pending, host_port, scheme, endpoint, |local| {
-            open_guest_tunnel(&app, &key, local, endpoint)
-        })?;
-        read(&app, &device_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let key = (device_id.clone(), computer_id, port);
+    finish_save(pending, host_port, scheme, endpoint, |local| {
+        open_guest_tunnel(&key, local, endpoint)
+    })?;
+    read(&device_id)
 }
 fn forget_port(key: &Key) {
     let closed = {
@@ -706,59 +700,49 @@ fn forget_port(key: &Key) {
 }
 
 /// Stops publishing the port on the owning device, then closes this device's tunnel.
-#[tauri::command]
-pub async fn remote_remove_network_port(
-    app: AppHandle,
+pub(crate) fn remote_remove_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
 ) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        remote::call_remote_typed(
-            &app,
-            &device_id,
-            "network.unpublish",
-            json!({"computerId":computer_id,"port":port}),
-        )?;
-        forget_port(&(device_id.clone(), computer_id, port));
-        read(&app, &device_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    remote::call_remote_typed(
+        &device_id,
+        "network.unpublish",
+        json!({"computerId":computer_id,"port":port}),
+    )?;
+    forget_port(&(device_id.clone(), computer_id, port));
+    read(&device_id)
 }
-#[tauri::command]
-pub async fn remote_open_network_port(
-    app: AppHandle,
+pub(crate) fn remote_open_network_port(
     device_id: String,
     computer_id: String,
     port: u16,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = read(&app, &device_id).map_err(|error| error.message)?;
-        let target = format!("silo-remote:{device_id}:{computer_id}");
-        let endpoint = state["computers"]
-            .as_array()
-            .and_then(|rows| rows.iter().find(|r| r["computer"] == target))
-            .and_then(|r| r["ports"].as_array())
-            .and_then(|ports| {
-                ports
-                    .iter()
-                    .find(|p| p["port"] == port && p["state"] == "reachable")
-            })
-            .ok_or("This service is not reachable.")?;
-        let scheme = endpoint["scheme"]
-            .as_str()
-            .filter(|s| matches!(*s, "http" | "https"))
-            .ok_or("This port is not a website.")?;
-        let local = endpoint["hostPort"]
-            .as_u64()
-            .and_then(|port| u16::try_from(port).ok())
-            .ok_or("This service is not connected.")?;
-        let url = crate::network::website_url(scheme, row_host(&state, &target), local);
-        crate::applications::open_browser(&app, &url)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+) -> Result<String, String> {
+    let state = read(&device_id).map_err(|error| error.message)?;
+    let target = format!("silo-remote:{device_id}:{computer_id}");
+    let endpoint = state["computers"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["computer"] == target))
+        .and_then(|r| r["ports"].as_array())
+        .and_then(|ports| {
+            ports
+                .iter()
+                .find(|p| p["port"] == port && p["state"] == "reachable")
+        })
+        .ok_or("This service is not reachable.")?;
+    let scheme = endpoint["scheme"]
+        .as_str()
+        .filter(|s| matches!(*s, "http" | "https"))
+        .ok_or("This port is not a website.")?;
+    let local = endpoint["hostPort"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok())
+        .ok_or("This service is not connected.")?;
+    Ok(crate::network::website_url(
+        scheme,
+        row_host(&state, &target),
+        local,
+    ))
 }
 fn row_host<'a>(state: &'a Value, target: &str) -> Option<&'a str> {
     state["computers"]

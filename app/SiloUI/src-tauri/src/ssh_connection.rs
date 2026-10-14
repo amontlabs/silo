@@ -5,8 +5,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use tauri::{AppHandle, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,69 +114,78 @@ pub(crate) fn forget_device(home: &Path, device: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) async fn ssh_connection(
-    app: AppHandle,
-    window: WebviewWindow,
+pub(crate) enum ConnectionResult {
+    Command(String),
+    KeyExport { source: PathBuf, filename: String },
+}
+
+pub(crate) fn prepare(
+    paths: &runtime::RuntimePaths,
     computer: Option<String>,
     device_id: Option<String>,
     computer_id: Option<String>,
     download: bool,
     network: Option<bool>,
-) -> Result<Option<String>, String> {
-    if window.label() != "main" {
-        return Err("SSH keys can only be exported from the main window.".into());
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime::runtime_paths(&app)?;
-        let is_remote = device_id.is_some();
-        let (value, key, identity) = if let Some(device) = device_id {
-            uuid::Uuid::parse_str(&device).map_err(|_| "Invalid device identity.")?;
-            let computer = computer_id.ok_or("Missing computer identity.")?;
-            uuid::Uuid::parse_str(&computer).map_err(|_| "Invalid computer identity.")?;
-            let key = remote_client_key(&paths.home, &device, &computer)?;
-            // The owner authorizes this device's public key under this device's
-            // Silo identity, so a replaced key supersedes the previous one.
-            let (controller, _) = remote::log_identity()?;
-            let value = remote::call_remote(&app, &device, "ssh.access.connection", serde_json::json!({
+) -> Result<ConnectionResult, String> {
+    let is_remote = device_id.is_some();
+    let (value, key, identity) = if let Some(device) = device_id {
+        uuid::Uuid::parse_str(&device).map_err(|_| "Invalid device identity.")?;
+        let computer = computer_id.ok_or("Missing computer identity.")?;
+        uuid::Uuid::parse_str(&computer).map_err(|_| "Invalid computer identity.")?;
+        let key = remote_client_key(&paths.home, &device, &computer)?;
+        // The owner authorizes this device's public key under this device's
+        // Silo identity, so a replaced key supersedes the previous one.
+        let (controller, _) = remote::log_identity()?;
+        let value = remote::call_remote(
+            &device,
+            "ssh.access.connection",
+            serde_json::json!({
                 "computerId":computer,"accountProtocol":1,"publicKey":editor::public_key(&key)?,"controllerId":controller,
-            }))?;
-            if value.get("privateKey").is_some() {
-                return Err("Update Silo on both devices to connect over SSH.".into());
-            }
-            (value, key, format!("{device}-{computer}"))
-        } else {
-            // Exporting a connection reconciles the shared SSH listeners and port
-            // allocation across computers; device scope.
-            let _guard = runtime::OPERATIONS
-                .device("Preparing SSH access")
-                .map_err(|e| e.to_string())?;
-            runtime::shutdown::ensure_accepting_operations()?;
-            let name = computer.ok_or("Missing computer name.")?;
-            let metadata = runtime::read_metadata(&paths.metadata).map_err(|_| "Could not read computers.")?;
-            let computer = metadata.computers.iter().find(|m| m.name() == name).ok_or("Computer no longer exists.")?;
-            let value = ssh_access::connection_material(&paths, computer.id())?;
-            let private = value["privateKey"].as_str().ok_or("Could not read the connection key.")?;
-            let root = legacy_connection_root(&paths.home);
-            editor::private_directory(&root)?;
-            let local = root.join(computer.id());
-            editor::write_private(&local, private.as_bytes())?;
-            // Verify the exported bytes form a usable private key before presenting them.
-            editor::public_key(&local)?;
-            (value, local, computer.id().to_owned())
-        };
-        let user = crate::working_account::response_user(&value)?;
-        let mut endpoint: Endpoint = serde_json::from_value(value).map_err(|_| "Invalid connection response. Update Silo on both devices.")?;
-        select_endpoint(&mut endpoint, network, is_remote, download)?;
-        if download {
-            let Some(selected) = app.dialog().file().set_parent(&window).set_title("Save SSH connection key")
-                .set_file_name(format!("silo-{identity}.key")).blocking_save_file() else { return Ok(None); };
-            let destination = selected.into_path().map_err(|_| "Choose a local file.")?;
-            let private = editor::read_regular(&key)?;
-            editor::write_private(&destination, &private)?;
-            Ok(None)
-        } else { command(&key, &endpoint, user).map(Some) }
-    }).await.map_err(|_| "Could not prepare SSH connection.".to_owned())?
+            }),
+        )?;
+        if value.get("privateKey").is_some() {
+            return Err("Update Silo on both devices to connect over SSH.".into());
+        }
+        (value, key, format!("{device}-{computer}"))
+    } else {
+        // Exporting a connection reconciles the shared SSH listeners and port
+        // allocation across computers; device scope.
+        let _guard = runtime::OPERATIONS
+            .device("Preparing SSH access")
+            .map_err(|e| e.to_string())?;
+        runtime::shutdown::ensure_accepting_operations()?;
+        let name = computer.ok_or("Missing computer name.")?;
+        let metadata =
+            runtime::read_metadata(&paths.metadata).map_err(|_| "Could not read computers.")?;
+        let computer = metadata
+            .computers
+            .iter()
+            .find(|m| m.name() == name)
+            .ok_or("Computer no longer exists.")?;
+        let value = ssh_access::connection_material(paths, computer.id())?;
+        let private = value["privateKey"]
+            .as_str()
+            .ok_or("Could not read the connection key.")?;
+        let root = legacy_connection_root(&paths.home);
+        editor::private_directory(&root)?;
+        let local = root.join(computer.id());
+        editor::write_private(&local, private.as_bytes())?;
+        // Verify the exported bytes form a usable private key before presenting them.
+        editor::public_key(&local)?;
+        (value, local, computer.id().to_owned())
+    };
+    let user = crate::working_account::response_user(&value)?;
+    let mut endpoint: Endpoint = serde_json::from_value(value)
+        .map_err(|_| "Invalid connection response. Update Silo on both devices.")?;
+    select_endpoint(&mut endpoint, network, is_remote, download)?;
+    if download {
+        Ok(ConnectionResult::KeyExport {
+            source: key,
+            filename: format!("silo-{identity}.key"),
+        })
+    } else {
+        command(&key, &endpoint, user).map(ConnectionResult::Command)
+    }
 }
 
 #[cfg(test)]

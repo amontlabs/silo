@@ -11,11 +11,10 @@ use std::{
     },
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
-use tauri::AppHandle;
 mod operations;
 /// Appends the key read from input to `authorized_keys` once. sshd runs this with the
 /// account's login shell, so the POSIX script is handed to `sh` in single quotes, which
@@ -47,6 +46,21 @@ fn config_lock() -> std::sync::MutexGuard<'static, ()> {
     crate::sync::lock_or_recover(&CONFIG_LOCK, "remote settings")
 }
 static REMOTE_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) type RuntimePathsResolver =
+    dyn Fn() -> Result<crate::runtime::RuntimePaths, String> + Send + Sync + 'static;
+
+struct RemoteRuntime {
+    paths: Arc<RuntimePathsResolver>,
+    checkpoints: Arc<crate::remote_access::CheckpointHandler>,
+}
+static REMOTE_RUNTIME: OnceLock<Arc<RemoteRuntime>> = OnceLock::new();
+
+fn remote_runtime() -> Result<Arc<RemoteRuntime>, String> {
+    REMOTE_RUNTIME
+        .get()
+        .cloned()
+        .ok_or_else(|| "The remote engine is not initialized.".to_owned())
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
@@ -122,8 +136,15 @@ fn connection_addresses(user: &str, name: &str, interfaces: &[String]) -> Vec<Co
     list
 }
 fn directory() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("Home directory is unavailable.")?;
-    directory_in(Path::new(&home))
+    directory_in(&current_home()?)
+}
+fn current_home() -> Result<PathBuf, String> {
+    if let Some(context) = silo_engine::context::current() {
+        return Ok(context.paths().home.clone());
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Home directory is unavailable.".into())
 }
 /// The current channel's `desktop-remote` directory under `home`, private to this account.
 fn directory_in(home: &Path) -> Result<PathBuf, String> {
@@ -155,8 +176,7 @@ fn read_config_in(dir: &Path) -> Result<Config, String> {
 /// The `desktop-remote` directory of the current channel as it exists, without creating
 /// or changing anything. Helper processes use it so they never write Connections state.
 fn existing_directory() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("Home directory is unavailable.")?;
-    Ok(existing_directory_in(Path::new(&home)))
+    Ok(existing_directory_in(&current_home()?))
 }
 fn existing_directory_in(home: &Path) -> PathBuf {
     crate::channel::current()
@@ -321,11 +341,10 @@ fn record_start_error(error: Option<String>) {
 async fn settings_io<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(work)
+    tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| "Connections settings are unavailable.".to_string())?
 }
-#[tauri::command]
 pub async fn connections_status() -> Result<ConnectionsStatus, String> {
     settings_io(|| {
         let _guard = config_lock();
@@ -389,7 +408,9 @@ fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
                             }))
             });
         if !ours {
-            return Err(format!("~/.local/bin/{name} already exists. Choose a different name for that file before turning on Connections."));
+            return Err(format!(
+                "~/.local/bin/{name} already exists. Choose a different name for that file before turning on Connections."
+            ));
         }
         if previous.as_deref() == Some(target) {
             return Ok(());
@@ -404,14 +425,9 @@ fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 fn link_bridge_for_this_account() -> Result<(), String> {
-    let home = PathBuf::from(std::env::var_os("HOME").ok_or("Home unavailable.")?);
-    link_bridge(&home, &bridge_target()?)
+    link_bridge(&current_home()?, &bridge_target()?)
 }
-#[tauri::command]
-pub async fn set_connections_enabled(
-    app: AppHandle,
-    enabled: bool,
-) -> Result<ConnectionsStatus, String> {
+pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus, String> {
     settings_io(move || {
         let _guard = config_lock();
         if enabled {
@@ -426,7 +442,7 @@ pub async fn set_connections_enabled(
             let listening = if LISTENING.load(std::sync::atomic::Ordering::Acquire) {
                 Ok(())
             } else {
-                listen(app)
+                listen()
             };
             record_start_error(listening.err());
         }
@@ -434,7 +450,6 @@ pub async fn set_connections_enabled(
     })
     .await
 }
-#[tauri::command]
 pub async fn device_list() -> Result<Vec<Device>, String> {
     settings_io(saved_devices).await
 }
@@ -442,15 +457,16 @@ pub(crate) fn saved_devices() -> Result<Vec<Device>, String> {
     let _guard = config_lock();
     Ok(read_config()?.devices)
 }
-#[tauri::command]
-pub async fn remove_device(app: AppHandle, device_id: String) -> Result<(), String> {
+pub async fn remove_device(device_id: String) -> Result<(), String> {
     // Closing tunnels and viewers waits for their processes; keep it off the main thread.
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _guard = config_lock();
         let mut config = read_config()?;
         // Keep the device available for retry if its local key cleanup fails.
-        if let Ok(paths) = crate::runtime::runtime_paths(&app) {
-            crate::ssh_connection::forget_device(&paths.home, &device_id)?;
+        if let Ok(runtime) = remote_runtime() {
+            if let Ok(paths) = (runtime.paths)() {
+                crate::ssh_connection::forget_device(&paths.home, &device_id)?;
+            }
         }
         config.devices.retain(|h| h.id != device_id);
         save_config(&config)?;
@@ -508,17 +524,8 @@ fn validate_address(address: &str) -> Result<(), String> {
     }
     Ok(())
 }
-#[tauri::command]
-pub async fn authorize_device(app: AppHandle, address: String) -> Result<(), String> {
-    // Resolving and launching the terminal can take seconds (application lookup, an
-    // AppleScript for Ghostty), so it runs off the main thread.
-    tauri::async_runtime::spawn_blocking(move || {
-        let command = authorize_command(address.trim())?;
-        let application = crate::applications::selected_terminal(&app)?;
-        crate::applications::open_terminal(&app, &application, &command)
-    })
-    .await
-    .map_err(|_| "Could not open the terminal.".to_string())?
+pub(crate) fn authorization_command(address: &str) -> Result<String, String> {
+    authorize_command(address.trim())
 }
 /// The terminal command that lets the user trust the host key and unlock their SSH key.
 fn authorize_command(address: &str) -> Result<String, String> {
@@ -812,20 +819,15 @@ fn tunnel_commands(
     (command, check)
 }
 
-#[tauri::command]
-pub async fn setup_device_key(app: AppHandle, address: String) -> Result<(), String> {
-    // ssh-keygen and the terminal launch run off the main thread.
-    tauri::async_runtime::spawn_blocking(move || {
-        let address = address.trim();
-        let command = key_setup_command(&directory()?, address)?;
-        let application = crate::applications::selected_terminal(&app)?;
-        crate::applications::open_terminal(&app, &application, &command)?;
-        // Offer Silo's key alone again once it is installed there.
-        remember_identity(address, Identity::SiloOnly);
-        Ok(())
-    })
-    .await
-    .map_err(|_| "Could not open the terminal.".to_string())?
+pub(crate) fn prepare_device_key_setup(address: &str) -> Result<(String, String), String> {
+    let address = address.trim().to_owned();
+    let command = key_setup_command(&directory()?, &address)?;
+    Ok((address, command))
+}
+
+pub(crate) fn remember_device_key_setup(address: &str) {
+    // Offer Silo's key alone again once it is installed there.
+    remember_identity(address, Identity::SiloOnly);
 }
 /// Creates Silo's key in `dir` if needed and returns the terminal command that installs
 /// its restricted `authorized_keys` line for the account at `address`.
@@ -1203,21 +1205,13 @@ fn run_exchange(
     decode_reply(&response)
 }
 /// Legacy adapter for callers whose command error contract has not migrated yet.
-pub(crate) fn call_remote(
-    app: &AppHandle,
-    device_id: &str,
-    method: &str,
-    params: Value,
-) -> Result<Value, String> {
-    call_remote_typed(app, device_id, method, params).map_err(|error| error.message)
+pub(crate) fn call_remote(device_id: &str, method: &str, params: Value) -> Result<Value, String> {
+    call_remote_typed(device_id, method, params).map_err(|error| error.message)
 }
 /// The methods the connected device `device_id` serves (its handshake), remembered for a
 /// minute so frequent callers (status polling) do not add a round trip each time.
 /// Failures are not remembered.
-pub(crate) fn device_capabilities(
-    app: &AppHandle,
-    device_id: &str,
-) -> Result<Vec<String>, BridgeError> {
+pub(crate) fn device_capabilities(device_id: &str) -> Result<Vec<String>, BridgeError> {
     static KNOWN: Mutex<Vec<(String, Instant, Vec<String>)>> = Mutex::new(Vec::new());
     const FRESH: Duration = Duration::from_secs(60);
     if let Some((_, _, known)) = crate::sync::lock_or_recover(&KNOWN, "remote capabilities")
@@ -1226,7 +1220,7 @@ pub(crate) fn device_capabilities(
     {
         return Ok(known.clone());
     }
-    let reply = call_remote_typed(app, device_id, "handshake", json!({}))?;
+    let reply = call_remote_typed(device_id, "handshake", json!({}))?;
     let names: Vec<String> = reply["capabilities"]
         .as_array()
         .map(|names| {
@@ -1258,7 +1252,6 @@ fn name_version_mismatch(error: BridgeError, device: &str) -> BridgeError {
 }
 
 pub(crate) fn call_remote_typed(
-    _app: &AppHandle,
     device_id: &str,
     method: &str,
     params: Value,
@@ -1359,9 +1352,7 @@ fn checkpoint_remote_request(
     Ok(params)
 }
 
-#[tauri::command]
 pub async fn remote_checkpoint_action(
-    app: AppHandle,
     device_id: String,
     computer_id: String,
     action: String,
@@ -1369,7 +1360,7 @@ pub async fn remote_checkpoint_action(
     checkpoint_id: Option<String>,
     new_name: Option<String>,
 ) -> Result<(), BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let (method, params) = checkpoint_remote_request(
             &computer_id,
             &action,
@@ -1377,7 +1368,7 @@ pub async fn remote_checkpoint_action(
             checkpoint_id.as_deref(),
             new_name.as_deref(),
         )?;
-        call_remote_typed(&app, &device_id, method, params).map(|_| ())
+        call_remote_typed(&device_id, method, params).map(|_| ())
     })
     .await
     .map_err(|_| "Silo could not finish the checkpoint action on the remote device. Reconnect to it and refresh the computer before retrying.".to_string())?
@@ -1397,9 +1388,8 @@ fn handshake_result(address: &str, reply: Result<Value, Failure>) -> Result<Valu
     Ok(result)
 }
 
-#[tauri::command]
 pub async fn connect_device(address: String, replace: Option<bool>) -> Result<Device, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let address = address.trim().to_owned();
         let handshake = json!({"version": VERSION, "method": "handshake", "params": {"sshKey": silo_public_key()}});
         let result = handshake_result(
@@ -1447,7 +1437,14 @@ fn save_connected_device(
         } else {
             let production = crate::channel::Channel::Production;
             let development = crate::channel::Channel::Development;
-            format!("{} uses this device's Silo identity, probably because its Silo settings were copied from here. On {}, quit Silo, delete ~/{}/desktop-remote/config.json (~/{}/desktop-remote/config.json for {}), and open Silo again.", device.name, device.name, production.state_dir_name(), development.state_dir_name(), development.product_name())
+            format!(
+                "{} uses this device's Silo identity, probably because its Silo settings were copied from here. On {}, quit Silo, delete ~/{}/desktop-remote/config.json (~/{}/desktop-remote/config.json for {}), and open Silo again.",
+                device.name,
+                device.name,
+                production.state_dir_name(),
+                development.state_dir_name(),
+                development.product_name()
+            )
         });
     }
     if let Some(saved) = config.devices.iter().find(|saved| saved.id == device.id) {
@@ -1464,15 +1461,12 @@ fn save_connected_device(
     Ok(device)
 }
 
-#[tauri::command]
 pub async fn device_snapshot(
-    app: AppHandle,
     device_id: String,
     refresh_repositories: Option<bool>,
 ) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let result = call_remote_typed(
-            &app,
             &device_id,
             "runtime.snapshot",
             json!({"refreshRepositories": refresh_repositories.unwrap_or(false)}),
@@ -1575,22 +1569,13 @@ pub(crate) fn close_after_failed_poll(device: &str, error: &BridgeError) {
         }
     }
 }
-#[tauri::command]
 pub async fn remote_computer_action(
-    app: AppHandle,
     device_id: String,
     computer_id: String,
     action: String,
-    name: Option<String>,
 ) -> Result<Value, BridgeError> {
-    // Elapsed time counts from the command, like a local action.
-    let started = std::time::Instant::now();
-    let notice_app = app.clone();
-    let (notice_id, notice_action, notice_device) =
-        (computer_id.clone(), action.clone(), device_id.clone());
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         call_remote_typed(
-            &app,
             &device_id,
             "runtime.action",
             json!({"computerId":computer_id,"action":action}),
@@ -1598,40 +1583,10 @@ pub async fn remote_computer_action(
     })
     .await
     .map_err(|e| e.to_string())?;
-    // The owning device reports only a state snapshot; the caller's name (or the
-    // snapshot) names the computer. Without either, the notice says "this computer".
-    let name = name
-        .or_else(|| {
-            result
-                .as_ref()
-                .ok()
-                .and_then(|state| computer_name(state, &notice_id))
-        })
-        .unwrap_or_else(|| "this computer".into());
-    let computer = remote_notice_computer(&notice_device, &notice_id, &name);
-    let outcome = match &result {
-        Ok(_) => crate::notifications::Outcome::Succeeded,
-        Err(error) if error.code == ErrorCode::Cancelled => {
-            crate::notifications::Outcome::Cancelled
-        }
-        Err(error) if error.code == ErrorCode::AlreadyQueued => {
-            crate::notifications::Outcome::AlreadyQueued
-        }
-        Err(message) => crate::notifications::Outcome::Failed(&message.message),
-    };
-    if let Some(notice) = crate::notifications::lifecycle_notice(
-        &notice_action,
-        &name,
-        Some(computer),
-        started.elapsed(),
-        outcome,
-    ) {
-        crate::notifications::notify_native(&notice_app, notice);
-    }
     result
 }
 
-fn remote_notice_computer(
+pub(crate) fn remote_notice_computer(
     device_id: &str,
     computer_id: &str,
     name: &str,
@@ -1673,7 +1628,7 @@ mod notice_tests {
 }
 
 /// Display name of one computer in a remote application snapshot.
-fn computer_name(state: &Value, computer_id: &str) -> Option<String> {
+pub(crate) fn computer_name(state: &Value, computer_id: &str) -> Option<String> {
     state["computers"]
         .as_array()?
         .iter()
@@ -1681,56 +1636,44 @@ fn computer_name(state: &Value, computer_id: &str) -> Option<String> {
         .and_then(|computer| computer["configuration"]["name"].as_str())
         .map(str::to_owned)
 }
-#[tauri::command]
 pub async fn remote_upsert_computer(
-    app: AppHandle,
     device_id: String,
     configuration: crate::runtime::ComputerConfiguration,
     expected: Option<crate::runtime::ComputerConfiguration>,
 ) -> Result<Value, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let created = expected.is_none();
-        let id = configuration.id().to_owned();
-        let state = call_remote_typed(
-            &app,
+    tokio::task::spawn_blocking(move || {
+        call_remote_typed(
             &device_id,
             "runtime.upsert",
             json!({"configuration":configuration,"expected":expected}),
-        )?;
-        if created {
-            // The other device's own setting decided the new computer's mode; this user's
-            // setting replaces it. An older Silo there does not serve the method and keeps its own.
-            let mode = crate::settings::current_settings(&app)
-                .map(|settings| crate::computer_use::initial_approval_from(&settings))
-                .unwrap_or_default();
-            if let Err(error) = call_remote_typed(
-                &app,
-                &device_id,
-                "computerUse.approval",
-                json!({"computerId":id,"mode":mode.as_str()}),
-            ) {
-                eprintln!(
-                    "Computer use approval was not set on the new remote computer: {error:?}"
-                );
-            }
-        }
-        Ok(state)
+        )
     })
     .await
     .map_err(|e| e.to_string())?
 }
-#[tauri::command]
+pub async fn remote_set_computer_approval(
+    device_id: String,
+    computer_id: String,
+    mode: String,
+) -> Result<(), BridgeError> {
+    tokio::task::spawn_blocking(move || {
+        call_remote_typed(
+            &device_id,
+            "computerUse.approval",
+            json!({"computerId":computer_id,"mode":mode}),
+        )
+        .map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 pub async fn remote_delete_computer(
-    app: AppHandle,
     device_id: String,
     computer_id: String,
     expected: crate::runtime::ComputerConfiguration,
 ) -> Result<Value, BridgeError> {
-    let notice_app = app.clone();
-    let deleted = format!("silo-remote:{device_id}:{computer_id}");
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         call_remote_typed(
-            &app,
             &device_id,
             "runtime.delete",
             json!({"computerId":computer_id,"expected":expected}),
@@ -1738,13 +1681,9 @@ pub async fn remote_delete_computer(
     })
     .await
     .map_err(|e| e.to_string())?;
-    if result.is_ok() {
-        // A deleted computer has nothing left to open: withdraw its delivered notices.
-        crate::notifications::clear_computer(&notice_app, &deleted);
-    }
     result
 }
-/// Called before constructing Tauri. A bridge never launches the GUI or runtime.
+/// Called before constructing the host app. A bridge never launches the GUI or runtime.
 pub(crate) fn run_bridge() -> Result<(), String> {
     let mut socket = UnixStream::connect(existing_directory()?.join("control.sock"))
         .map_err(|_| "Silo is not running on this device.".to_string())?;
@@ -1895,7 +1834,7 @@ fn read_reply_cancellable<R: std::io::BufRead + Send + 'static>(
         match receive.recv_timeout(Duration::from_millis(50)) {
             Ok(result) => return result,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                return Err("The remote Silo connection ended.".into())
+                return Err("The remote Silo connection ended.".into());
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
         }
@@ -2040,7 +1979,7 @@ fn bind_control_socket(dir: &Path) -> Result<UnixListener, String> {
             Err(error) => {
                 return Err(format!(
                     "Could not verify Connections socket ownership: {error}"
-                ))
+                ));
             }
         }
     }
@@ -2051,7 +1990,11 @@ fn bind_control_socket(dir: &Path) -> Result<UnixListener, String> {
 /// Serves Connections for the app's lifetime. A failure never stops Silo from
 /// opening: it is kept for the settings page (`error`) and retried when the user turns
 /// Connections on again.
-pub(crate) fn start(app: AppHandle) {
+pub(crate) fn start(
+    paths: Arc<RuntimePathsResolver>,
+    checkpoints: Arc<crate::remote_access::CheckpointHandler>,
+) {
+    let _ = REMOTE_RUNTIME.set(Arc::new(RemoteRuntime { paths, checkpoints }));
     let enabled = match read_config() {
         Ok(config) => config.enabled,
         Err(error) => return record_start_error(Some(error)),
@@ -2063,10 +2006,11 @@ pub(crate) fn start(app: AppHandle) {
     } else {
         Ok(())
     };
-    let listening = listen(app);
+    let listening = listen();
     record_start_error(listening.err().or(linked.err()));
 }
-fn listen(app: AppHandle) -> Result<(), String> {
+fn listen() -> Result<(), String> {
+    let remote_runtime = remote_runtime()?;
     let lease = lease_control(&directory()?)?;
     let listener = bind_control_socket(&directory()?)?;
     LISTENING.store(true, std::sync::atomic::Ordering::Release);
@@ -2080,7 +2024,8 @@ fn listen(app: AppHandle) -> Result<(), String> {
                 );
                 return;
             };
-            let app = app.clone();
+            let paths = remote_runtime.paths.clone();
+            let checkpoints = remote_runtime.checkpoints.clone();
             thread::spawn(move || {
                 let mut permit = Some(permit);
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
@@ -2094,7 +2039,10 @@ fn listen(app: AppHandle) -> Result<(), String> {
                                 &mut permit,
                                 &STREAMS,
                                 &request["params"],
-                                |params| crate::macos_remote::open_display_stream(&app, params),
+                                |params| {
+                                    let paths = paths()?;
+                                    crate::macos_remote::open_display_stream(&paths, params)
+                                },
                                 || {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
                                         && crate::runtime::shutdown::ensure_accepting_operations()
@@ -2111,7 +2059,8 @@ fn listen(app: AppHandle) -> Result<(), String> {
                                 &STREAMS,
                                 &request["params"],
                                 |params| {
-                                    crate::remote_access::spawn_stream(&app, "guest.ssh", params)
+                                    let paths = paths()?;
+                                    crate::remote_access::spawn_stream(&paths, "guest.ssh", params)
                                 },
                                 || {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
@@ -2122,7 +2071,13 @@ fn listen(app: AppHandle) -> Result<(), String> {
                             return Ok(None);
                         }
                         let peer = stream.try_clone().map_err(|e| e.to_string())?;
-                        dispatch(&app, request, Arc::new(move || connection_open(&peer))).map(Some)
+                        dispatch(
+                            paths.as_ref(),
+                            checkpoints.as_ref(),
+                            request,
+                            Arc::new(move || connection_open(&peer)),
+                        )
+                        .map(Some)
                     });
                 match result {
                     Ok(Some(result)) => {
@@ -2185,7 +2140,8 @@ fn validate_authorization(config: &Config, request: &Value) -> Result<(), Bridge
 }
 
 fn dispatch(
-    app: &AppHandle,
+    paths: &RuntimePathsResolver,
+    checkpoints: &crate::remote_access::CheckpointHandler,
     request: Value,
     connection: operations::Probe,
 ) -> Result<Value, BridgeError> {
@@ -2194,28 +2150,31 @@ fn dispatch(
         &request,
         connection,
         Arc::new(changes_allowed),
-        |method, params| execute(app, method, params),
+        |method, params| execute(paths, checkpoints, method, params),
     )
 }
 /// Runs one authorized, classified request against this device.
-fn execute(app: &AppHandle, method: &str, params: &Value) -> Result<Value, BridgeError> {
+fn execute(
+    paths: &RuntimePathsResolver,
+    checkpoints: &crate::remote_access::CheckpointHandler,
+    method: &str,
+    params: &Value,
+) -> Result<Value, BridgeError> {
+    if method == "handshake" {
+        // Earlier versions installed Silo's key without restrictions; tighten it over this session.
+        let Some(public) = params["sshKey"].as_str() else {
+            return Ok(Value::Null);
+        };
+        return handshake_key_in(&current_home()?.join(".ssh/authorized_keys"), Some(public));
+    }
+    let paths = paths().map_err(BridgeError::from)?;
     match method {
-        "handshake" => {
-            // Earlier versions installed Silo's key without restrictions; tighten it over this session.
-            let Some(public) = params["sshKey"].as_str() else {
-                return Ok(Value::Null);
-            };
-            let home = std::env::var_os("HOME").ok_or("Home directory is unavailable.")?;
-            handshake_key_in(
-                &PathBuf::from(home).join(".ssh/authorized_keys"),
-                Some(public),
-            )
-        }
         _ if method.starts_with("runtime.") => {
-            crate::runtime::remote_ops::dispatch(app, method, params.clone())
+            crate::runtime::remote_ops::dispatch(&paths, method, params.clone())
         }
-        _ if method.starts_with("macos.") => crate::macos_remote::dispatch(app, method, params),
-        _ => crate::remote_access::dispatch(app, method, params).map_err(BridgeError::from),
+        _ if method.starts_with("macos.") => crate::macos_remote::dispatch(&paths, method, params),
+        _ => crate::remote_access::dispatch(&paths, method, params, checkpoints)
+            .map_err(BridgeError::from),
     }
 }
 /// The methods this device serves, reported in the handshake.
@@ -3505,10 +3464,18 @@ mod setup_tests {
     fn commands_that_access_remote_settings_stay_off_the_main_thread() {
         let _test_state = crate::test_support::global_state();
         // Remote commands read durable settings or wait on the configuration lock.
-        let source = include_str!("remote.rs");
+        let source = include_str!("commands/remote.rs");
         let mut commands = 0;
-        for block in source.split("#[tauri::command]").skip(1) {
-            let signature = block.trim_start().lines().next().unwrap();
+        let lines: Vec<_> = source.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            if !line.trim_start().starts_with("#[") || !line.trim_end().ends_with("::command]") {
+                continue;
+            }
+            let signature = lines[index + 1..]
+                .iter()
+                .find(|line| !line.trim().is_empty())
+                .unwrap()
+                .trim();
             if !signature.starts_with("pub") {
                 continue;
             }
