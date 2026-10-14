@@ -402,9 +402,11 @@ fn disconnect_matching(matches: impl Fn(&Viewer) -> bool) {
 }
 pub fn close_all() {
     disconnect_matching(|_| true);
+    crate::desktop_viewer_api::close_all();
 }
 pub(crate) fn close_computer(computer: &str) {
     disconnect_matching(|entry| entry.computer == computer);
+    crate::desktop_viewer_api::close_computer(computer);
 }
 pub(crate) fn close_device(device: &str) {
     let prefix = format!("silo-remote:{device}:");
