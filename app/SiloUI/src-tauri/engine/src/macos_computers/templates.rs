@@ -742,6 +742,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         let layout = Layout::new(data.path(), &record.id);

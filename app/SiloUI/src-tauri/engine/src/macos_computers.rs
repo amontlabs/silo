@@ -20,6 +20,12 @@ mod engine;
 mod engine;
 #[path = "macos_computers/guest_access.rs"]
 mod guest_access;
+#[path = "macos_computers/files.rs"]
+pub(crate) mod files;
+#[path = "macos_computers/ssh_alias.rs"]
+mod ssh_alias;
+#[path = "macos_computers/ports.rs"]
+mod ports;
 #[path = "macos_computers/developer_tools.rs"]
 mod developer_tools;
 #[path = "macos_computers/guest_clipboard.rs"]
@@ -1070,6 +1076,118 @@ pub fn names(app: &MacosContext) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Browse one macOS computer's `/Users/silo/workspace` through guest SFTP access tooling.
+pub fn list_directory(
+    app: &MacosContext,
+    caller: String,
+    computer_id: String,
+    path: String,
+    offset: usize,
+    snapshot_id: Option<String>,
+) -> Result<crate::files::DirectoryPage, String> {
+    files::list(app, caller, computer_id, path, offset, snapshot_id)
+}
+
+pub fn ensure_ssh_alias(
+    app: &MacosContext,
+    computer_id: &str,
+    path: Option<&str>,
+    install_include: Option<bool>,
+) -> Result<silo_api::methods::guest::GuestSshAliasEnsureResult, String> {
+    ssh_alias::ensure(app, computer_id, path, install_include)
+}
+
+pub fn remove_ssh_alias(app: &MacosContext, computer_id: &str) -> Result<(), String> {
+    ssh_alias::remove(app, computer_id)
+}
+
+pub fn terminal_command(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<silo_api::methods::terminal::CommandResult, String> {
+    ssh_alias::terminal_command(app, computer_id)
+}
+
+pub fn editor_command(
+    app: &MacosContext,
+    computer_id: &str,
+    path: Option<&str>,
+    command: &crate::applications::launch::EditorCommand,
+) -> Result<silo_api::methods::terminal::CommandResult, String> {
+    ssh_alias::editor_command(app, computer_id, path, command)
+}
+
+pub fn upload_files(
+    app: &MacosContext,
+    owner: String,
+    transfer_id: String,
+    computer_id: String,
+    directory: String,
+    selection: String,
+    conflict: crate::transfer::ConflictPolicy,
+) -> Result<crate::transfer::UploadOutcome, String> {
+    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    crate::transfer::upload_files_with_transport(
+        PathBuf::from(connection.config_path),
+        connection.alias,
+        files::transfer_roots(),
+        owner,
+        transfer_id,
+        computer_id,
+        directory,
+        selection,
+        conflict,
+    )
+}
+
+pub fn prepare_download(
+    app: &MacosContext,
+    transfer_id: String,
+    computer_id: String,
+    path: String,
+) -> Result<(crate::transfer::DownloadSession, String), String> {
+    let connection = ssh_alias::ensure(app, &computer_id, None, Some(false))?;
+    crate::transfer::prepare_download_with_transport(
+        PathBuf::from(connection.config_path),
+        connection.alias,
+        files::transfer_roots(),
+        transfer_id,
+        computer_id,
+        path,
+    )
+}
+
+/// Observe and repair macOS guest listeners and their loopback SSH tunnels.
+pub fn read_network_state(app: &MacosContext) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::state(app)
+}
+
+pub fn publish_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+    host_port: Option<u16>,
+    scheme: Option<String>,
+) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::publish(app, computer_id, port, host_port, scheme)
+}
+
+pub fn remove_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+) -> Result<silo_api::methods::network::NetworkState, String> {
+    ports::unpublish(app, computer_id, port)
+}
+
+pub fn open_network_port(
+    app: &MacosContext,
+    computer_id: &str,
+    port: u16,
+) -> Result<String, String> {
+    ports::open_url(app, computer_id, port)
+}
+
 fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, String> {
     require_supported()?;
     ensure_loaded(app)?;
@@ -1386,6 +1504,7 @@ fn copy_template(
         developer_tools: true,
         computer_use: true,
         clipboard: true,
+        roots: false,
         needs_personalizing: true,
     };
     Ok(true)
@@ -1646,6 +1765,15 @@ fn computer(id: &str) -> Result<(Record, State), String> {
         .ok_or_else(|| "This computer no longer exists.".to_string())
 }
 
+fn computer_generation(id: &str) -> Result<u64, String> {
+    registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| entry.attempt)
+        .ok_or_else(|| "This computer no longer exists.".to_string())
+}
+
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
     let data = app_data(app)?;
@@ -1702,13 +1830,20 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
         .and_then(|()| start_machine(app, &record, &layout, plan, attempt, pending.as_ref()));
     match started {
         Ok(note) => {
-            update(app, id, |entry| {
+            let running = update(app, id, |entry| {
                 if entry.state == State::Starting && entry.attempt == attempt {
                     entry.state = State::Running;
                     entry.since = Instant::now();
                     entry.detail = note;
+                    true
+                } else {
+                    false
                 }
-            });
+            })
+            .unwrap_or(false);
+            if running {
+                ports::computer_started(app, id);
+            }
             guest_computer_use::update_in_background(app, id, attempt);
             Ok(())
         }
@@ -2069,7 +2204,12 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
         }
         // The entry stays until the files are gone, so a failed removal can be retried.
         match remove_computer(&Layout::new(&data, id)) {
-            Ok(()) => registry().entries.retain(|entry| entry.record.id != id),
+            Ok(()) => {
+                registry().entries.retain(|entry| entry.record.id != id);
+                if let Err(message) = ports::computer_removed(app, id) {
+                    eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
+                }
+            }
             Err(message) => {
                 update(app, id, |entry| {
                     entry.deleting = false;
@@ -2109,6 +2249,7 @@ fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<
             return;
         }
         close_display(&app, &id);
+        ports::computer_stopped(&id);
         update(&app, &id, |entry| {
             if matches!(
                 entry.state,
@@ -2485,6 +2626,7 @@ fn copy_for_fork(
         developer_tools: false,
         computer_use: true,
         clipboard: true,
+        roots: false,
         needs_personalizing: true,
     };
     // Persist while the fork is still in its creation state, where nothing else can start it.
@@ -2971,6 +3113,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         let json = serde_json::to_value(done.row()).unwrap();
@@ -3641,6 +3784,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: false,
             needs_personalizing: true,
         };
         record.template = Some("25G83-abcd".into());

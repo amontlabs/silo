@@ -77,6 +77,8 @@ pub(super) struct SetupProgress {
     pub developer_tools: bool,
     pub computer_use: bool,
     pub clipboard: bool,
+    /// `/Users/silo/workspace` and `/Users/silo/Downloads` were created for Files/SFTP.
+    pub roots: bool,
     /// A copy of a template still has the template's password, keys and identity.
     pub needs_personalizing: bool,
 }
@@ -88,6 +90,7 @@ impl SetupProgress {
             && self.developer_tools
             && self.computer_use
             && self.clipboard
+            && self.roots
             && !self.needs_personalizing
     }
 }
@@ -719,6 +722,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         record
@@ -836,10 +840,13 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: false,
             needs_personalizing: true,
         };
         assert!(!setup.complete());
         setup.needs_personalizing = false;
+        assert!(!setup.complete());
+        setup.roots = true;
         assert!(setup.complete());
     }
 
@@ -883,6 +890,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         let layout = Layout::new(app_data.path(), &original.id);
@@ -1011,6 +1019,7 @@ mod tests {
         computer.setup.clipboard = true;
         assert!(setup_allowed(State::Stopped, &computer).is_ok());
         computer.setup.developer_tools = true;
+        computer.setup.roots = true;
         assert!(setup_allowed(State::Stopped, &computer).is_err());
         assert!(start_allowed(State::SettingUp, &computer).is_err());
     }
@@ -1030,14 +1039,16 @@ mod tests {
             serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert_eq!(
             json["setup"],
-            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "needsPersonalizing": false})
+            serde_json::json!({"account": true, "sip": true, "developerTools": false, "computerUse": false, "clipboard": false, "roots": false, "needsPersonalizing": false})
         );
 
         let mut old_setup = json.clone();
         old_setup["setup"].as_object_mut().unwrap().remove("developerTools");
+        old_setup["setup"].as_object_mut().unwrap().remove("roots");
         fs::write(layout.record(), serde_json::to_vec(&old_setup).unwrap()).unwrap();
         let old_with_setup: Record = serde_json::from_slice(&fs::read(layout.record()).unwrap()).unwrap();
         assert!(!old_with_setup.setup.developer_tools);
+        assert!(!old_with_setup.setup.roots);
 
         let mut old = json;
         old.as_object_mut().unwrap().remove("setup");

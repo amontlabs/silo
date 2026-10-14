@@ -176,6 +176,7 @@ impl Provision<'_> {
             && !developer_tools_outdated(record, &developer_tools_version)
             && record.setup.computer_use
             && record.setup.clipboard
+            && record.setup.roots
             && !record.computer_use_stale()
         {
             return Ok(());
@@ -219,6 +220,22 @@ impl Provision<'_> {
             self.say("Setting up the clipboard")?;
             guest_clipboard::install(self.app, &self.id)?;
             self.mark(record, |setup| setup.clipboard = true)?;
+        }
+        if !record.setup.roots {
+            self.say("Creating workspace folders")?;
+            let (layout, current) = layout_and_record(self.app, &self.id)?;
+            let output = guest_access::run(
+                &layout,
+                &current,
+                "mkdir -p /Users/silo/workspace /Users/silo/Downloads && test -d /Users/silo/workspace && test -d /Users/silo/Downloads",
+                None,
+                GUEST_COMMAND,
+            )?;
+            self.log_command("workspace folders", &output);
+            if output.status != 0 {
+                return Err(Stop::Failed("Silo could not create the computer's workspace folders.".into()));
+            }
+            self.mark(record, |setup| setup.roots = true)?;
         }
         // A copy of a template made with another computer use brings it up to date here,
         // before the computer is handed over.
@@ -628,6 +645,7 @@ fn setup_summary(setup: &SetupProgress) -> String {
         (setup.developer_tools, "developer tools"),
         (setup.computer_use, "computer use"),
         (setup.clipboard, "clipboard"),
+        (setup.roots, "workspace folders"),
         (!setup.needs_personalizing, "personalized"),
     ]
     .into_iter()
@@ -775,7 +793,8 @@ mod tests {
         setup.account = true;
         setup.sip = true;
         setup.developer_tools = true;
-        assert_eq!(setup_summary(&setup), "account, sip, developer tools done");
+        setup.roots = true;
+        assert_eq!(setup_summary(&setup), "account, sip, developer tools, workspace folders done");
     }
 
     #[test]
