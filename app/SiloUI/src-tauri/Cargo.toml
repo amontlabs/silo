@@ -45,5 +45,12 @@ ksni = "0.3.6"
 zbus = "5"
 gtk = "0.18"
 
+# The two engine probes under examples/ (desktop-viewer-probe, recovery-probe) compile engine
+# modules in place; the app itself does not use these.
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dev-dependencies]
+objc2-virtualization = "0.3.2"
+
 [dev-dependencies]
+base64 = "0.22"
+libc = "0.2"
 tauri = { version = "2.11.3", features = ["test"] }
