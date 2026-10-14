@@ -6,7 +6,7 @@
 
 use crate::{desktop_proxy::Proxy, owned_tunnel::Tunnel};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -67,6 +67,23 @@ fn entries() -> &'static Mutex<HashMap<String, Viewer>> {
     ENTRIES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// The clients whose session is open. A connection can only be reserved for one of them, so
+/// a client that disconnected while its open was still reading credentials cannot get a
+/// viewer afterwards: nothing would ever close it.
+fn sessions() -> &'static Mutex<HashSet<String>> {
+    static SESSIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    SESSIONS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Marks the session of client `owner` as open. Its connections are claimed from now until
+/// [`close_client`].
+pub fn open_client(owner: &str) {
+    sessions()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(owner.to_owned());
+}
+
 fn open_result(connection_id: &str, viewer: &Viewer, name: &str) -> Result<OpenResult, String> {
     let proxy = viewer
         .proxy
@@ -91,6 +108,16 @@ pub fn claim(
     local: bool,
 ) -> Result<OpenPlan, String> {
     let mut entries = entries().lock().map_err(|_| "Desktop unavailable.")?;
+    // Checked while the registry is held: `close_client` ends the session first and
+    // closes the connections after, so a reservation made before the session ended is
+    // closed with it and none is made after.
+    if !sessions()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(owner)
+    {
+        return Err("The client disconnected.".into());
+    }
     claim_in(
         &mut entries,
         MAX_CONNECTIONS,
@@ -204,6 +231,25 @@ pub fn ensure_owned(owner: &str, connection_id: &str) -> Result<(), String> {
         .ok_or_else(|| "Unknown desktop viewer.".into())
 }
 
+/// Like [`ensure_owned`], and the connection must be the one for `computer` on `device`: a
+/// request that names another computer or device than the viewer was opened for is refused
+/// the same way, so a connection id cannot be used to act on a computer it does not show.
+pub fn ensure_target(
+    owner: &str,
+    connection_id: &str,
+    device: &str,
+    computer: &str,
+) -> Result<(), String> {
+    let entries = entries().lock().map_err(|_| "Desktop unavailable.")?;
+    entries
+        .get(connection_id)
+        .filter(|viewer| {
+            viewer.owner == owner && viewer.device == device && viewer.computer == computer
+        })
+        .map(|_| ())
+        .ok_or_else(|| "Unknown desktop viewer.".into())
+}
+
 pub fn bridge_ticket(owner: &str, connection_id: &str) -> Result<BridgeTicket, String> {
     let mut entries = entries().lock().map_err(|_| "Desktop unavailable.")?;
     let viewer = entries
@@ -265,8 +311,13 @@ fn close_matching(matches: impl Fn(&Viewer) -> bool) -> usize {
     removed.map_or(0, |removed| removed.len())
 }
 
-/// Closes every connection a disconnected client still holds.
+/// Ends the session of a disconnected client and closes every connection it holds,
+/// including one that is still being opened.
 pub fn close_client(owner: &str) {
+    sessions()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(owner);
     close_matching(|viewer| viewer.owner == owner);
 }
 
@@ -289,6 +340,7 @@ mod tests {
     use super::*;
 
     fn connect(owner: &str, device: &str, computer: &str, name: &str, local: bool) -> String {
+        open_client(owner);
         let OpenPlan::Connect {
             connection_id,
             generation,
@@ -312,6 +364,8 @@ mod tests {
 
     #[test]
     fn claims_are_scoped_to_the_client_device_and_computer() {
+        open_client("client-a");
+        open_client("client-b");
         let first = match claim("client-a", "device-a", "computer-a", "A", false).unwrap() {
             OpenPlan::Connect { connection_id, .. } => connection_id,
             OpenPlan::Existing(_) => unreachable!(),
@@ -362,6 +416,7 @@ mod tests {
 
     #[test]
     fn a_closed_generation_cannot_install_its_late_connection() {
+        open_client("client-g");
         let OpenPlan::Connect {
             connection_id,
             generation,
@@ -388,6 +443,63 @@ mod tests {
         assert!(ensure_owned("client-h", &remote).is_ok());
         close_device("device-i");
         assert!(ensure_owned("client-h", &remote).is_err());
+    }
+
+    #[test]
+    fn a_client_that_disconnected_before_its_claim_gets_no_connection() {
+        // The open read the guest's credentials, the client disconnected meanwhile, and only
+        // then the open reached its claim: nothing may be reserved, since nothing would
+        // close it, and no capacity slot is used.
+        open_client("client-j");
+        close_client("client-j");
+        let refused = claim("client-j", "device-j", "computer-j", "J", false);
+        assert_eq!(refused.err().unwrap(), "The client disconnected.");
+        assert!(entries()
+            .lock()
+            .unwrap()
+            .values()
+            .all(|viewer| viewer.owner != "client-j"));
+        // A client that never had a session is refused the same way.
+        assert!(claim("client-never", "device-j", "computer-j", "J", false).is_err());
+        // The next session of the same id starts clean.
+        open_client("client-j");
+        assert!(claim("client-j", "device-j", "computer-j", "J", false).is_ok());
+        close_client("client-j");
+    }
+
+    #[test]
+    fn a_disconnect_between_claim_and_finish_discards_the_late_connection() {
+        open_client("client-k");
+        let OpenPlan::Connect {
+            connection_id,
+            generation,
+            ..
+        } = claim("client-k", "device-k", "computer-k", "K", false).unwrap()
+        else {
+            panic!("expected a fresh connection");
+        };
+        close_client("client-k");
+        let proxy =
+            Proxy::start("/nonexistent/desktop.sock".into(), 6901, "silo", "secret").unwrap();
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.arg("60");
+        let tunnel = Tunnel::spawn(&command, None).unwrap();
+        assert!(finish("client-k", &connection_id, generation, proxy, tunnel, "K").is_err());
+    }
+
+    #[test]
+    fn a_connection_is_only_for_the_computer_and_device_it_was_opened_for() {
+        let first = connect("client-l", "device-l", "computer-l1", "L1", false);
+        let second = connect("client-l", "device-l", "computer-l2", "L2", false);
+        assert!(ensure_target("client-l", &first, "device-l", "computer-l1").is_ok());
+        assert!(ensure_target("client-l", &second, "device-l", "computer-l2").is_ok());
+        // Another computer, another device, another client or a missing connection.
+        assert!(ensure_target("client-l", &first, "device-l", "computer-l2").is_err());
+        assert!(ensure_target("client-l", &second, "device-l", "computer-l1").is_err());
+        assert!(ensure_target("client-l", &first, "device-m", "computer-l1").is_err());
+        assert!(ensure_target("client-m", &first, "device-l", "computer-l1").is_err());
+        assert!(ensure_target("client-l", "missing", "device-l", "computer-l1").is_err());
+        close_client("client-l");
     }
 
     #[test]

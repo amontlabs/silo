@@ -948,6 +948,16 @@ async fn clipboard_transfer(
         DispatchError::internal("Invalid params: connectionId is required for a Linux computer.")
     })?;
     let action = params.action;
+    // The viewer must show the computer on the device the request names; a connection id
+    // alone does not select the computer a transfer reaches.
+    let local_device = context.silod_context().local_device().device_id.clone();
+    silo_engine::desktop_viewer_api::ensure_target(
+        &context.client_identity().client_id,
+        &connection,
+        params.device_id.as_deref().unwrap_or(&local_device),
+        &params.computer_id,
+    )
+    .map_err(map_error)?;
     // One transfer per viewer: a second one reports `busy`.
     let label = format!("api-viewer-{connection}");
     let result = run_bridge(context, connection, move |bridge| {
@@ -1414,12 +1424,25 @@ mod tests {
     /// Registers a healthy viewer connection the way a finished `display.viewer.open` does,
     /// without a guest: a proxy on a loopback port and a tunnel process that only sleeps.
     fn hold_viewer(client: &str, computer: &str) -> (String, String, String, u16) {
-        use silo_engine::desktop_viewer_api::{claim, finish, OpenPlan};
+        hold_viewer_on(client, "local-device", computer)
+    }
+
+    /// Like [`hold_viewer`], for a computer of `device`.
+    fn hold_viewer_on(client: &str, device: &str, computer: &str) -> (String, String, String, u16) {
+        use silo_engine::desktop_viewer_api::{claim, finish, open_client, OpenPlan};
+        open_client(client);
         let OpenPlan::Connect {
             connection_id,
             generation,
             ..
-        } = claim(client, "local-device", computer, "Fixture", true).unwrap()
+        } = claim(
+            client,
+            device,
+            computer,
+            "Fixture",
+            device == "local-device",
+        )
+        .unwrap()
         else {
             panic!("expected a new connection");
         };
@@ -1893,6 +1916,44 @@ mod tests {
             )
             .await;
         assert_eq!(code(foreign).await, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn clipboard_transfer_refuses_a_viewer_of_another_computer_or_device() {
+        let fixture = fixture();
+        let (first, second) = (unknown(), unknown());
+        let (shows_first, ..) = hold_viewer("clip-owner", &first);
+        let (shows_second, ..) = hold_viewer("clip-owner", &second);
+        let (shows_remote, ..) = hold_viewer_on("clip-owner", "other-device", &first);
+        // The connection ids are all owned by the caller, but each shows another target
+        // than the request names: nothing is transferred and nothing is learned.
+        for (computer, connection) in [
+            (&first, &shows_second),
+            (&second, &shows_first),
+            // A viewer of a remote computer cannot be used under a local target.
+            (&first, &shows_remote),
+        ] {
+            let refused = fixture
+                .call(
+                    "clip-owner",
+                    MethodName::ClipboardTransfer,
+                    json!({"computerId": computer, "action": "copy", "connectionId": connection}),
+                )
+                .await;
+            assert_eq!(code(refused).await, ErrorCode::NotFound);
+        }
+        // Another client's matching viewer is refused as before.
+        let foreign = fixture
+            .call(
+                "clip-other",
+                MethodName::ClipboardTransfer,
+                json!({"computerId": first, "action": "copy", "connectionId": shows_first}),
+            )
+            .await;
+        assert_eq!(code(foreign).await, ErrorCode::NotFound);
+        for connection in [shows_first, shows_second, shows_remote] {
+            silo_engine::desktop_viewer_api::close("clip-owner", &connection).unwrap();
+        }
     }
 
     #[tokio::test]

@@ -241,9 +241,20 @@ async fn serve_connection(
         prepared => prepared,
     };
     let first_result = dispatcher.execute(first_prepared).await;
+    // The client may hold desktop viewers from the moment it can read the handshake reply,
+    // so its session is open before that reply is written. The disconnect below ends it.
+    let handshake_client = (!first_result.close)
+        .then(|| session.client_id().map(str::to_owned))
+        .flatten();
+    if let Some(client) = &handshake_client {
+        silo_engine::desktop_viewer_api::open_client(client);
+    }
     if let Some(response) = first_result.response {
         if let Err(error) = write_initial_response(&mut writer, &response).await {
             eprintln!("silod: handshake response failed: {error}");
+            if let Some(client) = handshake_client {
+                silo_engine::desktop_viewer_api::close_client(&client);
+            }
             return;
         }
     }
