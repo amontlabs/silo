@@ -157,6 +157,47 @@ impl HandlerContext {
     }
 }
 
+/// Methods the engine answers itself, outside any domain module.
+fn is_built_in(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::EngineHandshake
+            | MethodName::EngineState
+            | MethodName::EventsSubscribe
+            | MethodName::EventsUnsubscribe
+            | MethodName::NotificationsList
+            | MethodName::OperationsCancel
+            | MethodName::OperationsJobAcknowledge
+            | MethodName::OperationsJobGet
+            | MethodName::OperationsList
+            | MethodName::GuestSsh
+    )
+}
+
+/// Owned by a domain module but answered with a typed refusal for every caller, so the
+/// handshake must not advertise them.
+fn is_never_served(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::MacosDisplayStream | MethodName::DisplayNativeAttach
+    )
+}
+
+/// Whether this engine serves the method: a built-in or one a domain router owns. The
+/// handshake's capability list is derived from this, so it cannot drift from the routers.
+pub fn serves(method: MethodName) -> bool {
+    if is_never_served(method) {
+        return false;
+    }
+    is_built_in(method)
+        || computers::owns(method)
+        || checkpoints::owns(method)
+        || guest::owns(method)
+        || access::owns(method)
+        || display::owns(method)
+        || services::owns(method)
+}
+
 /// Tries domain handlers in stable order and returns the unsupported error if none handles it.
 pub(crate) async fn dispatch(
     context: &HandlerContext,
@@ -188,7 +229,40 @@ pub(crate) async fn dispatch(
 mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
-    use super::{access, checkpoints, computers, display, guest, services};
+    use super::{access, checkpoints, computers, display, guest, serves, services};
+
+    #[test]
+    fn the_capability_set_is_every_routed_method_and_nothing_unserved() {
+        let served: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        for name in [
+            "engine.handshake",
+            "guest.ssh",
+            "computers.list",
+            "computers.launch",
+            "checkpoints.create",
+            "exports.state",
+            "migration.state",
+            "display.show",
+            "desktop.connect",
+            "settings.read",
+            "engine.shutdown",
+        ] {
+            assert!(served.contains(&name), "{name} must be advertised");
+        }
+        assert!(!served.contains(&"macos.display.stream"));
+        assert!(!served.contains(&"display.native.attach"));
+        // Everything in the catalogue is either served or deliberately withheld.
+        let withheld: Vec<_> = method_registry()
+            .iter()
+            .filter(|descriptor| !serves(descriptor.method))
+            .map(|descriptor| descriptor.name)
+            .collect();
+        assert_eq!(withheld, ["display.native.attach", "macos.display.stream"]);
+    }
 
     fn core_method(method: MethodName) -> bool {
         matches!(
