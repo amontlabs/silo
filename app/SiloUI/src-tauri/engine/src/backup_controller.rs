@@ -13,6 +13,8 @@ use silo_engine::{
     context::{Audience, EngineContext, Event},
     jobs::{self, CancelRoute},
 };
+#[cfg(test)]
+use std::{collections::HashMap, sync::OnceLock};
 use std::{
     fs,
     io::{Read, Write},
@@ -274,6 +276,15 @@ pub struct Controller {
     busy: AtomicBool,
     revision: AtomicU64,
 }
+
+#[cfg(test)]
+struct PublicationPause {
+    reached: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+static PUBLICATION_PAUSES: OnceLock<Mutex<HashMap<usize, PublicationPause>>> = OnceLock::new();
 impl Controller {
     fn runtime_host(&self) -> Result<&dyn RuntimeHost, String> {
         self.host
@@ -467,6 +478,8 @@ fn wait_for_controller_recovery(
 }
 
 pub fn publish(controller: &Controller) {
+    #[cfg(test)]
+    pause_before_terminal_publication(controller);
     controller.revision.fetch_add(1, Ordering::Relaxed);
     if let Ok(host) = controller.runtime_host() {
         let context = host.engine_context();
@@ -477,6 +490,43 @@ pub fn publish(controller: &Controller) {
             Audience::All,
         );
     }
+}
+
+#[cfg(test)]
+fn pause_before_terminal_publication(controller: &Controller) {
+    let terminal = controller
+        .view
+        .lock()
+        .map(|view| matches!(view.operation, Some(Operation::Result { .. })))
+        .unwrap_or(false);
+    if !terminal {
+        return;
+    }
+    let pause = PUBLICATION_PAUSES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&(controller as *const Controller as usize));
+    if let Some(pause) = pause {
+        pause.reached.send(()).unwrap();
+        pause.resume.recv().unwrap();
+    }
+}
+
+#[cfg(test)]
+fn arm_publication_pause(
+    controller: &Controller,
+    reached: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
+) {
+    PUBLICATION_PAUSES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(
+            controller as *const Controller as usize,
+            PublicationPause { reached, resume },
+        );
 }
 
 /// Publishes a typed snapshot for clients that subscribe to the exports topic.
@@ -1016,6 +1066,13 @@ fn finish(controller: &Controller) {
     controller.busy.store(false, Ordering::Release);
 }
 
+fn publish_and_finish(controller: &Controller, publication: impl FnOnce()) {
+    // The transfer slot protects the current journal and view identity. Keep
+    // it claimed until both the domain result and durable job event are read.
+    publication();
+    finish(controller);
+}
+
 pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
@@ -1096,8 +1153,7 @@ pub fn begin_export(
         );
         let operation = recovery::complete(&controller, operation);
         let _ = set_operation(&controller, operation);
-        finish(&controller);
-        publish(&controller);
+        publish_and_finish(&controller, || publish(&controller));
         return Err(error);
     }
     publish(&controller);
@@ -1114,9 +1170,7 @@ pub fn begin_export(
         )
     };
     tokio::task::spawn_blocking(move || {
-        if contain_worker_panic(&controller, "backup", &failure_archive, None, work) {
-            publish(&controller);
-        }
+        contain_worker_panic(&controller, "backup", &failure_archive, None, work);
     });
     Ok(operation_id)
 }
@@ -1244,7 +1298,7 @@ fn contain_worker_panic(
     view.operation = Some(failure);
     view.cancellation = None;
     drop(view);
-    controller.busy.store(false, Ordering::Release);
+    publish_and_finish(controller, || publish(controller));
     true
 }
 
@@ -1283,8 +1337,7 @@ fn run_backup(
     let operation = recovery::complete(&controller, operation);
     notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
-    finish(&controller);
-    publish(&controller);
+    publish_and_finish(&controller, || publish(&controller));
 }
 
 /// Why an export or import worker ended without a result. The outcome comes
@@ -1913,8 +1966,7 @@ pub fn begin_import(
         );
         let operation = recovery::complete(&controller, operation);
         let _ = set_operation(&controller, operation);
-        finish(&controller);
-        publish(&controller);
+        publish_and_finish(&controller, || publish(&controller));
         return Err(error);
     }
     publish(&controller);
@@ -1931,9 +1983,7 @@ pub fn begin_import(
         )
     };
     tokio::task::spawn_blocking(move || {
-        if contain_worker_panic(&controller, "restore", &failure_archive, target, work) {
-            publish(&controller);
-        }
+        contain_worker_panic(&controller, "restore", &failure_archive, target, work);
     });
     Ok(operation_id)
 }
@@ -1981,8 +2031,7 @@ fn run_restore(
     let operation = recovery::complete(&controller, operation);
     notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
-    finish(&controller);
-    publish(&controller);
+    publish_and_finish(&controller, || publish(&controller));
 }
 
 fn select_archive_source(names: &[String], selected: Option<&str>) -> Result<String, String> {
@@ -2378,6 +2427,7 @@ mod tests {
         paths: EnginePaths,
         identity: EngineIdentity,
         runtime_state: Arc<EngineRuntimeState>,
+        publication_events: Mutex<Option<std::sync::mpsc::Sender<String>>>,
     }
 
     impl EngineContext for StartupTestContext {
@@ -2393,7 +2443,16 @@ mod tests {
             self.runtime_state.clone()
         }
 
-        fn publish(&self, _event: Event, _audience: Audience) {}
+        fn publish(&self, event: Event, _audience: Audience) {
+            if let Some(sender) = self
+                .publication_events
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+            {
+                let _ = sender.send(event.name);
+            }
+        }
 
         fn main_thread(&self) -> Option<&dyn MainThread> {
             None
@@ -2428,6 +2487,7 @@ mod tests {
                 package_kind: PackageKind::Other,
             },
             runtime_state: Arc::new(EngineRuntimeState::default()),
+            publication_events: Mutex::new(None),
         })
     }
 
@@ -2457,6 +2517,282 @@ mod tests {
         fn runtime_package_kind(&self) -> RuntimePackageKind {
             RuntimePackageKind::Other
         }
+    }
+
+    fn hosted_test_controller(directory: &Path) -> (Arc<Controller>, Arc<StartupTestContext>) {
+        let context = startup_job_context(directory);
+        let host: Arc<dyn RuntimeHost> = Arc::new(StartupTestHost(context.clone()));
+        let mut controller = history_controller(context.paths.app_data.join(HISTORY_FILE));
+        controller.host = Some(host);
+        (Arc::new(controller), context)
+    }
+
+    fn pause_terminal_publication(
+        controller: &Controller,
+    ) -> (
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        arm_publication_pause(controller, reached_tx, resume_rx);
+        (reached_rx, resume_tx)
+    }
+
+    #[test]
+    fn export_worker_publishes_its_terminal_job_before_admitting_a_successor() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let export_dir = directory.path().join("exports");
+        fs::create_dir_all(&export_dir).unwrap();
+        let first = claim_export(
+            &controller,
+            &export_dir,
+            export_dir.display().to_string(),
+            &["first".into()],
+            None,
+            None,
+        )
+        .unwrap();
+        register_backup_job(
+            &controller,
+            "exports",
+            &first.operation_id,
+            "exports.create",
+            CancelRoute::Export,
+            cancel_backup_job,
+        )
+        .unwrap();
+        let first_job = JobId::new(format!("exports:{}", first.operation_id)).unwrap();
+        let (at_publication_rx, resume_publication_tx) = pause_terminal_publication(&controller);
+        let worker_controller = controller.clone();
+        let first_archive_path = first.archive_path.clone();
+        let first_archive = first.archive.clone();
+        let worker = std::thread::spawn(move || {
+            run_backup(
+                worker_controller,
+                first_archive_path,
+                vec!["first".into()],
+                None,
+                first.cancellation,
+                first_archive,
+            );
+        });
+        at_publication_rx.recv().unwrap();
+        let busy_held_through_publication = controller.busy.load(Ordering::Acquire);
+        let successor = claim_export(
+            &controller,
+            &export_dir,
+            export_dir.display().to_string(),
+            &["successor".into()],
+            None,
+            None,
+        );
+        let successor_blocked = successor.is_err();
+        if successor.is_ok() {
+            finish(&controller);
+        }
+        resume_publication_tx.send(()).unwrap();
+        worker.join().unwrap();
+
+        assert!(
+            busy_held_through_publication && successor_blocked,
+            "an export successor must stay out until the predecessor's result is published"
+        );
+        let completed = context
+            .job_registry()
+            .unwrap()
+            .get(&first_job)
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(completed.outcome.unwrap().result.unwrap()["operation"], "backup");
+    }
+
+    #[test]
+    fn import_worker_publishes_its_terminal_job_before_admitting_a_successor() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let archive_path = directory.path().join("invalid.silo-backup");
+        fs::write(&archive_path, b"not a Silo export").unwrap();
+        let archive = Archive {
+            name: "invalid.silo-backup".into(),
+            archive_path: archive_path.display().to_string(),
+            completed_label: "Checking export file".into(),
+            size: "Unknown".into(),
+            destination: directory.path().display().to_string(),
+            computers: vec!["source".into()],
+            checkpoint_name: None,
+        };
+        let journal = recovery::Journal::restore(
+            archive.clone(),
+            "copy".into(),
+            Some("source".into()),
+        );
+        let operation_id = journal.identity().to_owned();
+        let cancellation = backup::Cancellation::default();
+        controller.busy.store(true, Ordering::Release);
+        recovery::begin(&controller, journal).unwrap();
+        {
+            let mut view = controller.view.lock().unwrap();
+            view.operation_id = Some(operation_id.clone());
+            view.cancellation = Some(cancellation.clone());
+            view.operation = Some(Operation::Running {
+                operation: "restore",
+                archive: archive.clone(),
+                running_names: Vec::new(),
+                target_name: Some("copy".into()),
+                progress: 0,
+                indeterminate: Some(true),
+                can_cancel: None,
+                phases: vec![Phase {
+                    title: "Checking export file".into(),
+                    detail: "Verifying the export before importing.".into(),
+                    tone: "running",
+                }],
+            });
+        }
+        register_backup_job(
+            &controller,
+            "exports",
+            &operation_id,
+            "exports.import",
+            CancelRoute::Export,
+            cancel_backup_job,
+        )
+        .unwrap();
+        let import_job = JobId::new(format!("exports:{operation_id}")).unwrap();
+        let (at_publication_rx, resume_publication_tx) = pause_terminal_publication(&controller);
+        let worker_controller = controller.clone();
+        let worker_path = archive_path.clone();
+        let worker = std::thread::spawn(move || {
+            run_restore(
+                worker_controller,
+                worker_path,
+                "copy".into(),
+                Some("source".into()),
+                cancellation,
+                archive,
+            );
+        });
+        at_publication_rx.recv().unwrap();
+        let busy_held_through_publication = controller.busy.load(Ordering::Acquire);
+        let export_dir = directory.path().join("exports");
+        fs::create_dir_all(&export_dir).unwrap();
+        let successor = claim_export(
+            &controller,
+            &export_dir,
+            export_dir.display().to_string(),
+            &["successor".into()],
+            None,
+            None,
+        );
+        let successor_blocked = successor.is_err();
+        if successor.is_ok() {
+            finish(&controller);
+        }
+        resume_publication_tx.send(()).unwrap();
+        worker.join().unwrap();
+
+        assert!(
+            busy_held_through_publication && successor_blocked,
+            "an export successor must stay out until the import result is published"
+        );
+        let completed = context
+            .job_registry()
+            .unwrap()
+            .get(&import_job)
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(completed.outcome.unwrap().result.unwrap()["operation"], "restore");
+    }
+
+    #[test]
+    fn startup_recovery_publication_replaces_the_restart_placeholder_seen_by_job_get() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let archive_path = directory.path().join("interrupted.silo-backup");
+        let archive = Archive {
+            name: "interrupted.silo-backup".into(),
+            archive_path: archive_path.display().to_string(),
+            completed_label: "Import interrupted".into(),
+            size: "Unknown".into(),
+            destination: directory.path().display().to_string(),
+            computers: vec!["source".into()],
+            checkpoint_name: None,
+        };
+        let journal = recovery::Journal::restore(
+            archive.clone(),
+            "copy".into(),
+            Some("source".into()),
+        );
+        let operation_id = journal.identity().to_owned();
+        let job_id = JobId::new(format!("exports:{operation_id}")).unwrap();
+        let engine_data = context
+            .paths
+            .home
+            .join(context.identity.channel.state_dir_name())
+            .join("engine");
+        let first_registry = silo_engine::jobs::JobRegistry::open(&engine_data).unwrap();
+        first_registry.accept(job_id.clone(), "exports.import").unwrap();
+        first_registry.mark_running(&job_id).unwrap();
+        drop(first_registry);
+
+        // Reopening the engine registry models process startup: the running row
+        // becomes a generic restart result before backup recovery publishes.
+        let initial = jobs::get_at(context.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(initial.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            initial.outcome.unwrap().error.unwrap().message,
+            "The engine restarted before this job completed."
+        );
+
+        recovery::begin(&controller, journal.clone()).unwrap();
+        controller
+            .view
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .operation_id = Some(operation_id);
+        let (published_tx, published_rx) = std::sync::mpsc::channel();
+        *context
+            .publication_events
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(published_tx);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (at_publication_rx, resume_publication_tx) = pause_terminal_publication(&controller);
+        recovery::resume(controller.clone(), journal, runtime.handle()).unwrap();
+        at_publication_rx.recv().unwrap();
+        let still_placeholder = jobs::get_at(context.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        assert!(still_placeholder.outcome.unwrap().error.is_some());
+        resume_publication_tx.send(()).unwrap();
+        loop {
+            if published_rx.recv().unwrap() == "silo://application-state-changed" {
+                break;
+            }
+        }
+        drop(runtime);
+
+        let final_job = jobs::get_at(context.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(final_job.state, silo_api::jobs::JobState::Finished);
+        let result = final_job.outcome.unwrap().result.unwrap();
+        assert_eq!(result["operation"], "restore");
+        assert_eq!(result["outcome"], "failed");
+        assert_eq!(result["message"], "Silo closed before this import finished.");
     }
 
     /// What the first launch of an upgrade made of the journal the previous version left
@@ -2697,6 +3033,7 @@ mod tests {
                 package_kind: PackageKind::Other,
             },
             runtime_state: Arc::new(EngineRuntimeState::default()),
+            publication_events: Mutex::new(None),
         });
         let host: Arc<dyn RuntimeHost> = Arc::new(StartupTestHost(context));
         let runtime = tokio::runtime::Builder::new_multi_thread()

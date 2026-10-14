@@ -357,19 +357,19 @@ impl JobRegistry {
         let outcome_json = serde_json::to_string(&outcome).map_err(RegistryError::serialization)?;
         let mut connection = self.lock_connection()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing: Option<(String, Option<String>)> = transaction
+        let existing: Option<(String, Option<String>, bool)> = transaction
             .query_row(
-                "SELECT state, outcome_json FROM jobs WHERE job_id = ?1",
+                "SELECT state, outcome_json, recovery_placeholder FROM jobs WHERE job_id = ?1",
                 [job_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
         match existing {
-            Some((state, _)) if state == "acknowledged" => {
+            Some((state, _, _)) if state == "acknowledged" => {
                 transaction.commit()?;
                 return Ok(false);
             }
-            Some((state, Some(previous))) if state == "finished" => {
+            Some((state, Some(previous), false)) if state == "finished" => {
                 transaction.commit()?;
                 if previous == outcome_json {
                     return Ok(false);
@@ -378,7 +378,14 @@ impl JobRegistry {
                     "Job {job_id} already has a different terminal outcome."
                 )));
             }
-            Some((state, _)) if state == "finished" => {
+            Some((state, _, true)) if state == "finished" => {
+                transaction.execute(
+                    "UPDATE jobs SET outcome_json = ?2, finished_at_ms = ?3, \
+                     recovery_placeholder = 0 WHERE job_id = ?1",
+                    params![job_id.as_str(), outcome_json, now_ms()],
+                )?;
+            }
+            Some((state, _, false)) if state == "finished" => {
                 transaction.commit()?;
                 return Ok(false);
             }

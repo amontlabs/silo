@@ -940,13 +940,10 @@ pub(super) fn resume(
                     .operation = None;
             }
         }
-        finish(&controller);
-        publish(&controller);
+        super::publish_and_finish(&controller, || publish(&controller));
     };
     runtime.spawn_blocking(move || {
-        if super::contain_worker_panic(&outer_controller, kind, &archive, target, work) {
-            publish(&outer_controller);
-        }
+        super::contain_worker_panic(&outer_controller, kind, &archive, target, work);
     });
     Ok(())
 }
