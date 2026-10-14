@@ -255,7 +255,6 @@ fn main() {
                     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &migration)?;
                 }
                 commands::computer_use::install(app.handle());
-                commands::remote::start(app.handle())?;
                 status_panel::install(app.handle())?;
                 #[cfg(debug_assertions)]
                 desktop_viewer_bench::start(app.handle());
