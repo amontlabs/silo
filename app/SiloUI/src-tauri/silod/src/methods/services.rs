@@ -8,7 +8,10 @@ use super::{ownership::owns_prefix, HandlerContext};
 pub(super) fn owns(method: MethodName) -> bool {
     owns_prefix(method, &["settings.", "updates."])
         || (owns_prefix(method, &["engine."])
-            && !matches!(method, MethodName::EngineHandshake | MethodName::EngineState))
+            && !matches!(
+                method,
+                MethodName::EngineHandshake | MethodName::EngineState
+            ))
 }
 
 pub async fn handle(

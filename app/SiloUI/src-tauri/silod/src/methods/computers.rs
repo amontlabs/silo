@@ -6,7 +6,10 @@ use crate::dispatcher::{method_name, DispatchError, HandlerOutput};
 use super::{ownership::owns_prefix, HandlerContext};
 
 pub(super) fn owns(method: MethodName) -> bool {
-    owns_prefix(method, &["computers.", "activity.", "logs.", "storage.", "macos."])
+    owns_prefix(
+        method,
+        &["computers.", "activity.", "logs.", "storage.", "macos."],
+    )
 }
 
 pub async fn handle(
