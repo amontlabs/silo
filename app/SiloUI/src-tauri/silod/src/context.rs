@@ -315,10 +315,6 @@ impl EngineContext for SilodContext {
         self.publish_operation_queue();
     }
 
-    fn close_remote_displays(&self, device: Option<&str>) {
-        crate::methods::computers::close_displays(device);
-    }
-
     fn main_thread(&self) -> Option<&dyn MainThread> {
         Some(self.main_thread.as_ref())
     }
@@ -328,6 +324,7 @@ impl EngineContext for SilodContext {
     }
 
     fn close_remote_displays(&self, device: Option<&str>) {
+        crate::methods::computers::close_displays(device);
         match device {
             Some(device) => silo_engine::desktop_viewer_api::close_device(device),
             None => silo_engine::desktop_viewer_api::close_all(),
