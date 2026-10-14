@@ -34,9 +34,17 @@ pub fn is_access_denied(error: &keyring::Error) -> bool {
             }
             _ => return false,
         };
+        // keyring 3.6 links two security-framework versions: the legacy keychain calls report
+        // the 2.x error, the SecItem calls the 3.x one. The status is the same.
         source
             .downcast_ref::<keychain_status::base::Error>()
-            .is_some_and(|error| is_denied_status(error.code()))
+            .map(|error| error.code())
+            .or_else(|| {
+                source
+                    .downcast_ref::<keychain_status_v3::base::Error>()
+                    .map(|error| error.code())
+            })
+            .is_some_and(is_denied_status)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -51,6 +59,9 @@ pub fn describe(error: &keyring::Error, fallback: &str) -> String {
     if is_access_denied(error) {
         ACCESS_DENIED_MESSAGE.to_owned()
     } else {
+        // The caller reports a generic message; the engine log keeps the reason (a status code
+        // or a variant, never a value) so a failure that is not a refusal can be told apart.
+        eprintln!("silo-engine: credential store call failed (not a refusal): {error:?}");
         fallback.to_owned()
     }
 }
@@ -119,6 +130,17 @@ mod tests {
         let locked =
             keyring::Error::NoStorageAccess(Box::new(keychain_status::base::Error::from(-128)));
         assert!(is_access_denied(&locked));
+        // The SecItem API reports the other security-framework version: the real refusal of
+        // the owner's item showed up as `PlatformFailure(Error { code: -25293 })` of this type.
+        let sec_item = keyring::Error::PlatformFailure(Box::new(
+            keychain_status_v3::base::Error::from_code(-25293),
+        ));
+        assert!(is_access_denied(&sec_item));
+        assert_eq!(describe(&sec_item, "fallback"), ACCESS_DENIED_MESSAGE);
+        let sec_item_other = keyring::Error::PlatformFailure(Box::new(
+            keychain_status_v3::base::Error::from_code(-25299),
+        ));
+        assert!(!is_access_denied(&sec_item_other));
     }
 
     #[cfg(target_os = "macos")]

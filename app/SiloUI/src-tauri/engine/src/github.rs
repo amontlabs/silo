@@ -138,6 +138,8 @@ static WORKER_WAKE: Condvar = Condvar::new();
 /// for example after the device sleeps) and ones not announced by `schedule`.
 const WORKER_MAX_SLEEP: Duration = Duration::from_secs(60);
 const WORKER_MIN_SLEEP: Duration = Duration::from_millis(100);
+/// How long the worker leaves a Keychain refusal alone before it asks again.
+const REFUSED_RETRY_SECS: u64 = 300;
 fn wake_worker() {
     *WORKER_WOKEN.lock().unwrap_or_else(PoisonError::into_inner) = true;
     WORKER_WAKE.notify_all();
@@ -3028,6 +3030,14 @@ pub fn install() -> Result<(), String> {
                     }
                     let _ = apply(&mut d, None, false);
                     let account_credential = credential();
+                    // The Keychain refused the engine (its signature is not in the item's
+                    // access list). Looking again at once never changes that, and each pass
+                    // holds the operation lock, which kept app updates and their resume from
+                    // taking it ("Wait for the GitHub operation to finish before updating").
+                    let refused = matches!(
+                        &account_credential,
+                        Err(message) if crate::credential_store::is_access_denied_message(message)
+                    );
                     {
                         let _state = serialize(&STATE);
                         if let Ok(mut current) = load() {
@@ -3051,11 +3061,20 @@ pub fn install() -> Result<(), String> {
                                     .refresh_at
                                     .min(c.expires_at.saturating_sub(120).max(now() + 30));
                             }
+                            if refused {
+                                current.refresh_at =
+                                    current.refresh_at.max(now() + REFUSED_RETRY_SECS);
+                            }
                             let _ = save(&current);
                         }
                     }
-                    // Re-evaluate promptly against the document this pass saved.
-                    wait = WORKER_MIN_SLEEP;
+                    // Re-evaluate promptly against the document this pass saved, unless the
+                    // Keychain refused: then look again later.
+                    wait = if refused {
+                        Duration::from_secs(REFUSED_RETRY_SECS)
+                    } else {
+                        WORKER_MIN_SLEEP
+                    };
                 } else {
                     wait = worker_wait(&d, pending_deadline, now(), Instant::now());
                 }

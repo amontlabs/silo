@@ -42,6 +42,8 @@ objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSetti
 block2 = "0.6"
 # keyring 3.6 reports Keychain failures as this exact security-framework version.
 keychain-status = { package = "security-framework", version = "2.11" }
+# ... and the Keychain calls that go through the SecItem API as this one.
+keychain-status-v3 = { package = "security-framework", version = "3.7" }
 keychain-status-sys = { package = "security-framework-sys", version = "2.17" }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
