@@ -136,6 +136,28 @@ pub(in crate::macos_computers_engine) fn stage_guest_bootstrap(
     write_identity(layout, &identity)
 }
 
+/// Stops the NAT bootstrap guest after its script ran. A guest that was staged is asked to
+/// shut down first and only force-stopped when it does not release the machine in time; one
+/// whose script failed is force-stopped at once. Fails when the machine is still held.
+fn stop_bootstrap_guest(
+    staged: bool,
+    shut_down_guest: impl FnOnce(),
+    mut wait_released: impl FnMut(Duration) -> bool,
+    force_stop: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let mut shut_down = false;
+    if staged {
+        shut_down_guest();
+        shut_down = wait_released(SHUTDOWN_WAIT);
+    }
+    let stop = if shut_down { Ok(()) } else { force_stop() };
+    let released = shut_down || wait_released(STOP_WAIT);
+    if !released {
+        return Err("The NAT bootstrap computer could not be stopped before gateway setup.".into());
+    }
+    stop
+}
+
 /// Convert a pre-proxy installation during the launch migration only.
 /// Ordinary Start must use `require_guest_bootstrap` and never perform this conversion.
 pub(in crate::macos_computers_engine) fn migrate_legacy_guest_bootstrap(
@@ -161,27 +183,21 @@ pub(in crate::macos_computers_engine) fn migrate_legacy_guest_bootstrap(
     // A force stop drops the guest's recent writes: the keychain trust, the launch daemon and
     // the git configuration the script installs last were lost that way. Ask macOS to shut
     // down first and force the stop only when it does not.
-    let mut shut_down = false;
-    if staged.is_ok() {
-        let _ = guest_access::run(
-            layout,
-            record,
-            "/usr/bin/sudo -n /sbin/shutdown -h now",
-            None,
-            SHUTDOWN_COMMAND_TIMEOUT,
-        );
-        shut_down = engine::wait_until_released(app, &record.id, generation, SHUTDOWN_WAIT);
-    }
-    let stop = if shut_down {
-        Ok(())
-    } else {
-        engine::force_stop_generation(app, &record.id, generation)
-    };
-    let released = shut_down || engine::wait_until_released(app, &record.id, generation, STOP_WAIT);
-    if !released {
-        return Err("The NAT bootstrap computer could not be stopped before gateway setup.".into());
-    }
-    stop?;
+    let stopped = stop_bootstrap_guest(
+        staged.is_ok(),
+        || {
+            let _ = guest_access::run(
+                layout,
+                record,
+                "/usr/bin/sudo -n /sbin/shutdown -h now",
+                None,
+                SHUTDOWN_COMMAND_TIMEOUT,
+            );
+        },
+        |wait| engine::wait_until_released(app, &record.id, generation, wait),
+        || engine::force_stop_generation(app, &record.id, generation),
+    );
+    stopped?;
     staged
 }
 
@@ -821,6 +837,59 @@ fn bootstrap_binary(app: &MacosContext) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_migration_asks_macos_to_shut_down_before_it_ever_force_stops() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::<String>::new());
+        let result = stop_bootstrap_guest(
+            true,
+            || calls.borrow_mut().push("shutdown".into()),
+            |wait| {
+                calls.borrow_mut().push(format!("wait {}", wait.as_secs()));
+                true
+            },
+            || {
+                calls.borrow_mut().push("force".into());
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        // No force stop right after the install script: the guest released the machine itself.
+        assert_eq!(*calls.borrow(), ["shutdown", "wait 90"]);
+    }
+
+    #[test]
+    fn the_migration_force_stops_only_a_guest_that_ignored_the_shutdown() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::<String>::new());
+        let mut waits = 0;
+        let result = stop_bootstrap_guest(
+            true,
+            || calls.borrow_mut().push("shutdown".into()),
+            |_| {
+                waits += 1;
+                waits > 1
+            },
+            || {
+                calls.borrow_mut().push("force".into());
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(*calls.borrow(), ["shutdown", "force"]);
+    }
+
+    #[test]
+    fn a_failed_script_is_force_stopped_without_a_shutdown_and_a_held_machine_is_an_error() {
+        let mut shutdowns = 0;
+        let result = stop_bootstrap_guest(false, || shutdowns += 1, |_| false, || Ok(()));
+        assert_eq!(shutdowns, 0);
+        assert!(result.unwrap_err().contains("could not be stopped"));
+        // The stop's own error is reported once the machine is released.
+        let result = stop_bootstrap_guest(false, || {}, |_| true, || Err("stop failed".into()));
+        assert_eq!(result, Err("stop failed".into()));
+    }
 
     fn record() -> Record {
         let request = super::super::super::store::CreateRequest {
