@@ -244,6 +244,14 @@ fn main() {
                     let _ = queue_app.emit("silo://operation-queue-changed", ());
                 });
                 commands::runtime_migration::install(app.handle())?;
+                // Checkpoint records from before automatic checkpoints become manual ones,
+                // once, before anything reads them (and before the macOS sweep).
+                {
+                    let migration = app.state::<std::sync::Arc<runtime_migration::Controller>>();
+                    let context = silo_engine::context::current()
+                        .ok_or("The engine context is not installed.")?;
+                    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &migration)?;
+                }
                 commands::computer_use::install(app.handle());
                 pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;

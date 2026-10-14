@@ -85,6 +85,7 @@ const checkpointShape = z.object({
     z.number().int().nonnegative().max(8.64e15).transform(value => new Date(value).toISOString()),
   ]),
   scope: z.enum(["full", "disk"]), reason: z.enum(["manual", "before-restore"]),
+  kind: z.enum(["manual", "automatic"]).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
 })
 const checkpointOperationShape = z.object({

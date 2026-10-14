@@ -4331,6 +4331,23 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
     }
 }
 
+/// The one-time launch upgrade of every macOS computer's checkpoint records (layout 1 to 2).
+/// It runs before the inventory loads, so no record of the previous layout is mistaken for
+/// garbage. Returns how many records were converted.
+pub fn upgrade_checkpoint_records(app_data: &std::path::Path) -> Result<usize, String> {
+    let Ok(entries) = std::fs::read_dir(store::root(app_data)) else {
+        return Ok(0);
+    };
+    let mut converted = 0;
+    for entry in entries.flatten() {
+        let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        converted += checkpoints::upgrade_records(&Layout::new(app_data, &id))?;
+    }
+    Ok(converted)
+}
+
 /// Forgets the loaded inventory so the next read loads from disk again.
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset_registry_for_test() {
@@ -4339,6 +4356,18 @@ pub fn reset_registry_for_test() {
     computers.loaded = false;
     computers.template = None;
     computers.min_disk_gib = store::MIN_DISK_GIB;
+}
+
+/// The policy kinds of a computer's readable checkpoints, newest first.
+#[cfg(any(test, feature = "test-support"))]
+pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<String> {
+    checkpoints::list(&Layout::new(app_data, computer_id))
+        .into_iter()
+        .map(|meta| match meta.policy_kind {
+            checkpoints::PolicyKind::Manual => "manual".to_owned(),
+            checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
+        })
+        .collect()
 }
 
 /// Writes one finished macOS computer with a disk checkpoint under `app_data` and returns
@@ -4370,7 +4399,7 @@ pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, St
     std::fs::write(layout.auxiliary_storage(), b"auxiliary").unwrap();
     std::fs::write(layout.hardware_model(), b"hardware").unwrap();
     let checkpoint = checkpoints::Meta {
-        schema_version: 1,
+        schema_version: checkpoints::SCHEMA_VERSION,
         id: uuid::Uuid::new_v4().to_string(),
         name: "Seeded".into(),
         created_at: "2026-10-14T00:00:00Z".into(),
@@ -4537,7 +4566,7 @@ mod tests {
         )
         .unwrap();
         let checkpoint_meta = checkpoints::Meta {
-            schema_version: 1,
+            schema_version: checkpoints::SCHEMA_VERSION,
             id: checkpoint_id.clone(),
             name: "Before fork".into(),
             created_at: "2026-10-14T00:00:00Z".into(),
@@ -5925,7 +5954,7 @@ mod tests {
         record.setup.developer_tools = true;
         record.developer_tools_version = Some("tools-current".into());
         let target = checkpoints::Meta {
-            schema_version: 1,
+            schema_version: checkpoints::SCHEMA_VERSION,
             id: "checkpoint".into(),
             name: "Before tools".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -6963,7 +6992,7 @@ mod tests {
         std::fs::write(dir.join("disk.img"), b"clone").unwrap();
         std::fs::write(dir.join("auxiliary-storage.img"), b"clone").unwrap();
         let meta = checkpoints::Meta {
-            schema_version: 1,
+            schema_version: checkpoints::SCHEMA_VERSION,
             id: id.clone(),
             name: format!("checkpoint {created_at}"),
             created_at: created_at.into(),

@@ -98,6 +98,36 @@ impl From<GateError> for Failure {
     }
 }
 
+/// The one-time launch upgrade of saved checkpoint records to the layout that stores the
+/// policy kind. Every record made before automatic checkpoints existed becomes `manual`,
+/// keeping its reason, native identity, dates, memory fields and journals. It must run
+/// before anything reads the records and before the macOS sweep, which would otherwise
+/// take an unconverted record for garbage. It is idempotent, so an interrupted launch
+/// finishes at the next one.
+///
+/// Linux records live in the runtime storage generation in use; while the storage
+/// migration has not finished that storage is the pre-upgrade backup source and is left
+/// byte for byte, and its records are converted at the launch after the migration.
+pub fn upgrade_layouts(
+    context: &dyn EngineContext,
+    migration: &crate::runtime_migration::Controller,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    if let Ok(storage) = migration.runtime_storage() {
+        if let Err(error) = runtime::checkpoints::upgrade_records(&storage) {
+            failures.push(error);
+        }
+    }
+    if let Err(error) = macos_computers::upgrade_checkpoint_records(&context.paths().app_data) {
+        failures.push(error);
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join(" "))
+    }
+}
+
 /// Which owner a computer's checkpoints belong to, by inventory rather than id format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Platform {
@@ -740,6 +770,74 @@ mod tests {
             .usage("22222222-2222-4222-8222-222222222222")
             .unwrap_err();
         assert_eq!(missing.code, ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn the_launch_upgrade_converts_linux_and_macos_records_and_waits_out_a_pending_migration() {
+        let _state = crate::test_support::global_state();
+        let fixture = fixture(3);
+        let app_data = fixture.engine.paths.app_data.clone();
+        // A layout-1 macOS record: no policy kind, schema version 1.
+        let layout_one = |macos_id: &str, checkpoint_id: &str| {
+            let file = app_data
+                .join("macos-computers")
+                .join(macos_id)
+                .join("checkpoints")
+                .join(checkpoint_id)
+                .join("checkpoint.json");
+            let mut value: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+            value["schemaVersion"] = json!(1);
+            value.as_object_mut().unwrap().remove("policyKind");
+            std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+            file
+        };
+        let macos_file = layout_one(&fixture.macos_id, &fixture.macos_checkpoint);
+        // A layout-1 Linux record in the storage the normal runtime reads.
+        let storage = app_data.join("runtime");
+        std::fs::create_dir_all(storage.join("checkpoints")).unwrap();
+        let linux_file = storage.join("checkpoints").join(format!("{LINUX_ID}.json"));
+        std::fs::write(
+            &linux_file,
+            json!({"version": 1, "checkpoints": [{
+                "id": "c000000000000000000000000000000", "name": "Old", "createdAt": 1,
+                "scope": "disk", "reason": "manual"
+            }], "pendingCheckpointRestore": null, "checkpointOperation": null})
+            .to_string(),
+        )
+        .unwrap();
+
+        // While the storage migration is pending, the Linux storage is the backup source and
+        // stays byte for byte; the macOS records have no such constraint.
+        std::fs::write(storage.join("computers.json"), b"{}").unwrap();
+        let pending = crate::runtime_migration::Controller::new(app_data.clone());
+        assert!(pending.runtime_storage().is_err());
+        let before = std::fs::read(&linux_file).unwrap();
+        upgrade_layouts(fixture.engine.as_ref(), &pending).unwrap();
+        assert_eq!(std::fs::read(&linux_file).unwrap(), before);
+        assert!(!std::fs::read_to_string(&macos_file)
+            .unwrap()
+            .contains("schemaVersion\": 1"));
+        assert!(std::fs::read_to_string(&macos_file)
+            .unwrap()
+            .contains("policyKind"));
+        assert_eq!(
+            macos_computers::seed_check_policy(&app_data, &fixture.macos_id),
+            vec!["manual".to_owned()]
+        );
+
+        // Once the migration is not required the Linux record is converted too.
+        std::fs::remove_file(storage.join("computers.json")).unwrap();
+        let ready = crate::runtime_migration::Controller::new(app_data.clone());
+        assert!(ready.runtime_storage().is_ok());
+        upgrade_layouts(fixture.engine.as_ref(), &ready).unwrap();
+        let converted: Value =
+            serde_json::from_slice(&std::fs::read(&linux_file).unwrap()).unwrap();
+        assert_eq!(converted["version"], 2);
+        assert_eq!(converted["checkpoints"][0]["kind"], "manual");
+        // And running it again changes nothing.
+        let settled = std::fs::read(&linux_file).unwrap();
+        upgrade_layouts(fixture.engine.as_ref(), &ready).unwrap();
+        assert_eq!(std::fs::read(&linux_file).unwrap(), settled);
     }
 
     #[test]

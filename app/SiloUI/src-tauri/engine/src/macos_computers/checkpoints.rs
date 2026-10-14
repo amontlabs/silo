@@ -23,7 +23,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: u32 = 1;
+/// Layout 2 stores the policy kind next to the capture kind. Layout 1 had no policy kind;
+/// the launch upgrade (`upgrade_records`) is the only code that still reads it.
+pub(super) const SCHEMA_VERSION: u32 = 2;
+const PREVIOUS_SCHEMA_VERSION: u32 = 1;
 const META: &str = "checkpoint.json";
 const DISK: &str = "disk.img";
 const AUXILIARY_STORAGE: &str = "auxiliary-storage.img";
@@ -60,10 +63,9 @@ pub(super) enum Reason {
     BeforeRestore,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum PolicyKind {
-    #[default]
     Manual,
     Automatic,
 }
@@ -77,8 +79,7 @@ pub(super) struct Meta {
     pub created_at: String,
     pub kind: Kind,
     pub reason: Reason,
-    /// User-facing checkpoint policy; absent in saved records means manual.
-    #[serde(default)]
+    /// Whether the user made the checkpoint or an unattended run did.
     pub policy_kind: PolicyKind,
     /// The macOS the computer had, as `Record::os_version` words it.
     #[serde(default)]
@@ -275,7 +276,19 @@ pub(super) fn find(layout: &Layout, id: &str) -> Result<Meta, String> {
         .ok_or_else(|| "This checkpoint no longer exists.".to_string())
 }
 
-/// Removes what an interrupted run left: partial folders and folders without a readable record.
+/// Whether a folder's record is a readable layout-1 record that the launch upgrade has not
+/// converted yet. It is not garbage: it is a user's checkpoint.
+fn is_previous_layout(dir: &Path) -> bool {
+    fs::read(dir.join(META))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|value| {
+            value.get("schemaVersion") == Some(&serde_json::Value::from(PREVIOUS_SCHEMA_VERSION))
+        })
+}
+
+/// Removes what an interrupted run left: partial folders and folders without a readable
+/// record. A record of the previous layout is kept for the launch upgrade to convert.
 pub(super) fn sweep(layout: &Layout) {
     let Ok(entries) = fs::read_dir(root(layout)) else {
         return;
@@ -283,10 +296,48 @@ pub(super) fn sweep(layout: &Layout) {
     for entry in entries.flatten() {
         let path = entry.path();
         let partial = entry.file_name().to_string_lossy().starts_with(PARTIAL);
-        if path.is_dir() && (partial || read_meta(&path).is_none()) {
+        if path.is_dir() && (partial || (read_meta(&path).is_none() && !is_previous_layout(&path)))
+        {
             let _ = fs::remove_dir_all(&path);
         }
     }
+}
+
+/// The one-time launch upgrade of one computer's checkpoint records from layout 1 to 2:
+/// each gains `policyKind: "manual"` (it predates automatic checkpoints) and keeps its
+/// capture kind, reason, dates and files. A record that is not layout 1 is left as it is.
+/// Returns how many were converted.
+pub(super) fn upgrade_records(layout: &Layout) -> Result<usize, String> {
+    let Ok(entries) = fs::read_dir(root(layout)) else {
+        return Ok(0);
+    };
+    let mut converted = 0;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() || !is_previous_layout(&dir) {
+            continue;
+        }
+        let bytes = fs::read(dir.join(META))
+            .map_err(|error| store::io_error("read the checkpoint for upgrade", &error))?;
+        let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        value["schemaVersion"] = serde_json::Value::from(SCHEMA_VERSION);
+        value["policyKind"] = serde_json::Value::from("manual");
+        let mut file = tempfile::NamedTempFile::new_in(&dir)
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        file.write_all(&serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?)
+            .and_then(|()| file.as_file().sync_all())
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        fs::set_permissions(file.path(), fs::Permissions::from_mode(0o600))
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        file.persist(dir.join(META))
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error.error))?;
+        store::sync_dir(&dir)
+            .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
+        converted += 1;
+    }
+    Ok(converted)
 }
 
 /// Deletes one checkpoint. The record goes first, so a checkpoint cut short is never listed.
@@ -1649,5 +1700,54 @@ mod tests {
         assert_eq!(automatic.kind, Kind::Disk);
         let manual = create(&subject(&layout, &machine, false), "Mine", Reason::Manual).unwrap();
         assert_eq!(manual.policy_kind, PolicyKind::Manual);
+    }
+
+    fn write_layout_one(layout: &Layout, meta: &Meta) {
+        let dir = dir(layout, &meta.id);
+        let mut value = serde_json::to_value(meta).unwrap();
+        value["schemaVersion"] = serde_json::Value::from(PREVIOUS_SCHEMA_VERSION);
+        value.as_object_mut().unwrap().remove("policyKind");
+        fs::write(dir.join(META), serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_unconverted_record_is_neither_listed_nor_swept_and_the_upgrade_converts_it() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let old = create(
+            &subject(&layout, &machine, true),
+            "Old",
+            Reason::BeforeRestore,
+        )
+        .unwrap();
+        write_layout_one(&layout, &old);
+        let garbage = root(&layout).join("garbage");
+        fs::create_dir_all(&garbage).unwrap();
+        fs::write(garbage.join(META), b"{").unwrap();
+
+        // The current code reads only the current layout.
+        assert!(list(&layout).is_empty());
+        // The sweep removes garbage but must not take the old record for it.
+        sweep(&layout);
+        assert!(!garbage.exists());
+        assert!(dir(&layout, &old.id).join(STATE).exists());
+
+        assert_eq!(upgrade_records(&layout), Ok(1));
+        let converted = find(&layout, &old.id).unwrap();
+        assert_eq!(converted.policy_kind, PolicyKind::Manual);
+        assert_eq!(converted.schema_version, SCHEMA_VERSION);
+        // Everything else is as it was made.
+        assert_eq!(converted.reason, Reason::BeforeRestore);
+        assert_eq!(converted.kind, Kind::Memory);
+        assert_eq!(converted.created_at, old.created_at);
+        assert_eq!(converted.size_bytes, old.size_bytes);
+        let mode = fs::metadata(dir(&layout, &old.id).join(META))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        // Idempotent.
+        assert_eq!(upgrade_records(&layout), Ok(0));
     }
 }

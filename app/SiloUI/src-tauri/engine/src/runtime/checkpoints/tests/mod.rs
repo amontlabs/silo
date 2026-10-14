@@ -3,11 +3,10 @@ use super::*;
 #[test]
 fn a_migrated_checkpoint_record_loads() {
     let migrated = crate::runtime_migration::vocabulary_tests::migrated_installation();
-    let record = load(
-        &migrated.runtime_paths(),
-        crate::runtime_migration::vocabulary_tests::ID,
-    )
-    .unwrap();
+    let paths = migrated.runtime_paths();
+    // The record layout is upgraded once at launch, after the vocabulary conversion.
+    upgrade_records(paths.metadata.parent().unwrap()).unwrap();
+    let record = load(&paths, crate::runtime_migration::vocabulary_tests::ID).unwrap();
     let pending = record.pending_checkpoint_restore.unwrap();
     assert_eq!(pending.source_computer, "dev");
     assert_eq!(pending.state, "full");
@@ -4348,4 +4347,77 @@ fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
     // candidate, and 3 and 4 are the kept newest pair.
     assert!(left.contains(&native_id(1)));
     assert!(left.contains(&native_id(3)) && left.contains(&native_id(4)));
+}
+
+// MARK: Launch upgrade of the record layout
+
+fn layout_one_record() -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "checkpoints": [{
+            "id": A, "nativeId": "native-a", "name": "Legacy", "createdAt": 5,
+            "scope": "full", "reason": "before-restore"
+        }],
+        "inflightCheckpoint": {
+            "id": B, "name": "Capturing", "createdAt": 6, "scope": "disk", "reason": "manual"
+        },
+        "restoreJournal": {
+            "targetCheckpointId": A,
+            "recoveryCheckpoint": {
+                "id": C, "name": "Before restore", "createdAt": 7, "scope": "disk",
+                "reason": "before-restore"
+            },
+            "priorRunning": false,
+            "phase": "capturing"
+        },
+        "pendingCheckpointRestore": null,
+        "checkpointOperation": null
+    })
+}
+
+#[test]
+fn the_launch_upgrade_makes_every_old_record_manual_and_keeps_the_rest() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let storage = directory.path();
+    fs::create_dir_all(storage.join("checkpoints")).unwrap();
+    let file = storage.join("checkpoints").join(format!("{ID}.json"));
+    fs::write(&file, layout_one_record().to_string()).unwrap();
+    let damaged = storage.join("checkpoints").join(format!("{FORK_ID}.json"));
+    fs::write(&damaged, b"{not json").unwrap();
+
+    // Before the upgrade the old layout is refused, not silently accepted.
+    let paths = crate::test_support::paths(storage);
+    assert!(load(&paths, ID).is_err());
+
+    assert_eq!(upgrade_records(storage), Ok(1));
+
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(record.version, RECORD_VERSION);
+    let first = &record.checkpoints[0];
+    assert_eq!(first.kind, "manual");
+    assert_eq!(first.reason, "before-restore", "the reason is kept");
+    assert_eq!(first.native_id.as_deref(), Some("native-a"));
+    assert_eq!(first.created_at, 5);
+    assert_eq!(record.inflight_checkpoint.unwrap().kind, "manual");
+    assert_eq!(
+        record.restore_journal.unwrap().recovery_checkpoint.kind,
+        "manual"
+    );
+    assert_eq!(
+        fs::read(&damaged).unwrap(),
+        b"{not json",
+        "a damaged history is preserved"
+    );
+
+    // Idempotent: a converted file is not rewritten.
+    let converted = fs::read(&file).unwrap();
+    assert_eq!(upgrade_records(storage), Ok(0));
+    assert_eq!(fs::read(&file).unwrap(), converted);
+}
+
+#[test]
+fn a_computer_without_a_history_folder_has_nothing_to_upgrade() {
+    let directory = tempfile::tempdir().unwrap();
+    assert_eq!(upgrade_records(directory.path()), Ok(0));
 }

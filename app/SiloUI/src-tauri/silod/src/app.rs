@@ -113,6 +113,9 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    // Checkpoint records written before automatic checkpoints existed become manual ones,
+    // once, before anything reads them.
+    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
     let runtime_home =

@@ -23,14 +23,13 @@ pub(super) struct Checkpoint {
     pub(super) created_at: u64,
     pub(super) scope: String,
     pub(super) reason: String,
-    /// User policy kind; old checkpoint records deserialize as manual.
-    #[serde(default = "manual_checkpoint_kind")]
+    /// Policy origin, `manual` or `automatic`. Records from before the field existed are
+    /// rewritten once by the launch upgrade (`upgrade_records`); nothing else accepts them.
     pub(super) kind: String,
 }
 
-fn manual_checkpoint_kind() -> String {
-    "manual".to_owned()
-}
+/// The layout of `checkpoints/<computer id>.json`. Version 1 had no checkpoint `kind`.
+const RECORD_VERSION: u8 = 2;
 
 impl Checkpoint {
     fn native_id(&self) -> &str {
@@ -181,7 +180,7 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
     }
     let record: Record = serde_json::from_slice(&bytes)
         .map_err(|_| error("Checkpoint history is invalid; it was preserved."))?;
-    if record.version != 1
+    if record.version != RECORD_VERSION
         || record
             .snapshot_group
             .as_deref()
@@ -347,7 +346,7 @@ pub(super) fn save(paths: &RuntimePaths, id: &str, record: &Record) -> Result<()
     let mut file = tempfile::NamedTempFile::new_in(&directory)
         .map_err(|_| error("Checkpoint history could not be saved."))?;
     let mut record = record.clone();
-    record.version = 1;
+    record.version = RECORD_VERSION;
     serde_json::to_writer(&mut file, &record)
         .map_err(|_| error("Checkpoint history could not be encoded."))?;
     file.as_file()
@@ -819,6 +818,69 @@ pub fn create(paths: &RuntimePaths, computer_id: &str, name: &str) -> Result<(),
     let result = capture_with(&ProcessRunner, paths, computer_id, name, "manual");
     drop(guard);
     result.map_err(|error| error.to_string())
+}
+
+/// The one-time launch upgrade of `<storage>/checkpoints/<computer id>.json` from layout 1
+/// to layout 2: every checkpoint record gains `kind: "manual"` (it was made before automatic
+/// checkpoints existed) and keeps its reason, native identity, dates and journals. A file
+/// that is not a layout-1 record is left exactly as it is, so a damaged history stays
+/// protected and a converted one is not rewritten. Returns how many files were converted.
+pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
+    let directory = storage.join("checkpoints");
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(_) => return Err("Checkpoint history could not be scanned for upgrade.".into()),
+    };
+    let mut converted = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_record = path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .is_some_and(|stem| uuid::Uuid::parse_str(stem).is_ok());
+        if !is_record {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else {
+            return Err("Checkpoint history could not be read for upgrade.".into());
+        };
+        let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        if value.get("version") != Some(&Value::from(1)) {
+            continue;
+        }
+        let mark = |checkpoint: Option<&mut Value>| {
+            if let Some(object) = checkpoint.and_then(Value::as_object_mut) {
+                object
+                    .entry("kind")
+                    .or_insert_with(|| Value::String("manual".into()));
+            }
+        };
+        if let Some(list) = value.get_mut("checkpoints").and_then(Value::as_array_mut) {
+            for checkpoint in list {
+                mark(Some(checkpoint));
+            }
+        }
+        mark(value.get_mut("inflightCheckpoint"));
+        mark(value.pointer_mut("/restoreJournal/recoveryCheckpoint"));
+        value["version"] = Value::from(RECORD_VERSION);
+        let mut file = tempfile::NamedTempFile::new_in(&directory)
+            .map_err(|_| "Checkpoint history could not be saved for upgrade.".to_owned())?;
+        serde_json::to_writer(&mut file, &value)
+            .map_err(|_| "Checkpoint history could not be encoded for upgrade.".to_owned())?;
+        file.as_file()
+            .sync_all()
+            .and_then(|()| file.persist(&path).map(drop).map_err(|error| error.error))
+            .and_then(|()| File::open(&directory)?.sync_all())
+            .map_err(|_| "Checkpoint history could not be saved for upgrade.".to_owned())?;
+        converted += 1;
+    }
+    Ok(converted)
 }
 
 /// The Linux record of a computer exists in this device's inventory.
