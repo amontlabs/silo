@@ -60,6 +60,14 @@ pub(super) enum Reason {
     BeforeRestore,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum PolicyKind {
+    #[default]
+    Manual,
+    Automatic,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Meta {
@@ -69,6 +77,9 @@ pub(super) struct Meta {
     pub created_at: String,
     pub kind: Kind,
     pub reason: Reason,
+    /// User-facing checkpoint policy; absent in saved records means manual.
+    #[serde(default)]
+    pub policy_kind: PolicyKind,
     /// The macOS the computer had, as `Record::os_version` words it.
     #[serde(default)]
     pub macos_version: Option<String>,
@@ -101,6 +112,7 @@ pub(crate) struct Summary {
     /// `full` includes memory, `disk` does not: the words the Linux checkpoint list uses.
     scope: &'static str,
     reason: Reason,
+    kind: PolicyKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
 }
@@ -116,6 +128,7 @@ impl Meta {
                 Kind::Disk => "disk",
             },
             reason: self.reason,
+            kind: self.policy_kind,
             size_bytes: self.size_bytes,
         }
     }
@@ -383,6 +396,15 @@ pub(super) fn create<M: Machine>(
     name: &str,
     reason: Reason,
 ) -> Result<Meta, String> {
+    create_with_policy(subject, name, reason, PolicyKind::Manual)
+}
+
+pub(super) fn create_with_policy<M: Machine>(
+    subject: &Subject<'_, M>,
+    name: &str,
+    reason: Reason,
+    policy_kind: PolicyKind,
+) -> Result<Meta, String> {
     let name = validate_name(name)?;
     let machine = subject.machine;
     let layout = subject.layout;
@@ -393,7 +415,7 @@ pub(super) fn create<M: Machine>(
     }
     let id = uuid::Uuid::new_v4().to_string();
     let partial = partial_dir(layout, &id);
-    let outcome = build(subject, &partial, &id, name, reason);
+    let outcome = build(subject, &partial, &id, name, reason, policy_kind);
     match outcome {
         Ok(meta) => {
             fs::rename(&partial, dir(layout, &id)).map_err(|error| {
@@ -427,6 +449,7 @@ fn build<M: Machine>(
     id: &str,
     name: String,
     reason: Reason,
+    policy_kind: PolicyKind,
 ) -> Result<Meta, String> {
     let machine = subject.machine;
     private_dir(partial)?;
@@ -459,6 +482,7 @@ fn build<M: Machine>(
             Kind::Disk
         },
         reason,
+        policy_kind,
         macos_version: subject.macos_version.clone(),
         host_build: host_build(),
         size_bytes,
@@ -716,6 +740,46 @@ pub(super) fn recover(layout: &Layout) -> Result<Option<PendingRestore>, String>
         // the computer from starting, until someone can look at it.
         Err(_) => Err(UNREADABLE_JOURNAL.into()),
     }
+}
+
+/// What an explicit abandon of an unfinished Restore found and did.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Abandon {
+    /// The journal was still staging: the staged files and the journal are gone and the
+    /// computer keeps its original files and every recovery checkpoint.
+    Discarded,
+    /// The journal was swapping, so the files are already the checkpoint's. The roll-forward
+    /// is finished; the caller saves this pending Restore before refusing the abandon.
+    AlreadyReplaced(PendingRestore),
+}
+
+/// Abandons a Restore at the same safety boundary as Linux: it succeeds only while the
+/// computer's original files still exist. A swapping journal is rolled forward, never back;
+/// an unreadable journal keeps every file; a pending Restore that is already settled and no
+/// journal at all are refused with their own messages.
+pub(super) fn abandon_restore(
+    layout: &Layout,
+    name: &str,
+    pending: Option<&PendingRestore>,
+) -> Result<Abandon, String> {
+    match read_back(layout) {
+        Readback::Absent if pending.is_some() => Err(already_replaced(name)),
+        Readback::Absent => Err(format!("{name} has no unfinished Restore.")),
+        Readback::Unknown => Err(UNREADABLE_JOURNAL.into()),
+        Readback::Phase(Phase::Staging) => {
+            remove_staged(layout);
+            finish_restore(layout);
+            Ok(Abandon::Discarded)
+        }
+        Readback::Phase(Phase::Swapping) => match recover(layout)? {
+            Some(pending) => Ok(Abandon::AlreadyReplaced(pending)),
+            None => Err(format!("{name} has no unfinished Restore.")),
+        },
+    }
+}
+
+pub(super) fn already_replaced(name: &str) -> String {
+    format!("{name} was already replaced by this Restore. Start {name} to finish it, or Restore another checkpoint.")
 }
 
 /// Ends the journal once the record names the Restore the files already carry out.
@@ -1507,5 +1571,83 @@ mod tests {
         assert_eq!(json["scope"], "disk");
         assert_eq!(json["reason"], "before-restore");
         assert!(json.get("sizeBytes").is_none());
+    }
+
+    #[test]
+    fn abandoning_a_staging_restore_discards_it_and_keeps_the_original_files() {
+        let (_data, layout, _) = interrupted("staging");
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Ok(Abandon::Discarded)
+        );
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert_eq!(fs::read(layout.auxiliary_storage()).unwrap(), b"aux-v2");
+        assert!(!restore_unfinished(&layout));
+        assert!(staged(&layout)
+            .iter()
+            .all(|(_, temporary)| !temporary.exists()));
+    }
+
+    #[test]
+    fn abandoning_a_swapping_restore_rolls_forward_and_refuses_to_undo_it() {
+        let (_data, layout, meta) = interrupted("swapping");
+        let Ok(Abandon::AlreadyReplaced(pending)) = abandon_restore(&layout, "dev", None) else {
+            panic!("a swapping journal is rolled forward");
+        };
+        assert_eq!(pending.checkpoint_id, meta.id);
+        // The files are now the checkpoint's: nothing was rolled back.
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
+        assert!(restore_unfinished(&layout));
+    }
+
+    #[test]
+    fn abandoning_an_unreadable_journal_keeps_every_file_and_refuses() {
+        let (_data, layout, _) = interrupted("swapping");
+        fs::write(journal_path(&layout), b"{").unwrap();
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Err(UNREADABLE_JOURNAL.to_string())
+        );
+        assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v2");
+        assert!(restore_unfinished(&layout));
+    }
+
+    #[test]
+    fn abandoning_without_a_journal_names_what_is_missing_or_already_settled() {
+        let (_data, layout) = computer();
+        assert_eq!(
+            abandon_restore(&layout, "dev", None),
+            Err("dev has no unfinished Restore.".to_string())
+        );
+        let settled = PendingRestore {
+            checkpoint_id: "x".into(),
+            memory: false,
+        };
+        assert_eq!(
+            abandon_restore(&layout, "dev", Some(&settled)),
+            Err(already_replaced("dev"))
+        );
+        assert!(already_replaced("dev").contains("Start dev to finish it"));
+    }
+
+    #[test]
+    fn the_policy_kind_is_stored_and_shown_next_to_the_capture_reason() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let automatic = create_with_policy(
+            &subject(&layout, &machine, false),
+            "Before run: tests, deleted automatically",
+            Reason::Manual,
+            PolicyKind::Automatic,
+        )
+        .unwrap();
+        assert_eq!(list(&layout), [automatic.clone()]);
+        let summary = serde_json::to_value(automatic.summary()).unwrap();
+        assert_eq!(summary["kind"], "automatic");
+        assert_eq!(summary["reason"], "manual");
+        // The capture kind stays the memory/disk fact; the policy kind is separate.
+        assert_eq!(automatic.kind, Kind::Disk);
+        let manual = create(&subject(&layout, &machine, false), "Mine", Reason::Manual).unwrap();
+        assert_eq!(manual.policy_kind, PolicyKind::Manual);
     }
 }

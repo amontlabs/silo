@@ -23,6 +23,13 @@ pub(super) struct Checkpoint {
     pub(super) created_at: u64,
     pub(super) scope: String,
     pub(super) reason: String,
+    /// User policy kind; old checkpoint records deserialize as manual.
+    #[serde(default = "manual_checkpoint_kind")]
+    pub(super) kind: String,
+}
+
+fn manual_checkpoint_kind() -> String {
+    "manual".to_owned()
 }
 
 impl Checkpoint {
@@ -187,6 +194,7 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
                     .is_some_and(|native_id| !valid_native_id(native_id))
                 || !matches!(checkpoint.scope.as_str(), "full" | "disk")
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
+                || !matches!(checkpoint.kind.as_str(), "manual" | "automatic")
         })
         || !unique_checkpoint_ids(&record.checkpoints)
         || record
@@ -585,6 +593,17 @@ fn capture_with(
     display_name: &str,
     reason: &str,
 ) -> Result<(), RuntimeError> {
+    capture_with_kind(runner, paths, id, display_name, reason, "manual").map(|_| ())
+}
+
+fn capture_with_kind(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    display_name: &str,
+    reason: &str,
+    policy_kind: &str,
+) -> Result<Checkpoint, RuntimeError> {
     let label = display_name.trim();
     if label.is_empty() || label.chars().count() > 80 || label.chars().any(char::is_control) {
         return Err(RuntimeError::Invalid(
@@ -624,10 +643,13 @@ fn capture_with(
             created_at: activity_timestamp(),
             scope: pending.state,
             reason: reason.into(),
+            kind: policy_kind.into(),
         };
         record.checkpoints.insert(0, checkpoint);
         record.checkpoint_operation = None;
-        return save(paths, id, &record);
+        let checkpoint = record.checkpoints[0].clone();
+        save(paths, id, &record)?;
+        return Ok(checkpoint);
     }
     ensure_no_unfinished_restore(&record, "creating another checkpoint")?;
     let mut inspected = inspect_computer(runner, paths, configuration.name())?;
@@ -700,6 +722,7 @@ fn capture_with(
         created_at: activity_timestamp(),
         scope: scope.into(),
         reason: reason.into(),
+        kind: policy_kind.into(),
     };
     record.inflight_checkpoint = Some(new_checkpoint.clone());
     record.checkpoint_operation = Some(Operation {
@@ -737,7 +760,9 @@ fn capture_with(
             record.checkpoints.insert(0, new_checkpoint);
             record.inflight_checkpoint = None;
             record.checkpoint_operation = None;
-            save(paths, id, &record)
+            let checkpoint = record.checkpoints[0].clone();
+            save(paths, id, &record)?;
+            Ok(checkpoint)
         }
         Err(failure) => {
             let (settled, failure) = if scope == "full" {
@@ -794,6 +819,153 @@ pub fn create(paths: &RuntimePaths, computer_id: &str, name: &str) -> Result<(),
     let result = capture_with(&ProcessRunner, paths, computer_id, name, "manual");
     drop(guard);
     result.map_err(|error| error.to_string())
+}
+
+/// The Linux record of a computer exists in this device's inventory.
+pub fn has_computer(paths: &RuntimePaths, computer_id: &str) -> bool {
+    computer_configuration(paths, computer_id).is_ok()
+}
+
+/// Captures a Linux checkpoint as one durable, cancellable job operation and returns the
+/// exact record it committed. An automatic capture is refused while the setting is off,
+/// both before it queues (the caller) and once the queue admits it (here).
+pub fn create_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    name: &str,
+    automatic: bool,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<silo_api::methods::checkpoints::Checkpoint, String> {
+    use super::operation_gate::{OperationKind, Scope};
+
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(OperationKind::CheckpointCapture)
+        .acquire_for_job(
+            Scope::Computer {
+                id: computer_id.to_owned(),
+            },
+            Some(computer_name.clone()),
+            "Creating checkpoint",
+            None,
+            job_id.clone(),
+            Some(cancellation),
+        )
+        .map_err(|error| error.to_string())?;
+    guard.allow_cancel();
+    guard.expect_within(std::time::Duration::from_secs(15 * 60));
+    shutdown::ensure_accepting_operations()?;
+    if automatic && retention()? == 0 {
+        return Err(crate::checkpoints::AUTOMATIC_OFF.into());
+    }
+    let policy_kind = if automatic { "automatic" } else { "manual" };
+    let checkpoint = capture_with_kind(
+        &ProcessRunner,
+        paths,
+        computer_id,
+        name,
+        "manual",
+        policy_kind,
+    )
+    .map_err(|error| error.to_string())?;
+    // The capture's computer lane is released before retention asks for the device lane.
+    drop(guard);
+    if automatic {
+        prune_automatic_with(
+            &OPERATIONS,
+            &ProcessRunner,
+            paths,
+            computer_id,
+            retention,
+            job_id,
+        );
+    }
+    Ok(api_checkpoint(checkpoint))
+}
+
+fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Checkpoint {
+    use silo_api::methods::checkpoints::{
+        Checkpoint as ApiCheckpoint, CheckpointKind, CheckpointReason, CheckpointScope,
+    };
+    ApiCheckpoint {
+        id: checkpoint.id,
+        name: checkpoint.name,
+        created_at: crate::checkpoints::retention::format_millis(checkpoint.created_at),
+        scope: if checkpoint.scope == "full" {
+            CheckpointScope::Full
+        } else {
+            CheckpointScope::Disk
+        },
+        reason: if checkpoint.reason == "before-restore" {
+            CheckpointReason::BeforeRestore
+        } else {
+            CheckpointReason::Manual
+        },
+        kind: if checkpoint.kind == "automatic" {
+            CheckpointKind::Automatic
+        } else {
+            CheckpointKind::Manual
+        },
+        size_bytes: None,
+    }
+}
+
+/// Removes this computer's automatic checkpoints beyond the newest N, oldest first, through
+/// ordinary safe deletion. It never touches manual or before-restore records. The count is
+/// read again before each deletion so turning the setting off stops later deletions, and a
+/// checkpoint something still needs is kept (visible with its `deleteBlocker`).
+fn prune_automatic_with(
+    gate: &super::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
+    use super::operation_gate::{OperationKind, Scope};
+
+    let Ok(count) = retention() else { return };
+    if count == 0 {
+        return;
+    }
+    let Ok(record) = load(paths, computer_id) else {
+        return;
+    };
+    let entries: Vec<_> = record
+        .checkpoints
+        .iter()
+        .map(|checkpoint| crate::checkpoints::retention::Entry {
+            id: checkpoint.id.clone(),
+            created_at_ms: i128::from(checkpoint.created_at),
+            automatic: checkpoint.kind == "automatic",
+        })
+        .collect();
+    for candidate in crate::checkpoints::retention::plan(&entries, count).candidates {
+        // The setting is checked at the moment each deletion is admitted.
+        if !matches!(retention(), Ok(current) if current > 0) {
+            return;
+        }
+        let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
+            Scope::Device,
+            None,
+            "Removing an older automatic checkpoint",
+            None,
+            job_id.clone(),
+            None,
+        ) else {
+            return;
+        };
+        if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
+            // Dependencies and in-progress recovery defer retention. Never force-delete a
+            // checkpoint the runtime says something still needs.
+            eprintln!("Silo kept an older automatic checkpoint: {error}");
+        }
+    }
 }
 
 pub(super) fn is_pending(paths: &RuntimePaths, id: &str) -> Result<bool, RuntimeError> {
@@ -1705,25 +1877,49 @@ fn fork_in_lanes(
     checkpoint_id: Option<&str>,
     new_name: &str,
     macos_names: &dyn Fn() -> Vec<String>,
+    job: Option<(
+        silo_api::jobs::JobId,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    )>,
 ) -> Result<(), RuntimeError> {
-    use super::operation_gate::OperationKind;
+    use super::operation_gate::{OperationKind, Scope};
     let computer_name = computer_configuration(paths, computer_id)?
         .name()
         .to_owned();
     let fork = {
-        let guard = gate.kind(OperationKind::CheckpointFork).computer(
-            computer_id,
-            &computer_name,
-            "Forking checkpoint",
-        )?;
+        let gate = gate.kind(OperationKind::CheckpointFork);
+        let guard = if let Some((job_id, cancellation)) = &job {
+            gate.acquire_for_job(
+                Scope::Computer {
+                    id: computer_id.to_owned(),
+                },
+                Some(computer_name.clone()),
+                "Forking checkpoint",
+                None,
+                job_id.clone(),
+                Some(cancellation.clone()),
+            )?
+        } else {
+            gate.computer(computer_id, &computer_name, "Forking checkpoint")?
+        };
         // Fork is not cancellable; flag it slow after the capture window.
         guard.expect_within(Duration::from_secs(10 * 60));
         shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
         fork_source(runner, paths, computer_id, checkpoint_id, new_name)?
     };
-    let guard = gate
-        .kind(OperationKind::CheckpointFork)
-        .device("Forking checkpoint")?;
+    let gate = gate.kind(OperationKind::CheckpointFork);
+    let guard = if let Some((job_id, cancellation)) = &job {
+        gate.acquire_for_job(
+            Scope::Device,
+            None,
+            "Forking checkpoint",
+            None,
+            job_id.clone(),
+            Some(cancellation.clone()),
+        )?
+    } else {
+        gate.device("Forking checkpoint")?
+    };
     guard.expect_within(Duration::from_secs(60));
     shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
     // Held until the fork is in the inventory, so a macOS creation sees the name.
@@ -1757,6 +1953,32 @@ pub fn fork(
         checkpoint_id,
         new_name,
         macos_names,
+        None,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Forks a Linux checkpoint while both admission lanes are linked to its durable job.
+pub fn fork_for_job(
+    paths: &RuntimePaths,
+    assignments: &dyn ForkAssignments,
+    computer_id: &str,
+    checkpoint_id: Option<&str>,
+    new_name: &str,
+    macos_names: &dyn Fn() -> Vec<String>,
+    job_id: silo_api::jobs::JobId,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    fork_in_lanes(
+        &OPERATIONS,
+        &ProcessRunner,
+        paths,
+        assignments,
+        computer_id,
+        checkpoint_id,
+        new_name,
+        macos_names,
+        Some((job_id, cancellation)),
     )
     .map_err(|error| error.to_string())
 }
@@ -1894,6 +2116,7 @@ fn restore_steps(
             created_at: activity_timestamp(),
             scope: pending.state,
             reason: "before-restore".into(),
+            kind: "manual".into(),
         };
         record.checkpoints.insert(0, current);
         let policy = record.desired_network_policy.as_ref().ok_or_else(|| {
@@ -1985,6 +2208,7 @@ fn restore_steps(
             created_at: activity_timestamp(),
             scope: if prior_running { "full" } else { "disk" }.into(),
             reason: "before-restore".into(),
+            kind: "manual".into(),
         };
         record.desired_network_policy = Some(policy);
         record.restore_journal = Some(RestoreJournal {
@@ -2150,6 +2374,39 @@ pub fn restore(paths: &RuntimePaths, computer_id: &str, checkpoint_id: &str) -> 
     // Restore is deliberately not cancellable; flag it slow after the restore window.
     guard.expect_within(RESTORE_EXPECTED_DURATION);
     let _guard = guard;
+    shutdown::ensure_accepting_operations()?;
+    restore_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Restores a Linux checkpoint under the operation gate owned by a durable job.
+pub fn restore_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+    job_id: silo_api::jobs::JobId,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use super::operation_gate::{OperationKind, Scope};
+
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(OperationKind::CheckpointRestore)
+        .acquire_for_job(
+            Scope::Computer {
+                id: computer_id.to_owned(),
+            },
+            Some(computer_name),
+            "Restoring checkpoint",
+            None,
+            job_id,
+            Some(cancellation),
+        )
+        .map_err(|error| error.to_string())?;
+    guard.expect_within(RESTORE_EXPECTED_DURATION);
     shutdown::ensure_accepting_operations()?;
     restore_with(&ProcessRunner, paths, computer_id, checkpoint_id)
         .map_err(|error| error.to_string())
@@ -2426,6 +2683,37 @@ pub fn abandon_restore(paths: &RuntimePaths, computer_id: &str) -> Result<(), St
     abandon_restore_with(&ProcessRunner, paths, computer_id).map_err(|error| error.to_string())
 }
 
+/// Abandons a Linux restore while exposing its device change as a job-owned queue entry.
+pub fn abandon_restore_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    job_id: silo_api::jobs::JobId,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use super::operation_gate::{OperationKind, Scope};
+
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(OperationKind::CheckpointRestore)
+        .acquire_for_job(
+            Scope::Computer {
+                id: computer_id.to_owned(),
+            },
+            Some(computer_name),
+            "Abandoning Restore",
+            None,
+            job_id,
+            Some(cancellation),
+        )
+        .map_err(|error| error.to_string())?;
+    guard.expect_within(std::time::Duration::from_secs(5 * 60));
+    shutdown::ensure_accepting_operations()?;
+    abandon_restore_with(&ProcessRunner, paths, computer_id).map_err(|error| error.to_string())
+}
+
 /// Quit stops computers gracefully, which a paused computer cannot take. Release a computer an unfinished
 /// Restore left paused; the Restore itself stays unfinished and can be retried (E-05).
 pub(crate) fn release_paused_restore(
@@ -2679,6 +2967,33 @@ pub fn delete(paths: &RuntimePaths, computer_id: &str, checkpoint_id: &str) -> R
         .map_err(|error| error.to_string())?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     let _guard = guard;
+    shutdown::ensure_accepting_operations()?;
+    delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+        .map_err(|error| error.to_string())
+}
+
+/// Deletes a Linux checkpoint under a device-wide operation gate owned by a durable job.
+pub fn delete_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+    job_id: silo_api::jobs::JobId,
+    cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), String> {
+    use super::operation_gate::{OperationKind, Scope};
+
+    let guard = OPERATIONS
+        .kind(OperationKind::CheckpointDelete)
+        .acquire_for_job(
+            Scope::Device,
+            None,
+            "Deleting checkpoint",
+            None,
+            job_id,
+            Some(cancellation),
+        )
+        .map_err(|error| error.to_string())?;
+    guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
     delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
         .map_err(|error| error.to_string())

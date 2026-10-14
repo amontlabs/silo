@@ -113,6 +113,7 @@ fn export_preflight_does_not_migrate_lineage_while_checkpoint_work_holds_gate() 
         created_at: 1,
         scope: "disk".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &record).unwrap();
     let before = fs::read(path(&paths, ID)).unwrap();
@@ -201,6 +202,7 @@ fn export_source_resolves_checkpoint_member_and_rejects_unknown_or_inflight() {
         created_at: 1,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &record).unwrap();
     let (group, member, scope, name) =
@@ -220,6 +222,7 @@ fn export_source_resolves_checkpoint_member_and_rejects_unknown_or_inflight() {
         created_at: 2,
         scope: "disk".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &inflight).unwrap();
     assert!(export_source(&paths, ID, "c000000000000000000000000000002").is_err());
@@ -742,6 +745,7 @@ fn original_v1_checkpoints_migrate_to_default_group_but_lost_import_group_fails_
         created_at: 1,
         scope: "disk".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &original).unwrap();
     assert_eq!(ensure_snapshot_group(&paths, ID, "dev").unwrap(), "dev");
@@ -1079,6 +1083,7 @@ fn pending_full_checkpoint_can_be_aliased_switched_recovered_and_started_explici
         created_at: 1,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     };
     let second = Checkpoint {
         id: "c111111111111111111111111111111".into(),
@@ -1087,6 +1092,7 @@ fn pending_full_checkpoint_can_be_aliased_switched_recovered_and_started_explici
         created_at: 2,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     };
     let mut record = Record::default();
     record.snapshot_group = Some("dev".into());
@@ -1565,6 +1571,7 @@ fn restore_journal_distinguishes_original_before_and_after_runtime_removal() {
         created_at: 1,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     };
     let recovery = Checkpoint {
         id: "c111111111111111111111111111111".into(),
@@ -1573,6 +1580,7 @@ fn restore_journal_distinguishes_original_before_and_after_runtime_removal() {
         created_at: 2,
         scope: "full".into(),
         reason: "before-restore".into(),
+        kind: "manual".into(),
     };
     let mut record = Record::default();
     record.checkpoints = vec![recovery.clone(), target.clone()];
@@ -1771,6 +1779,7 @@ fn restore_secures_recovery_before_retiring_original_and_keeps_stable_identity()
         created_at: 1,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &record).unwrap();
     let runner = RestoreRunner {
@@ -1911,6 +1920,7 @@ fn restore_fixture(directory: &tempfile::TempDir, journal: Option<(&str, bool)>)
         created_at: 1,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     if let Some((phase, prior_running)) = journal {
         record.restore_journal = Some(RestoreJournal {
@@ -1922,6 +1932,7 @@ fn restore_fixture(directory: &tempfile::TempDir, journal: Option<(&str, bool)>)
                 created_at: 2,
                 scope: if prior_running { "full" } else { "disk" }.into(),
                 reason: "before-restore".into(),
+                kind: "manual".into(),
             },
             prior_running,
             phase: phase.into(),
@@ -2046,6 +2057,7 @@ fn interrupted_checkpoint_is_kept_when_the_snapshot_list_fails() {
         created_at: 3,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &record).unwrap();
     let runner = journal_runner("Running", "list");
@@ -2510,6 +2522,7 @@ fn current_state_fork_captures_under_the_source_lane_and_writes_under_the_device
         None,
         "branch",
         &Vec::new,
+        None,
     )
     .unwrap();
     let lanes = runner.lanes.lock().unwrap();
@@ -2679,6 +2692,7 @@ fn entry(id: &str, name: &str, reason: &str) -> Checkpoint {
         created_at: 1,
         scope: "full".into(),
         reason: reason.into(),
+        kind: "manual".into(),
     }
 }
 
@@ -3642,6 +3656,7 @@ fn unfinished_restore_messages_and_view_name_the_checkpoint() {
         created_at: 3,
         scope: "full".into(),
         reason: "manual".into(),
+        kind: "manual".into(),
     });
     save(&paths, ID, &record).unwrap();
     let mut runner = journal_runner("Running", "");
@@ -4154,4 +4169,183 @@ fn has_chatgpt_mount(config: &Value) -> bool {
 
 fn computer_desktop_absent(configuration: &crate::runtime::ComputerConfiguration) -> bool {
     crate::desktop::configuration(configuration).is_none()
+}
+
+// MARK: Automatic checkpoints and retention
+
+fn automatic_entry(id: &str, created_at: u64) -> Checkpoint {
+    Checkpoint {
+        created_at,
+        kind: "automatic".into(),
+        ..entry(
+            id,
+            &format!("Before run: {created_at}, deleted automatically"),
+            "manual",
+        )
+    }
+}
+
+fn native_id(index: u64) -> String {
+    format!("c{index:031x}")
+}
+
+#[test]
+fn an_automatic_capture_returns_its_record_and_persists_its_policy_kind() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    let store = Store::new(vec![("dev", None)]);
+
+    let captured = capture_with_kind(
+        &store,
+        &paths,
+        ID,
+        "Before run: tests, deleted automatically",
+        "manual",
+        "automatic",
+    )
+    .unwrap();
+
+    assert_eq!(captured.kind, "automatic");
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(record.checkpoints.len(), 1);
+    assert_eq!(record.checkpoints[0].id, captured.id);
+    assert_eq!(record.checkpoints[0].kind, "automatic");
+    let api = api_checkpoint(captured);
+    assert_eq!(
+        api.kind,
+        silo_api::methods::checkpoints::CheckpointKind::Automatic
+    );
+    assert_eq!(
+        api.reason,
+        silo_api::methods::checkpoints::CheckpointReason::Manual
+    );
+}
+
+#[test]
+fn retention_removes_only_automatic_records_beyond_the_newest_count() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut entries: Vec<Checkpoint> = (1..=5)
+        .map(|n| automatic_entry(&native_id(n), n * 10))
+        .collect();
+    // Manual and before-restore records are older than every automatic one and never touched.
+    entries.push(entry(&native_id(90), "Mine", "manual"));
+    entries.push(entry(&native_id(91), "Before restore", "before-restore"));
+    let paths = delete_fixture(&directory, entries, None);
+    let mut store = Store::new(vec![("dev", None)]);
+    for n in [90, 91, 1, 2, 3, 4, 5] {
+        store = store.with("dev", &native_id(n), &format!("snap_{n}"), None);
+    }
+    // The head is the newest member; the others can be removed one by one.
+    store
+        .heads
+        .lock()
+        .unwrap()
+        .insert("dev".into(), "snap_5".into());
+    let gate = super::super::operation_gate::OperationGate::new();
+
+    prune_automatic_with(
+        &gate,
+        &store,
+        &paths,
+        ID,
+        &|| Ok(3),
+        silo_api::jobs::JobId::new("job:1").unwrap(),
+    );
+
+    let record = load(&paths, ID).unwrap();
+    let mut left: Vec<_> = record.checkpoints.iter().map(|c| c.id.clone()).collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            native_id(3),
+            native_id(4),
+            native_id(5),
+            native_id(90),
+            native_id(91)
+        ]
+    );
+    assert_eq!(store.removals().len(), 2);
+}
+
+#[test]
+fn retention_stops_when_the_setting_is_turned_off_between_deletions() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let entries: Vec<Checkpoint> = (1..=4)
+        .map(|n| automatic_entry(&native_id(n), n * 10))
+        .collect();
+    let paths = delete_fixture(&directory, entries, None);
+    let mut store = Store::new(vec![("dev", None)]);
+    for n in 1..=4 {
+        store = store.with("dev", &native_id(n), &format!("snap_{n}"), None);
+    }
+    let gate = super::super::operation_gate::OperationGate::new();
+    let reads = std::sync::atomic::AtomicUsize::new(0);
+    // The first two reads (the plan, the first deletion) see 1; later reads see "off".
+    let setting = || {
+        Ok(
+            if reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+                1
+            } else {
+                0
+            },
+        )
+    };
+
+    prune_automatic_with(
+        &gate,
+        &store,
+        &paths,
+        ID,
+        &setting,
+        silo_api::jobs::JobId::new("job:2").unwrap(),
+    );
+
+    assert_eq!(
+        store.removals().len(),
+        1,
+        "only the deletion admitted before it was off"
+    );
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
+}
+
+#[test]
+fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let entries: Vec<Checkpoint> = (1..=4)
+        .map(|n| automatic_entry(&native_id(n), n * 10))
+        .collect();
+    let paths = delete_fixture(&directory, entries, None);
+    // Checkpoint 2 builds on checkpoint 1, so 1 cannot be removed without --force.
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", &native_id(1), "snap_1", None)
+        .with("dev", &native_id(2), "snap_2", Some("snap_1"))
+        .with("dev", &native_id(3), "snap_3", None)
+        .with("dev", &native_id(4), "snap_4", None);
+    let gate = super::super::operation_gate::OperationGate::new();
+
+    prune_automatic_with(
+        &gate,
+        &store,
+        &paths,
+        ID,
+        &|| Ok(2),
+        silo_api::jobs::JobId::new("job:3").unwrap(),
+    );
+
+    let mut left: Vec<_> = load(&paths, ID)
+        .unwrap()
+        .checkpoints
+        .iter()
+        .map(|c| c.id.clone())
+        .collect();
+    left.sort();
+    // 1 stays (pinned by its dependent), 2 is removed once it is the only blocker-free
+    // candidate, and 3 and 4 are the kept newest pair.
+    assert!(left.contains(&native_id(1)));
+    assert!(left.contains(&native_id(3)) && left.contains(&native_id(4)));
 }

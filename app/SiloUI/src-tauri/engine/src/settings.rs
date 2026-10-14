@@ -11,6 +11,7 @@ use std::{
 
 const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
+pub const DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT: u32 = 3;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -287,6 +288,9 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         "computerOrder" => value.as_array().is_some_and(|keys| {
             keys.len() <= 1024 && keys.iter().all(|key| bounded_string(key, 512, false))
         }),
+        "automaticCheckpointRetentionCount" => value
+            .as_u64()
+            .is_some_and(|count| count <= u64::from(u32::MAX)),
         _ => return None,
     })
 }
@@ -750,14 +754,37 @@ pub fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
 pub fn current_settings() -> Result<Map<String, Value>, String> {
     let context = silo_engine::context::current()
         .ok_or_else(|| "The engine context is unavailable".to_owned())?;
-    let state = context.runtime_state();
-    let snapshot = state
+    current_settings_for(context.as_ref())
+}
+
+/// The same read for a caller that holds its engine context.
+pub fn current_settings_for(
+    context: &dyn silo_engine::EngineContext,
+) -> Result<Map<String, Value>, String> {
+    let snapshot = context
+        .runtime_state()
         .settings()
-        .initialize(|| configured_path(context.as_ref()))?;
+        .initialize(|| configured_path(context))?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
     }
     Ok(snapshot.settings)
+}
+
+/// The per-computer automatic checkpoint retention policy (95 A-18). Zero turns new
+/// automatic captures off without deleting checkpoints that already exist; a missing
+/// setting means the default of three.
+pub fn automatic_checkpoint_retention_count_for(
+    context: &dyn silo_engine::EngineContext,
+) -> Result<u32, String> {
+    let settings = current_settings_for(context)?;
+    let Some(value) = settings.get("automaticCheckpointRetentionCount") else {
+        return Ok(DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT);
+    };
+    value
+        .as_u64()
+        .and_then(|count| u32::try_from(count).ok())
+        .ok_or_else(|| "The automatic checkpoint retention setting is invalid.".to_owned())
 }
 
 pub fn read(main: bool) -> Result<Snapshot, String> {
