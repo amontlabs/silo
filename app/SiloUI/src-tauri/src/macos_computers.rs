@@ -10,31 +10,49 @@
 //! A finished computer becomes a template (`templates`); later computers are copied
 //! from it and made their own by `personalize`. `checkpoints` saves and restores a
 //! computer's disk and memory and forks new computers from them.
+#[path = "macos_computers/checkpoints.rs"]
 mod checkpoints;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "macos_computers/engine.rs"]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
+#[path = "macos_computers/guest_access.rs"]
 mod guest_access;
+#[path = "macos_computers/guest_clipboard.rs"]
 mod guest_clipboard;
+#[path = "macos_computers/guest_computer_use.rs"]
 mod guest_computer_use;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "macos_computers/guest_screen.rs"]
 mod guest_screen;
+#[path = "macos_computers/input.rs"]
 mod input;
+#[path = "macos_computers/offline_setup.rs"]
 mod offline_setup;
+#[path = "macos_computers/personalize.rs"]
 mod personalize;
+#[path = "macos_computers/provision.rs"]
 mod provision;
+#[path = "macos_computers/recovery.rs"]
 mod recovery;
+#[path = "macos_computers/remote_display.rs"]
 mod remote_display;
+#[path = "macos_computers/restore_image.rs"]
 mod restore_image;
+#[path = "macos_computers/setup_log.rs"]
 mod setup_log;
+#[path = "macos_computers/store.rs"]
 mod store;
+#[path = "macos_computers/templates.rs"]
 mod templates;
 
 use crate::runtime;
+pub(crate) use guest_clipboard::Direction as ClipboardDirection;
 pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
+use silo_engine::{Audience, EngineContext, Event};
 use std::{
     path::PathBuf,
     sync::{
@@ -45,7 +63,6 @@ use std::{
 };
 pub(crate) use store::{Action, CreateRequest};
 use store::{DeleteMode, Layout, Record, State};
-use tauri::{AppHandle, Emitter, Manager, Window};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
 const NOT_SUPPORTED: &str = "macOS computers need a Mac with Apple silicon.";
@@ -59,6 +76,56 @@ const QUIT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 /// Less than this is not worth an SSH attempt.
 const MIN_QUIT_SHUTDOWN: Duration = Duration::from_secs(2);
 const FORCED_QUIT: Duration = Duration::from_secs(8);
+
+/// Host services that remain outside the macOS computer engine.
+pub(crate) trait MacosHost: Send + Sync {
+    fn show_display(
+        &self,
+        context: &MacosContext,
+        id: &str,
+        title: &str,
+        toolbar: bool,
+    ) -> Result<(), String>;
+    fn close_display(&self, id: &str);
+    fn linux_computer_names(&self) -> Vec<String>;
+}
+
+/// Context for macOS computer work: engine capabilities plus its host's display-window adapter.
+#[derive(Clone)]
+pub(crate) struct MacosContext {
+    engine: Arc<dyn EngineContext>,
+    host: Arc<dyn MacosHost>,
+}
+
+impl MacosContext {
+    pub(crate) fn new(engine: Arc<dyn EngineContext>, host: Arc<dyn MacosHost>) -> Self {
+        Self { engine, host }
+    }
+
+    fn paths(&self) -> &silo_engine::EnginePaths {
+        self.engine.paths()
+    }
+
+    fn publish(&self, event: Event, audience: Audience) {
+        self.engine.publish(event, audience);
+    }
+
+    fn main_thread(&self) -> Option<&dyn silo_engine::MainThread> {
+        self.engine.main_thread()
+    }
+
+    fn show_display(&self, id: &str, title: &str, toolbar: bool) -> Result<(), String> {
+        self.host.show_display(self, id, title, toolbar)
+    }
+
+    fn close_display(&self, id: &str) {
+        self.host.close_display(id);
+    }
+
+    fn linux_computer_names(&self) -> Vec<String> {
+        self.host.linux_computer_names()
+    }
+}
 
 /// Why a creation workflow was asked to end.
 const RUN: u8 = 0;
@@ -515,10 +582,8 @@ fn registry() -> std::sync::MutexGuard<'static, Registry> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map_err(|_| "Silo could not find its data folder.".to_string())
+fn app_data(app: &MacosContext) -> Result<PathBuf, String> {
+    Ok(app.paths().app_data.clone())
 }
 
 /// Settles a Restore that Silo was interrupted in, so the disk, the auxiliary storage and the
@@ -543,7 +608,7 @@ fn settle_restore(layout: &Layout, mut record: Record) -> Record {
     record
 }
 
-fn ensure_loaded(app: &AppHandle) -> Result<(), String> {
+fn ensure_loaded(app: &MacosContext) -> Result<(), String> {
     let mut registry = registry();
     if registry.loaded {
         return Ok(());
@@ -603,14 +668,14 @@ fn protected_templates() -> Vec<String> {
         .collect()
 }
 
-fn refresh_template(app: &AppHandle) {
+fn refresh_template(app: &MacosContext) {
     if let Ok(data) = app_data(app) {
         registry().refresh_template(&data);
     }
 }
 
 /// Removes the templates that nothing needs any more.
-fn prune_templates(app: &AppHandle) {
+fn prune_templates(app: &MacosContext) {
     if let Ok(data) = app_data(app) {
         if let Err(message) = templates::prune_stale(&data, &protected_templates) {
             eprintln!("macOS templates could not be pruned: {message}");
@@ -621,7 +686,7 @@ fn prune_templates(app: &AppHandle) {
 
 /// Asks the framework for the newest macOS in the background, at most every few minutes, so
 /// the form knows which template a new computer would use.
-fn refresh_latest_build(app: &AppHandle) {
+fn refresh_latest_build(app: &MacosContext) {
     static LAST: Mutex<Option<Instant>> = Mutex::new(None);
     const EVERY: Duration = Duration::from_secs(600);
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -642,7 +707,7 @@ fn refresh_latest_build(app: &AppHandle) {
     });
 }
 
-fn note_latest_build(app: &AppHandle, build: &str) {
+fn note_latest_build(app: &MacosContext, build: &str) {
     registry().latest_build = Some(build.to_string());
     refresh_template(app);
     emit(app);
@@ -664,12 +729,14 @@ fn snapshot() -> MacosComputersState {
     }
 }
 
-fn emit(app: &AppHandle) {
-    let _ = app.emit(CHANGED_EVENT, snapshot());
+fn emit(app: &MacosContext) {
+    if let Ok(payload) = serde_json::to_value(snapshot()) {
+        app.publish(Event::new(CHANGED_EVENT, payload), Audience::All);
+    }
 }
 
 /// Applies `change` to one computer and tells the UI. Returns `None` for an unknown id.
-fn update<R>(app: &AppHandle, id: &str, change: impl FnOnce(&mut Entry) -> R) -> Option<R> {
+fn update<R>(app: &MacosContext, id: &str, change: impl FnOnce(&mut Entry) -> R) -> Option<R> {
     let result = {
         let mut registry = registry();
         registry
@@ -684,17 +751,17 @@ fn update<R>(app: &AppHandle, id: &str, change: impl FnOnce(&mut Entry) -> R) ->
     result
 }
 
-fn set_detail(app: &AppHandle, id: &str, detail: &str) {
+fn set_detail(app: &MacosContext, id: &str, detail: &str) {
     update(app, id, |entry| entry.detail = Some(detail.to_string()));
 }
 
 /// The files and latest record of a computer.
-fn layout_and_record(app: &AppHandle, id: &str) -> Result<(Layout, Record), String> {
+fn layout_and_record(app: &MacosContext, id: &str) -> Result<(Layout, Record), String> {
     let (record, _) = computer(id)?;
     Ok((Layout::new(&app_data(app)?, id), record))
 }
 
-fn set_state(app: &AppHandle, id: &str, state: State, detail: Option<String>) {
+fn set_state(app: &MacosContext, id: &str, state: State, detail: Option<String>) {
     update(app, id, |entry| {
         entry.state = state;
         entry.detail = detail;
@@ -704,7 +771,7 @@ fn set_state(app: &AppHandle, id: &str, state: State, detail: Option<String>) {
 }
 
 /// Records progress and tells the UI at most once per `PROGRESS_INTERVAL`.
-fn set_progress(app: &AppHandle, id: &str, fraction: f64) {
+fn set_progress(app: &MacosContext, id: &str, fraction: f64) {
     let due = {
         let mut registry = registry();
         let Some(entry) = registry.entries.iter_mut().find(|e| e.record.id == id) else {
@@ -748,16 +815,8 @@ fn state_of(id: &str) -> Option<State> {
         .map(|entry| entry.state)
 }
 
-fn display_label(id: &str) -> String {
+pub(crate) fn display_label(id: &str) -> String {
     format!("macos-display-{id}")
-}
-
-fn main_window_only(window: &Window) -> Result<(), String> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err("Manage macOS computers from the main Silo window.".into())
-    }
 }
 
 fn require_supported() -> Result<(), String> {
@@ -771,19 +830,12 @@ fn require_supported() -> Result<(), String> {
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(work)
+    tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| "The macOS computer operation failed unexpectedly.".to_string())?
 }
 
-// MARK: Commands
-
-#[tauri::command]
-pub(crate) async fn read_macos_computers(
-    app: AppHandle,
-    window: Window,
-) -> Result<MacosComputersState, String> {
-    main_window_only(&window)?;
+pub(crate) async fn read_macos_computers(app: MacosContext) -> Result<MacosComputersState, String> {
     blocking(move || {
         ensure_loaded(&app)?;
         refresh_template(&app);
@@ -794,9 +846,7 @@ pub(crate) async fn read_macos_computers(
 }
 
 /// Removes the template new computers are copied from. Computers made from it keep working.
-#[tauri::command]
-pub(crate) async fn delete_macos_template(app: AppHandle, window: Window) -> Result<(), String> {
-    main_window_only(&window)?;
+pub(crate) async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || {
         require_supported()?;
@@ -809,104 +859,77 @@ pub(crate) async fn delete_macos_template(app: AppHandle, window: Window) -> Res
     .await
 }
 
-#[tauri::command]
 pub(crate) async fn create_macos_computer(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     request: CreateRequest,
 ) -> Result<MacosComputer, String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || create(&app, request)).await
 }
 
-#[tauri::command]
 pub(crate) async fn macos_computer_action(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     action: Action,
 ) -> Result<(), String> {
-    main_window_only(&window)?;
     if matches!(action, Action::Start | Action::Setup) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
     blocking(move || perform(&app, &id, action)).await
 }
 
-#[tauri::command]
-pub(crate) async fn open_macos_display(
-    app: AppHandle,
-    window: Window,
-    id: String,
-) -> Result<(), String> {
-    main_window_only(&window)?;
+pub(crate) async fn open_macos_display(app: MacosContext, id: String) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || open_display(&app, &id)).await
 }
 
 /// Saves a checkpoint of a computer: its memory too when it runs.
-#[tauri::command]
 pub(crate) async fn create_macos_checkpoint(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     name: String,
 ) -> Result<(), String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || create_checkpoint(&app, &id, &name)).await
 }
 
 /// Rewinds a computer to a checkpoint. The computer stays stopped.
-#[tauri::command]
 pub(crate) async fn restore_macos_checkpoint(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     checkpoint_id: String,
 ) -> Result<(), String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || restore_checkpoint(&app, &id, &checkpoint_id)).await
 }
 
 /// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
-#[tauri::command]
 pub(crate) async fn fork_macos_checkpoint(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     checkpoint_id: String,
     new_name: String,
 ) -> Result<(), String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
 }
 
-#[tauri::command]
 pub(crate) async fn delete_macos_checkpoint(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     checkpoint_id: String,
 ) -> Result<(), String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || delete_checkpoint(&app, &id, &checkpoint_id)).await
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
 /// clipboard to this Mac. Only the main window can start it.
-#[tauri::command]
 pub(crate) async fn macos_computer_clipboard(
-    app: AppHandle,
-    window: Window,
+    app: MacosContext,
     id: String,
     direction: guest_clipboard::Direction,
 ) -> Result<crate::viewer_clipboard::Report, String> {
-    main_window_only(&window)?;
     runtime::shutdown::ensure_accepting_operations()?;
     blocking(move || guest_clipboard::run(&app, &id, direction)).await
 }
@@ -915,7 +938,7 @@ pub(crate) async fn macos_computer_clipboard(
 
 /// The state of this device's macOS computers as another device reads it. A device that cannot
 /// host them reports `supported: false` with the reason.
-pub(crate) fn state_for_remote(app: &AppHandle) -> Result<MacosComputersState, String> {
+pub(crate) fn state_for_remote(app: &MacosContext) -> Result<MacosComputersState, String> {
     ensure_loaded(app)?;
     refresh_template(app);
     refresh_latest_build(app);
@@ -924,7 +947,7 @@ pub(crate) fn state_for_remote(app: &AppHandle) -> Result<MacosComputersState, S
 
 /// Creates a computer on another device's request.
 pub(crate) fn create_for_remote(
-    app: &AppHandle,
+    app: &MacosContext,
     request: CreateRequest,
 ) -> Result<MacosComputer, String> {
     runtime::shutdown::ensure_accepting_operations()?;
@@ -933,7 +956,11 @@ pub(crate) fn create_for_remote(
 
 /// Runs a lifecycle action on another device's request. Start and Setup are refused once Quit
 /// has begun, as they are for the local command. Nothing here opens a window.
-pub(crate) fn action_for_remote(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
+pub(crate) fn action_for_remote(
+    app: &MacosContext,
+    id: &str,
+    action: Action,
+) -> Result<(), String> {
     if matches!(action, Action::Start | Action::Setup) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
@@ -941,14 +968,14 @@ pub(crate) fn action_for_remote(app: &AppHandle, id: &str, action: Action) -> Re
 }
 
 /// The sign-in for the screen of a running computer, for another device.
-pub(crate) fn display_session(app: &AppHandle, id: &str) -> Result<DisplaySession, String> {
+pub(crate) fn display_session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::session(app, id)
 }
 
 /// A connection to the Screen Sharing port of a running computer, for the owner to relay.
-pub(crate) fn display_stream(app: &AppHandle, id: &str) -> Result<std::net::TcpStream, String> {
+pub(crate) fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::TcpStream, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     ensure_loaded(app)?;
     remote_display::connect(app, id)
@@ -956,7 +983,7 @@ pub(crate) fn display_stream(app: &AppHandle, id: &str) -> Result<std::net::TcpS
 
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
 pub(crate) fn resize_display(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     width: u64,
     height: u64,
@@ -969,19 +996,19 @@ pub(crate) fn resize_display(
 // MARK: Create
 
 /// The lowercased names of the macOS computers on this device, loaded or not.
-pub(crate) fn names(app: &AppHandle) -> Vec<String> {
+pub(crate) fn names(app: &MacosContext) -> Vec<String> {
     app_data(app)
         .map(|data| store::names(&data))
         .unwrap_or_default()
 }
 
-fn create(app: &AppHandle, request: CreateRequest) -> Result<MacosComputer, String> {
+fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
     // Held until the computer is registered and saved, so a Linux creation sees it.
     let reservation =
-        crate::computer_names::reserve(&[request.name.clone()], &|| runtime::computer_names(app))?;
+        crate::computer_names::reserve(&[request.name.clone()], &|| app.linux_computer_names())?;
     let (record, cancel, row) = {
         let _admitted = admission()?;
         let mut registry = registry();
@@ -1033,7 +1060,7 @@ impl From<engine::InstallError> for Stop {
     }
 }
 
-fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, cancel: &AtomicU8) {
+fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, cancel: &AtomicU8) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
     let result = run_creation(app, data, record, &layout, cancel);
@@ -1041,14 +1068,19 @@ fn create_workflow(app: &AppHandle, data: &std::path::Path, record: Record, canc
 }
 
 /// Provisions an installed computer again, resuming at the first unfinished step.
-fn setup_workflow(app: &AppHandle, data: &std::path::Path, mut record: Record, cancel: &AtomicU8) {
+fn setup_workflow(
+    app: &MacosContext,
+    data: &std::path::Path,
+    mut record: Record,
+    cancel: &AtomicU8,
+) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
     let result = run_setup(app, &layout, &mut record, cancel, None);
     end_workflow(app, &id, &layout, result);
 }
 
-fn end_workflow(app: &AppHandle, id: &str, layout: &Layout, result: Result<(), Stop>) {
+fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<(), Stop>) {
     // The outcome is decided under the lock a Delete takes, so a Delete accepted
     // before it is never lost.
     let finish = registry().finish_workflow(id, result);
@@ -1073,7 +1105,7 @@ fn remove_computer(layout: &Layout) -> Result<(), String> {
 }
 
 fn run_creation(
-    app: &AppHandle,
+    app: &MacosContext,
     data: &std::path::Path,
     mut record: Record,
     layout: &Layout,
@@ -1181,7 +1213,7 @@ fn run_creation(
 /// Copies a template's files into the new computer and records what the copy still lacks.
 /// Returns false when the volume cannot clone files, so the computer is installed instead.
 fn copy_template(
-    app: &AppHandle,
+    app: &MacosContext,
     layout: &Layout,
     record: &mut Record,
     lease: &templates::Lease,
@@ -1233,7 +1265,7 @@ fn copy_template(
 /// Runs the provisioning steps, then leaves the computer stopped. A computer that was just
 /// installed and set up, and never started by the user, becomes the template.
 fn run_setup(
-    app: &AppHandle,
+    app: &MacosContext,
     layout: &Layout,
     record: &mut Record,
     cancel: &AtomicU8,
@@ -1254,7 +1286,7 @@ fn run_setup(
 }
 
 /// Makes the template of `record`. A failure only costs the speed of later computers.
-fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: bool) {
+fn save_template(app: &MacosContext, layout: &Layout, record: &Record, refresh: bool) {
     let Ok(data) = app_data(app) else {
         return;
     };
@@ -1291,7 +1323,7 @@ fn save_template(app: &AppHandle, layout: &Layout, record: &Record, refresh: boo
 /// that are reading an image keep it, so this runs again whenever one ends. The image is
 /// downloaded again when a new macOS build or a changed base setup needs an installation.
 /// `log_to` names the computer whose log notes the removal, when it still exists.
-fn remove_restore_images(app: &AppHandle, log_to: Option<&str>) {
+fn remove_restore_images(app: &MacosContext, log_to: Option<&str>) {
     let Ok(data) = app_data(app) else {
         return;
     };
@@ -1322,7 +1354,7 @@ static DOWNLOAD_TURN: Mutex<()> = Mutex::new(());
 
 // MARK: Actions
 
-fn perform(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
+fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
     ensure_loaded(app)?;
     match action {
         Action::Start => start(app, id),
@@ -1334,7 +1366,7 @@ fn perform(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
 }
 
 /// The name and retained-log folder of the macOS computer `id`, for the Logs page.
-pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, std::path::PathBuf)> {
+pub(crate) fn log_target(app: &MacosContext, id: &str) -> Option<(String, std::path::PathBuf)> {
     let (record, _) = computer(id).ok()?;
     Some((record.name, setup_log::directory(app, id)?))
 }
@@ -1348,7 +1380,7 @@ fn computer(id: &str) -> Result<(Record, State), String> {
         .ok_or_else(|| "This computer no longer exists.".to_string())
 }
 
-fn start(app: &AppHandle, id: &str) -> Result<(), String> {
+fn start(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
     let data = app_data(app)?;
     // The state check and the change to `starting` happen under one lock.
@@ -1438,7 +1470,7 @@ fn state_after_failed_start(released: Result<(), String>) -> (State, Option<Stri
 /// released it, or says that it could not be. It acts only while that Start still owns the
 /// computer: once something else has moved the computer on (the machine ended and a later Start
 /// began), the machine is not this Start's to stop.
-fn ensure_released(app: &AppHandle, id: &str, attempt: u64) -> Result<(), String> {
+fn ensure_released(app: &MacosContext, id: &str, attempt: u64) -> Result<(), String> {
     for _ in 0..5 {
         let guard = {
             let id = id.to_string();
@@ -1463,7 +1495,7 @@ const UNFINISHED_RESTORE: &str =
 
 /// Marks the pending Restore that Start number `attempt` read as used, durably.
 fn clear_pending_restore(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     layout: &Layout,
     attempt: u64,
@@ -1479,7 +1511,7 @@ fn clear_pending_restore(
 /// computer boots from its disk and the returned note says why. A note is also returned when
 /// the plan itself gave up on the memory.
 fn start_machine(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     layout: &Layout,
     plan: checkpoints::StartPlan,
@@ -1542,7 +1574,7 @@ fn start_machine(
     Ok(note)
 }
 
-fn begin_setup(app: &AppHandle, id: &str) -> Result<(), String> {
+fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
     let data = app_data(app)?;
     let (record, cancel) = {
@@ -1629,7 +1661,7 @@ fn quit_shutdown_timeout(remaining: Option<Duration>) -> Option<Duration> {
 }
 
 /// Shuts the guest down over SSH; false when it could not be done.
-fn shutdown_over_ssh(app: &AppHandle, record: &Record, timeout: Duration) -> bool {
+fn shutdown_over_ssh(app: &MacosContext, record: &Record, timeout: Duration) -> bool {
     let Ok(data) = app_data(app) else {
         return false;
     };
@@ -1646,7 +1678,7 @@ fn shutdown_over_ssh(app: &AppHandle, record: &Record, timeout: Duration) -> boo
 /// Asks a running computer to stop. Returns the note to show when the framework's request was
 /// used, because the guest is then waiting for a confirmation nobody gave.
 fn request_graceful_stop(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     timeout: Duration,
 ) -> Result<Option<&'static str>, String> {
@@ -1659,7 +1691,7 @@ fn request_graceful_stop(
     Ok(Some(CONFIRM_IN_SCREEN))
 }
 
-fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
+fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
     // The ownership check and the claim of the transition happen under one lock.
     let (record, before) = {
         let mut registry = registry();
@@ -1700,7 +1732,7 @@ fn stop(app: &AppHandle, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
+fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
     let before = registry().begin_force_stop(id)?;
     emit(app);
     if let Err(message) = engine::force_stop(app, id) {
@@ -1711,7 +1743,7 @@ fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
+fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
     let data = app_data(app)?;
     let removed = {
         let mut registry = registry();
@@ -1767,7 +1799,7 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
 }
 
 /// A force stop failed while the machine is still alive: keep it tracked as running.
-fn force_stop_failed(app: &AppHandle, id: &str, message: String) {
+fn force_stop_failed(app: &MacosContext, id: &str, message: String) {
     registry().force_stop_failed(id, message);
     emit(app);
 }
@@ -1780,7 +1812,7 @@ fn slot_is_current(current: Option<u64>, event: u64) -> bool {
 }
 
 /// The machine ended on its own or at Silo's request.
-fn machine_stopped(app: &AppHandle, id: &str, generation: u64, error: Option<String>) {
+fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<String>) {
     let (app, id) = (app.clone(), id.to_string());
     // Deferred so the framework callback that reported the stop has returned before
     // its machine is released.
@@ -1817,7 +1849,7 @@ const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
 
 /// Ends a checkpoint operation when dropped, whichever way the work ended.
 struct Held<'a> {
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     id: String,
     record: Record,
     state: State,
@@ -1841,7 +1873,7 @@ fn first_stage(kind: checkpoints::OperationKind) -> &'static str {
 
 /// Claims the computer for one checkpoint operation, if nothing else is using it.
 fn begin_operation<'a>(
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     id: &str,
     kind: checkpoints::OperationKind,
 ) -> Result<Held<'a>, String> {
@@ -1874,7 +1906,7 @@ fn begin_operation<'a>(
 
 /// The machine of a computer as the checkpoint workflows reach it.
 struct LiveMachine<'a> {
-    app: &'a AppHandle,
+    app: &'a MacosContext,
     id: &'a str,
     cancel: &'a AtomicU8,
 }
@@ -1920,14 +1952,14 @@ impl checkpoints::Machine for LiveMachine<'_> {
     }
 }
 
-fn log_line(app: &AppHandle, id: &str, line: &str) {
+fn log_line(app: &MacosContext, id: &str, line: &str) {
     if let Some(log) = setup_log::SetupLog::open(app, id) {
         log.line(line);
     }
 }
 
 /// Reads the checkpoints on disk again, after an operation that may have changed them.
-fn refresh_checkpoints(app: &AppHandle, id: &str, layout: &Layout) {
+fn refresh_checkpoints(app: &MacosContext, id: &str, layout: &Layout) {
     let found = checkpoints::list(layout);
     update(app, id, |entry| entry.checkpoints = found);
 }
@@ -1943,7 +1975,7 @@ fn reserve_for_memory(
         .transpose()
 }
 
-fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String> {
+fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
@@ -1980,7 +2012,7 @@ fn create_checkpoint(app: &AppHandle, id: &str, name: &str) -> Result<(), String
     result.map(|_| ())
 }
 
-fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
@@ -2034,7 +2066,7 @@ fn restore_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<
     Ok(())
 }
 
-fn delete_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn delete_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
@@ -2067,7 +2099,7 @@ fn delete_checkpoint(app: &AppHandle, id: &str, checkpoint_id: &str) -> Result<(
 /// Creates a stopped computer with a copy of a checkpoint's disk, and sets it up in the
 /// background: it gets its own password, keys and name, like a copy of a template.
 fn fork_checkpoint(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     checkpoint_id: &str,
     new_name: &str,
@@ -2078,7 +2110,7 @@ fn fork_checkpoint(
     let new_name = new_name.trim().to_string();
     // Held until the fork is registered and saved, so a Linux creation sees it.
     let reservation =
-        crate::computer_names::reserve(&[new_name.clone()], &|| runtime::computer_names(app))?;
+        crate::computer_names::reserve(&[new_name.clone()], &|| app.linux_computer_names())?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Fork)?;
     let source = Layout::new(&data, id);
     let checkpoint = checkpoints::find(&source, checkpoint_id)?;
@@ -2179,7 +2211,7 @@ fn copy_for_fork(
 }
 
 fn fork_workflow(
-    app: &AppHandle,
+    app: &MacosContext,
     data: &std::path::Path,
     mut record: Record,
     cancel: &AtomicU8,
@@ -2193,7 +2225,7 @@ fn fork_workflow(
 
 // MARK: Display
 
-fn open_display(app: &AppHandle, id: &str) -> Result<(), String> {
+fn open_display(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
     let (record, state) = computer(id)?;
     if state != State::Running {
@@ -2206,54 +2238,37 @@ fn open_display(app: &AppHandle, id: &str) -> Result<(), String> {
 /// existing one forward.
 /// `toolbar` adds the clipboard buttons, which belong to the user's own window and not to the
 /// window of a setup that types into the computer itself.
-fn show_display(app: &AppHandle, id: &str, title: &str, toolbar: bool) -> Result<(), String> {
-    use tauri::{WebviewUrl, WebviewWindowBuilder};
-    let label = display_label(id);
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.show();
-        return existing
-            .set_focus()
-            .map_err(|_| "Could not focus the display.".to_string());
-    }
-    // A blank page that loads nothing: the label matches no capability, so the window
-    // has no access to Silo's commands. The machine's screen is a native view on top.
-    let blank = tauri::Url::parse("about:blank").map_err(|error| error.to_string())?;
-    let display = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
-        .title(title)
-        .inner_size(1440., 900.)
-        .min_inner_size(640., 400.)
-        .resizable(true)
-        .build()
-        .map_err(|_| "Silo could not open the display.".to_string())?;
-    let (handle, closed) = (app.clone(), id.to_string());
-    display.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
-            engine::detach_display(&handle, &closed);
-            update(&handle, &closed, |entry| entry.display_open = false);
-        }
-    });
+fn show_display(app: &MacosContext, id: &str, title: &str, toolbar: bool) -> Result<(), String> {
+    app.show_display(id, title, toolbar)?;
     update(app, id, |entry| entry.display_open = true);
-    if let Err(message) = engine::attach_display(app, id, &display, toolbar) {
-        let _ = display.destroy();
-        return Err(message);
-    }
     Ok(())
 }
 
-fn close_display(app: &AppHandle, id: &str) {
-    if let Some(display) = app.get_webview_window(&display_label(id)) {
-        // The destroy waits for the main thread, which may be the caller.
-        std::thread::spawn(move || {
-            let _ = display.destroy();
-        });
-    }
+fn close_display(app: &MacosContext, id: &str) {
+    app.close_display(id);
+}
+
+/// Attaches the VM view to a native window supplied by the host's UI adapter.
+pub(crate) fn attach_display(
+    context: &MacosContext,
+    id: &str,
+    native_window: usize,
+    toolbar: bool,
+) -> Result<(), String> {
+    engine::attach_display(context, id, native_window, toolbar)
+}
+
+/// Called by the host when its display window closes.
+pub(crate) fn display_window_closed(context: &MacosContext, id: &str) {
+    engine::detach_display(context, id);
+    update(context, id, |entry| entry.display_open = false);
 }
 
 // MARK: Watching
 
 /// Notices machine states the framework did not report through its delegate: a
 /// stop the guest declined, and a machine that ended without a callback.
-fn watch(app: &AppHandle) {
+fn watch(app: &MacosContext) {
     static STARTED: Once = Once::new();
     let app = app.clone();
     STARTED.call_once(move || {
@@ -2266,7 +2281,7 @@ fn watch(app: &AppHandle) {
     });
 }
 
-fn reconcile(app: &AppHandle, samples: &[engine::Sample]) {
+fn reconcile(app: &MacosContext, samples: &[engine::Sample]) {
     for sample in samples {
         let (id, machine, generation) = (&sample.id, &sample.state, sample.generation);
         let Some((_, state)) = computer(id).ok() else {
@@ -2351,7 +2366,7 @@ fn settle_absent(registry: &Mutex<Registry>, held: &[String], dispatch: &dyn Fn(
 }
 
 /// Finishes a stop whose machine is gone: there is no slot left to release.
-fn stop_finished_without_machine(app: &AppHandle, id: &str) {
+fn stop_finished_without_machine(app: &MacosContext, id: &str) {
     update(app, id, |entry| {
         if entry.state == State::Stopping && entry.operation.is_none() {
             entry.state = State::Stopped;
@@ -2421,7 +2436,7 @@ fn is_busy(state: State) -> bool {
 /// Stops every macOS computer for Quit: a graceful request first, then a forced
 /// stop. Runs on a worker thread; the main thread must stay free to run the
 /// framework's callbacks.
-pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
+pub(crate) fn stop_all(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
     let stopped = stop_busy(app, deadline);
     // A host-attached disk image outlives Silo; none may be left behind.
     let detached = release_disks(app);
@@ -2431,7 +2446,7 @@ pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(),
 /// Detaches the disk image of every macOS computer on disk from this Mac, except
 /// those a creation or setup still owns: their worker detaches its own image, and a
 /// forced detach under it would corrupt the patch. Those report through `stop_busy`.
-fn release_disks(app: &AppHandle) -> Result<(), String> {
+fn release_disks(app: &MacosContext) -> Result<(), String> {
     // Computers a previous launch left behind count even if nothing loaded them yet.
     let _ = ensure_loaded(app);
     let Ok(data) = app_data(app) else {
@@ -2457,7 +2472,7 @@ fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
     ids.into_iter().filter(|id| !owned.contains(id)).collect()
 }
 
-fn stop_busy(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
+fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
     // From here on nothing new is admitted; anything admitted before is in the snapshot.
     closed().quit = true;
     let busy: Vec<(String, State, Arc<AtomicU8>, bool)> = registry()

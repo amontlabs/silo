@@ -2,6 +2,7 @@
 //! Sharing (VNC) server on its NAT address, signed in to with the account setup created. The
 //! computer-use setup step turns the service on; nothing is installed for this. This device
 //! hands out the credentials and a byte stream to the port, and resizes the framework display.
+use super::MacosContext;
 use super::{
     computer, engine, guest_access, layout_and_record,
     store::{SetupProgress, State},
@@ -11,7 +12,6 @@ use std::{
     net::{SocketAddr, TcpStream},
     time::Duration,
 };
-use tauri::AppHandle;
 
 /// Screen Sharing's port inside the guest.
 const PORT: u16 = 5900;
@@ -73,7 +73,7 @@ fn ready(state: State, installed: bool, setup: SetupProgress) -> Result<(), Stri
 }
 
 fn checked(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
 ) -> Result<(super::store::Layout, super::store::Record), String> {
     let (record, state) = computer(id)?;
@@ -87,7 +87,7 @@ fn address(record: &super::store::Record) -> Result<SocketAddr, String> {
 }
 
 /// Opens a connection to the guest's Screen Sharing port, for the owner to relay.
-pub(crate) fn connect(app: &AppHandle, id: &str) -> Result<TcpStream, String> {
+pub(crate) fn connect(app: &MacosContext, id: &str) -> Result<TcpStream, String> {
     let (_, record) = checked(app, id)?;
     let target = address(&record)?;
     let stream = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT)
@@ -97,7 +97,7 @@ pub(crate) fn connect(app: &AppHandle, id: &str) -> Result<TcpStream, String> {
 }
 
 /// The sign-in for a running, set-up computer whose Screen Sharing answers.
-pub(crate) fn session(app: &AppHandle, id: &str) -> Result<DisplaySession, String> {
+pub(crate) fn session(app: &MacosContext, id: &str) -> Result<DisplaySession, String> {
     let (layout, record) = checked(app, id)?;
     let target = address(&record)?;
     TcpStream::connect_timeout(&target, CONNECT_TIMEOUT)
@@ -115,7 +115,7 @@ pub(crate) fn session(app: &AppHandle, id: &str) -> Result<DisplaySession, Strin
 /// Resizes the computer's display to the pixel size of a viewer's window. The size is clamped
 /// and the size the framework applied is returned.
 pub(crate) fn resize(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     width: u64,
     height: u64,

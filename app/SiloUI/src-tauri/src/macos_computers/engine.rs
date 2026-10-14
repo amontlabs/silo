@@ -9,6 +9,7 @@
 use super::guest_screen;
 use super::input::{self, KeyEvent, Monitors, PointerKind, TextLine};
 use super::store::{self, HostLimits, Layout, Record};
+use super::MacosContext;
 use block2::RcBlock;
 use objc2::Message as _;
 use objc2::{
@@ -34,7 +35,6 @@ use std::{
     sync::{mpsc, Arc, Mutex, OnceLock},
     time::Duration,
 };
-use tauri::AppHandle;
 
 const MAIN_THREAD_WAIT: Duration = Duration::from_secs(10);
 const FETCH_WAIT: Duration = Duration::from_secs(60);
@@ -67,7 +67,7 @@ thread_local! {
 }
 
 struct DelegateState {
-    app: AppHandle,
+    app: MacosContext,
     id: String,
     /// The generation of the machine the delegate belongs to (0 for a toolbar).
     generation: u64,
@@ -111,7 +111,12 @@ define_class!(
 );
 
 impl MachineDelegate {
-    fn new(mtm: MainThreadMarker, app: AppHandle, id: String, generation: u64) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        app: MacosContext,
+        id: String,
+        generation: u64,
+    ) -> Retained<Self> {
         let allocated = mtm.alloc::<Self>().set_ivars(DelegateState {
             app,
             id,
@@ -142,7 +147,7 @@ fn describe_ptr(error: *mut NSError) -> String {
 /// Runs `work` on the main thread and waits for its result. Never call this
 /// from the main thread: it would wait on itself.
 pub(super) fn on_main<T: Send + 'static>(
-    app: &AppHandle,
+    app: &MacosContext,
     work: impl FnOnce(MainThreadMarker) -> T + Send + 'static,
 ) -> Result<T, String> {
     if MainThreadMarker::new().is_some() {
@@ -153,7 +158,10 @@ pub(super) fn on_main<T: Send + 'static>(
     let phase = Arc::new(Mutex::new(Phase::Pending));
     let (send, receive) = mpsc::channel();
     let worker_phase = phase.clone();
-    app.run_on_main_thread(move || {
+    let main_thread = app
+        .main_thread()
+        .ok_or_else(|| "Silo could not reach its main thread.".to_string())?;
+    main_thread.run(Box::new(move || {
         {
             let mut phase = worker_phase.lock().unwrap_or_else(|p| p.into_inner());
             if *phase == Phase::Abandoned {
@@ -164,8 +172,7 @@ pub(super) fn on_main<T: Send + 'static>(
         if let Some(mtm) = MainThreadMarker::new() {
             let _ = send.send(work(mtm));
         }
-    })
-    .map_err(|_| "Silo could not reach its main thread.".to_string())?;
+    }))?;
     match receive.recv_timeout(MAIN_THREAD_WAIT) {
         Ok(result) => Ok(result),
         Err(_) => {
@@ -186,19 +193,21 @@ pub(super) fn on_main<T: Send + 'static>(
 /// to it. For steps that undo an earlier one (resuming a paused machine), whose skipping
 /// would leave the machine in a state nothing tracks.
 fn on_main_patient<T: Send + 'static>(
-    app: &AppHandle,
+    app: &MacosContext,
     work: impl FnOnce(MainThreadMarker) -> T + Send + 'static,
 ) -> Result<T, String> {
     if MainThreadMarker::new().is_some() {
         return Err("macOS computers cannot wait on the main thread.".into());
     }
     let (send, receive) = mpsc::channel();
-    app.run_on_main_thread(move || {
+    let main_thread = app
+        .main_thread()
+        .ok_or_else(|| "Silo could not reach its main thread.".to_string())?;
+    main_thread.run(Box::new(move || {
         if let Some(mtm) = MainThreadMarker::new() {
             let _ = send.send(work(mtm));
         }
-    })
-    .map_err(|_| "Silo could not reach its main thread.".to_string())?;
+    }))?;
     receive
         .recv()
         .map_err(|_| "Silo's main thread did not respond.".to_string())
@@ -537,7 +546,7 @@ fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifi
 /// Creates the machine for `configuration` and keeps it in the main-thread slots.
 fn register(
     mtm: MainThreadMarker,
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     configuration: &VZVirtualMachineConfiguration,
     installer_image: Option<&Path>,
@@ -584,7 +593,7 @@ impl From<String> for InstallError {
 /// Installs macOS from `image` onto a new machine. Raises `record`'s resources
 /// to what the image requires; the caller persists them.
 pub(super) fn install(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &mut Record,
     layout: &Layout,
     image: &Path,
@@ -698,7 +707,7 @@ pub(super) fn install(
     outcome
 }
 
-fn cancel_install(app: &AppHandle, id: &str) {
+fn cancel_install(app: &MacosContext, id: &str) {
     let id = id.to_string();
     let _ = on_main(app, move |_| {
         SLOTS.with(|slots| {
@@ -719,7 +728,7 @@ fn cancel_install(app: &AppHandle, id: &str) {
 }
 
 /// Drops a computer's machine and its display view.
-fn discard(app: &AppHandle, id: &str) {
+fn discard(app: &MacosContext, id: &str) {
     let id = id.to_string();
     let _ = on_main(app, move |_| release(&id));
 }
@@ -761,13 +770,13 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 
 // MARK: Running
 
-pub(super) fn start(app: &AppHandle, record: &Record, layout: &Layout) -> Result<(), String> {
+pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Result<(), String> {
     start_machine(app, record, layout, &Boot::Normal)
 }
 
 /// Starts the computer in macOS Recovery instead of its installed system.
 pub(super) fn start_in_recovery(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     layout: &Layout,
 ) -> Result<(), String> {
@@ -809,7 +818,7 @@ pub(super) enum StateStartError {
 /// Restores the memory saved in `state` into a new machine, which is left paused: resume it
 /// with `resume_paused` once the saved memory has been marked as used.
 pub(super) fn start_from_state(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     layout: &Layout,
     state: &Path,
@@ -842,7 +851,7 @@ const LOCK_RETRIES: u32 = 6;
 const LOCK_BACKOFF: Duration = Duration::from_secs(2);
 
 fn start_machine(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     layout: &Layout,
     boot: &Boot,
@@ -879,7 +888,7 @@ fn is_lock_error(message: &str) -> bool {
 }
 
 fn start_machine_once(
-    app: &AppHandle,
+    app: &MacosContext,
     record: &Record,
     layout: &Layout,
     boot: &Boot,
@@ -977,7 +986,7 @@ pub(super) const SUPERSEDED: &str = "The computer was started again, or stopped,
 /// thread at that moment. A later machine, or a start that was superseded, is left alone and
 /// reported as `SUPERSEDED`.
 pub(super) fn resume_if(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     generation: u64,
     guard: impl Fn() -> bool + Send + 'static,
@@ -1014,7 +1023,7 @@ fn completion(send: mpsc::Sender<Result<(), String>>) -> RcBlock<dyn Fn(*mut NSE
 /// Calls `call` on the main thread with the running machine of computer `id` and a sender
 /// for its completion handler, then waits for what the handler reports.
 fn on_machine(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     patient: bool,
     call: impl FnOnce(&VZVirtualMachine, mpsc::Sender<Result<(), String>>) + Send + 'static,
@@ -1039,7 +1048,7 @@ fn on_machine(
 }
 
 /// Whether the framework can save the running machine's memory, or why not.
-pub(super) fn memory_support(app: &AppHandle, id: &str) -> Result<(), String> {
+pub(super) fn memory_support(app: &MacosContext, id: &str) -> Result<(), String> {
     let id = id.to_string();
     on_main(app, move |_| {
         SLOTS.with(|slots| {
@@ -1054,7 +1063,7 @@ pub(super) fn memory_support(app: &AppHandle, id: &str) -> Result<(), String> {
 
 /// Resumes a paused machine. Not abandoned if the main thread is slow: a machine left paused
 /// would look running to everything else.
-pub(super) fn resume_paused(app: &AppHandle, id: &str) -> Result<(), String> {
+pub(super) fn resume_paused(app: &MacosContext, id: &str) -> Result<(), String> {
     on_machine(app, id, true, |machine, send| {
         // SAFETY: Main thread.
         unsafe {
@@ -1070,7 +1079,7 @@ pub(super) fn resume_paused(app: &AppHandle, id: &str) -> Result<(), String> {
 /// Resumes a machine the watcher found paused, unless a checkpoint operation owns it. Both are
 /// checked on the main thread at the moment of the resume, not when the machine was sampled.
 pub(super) fn resume_stray(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     generation: u64,
     owned: impl Fn() -> bool + Send + 'static,
@@ -1098,7 +1107,7 @@ pub(super) fn resume_stray(
 /// and resumes it. The machine is resumed whatever `copy` returned; a machine that could not
 /// be paused is left as it was.
 pub(super) fn save_running(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     state: &Path,
     copy: &mut dyn FnMut() -> Result<(), String>,
@@ -1134,7 +1143,7 @@ pub(super) fn save_running(
     }
 }
 
-pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {
+pub(super) fn request_stop(app: &MacosContext, id: &str) -> Result<(), String> {
     let id = id.to_string();
     on_main(app, move |_| {
         SLOTS.with(|slots| {
@@ -1156,7 +1165,7 @@ pub(super) fn request_stop(app: &AppHandle, id: &str) -> Result<(), String> {
     })?
 }
 
-pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
+pub(super) fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
     force_stop_machine(app, id, None, None).map(|_| ())
 }
 
@@ -1165,7 +1174,7 @@ pub(super) fn force_stop(app: &AppHandle, id: &str) -> Result<(), String> {
 /// registered, so no later machine can be the one stopped. Returns the generation of the
 /// machine whose stop was issued, or `None` when the guard failed or there is no machine.
 pub(super) fn force_stop_if(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     guard: impl Fn() -> bool + Send + 'static,
 ) -> Result<Option<u64>, String> {
@@ -1176,7 +1185,7 @@ pub(super) fn force_stop_if(
 /// are registered on the main thread too, so a machine can't appear between the check and
 /// `apply`. Returns whether `apply` ran.
 pub(super) fn run_if_no_machine(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     apply: impl FnOnce() + Send + 'static,
 ) -> Result<bool, String> {
@@ -1193,7 +1202,7 @@ pub(super) fn run_if_no_machine(
 
 /// Force stops the machine of generation `generation` only; a later machine is left alone.
 pub(super) fn force_stop_generation(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     generation: u64,
 ) -> Result<(), String> {
@@ -1203,7 +1212,7 @@ pub(super) fn force_stop_generation(
 type Guard = Box<dyn Fn() -> bool + Send>;
 
 fn force_stop_machine(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     expected: Option<u64>,
     guard: Option<Guard>,
@@ -1272,7 +1281,7 @@ pub(super) enum MachineState {
 }
 
 /// The framework's state of every machine Silo holds.
-pub(super) fn machine_states(app: &AppHandle) -> Result<Vec<(String, MachineState)>, String> {
+pub(super) fn machine_states(app: &MacosContext) -> Result<Vec<(String, MachineState)>, String> {
     Ok(machine_samples(app)?
         .into_iter()
         .map(|sample| (sample.id, sample.state))
@@ -1289,7 +1298,7 @@ pub(super) struct Sample {
 
 /// The machines Silo holds, with the generation each one is, so that what is done about a
 /// sample reaches that machine and no later one.
-pub(super) fn machine_samples(app: &AppHandle) -> Result<Vec<Sample>, String> {
+pub(super) fn machine_samples(app: &MacosContext) -> Result<Vec<Sample>, String> {
     on_main(app, |_| {
         SLOTS.with(|slots| {
             slots
@@ -1409,7 +1418,7 @@ define_class!(
 );
 
 /// Adds the clipboard buttons to `native`'s toolbar. Call on the main thread.
-fn install_toolbar(mtm: MainThreadMarker, app: &AppHandle, id: &str, native: &NSWindow) {
+fn install_toolbar(mtm: MainThreadMarker, app: &MacosContext, id: &str, native: &NSWindow) {
     let delegate = mtm.alloc::<ToolbarDelegate>().set_ivars(DelegateState {
         generation: 0,
         app: app.clone(),
@@ -1429,39 +1438,29 @@ fn install_toolbar(mtm: MainThreadMarker, app: &AppHandle, id: &str, native: &NS
 }
 
 /// Shows `text` under the title of the computer's screen window; empty clears it.
-pub(super) fn set_display_subtitle(app: &AppHandle, id: &str, text: &str) {
-    let (app_handle, label, text) = (app.clone(), super::display_label(id), text.to_string());
-    let _ = app.run_on_main_thread(move || {
-        use tauri::Manager;
-        let Some(window) = app_handle.get_webview_window(&label) else {
-            return;
-        };
-        let Ok(pointer) = window.ns_window() else {
-            return;
-        };
-        // SAFETY: Main thread; Tauri owns the NSWindow, which outlives this closure.
-        let native = unsafe { &*pointer.cast::<NSWindow>() };
-        native.setSubtitle(&NSString::from_str(&text));
+pub(super) fn set_display_subtitle(app: &MacosContext, id: &str, text: &str) {
+    let text = text.to_string();
+    let _ = with_display_window(app, id, move |window, _| {
+        window.setSubtitle(&NSString::from_str(&text));
+        Ok(())
     });
 }
 
-/// Adds the machine's screen to `window`, filling its content view.
+/// Adds the machine's screen to the host-provided native window, filling its content view.
 pub(super) fn attach_display(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
-    window: &tauri::WebviewWindow,
+    native_window: usize,
     toolbar: bool,
 ) -> Result<(), String> {
-    let (id, window, handle) = (id.to_string(), window.clone(), app.clone());
+    let (id, native_window, handle) = (id.to_string(), native_window, app.clone());
     on_main(app, move |mtm| {
         SLOTS.with(|slots| {
             let mut slots = slots.borrow_mut();
             let slot = slots.get_mut(&id).ok_or("This computer isn't running.")?;
-            let pointer = window
-                .ns_window()
-                .map_err(|_| "Silo could not open the display.".to_string())?;
-            // Tauri owns the NSWindow; this closure runs on its AppKit thread.
-            let native = unsafe { &*pointer.cast::<NSWindow>() };
+            // SAFETY: The host keeps the NSWindow alive until this main-thread attachment
+            // completes and calls `detach_display` before destroying it.
+            let native = unsafe { &*(native_window as *mut NSWindow) };
             if toolbar {
                 install_toolbar(mtm, &handle, &id, native);
             }
@@ -1516,9 +1515,12 @@ pub(super) fn attach_display(
 }
 
 /// Detaches the display view; the machine keeps running. Safe from any thread.
-pub(super) fn detach_display(app: &AppHandle, id: &str) {
+pub(super) fn detach_display(app: &MacosContext, id: &str) {
     let id = id.to_string();
-    let _ = app.run_on_main_thread(move || {
+    let Some(main_thread) = app.main_thread() else {
+        return;
+    };
+    let _ = main_thread.run(Box::new(move || {
         TOOLBARS.with(|toolbars| toolbars.borrow_mut().remove(&id));
         SLOTS.with(|slots| {
             if let Some(slot) = slots.borrow_mut().get_mut(&id) {
@@ -1529,7 +1531,7 @@ pub(super) fn detach_display(app: &AppHandle, id: &str) {
                 }
             }
         });
-    });
+    }));
 }
 
 /// The first display of a running machine, on the main thread.
@@ -1547,7 +1549,7 @@ fn machine_display(id: &str) -> Result<Retained<VZGraphicsDisplay>, String> {
 }
 
 /// The pixel size of a running machine's display.
-pub(super) fn display_size(app: &AppHandle, id: &str) -> Option<(u32, u32)> {
+pub(super) fn display_size(app: &MacosContext, id: &str) -> Option<(u32, u32)> {
     let id = id.to_string();
     on_main(app, move |_| {
         let display = machine_display(&id).ok()?;
@@ -1562,7 +1564,7 @@ pub(super) fn display_size(app: &AppHandle, id: &str) -> Option<(u32, u32)> {
 /// Resizes a running machine's display, with no view needed, and returns the size the
 /// framework reports. The guest may not follow it at once.
 pub(super) fn reconfigure_display(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     width: u32,
     height: u32,
@@ -1593,7 +1595,7 @@ pub(super) fn reconfigure_display(
 
 /// Runs `work` on the main thread with the window that shows the machine's screen.
 fn with_display_window<T: Send + 'static>(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     work: impl FnOnce(&NSWindow, &VZVirtualMachineView) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -1613,7 +1615,7 @@ fn with_display_window<T: Send + 'static>(
 
 /// Brings the display window forward with the machine's view first in line for
 /// keys, and returns the window's number.
-pub(super) fn focus_display(app: &AppHandle, id: &str) -> Result<isize, String> {
+pub(super) fn focus_display(app: &MacosContext, id: &str) -> Result<isize, String> {
     with_display_window(app, id, |window, view| {
         window.makeKeyAndOrderFront(None);
         let responder: &NSResponder = view;
@@ -1622,7 +1624,7 @@ pub(super) fn focus_display(app: &AppHandle, id: &str) -> Result<isize, String> 
     })
 }
 
-pub(super) fn send_keys(app: &AppHandle, id: &str, events: Vec<KeyEvent>) -> Result<(), String> {
+pub(super) fn send_keys(app: &MacosContext, id: &str, events: Vec<KeyEvent>) -> Result<(), String> {
     with_display_window(app, id, move |window, _| {
         guest_screen::deliver_keys(window, &events)
     })
@@ -1631,7 +1633,7 @@ pub(super) fn send_keys(app: &AppHandle, id: &str, events: Vec<KeyEvent>) -> Res
 /// Moves, presses or releases the pointer at a position given as fractions of
 /// the machine's screen, measured from its bottom left.
 pub(super) fn send_pointer(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     kind: PointerKind,
     x: f64,
@@ -1644,7 +1646,7 @@ pub(super) fn send_pointer(
 
 /// The text on the machine's screen (the display view, not the window's title
 /// bar).
-pub(super) fn read_screen(app: &AppHandle, id: &str) -> Result<Vec<TextLine>, String> {
+pub(super) fn read_screen(app: &MacosContext, id: &str) -> Result<Vec<TextLine>, String> {
     let (number, geometry) = with_display_window(app, id, |window, view| {
         Ok((
             window.windowNumber(),
@@ -1691,7 +1693,7 @@ thread_local! {
 /// machine's screen, and shows `subtitle` in its title bar. Events Silo
 /// delivers with `window.sendEvent` do not pass through event monitors, so they
 /// still arrive.
-pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<(), String> {
+pub(super) fn lock_input(app: &MacosContext, id: &str, subtitle: &str) -> Result<(), String> {
     let (subtitle, key) = (subtitle.to_string(), id.to_string());
     with_display_window(app, id, move |window, view| {
         window.setSubtitle(&NSString::from_str(&subtitle));
@@ -1738,7 +1740,7 @@ pub(super) fn lock_input(app: &AppHandle, id: &str, subtitle: &str) -> Result<()
 }
 
 /// Gives the user's input back to the display window.
-pub(super) fn unlock_input(app: &AppHandle, id: &str) {
+pub(super) fn unlock_input(app: &MacosContext, id: &str) {
     let id = id.to_string();
     let _ = on_main(app, move |_| {
         INPUT_MONITORS.with(|monitors| {
@@ -1762,7 +1764,7 @@ pub(super) fn unlock_input(app: &AppHandle, id: &str) {
 
 /// Whether the machine of generation `generation` has been released within `timeout`.
 pub(super) fn wait_until_released(
-    app: &AppHandle,
+    app: &MacosContext,
     id: &str,
     generation: u64,
     timeout: Duration,
@@ -1786,7 +1788,7 @@ pub(super) fn wait_until_released(
 
 /// Whether the machine has stopped and been released within `timeout`. A machine
 /// that is stopping, stopped but not yet released, or running does not count.
-pub(super) fn wait_until_stopped(app: &AppHandle, id: &str, timeout: Duration) -> bool {
+pub(super) fn wait_until_stopped(app: &MacosContext, id: &str, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         let released = machine_states(app)

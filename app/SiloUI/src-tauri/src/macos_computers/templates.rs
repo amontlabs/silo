@@ -714,7 +714,7 @@ fn reserve_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::macos_computers::store::{CreateRequest, RestoreImageInfo, SetupProgress};
+    use crate::macos_computers_engine::store::{CreateRequest, RestoreImageInfo, SetupProgress};
 
     fn record(disk_gib: u64) -> (Record, Layout, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();

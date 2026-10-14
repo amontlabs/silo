@@ -7,9 +7,9 @@ mod bundled_tools;
 mod channel;
 mod chatgpt_app;
 mod clipboard;
-mod commands;
 #[cfg(test)]
 mod command_permissions_tests;
+mod commands;
 mod computer_names;
 mod computer_use;
 mod creation_inputs;
@@ -41,10 +41,12 @@ mod host_push_operations;
 mod host_push_transport;
 mod log_export;
 mod log_retention;
-mod macos_computers;
+#[path = "macos_computers.rs"]
+mod macos_computers_engine;
 mod macos_display_gateway;
 mod macos_remote;
-pub(crate) use commands::macos_remote_viewer as macos_remote_viewer;
+pub(crate) use commands::macos_computers;
+pub(crate) use commands::macos_remote_viewer;
 mod network;
 mod notifications;
 mod owned_tunnel;
@@ -145,16 +147,16 @@ fn main() {
             desktop_viewer_media::desktop_viewer_set_audio,
             desktop_viewer_media::desktop_viewer_reset_screen,
             desktop_viewer::desktop_viewer_clipboard,
-            macos_computers::read_macos_computers,
-            macos_computers::create_macos_computer,
-            macos_computers::macos_computer_action,
-            macos_computers::open_macos_display,
-            macos_computers::macos_computer_clipboard,
-            macos_computers::delete_macos_template,
-            macos_computers::create_macos_checkpoint,
-            macos_computers::restore_macos_checkpoint,
-            macos_computers::fork_macos_checkpoint,
-            macos_computers::delete_macos_checkpoint,
+            commands::macos_computers::read_macos_computers,
+            commands::macos_computers::create_macos_computer,
+            commands::macos_computers::macos_computer_action,
+            commands::macos_computers::open_macos_display,
+            commands::macos_computers::macos_computer_clipboard,
+            commands::macos_computers::delete_macos_template,
+            commands::macos_computers::create_macos_checkpoint,
+            commands::macos_computers::restore_macos_checkpoint,
+            commands::macos_computers::fork_macos_checkpoint,
+            commands::macos_computers::delete_macos_checkpoint,
             macos_remote::remote_macos_snapshot,
             macos_remote::remote_macos_create,
             macos_remote::remote_macos_action,
