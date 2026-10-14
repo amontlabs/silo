@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+/target/
 
 # Cargo build output, including the worktree-level CARGO_TARGET_DIR.
 target/
