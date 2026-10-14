@@ -2,11 +2,10 @@
 //! the VM image import and the ChatGPT for Linux download, both of which run in the
 //! background. Waiting here, not under the gate, keeps lifecycle operations and Quit
 //! from queueing behind a download that can take minutes.
-use crate::chatgpt_app::{self, Status};
-use crate::runtime::{self, RuntimePaths};
+use crate::runtime::RuntimePaths;
 use std::collections::HashSet;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_millis(250);
@@ -37,25 +36,6 @@ pub(crate) enum ChatGpt {
     Failed { reason: String },
 }
 
-impl From<Option<Status>> for ChatGpt {
-    fn from(status: Option<Status>) -> Self {
-        match status {
-            None | Some(Status::Idle) => Self::Pending,
-            Some(Status::Downloading {
-                received_bytes,
-                total_bytes,
-            }) => Self::Downloading {
-                received: received_bytes,
-                total: total_bytes,
-            },
-            Some(Status::Verifying) => Self::Verifying,
-            Some(Status::Extracting) => Self::Extracting,
-            Some(Status::Ready { .. }) => Self::Ready,
-            Some(Status::Failed { reason, .. }) => Self::Failed { reason },
-        }
-    }
-}
-
 /// One step shown while waiting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
@@ -75,6 +55,21 @@ pub(crate) trait Inputs: Send + Sync {
     fn show(&self, step: &Step);
     /// The user chose to finish creation without computer use.
     fn skipped(&self) -> bool;
+}
+
+/// Builds the host-side inputs for one creation wait. The UI adapter installs this once at
+/// startup; the wait itself and its state stay independent of Tauri.
+pub(crate) trait InputsProvider: Send + Sync + 'static {
+    fn create(&self, paths: &RuntimePaths, request_id: &str) -> Arc<dyn Inputs>;
+}
+
+static INPUTS_PROVIDER: OnceLock<Arc<dyn InputsProvider>> = OnceLock::new();
+
+/// Installs the host adapter once at app startup.
+pub(crate) fn install_provider(provider: Arc<dyn InputsProvider>) -> Result<(), String> {
+    INPUTS_PROVIDER
+        .set(provider)
+        .map_err(|_| "Creation inputs are already installed".to_owned())
 }
 
 /// What the wait decided about computer use for the new computers.
@@ -173,6 +168,11 @@ pub(crate) fn skip(request_id: &str) {
     });
 }
 
+/// Whether the user asked this creation to finish without computer use.
+pub(crate) fn was_skipped(request_id: &str) -> bool {
+    with_set(&SKIPPED_REQUESTS, |set| set.contains(request_id))
+}
+
 /// Records that these new computers finish creation without the computer-use setup.
 pub(crate) fn exclude_computer_use(computer_ids: &[String]) {
     with_set(&WITHOUT_COMPUTER_USE, |set| {
@@ -185,57 +185,21 @@ pub(crate) fn take_without_computer_use(computer_id: &str) -> bool {
     with_set(&WITHOUT_COMPUTER_USE, |set| set.remove(computer_id))
 }
 
-struct Live {
-    app: tauri::AppHandle,
-    paths: RuntimePaths,
-    request_id: String,
-}
-
-impl Inputs for Live {
-    fn ensure_image(&self) -> Result<(), String> {
-        crate::preparation::ensure_image(&self.paths, &|_| {})
-    }
-
-    fn chatgpt(&self) -> ChatGpt {
-        chatgpt_app::cached_status().into()
-    }
-
-    fn start_chatgpt(&self) {
-        // The status is unknown before the first read of a process; start the download
-        // worker unless the app is already published.
-        let status = chatgpt_app::local_status(&self.app).ok();
-        if !matches!(status, Some(Status::Ready { .. })) {
-            chatgpt_app::ensure_in_background(&self.app);
-        }
-    }
-
-    fn quitting(&self) -> bool {
-        runtime::shutdown::ensure_accepting_operations().is_err()
-    }
-
-    fn show(&self, step: &Step) {
-        runtime::publish_creation_wait(&self.app, &self.request_id, step);
-    }
-
-    fn skipped(&self) -> bool {
-        with_set(&SKIPPED_REQUESTS, |set| set.contains(&self.request_id))
-    }
-}
-
 /// Waits for everything `needs` before the creation takes its operation gate. When the user
 /// finishes without computer use, the new computers are recorded so their creation skips it.
 pub(crate) fn wait_before_gate(
-    app: &tauri::AppHandle,
     paths: &RuntimePaths,
     request_id: &str,
     needs: &Needs,
 ) -> Result<(), String> {
-    let live: Arc<dyn Inputs> = Arc::new(Live {
-        app: app.clone(),
-        paths: paths.clone(),
-        request_id: request_id.to_owned(),
-    });
-    let outcome = wait(&live, needs);
+    let outcome = if needs.is_empty() {
+        Ok(Outcome::Ready)
+    } else {
+        match INPUTS_PROVIDER.get() {
+            Some(provider) => wait(&provider.create(paths, request_id), needs),
+            None => Err("Creation inputs are not available yet. Try again.".to_owned()),
+        }
+    };
     with_set(&SKIPPED_REQUESTS, |set| {
         set.remove(request_id);
     });
@@ -248,6 +212,7 @@ pub(crate) fn wait_before_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     struct Fake {
