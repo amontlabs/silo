@@ -78,22 +78,11 @@ impl RuntimeHost for TauriRuntimeHost {
     }
 
     fn notify(&self, notice: crate::notifications::Notice) {
-        let context = silo_engine::context::current();
-        publish_engine_notice(&notice, context.as_deref());
+        deliver_runtime_notice(self, notice);
     }
 
     fn clear_computer_notices(&self, computer_ids: &[String]) {
-        for computer_id in computer_ids {
-            if let Some(context) = silo_engine::context::current() {
-                if let Err(error) = silo_engine::notices::clear_for_computer(
-                    context.as_ref(),
-                    computer_id,
-                    silo_engine::context::Audience::All,
-                ) {
-                    eprintln!("Silo could not clear retained notices: {error}");
-                }
-            }
-        }
+        withdraw_runtime_notices(self, computer_ids);
     }
 
     fn stop_macos_computers(&self, deadline: Option<std::time::Instant>) -> Result<(), String> {
@@ -123,43 +112,37 @@ impl RuntimeHost for TauriRuntimeHost {
         if let Some(notice) =
             crate::notifications::lifecycle_notice(action, name, computer, elapsed, outcome)
         {
-            let context = silo_engine::context::current();
-            publish_engine_notice(&notice, context.as_deref());
+            deliver_runtime_notice(self, notice);
         }
     }
 }
 
-fn publish_engine_notice(
-    notice: &crate::notifications::Notice,
-    context: Option<&dyn EngineContext>,
-) {
-    let Some(context) = context else {
-        return;
-    };
-    let payload = match serde_json::to_value(notice) {
-        Ok(payload) => payload,
-        Err(error) => {
-            eprintln!("Silo could not encode a notice: {error}");
-            return;
-        }
-    };
-    match serde_json::from_value::<silo_api::methods::notifications::Notice>(payload.clone()) {
-        Ok(api_notice) => {
-            if let Err(error) = silo_engine::notices::retain(
-                context,
-                &api_notice,
-                silo_engine::context::Audience::All,
-            ) {
-                eprintln!("Silo could not retain a notice: {error}");
-            }
-        }
-        Err(error) => eprintln!("Silo could not map a notice to the API contract: {error}"),
+trait RuntimeNoticeDelivery {
+    fn notify_native(&self, notice: crate::notifications::Notice);
+    fn clear_computer(&self, computer_id: &str);
+}
+
+impl RuntimeNoticeDelivery for TauriRuntimeHost {
+    fn notify_native(&self, notice: crate::notifications::Notice) {
+        crate::commands::notifications::notify_native(&self.0, notice);
     }
-    // Keep the existing in-app toast event until the frontend switches to engine notices.
-    context.publish(
-        silo_engine::context::Event::new(crate::notifications::NOTICE_EVENT, payload),
-        silo_engine::context::Audience::All,
-    );
+
+    fn clear_computer(&self, computer_id: &str) {
+        crate::commands::notifications::clear_computer(&self.0, computer_id);
+    }
+}
+
+fn deliver_runtime_notice(
+    delivery: &impl RuntimeNoticeDelivery,
+    notice: crate::notifications::Notice,
+) {
+    delivery.notify_native(notice);
+}
+
+fn withdraw_runtime_notices(delivery: &impl RuntimeNoticeDelivery, computer_ids: &[String]) {
+    for computer_id in computer_ids {
+        delivery.clear_computer(computer_id);
+    }
 }
 
 pub(crate) fn package_kind(bundle: Option<BundleType>) -> RuntimePackageKind {
@@ -353,50 +336,21 @@ pub async fn change_computer_configuration(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use silo_engine::context::{
-        EngineIdentity, EnginePaths, EngineRuntimeState, Event, MainThread, PackageKind,
-        ProcessControl,
-    };
     use std::sync::Mutex;
 
-    struct NoticeTestContext {
-        paths: EnginePaths,
-        identity: EngineIdentity,
-        runtime_state: Arc<EngineRuntimeState>,
-        published: Mutex<Vec<(Event, silo_engine::context::Audience)>>,
+    #[derive(Default)]
+    struct RecordingNoticeDelivery {
+        native: Mutex<Vec<crate::notifications::Notice>>,
+        cleared: Mutex<Vec<String>>,
     }
 
-    impl EngineContext for NoticeTestContext {
-        fn paths(&self) -> &EnginePaths {
-            &self.paths
+    impl RuntimeNoticeDelivery for RecordingNoticeDelivery {
+        fn notify_native(&self, notice: crate::notifications::Notice) {
+            self.native.lock().unwrap().push(notice);
         }
 
-        fn identity(&self) -> &EngineIdentity {
-            &self.identity
-        }
-
-        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
-            self.runtime_state.clone()
-        }
-
-        fn publish(&self, event: Event, audience: silo_engine::context::Audience) {
-            self.published.lock().unwrap().push((event, audience));
-        }
-
-        fn main_thread(&self) -> Option<&dyn MainThread> {
-            None
-        }
-
-        fn process(&self) -> &dyn ProcessControl {
-            self
-        }
-    }
-
-    impl ProcessControl for NoticeTestContext {
-        fn exit(&self, _code: i32) {}
-
-        fn restart(&self) -> ! {
-            panic!("notice test must not restart the process")
+        fn clear_computer(&self, computer_id: &str) {
+            self.cleared.lock().unwrap().push(computer_id.to_owned());
         }
     }
 
@@ -411,21 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn engine_notice_retains_api_notice_and_preserves_the_tauri_toast_event() {
-        let directory = tempfile::tempdir().unwrap();
-        let context = NoticeTestContext {
-            paths: EnginePaths {
-                app_data: directory.path().to_path_buf(),
-                ..EnginePaths::default()
-            },
-            identity: EngineIdentity {
-                channel: silo_engine::channel::Channel::Production,
-                version: "test".into(),
-                package_kind: PackageKind::MacApp,
-            },
-            runtime_state: Arc::new(EngineRuntimeState::default()),
-            published: Mutex::new(Vec::new()),
-        };
+    fn runtime_notice_uses_native_only_delivery() {
         let notice = crate::notifications::Notice {
             category: crate::notifications::Category::Failures,
             key: "lifecycle:dev".into(),
@@ -433,26 +373,22 @@ mod tests {
             body: "The framework rejected the start.".into(),
             computer: None,
         };
-        publish_engine_notice(&notice, Some(&context));
+        let delivery = RecordingNoticeDelivery::default();
 
-        let events = context.published.lock().unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .map(|(event, _)| event.name.as_str())
-                .collect::<Vec<_>>(),
-            ["notifications.notice", crate::notifications::NOTICE_EVENT]
-        );
-        for (_, audience) in events.iter() {
-            assert_eq!(audience, &silo_engine::context::Audience::All);
-        }
-        let legacy_payload = serde_json::to_value(&notice).unwrap();
-        assert_eq!(events[1].0.payload, legacy_payload);
-        let retained = silo_engine::notices::list(&context).unwrap();
-        assert_eq!(retained.len(), 1);
-        assert_eq!(
-            serde_json::to_value(&retained[0]).unwrap(),
-            serde_json::to_value(&notice).unwrap()
-        );
+        deliver_runtime_notice(&delivery, notice.clone());
+
+        assert_eq!(*delivery.native.lock().unwrap(), vec![notice]);
+        assert!(delivery.cleared.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn runtime_notice_withdrawal_uses_native_notification_clear() {
+        let delivery = RecordingNoticeDelivery::default();
+        let computer_ids = vec!["local:dev".to_owned(), "remote:dev".to_owned()];
+
+        withdraw_runtime_notices(&delivery, &computer_ids);
+
+        assert_eq!(*delivery.cleared.lock().unwrap(), computer_ids);
+        assert!(delivery.native.lock().unwrap().is_empty());
     }
 }
