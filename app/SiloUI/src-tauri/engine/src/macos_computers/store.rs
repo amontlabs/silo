@@ -131,6 +131,10 @@ pub(super) struct Record {
     /// The approval mode computer use was last set up with; an update keeps it.
     #[serde(default)]
     pub computer_use_approval: Option<crate::computer_use::Approval>,
+    /// The approval mode the owner wants. It is separate from the mode last applied to the
+    /// guest so a change can be retried after a guest or engine failure.
+    #[serde(default)]
+    pub computer_use_desired_approval: Option<crate::computer_use::Approval>,
     /// Set by a Restore: what the next Start does before it hands the computer over.
     #[serde(default)]
     pub pending_restore: Option<super::checkpoints::PendingRestore>,
@@ -145,7 +149,8 @@ impl Record {
     /// known to match: the update runs again.
     pub(super) fn computer_use_stale(&self) -> bool {
         let approval = self
-            .computer_use_approval
+            .computer_use_desired_approval
+            .or(self.computer_use_approval)
             .unwrap_or_else(crate::computer_use::initial_approval);
         self.computer_use_version.as_deref()
             != Some(super::templates::computer_use_version_for(approval).as_str())
@@ -294,6 +299,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         setup_version: None,
         computer_use_version: None,
         computer_use_approval: None,
+        computer_use_desired_approval: None,
         pending_restore: None,
         inherited_access: false,
     }
