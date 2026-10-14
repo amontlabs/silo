@@ -81,6 +81,7 @@ static MACOS_PENDING_FORK_WORKFLOWS: OnceLock<
     Mutex<HashMap<silo_api::jobs::JobId, ForkContinuation>>,
 > = OnceLock::new();
 static MACOS_CHECKPOINT_RETRY_WORKER: Once = Once::new();
+static MACOS_JOB_EVENT_PUBLISH_LOCK: Mutex<()> = Mutex::new(());
 /// How long a guest may ignore a stop request before the computer counts as running again.
 const STOP_IGNORED_AFTER: Duration = Duration::from_secs(20);
 const GRACEFUL_QUIT: Duration = Duration::from_secs(60);
@@ -817,16 +818,53 @@ fn publish_job_activity(app: &MacosContext, state: &MacosComputersState) {
             }
         };
         let event = silo_api::jobs::JobProgress::Macos {
-            job_id,
+            job_id: job_id.clone(),
             kind: None,
             computer_id: Some(data.computer_id.clone()),
             data,
         };
-        if let Err(error) = crate::jobs::publish_progress(app.engine.as_ref(), event, Audience::All)
-        {
-            eprintln!("silo-engine: could not persist macOS job progress: {error}");
-        }
+        publish_macos_job_progress(app.engine.as_ref(), &job_id, event);
     }
+}
+
+fn publish_macos_job_progress(
+    context: &dyn EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    progress: silo_api::jobs::JobProgress,
+) {
+    let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !macos_job_progress_is_active(job_id) {
+        return;
+    }
+    if let Err(error) = crate::jobs::publish_progress(context, progress, Audience::All) {
+        eprintln!("silo-engine: could not persist macOS job progress: {error}");
+    }
+}
+
+fn macos_job_progress_is_active(job_id: &silo_api::jobs::JobId) -> bool {
+    let pending_finish = MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains_key(job_id);
+    if pending_finish {
+        return false;
+    }
+    let lifecycle_active = MACOS_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .any(|active| active == job_id);
+    let checkpoint_active = MACOS_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .any(|active| active == job_id);
+    lifecycle_active || checkpoint_active
 }
 
 #[derive(Clone)]
@@ -1026,6 +1064,9 @@ fn macos_job_finished(
 }
 
 fn publish_macos_job_finished(context: &dyn EngineContext, finished: silo_api::jobs::JobFinished) {
+    let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Err(error) = crate::jobs::publish_finished(context, finished, Audience::All) {
         eprintln!("silo-engine: could not persist macOS job outcome: {error}");
     }
@@ -1207,7 +1248,13 @@ fn retry_pending_checkpoint_completions(app: &MacosContext) {
         })
         .collect::<Vec<_>>();
     for (job_id, computer_id, finished) in pending {
-        match crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All) {
+        let published = {
+            let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All)
+        };
+        match published {
             Ok(()) => {
                 MACOS_PENDING_CHECKPOINT_JOBS
                     .get_or_init(Default::default)
@@ -3906,6 +3953,7 @@ mod tests {
         paths: silo_engine::EnginePaths,
         identity: EngineIdentity,
         runtime_state: Arc<EngineRuntimeState>,
+        published_events: std::sync::Mutex<Vec<Event>>,
     }
 
     struct JobTestHost;
@@ -3941,6 +3989,7 @@ mod tests {
                     package_kind: PackageKind::MacApp,
                 },
                 runtime_state: Arc::new(EngineRuntimeState::default()),
+                published_events: std::sync::Mutex::new(Vec::new()),
             }
         }
     }
@@ -3958,7 +4007,12 @@ mod tests {
             self.runtime_state.clone()
         }
 
-        fn publish(&self, _event: Event, _audience: Audience) {}
+        fn publish(&self, event: Event, _audience: Audience) {
+            self.published_events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(event);
+        }
 
         fn main_thread(&self) -> Option<&dyn MainThread> {
             None
@@ -5105,6 +5159,49 @@ mod tests {
         assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
         assert_eq!(error.message, "The framework rejected the start.");
         assert_eq!(state_after_failed_start(Ok(())).0, State::Stopped);
+    }
+
+    #[test]
+    fn stale_macos_progress_snapshot_is_not_published_after_job_finish() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = JobTestContext::new(directory.path().to_path_buf());
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(&context, "computers.start", gate).unwrap();
+        accepted.registry.mark_running(&accepted.job_id).unwrap();
+        let computer_id = format!("computer-for-{}", accepted.job_id);
+        track_macos_job(&computer_id, accepted.job_id.clone());
+
+        let stale = silo_api::jobs::JobProgress::Macos {
+            job_id: accepted.job_id.clone(),
+            kind: None,
+            computer_id: Some(computer_id.clone()),
+            data: silo_api::jobs::MacosJobProgress {
+                computer_id: computer_id.clone(),
+                state: silo_api::methods::computers::MacosComputerState::Starting,
+                progress: Some(0.5),
+                detail: None,
+                checkpoint_operation: None,
+            },
+        };
+
+        finish_macos_job(
+            &context,
+            Some(&computer_id),
+            accepted.job_id.clone(),
+            lifecycle_job_outcome(Ok(())),
+        );
+        publish_macos_job_progress(&context, &accepted.job_id, stale);
+
+        let published = context
+            .published_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let names = published
+            .iter()
+            .map(|event| event.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["operations.job.finished"]);
     }
 
     #[test]
