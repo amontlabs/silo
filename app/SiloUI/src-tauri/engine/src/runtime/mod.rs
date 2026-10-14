@@ -699,9 +699,26 @@ impl ApplicationSource {
         if let Some(computers) = value.get_mut("computers").and_then(Value::as_array_mut) {
             for computer in computers {
                 computer["kind"] = Value::String("linux".to_owned());
+                canonical_checkpoint_times(computer);
             }
         }
         Ok(value)
+    }
+}
+
+/// A record keeps a checkpoint's `createdAt` as epoch milliseconds; the API carries an ISO string.
+pub(crate) fn canonical_checkpoint_times(computer: &mut Value) {
+    let Some(checkpoints) = computer
+        .get_mut("checkpoints")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for checkpoint in checkpoints {
+        if let Some(millis) = checkpoint["createdAt"].as_u64() {
+            checkpoint["createdAt"] =
+                Value::String(crate::checkpoints::retention::format_millis(millis));
+        }
     }
 }
 

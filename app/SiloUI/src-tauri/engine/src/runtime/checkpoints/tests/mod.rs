@@ -4222,6 +4222,18 @@ fn an_automatic_capture_returns_its_record_and_persists_its_policy_kind() {
 }
 
 #[test]
+fn the_canonical_computer_list_carries_checkpoints_in_the_api_shape() {
+    let mut computer = json!({"checkpoints": [{
+        "id": "c1", "name": "Before run: x, deleted automatically",
+        "createdAt": 1791986953387u64, "scope": "full", "reason": "manual", "kind": "automatic"
+    }]});
+    super::super::canonical_checkpoint_times(&mut computer);
+    let back: Vec<silo_api::methods::checkpoints::Checkpoint> =
+        serde_json::from_value(computer["checkpoints"].clone()).unwrap();
+    assert_eq!(back[0].created_at, "2026-10-14T14:09:13.387Z");
+}
+
+#[test]
 fn retention_removes_only_automatic_records_beyond_the_newest_count() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
