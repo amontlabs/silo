@@ -620,6 +620,12 @@ async fn serve_connection(
     let _ = reader_task.await;
     drop(reply_tx);
     drop(event_tx);
+    // Stopping a tunnel can wait up to half a second, so it must not hold an async worker.
+    let closing = client_id.as_str().to_owned();
+    let _ = tokio::task::spawn_blocking(move || {
+        silo_engine::desktop_viewer_api::close_client(&closing);
+    })
+    .await;
     event_stream.disconnect();
 
     if (immediate_disconnect || !close_after_reply) && writer_result.is_none() {
