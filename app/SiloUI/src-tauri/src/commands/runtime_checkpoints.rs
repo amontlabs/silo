@@ -48,7 +48,7 @@ pub(crate) async fn create_checkpoint(
     computer_id: String,
     name: String,
 ) -> Result<runtime::ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let paths = runtime::runtime_paths(&worker_app)?;
@@ -69,7 +69,7 @@ pub(crate) async fn fork_checkpoint(
     checkpoint_id: Option<String>,
     new_name: String,
 ) -> Result<runtime::ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let paths = runtime::runtime_paths(&worker_app)?;
@@ -96,7 +96,7 @@ pub(crate) async fn restore_checkpoint(
     computer_id: String,
     checkpoint_id: String,
 ) -> Result<runtime::ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let paths = runtime::runtime_paths(&worker_app)?;
@@ -115,7 +115,7 @@ pub(crate) async fn abandon_restore(
     app: AppHandle,
     computer_id: String,
 ) -> Result<runtime::ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let paths = runtime::runtime_paths(&worker_app)?;
@@ -135,7 +135,7 @@ pub(crate) async fn delete_checkpoint(
     computer_id: String,
     checkpoint_id: String,
 ) -> Result<runtime::ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
     tokio::task::spawn_blocking(move || {
         let paths = runtime::runtime_paths(&worker_app)?;

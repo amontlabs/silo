@@ -13,11 +13,11 @@ impl RuntimeHost for AppHandle {
     }
 
     fn runtime_storage(&self) -> Result<PathBuf, String> {
-        crate::runtime_migration::runtime_storage(self)
+        crate::commands::runtime_migration::runtime_storage(self)
     }
 
     fn blocks_operations(&self) -> bool {
-        crate::runtime_migration::blocks_operations(self)
+        crate::commands::runtime_migration::blocks_operations(self)
     }
 
     fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
@@ -25,7 +25,7 @@ impl RuntimeHost for AppHandle {
     }
 
     fn ensure_runtime_ready(&self) -> Result<(), String> {
-        crate::runtime_migration::ensure_ready(self)
+        crate::commands::runtime_migration::ensure_ready(self)
     }
 
     fn runtime_package_kind(&self) -> RuntimePackageKind {

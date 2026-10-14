@@ -252,9 +252,9 @@ fn main() {
             commands::applications::choose_application,
             commands::dependencies::read_dependencies,
             commands::backup_controller::read_backup_state,
-            runtime_migration::read_runtime_migration_state,
-            runtime_migration::retry_runtime_migration,
-            runtime_migration::continue_after_migration_failure,
+            commands::runtime_migration::read_runtime_migration_state,
+            commands::runtime_migration::retry_runtime_migration,
+            commands::runtime_migration::continue_after_migration_failure,
             commands::pre_upgrade_backup::read_pre_upgrade_backup,
             commands::pre_upgrade_backup::measure_pre_upgrade_backup,
             commands::pre_upgrade_backup::delete_pre_upgrade_backup,
@@ -306,14 +306,14 @@ fn main() {
                 runtime::OPERATIONS.set_listener(move || {
                     let _ = queue_app.emit("silo://operation-queue-changed", ());
                 });
-                runtime_migration::install(app.handle())?;
+                commands::runtime_migration::install(app.handle())?;
                 computer_use::install(app.handle());
                 pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;
                 commands::secrets::install(app.handle())?;
                 commands::github::install(app.handle())?;
                 commands::backup_controller::install(app.handle())?;
-                runtime_migration::start_if_pending(app.handle())?;
+                commands::runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
                 #[cfg(debug_assertions)]
                 desktop_viewer_bench::start(app.handle());

@@ -11,7 +11,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Manager};
 
 const VERSION: u32 = 1;
 const FILE: &str = "runtime-migration.json";
@@ -94,11 +93,144 @@ pub(crate) struct MigrationState {
     pub(crate) error: Option<String>,
 }
 
-struct Controller {
+pub(crate) struct Controller {
     app_data: PathBuf,
     path: PathBuf,
     state: Mutex<MigrationState>,
     writable: bool,
+}
+
+impl Controller {
+    pub(crate) fn new(app_data: PathBuf) -> Self {
+        let path = app_data.join(FILE);
+        let (state, writable) = match initial(&path, &app_data) {
+            Ok(state) => (state, true),
+            Err(error) => {
+                let mut state = fresh("failed", 0);
+                state.stage = "Migration needs attention".into();
+                state.error = Some(error);
+                (state, false)
+            }
+        };
+        Self {
+            app_data,
+            path,
+            state: Mutex::new(state),
+            writable,
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<MigrationState, String> {
+        self.state
+            .lock()
+            .map(|state| state.clone())
+            .map_err(|_| "Migration state is unavailable.".to_string())
+    }
+
+    pub(crate) fn ensure_ready(&self) -> Result<(), String> {
+        let state = self.snapshot()?;
+        self.ensure_ready_for(&state)
+    }
+
+    pub(crate) fn ensure_ready_for(&self, state: &MigrationState) -> Result<(), String> {
+        check_ready(self.writable, &state.status)
+    }
+
+    pub(crate) fn runtime_storage(&self) -> Result<PathBuf, String> {
+        let state = self.snapshot()?;
+        usable_storage(&self.app_data, self.writable, &state.status)
+    }
+
+    pub(crate) fn blocks_operations(&self) -> bool {
+        self.ensure_ready().is_err()
+    }
+
+    pub(crate) fn needs_recovery(&self) -> Result<bool, String> {
+        Ok(generation(&self.app_data)?.is_none())
+    }
+
+    pub(crate) fn staged_storage(&self) -> PathBuf {
+        self.app_data.join(CONVERTED)
+    }
+
+    fn update(
+        &self,
+        change: impl FnOnce(&mut MigrationState) -> Result<(), String>,
+    ) -> Result<MigrationState, String> {
+        if !self.writable {
+            return Err("Saved migration data needs manual repair. The file was preserved.".into());
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Migration state is unavailable.")?;
+        let mut next = state.clone();
+        change(&mut next)?;
+        write(&self.path, &next)?;
+        *state = next.clone();
+        Ok(next)
+    }
+
+    pub(crate) fn record_failure(&self, error: String) -> Result<(), String> {
+        record_failure(&self.state, &self.path, error)
+    }
+
+    pub(crate) fn prepare_retry(&self) -> Result<MigrationState, String> {
+        self.update(|state| prepare_retry(state, &self.app_data))
+    }
+
+    pub(crate) fn continue_after_failure(&self) -> Result<MigrationState, String> {
+        if !self.writable {
+            return Err("Saved migration data needs manual repair. The file was preserved.".into());
+        }
+        let current = self.snapshot()?;
+        if current.status != "failed" || current.total_count == 0 {
+            return Err("Continue is available only after a computer migration failure.".into());
+        }
+        // This creates an independent runtime namespace. The old database, root
+        // disks and external computer images stay at their original paths, even
+        // if a previous computer process has them open.
+        prepare_clean_generation(&self.app_data)?;
+        select_generation(&self.app_data, CLEAN)?;
+        quarantine_previous_backup_state(&self.app_data, CLEAN)?;
+        self.update(|state| {
+            state.status = "running".into();
+            state.stage = "Restarting into a fresh runtime".into();
+            state.error = None;
+            state.can_continue = false;
+            state.failed_count = state.total_count;
+            state.logs.push(
+                "Original computer data was preserved. Silo will restart with an empty computer runtime."
+                    .into(),
+            );
+            Ok(())
+        })
+    }
+
+    pub(crate) fn convert_with_progress(
+        &self,
+        runner: &dyn runtime::RuntimeRunner,
+        paths: &runtime::RuntimePaths,
+        progress_changed: &dyn Fn(),
+    ) -> Result<(), String> {
+        convert_with(runner, &self.app_data, paths, &|step| {
+            self.update(|state| {
+                apply_step(state, &step);
+                Ok(())
+            })?;
+            progress_changed();
+            Ok(())
+        })?;
+        self.update(|state| {
+            state.status = "running".into();
+            state.stage = "Restarting with upgraded computer storage".into();
+            state.can_continue = false;
+            state.error = None;
+            Ok(())
+        })?;
+        progress_changed();
+        Ok(())
+    }
 }
 
 fn fresh(status: &str, total_count: usize) -> MigrationState {
@@ -404,12 +536,6 @@ fn copy_runtime_tree(
     Ok(())
 }
 
-/// The staged runtime the conversion runs against. It never names the previous
-/// generation: the staged copy is the only runtime a migration in progress may run.
-fn staged_paths(app: &AppHandle, app_data: &Path) -> Result<runtime::RuntimePaths, String> {
-    runtime::migration_runtime_paths(app, &app_data.join(CONVERTED))
-}
-
 fn inspection_failure(stage: &str, name: &str, error: &runtime::RuntimeError) -> String {
     let computer = if name.len() <= 64
         && !name.is_empty()
@@ -546,6 +672,14 @@ fn record_migration_failure(state: &mut MigrationState, error: String) {
     state.logs.push(error);
 }
 
+fn record_failure(state: &Mutex<MigrationState>, path: &Path, error: String) -> Result<(), String> {
+    let mut state = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    record_migration_failure(&mut state, error);
+    write(path, &state)
+}
+
 /// Adoption reads the configured disk in the previous generation, verifies its
 /// owned copy, and never writes the source.
 fn convert_workspace_disk(
@@ -650,39 +784,6 @@ fn apply_step(state: &mut MigrationState, step: &Step) {
             ));
         }
     }
-}
-
-fn convert(app: &AppHandle) -> Result<(), String> {
-    let controller = app.state::<Arc<Controller>>();
-    let paths = staged_paths(app, &controller.app_data)?;
-    if generation(&controller.app_data)?.is_none() {
-        crate::commands::backup_controller::wait_for_migration_recovery(app)?;
-    }
-    convert_with(
-        &runtime::ProcessRunner,
-        &controller.app_data,
-        &paths,
-        &|step| {
-            update(app, |state| {
-                apply_step(state, &step);
-                Ok(())
-            })
-            .map(drop)
-        },
-    )?;
-    update(app, |state| {
-        state.status = "running".into();
-        state.stage = "Restarting with upgraded computer storage".into();
-        state.can_continue = false;
-        state.error = None;
-        Ok(())
-    })?;
-    let restart = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        restart.restart();
-    });
-    Ok(())
 }
 
 /// Convert the previous runtime generation under `app_data` into a staged copy
@@ -818,46 +919,6 @@ fn convert_with(
     Ok(())
 }
 
-pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Silo application storage is unavailable.")?;
-    let path = app_data.join(FILE);
-    let (state, writable) = match initial(&path, &app_data) {
-        Ok(state) => (state, true),
-        Err(error) => {
-            let mut state = fresh("failed", 0);
-            state.stage = "Migration needs attention".into();
-            state.error = Some(error);
-            (state, false)
-        }
-    };
-    app.manage(Arc::new(Controller {
-        app_data,
-        path,
-        state: Mutex::new(state),
-        writable,
-    }));
-    Ok(())
-}
-
-/// Automatic conversion starts only after the export/import controller is installed,
-/// so its worker can settle any journal left by the previous process first.
-pub(crate) fn start_if_pending(app: &AppHandle) -> Result<(), String> {
-    let controller = app.state::<Arc<Controller>>();
-    let needs_conversion = controller
-        .state
-        .lock()
-        .map_err(|_| "Migration state is unavailable.")?
-        .status
-        == "scanning";
-    if needs_conversion {
-        let _ = retry_runtime_migration_blocking(app.clone())?;
-    }
-    Ok(())
-}
-
 const NOT_READY: &str = "Finish the Silo runtime migration before using computers.";
 
 /// Whether the normal runtime may be used in this migration state. Until the
@@ -889,86 +950,13 @@ fn usable_storage(app_data: &Path, writable: bool, status: &str) -> Result<PathB
     }
 }
 
-fn readiness(app: &AppHandle) -> Result<(Arc<Controller>, String), String> {
-    // A runtime asked for before the gate exists is not ready either.
-    let controller = app
-        .try_state::<Arc<Controller>>()
-        .ok_or(NOT_READY)?
-        .inner()
-        .clone();
-    let status = controller
-        .state
-        .lock()
-        .map_err(|_| "Migration state is unavailable.")?
-        .status
-        .clone();
-    Ok((controller, status))
-}
-
-pub(crate) fn ensure_ready(app: &AppHandle) -> Result<(), String> {
-    let (controller, status) = readiness(app)?;
-    check_ready(controller.writable, &status)
-}
-
-pub(crate) async fn ensure_ready_async(app: &AppHandle) -> Result<(), String> {
-    let controller = app
-        .try_state::<Arc<Controller>>()
-        .ok_or(NOT_READY)?
-        .inner()
-        .clone();
-    let writable = controller.writable;
-    let state = migration_snapshot(controller).await?;
-    check_ready(writable, &state.status)
-}
-
-/// The storage behind `runtime::runtime_paths`, the only way to name a runtime.
-pub(crate) fn runtime_storage(app: &AppHandle) -> Result<PathBuf, String> {
-    let (controller, status) = readiness(app)?;
-    usable_storage(&controller.app_data, controller.writable, &status)
-}
-
-pub(crate) fn blocks_operations(app: &AppHandle) -> bool {
-    ensure_ready(app).is_err()
-}
-
 /// Record a failed migration in memory even when saving it fails (a full disk
 /// is the likely cause of the failed copy), so Retry and Continue stay
 /// available for this session. The persistence error is returned.
-fn record_failure(state: &Mutex<MigrationState>, path: &Path, error: String) -> Result<(), String> {
-    let mut state = state
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    record_migration_failure(&mut state, error);
-    write(path, &state)
-}
-
-fn update(
-    app: &AppHandle,
-    change: impl FnOnce(&mut MigrationState) -> Result<(), String>,
+pub(crate) async fn migration_snapshot(
+    controller: Arc<Controller>,
 ) -> Result<MigrationState, String> {
-    let controller = app.state::<Arc<Controller>>();
-    if !controller.writable {
-        return Err("Saved migration data needs manual repair. The file was preserved.".into());
-    }
-    let mut state = controller
-        .state
-        .lock()
-        .map_err(|_| "Migration state is unavailable.")?;
-    let mut next = state.clone();
-    change(&mut next)?;
-    write(&controller.path, &next)?;
-    *state = next.clone();
-    let _ = app.emit("silo://application-state-changed", ());
-    Ok(next)
-}
-
-#[tauri::command]
-pub(crate) async fn read_runtime_migration_state(app: AppHandle) -> Result<MigrationState, String> {
-    migration_snapshot(app.state::<Arc<Controller>>().inner().clone()).await
-}
-
-async fn migration_snapshot(controller: Arc<Controller>) -> Result<MigrationState, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         controller
             .state
             .lock()
@@ -977,21 +965,6 @@ async fn migration_snapshot(controller: Arc<Controller>) -> Result<MigrationStat
     })
     .await
     .map_err(|_| "Migration state is unavailable.".to_string())?
-}
-
-/// Runs file writes and fsyncs off the main thread.
-async fn blocking(
-    app: AppHandle,
-    work: fn(AppHandle) -> Result<MigrationState, String>,
-) -> Result<MigrationState, String> {
-    tauri::async_runtime::spawn_blocking(move || work(app))
-        .await
-        .map_err(|_| "Migration state is unavailable.".to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn retry_runtime_migration(app: AppHandle) -> Result<MigrationState, String> {
-    blocking(app, retry_runtime_migration_blocking).await
 }
 
 fn prepare_retry(state: &mut MigrationState, app_data: &Path) -> Result<(), String> {
@@ -1014,69 +987,6 @@ fn prepare_retry(state: &mut MigrationState, app_data: &Path) -> Result<(), Stri
         state.logs.clear();
     }
     Ok(())
-}
-
-fn retry_runtime_migration_blocking(app: AppHandle) -> Result<MigrationState, String> {
-    let controller = app.state::<Arc<Controller>>();
-    let result = update(&app, |state| prepare_retry(state, &controller.app_data))?;
-    let worker = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        // A panic must still leave a retryable failed state, not "running".
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| convert(&worker)))
-            .unwrap_or_else(|_| Err("Migration stopped unexpectedly. Retry the migration.".into()));
-        if let Err(error) = outcome {
-            let controller = worker.state::<Arc<Controller>>();
-            let _ = record_failure(&controller.state, &controller.path, error);
-            let _ = worker.emit("silo://application-state-changed", ());
-        }
-    });
-    Ok(result)
-}
-
-#[tauri::command]
-pub(crate) async fn continue_after_migration_failure(
-    app: AppHandle,
-) -> Result<MigrationState, String> {
-    blocking(app, continue_after_migration_failure_blocking).await
-}
-
-fn continue_after_migration_failure_blocking(app: AppHandle) -> Result<MigrationState, String> {
-    let controller = app.state::<Arc<Controller>>();
-    if !controller.writable {
-        return Err("Saved migration data needs manual repair. The file was preserved.".into());
-    }
-    let current = controller
-        .state
-        .lock()
-        .map_err(|_| "Migration state is unavailable.")?
-        .clone();
-    if current.status != "failed" || current.total_count == 0 {
-        return Err("Continue is available only after a computer migration failure.".into());
-    }
-    // This creates an independent runtime namespace. The old database, root
-    // disks and external computer images stay at their original paths, even
-    // if a previous computer process has them open.
-    prepare_clean_generation(&controller.app_data)?;
-    select_generation(&controller.app_data, CLEAN)?;
-    quarantine_previous_backup_state(&controller.app_data, CLEAN)?;
-    let result = update(&app, |state| {
-        state.status = "running".into();
-        state.stage = "Restarting into a fresh runtime".into();
-        state.error = None;
-        state.can_continue = false;
-        state.failed_count = state.total_count;
-        state.logs.push(
-            "Original computer data was preserved. Silo will restart with an empty computer runtime."
-                .into(),
-        );
-        Ok(())
-    })?;
-    let restart = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        restart.restart();
-    });
-    Ok(result)
 }
 
 /// True when the migration finished and every computer lives in the converted generation.

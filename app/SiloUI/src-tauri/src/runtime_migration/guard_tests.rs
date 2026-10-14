@@ -378,7 +378,10 @@ fn only_the_gate_can_name_a_runtime_and_only_the_migration_names_the_previous_on
                 "{relative} names an inventory file of the earlier vocabulary; only the migration may"
             );
         }
-        if relative != "runtime.rs" && relative != "runtime_migration.rs" {
+        if !matches!(
+            relative.as_ref(),
+            "runtime.rs" | "runtime_migration.rs" | "commands/runtime_migration.rs"
+        ) {
             assert!(
                 !text.contains("migration_runtime_paths")
                     && !text.contains("selected_runtime_storage"),

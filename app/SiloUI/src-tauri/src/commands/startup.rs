@@ -11,7 +11,7 @@ struct TauriStartupServices {
 
 impl StartupServices for TauriStartupServices {
     fn blocks_runtime_operations(&self) -> bool {
-        crate::runtime_migration::blocks_operations(&self.app)
+        crate::commands::runtime_migration::blocks_operations(&self.app)
     }
 
     fn wait_for_recovery(&self) -> Result<(), String> {
