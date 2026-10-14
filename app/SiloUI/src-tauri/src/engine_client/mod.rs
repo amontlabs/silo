@@ -356,6 +356,13 @@ impl EngineClient {
         patience: Duration,
     ) -> Result<Value, EngineError> {
         let connected = self.connected(patience).await?;
+        // The handshake lists what this engine serves. A method it does not list is the
+        // deliberate unavailable state, never a fallback to doing the work here.
+        if !connected.client.supports(method) {
+            return Err(EngineError::unavailable(format!(
+                "Silo's engine does not support {method}. Update Silo to use this."
+            )));
+        }
         if connected.client.requests_sent() >= REQUEST_ID_BUDGET {
             // Start a new session before the engine refuses more ids on this one.
             connected.client.close().await;

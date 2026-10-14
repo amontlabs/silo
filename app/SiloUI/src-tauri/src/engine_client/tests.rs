@@ -208,3 +208,20 @@ async fn a_shutdown_job_ends_when_the_engine_exits_after_stopping_the_computers(
     // An ordinary job keeps waiting through a lost connection instead of inventing a result.
     assert!(fake.calls("operations.job.acknowledge").is_empty());
 }
+
+#[tokio::test]
+async fn a_method_the_engine_does_not_advertise_is_unavailable_without_a_request() {
+    let fake = FakeEngine::start(|_, _| ok(json!({"subscription": "sub"})));
+    fake.advertise(&[
+        "engine.state",
+        "events.subscribe",
+        "settings.read",
+        "computers.list",
+    ]);
+    let (client, _sink) = connected_client(&fake).await;
+    let error = client.call("updates.state", json!({})).await.unwrap_err();
+    assert_eq!(error.code, "unsupported_remote_operation");
+    assert!(error.message.contains("updates.state"));
+    assert!(fake.calls("updates.state").is_empty());
+    assert!(client.call("computers.list", json!({})).await.is_ok());
+}
