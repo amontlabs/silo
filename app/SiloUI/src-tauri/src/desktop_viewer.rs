@@ -256,11 +256,7 @@ fn connect(app: &AppHandle, computer: &str) -> Result<(Proxy, Option<Tunnel>), S
     editor::require_openssh("view computer desktops")?;
     let remote_target = remote_access::target(computer)?;
     let connection = if let Some((device, computer)) = &remote_target {
-        remote::call_remote(
-            device,
-            "desktop.connect",
-            json!({"computerId":computer}),
-        )?
+        remote::call_remote(device, "desktop.connect", json!({"computerId":computer}))?
     } else {
         local_connection(app, computer, None)?
     };
@@ -326,11 +322,8 @@ pub(crate) async fn open_desktop(
         let mut stable_id = computer.clone();
         let name = if let Some((device, computer)) = remote_access::target(&computer)? {
             // Verify the remote identity before creating a shell.
-            let state = remote::call_remote(
-                &device,
-                "desktop.status",
-                json!({"computerId":computer}),
-            )?;
+            let state =
+                remote::call_remote(&device, "desktop.status", json!({"computerId":computer}))?;
             let configuration = state["name"].as_str().unwrap_or(&computer);
             let device_name = remote::saved_devices()?
                 .into_iter()

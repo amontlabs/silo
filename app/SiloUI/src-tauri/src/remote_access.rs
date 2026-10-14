@@ -54,9 +54,7 @@ pub(crate) fn dispatch(
             state["name"] = Value::String(computer_name(paths, params)?);
             Ok(state)
         }
-        "desktop.action" | "computerUse.approval" => {
-            local.desktop_dispatch(method, params)
-        }
+        "desktop.action" | "computerUse.approval" => local.desktop_dispatch(method, params),
         "chatgpt.status" => local.chatgpt_status(),
         "chatgpt.retry" => local.chatgpt_retry(),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {

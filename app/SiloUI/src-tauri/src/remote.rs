@@ -2208,14 +2208,8 @@ fn execute(
         _ if method.starts_with("macos.") => {
             crate::macos_remote_engine::dispatch(macos, method, params)
         }
-        _ => crate::remote_access::dispatch(
-            &paths,
-            method,
-            params,
-            checkpoints,
-            local_access,
-        )
-        .map_err(BridgeError::from),
+        _ => crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
+            .map_err(BridgeError::from),
     }
 }
 /// The methods this device serves, reported in the handshake.

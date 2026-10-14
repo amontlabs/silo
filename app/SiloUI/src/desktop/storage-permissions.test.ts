@@ -10,7 +10,7 @@ describe.each(commands)("Storage permission boundary: %s", command => {
   it("registers the handler and generates its command permission", () => {
     const handlers = readFileSync(resolve(native, "src/main.rs"), "utf8").split("tauri::generate_handler![")[1]?.split("])")[0] ?? ""
     const manifest = readFileSync(resolve(native, "build.rs"), "utf8").split(".commands(&[")[1]?.split("])")[0] ?? ""
-    expect(handlers).toContain(`runtime::storage::${command},`)
+    expect(handlers).toContain(`commands::runtime_storage::${command},`)
     expect(manifest).toContain(`"${command}"`)
   })
 
