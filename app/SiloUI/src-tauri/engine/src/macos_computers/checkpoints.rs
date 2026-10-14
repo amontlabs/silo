@@ -299,8 +299,10 @@ fn is_previous_layout(dir: &Path) -> bool {
         })
 }
 
-/// Removes what an interrupted run left: partial folders and folders without a readable
-/// record. A record of the previous layout is kept for the launch upgrade to convert.
+/// Removes what an interrupted run left: partial folders and folders with no record file at
+/// all. A folder that has a record file is never removed, even when the record is damaged or
+/// of the previous layout: it may be a user's checkpoint, and it is only ever deleted by the
+/// user's own delete or by retention.
 pub(super) fn sweep(layout: &Layout) {
     let Ok(entries) = fs::read_dir(root(layout)) else {
         return;
@@ -308,8 +310,7 @@ pub(super) fn sweep(layout: &Layout) {
     for entry in entries.flatten() {
         let path = entry.path();
         let partial = entry.file_name().to_string_lossy().starts_with(PARTIAL);
-        if path.is_dir() && (partial || (read_meta(&path).is_none() && !is_previous_layout(&path)))
-        {
+        if path.is_dir() && (partial || !path.join(META).exists()) {
             let _ = fs::remove_dir_all(&path);
         }
     }
@@ -336,6 +337,18 @@ pub(super) fn upgrade_records(layout: &Layout) -> Result<usize, String> {
         };
         value["schemaVersion"] = serde_json::Value::from(SCHEMA_VERSION);
         value["policyKind"] = serde_json::Value::from("manual");
+        // Only a record that reads as a current checkpoint of this very folder replaces the
+        // original. A damaged one stays byte for byte as it is, and is reported.
+        let valid = serde_json::from_value::<Meta>(value.clone()).is_ok_and(|meta| {
+            valid_id(&meta.id) && dir.file_name().and_then(|name| name.to_str()) == Some(&meta.id)
+        });
+        if !valid {
+            eprintln!(
+                "silo-engine: left damaged checkpoint record untouched: {}",
+                dir.display()
+            );
+            continue;
+        }
         let mut file = tempfile::NamedTempFile::new_in(&dir)
             .map_err(|error| store::io_error("save the checkpoint upgrade", &error))?;
         file.write_all(&serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?)
@@ -1379,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sweep_removes_partial_and_unreadable_folders_only() {
+    fn a_sweep_removes_partial_and_recordless_folders_only() {
         let (_data, layout) = computer();
         let machine = Fake::default();
         let meta = create(&subject(&layout, &machine, false), "Keep", Reason::Manual).unwrap();
@@ -1751,9 +1764,9 @@ mod tests {
 
         // The current code reads only the current layout.
         assert!(list(&layout).is_empty());
-        // The sweep removes garbage but must not take the old record for it.
+        // The sweep keeps every folder that has a record file, however damaged.
         sweep(&layout);
-        assert!(!garbage.exists());
+        assert!(garbage.exists());
         assert!(dir(&layout, &old.id).join(STATE).exists());
 
         assert_eq!(upgrade_records(&layout), Ok(1));
@@ -1772,6 +1785,52 @@ mod tests {
             & 0o777;
         assert_eq!(mode, 0o600);
         // Idempotent.
+        assert_eq!(upgrade_records(&layout), Ok(0));
+    }
+
+    #[test]
+    fn the_upgrade_leaves_damaged_records_untouched_and_the_sweep_keeps_them() {
+        let (_data, layout) = computer();
+        let machine = Fake::default();
+        let make = |name: &str| {
+            let meta = create(&subject(&layout, &machine, true), name, Reason::Manual).unwrap();
+            write_layout_one(&layout, &meta);
+            meta
+        };
+        // A required field missing, an invalid enum, and a record naming another folder.
+        let missing = make("Missing");
+        let bad_enum = make("Enum");
+        let foreign = make("Foreign");
+        let good = make("Good");
+        let edit = |id: &str, change: &dyn Fn(&mut serde_json::Value)| {
+            let path = dir(&layout, id).join(META);
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            change(&mut value);
+            fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            fs::read(&path).unwrap()
+        };
+        let before_missing = edit(&missing.id, &|v| {
+            v.as_object_mut().unwrap().remove("reason");
+        });
+        let before_enum = edit(&bad_enum.id, &|v| v["kind"] = "bogus".into());
+        let before_foreign = edit(&foreign.id, &|v| {
+            v["id"] = uuid::Uuid::new_v4().to_string().into();
+        });
+
+        assert_eq!(upgrade_records(&layout), Ok(1));
+        sweep(&layout);
+
+        for (id, before) in [
+            (&missing.id, before_missing),
+            (&bad_enum.id, before_enum),
+            (&foreign.id, before_foreign),
+        ] {
+            assert_eq!(fs::read(dir(&layout, id).join(META)).unwrap(), before);
+            assert!(dir(&layout, id).join(STATE).exists(), "files are kept");
+        }
+        assert!(find(&layout, &good.id).is_ok());
+        // The damaged ones stay skipped on every later launch.
         assert_eq!(upgrade_records(&layout), Ok(0));
     }
 }
