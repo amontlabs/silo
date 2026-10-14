@@ -4753,6 +4753,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "silo-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "silo-api",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "silo-engine"
 version = "0.1.0"
 dependencies = [
