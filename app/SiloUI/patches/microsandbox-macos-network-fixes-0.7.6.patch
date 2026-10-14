@@ -1,0 +1,77 @@
+diff --git a/crates/network/lib/engine/netstack/backend.rs b/crates/network/lib/engine/netstack/backend.rs
+index 4ca0e92..4f1c4b8 100644
+--- a/crates/network/lib/engine/netstack/backend.rs
++++ b/crates/network/lib/engine/netstack/backend.rs
+@@ -58,6 +58,19 @@ impl SmoltcpBackend {
+     }
+ 
+     fn read_frame_from_ring(&mut self, buf: &mut [u8]) -> Result<usize, ReadError> {
++        let result = self.pop_frame_into(buf);
++        // The drain above consumed every wake byte, including those for frames that are still
++        // queued. A reader that bounds its work per wakeup (or that is edge-triggered) would never
++        // be told about them, so readiness must outlive the pop for as long as the ring holds
++        // frames. A producer pushes before it wakes, so a frame pushed after the check below
++        // brings its own wake.
++        if !self.shared.rx_ring.is_empty() {
++            self.shared.rx_wake.wake();
++        }
++        result
++    }
++
++    fn pop_frame_into(&mut self, buf: &mut [u8]) -> Result<usize, ReadError> {
+         self.shared.rx_wake.drain();
+ 
+         let frame = self.shared.rx_ring.pop().ok_or(ReadError::NothingRead)?;
+@@ -173,6 +186,52 @@ mod tests {
+         assert!(fd_is_readable(backend.raw_socket_fd()));
+     }
+ 
++    #[test]
++    fn read_frame_keeps_rx_wake_readable_while_frames_remain() {
++        let shared = Arc::new(SharedState::new(8));
++        let mut backend = SmoltcpBackend::new(shared.clone());
++        let mut buf = [0u8; 64];
++
++        for frame in [vec![1u8], vec![2], vec![3]] {
++            assert!(shared.push_rx_frame_and_wake(frame));
++        }
++
++        for expected in [1u8, 2] {
++            let n = backend.read_frame(&mut buf).expect("frame should be read");
++            assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[expected]);
++            assert!(
++                fd_is_readable(backend.raw_socket_fd()),
++                "queued frames must keep the wake descriptor readable"
++            );
++        }
++        let n = backend.read_frame(&mut buf).expect("last frame");
++        assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[3]);
++        assert!(!fd_is_readable(backend.raw_socket_fd()));
++        assert!(matches!(
++            backend.read_frame(&mut buf),
++            Err(ReadError::NothingRead)
++        ));
++        assert!(!fd_is_readable(backend.raw_socket_fd()));
++    }
++
++    #[test]
++    fn dropping_an_oversized_frame_keeps_the_rest_of_the_ring_readable() {
++        let shared = Arc::new(SharedState::new(4));
++        let mut backend = SmoltcpBackend::new(shared.clone());
++        let mut buf = [0u8; VIRTIO_NET_HDR_LEN + 2];
++
++        assert!(shared.push_rx_frame_and_wake(vec![0; 8]));
++        assert!(shared.push_rx_frame_and_wake(vec![7, 8]));
++
++        assert!(matches!(
++            backend.read_frame(&mut buf),
++            Err(ReadError::NothingRead)
++        ));
++        assert!(fd_is_readable(backend.raw_socket_fd()));
++        let n = backend.read_frame(&mut buf).expect("next frame");
++        assert_eq!(&buf[VIRTIO_NET_HDR_LEN..n], &[7, 8]);
++    }
++
+     #[test]
+     fn write_frame_enqueues_guest_frame_and_wakes_poll_loop() {
+         let shared = Arc::new(SharedState::new(1));
