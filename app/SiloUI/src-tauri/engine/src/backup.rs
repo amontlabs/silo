@@ -4638,23 +4638,23 @@ mod tests {
     /// that migration runs.
     fn captured_network(origin: &str) -> Value {
         let text = match origin {
-            "created-0.7.6" => include_str!("../../src/test_support/msb-inspect/created-0.7.6.json"),
-            "restored-0.7.6" => include_str!("../../src/test_support/msb-inspect/restored-0.7.6.json"),
-            "forked-0.7.6" => include_str!("../../src/test_support/msb-inspect/forked-0.7.6.json"),
-            "imported-0.7.6" => include_str!("../../src/test_support/msb-inspect/imported-0.7.6.json"),
-            "created-0.7.4" => include_str!("../../src/test_support/msb-inspect/created-0.7.4.json"),
-            "restored-0.7.4" => include_str!("../../src/test_support/msb-inspect/restored-0.7.4.json"),
-            "forked-0.7.4" => include_str!("../../src/test_support/msb-inspect/forked-0.7.4.json"),
-            "imported-0.7.4" => include_str!("../../src/test_support/msb-inspect/imported-0.7.4.json"),
-            "created-0.7.2" => include_str!("../../src/test_support/msb-inspect/created-0.7.2.json"),
+            "created-0.7.6" => include_str!("test_support/msb-inspect/created-0.7.6.json"),
+            "restored-0.7.6" => include_str!("test_support/msb-inspect/restored-0.7.6.json"),
+            "forked-0.7.6" => include_str!("test_support/msb-inspect/forked-0.7.6.json"),
+            "imported-0.7.6" => include_str!("test_support/msb-inspect/imported-0.7.6.json"),
+            "created-0.7.4" => include_str!("test_support/msb-inspect/created-0.7.4.json"),
+            "restored-0.7.4" => include_str!("test_support/msb-inspect/restored-0.7.4.json"),
+            "forked-0.7.4" => include_str!("test_support/msb-inspect/forked-0.7.4.json"),
+            "imported-0.7.4" => include_str!("test_support/msb-inspect/imported-0.7.4.json"),
+            "created-0.7.2" => include_str!("test_support/msb-inspect/created-0.7.2.json"),
             "migrated-from-0.7.2" => {
-                include_str!("../../src/test_support/msb-inspect/migrated-from-0.7.2.json")
+                include_str!("test_support/msb-inspect/migrated-from-0.7.2.json")
             }
             "migrated-from-0.6.17" => {
-                include_str!("../../src/test_support/msb-inspect/migrated-from-0.6.17.json")
+                include_str!("test_support/msb-inspect/migrated-from-0.6.17.json")
             }
             "migrated-from-0.6.17-before-adopt-disk" => {
-                include_str!("../../src/test_support/msb-inspect/migrated-from-0.6.17-before-adopt-disk.json")
+                include_str!("test_support/msb-inspect/migrated-from-0.6.17-before-adopt-disk.json")
             }
             other => panic!("no captured network for {other}"),
         };
@@ -6083,8 +6083,8 @@ mod tests {
     fn descriptor_scope_names_are_the_runtimes_and_the_index_spellings() {
         // Real descriptors written by `msb snapshot create` (see test_support/msb-descriptor).
         for fixture in [
-            include_str!("../../src/test_support/msb-descriptor/checkpoint-0.7.4.json"),
-            include_str!("../../src/test_support/msb-descriptor/checkpoint-0.7.6.json"),
+            include_str!("test_support/msb-descriptor/checkpoint-0.7.4.json"),
+            include_str!("test_support/msb-descriptor/checkpoint-0.7.6.json"),
         ] {
             let descriptor: Value = serde_json::from_str(fixture).unwrap();
             assert!(descriptor_scope_supported(

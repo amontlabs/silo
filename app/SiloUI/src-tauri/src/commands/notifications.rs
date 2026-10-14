@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager};
 use crate::notifications::{self, Notice, PendingDelivery};
 
 pub(crate) fn install(app: &AppHandle) {
-    crate::system_integrations::install_notifications(app);
+    crate::commands::system_integrations::install_notifications(app);
     crate::commands::health_watch::install(app);
 }
 

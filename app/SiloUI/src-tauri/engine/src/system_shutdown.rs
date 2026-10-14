@@ -50,9 +50,6 @@ pub(crate) fn logind_budget(max_delay: Option<Duration>) -> Duration {
     max_delay.saturating_sub(margin).min(SESSION_END_BUDGET)
 }
 
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::system_shutdown::{cancel, exit};
-
 #[cfg(test)]
 mod tests {
     use super::*;

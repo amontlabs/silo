@@ -4,10 +4,10 @@ use std::{collections::BTreeMap, path::Path};
 #[path = "applications/launch.rs"]
 pub mod launch;
 #[cfg(target_os = "linux")]
-#[cfg_attr(feature = "engine-sources", path = "applications/linux.rs")]
+#[path = "applications/linux.rs"]
 mod linux;
 #[cfg(target_os = "macos")]
-#[cfg_attr(feature = "engine-sources", path = "applications/macos.rs")]
+#[path = "applications/macos.rs"]
 mod macos;
 #[cfg(target_os = "linux")]
 use linux as platform;
@@ -37,11 +37,6 @@ pub enum ApplicationKind {
     Editor,
     Browser,
 }
-
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::applications::{
-    open_browser, open_terminal, selected_editor, selected_terminal,
-};
 
 /// Open a web address using the selected browser path. Call from a worker.
 pub fn validated_browser_url(value: &str) -> Result<String, String> {

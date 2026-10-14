@@ -1,4 +1,4 @@
-use crate::{applications, editor, remote_access, runtime, terminal};
+use crate::{editor, remote_access, runtime, terminal};
 use tauri::AppHandle;
 
 /// Open the selected terminal against an already running local or remote computer.

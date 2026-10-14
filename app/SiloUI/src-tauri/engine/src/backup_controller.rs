@@ -1,7 +1,4 @@
-#[cfg(feature = "engine-sources")]
 #[path = "backup_controller/recovery.rs"]
-mod recovery;
-#[cfg(not(feature = "engine-sources"))]
 mod recovery;
 
 use crate::runtime::RuntimeHost;
@@ -2499,7 +2496,7 @@ mod tests {
         // 0.7.4 with the argument list of `runtime::create_computer` (smaller disks),
         // including `--net-strict=true`.
         let mut inspected: Value = serde_json::from_str(include_str!(
-            "../../src/test_support/msb-inspect/created-by-silo-0.7.4-config.json"
+            "test_support/msb-inspect/created-by-silo-0.7.4-config.json"
         ))
         .unwrap();
         assert_eq!(inspected["network"]["strict"], true);
@@ -2518,7 +2515,7 @@ mod tests {
         // `msb inspect` of a forked (full) restore from MicroSandbox 0.7.4: it keeps the
         // interface addresses of the checkpoint, and `strict` is the runtime's default.
         let network: Value =
-            serde_json::from_str(include_str!("../../src/test_support/msb-inspect/forked-0.7.4.json"))
+            serde_json::from_str(include_str!("test_support/msb-inspect/forked-0.7.4.json"))
                 .unwrap();
         assert_eq!(network["strict"], true);
         assert_ne!(network["interface"], serde_json::json!({}));

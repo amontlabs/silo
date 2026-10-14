@@ -15,7 +15,7 @@ wire_struct! {
     }
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/updates.rs::Snapshot` with camelCase
+/// Mirrors `app/SiloUI/src-tauri/engine/src/updates.rs::Snapshot` with camelCase
 /// fields. `installStatus` is excluded by 60 §5.1 even though the current Rust
 /// source still serializes its obsolete Debian helper value.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -40,7 +40,7 @@ pub struct UpdateSnapshot {
 }
 
 /// The `operations.job.progress` source projection mirrors the current Rust
-/// `updates::Snapshot` at `app/SiloUI/src-tauri/src/updates.rs:41-61` exactly.
+/// `updates::Snapshot` at `app/SiloUI/src-tauri/engine/src/updates.rs:41-61` exactly.
 /// Method and `updates.changed` results use `UpdateSnapshot`, which omits the
 /// obsolete install helper field per 60 §5.1.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]

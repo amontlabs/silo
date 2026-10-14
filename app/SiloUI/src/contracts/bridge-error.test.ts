@@ -8,7 +8,7 @@ import fixture from "@/test/contracts/bridge-errors.json"
 
 describe("native bridge errors", () => {
   it("accepts Rust-emitted errors and has exactly the Rust enum's codes", () => {
-    const rust = readFileSync(new URL("../../src-tauri/src/bridge_error.rs", import.meta.url), "utf8")
+    const rust = readFileSync(new URL("../../src-tauri/engine/src/bridge_error.rs", import.meta.url), "utf8")
     const variants = /pub enum ErrorCode\s*\{([^}]+)\}/.exec(rust)![1]
       .split(",").map(value => value.trim()).filter(Boolean)
       .map(value => value.replace(/[A-Z]/g, (letter, index) => `${index ? "_" : ""}${letter.toLowerCase()}`))

@@ -25,9 +25,9 @@ fn macos_10_14_or_newer() -> bool {
 }
 
 /// UserNotifications requires a real application bundle: it throws (and aborts) when the
-/// process runs as a bare executable, as `tauri dev` does. Treat notifications as
+/// process runs as a bare executable during development. Treat notifications as
 /// unavailable there instead of crashing.
-pub(crate) fn notifications_supported() -> bool {
+pub fn notifications_supported() -> bool {
     macos_10_14_or_newer()
         && NSBundle::mainBundle()
             .bundlePath()

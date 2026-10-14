@@ -301,31 +301,6 @@ fn splice(
     let _ = reading.join();
 }
 
-/// The origins a window of this app loads from: the production scheme on each platform, and
-/// the dev server in debug builds.
-pub fn app_origins(dev_url: Option<&str>) -> Vec<String> {
-    let mut origins = vec![
-        "tauri://localhost".to_string(),
-        "http://tauri.localhost".to_string(),
-        "https://tauri.localhost".to_string(),
-    ];
-    if cfg!(debug_assertions) {
-        if let Some(origin) = dev_url.and_then(origin_of) {
-            origins.push(origin);
-        }
-    }
-    origins
-}
-
-fn origin_of(url: &str) -> Option<String> {
-    let parsed = http::Uri::try_from(url).ok()?;
-    Some(format!(
-        "{}://{}",
-        parsed.scheme_str()?,
-        parsed.authority()?
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,15 +556,4 @@ mod tests {
         assert!(url.ends_with(&gateway.token));
     }
 
-    #[test]
-    fn app_origins_include_the_app_schemes_and_in_debug_the_dev_server() {
-        let origins = app_origins(Some("http://localhost:1420"));
-        assert!(origins.contains(&"tauri://localhost".to_string()));
-        assert!(origins.contains(&"http://tauri.localhost".to_string()));
-        assert_eq!(
-            origins.contains(&"http://localhost:1420".to_string()),
-            cfg!(debug_assertions)
-        );
-        assert!(!app_origins(None).iter().any(|o| o.contains("1420")));
-    }
 }

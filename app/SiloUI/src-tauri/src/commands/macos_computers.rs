@@ -188,7 +188,7 @@ pub(crate) async fn macos_computer_clipboard(
 }
 
 // Compatibility adapters for call sites owned by the runtime, logs, and remote tracks.
-pub(crate) use engine::{close_for_update, reopen_after_quit, reopen_after_update};
+pub(crate) use engine::{close_for_update, reopen_after_update};
 
 pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
     engine::stop_all(&new_context(app)?, deadline)

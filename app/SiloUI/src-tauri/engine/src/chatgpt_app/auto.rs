@@ -392,8 +392,8 @@ mod tests {
         ] {
             assert!(!code.contains(forbidden), "{forbidden} is still present");
         }
-        let build = include_str!("../../build.rs");
-        let capabilities = include_str!("../../capabilities/preview.json");
+        let build = include_str!("../../../build.rs");
+        let capabilities = include_str!("../../../capabilities/preview.json");
         for removed in ["chatgpt_app_accept_notice", "chatgpt_app_prepare"] {
             assert!(!build.contains(removed));
         }

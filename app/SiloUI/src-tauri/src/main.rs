@@ -1,17 +1,6 @@
 mod app_menu;
 mod commands;
-pub(crate) use silo_engine::{
-    applications, backup, backup_controller, bridge_error, bundled_tools, chatgpt_app, clipboard,
-    computer_names, computer_use, creation_inputs, dependencies, desktop, desktop_bridge,
-    desktop_proxy, desktop_viewer, desktop_viewer_media, device_identity, editor, files, github,
-    github_http, github_tokens, health_watch, host_push, host_push_cache, host_push_operations,
-    host_push_transport, log_export, log_retention, macos_computers_engine, macos_display_gateway,
-    macos_remote_engine, network, notifications, owned_tunnel, pre_upgrade_backup, preparation,
-    remote, remote_access, remote_network, remote_ssh_access, runtime, runtime_migration, secrets,
-    settings, ssh_access, ssh_connection, startup, sync, system_shutdown, terminal, transfer,
-    updates, viewer_clipboard, working_account,
-};
-mod channel;
+pub(crate) use silo_engine::*;
 #[cfg(test)]
 mod command_permissions_tests;
 #[cfg(debug_assertions)]
@@ -26,9 +15,6 @@ pub(crate) use commands::macos_remote;
 pub(crate) use commands::macos_remote_viewer;
 mod single_instance;
 mod status_panel;
-mod system_integrations;
-#[cfg(test)]
-mod test_support;
 #[cfg(target_os = "macos")]
 mod titlebar;
 mod tray;

@@ -436,7 +436,7 @@ mod native {
                     });
                 if let (Err(message), Some(window)) = (result, app.get_webview_window("main")) {
                     crate::status_panel::report(
-                        crate::system_integrations::show_integration_error(
+                        crate::commands::system_integrations::show_integration_error(
                             app.clone(),
                             window,
                             message,
@@ -479,7 +479,7 @@ mod native {
                     if let Err(message) = result {
                         if let Some(window) = app.get_webview_window("main") {
                             crate::status_panel::report(
-                                crate::system_integrations::show_integration_error(
+                                crate::commands::system_integrations::show_integration_error(
                                     app.clone(),
                                     window,
                                     message.into(),

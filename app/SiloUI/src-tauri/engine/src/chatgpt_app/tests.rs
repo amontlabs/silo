@@ -690,15 +690,9 @@ fn status_serializes_for_the_ui() {
     }
 }
 
-#[cfg(feature = "engine-sources")]
 #[path = "tests/hardening.rs"]
 mod hardening;
-#[cfg(not(feature = "engine-sources"))]
-mod hardening;
-#[cfg(feature = "engine-sources")]
 #[path = "tests/http.rs"]
-mod http;
-#[cfg(not(feature = "engine-sources"))]
 mod http;
 
 /// Opt-in: downloads the real pinned arm64 package from OpenAI (453 MB) into a

@@ -68,7 +68,7 @@ impl StartupServices for TauriStartupServices {
 
     fn show_integration_error(&self, message: String) {
         if let Some(window) = self.app.get_webview_window("main") {
-            let _ = crate::system_integrations::show_integration_error(
+            let _ = crate::commands::system_integrations::show_integration_error(
                 self.app.clone(),
                 window,
                 message,

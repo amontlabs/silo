@@ -25,7 +25,7 @@ use std::{
 };
 
 const STATUS_EVENT: &str = "silo://preparation-status";
-const LCU_LOCK: &str = include_str!("../guest/lcu-lock.json");
+const LCU_LOCK: &str = include_str!("../../guest/lcu-lock.json");
 const DOWNLOAD_DIR: &str = ".download";
 const PUBLISH_PREFIX: &str = ".publish-";
 
@@ -219,9 +219,6 @@ static IMAGE: Job = Job::new();
 static LCU: Job = Job::new();
 static PATHS: OnceLock<RuntimePaths> = OnceLock::new();
 static LCU_ROOT: OnceLock<PathBuf> = OnceLock::new();
-
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::preparation::start;
 
 pub fn snapshot() -> PreparationStatus {
     PreparationStatus {
@@ -601,8 +598,6 @@ fn remove_other_partials(downloads: &Path, keep: &str) {
     }
 }
 
-#[cfg(all(test, feature = "engine-sources"))]
+#[cfg(test)]
 #[path = "preparation/tests.rs"]
-mod tests;
-#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;

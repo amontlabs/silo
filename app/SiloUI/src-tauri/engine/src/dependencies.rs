@@ -61,7 +61,7 @@ struct RuntimeTarget {
 }
 
 static RUNTIME_INPUTS: std::sync::LazyLock<RuntimeInputs> = std::sync::LazyLock::new(|| {
-    let inputs: RuntimeInputs = serde_json::from_str(include_str!("../../runtime-inputs.json"))
+    let inputs: RuntimeInputs = serde_json::from_str(include_str!("../../../runtime-inputs.json"))
         .expect("checked-in runtime inputs must be valid");
     assert_eq!(inputs.schema_version, 2, "unsupported runtime input schema");
     inputs

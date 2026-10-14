@@ -51,7 +51,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const LOCK_JSON: &str = include_str!("../guest/chatgpt-app-lock.json");
+const LOCK_JSON: &str = include_str!("../../guest/chatgpt-app-lock.json");
 const DOWNLOAD_HOST: &str = "persistent.oaistatic.com";
 /// The directory dpkg would fill, relative to the archive root.
 const TREE_PREFIX: [&str; 3] = ["usr", "lib", "chatgpt"];
@@ -2274,13 +2274,8 @@ pub(crate) fn remote_status(
 
 // ---------------------------------------------------------------- tests
 
-#[cfg(feature = "engine-sources")]
 #[path = "chatgpt_app/auto.rs"]
 pub mod auto;
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) mod auto;
-#[cfg(all(test, feature = "engine-sources"))]
+#[cfg(test)]
 #[path = "chatgpt_app/tests.rs"]
-mod tests;
-#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;

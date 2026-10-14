@@ -42,7 +42,7 @@ pub type ComputerIdentitiesConfigureResult = super::common::JobStartResult;
 pub type ComputerConfigurationRetryResult = super::common::JobStartResult;
 pub type ComputerConfigurationChangeResult = super::common::JobStartResult;
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ComputerConfiguration`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerConfiguration`
 /// (lines 304-319), including rejection of unknown fields.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -64,7 +64,7 @@ pub struct ComputerConfiguration {
     pub desktop: Option<DesktopConfiguration>,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/desktop.rs::DesktopConfiguration`.
+/// Mirrors `app/SiloUI/src-tauri/engine/src/desktop.rs::DesktopConfiguration`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesktopConfiguration {
@@ -82,7 +82,7 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ComputerConfigurationRequest`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerConfigurationRequest`
 /// (lines 297-302).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -227,7 +227,7 @@ wire_struct! {
     }
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ApplicationSource` (lines
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ApplicationSource` (lines
 /// 548-565), retaining its field types and camelCase serialization.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -243,7 +243,7 @@ pub struct ApplicationSource {
     pub device_capacity: Option<DeviceCapacity>,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ApplicationComputer` (lines
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ApplicationComputer` (lines
 /// 591-628). `kind` is the discriminator required by 10 §1.3 and is added by
 /// the canonical API; source fields retain their names and omission behavior.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -282,7 +282,7 @@ pub struct ApplicationComputer {
     pub unfinished_restore: Option<super::checkpoints::UnfinishedRestore>,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ComputerAttention`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerAttention`
 /// (lines 638-650).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -322,7 +322,7 @@ pub enum Freshness {
 }
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/runtime.rs::DeviceCapacity`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::DeviceCapacity`."]
     DeviceCapacity {
         logical_cpus: usize,
         physical_memory_bytes: u64,
@@ -330,7 +330,7 @@ wire_struct! {
     }
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/macos_computers.rs::MacosComputer`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers.rs::MacosComputer`
 /// (lines 68-92). `kind` is added by the unified `computers.list` contract;
 /// source `Option` fields remain explicit JSON nulls.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -362,7 +362,7 @@ pub struct MacosComputer {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
-/// Mirrors `app/SiloUI/src-tauri/src/macos_computers/store.rs::State`.
+/// Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers/store.rs::State`.
 pub enum MacosComputerState {
     Preparing,
     Copying,
@@ -377,7 +377,7 @@ pub enum MacosComputerState {
 }
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/macos_computers.rs::TemplateSummary`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers.rs::TemplateSummary`."]
     TemplateSummary {
         macos_version: String,
         build: String,
@@ -386,7 +386,7 @@ wire_struct! {
 }
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/macos_computers.rs::MacosComputersState`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers.rs::MacosComputersState`."]
     MacosComputersState {
         supported: bool,
         #[serde(default)]
@@ -399,7 +399,7 @@ wire_struct! {
     }
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime.rs::ComputerConfigurationProgress`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerConfigurationProgress`
 /// (lines 3343 and 3462-3494), including its explicit `type` field.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

@@ -11,7 +11,7 @@ use crate::methods::{
 };
 
 /// Stable snake_case wire error code. Existing values are sourced from
-/// `app/SiloUI/src-tauri/src/bridge_error.rs`; pending values are listed in 95 A-10.
+/// `app/SiloUI/src-tauri/engine/src/bridge_error.rs`; pending values are listed in 95 A-10.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -217,7 +217,7 @@ pub enum JobProgress {
 }
 
 /// Canonical lifecycle payload at `runtime.rs:3343`; the step values mirror
-/// `app/SiloUI/src-tauri/src/runtime.rs::LifecycleStep` (line 1275).
+/// `app/SiloUI/src-tauri/engine/src/runtime.rs::LifecycleStep` (line 1275).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LifecycleProgress {

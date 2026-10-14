@@ -154,7 +154,7 @@ pub enum BackupOutcome {
     Cancelled,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/backup_controller.rs::BackupState`, with
+/// Mirrors `app/SiloUI/src-tauri/engine/src/backup_controller.rs::BackupState`, with
 /// the API's remembered destination field added for a client-owned folder picker.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

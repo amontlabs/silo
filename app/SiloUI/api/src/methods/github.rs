@@ -30,7 +30,7 @@ wire_struct! {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-/// Public projection of `app/SiloUI/src-tauri/src/github.rs::public_snapshot`;
+/// Public projection of `app/SiloUI/src-tauri/engine/src/github.rs::public_snapshot`;
 /// `computer` references are replaced with canonical `computerId` identifiers.
 pub struct GitHubPolicy {
     pub computer_id: String,
@@ -108,7 +108,7 @@ pub type GitHubCommandResult = GitHubState;
 pub type GitHubCallbackResult = ();
 pub type GitHubNoParams = EmptyParams;
 
-/// Public projection of `app/SiloUI/src-tauri/src/github.rs::public_snapshot`
+/// Public projection of `app/SiloUI/src-tauri/engine/src/github.rs::public_snapshot`
 /// from 50 §2. Token values and other credential material are absent.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

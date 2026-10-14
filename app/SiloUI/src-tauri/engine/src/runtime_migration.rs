@@ -1039,18 +1039,15 @@ impl BackupLocations {
 }
 
 #[cfg(test)]
-#[cfg_attr(feature = "engine-sources", path = "runtime_migration/guard_tests.rs")]
+#[path = "runtime_migration/guard_tests.rs"]
 mod guard_tests;
 #[cfg(test)]
-#[cfg_attr(feature = "engine-sources", path = "runtime_migration/interrupted_tests.rs")]
+#[path = "runtime_migration/interrupted_tests.rs"]
 mod interrupted_tests;
-#[cfg(feature = "engine-sources")]
 #[path = "runtime_migration/vocabulary.rs"]
 pub mod vocabulary;
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) mod vocabulary;
 #[cfg(test)]
-#[cfg_attr(feature = "engine-sources", path = "runtime_migration/vocabulary_tests.rs")]
+#[path = "runtime_migration/vocabulary_tests.rs"]
 pub(crate) mod vocabulary_tests;
 
 #[cfg(test)]

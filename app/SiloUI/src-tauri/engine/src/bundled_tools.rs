@@ -11,9 +11,6 @@ pub enum BundleKind {
     Other,
 }
 
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::bundled_tools::directory;
-
 pub(crate) fn is_packaged_linux(bundle: Option<BundleKind>) -> bool {
     matches!(
         bundle,

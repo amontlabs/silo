@@ -33,7 +33,7 @@ wire_struct! {
     }
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime/operation_gate.rs::OperationKind`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime/operation_gate.rs::OperationKind`
 /// and its camelCase serde names.
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema,
@@ -58,7 +58,7 @@ pub enum OperationKind {
     Other,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime/operation_gate.rs::OperationEntry`.
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime/operation_gate.rs::OperationEntry`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationEntry {
@@ -80,7 +80,7 @@ pub struct OperationEntry {
     pub job_id: Option<crate::jobs::JobId>,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/runtime/operation_gate.rs::OperationQueue`
+/// Mirrors `app/SiloUI/src-tauri/engine/src/runtime/operation_gate.rs::OperationQueue`
 /// and adds the retained completed-job discovery list required by 95 §3.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

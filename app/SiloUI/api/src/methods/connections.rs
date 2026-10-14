@@ -11,7 +11,7 @@ wire_struct! {
 }
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/remote.rs::Device`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/remote.rs::Device`."]
     Device {
         id: String,
         name: String,
@@ -52,7 +52,7 @@ wire_struct! {
 }
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/remote.rs::ConnectionsStatus`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/remote.rs::ConnectionsStatus`."]
     ConnectionsStatus {
         enabled: bool,
         device_id: String,

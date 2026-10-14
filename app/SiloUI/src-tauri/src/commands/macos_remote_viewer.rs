@@ -264,7 +264,7 @@ fn endpoint(app: &AppHandle, label: &str, device: &str, computer: &str) -> Resul
         })
     });
     let dev_url = app.config().build.dev_url.as_ref().map(ToString::to_string);
-    let started = Gateway::start(open, gateway::app_origins(dev_url.as_deref()))?;
+    let started = Gateway::start(open, app_origins(dev_url.as_deref()))?;
     let url = started.url();
     let kept = with_viewers(|viewers| {
         viewers.get_mut(label).map(|viewer| {
@@ -272,6 +272,31 @@ fn endpoint(app: &AppHandle, label: &str, device: &str, computer: &str) -> Resul
         })
     });
     kept.map(|()| url).ok_or_else(|| NOT_A_VIEWER.to_string())
+}
+
+/// Origins accepted by the loopback gateway for this app's webview and debug server.
+fn app_origins(dev_url: Option<&str>) -> Vec<String> {
+    let mut origins = vec![
+        "tauri://localhost".to_string(),
+        "http://tauri.localhost".to_string(),
+        "https://tauri.localhost".to_string(),
+    ];
+    if cfg!(debug_assertions) {
+        if let Some(origin) = dev_url.and_then(origin_of) {
+            origins.push(origin);
+        }
+    }
+    origins
+}
+
+fn origin_of(url: &str) -> Option<String> {
+    let parsed = tauri::Url::parse(url).ok()?;
+    let mut authority = parsed.host_str()?.to_string();
+    if let Some(port) = parsed.port() {
+        authority.push(':');
+        authority.push_str(&port.to_string());
+    }
+    Some(format!("{}://{authority}", parsed.scheme()))
 }
 
 /// Resizes the window's computer to the pixel size of the window. The owner clamps it and
@@ -324,6 +349,18 @@ mod tests {
 
     const DEVICE: &str = "22222222-2222-4222-8222-222222222222";
     const COMPUTER: &str = "11111111-1111-4111-8111-111111111111";
+
+    #[test]
+    fn app_origins_include_the_app_schemes_and_in_debug_the_dev_server() {
+        let origins = app_origins(Some("http://localhost:1420"));
+        assert!(origins.contains(&"tauri://localhost".to_string()));
+        assert!(origins.contains(&"http://tauri.localhost".to_string()));
+        assert_eq!(
+            origins.contains(&"http://localhost:1420".to_string()),
+            cfg!(debug_assertions)
+        );
+        assert!(!app_origins(None).iter().any(|o| o.contains("1420")));
+    }
 
     #[test]
     fn a_computer_has_one_stable_viewer_label_that_is_a_desktop_shell() {

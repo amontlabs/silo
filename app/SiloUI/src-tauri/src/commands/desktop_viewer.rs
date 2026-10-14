@@ -13,7 +13,7 @@ use tauri::{
     WebviewWindowBuilder, Window,
 };
 
-const GUEST_BRIDGE_SCRIPT: &str = include_str!("../desktop_viewer_bridge.js");
+const GUEST_BRIDGE_SCRIPT: &str = include_str!("../../engine/src/desktop_viewer_bridge.js");
 const VIEWER_PAGE_EVENT: &str = "silo://desktop-viewer-page";
 
 pub(crate) fn require_computer(window: &Window, computer: &str) -> Result<(), String> {

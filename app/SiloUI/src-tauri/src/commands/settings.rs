@@ -201,7 +201,11 @@ fn cancel_exit(app: &AppHandle, message: String) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
-        let _ = crate::system_integrations::show_integration_error(app.clone(), window, message);
+        let _ = crate::commands::system_integrations::show_integration_error(
+            app.clone(),
+            window,
+            message,
+        );
     }
 }
 

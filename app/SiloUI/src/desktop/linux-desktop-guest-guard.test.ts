@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest"
 // The script Silo injects into every frame of a guest desktop webview (G-20).
 // It locks what it guards, so it runs once, as it does in a real frame.
 const native = resolve(dirname(fileURLToPath(import.meta.url)), "../../src-tauri")
-const guard = readFileSync(resolve(native, "src/desktop_viewer_bridge.js"), "utf8")
+const guard = readFileSync(resolve(native, "engine/src/desktop_viewer_bridge.js"), "utf8")
 
 class FakeClipboard {
   writeText = vi.fn(async () => {})

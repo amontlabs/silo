@@ -213,7 +213,7 @@ pub enum Theme {
     Dark,
 }
 
-/// Mirrors `app/SiloUI/src-tauri/src/settings.rs::Snapshot`, with the
+/// Mirrors `app/SiloUI/src-tauri/engine/src/settings.rs::Snapshot`, with the
 /// engine-owned API draft fixed to JSON null as 60 §2.1 and 95 A-5 require.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]

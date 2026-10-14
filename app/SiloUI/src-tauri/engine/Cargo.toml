@@ -5,8 +5,6 @@ edition = "2021"
 publish = false
 
 [features]
-default = ["engine-sources"]
-engine-sources = []
 test-support = []
 
 [dependencies]

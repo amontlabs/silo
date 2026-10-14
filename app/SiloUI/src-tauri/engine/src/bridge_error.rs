@@ -159,7 +159,7 @@ mod tests {
             .collect();
         let value = serde_json::to_value(&errors).unwrap();
         let expected: serde_json::Value =
-            serde_json::from_str(include_str!("../../src/test/contracts/bridge-errors.json"))
+            serde_json::from_str(include_str!("../../../src/test/contracts/bridge-errors.json"))
                 .unwrap();
         assert_eq!(value, expected);
         assert_eq!(

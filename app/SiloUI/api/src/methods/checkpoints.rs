@@ -128,7 +128,7 @@ pub enum OperationStatus {
 }
 
 /// Mirrors the Linux restore journal view in
-/// `app/SiloUI/src-tauri/src/runtime/checkpoints.rs` (lines 2381-2403).
+/// `app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs` (lines 2381-2403).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UnfinishedRestore {

@@ -90,13 +90,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(feature = "engine-sources")]
 #[path = "vocabulary/convert.rs"]
 mod convert;
-#[cfg(not(feature = "engine-sources"))]
-mod convert;
 #[cfg(test)]
-#[cfg_attr(feature = "engine-sources", path = "vocabulary/convert_tests.rs")]
+#[path = "vocabulary/convert_tests.rs"]
 mod convert_tests;
 
 use convert::computers_metadata;

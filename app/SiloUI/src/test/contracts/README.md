@@ -47,7 +47,7 @@ flag with the `backup_operation_serialization_matches_frontend_contract` filter,
 repeat without the update flag, then run `src/desktop/production-source.test.ts`.
 
 `github-authentication.json` exercises native policies with a null, OAuth, or token
-method. [Native policy validation](../../../src-tauri/src/github.rs) accepts null
+method. [Native policy validation](../../../src-tauri/engine/src/github.rs) accepts null
 as the default OAuth method and returns the saved value; the
 [frontend parser](../../desktop/production-source.ts) normalizes it to its optional
 authentication field. Regenerate it with

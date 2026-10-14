@@ -1,7 +1,7 @@
-#[path = "../src/desktop_bridge.rs"]
+#[path = "../engine/src/desktop_bridge.rs"]
 #[allow(dead_code)]
 mod desktop_bridge;
-#[path = "../src/desktop_proxy.rs"]
+#[path = "../engine/src/desktop_proxy.rs"]
 mod desktop_proxy;
 
 use base64::{engine::general_purpose::STANDARD, Engine};

@@ -15,10 +15,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-#[cfg(feature = "engine-sources")]
 #[path = "remote/operations.rs"]
-mod operations;
-#[cfg(not(feature = "engine-sources"))]
 mod operations;
 /// Appends the key read from input to `authorized_keys` once. sshd runs this with the
 /// account's login shell, so the POSIX script is handed to `sh` in single quotes, which
@@ -5659,8 +5656,6 @@ mod config_io_limit_tests {
         assert_eq!(fs::read(&path).unwrap(), previous);
     }
 }
-#[cfg(all(test, feature = "engine-sources"))]
+#[cfg(test)]
 #[path = "remote/display_stream_tests.rs"]
-mod display_stream_tests;
-#[cfg(all(test, not(feature = "engine-sources")))]
 mod display_stream_tests;

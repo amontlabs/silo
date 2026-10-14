@@ -36,7 +36,7 @@ describe("bundled MicroSandbox release staging", () => {
     const section = patch.split(marker)[1]?.split("diff --git ")[0]
     expect(section).toBeDefined()
     const source = section!.split("\n").filter((line) => line.startsWith("+")).map((line) => line.slice(1)).join("\n") + "\n"
-    expect(source).toBe(readFileSync("src-tauri/src/log_retention.rs", "utf8"))
+    expect(source).toBe(readFileSync("src-tauri/engine/src/log_retention.rs", "utf8"))
   })
 
   it("applies a source patch inside another repository without changing the parent", async () => {

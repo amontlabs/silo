@@ -1,12 +1,12 @@
 use crate::notifications::NotificationDelivery;
 use serde::Serialize;
 
-pub(crate) const ROUTE_KEY: &str = "route";
+pub const ROUTE_KEY: &str = "route";
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
-pub(crate) mod macos;
+pub mod macos;
 #[cfg(any(test, target_os = "linux"))]
 mod notification_ids;
 #[cfg(target_os = "linux")]
@@ -45,7 +45,7 @@ pub struct SystemIntegrations {
     pub notifications: IntegrationStatus,
 }
 
-pub(crate) fn require_main_label(label: &str) -> Result<(), String> {
+pub fn require_main_label(label: &str) -> Result<(), String> {
     if label == "main" {
         Ok(())
     } else {
@@ -53,36 +53,32 @@ pub(crate) fn require_main_label(label: &str) -> Result<(), String> {
     }
 }
 
-pub(crate) fn read() -> SystemIntegrations {
+pub fn read() -> SystemIntegrations {
     platform::read()
 }
 
-pub(crate) fn set_login_item(enabled: bool) -> Result<IntegrationStatus, String> {
+pub fn set_login_item(enabled: bool) -> Result<IntegrationStatus, String> {
     platform::set_login_item(enabled)
 }
 
-pub(crate) fn request_notification_authorization() -> Result<IntegrationStatus, String> {
+pub fn request_notification_authorization() -> Result<IntegrationStatus, String> {
     platform::request_notifications()
 }
 
-pub(crate) fn open_settings(integration: &str) -> Result<(), String> {
+pub fn open_settings(integration: &str) -> Result<(), String> {
     platform::open_settings(integration)
 }
 
-pub(crate) use crate::commands::system_integrations::{
-    install_notifications, show_integration_error,
-};
-
 /// Delivery never requests authorization or opens a permission prompt. A newer notice
 /// with the same key replaces the older one.
-pub(crate) fn deliver_notification(
+pub fn deliver_notification(
     notice: &crate::notifications::Notice,
 ) -> Result<NotificationDelivery, String> {
     platform::deliver_notification(notice)
 }
 
 /// Withdraw delivered notifications by key. Best effort.
-pub(crate) fn clear_notifications(keys: &[String]) {
+pub fn clear_notifications(keys: &[String]) {
     platform::clear_notifications(keys);
 }
 
@@ -91,18 +87,18 @@ fn notification_authorized(state: &str) -> bool {
 }
 
 /// The Linux packages install `{productName}.desktop` and an icon named after the
-/// main binary (tauri-bundler). Notification servers use the desktop entry to
+/// main binary. Notification servers use the desktop entry to
 /// attribute notices and list Silo in per-app settings (F-24).
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
-pub(crate) fn notification_desktop_entry() -> &'static str {
+pub fn notification_desktop_entry() -> &'static str {
     crate::channel::current().notification_desktop_entry()
 }
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
-pub(crate) const NOTIFICATION_ICON: &str = env!("CARGO_PKG_NAME");
+pub(crate) const NOTIFICATION_ICON: &str = "silo-ui";
 
 /// Created by the Debian preinst and removed by postinst.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub(crate) const PACKAGE_UPDATE_MARKER: &str = "/var/lib/silo/package-update-in-progress";
+pub const PACKAGE_UPDATE_MARKER: &str = "/var/lib/silo/package-update-in-progress";
 /// A marker older than this is left over from an interrupted update.
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
 const PACKAGE_UPDATE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -135,7 +131,7 @@ fn dpkg_running(proc: &std::path::Path) -> bool {
 
 /// Show why Silo will not open during an unfinished package update, then return.
 #[cfg(target_os = "linux")]
-pub(crate) fn explain_unfinished_package_update() {
+pub fn explain_unfinished_package_update() {
     let age = std::fs::metadata(PACKAGE_UPDATE_MARKER)
         .and_then(|metadata| metadata.modified())
         .ok()
@@ -185,7 +181,7 @@ mod tests {
     #[test]
     fn notifications_name_the_installed_desktop_entry_and_icon() {
         let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
         assert_eq!(config["productName"], notification_desktop_entry());
         assert!(
             config["mainBinaryName"].is_null(),

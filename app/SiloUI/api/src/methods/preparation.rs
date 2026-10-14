@@ -12,7 +12,7 @@ pub type PreparationRetryResult = PreparationStatus;
 pub type ChatGptPreparationResult = ChatGptPreparationStatus;
 
 wire_struct! {
-    #[doc = "Mirrors `app/SiloUI/src-tauri/src/preparation.rs::PreparationStatus`."]
+    #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/preparation.rs::PreparationStatus`."]
     PreparationStatus {
         image: PreparationTask,
         lcu: PreparationTask,

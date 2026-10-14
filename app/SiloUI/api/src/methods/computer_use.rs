@@ -31,7 +31,7 @@ wire_struct! {
 }
 
 /// State projection described by 40 §4 and `computer_use::state_object` in
-/// `app/SiloUI/src-tauri/src/computer_use.rs`.
+/// `app/SiloUI/src-tauri/engine/src/computer_use.rs`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ComputerUseState {

@@ -66,7 +66,7 @@ wire_struct! {
 pub type PushStartResult = JobStartResult;
 
 /// Mirrors the push-operation value recorded by
-/// `app/SiloUI/src-tauri/src/host_push_operations.rs`.
+/// `app/SiloUI/src-tauri/engine/src/host_push_operations.rs`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PushOperation {

@@ -1,8 +1,5 @@
 //! Update policy and durable preferences. This module does not depend on Tauri.
-#[cfg(feature = "engine-sources")]
 #[path = "updates/schedule.rs"]
-mod schedule;
-#[cfg(not(feature = "engine-sources"))]
 mod schedule;
 
 use schedule::Schedule;

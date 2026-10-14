@@ -1,5 +1,5 @@
 //! Tauri adapters for the ChatGPT app engine.
-use crate::{chatgpt_app, computer_use, runtime};
+use crate::{chatgpt_app, runtime};
 use std::{path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Emitter, Manager};
 

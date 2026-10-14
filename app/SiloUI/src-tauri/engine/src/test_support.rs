@@ -1,18 +1,9 @@
 //! Fixtures for native unit tests. Never use product locks to serialize tests.
-#[cfg(feature = "engine-sources")]
 #[path = "test_support/computer_use_live.rs"]
 pub(crate) mod computer_use_live;
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) mod computer_use_live;
-#[cfg(feature = "engine-sources")]
 #[path = "test_support/live.rs"]
 pub(crate) mod live;
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) mod live;
-#[cfg(feature = "engine-sources")]
 #[path = "test_support/runner.rs"]
-pub(crate) mod runner;
-#[cfg(not(feature = "engine-sources"))]
 pub(crate) mod runner;
 
 use std::sync::{Mutex, MutexGuard};
@@ -39,12 +30,9 @@ impl Drop for GlobalStateGuard {
     }
 }
 
-/// The package root while these fixtures compile from either SiloUI or silo-engine.
+/// The app root for runtime fixtures used by this crate.
 pub(crate) fn manifest_root() -> std::path::PathBuf {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    #[cfg(feature = "engine-sources")]
-    let root = root.join("..");
-    root
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
 /// One disposable runtime layout for in-process runners and fake executable tests.

@@ -91,7 +91,7 @@ pub type FileDownloadResult = JobStartResult;
 pub type FileUploadFinishedResult = UploadOutcome;
 pub type FileDownloadFinishedResult = DownloadOutcome;
 
-/// Mirrors `app/SiloUI/src-tauri/src/transfer.rs::Progress`; the serialized
+/// Mirrors `app/SiloUI/src-tauri/engine/src/transfer.rs::Progress`; the serialized
 /// names deliberately retain `id` and `computer`, not the surrounding job's
 /// `jobId` and `computerId`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]

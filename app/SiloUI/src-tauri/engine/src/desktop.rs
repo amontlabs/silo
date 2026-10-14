@@ -144,7 +144,7 @@ pub(crate) fn guest_within(
 }
 
 /// The pinned streamer recipe this Silo installs.
-const STREAMER_LOCK: &str = include_str!("../guest/desktop-streamer-lock.json");
+const STREAMER_LOCK: &str = include_str!("../../guest/desktop-streamer-lock.json");
 /// The oldest installed streamer recipe revision the bundled guest helper still runs.
 const OLDEST_RUNNABLE_RECIPE: u64 = 1;
 const STREAMER_RECEIPT: &str = "/var/lib/silo-desktop/streamer.json";
@@ -213,7 +213,7 @@ fn installer_script(action: &str) -> String {
         (
             "SILO_DESKTOP_SERVICE_SOURCE",
             "desktop-service.py",
-            include_str!("../guest/desktop-service.py"),
+            include_str!("../../guest/desktop-service.py"),
             "SILO_DESKTOP_SERVICE_EOF",
         ),
         (
@@ -225,32 +225,32 @@ fn installer_script(action: &str) -> String {
         (
             "SILO_SELKIES_WEB_CLIENT_PATCH_SOURCE",
             "patch-selkies-web-client.py",
-            include_str!("../guest/patch-selkies-web-client.py"),
+            include_str!("../../guest/patch-selkies-web-client.py"),
             "SILO_SELKIES_WEB_CLIENT_PATCH_EOF",
         ),
         (
             "SILO_SELKIES_DISPLAY_PATCH_SOURCE",
             "patch-selkies-display-scaling.py",
-            include_str!("../guest/patch-selkies-display-scaling.py"),
+            include_str!("../../guest/patch-selkies-display-scaling.py"),
             "SILO_SELKIES_DISPLAY_PATCH_EOF",
         ),
         (
             "SILO_DESKTOP_PACKAGES_SOURCE",
             "desktop-packages.txt",
-            include_str!("../guest/desktop-packages.txt"),
+            include_str!("../../guest/desktop-packages.txt"),
             "SILO_DESKTOP_PACKAGES_EOF",
         ),
         (
             "SILO_ACCESSIBILITY_HELPER_SOURCE",
             "silo-accessibility.py",
-            include_str!("../guest/silo-accessibility.py"),
+            include_str!("../../guest/silo-accessibility.py"),
             "SILO_ACCESSIBILITY_HELPER_EOF",
         ),
     ] {
         script.push_str(&format!("export {variable}=\"$desktop_stage/{filename}\"\ncat > \"${variable}\" <<'{delimiter}'\n{source}\n{delimiter}\n"));
     }
     script.push_str(&format!("set -- {action}\n(\n"));
-    script.push_str(include_str!("../guest/setup-desktop.sh"));
+    script.push_str(include_str!("../../guest/setup-desktop.sh"));
     script.push_str("\n)\n");
     script
 }
@@ -262,12 +262,12 @@ fn lcu_setup_script() -> String {
     for (filename, source, delimiter) in [
         (
             "setup-lcu.py",
-            include_str!("../guest/setup-lcu.py"),
+            include_str!("../../guest/setup-lcu.py"),
             "SILO_LCU_SETUP_EOF",
         ),
         (
             "lcu-lock.json",
-            include_str!("../guest/lcu-legacy-lock.json"),
+            include_str!("../../guest/lcu-legacy-lock.json"),
             "SILO_LCU_LOCK_EOF",
         ),
     ] {

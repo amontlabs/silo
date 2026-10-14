@@ -3,12 +3,12 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
-// The page half of the host bridge (src-tauri/src/desktop_viewer_bridge.js),
+// The page half of the host bridge (src-tauri/engine/src/desktop_viewer_bridge.js),
 // run against a fake Selkies socket the way Rust drives it through eval.
 const native = resolve(dirname(fileURLToPath(import.meta.url)), "../../src-tauri")
-const script = readFileSync(resolve(native, "src/desktop_viewer_bridge.js"), "utf8")
+const script = readFileSync(resolve(native, "engine/src/desktop_viewer_bridge.js"), "utf8")
 // Requests the script must produce, also fed to the Rust parser (desktop_bridge.rs).
-const contract = JSON.parse(readFileSync(resolve(native, "src/desktop_bridge_contract.json"), "utf8")) as Array<{ name: string; url: string; body: string; kind: string }>
+const contract = JSON.parse(readFileSync(resolve(native, "engine/src/desktop_bridge_contract.json"), "utf8")) as Array<{ name: string; url: string; body: string; kind: string }>
 
 class FakeSocket {
   readyState?: number

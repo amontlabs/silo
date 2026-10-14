@@ -12,7 +12,7 @@ import time
 import unittest
 
 
-REMOTE_SOURCE = Path(__file__).parents[1] / 'src-tauri/src/remote.rs'
+REMOTE_SOURCE = Path(__file__).parents[1] / 'src-tauri/engine/src/remote.rs'
 
 
 @unittest.skipUnless(os.environ.get('SILO_TEST_LOCAL_SSHD') == '1', 'Opt-in local sshd test')

@@ -1,5 +1,5 @@
 //! Tauri adapters for the host-owned signed update flow.
-#[path = "../updates/debian.rs"]
+#[path = "../../engine/src/updates/debian.rs"]
 mod debian;
 use crate::updates as engine;
 use engine::{Snapshot, State, MAX_DOWNLOAD_BYTES, RELEASE_URL};

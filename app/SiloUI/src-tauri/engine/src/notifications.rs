@@ -271,9 +271,6 @@ impl PendingWithdrawal {
     }
 }
 
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::notifications::{clear_computer, notify, notify_native};
-
 /// Longest body shown in a system notification. Full detail stays in the app.
 const BODY_LIMIT: usize = 200;
 

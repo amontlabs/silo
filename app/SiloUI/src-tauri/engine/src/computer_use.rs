@@ -33,8 +33,8 @@ use std::{
 pub(crate) const GUEST_MOUNT: &str = "/opt/silo/chatgpt";
 /// Where the guest finds the host's verified LCU archive, read-only.
 pub(crate) const LCU_GUEST_MOUNT: &str = "/opt/silo/lcu";
-const HELPER: &str = include_str!("../guest/silo-computer-use.py");
-const LCU_LOCK: &str = include_str!("../guest/lcu-lock.json");
+const HELPER: &str = include_str!("../../guest/silo-computer-use.py");
+const LCU_LOCK: &str = include_str!("../../guest/lcu-lock.json");
 const GUEST_HELPER: &str = "/usr/local/libexec/silo-computer-use";
 /// The most one run of the guest helper may take (install, setup and the readiness check
 /// with its bounded wait for the desktop session), and the host's allowance on top of it
@@ -1339,9 +1339,6 @@ pub fn publish_application_state_changed() {
 
 // ------------------------------------------------------- reported state
 
-#[cfg(not(feature = "engine-sources"))]
-pub(crate) use crate::commands::computer_use::{app_ready, install, reconcile};
-
 fn reason_text(code: &str) -> &'static str {
     match code {
         "interrupted" => "Setup was interrupted. Try again.",
@@ -1702,8 +1699,6 @@ fn apply_approval_in(
 
 /// Prepares the shared folder and the status cache at app start, then downloads the
 /// pinned ChatGPT app in the background when it is not published yet.
-#[cfg(all(test, feature = "engine-sources"))]
+#[cfg(test)]
 #[path = "computer_use/tests.rs"]
-mod tests;
-#[cfg(all(test, not(feature = "engine-sources")))]
 mod tests;
