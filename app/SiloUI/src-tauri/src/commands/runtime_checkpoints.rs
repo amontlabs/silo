@@ -3,6 +3,16 @@ use crate::{runtime, runtime::checkpoints};
 use serde_json::Value;
 use tauri::AppHandle;
 
+fn spawn_checkpoint_blocking<F, R>(work: F) -> tokio::task::JoinHandle<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    // Connections runs remote checkpoint handlers under a StartCondition. Carry it
+    // across this host adapter so queued work can expire before gate admission.
+    runtime::operation_gate::spawn_blocking(work)
+}
+
 struct AppForkAssignments;
 
 impl checkpoints::ForkAssignments for AppForkAssignments {
@@ -50,7 +60,7 @@ pub(crate) async fn create_checkpoint(
 ) -> Result<runtime::ApplicationSource, String> {
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
-    tokio::task::spawn_blocking(move || {
+    spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::create(&paths, &computer_id, &name)?;
         refreshed_state(&worker_app, &paths)
@@ -71,7 +81,7 @@ pub(crate) async fn fork_checkpoint(
 ) -> Result<runtime::ApplicationSource, String> {
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
-    tokio::task::spawn_blocking(move || {
+    spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::fork(
             &paths,
@@ -98,7 +108,7 @@ pub(crate) async fn restore_checkpoint(
 ) -> Result<runtime::ApplicationSource, String> {
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
-    tokio::task::spawn_blocking(move || {
+    spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::restore(&paths, &computer_id, &checkpoint_id)?;
         refreshed_state(&worker_app, &paths)
@@ -117,7 +127,7 @@ pub(crate) async fn abandon_restore(
 ) -> Result<runtime::ApplicationSource, String> {
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
-    tokio::task::spawn_blocking(move || {
+    spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::abandon_restore(&paths, &computer_id)?;
         refreshed_state(&worker_app, &paths)
@@ -137,7 +147,7 @@ pub(crate) async fn delete_checkpoint(
 ) -> Result<runtime::ApplicationSource, String> {
     crate::commands::runtime_migration::ensure_ready_async(&app).await?;
     let worker_app = app.clone();
-    tokio::task::spawn_blocking(move || {
+    spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
         checkpoints::delete(&paths, &computer_id, &checkpoint_id)?;
         refreshed_state(&worker_app, &paths)
@@ -162,4 +172,62 @@ pub(crate) async fn read_checkpoint_usage(
     .map_err(|_| {
         "Silo could not read checkpoint disk usage. Refresh the Storage tab and retry.".to_string()
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runtime::operation_gate::{GateError, OperationGate, OperationKind, StartCondition};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn queued_remote_checkpoint_expires_before_gate_admission() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let gate = Arc::new(OperationGate::new());
+        let busy = gate
+            .kind(OperationKind::Lifecycle)
+            .computer("computer-id", "computer", "Running another operation")
+            .unwrap();
+        let wanted = Arc::new(AtomicBool::new(true));
+        let condition = StartCondition::new({
+            let wanted = wanted.clone();
+            move || wanted.load(Ordering::SeqCst)
+        });
+        let checkpoint = {
+            let gate = gate.clone();
+            runtime.block_on(async {
+                StartCondition::scope(Some(condition.clone()), || {
+                    spawn_checkpoint_blocking(move || {
+                        gate.kind(OperationKind::CheckpointCapture)
+                            .computer("computer-id", "computer", "Creating checkpoint")
+                            .map(drop)
+                    })
+                })
+            })
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while gate.snapshot().waiting.is_empty() {
+            assert!(Instant::now() < deadline, "checkpoint did not queue");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        wanted.store(false, Ordering::SeqCst);
+        drop(busy);
+
+        assert_eq!(
+            runtime.block_on(checkpoint).unwrap(),
+            Err(GateError::Abandoned)
+        );
+        assert!(condition.expired());
+        assert!(!condition.started());
+        assert!(gate.snapshot().waiting.is_empty());
+    }
 }
