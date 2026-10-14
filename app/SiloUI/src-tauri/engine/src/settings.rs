@@ -754,17 +754,13 @@ pub fn initialize(path: Option<PathBuf>) -> Result<Snapshot, String> {
 pub fn current_settings() -> Result<Map<String, Value>, String> {
     let context = silo_engine::context::current()
         .ok_or_else(|| "The engine context is unavailable".to_owned())?;
-    current_settings_for(context.as_ref())
+    settings_of(context.as_ref())
 }
 
-/// The same read for a caller that holds its engine context.
-pub fn current_settings_for(
-    context: &dyn silo_engine::EngineContext,
-) -> Result<Map<String, Value>, String> {
-    let snapshot = context
-        .runtime_state()
-        .settings()
-        .initialize(|| configured_path(context))?;
+/// Validated, persisted preferences of one engine context.
+pub fn settings_of(context: &dyn silo_engine::EngineContext) -> Result<Map<String, Value>, String> {
+    let state = context.runtime_state();
+    let snapshot = state.settings().initialize(|| configured_path(context))?;
     if let Some(error) = &snapshot.save_error {
         eprintln!("Silo settings: using unsaved settings: {error}");
     }
@@ -777,7 +773,7 @@ pub fn current_settings_for(
 pub fn automatic_checkpoint_retention_count_for(
     context: &dyn silo_engine::EngineContext,
 ) -> Result<u32, String> {
-    let settings = current_settings_for(context)?;
+    let settings = settings_of(context)?;
     let Some(value) = settings.get("automaticCheckpointRetentionCount") else {
         return Ok(DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT);
     };

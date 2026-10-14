@@ -1251,6 +1251,42 @@
             "changes"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "computerId": {
+              "type": "string"
+            },
+            "cpus": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "expected": {
+              "$ref": "#/$defs/MacosResourceConfiguration"
+            },
+            "kind": {
+              "const": "macosResources",
+              "type": "string"
+            },
+            "memoryGiB": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "requestId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "computerId",
+            "expected",
+            "cpus",
+            "memoryGiB",
+            "requestId"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -6362,6 +6398,33 @@
       "required": [
         "computerId",
         "state"
+      ],
+      "type": "object"
+    },
+    "MacosResourceConfiguration": {
+      "additionalProperties": false,
+      "description": "Optimistic state check for a stopped macOS computer's resource edit.",
+      "properties": {
+        "cpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskGiB": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryGiB": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpus",
+        "memoryGiB",
+        "diskGiB"
       ],
       "type": "object"
     },

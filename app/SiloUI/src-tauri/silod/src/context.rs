@@ -158,6 +158,8 @@ impl SilodContext {
 
     pub fn disconnect_events(&self, client_id: &ClientId) {
         self.wire_events.disconnect(client_id);
+        // A client's open screens end with its connection and never another client's.
+        crate::methods::computers::close_client_displays(client_id.as_str());
     }
 
     pub fn install_queue_events(&self) {
@@ -434,6 +436,7 @@ impl EngineContext for SilodContext {
     }
 
     fn close_remote_displays(&self, device: Option<&str>) {
+        crate::methods::computers::close_displays(device);
         match device {
             Some(device) => silo_engine::desktop_viewer_api::close_device(device),
             None => silo_engine::desktop_viewer_api::close_all(),

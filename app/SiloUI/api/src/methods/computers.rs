@@ -126,6 +126,25 @@ pub enum ComputerConfigurationChange {
     Batch {
         changes: Vec<ComputerConfigurationChange>,
     },
+    MacosResources {
+        computer_id: String,
+        expected: MacosResourceConfiguration,
+        cpus: u64,
+        #[serde(rename = "memoryGiB")]
+        memory_gib: u64,
+        request_id: String,
+    },
+}
+
+/// Optimistic state check for a stopped macOS computer's resource edit.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MacosResourceConfiguration {
+    pub cpus: u64,
+    #[serde(rename = "memoryGiB")]
+    pub memory_gib: u64,
+    #[serde(rename = "diskGiB")]
+    pub disk_gib: u64,
 }
 
 wire_struct! {
@@ -430,4 +449,48 @@ pub struct ComputerConfigurationProgress {
     pub diagnostic: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub partial: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_resources_change_uses_the_wire_names_and_round_trips() {
+        let wire = serde_json::json!({
+            "kind": "macosResources",
+            "computerId": "11111111-1111-4111-8111-111111111111",
+            "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "cpus": 6,
+            "memoryGiB": 12,
+            "requestId": "request-1"
+        });
+        let change: ComputerConfigurationChange = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(
+            change,
+            ComputerConfigurationChange::MacosResources {
+                computer_id: "11111111-1111-4111-8111-111111111111".into(),
+                expected: MacosResourceConfiguration {
+                    cpus: 4,
+                    memory_gib: 8,
+                    disk_gib: 64
+                },
+                cpus: 6,
+                memory_gib: 12,
+                request_id: "request-1".into(),
+            }
+        );
+        assert_eq!(serde_json::to_value(change).unwrap(), wire);
+    }
+
+    #[test]
+    fn macos_resources_change_rejects_an_unknown_expected_field() {
+        let wire = serde_json::json!({
+            "kind": "macosResources",
+            "computerId": "c",
+            "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64, "extra": 1},
+            "cpus": 6, "memoryGiB": 12, "requestId": "r"
+        });
+        assert!(serde_json::from_value::<ComputerConfigurationChange>(wire).is_err());
+    }
 }
