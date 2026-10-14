@@ -118,6 +118,11 @@ impl Quit {
         matches!(self.lock().phase, Phase::Flushing { .. } | Phase::Exiting)
     }
 
+    /// The graceful path already approved the exit; the process may end now.
+    pub(crate) fn exit_approved(&self) -> bool {
+        matches!(self.lock().phase, Phase::Exiting)
+    }
+
     /// AppKit should wait for Silo's own path unless it already approved the exit.
     pub(crate) fn accepts_terminate_request(&self) -> bool {
         !matches!(self.lock().phase, Phase::Exiting)
@@ -169,6 +174,15 @@ impl Quit {
         if !self.host.ask(&request) {
             // Without a prompt there is nothing to wait for; computers are left as they are.
             self.begin_exit(false);
+        }
+    }
+
+    /// The user already chose (the tray's own confirmation): skip the prompt.
+    pub(crate) fn quit_chosen(self: &Arc<Self>, choice: Choice) {
+        match choice {
+            Choice::Cancel => {}
+            Choice::KeepRunning => self.begin_exit(false),
+            Choice::StopAndQuit => self.begin_exit(true),
         }
     }
 
@@ -559,6 +573,18 @@ mod tests {
         quit.request_blocking();
         quit.begin_flush().unwrap();
         assert!(quit.begin_flush().is_err());
+    }
+
+    #[test]
+    fn a_choice_made_in_the_tray_skips_the_prompt() {
+        let script = Script::new(Ok(vec!["dev"]));
+        let quit = quit(&script);
+        quit.quit_chosen(Choice::StopAndQuit);
+        quit.begin_flush().unwrap();
+        quit.complete_flush();
+        let log = script.log();
+        assert!(!log.iter().any(|entry| entry.starts_with("ask")));
+        assert_eq!(&log[log.len() - 3..], ["settings", "stop", "exit"]);
     }
 
     #[test]

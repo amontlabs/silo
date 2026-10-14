@@ -129,6 +129,19 @@ pub(crate) struct TauriSink(pub AppHandle);
 impl EventSink for TauriSink {
     fn event(&self, frame: &Value) {
         let _ = self.0.emit(relay::ENGINE_EVENT, frame);
+        let payload = frame.get("payload").cloned().unwrap_or(Value::Null);
+        match frame.get("event").and_then(Value::as_str) {
+            Some("notifications.notice") => {
+                crate::commands::notifications::engine_notice(&self.0, &payload)
+            }
+            Some("notifications.cleared") => {
+                crate::commands::notifications::engine_cleared(&self.0, &payload)
+            }
+            Some("settings.changed") => {
+                crate::commands::settings::apply_theme(&self.0, &json!({"settings": payload.get("settings")}))
+            }
+            _ => {}
+        }
         for (name, payload) in relay::legacy_events(frame) {
             let _ = self.0.emit(name, payload);
         }
@@ -164,6 +177,9 @@ pub(crate) struct EngineClient {
     sink: Arc<dyn EventSink>,
     current: watch::Sender<Option<Connected>>,
     status: Mutex<Status>,
+    /// The engine's settings as last read or announced: what this client needs to know
+    /// synchronously (which terminal, editor and browser, notification categories).
+    settings: Mutex<serde_json::Map<String, Value>>,
     finished: Notify,
     backoff: Duration,
 }
@@ -182,6 +198,7 @@ impl EngineClient {
             sink,
             current: watch::channel(None).0,
             status: Mutex::new(Status::Connecting),
+            settings: Mutex::new(serde_json::Map::new()),
             finished: Notify::new(),
             backoff: Duration::from_millis(500),
         })
@@ -191,6 +208,18 @@ impl EngineClient {
     pub(crate) fn with_backoff(mut self: Arc<Self>, backoff: Duration) -> Arc<Self> {
         Arc::get_mut(&mut self).expect("not shared yet").backoff = backoff;
         self
+    }
+
+    /// Remembers the settings of a `settings.read`/`settings.update` result or a
+    /// `settings.changed` payload.
+    pub(crate) fn remember_settings(&self, snapshot: &Value) {
+        if let Some(settings) = snapshot.get("settings").and_then(Value::as_object) {
+            *self.settings.lock().unwrap() = settings.clone();
+        }
+    }
+
+    pub(crate) fn cached_settings(&self) -> serde_json::Map<String, Value> {
+        self.settings.lock().unwrap().clone()
     }
 
     pub(crate) fn status(&self) -> Status {
@@ -213,11 +242,19 @@ impl EngineClient {
                     self.set_status(Status::Connected);
                     self.current.send_replace(Some(connected.clone()));
                     self.sink.connection(true, None);
+                    // The first read warms the settings cache before anything asks for it.
+                    if let Ok(snapshot) = connected.client.request("settings.read", json!({})).await {
+                        self.remember_settings(&snapshot);
+                    }
                     while let Some(frame) = feed.next().await {
-                        if frame.get("event").and_then(Value::as_str)
-                            == Some("operations.job.finished")
-                        {
-                            self.finished.notify_waiters();
+                        match frame.get("event").and_then(Value::as_str) {
+                            Some("operations.job.finished") => self.finished.notify_waiters(),
+                            Some("settings.changed") => {
+                                if let Some(payload) = frame.get("payload") {
+                                    self.remember_settings(payload);
+                                }
+                            }
+                            _ => {}
                         }
                         self.sink.event(&frame);
                     }
@@ -486,6 +523,11 @@ pub(crate) type Engine<'a> = tauri::State<'a, Arc<EngineClient>>;
 /// The shared client for code that has only an `AppHandle`.
 pub(crate) fn of(app: &AppHandle) -> Arc<EngineClient> {
     app.state::<Arc<EngineClient>>().inner().clone()
+}
+
+/// The shared client when setup has already installed it (window events can come first).
+pub(crate) fn try_of(app: &AppHandle) -> Option<Arc<EngineClient>> {
+    app.try_state::<Arc<EngineClient>>().map(|state| state.inner().clone())
 }
 
 /// Builds the client for this app, registers it as managed state and starts keeping the

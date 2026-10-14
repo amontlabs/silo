@@ -1,6 +1,6 @@
 import type { ApplicationComputer } from "@/features/application/model/application-source"
 
-/** Quit stops Silo-owned local computers only; remote computers keep running (decision 7). */
+/** Computers Stop and quit would stop: local ones only; remote computers keep running (decision 7). */
 export function computersStoppedByQuit(computers: ApplicationComputer[]): string[] {
   return computers
     .filter((computer) => !computer.device && (computer.state === "running" || computer.state === "starting"))
@@ -8,5 +8,5 @@ export function computersStoppedByQuit(computers: ApplicationComputer[]): string
 }
 
 export function quitConfirmationDetail(names: string[]): string {
-  return `This stops ${names.length} running ${names.length === 1 ? "computer" : "computers"}: ${names.join(", ")}.`
+  return `${names.length} ${names.length === 1 ? "computer is" : "computers are"} running: ${names.join(", ")}. Keep running leaves ${names.length === 1 ? "it" : "them"} running in the background; Stop and quit stops ${names.length === 1 ? "it" : "them"} first.`
 }

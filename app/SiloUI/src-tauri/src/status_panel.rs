@@ -174,8 +174,12 @@ pub fn take_main_route(app: AppHandle) -> Option<serde_json::Value> {
 }
 
 #[tauri::command]
-pub fn quit_app(app: AppHandle) {
-    crate::commands::settings::request_quit(&app);
+pub fn quit_app(app: AppHandle, choice: Option<String>) {
+    // The tray already asked the user when computers run: `keep` or `stop` is their answer.
+    match choice.as_deref().and_then(crate::quit::Choice::parse) {
+        Some(choice) => crate::commands::settings::quit_with(&app, choice),
+        None => crate::commands::settings::request_quit(&app),
+    }
 }
 
 #[cfg(test)]

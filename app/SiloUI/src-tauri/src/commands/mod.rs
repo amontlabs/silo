@@ -32,7 +32,6 @@ pub(crate) mod runtime_storage;
 pub(crate) mod secrets;
 pub(crate) mod settings;
 pub(crate) mod ssh_access;
-pub(crate) mod startup;
 pub(crate) mod system_integrations;
 pub(crate) mod system_shutdown;
 pub(crate) mod terminal;

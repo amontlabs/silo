@@ -32,15 +32,19 @@ describe("quit confirmation", () => {
     const { user, actions } = setup(withStates(["running", "stopped", "running"]))
     await user.click(screen.getByRole("button", { name: "Quit Silo" }))
     const prompt = screen.getByRole("alertdialog", { name: "Quit Silo?" })
-    expect(prompt).toHaveTextContent("This stops 2 running computers: box-0, box-2.")
+    expect(prompt).toHaveTextContent("2 computers are running: box-0, box-2.")
     expect(actions.quit).not.toHaveBeenCalled()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     expect(actions.quit).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole("button", { name: "Quit Silo" }))
-    await user.click(screen.getByRole("button", { name: "Quit and stop" }))
-    expect(actions.quit).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole("button", { name: "Keep running" }))
+    expect(actions.quit).toHaveBeenCalledExactlyOnceWith("keep")
+
+    await user.click(screen.getByRole("button", { name: "Quit Silo" }))
+    await user.click(screen.getByRole("button", { name: "Stop and quit" }))
+    expect(actions.quit).toHaveBeenLastCalledWith("stop")
   })
 
   it("quits without a prompt when nothing runs", async () => {
@@ -55,6 +59,6 @@ describe("quit confirmation", () => {
     const { rerender, actions } = setup(source)
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
     rerender(<StatusBarContent source={source} actions={actions} focusContent={vi.fn()} quitRequest={1} />)
-    expect(screen.getByRole("alertdialog", { name: "Quit Silo?" })).toHaveTextContent("This stops 1 running computer: box-0.")
+    expect(screen.getByRole("alertdialog", { name: "Quit Silo?" })).toHaveTextContent("1 computer is running: box-0.")
   })
 })
