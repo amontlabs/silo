@@ -1618,10 +1618,37 @@ fn change_resource_configuration(
         engine::host_limits(),
         &others,
     )?;
-    store::save(&Layout::new(&data, id), &updated)?;
-    update(app, id, |entry| entry.record = updated);
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        updated,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
     emit(app);
     Ok(())
+}
+
+fn persist_then_commit(
+    record: Record,
+    persist: impl FnOnce(&Record) -> Result<(), String>,
+    reconcile: impl FnOnce() -> Option<Record>,
+    commit: impl FnOnce(Record),
+) -> Result<(), String> {
+    match persist(&record) {
+        Ok(()) => {
+            commit(record);
+            Ok(())
+        }
+        Err(error) => {
+            if let Some(saved) = reconcile() {
+                commit(saved);
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Starts a local macOS computer for the launch coordinator. Returns false when `id` belongs
@@ -3634,6 +3661,54 @@ mod tests {
             &record,
             &developer_tools::version()
         ));
+    }
+
+    #[test]
+    fn failed_resource_save_rolls_back_disk_registry_and_reload_state() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut registry, id) = registry_with(State::Stopped);
+        let record = &mut registry.entries[0].record;
+        record.installed = true;
+        record.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            needs_personalizing: false,
+        };
+        record.developer_tools_version = Some(developer_tools::version());
+        let old = record.clone();
+        let layout = Layout::new(data.path(), &id);
+        store::save(&layout, &old).unwrap();
+        let mut registry_record = old.clone();
+        let mut updated = old.clone();
+        updated.cpus += 2;
+        updated.memory_gib += 4;
+        let mut sync_calls = 0;
+
+        let error = persist_then_commit(
+            updated,
+            |record| {
+                store::save_with_sync(&layout, record, |_directory| {
+                    sync_calls += 1;
+                    if sync_calls == 1 {
+                        Err(std::io::Error::other("injected directory sync failure"))
+                    } else {
+                        store::sync_dir(&layout.dir)
+                    }
+                })
+            },
+            || store::read_record(&layout).ok(),
+            |record| registry_record = record,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("injected directory sync failure"));
+        assert_eq!((registry_record.cpus, registry_record.memory_gib), (old.cpus, old.memory_gib));
+        let reloaded = store::load_all(data.path());
+        assert_eq!(reloaded, [old.clone()]);
+        assert_eq!((reloaded[0].cpus, reloaded[0].memory_gib), (old.cpus, old.memory_gib));
     }
 
     #[test]

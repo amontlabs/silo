@@ -483,18 +483,66 @@ impl Layout {
 }
 
 pub(super) fn save(layout: &Layout, record: &Record) -> Result<(), String> {
+    save_with_sync(layout, record, sync_dir)
+}
+
+pub(super) fn read_record(layout: &Layout) -> Result<Record, String> {
+    let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+}
+
+pub(super) fn save_with_sync(
+    layout: &Layout,
+    record: &Record,
+    mut sync: impl FnMut(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     fs::create_dir_all(&layout.dir).map_err(|error| io_error("create the computer", &error))?;
     let json = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
-    let mut file = tempfile::NamedTempFile::new_in(&layout.dir)
-        .map_err(|error| io_error("save the computer", &error))?;
-    std::io::Write::write_all(&mut file, &json)
-        .map_err(|error| io_error("save the computer", &error))?;
-    file.as_file()
-        .sync_all()
-        .map_err(|error| io_error("save the computer", &error))?;
-    file.persist(layout.record())
-        .map_err(|error| io_error("save the computer", &error.error))?;
-    sync_dir(&layout.dir).map_err(|error| io_error("save the computer", &error))
+    let previous = match fs::read(layout.record()) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(io_error("read the computer before saving", &error)),
+    };
+    match write_record(layout, &json, &mut sync) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let original = io_error("save the computer", &error);
+            let rollback = match previous {
+                Some(bytes) => write_record(layout, &bytes, &mut sync),
+                None => remove_record(layout, &mut sync),
+            };
+            match rollback {
+                Ok(()) => Err(original),
+                Err(rollback) => Err(format!(
+                    "{original} The previous computer record could not be restored: {}",
+                    io_error("restore the computer record", &rollback)
+                )),
+            }
+        }
+    }
+}
+
+fn write_record(
+    layout: &Layout,
+    bytes: &[u8],
+    sync: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut file = tempfile::NamedTempFile::new_in(&layout.dir)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.as_file().sync_all()?;
+    file.persist(layout.record()).map_err(|error| error.error)?;
+    sync(&layout.dir)
+}
+
+fn remove_record(
+    layout: &Layout,
+    sync: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match fs::remove_file(layout.record()) {
+        Ok(()) => sync(&layout.dir),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 /// Makes the entries of a folder (a rename, a new or removed file) durable.
