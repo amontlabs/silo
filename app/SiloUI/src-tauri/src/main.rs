@@ -255,10 +255,7 @@ fn main() {
                     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &migration)?;
                 }
                 commands::computer_use::install(app.handle());
-                pre_upgrade_backup::install();
                 commands::remote::start(app.handle())?;
-                commands::backup_controller::install(app.handle())?;
-                commands::runtime_migration::start_if_pending(app.handle())?;
                 status_panel::install(app.handle())?;
                 #[cfg(debug_assertions)]
                 desktop_viewer_bench::start(app.handle());
@@ -292,7 +289,6 @@ fn main() {
                 titlebar::install(&window)?;
                 commands::notifications::install(app.handle());
                 commands::updates::install(app.handle())?;
-                commands::editor::refresh_transports(app.handle());
                 commands::runtime_storage::start_monitor(app.handle());
                 commands::startup::install(app.handle());
                 Ok(())

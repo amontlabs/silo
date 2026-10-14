@@ -1,7 +1,15 @@
-//! Tauri adapters for runtime migration state and restart coordination.
-use crate::runtime_migration::{self as engine, Controller, MigrationState};
+//! Launch-migration state, through `migration.state`. The engine converts the old storage
+//! before it serves; it has no retry or continue method, so those two commands report the
+//! typed unavailable state.
+use crate::engine_client::{Engine, EngineClient, EngineError};
+use crate::runtime_migration::{self as engine, Controller};
+use serde_json::{json, Value};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
+
+// The functions up to `read_state` are still called by `startup.rs`, `runtime.rs`,
+// `runtime_checkpoints.rs` and `main.rs` on the in-process controller; they leave with
+// those callers.
 
 fn controller(app: &AppHandle) -> Result<Arc<Controller>, String> {
     app.try_state::<Arc<Controller>>()
@@ -41,87 +49,70 @@ pub(crate) fn migrate_macos_proxy_bootstraps(app: &AppHandle) -> Result<(), Stri
     crate::commands::macos_computers::migrate_proxy_bootstraps_at_launch(app)
 }
 
-/// Automatic conversion starts only after the export/import controller is installed,
-/// so its worker can settle any journal left by the previous process first.
-pub(crate) fn start_if_pending(app: &AppHandle) -> Result<(), String> {
-    let migration = controller(app)?;
-    if migration.snapshot()?.status == "scanning" {
-        let _ = retry_runtime_migration_blocking(app.clone())?;
+// MARK: Operations
+
+pub(crate) async fn read_state(client: &EngineClient) -> Result<Value, EngineError> {
+    client.call("migration.state", json!({})).await
+}
+
+fn unavailable(what: &str) -> EngineError {
+    EngineError::unavailable(format!(
+        "{what} is not available from Silo's engine. Relaunch Silo to run the migration again."
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn read_runtime_migration_state(client: Engine<'_>) -> Result<Value, EngineError> {
+    read_state(&client).await
+}
+
+/// The engine has no method to retry a migration.
+#[tauri::command]
+pub(crate) async fn retry_runtime_migration() -> Result<Value, EngineError> {
+    Err(unavailable("Retrying the migration"))
+}
+
+/// The engine has no method to continue after a failed migration.
+#[tauri::command]
+pub(crate) async fn continue_after_migration_failure() -> Result<Value, EngineError> {
+    Err(unavailable("Continuing after a failed migration"))
+}
+
+#[cfg(test)]
+mod forwarding_tests {
+    use super::*;
+    use crate::engine_client::testing::{connected_client, FakeEngine};
+
+    #[tokio::test]
+    async fn the_state_is_the_engines_and_errors_stay_typed() {
+        let fake = FakeEngine::start(|method, _| match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "migration.state" => {
+                Ok(json!({"status": "done", "stage": "ready", "canContinue": false}))
+            }
+            _ => Ok(Value::Null),
+        });
+        let (client, _) = connected_client(&fake).await;
+        assert_eq!(read_state(&client).await.unwrap()["status"], "done");
+
+        let broken = FakeEngine::start(|method, _| match method {
+            "events.subscribe" => Ok(json!({"subscription": "sub"})),
+            "engine.state" => Ok(Value::Null),
+            _ => Err(("internal", "The migration journal is unreadable.".into())),
+        });
+        let (client, _) = connected_client(&broken).await;
+        let error = read_state(&client).await.unwrap_err();
+        assert_eq!(error.code, "internal");
     }
-    Ok(())
-}
 
-#[tauri::command]
-pub(crate) async fn read_runtime_migration_state(app: AppHandle) -> Result<MigrationState, String> {
-    engine::migration_snapshot(controller(&app)?).await
-}
-
-async fn blocking(
-    app: AppHandle,
-    work: fn(AppHandle) -> Result<MigrationState, String>,
-) -> Result<MigrationState, String> {
-    tauri::async_runtime::spawn_blocking(move || work(app))
-        .await
-        .map_err(|_| "Migration state is unavailable.".to_string())?
-}
-
-#[tauri::command]
-pub(crate) async fn retry_runtime_migration(app: AppHandle) -> Result<MigrationState, String> {
-    blocking(app, retry_runtime_migration_blocking).await
-}
-
-fn retry_runtime_migration_blocking(app: AppHandle) -> Result<MigrationState, String> {
-    let migration = controller(&app)?;
-    let result = migration.prepare_retry()?;
-    let _ = app.emit("silo://application-state-changed", ());
-    let worker_app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        // A panic must still leave a retryable failed state, not "running".
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            convert(&worker_app, &migration)
-        }))
-        .unwrap_or_else(|_| Err("Migration stopped unexpectedly. Retry the migration.".into()));
-        if let Err(error) = outcome {
-            let _ = migration.record_failure(error);
-            let _ = worker_app.emit("silo://application-state-changed", ());
+    #[tokio::test]
+    async fn retry_and_continue_are_the_typed_unavailable_state() {
+        for error in [
+            retry_runtime_migration().await.unwrap_err(),
+            continue_after_migration_failure().await.unwrap_err(),
+        ] {
+            assert_eq!(error.code, "unsupported_remote_operation");
+            assert!(error.message.contains("not available"));
         }
-    });
-    Ok(result)
-}
-
-fn convert(app: &AppHandle, migration: &Controller) -> Result<(), String> {
-    let paths = crate::runtime::migration_runtime_paths(
-        &crate::commands::runtime::host(app),
-        &migration.staged_storage(),
-    )?;
-    if migration.needs_recovery()? {
-        crate::commands::backup_controller::wait_for_migration_recovery(app)?;
     }
-    migration.convert_with_progress(&crate::runtime::ProcessRunner, &paths, &|| {
-        let _ = app.emit("silo://application-state-changed", ());
-    })?;
-    let restart = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        restart.restart();
-    });
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn continue_after_migration_failure(
-    app: AppHandle,
-) -> Result<MigrationState, String> {
-    blocking(app, continue_after_migration_failure_blocking).await
-}
-
-fn continue_after_migration_failure_blocking(app: AppHandle) -> Result<MigrationState, String> {
-    let result = controller(&app)?.continue_after_failure()?;
-    let _ = app.emit("silo://application-state-changed", ());
-    let restart = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        restart.restart();
-    });
-    Ok(result)
 }
