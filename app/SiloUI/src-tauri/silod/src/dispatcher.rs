@@ -6,9 +6,10 @@ use silo_api::{
     jobs::ErrorCode,
     methods::{
         engine::{EngineState, EngineStateParams, EventsSubscribeParams, EventsUnsubscribeParams},
+        method_registry,
         notifications::NotificationsListParams,
         operations::{AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationsListParams},
-        method_registry, MethodDescriptor, MethodName,
+        MethodDescriptor, MethodName,
     },
     transport::{
         ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult,
@@ -175,9 +176,9 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
                 MethodName::OperationsJobGet => {
                     let params: GetJobParams = parse_params(params)?;
-                    let registry = context.job_registry().map_err(registry_error)?;
+                    let registry = context.job_registry().map_err(DispatchError::internal)?;
                     let result = registry
-                        .get(&params.job_id)
+                        .get_at(&params.job_id, params.offset_bytes)
                         .map_err(registry_error)?
                         .ok_or_else(|| DispatchError {
                             code: ErrorCode::NotFound,
@@ -190,7 +191,7 @@ impl MethodRegistry for CoreMethodRegistry {
                     let params: AcknowledgeJobParams = parse_params(params)?;
                     context
                         .job_registry()
-                        .map_err(registry_error)?
+                        .map_err(DispatchError::internal)?
                         .acknowledge(&params.job_id)
                         .map_err(registry_error)?;
                     context.job_queue_changed();
@@ -211,7 +212,7 @@ impl MethodRegistry for CoreMethodRegistry {
                     let params: CancelJobParams = parse_params(params)?;
                     context
                         .job_registry()
-                        .map_err(registry_error)?
+                        .map_err(DispatchError::internal)?
                         .cancel(&params.job_id)
                         .map_err(registry_error)?;
                     Ok(Value::Null)
@@ -408,9 +409,7 @@ impl Dispatcher {
                             value
                                 .get("subscription")
                                 .and_then(Value::as_str)
-                                .map(|subscription| {
-                                    (client_id, subscription.to_owned())
-                                })
+                                .map(|subscription| (client_id, subscription.to_owned()))
                         } else {
                             None
                         };
@@ -533,17 +532,20 @@ fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, Dispat
         .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))
 }
 
-fn registry_error(error: impl std::fmt::Display) -> DispatchError {
+fn registry_error(error: silo_engine::jobs::RegistryError) -> DispatchError {
     let message = error.to_string();
-    let code = if message == "not_found" {
-        ErrorCode::NotFound
-    } else if message.starts_with("busy:")
-        || message.contains("cannot be acknowledged")
-        || message.contains("can't be cancelled")
-    {
-        ErrorCode::Busy
-    } else {
-        ErrorCode::Internal
+    let code = match error.kind() {
+        silo_engine::jobs::RegistryErrorKind::NotCancellable => ErrorCode::Internal,
+        silo_engine::jobs::RegistryErrorKind::Storage
+        | silo_engine::jobs::RegistryErrorKind::Internal => {
+            if message == "not_found" {
+                ErrorCode::NotFound
+            } else if message.starts_with("busy:") || message.contains("cannot be acknowledged") {
+                ErrorCode::Busy
+            } else {
+                ErrorCode::Internal
+            }
+        }
     };
     DispatchError { code, message }
 }
@@ -768,5 +770,18 @@ mod tests {
             dispatcher.prepare(request, &mut session),
             PreparedRequest::Close(Some(ResponseEnvelope::Error { .. }), _)
         ));
+    }
+
+    #[test]
+    fn not_cancellable_uses_the_contract_internal_error_code() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = silo_engine::jobs::JobRegistry::open(temporary.path()).unwrap();
+        let job_id = silo_api::jobs::JobId::new("job:1").unwrap();
+        registry.accept(job_id.clone(), "test.operation").unwrap();
+
+        let mapped = registry_error(registry.cancel(&job_id).unwrap_err());
+
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(mapped.message, "This operation can't be cancelled.");
     }
 }
