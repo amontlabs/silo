@@ -221,7 +221,9 @@ INITIAL_NEW = b'''                    target_h = old_display_height if old_displ
 WEBSOCKETS_REPLACEMENTS = ((IMPORT_OLD, IMPORT_NEW), (INITIAL_OLD, INITIAL_NEW))
 
 # Each patched module with its pinned 2.0.0 source hash, the hash after the
-# patch, and the fragments rewritten.
+# patch, and the fragments rewritten. ``later`` lists the hashes of the module
+# after a patch that runs after this one (patch-selkies-multiclient.py): such a
+# module already carries this patch.
 MODULES = {
     'display_utils.py': {
         'source': 'b00e3f43be55ece8ad5ad0a589eb236e8d1f303db96297fe33ac925ef388ab84',
@@ -231,6 +233,7 @@ MODULES = {
     'websockets_mode.py': {
         'source': '1d86b0092fc9f24ccec1e862bf94309021b9136344916ac7836565e1a4c4cebc',
         'patched': '5de8017e68901b42090b1e5252d7774f5164bc7cf1c60139583775af7cef4319',
+        'later': ('8e9540f558208c4d77975da290b23cc82c99b519c407293cd9a57343e3362a1d',),
         'replacements': WEBSOCKETS_REPLACEMENTS,
     },
 }
@@ -263,7 +266,7 @@ def plan_file(path, name, spec):
     """The patched bytes for one module, or None when it is already patched."""
     source = read_module(path, name)
     digest = sha256(source)
-    if digest == spec['patched']:
+    if digest == spec['patched'] or digest in spec.get('later', ()):
         return None
     if digest != spec['source']:
         raise ValueError(f'Selkies module {name} source hash is not the pinned 2.0.0 module')
