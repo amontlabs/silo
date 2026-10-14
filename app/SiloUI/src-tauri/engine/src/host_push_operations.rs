@@ -11,7 +11,10 @@ use std::{
     fs,
     io::{Read, Write},
     path::Path,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -186,6 +189,25 @@ fn persist_claim(
     }
     Ok(())
 }
+fn publish_job_progress(
+    context: &dyn silo_engine::EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    value: &Value,
+    computer_id: Option<String>,
+) -> Result<(), String> {
+    let data = serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+    silo_engine::jobs::publish_progress(
+        context,
+        silo_api::jobs::JobProgress::Push {
+            job_id: job_id.clone(),
+            kind: Some(silo_api::methods::operations::OperationKind::Push),
+            computer_id,
+            data,
+        },
+        silo_engine::context::Audience::All,
+    )
+    .map_err(|error| error.to_string())
+}
 pub(crate) fn start(
     paths: &RuntimePaths,
     computer: String,
@@ -198,7 +220,55 @@ pub(crate) fn start(
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
     let mut jobs = read(&journal)?;
     let (mut value, created) = claim(&mut jobs, &id, &computer, &path, &target)?;
+    let context = silo_engine::context::current();
     if !created {
+        if let Some(context) = context.as_ref() {
+            // claim() can coalesce a new request onto an already active push for
+            // this repository. The journal's operation id remains canonical.
+            let canonical_id = value["operationId"]
+                .as_str()
+                .ok_or_else(|| "Push journal returned an invalid operation identifier.".to_string())?;
+            let acceptance = silo_engine::jobs::accept_domain_id(
+                context.as_ref(),
+                "push",
+                canonical_id,
+                "push.start",
+            )
+            .map_err(|error| error.to_string())?;
+            if acceptance.created {
+                if value["status"] == "pushing" {
+                    let computer_id = runtime::resolve_computer_id(paths, &computer).ok();
+                    publish_job_progress(
+                        context.as_ref(),
+                        &acceptance.job_id,
+                        &value,
+                        computer_id,
+                    )?;
+                } else {
+                    let _ = silo_engine::jobs::reconcile_finished(
+                        context.as_ref(),
+                        silo_api::jobs::JobFinished {
+                            job_id: acceptance.job_id,
+                            result: Some(value.clone()),
+                            error: None,
+                        },
+                        silo_engine::context::Audience::All,
+                    );
+                }
+            } else if value["status"] != "pushing" {
+                // The domain journal may contain a result committed just before the
+                // engine crashed while committing its generic job record.
+                let _ = silo_engine::jobs::reconcile_finished(
+                    context.as_ref(),
+                    silo_api::jobs::JobFinished {
+                        job_id: acceptance.job_id,
+                        result: Some(value.clone()),
+                        error: None,
+                    },
+                    silo_engine::context::Audience::All,
+                );
+            }
+        }
         return Ok(value);
     }
     let planned = host_push::planned_count(paths, &computer, &path);
@@ -208,25 +278,129 @@ pub(crate) fn start(
     }
     // Persist before acknowledging or starting: retrying a lost reply never starts a second job.
     persist_claim(&journal, &jobs, &id, write)?;
+    let job = if let Some(context) = context {
+        let acceptance = match silo_engine::jobs::accept_domain_id(
+            context.as_ref(),
+            "push",
+            &id,
+            "push.start",
+        ) {
+            Ok(acceptance) => acceptance,
+            Err(error) => {
+                let message = error.to_string();
+                value["status"] = json!("failed");
+                value["message"] = json!(message);
+                record_completion_locked(&journal, &id, value.clone(), write);
+                publish_application_state_changed();
+                return Err(message);
+            }
+        };
+        if !acceptance.created {
+            // A retained registry identity is authoritative even when the domain
+            // journal no longer contains its row. Never launch the operation twice.
+            value["status"] = json!("unknown");
+            value["message"] = json!("This push operation id was already accepted.");
+            record_completion_locked(&journal, &id, value.clone(), write);
+            let _ = silo_engine::jobs::reconcile_finished(
+                context.as_ref(),
+                silo_api::jobs::JobFinished {
+                    job_id: acceptance.job_id,
+                    result: Some(value.clone()),
+                    error: None,
+                },
+                silo_engine::context::Audience::All,
+            );
+            publish_application_state_changed();
+            return Ok(value);
+        }
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let gate_key = format!("push-job:{id}");
+        let cancel_flag = cancellation.clone();
+        let cancel_key = gate_key.clone();
+        context
+            .job_registry()
+            .map_err(|error| error.to_string())?
+            .register_cancel(
+                acceptance.job_id.clone(),
+                silo_engine::jobs::CancelRoute::PushGate,
+                move || {
+                    let result = runtime::OPERATIONS
+                        .cancel_key(&cancel_key)
+                        .map_err(|error| error.to_string());
+                    if result.is_ok() {
+                        cancel_flag.store(true, Ordering::SeqCst);
+                    }
+                    result
+                },
+            );
+        let computer_id = runtime::resolve_computer_id(paths, &computer).ok();
+        if let Err(error) =
+            publish_job_progress(context.as_ref(), &acceptance.job_id, &value, computer_id)
+        {
+            value["status"] = json!("failed");
+            value["message"] = json!(error);
+            record_completion_locked(&journal, &id, value.clone(), write);
+            let _ = silo_engine::jobs::finish_with_result(
+                        context.as_ref(),
+                        acceptance.job_id,
+                        value.clone(),
+                        silo_engine::context::Audience::All,
+                    );
+            publish_application_state_changed();
+            return Err(error);
+        }
+        Some((context, acceptance.job_id, cancellation, gate_key))
+    } else {
+        None
+    };
     let paths = paths.clone();
     let failure_journal = journal.clone();
     let failure_id = id.clone();
     let failure_computer = computer.clone();
     let failure_path = path.clone();
     let failure_target = target.clone();
+    let failure_job = job.clone();
+    let (push_cancellation, push_gate_key, push_job_id) = job
+        .as_ref()
+        .map(|(_, job_id, cancellation, gate_key)| {
+            (cancellation.clone(), gate_key.clone(), Some(job_id.clone()))
+        })
+        .unwrap_or_else(|| {
+            (
+                Arc::new(AtomicBool::new(false)),
+                format!("push-job:{id}"),
+                None,
+            )
+        });
     std::thread::spawn(move || {
         let task = async move {
-            let result =
-                host_push::push_repository(paths, computer.clone(), path.clone(), target.clone())
-                    .await;
+            let result = host_push::push_repository(
+                paths,
+                computer.clone(),
+                path.clone(),
+                target.clone(),
+                push_cancellation,
+                push_gate_key,
+                push_job_id,
+            )
+            .await;
             let mut value = result.unwrap_or_else(|message| json!({"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message,"target":target}));
             value["operationId"] = json!(id);
+            let finished_value = value.clone();
             // The std lock and fsync'd journal write block; keep them off the async workers.
             let _ = runtime::operation_gate::spawn_blocking(move || {
                 record_completion(&journal, &id, value)
             })
             .await;
             publish_application_state_changed();
+            if let Some((context, job_id, _, _)) = job {
+                let _ = silo_engine::jobs::finish_with_result(
+                    context.as_ref(),
+                    job_id,
+                    finished_value,
+                    silo_engine::context::Audience::All,
+                );
+            }
         };
         match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -243,8 +417,17 @@ pub(crate) fn start(
                     "target": failure_target
                 });
                 value["operationId"] = json!(failure_id);
+                let finished_value = value.clone();
                 record_completion(&failure_journal, &failure_id, value);
                 publish_application_state_changed();
+                if let Some((context, job_id, _, _)) = failure_job {
+                    let _ = silo_engine::jobs::finish_with_result(
+                        context.as_ref(),
+                        job_id,
+                        finished_value,
+                        silo_engine::context::Audience::All,
+                    );
+                }
             }
         }
     });
@@ -287,12 +470,7 @@ fn record_completion_locked(
         }
     }
 }
-pub fn status(
-    paths: &RuntimePaths,
-    computer: &str,
-    path: &str,
-    id: &str,
-) -> Result<Value, String> {
+pub fn status(paths: &RuntimePaths, computer: &str, path: &str, id: &str) -> Result<Value, String> {
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
     let jobs = read(&paths.home.join("repository-push-operations.json"))?;
     let Some(job) = jobs.get(id) else {
@@ -307,6 +485,47 @@ pub fn merge(paths: &RuntimePaths, legacy: Vec<Value>) -> Result<Vec<Value>, Str
     let journal = paths.home.join("repository-push-operations.json");
     Ok(merge_journal(&journal, legacy))
 }
+
+/// Reconciles retained push outcomes before silod accepts requests. The generic
+/// registry first marks unfinished jobs as interrupted; this pass replaces that
+/// placeholder with the durable push journal result before get/ack is exposed.
+pub fn reconcile_jobs_before_serving(
+    context: &dyn silo_engine::EngineContext,
+    runtime_home: &Path,
+) -> Result<(), String> {
+    let jobs = {
+        let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
+        read(&runtime_home.join("repository-push-operations.json"))?
+    };
+    let registry = context.job_registry()?;
+    for job in jobs.values() {
+        let value = operation(job);
+        let Some(operation_id) = value["operationId"].as_str() else {
+            continue;
+        };
+        let job_id = silo_api::jobs::JobId::new(format!("push:{operation_id}"))
+            .map_err(|error| error.to_string())?;
+        if registry
+            .get(&job_id)
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            continue;
+        }
+        silo_engine::jobs::reconcile_finished(
+            context,
+            silo_api::jobs::JobFinished {
+                job_id,
+                result: Some(value),
+                error: None,
+            },
+            silo_engine::context::Audience::All,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// A damaged push journal must not hide the rest of the application state:
 /// fall back to the in-memory pushes and report the journal problem.
 fn merge_journal(journal: &Path, legacy: Vec<Value>) -> Vec<Value> {

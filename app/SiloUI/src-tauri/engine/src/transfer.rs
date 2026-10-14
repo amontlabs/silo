@@ -1105,7 +1105,15 @@ struct Slot {
 
 impl Slot {
     fn take(id: &str) -> Result<Self, String> {
-        Self::take_if_accepting(id, crate::runtime::shutdown::ensure_accepting_operations)
+        Self::take_with_cancel(id, None)
+    }
+
+    fn take_with_cancel(id: &str, cancel: Option<Arc<AtomicBool>>) -> Result<Self, String> {
+        Self::take_if_accepting_with_cancel(
+            id,
+            cancel,
+            crate::runtime::shutdown::ensure_accepting_operations,
+        )
     }
 
     /// Registers the slot unless `accepting` refuses. Quit refuses admission before it
@@ -1113,6 +1121,14 @@ impl Slot {
     /// transfer registered after that cancellation.
     fn take_if_accepting(
         id: &str,
+        accepting: impl FnOnce() -> Result<(), String>,
+    ) -> Result<Self, String> {
+        Self::take_if_accepting_with_cancel(id, None, accepting)
+    }
+
+    fn take_if_accepting_with_cancel(
+        id: &str,
+        cancel: Option<Arc<AtomicBool>>,
         accepting: impl FnOnce() -> Result<(), String>,
     ) -> Result<Self, String> {
         if id.is_empty()
@@ -1130,11 +1146,22 @@ impl Slot {
         if PAUSED.load(Ordering::Acquire) {
             return Err("Silo is installing an update. Try again after it restarts.".into());
         }
-        if active.is_some() {
-            return Err("Another file transfer is still running.".into());
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        *active = Some((id.into(), cancel.clone()));
+        let cancel = match active.as_ref() {
+            Some((active_id, active_cancel))
+                if active_id == id
+                    && cancel
+                        .as_ref()
+                        .is_some_and(|cancel| Arc::ptr_eq(cancel, active_cancel)) =>
+            {
+                active_cancel.clone()
+            }
+            Some(_) => return Err("Another file transfer is still running.".into()),
+            None => {
+                let cancel = cancel.unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                *active = Some((id.into(), cancel.clone()));
+                cancel
+            }
+        };
         Ok(Self {
             id: id.into(),
             cancel,
@@ -1332,6 +1359,14 @@ pub fn native_drop(shell: &str, event: NativeDropEvent) {
 
 fn publish_event(name: &str, payload: serde_json::Value) {
     if let Some(context) = silo_engine::context::current() {
+        if let Err(error) = silo_engine::jobs::publish_source_progress(
+            context.as_ref(),
+            name,
+            &payload,
+            silo_engine::context::Audience::All,
+        ) {
+            eprintln!("silo-engine: could not persist transfer progress: {error}");
+        }
         // window-targeted events use Audience::All until client ids replace labels.
         context.publish(
             silo_engine::context::Event::new(name, payload),
@@ -1346,6 +1381,101 @@ pub fn issue_upload_selection(owner: &str, paths: Vec<String>) -> UploadSelectio
 
 fn publish_progress(progress: &Progress) {
     publish_event(PROGRESS_EVENT, serde_json::json!(progress));
+}
+
+fn begin_transfer_job(
+    transfer_id: &str,
+    method: &'static str,
+) -> Result<
+    Option<(
+        std::sync::Arc<dyn silo_engine::context::EngineContext>,
+        silo_api::jobs::JobId,
+        Arc<AtomicBool>,
+    )>,
+    String,
+> {
+    let Some(context) = silo_engine::context::current() else {
+        return Ok(None);
+    };
+    let accepted = silo_engine::jobs::accept_domain_id(
+        context.as_ref(),
+        "transfer",
+        transfer_id,
+        method,
+    )
+    .map_err(|error| error.to_string())?;
+    if !accepted.created {
+        return Err(if accepted.acknowledged {
+            "This transfer ID was already acknowledged. Start a new transfer.".to_owned()
+        } else {
+            "This transfer ID is already in use.".to_owned()
+        });
+    }
+    let registry = context.job_registry()?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    // Reserve the single transfer slot at acceptance so both the job API and the
+    // existing Tauri cancel command can reach the token before Slot::take runs.
+    {
+        let mut active = ACTIVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if active.is_none() {
+            *active = Some((transfer_id.to_owned(), cancel.clone()));
+        }
+    }
+    let cancel_job = cancel.clone();
+    let cancel_id = transfer_id.to_owned();
+    registry.register_cancel(
+        accepted.job_id.clone(),
+        silo_engine::jobs::CancelRoute::Transfer,
+        move || {
+            cancel_job.store(true, Ordering::Release);
+            cancel_transfer("main", &cancel_id)
+        },
+    );
+    if let Err(error) = registry.mark_running(&accepted.job_id) {
+        clear_transfer_reservation(transfer_id, &cancel);
+        return Err(error.to_string());
+    }
+    Ok(Some((context, accepted.job_id, cancel)))
+}
+
+fn clear_transfer_reservation(transfer_id: &str, cancel: &Arc<AtomicBool>) {
+    let mut active = ACTIVE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if active.as_ref().is_some_and(|(id, active_cancel)| {
+        id == transfer_id && Arc::ptr_eq(active_cancel, cancel)
+    }) {
+        *active = None;
+    }
+}
+
+fn finish_transfer_job<T: Serialize>(
+    context: &dyn silo_engine::context::EngineContext,
+    job_id: silo_api::jobs::JobId,
+    result: &Result<T, String>,
+) -> Result<(), String> {
+    match result {
+        Ok(value) => silo_engine::jobs::finish_with_result(
+            context,
+            job_id,
+            serde_json::to_value(value).map_err(|error| error.to_string())?,
+            silo_engine::context::Audience::All,
+        ),
+        Err(message) => silo_engine::jobs::finish_with_error(
+            context,
+            job_id,
+            if message == CANCELLED {
+                silo_api::jobs::ErrorCode::Cancelled
+            } else {
+                silo_api::jobs::ErrorCode::Internal
+            },
+            message.clone(),
+            silo_engine::context::Audience::All,
+        ),
+    }
+    .map_err(|error| error.to_string())
 }
 
 /// Resolves the private SSH transport for a computer that is ready for transfers.
@@ -1383,6 +1513,35 @@ pub fn upload_files(
     selection: String,
     conflict: ConflictPolicy,
 ) -> Result<UploadOutcome, String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.upload")?;
+    let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
+    let outcome = upload_files_inner(
+        paths,
+        owner,
+        transfer_id.clone(),
+        computer,
+        directory,
+        selection,
+        conflict,
+        cancel,
+    );
+    if let Some((context, job_id, cancel)) = tracked {
+        clear_transfer_reservation(&transfer_id, &cancel);
+        finish_transfer_job(context.as_ref(), job_id, &outcome)?;
+    }
+    outcome
+}
+
+fn upload_files_inner(
+    paths: Option<&crate::runtime::RuntimePaths>,
+    owner: String,
+    transfer_id: String,
+    computer: String,
+    directory: String,
+    selection: String,
+    conflict: ConflictPolicy,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<UploadOutcome, String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let roots = default_roots();
     if !within_any(&directory, &roots) {
@@ -1392,7 +1551,7 @@ pub fn upload_files(
     if owner != "main" && directory != downloads_root() {
         return Err("This window can only upload to the Downloads folder.".into());
     }
-    let slot = Slot::take(&transfer_id)?;
+    let slot = Slot::take_with_cancel(&transfer_id, cancel)?;
     let paths_to_upload = take_selection(&selection, &owner)?;
     let sources = prepare_sources(&paths_to_upload)?;
     let sftp = connect(paths, &computer)?;
@@ -1441,6 +1600,27 @@ pub fn prepare_download(
     computer: String,
     path: String,
 ) -> Result<(DownloadSession, String), String> {
+    let tracked = begin_transfer_job(&transfer_id, "files.download")?;
+    let cancel = tracked.as_ref().map(|(_, _, cancel)| cancel.clone());
+    let result = prepare_download_inner(paths, transfer_id.clone(), computer, path, cancel);
+    if let (Some((context, job_id, cancel)), Err(message)) = (tracked, &result) {
+        clear_transfer_reservation(&transfer_id, &cancel);
+        finish_transfer_job::<serde_json::Value>(
+            context.as_ref(),
+            job_id,
+            &Err(message.clone()),
+        )?;
+    }
+    result
+}
+
+fn prepare_download_inner(
+    paths: Option<&crate::runtime::RuntimePaths>,
+    transfer_id: String,
+    computer: String,
+    path: String,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<(DownloadSession, String), String> {
     crate::runtime::shutdown::ensure_accepting_operations()?;
     let roots = default_roots();
     if !within_any(&path, &roots) {
@@ -1448,7 +1628,7 @@ pub fn prepare_download(
             "Silo can only download files from the workspace or the Downloads folder.".into(),
         );
     }
-    let slot = Slot::take(&transfer_id)?;
+    let slot = Slot::take_with_cancel(&transfer_id, cancel)?;
     let sftp = connect(paths, &computer)?;
     let emit = |_progress: &Progress| {};
     let control = Control {
@@ -1522,6 +1702,11 @@ pub fn download_prepared(
         Ok(DownloadOutcome::Cancelled) => control.report("download", "cancelled", "", 0, 0, 0, 0),
         Err(_) => control.report("download", "failed", "", 0, 0, 0, 0),
         _ => {}
+    }
+    if let Some(context) = silo_engine::context::current() {
+        let job_id = silo_api::jobs::JobId::new(format!("transfer:{}", slot.id))
+            .map_err(|error| error.to_string())?;
+        finish_transfer_job(context.as_ref(), job_id, &outcome)?;
     }
     outcome
 }
@@ -2368,6 +2553,23 @@ mod tests {
         assert!(admit("late").is_err());
         drop(held);
         drop(admit("after").unwrap());
+
+        let pending_cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut active = ACTIVE.lock().unwrap();
+            assert!(active.is_none());
+            *active = Some(("pending".into(), pending_cancel.clone()));
+        }
+        cancel_transfer("main", "pending").unwrap();
+        assert!(pending_cancel.load(Ordering::Acquire));
+        let adopted = Slot::take_if_accepting_with_cancel(
+            "pending",
+            Some(pending_cancel.clone()),
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(Arc::ptr_eq(&adopted.cancel, &pending_cancel));
+        drop(adopted);
     }
 
     /// A client for the real server whose batches that contain `needle` first run `before`,

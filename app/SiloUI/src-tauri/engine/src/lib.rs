@@ -20,6 +20,7 @@ pub mod desktop_proxy;
 pub mod desktop_viewer;
 pub mod desktop_viewer_media;
 pub mod device_identity;
+pub mod events;
 pub mod editor;
 pub mod context;
 pub mod files;
@@ -33,6 +34,7 @@ pub mod host_push_transport;
 pub mod health_watch;
 pub mod log_export;
 pub mod log_retention;
+pub mod jobs;
 #[path = "macos_computers.rs"]
 pub mod macos_computers_engine;
 pub use macos_computers_engine as macos_computers;
@@ -40,6 +42,7 @@ pub mod macos_display_gateway;
 #[path = "macos_remote.rs"]
 pub mod macos_remote_engine;
 pub mod network;
+pub mod notices;
 pub mod notifications;
 pub mod owned_tunnel;
 pub mod pre_upgrade_backup;

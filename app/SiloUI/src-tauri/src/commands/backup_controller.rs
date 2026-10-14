@@ -180,6 +180,7 @@ pub(crate) async fn start_restore(
     })
     .await
     .map_err(|error| error.to_string())?
+    .map(|_| ())
 }
 
 #[tauri::command]

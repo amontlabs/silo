@@ -5,7 +5,14 @@ use crate::runtime::RuntimeHost;
 use crate::{backup, runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use silo_engine::context::{Audience, Event};
+use silo_api::{
+    jobs::{ErrorCode, JobId, JobProgress},
+    methods::{exports::BackupOperation, operations::OperationKind},
+};
+use silo_engine::{
+    context::{Audience, EngineContext, Event},
+    jobs::{self, CancelRoute},
+};
 use std::{
     fs,
     io::{Read, Write},
@@ -325,6 +332,44 @@ pub fn install(host: Arc<dyn RuntimeHost>) -> Result<Arc<Controller>, String> {
     Ok(controller)
 }
 
+/// Reconciles an already committed export/import outcome before the socket host
+/// exposes operations.job.get and operations.job.acknowledge after a restart.
+pub fn reconcile_jobs_before_serving(context: &dyn EngineContext) -> Result<(), String> {
+    let history_path = context.paths().app_data.join(HISTORY_FILE);
+    let retained = match recovery::retained_terminal_operation(&history_path) {
+        Ok(retained) => retained,
+        Err(error) => {
+            // A damaged backup journal must not prevent the rest of Silo from
+            // starting. Its existing interrupted job remains available to inspect.
+            eprintln!("Silo could not reconcile the backup job journal: {error}");
+            return Ok(());
+        }
+    };
+    let Some((operation_id, result)) = retained else {
+        return Ok(());
+    };
+    let job_id = JobId::new(format!("exports:{operation_id}"))
+        .map_err(|error| error.to_string())?;
+    let registry = context.job_registry()?;
+    if registry
+        .get(&job_id)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        return Ok(());
+    }
+    jobs::reconcile_finished(
+        context,
+        silo_api::jobs::JobFinished {
+            job_id,
+            result: Some(result),
+            error: None,
+        },
+        Audience::All,
+    )
+    .map_err(|error| error.to_string())
+}
+
 /// Startup runs this in its background worker before other recovery or optional
 /// starts. An interrupted import may still own a checkpoint record for a computer
 /// whose settings were never saved; its recovery is short and never repeats the
@@ -412,11 +457,227 @@ fn wait_for_controller_recovery(
 pub fn publish(controller: &Controller) {
     controller.revision.fetch_add(1, Ordering::Relaxed);
     if let Ok(host) = controller.runtime_host() {
-        host.engine_context().publish(
+        let context = host.engine_context();
+        publish_backup_state(controller, context.as_ref());
+        publish_job_state(controller, context.as_ref());
+        context.publish(
             Event::new("silo://application-state-changed", Value::Null),
             Audience::All,
         );
     }
+}
+
+/// Publishes a typed snapshot for clients that subscribe to the exports topic.
+fn publish_backup_state(controller: &Controller, context: &dyn EngineContext) {
+    let state = match backup_state(controller) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("Silo could not read backup state for exports.changed: {error}");
+            return;
+        }
+    };
+    // Decode through the public API type so this topic remains contract checked,
+    // including fields owned by the client such as the remembered destination.
+    let state = match serde_json::to_value(state)
+        .map_err(|error| error.to_string())
+        .and_then(|value| {
+            serde_json::from_value::<silo_api::methods::exports::BackupState>(value)
+                .map_err(|error| error.to_string())
+        }) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("Silo could not map backup state to the API contract: {error}");
+            return;
+        }
+    };
+    match serde_json::to_value(state) {
+        Ok(payload) => context.publish(Event::new("exports.changed", payload), Audience::All),
+        Err(error) => eprintln!("Silo could not encode exports.changed state: {error}"),
+    }
+}
+
+/// Publishes the current backup operation through the durable job contract.
+/// The Tauri application-state event remains the UI's refresh signal until its
+/// client migrates to `operations.job.progress` and `operations.job.finished`.
+fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
+    let operation = controller
+        .view
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .operation
+        .clone();
+    let Some(operation) = operation else {
+        return;
+    };
+    let journal = match recovery::snapshot(controller) {
+        Ok(Some(journal)) => journal,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("Silo could not read the backup job identity: {error}");
+            return;
+        }
+    };
+    let job_id = match JobId::new(format!("exports:{}", journal.identity())) {
+        Ok(job_id) => job_id,
+        Err(error) => {
+            eprintln!("Silo could not form the backup job identity: {error}");
+            return;
+        }
+    };
+    let serialized = match serde_json::to_value(&operation) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Silo could not encode backup job state: {error}");
+            return;
+        }
+    };
+
+    match operation {
+        Operation::Running { operation, .. } => {
+            let data = match serde_json::from_value::<BackupOperation>(serialized) {
+                Ok(data) => data,
+                Err(error) => {
+                    eprintln!("Silo could not map backup progress to the API contract: {error}");
+                    return;
+                }
+            };
+            let kind = match operation {
+                "backup" => OperationKind::Export,
+                "restore" => OperationKind::Import,
+                _ => OperationKind::Other,
+            };
+            if let Err(error) = jobs::publish_progress(
+                context,
+                JobProgress::Backup {
+                    job_id,
+                    kind: Some(kind),
+                    computer_id: None,
+                    data,
+                },
+                Audience::All,
+            ) {
+                eprintln!("Silo could not publish backup progress: {error}");
+            }
+        }
+        Operation::Result { .. } => {
+            if let Err(error) = jobs::reconcile_finished(
+                context,
+                silo_api::jobs::JobFinished {
+                    job_id,
+                    result: Some(serialized),
+                    error: None,
+                },
+                Audience::All,
+            ) {
+                eprintln!("Silo could not publish the backup outcome: {error}");
+            }
+        }
+    }
+}
+
+/// A newly accepted existing backup/restore identity, before it is marked
+/// running and receives its cancellation callback.
+struct AcceptedBackupJob {
+    context: Arc<dyn EngineContext>,
+    job_id: JobId,
+    domain_id: String,
+}
+
+fn accept_backup_job(
+    controller: &Arc<Controller>,
+    space: &str,
+    domain_id: &str,
+    method: &str,
+) -> Result<Option<AcceptedBackupJob>, BackupJobRegistrationError> {
+    let Ok(host) = controller.runtime_host() else {
+        // Test and recovery-only controllers have no runtime host and retain
+        // the legacy behavior without a P2 job record.
+        return Ok(None);
+    };
+    let context = host.engine_context();
+    let accepted = jobs::accept_domain_id(context.as_ref(), space, domain_id, method)
+        .map_err(|error| BackupJobRegistrationError::Registry(error.to_string()))?;
+    if !accepted.created {
+        return Err(BackupJobRegistrationError::Duplicate {
+            acknowledged: accepted.acknowledged,
+        });
+    }
+    Ok(Some(AcceptedBackupJob {
+        context,
+        job_id: accepted.job_id,
+        domain_id: domain_id.to_owned(),
+    }))
+}
+
+fn start_backup_job(
+    controller: &Arc<Controller>,
+    accepted: AcceptedBackupJob,
+    route: CancelRoute,
+    cancel: fn(&Controller, &str) -> Result<(), String>,
+) -> Result<JobId, BackupJobRegistrationError> {
+    let registry = accepted
+        .context
+        .job_registry()
+        .map_err(|error| BackupJobRegistrationError::Registry(error.to_string()))?;
+    registry
+        .mark_running(&accepted.job_id)
+        .map_err(|error| BackupJobRegistrationError::Registry(error.to_string()))?;
+    let weak_controller = Arc::downgrade(controller);
+    let cancel_id = accepted.domain_id;
+    let job_id = accepted.job_id;
+    registry.register_cancel(job_id.clone(), route, move || {
+        let controller = weak_controller
+            .upgrade()
+            .ok_or_else(|| "This operation is no longer available.".to_owned())?;
+        cancel(&controller, &cancel_id)
+    });
+    Ok(job_id)
+}
+
+fn register_backup_job(
+    controller: &Arc<Controller>,
+    space: &str,
+    domain_id: &str,
+    method: &str,
+    route: CancelRoute,
+    cancel: fn(&Controller, &str) -> Result<(), String>,
+) -> Result<Option<JobId>, BackupJobRegistrationError> {
+    accept_backup_job(controller, space, domain_id, method)?.map_or(Ok(None), |accepted| {
+        start_backup_job(controller, accepted, route, cancel).map(Some)
+    })
+}
+
+#[derive(Debug)]
+enum BackupJobRegistrationError {
+    Duplicate { acknowledged: bool },
+    Registry(String),
+}
+
+impl std::fmt::Display for BackupJobRegistrationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Duplicate { acknowledged: true } => {
+                formatter.write_str("This operation ID was already acknowledged.")
+            }
+            Self::Duplicate {
+                acknowledged: false,
+            } => formatter.write_str("This operation ID is already in use."),
+            Self::Registry(error) => formatter.write_str(error),
+        }
+    }
+}
+
+fn cancel_backup_job(controller: &Controller, operation_id: &str) -> Result<(), String> {
+    if recovery::token(controller)?.as_deref() != Some(operation_id) {
+        return Err("not_found".to_owned());
+    }
+    cancel_operation(controller)
+}
+
+fn cancel_inspection_job(controller: &Controller, request_id: &str) -> Result<(), String> {
+    cancel_inspection(controller, request_id)
+        .then_some(())
+        .ok_or_else(|| "not_found".to_owned())
 }
 
 /// Binary sizes, as the storage panel shows them (E-41).
@@ -505,12 +766,50 @@ pub fn inspection_worker(
     path: PathBuf,
     request_id: String,
 ) -> impl FnOnce() -> Result<ArchiveInspectionResult, String> + Send {
+    // Reject a reused API identity before it can replace and cancel an active
+    // inspection with the same request id.
+    let (accepted, mut duplicate_error) =
+        match accept_backup_job(&controller, "inspect", &request_id, "exports.inspect") {
+            Ok(accepted) => (accepted, None),
+            Err(error @ BackupJobRegistrationError::Duplicate { .. }) => {
+                (None, Some(error.to_string()))
+            }
+            Err(BackupJobRegistrationError::Registry(error)) => {
+                eprintln!("Silo could not register the archive inspection job: {error}");
+                (None, Some(error))
+            }
+        };
     // Register before dispatch so cancellation and replacement also cover queued work.
-    let cancellation = register_inspection(&controller, request_id.clone());
+    let cancellation = duplicate_error
+        .is_none()
+        .then(|| register_inspection(&controller, request_id.clone()));
+    let job_id = match accepted {
+        Some(accepted) => match start_backup_job(
+            &controller,
+            accepted,
+            CancelRoute::Inspection,
+            cancel_inspection_job,
+        ) {
+            Ok(job_id) => Some(job_id),
+            Err(error) => {
+                eprintln!("Silo could not register the archive inspection job: {error}");
+                if duplicate_error.is_none() {
+                    duplicate_error = Some(error.to_string());
+                }
+                None
+            }
+        },
+        None => None,
+    };
     move || {
+        if let Some(error) = duplicate_error {
+            return Err(error);
+        }
+        let cancellation = cancellation
+            .ok_or_else(|| "The archive inspection could not be registered.".to_owned())?;
         let inspected = controller.service.inspect_archive(&path, &cancellation);
         finish_inspection(&controller, &request_id);
-        match inspected {
+        let result: Result<ArchiveInspectionResult, String> = match inspected {
             Ok(inspection) => Ok(ArchiveInspectionResult {
                 archive: archive_from(&path, &inspection),
                 valid: true,
@@ -537,7 +836,48 @@ pub fn inspection_worker(
                 valid: false,
                 reason: Some(error.to_string()),
             }),
+        };
+        if let Some(job_id) = job_id {
+            if let Ok(host) = controller.runtime_host() {
+                let context = host.engine_context();
+                let published = if cancellation.cancelled() {
+                    jobs::finish_with_error(
+                        context.as_ref(),
+                        job_id,
+                        ErrorCode::Cancelled,
+                        "The archive inspection was cancelled.",
+                        Audience::All,
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    match &result {
+                        Ok(result) => serde_json::to_value(result)
+                            .map_err(|error| error.to_string())
+                            .and_then(|value| {
+                                jobs::finish_with_result(
+                                    context.as_ref(),
+                                    job_id,
+                                    value,
+                                    Audience::All,
+                                )
+                                .map_err(|error| error.to_string())
+                            }),
+                        Err(error) => jobs::finish_with_error(
+                            context.as_ref(),
+                            job_id,
+                            ErrorCode::Internal,
+                            error.clone(),
+                            Audience::All,
+                        )
+                        .map_err(|error| error.to_string()),
+                    }
+                };
+                if let Err(error) = published {
+                    eprintln!("Silo could not publish the archive inspection outcome: {error}");
+                }
+            }
         }
+        result
     }
 }
 
@@ -730,6 +1070,27 @@ pub fn begin_export(
         checkpoint_id.clone(),
         checkpoint_name.as_deref(),
     )?;
+    if let Err(error) = register_backup_job(
+        &controller,
+        "exports",
+        &operation_id,
+        "exports.create",
+        CancelRoute::Export,
+        cancel_backup_job,
+    ) {
+        let error = error.to_string();
+        let operation = failed_transfer(
+            "backup",
+            pending_archive.clone(),
+            None,
+            TransferError::from(error.clone()),
+        );
+        let operation = recovery::complete(&controller, operation);
+        let _ = set_operation(&controller, operation);
+        finish(&controller);
+        publish(&controller);
+        return Err(error);
+    }
     publish(&controller);
     let failure_archive = pending_archive.clone();
     let work_controller = controller.clone();
@@ -1463,7 +1824,7 @@ pub fn begin_import(
     archive_path: String,
     new_name: String,
     source_name: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     runtime::validate_name(&new_name).map_err(|error| error.to_string())?;
     if let Some(source_name) = &source_name {
         runtime::validate_name(source_name).map_err(|error| error.to_string())?;
@@ -1494,10 +1855,10 @@ pub fn begin_import(
         computers: source_name.iter().cloned().collect(),
         checkpoint_name: None,
     };
-    if let Err(error) = recovery::begin(
-        &controller,
-        recovery::Journal::restore(archive.clone(), new_name.clone(), source_name.clone()),
-    ) {
+    let journal =
+        recovery::Journal::restore(archive.clone(), new_name.clone(), source_name.clone());
+    let operation_id = journal.identity().to_owned();
+    if let Err(error) = recovery::begin(&controller, journal) {
         finish(&controller);
         return Err(error);
     }
@@ -1524,6 +1885,27 @@ pub fn begin_import(
             }],
         });
     }
+    if let Err(error) = register_backup_job(
+        &controller,
+        "exports",
+        &operation_id,
+        "exports.import",
+        CancelRoute::Export,
+        cancel_backup_job,
+    ) {
+        let error = error.to_string();
+        let operation = failed_transfer(
+            "restore",
+            archive.clone(),
+            Some(new_name.clone()),
+            TransferError::from(error.clone()),
+        );
+        let operation = recovery::complete(&controller, operation);
+        let _ = set_operation(&controller, operation);
+        finish(&controller);
+        publish(&controller);
+        return Err(error);
+    }
     publish(&controller);
     let (failure_archive, target) = (archive.clone(), Some(new_name.clone()));
     let work_controller = controller.clone();
@@ -1542,7 +1924,7 @@ pub fn begin_import(
             publish(&controller);
         }
     });
-    Ok(())
+    Ok(operation_id)
 }
 
 fn run_restore(

@@ -54,10 +54,11 @@ pub(crate) use remote_display::DisplaySession;
 use serde::Serialize;
 use silo_engine::{Audience, EngineContext, Event};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicU8, Ordering},
-        Arc, Mutex, Once,
+        Arc, Mutex, Once, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -68,6 +69,13 @@ const CHANGED_EVENT: &str = "silo://macos-computers-changed";
 const NOT_SUPPORTED: &str = "macOS computers need a Mac with Apple silicon.";
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
+static MACOS_JOBS: OnceLock<Mutex<HashMap<String, silo_api::jobs::JobId>>> = OnceLock::new();
+static MACOS_CHECKPOINT_JOBS: OnceLock<Mutex<HashMap<String, silo_api::jobs::JobId>>> =
+    OnceLock::new();
+static MACOS_PENDING_CHECKPOINT_JOBS: OnceLock<
+    Mutex<HashMap<silo_api::jobs::JobId, (String, silo_api::jobs::JobFinished)>>,
+> = OnceLock::new();
+static MACOS_CHECKPOINT_RETRY_WORKER: Once = Once::new();
 /// How long a guest may ignore a stop request before the computer counts as running again.
 const STOP_IGNORED_AFTER: Duration = Duration::from_secs(20);
 const GRACEFUL_QUIT: Duration = Duration::from_secs(60);
@@ -730,9 +738,245 @@ fn snapshot() -> MacosComputersState {
 }
 
 fn emit(app: &MacosContext) {
-    if let Ok(payload) = serde_json::to_value(snapshot()) {
+    let state = snapshot();
+    publish_job_activity(app, &state);
+    if let Ok(payload) = serde_json::to_value(&state) {
+        app.publish(
+            Event::new(
+                "computers.changed",
+                serde_json::json!({"macos": payload}),
+            ),
+            Audience::All,
+        );
         app.publish(Event::new(CHANGED_EVENT, payload), Audience::All);
     }
+}
+
+fn publish_job_activity(app: &MacosContext, state: &MacosComputersState) {
+    retry_pending_checkpoint_completions(app);
+    let jobs = MACOS_JOBS.get_or_init(|| Mutex::new(HashMap::new()));
+    let existing = state
+        .computers
+        .iter()
+        .map(|computer| computer.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let mut completed = Vec::new();
+    let mut progress = Vec::new();
+    {
+        let mut active = jobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for computer in &state.computers {
+            if is_macos_job_state(computer.state) {
+                let job_id = match active.get(&computer.id) {
+                    Some(job_id) => job_id.clone(),
+                    None => {
+                        let accepted = match crate::jobs::allocate(
+                            app.engine.as_ref(),
+                            "computers.macos",
+                        ) {
+                            Ok(accepted) => accepted,
+                            Err(error) => {
+                                eprintln!("silo-engine: could not accept macOS job: {error}");
+                                continue;
+                            }
+                        };
+                        let job_id = accepted.job_id;
+                        active.insert(computer.id.clone(), job_id.clone());
+                        let cancellation = registry()
+                            .entries
+                            .iter()
+                            .find(|entry| entry.record.id == computer.id && is_creating(entry.state))
+                            .map(|entry| entry.cancel.clone());
+                        if let Some(cancellation) = cancellation {
+                            if let Ok(registry) = app.engine.job_registry() {
+                                let cancel_flag = cancellation.clone();
+                                registry.register_cancel(
+                                    job_id.clone(),
+                                    crate::jobs::CancelRoute::MacosGate,
+                                    move || {
+                                        cancel_flag.store(CANCEL_AND_REMOVE, Ordering::SeqCst);
+                                        Ok(())
+                                    },
+                                );
+                            }
+                        }
+                        job_id
+                    }
+                };
+                progress.push((job_id, computer));
+            } else if let Some(job_id) = active.remove(&computer.id) {
+                completed.push((job_id, computer.state, computer.detail.clone()));
+            }
+
+            if computer.checkpoint_operation.is_some() {
+                let checkpoint_job = MACOS_CHECKPOINT_JOBS
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&computer.id)
+                    .cloned();
+                if let Some(job_id) = checkpoint_job {
+                    progress.push((job_id, computer));
+                }
+            }
+        }
+        let missing = active
+            .keys()
+            .filter(|computer_id| !existing.contains(computer_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        for computer_id in missing {
+            if let Some(job_id) = active.remove(&computer_id) {
+                completed.push((job_id, State::Failed, Some("The computer was removed.".into())));
+            }
+        }
+    }
+    for (job_id, computer) in progress {
+        let progress = serde_json::json!({
+            "computerId": computer.id,
+            "state": computer.state,
+            "progress": computer.progress,
+            "detail": computer.detail,
+            "checkpointOperation": computer.checkpoint_operation,
+        });
+        let data = match serde_json::from_value::<silo_api::jobs::MacosJobProgress>(progress) {
+            Ok(data) => data,
+            Err(error) => {
+                eprintln!("silo-engine: could not encode macOS job progress: {error}");
+                continue;
+            }
+        };
+        let event = silo_api::jobs::JobProgress::Macos {
+            job_id,
+            kind: None,
+            computer_id: Some(data.computer_id.clone()),
+            data,
+        };
+        if let Err(error) = crate::jobs::publish_progress(app.engine.as_ref(), event, Audience::All)
+        {
+            eprintln!("silo-engine: could not persist macOS job progress: {error}");
+        }
+    }
+    for (job_id, state, detail) in completed {
+        let result = if state == State::Failed {
+            crate::jobs::finish_with_error(
+                app.engine.as_ref(),
+                job_id,
+                silo_api::jobs::ErrorCode::Internal,
+                detail.unwrap_or_else(|| "The macOS operation failed.".into()),
+                Audience::All,
+            )
+        } else {
+            crate::jobs::finish_with_result(
+                app.engine.as_ref(),
+                job_id,
+                serde_json::Value::Null,
+                Audience::All,
+            )
+        };
+        if let Err(error) = result {
+            eprintln!("silo-engine: could not persist macOS job outcome: {error}");
+        }
+    }
+}
+
+fn publish_checkpoint_completion(
+    app: &MacosContext,
+    job_id: silo_api::jobs::JobId,
+    computer_id: &str,
+    result: &Result<(), String>,
+) {
+    let finished = match result {
+        Ok(()) => silo_api::jobs::JobFinished {
+            job_id: job_id.clone(),
+            result: Some(serde_json::Value::Null),
+            error: None,
+        },
+        Err(message) => silo_api::jobs::JobFinished {
+            job_id: job_id.clone(),
+            result: None,
+            error: Some(silo_api::transport::ErrorObject {
+                code: silo_api::jobs::ErrorCode::Internal,
+                message: message.clone(),
+                diagnostics: None,
+            }),
+        },
+    };
+    MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(job_id, (computer_id.to_owned(), finished));
+    retry_pending_checkpoint_completions(app);
+    let pending = !MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_empty();
+    if pending {
+        ensure_checkpoint_retry_worker(app.clone());
+    }
+}
+
+fn ensure_checkpoint_retry_worker(app: MacosContext) {
+    MACOS_CHECKPOINT_RETRY_WORKER.call_once(move || {
+        let result = std::thread::Builder::new()
+            .name("silo-checkpoint-job-retry".to_owned())
+            .spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                retry_pending_checkpoint_completions(&app);
+            });
+        if let Err(error) = result {
+            eprintln!("silo-engine: could not start checkpoint outcome retry: {error}");
+        }
+    });
+}
+
+fn retry_pending_checkpoint_completions(app: &MacosContext) {
+    let pending = MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|(job_id, (computer_id, finished))| {
+            (job_id.clone(), computer_id.clone(), finished.clone())
+        })
+        .collect::<Vec<_>>();
+    for (job_id, computer_id, finished) in pending {
+        match crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All) {
+            Ok(()) => {
+                MACOS_PENDING_CHECKPOINT_JOBS
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&job_id);
+                let mut checkpoint_jobs = MACOS_CHECKPOINT_JOBS
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if checkpoint_jobs.get(&computer_id) == Some(&job_id) {
+                    checkpoint_jobs.remove(&computer_id);
+                }
+            }
+            Err(error) => {
+                eprintln!("silo-engine: could not persist macOS checkpoint outcome: {error}");
+            }
+        }
+    }
+}
+
+fn is_macos_job_state(state: State) -> bool {
+    matches!(
+        state,
+        State::Preparing
+            | State::Copying
+            | State::Downloading
+            | State::Installing
+            | State::SettingUp
+            | State::Starting
+            | State::Stopping
+    )
 }
 
 /// Applies `change` to one computer and tells the UI. Returns `None` for an unknown id.
@@ -859,6 +1103,12 @@ pub async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
     .await
 }
 
+fn accept_checkpoint_job(app: &MacosContext) -> Result<silo_api::jobs::JobId, String> {
+    crate::jobs::allocate(app.engine.as_ref(), "computers.macos.checkpoint")
+        .map(|accepted| accepted.job_id)
+        .map_err(|error| error.to_string())
+}
+
 pub async fn create_macos_computer(
     app: MacosContext,
     request: CreateRequest,
@@ -890,7 +1140,16 @@ pub async fn create_macos_checkpoint(
     name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || create_checkpoint(&app, &id, &name)).await
+    let job_id = accept_checkpoint_job(&app)?;
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let worker_job_id = job_id.clone();
+    let result = blocking(move || {
+        create_checkpoint(&worker_app, &worker_id, &name, worker_job_id)
+    })
+    .await;
+    publish_checkpoint_completion(&app, job_id, &id, &result);
+    result
 }
 
 /// Rewinds a computer to a checkpoint. The computer stays stopped.
@@ -900,7 +1159,16 @@ pub async fn restore_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || restore_checkpoint(&app, &id, &checkpoint_id)).await
+    let job_id = accept_checkpoint_job(&app)?;
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let worker_job_id = job_id.clone();
+    let result = blocking(move || {
+        restore_checkpoint(&worker_app, &worker_id, &checkpoint_id, worker_job_id)
+    })
+    .await;
+    publish_checkpoint_completion(&app, job_id, &id, &result);
+    result
 }
 
 /// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
@@ -911,7 +1179,22 @@ pub async fn fork_macos_checkpoint(
     new_name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || fork_checkpoint(&app, &id, &checkpoint_id, &new_name)).await
+    let job_id = accept_checkpoint_job(&app)?;
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let worker_job_id = job_id.clone();
+    let result = blocking(move || {
+        fork_checkpoint(
+            &worker_app,
+            &worker_id,
+            &checkpoint_id,
+            &new_name,
+            worker_job_id,
+        )
+    })
+    .await;
+    publish_checkpoint_completion(&app, job_id, &id, &result);
+    result
 }
 
 pub async fn delete_macos_checkpoint(
@@ -920,7 +1203,16 @@ pub async fn delete_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || delete_checkpoint(&app, &id, &checkpoint_id)).await
+    let job_id = accept_checkpoint_job(&app)?;
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let worker_job_id = job_id.clone();
+    let result = blocking(move || {
+        delete_checkpoint(&worker_app, &worker_id, &checkpoint_id, worker_job_id)
+    })
+    .await;
+    publish_checkpoint_completion(&app, job_id, &id, &result);
+    result
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
@@ -1876,6 +2168,7 @@ fn begin_operation<'a>(
     app: &'a MacosContext,
     id: &str,
     kind: checkpoints::OperationKind,
+    job_id: silo_api::jobs::JobId,
 ) -> Result<Held<'a>, String> {
     let _admitted = admission()?;
     let (record, state, cancel) = {
@@ -1894,6 +2187,11 @@ fn begin_operation<'a>(
         entry.operation = Some(checkpoints::Operation::running(kind, first_stage(kind)));
         (entry.record.clone(), entry.state, entry.cancel.clone())
     };
+    MACOS_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id.to_owned(), job_id);
     emit(app);
     Ok(Held {
         app,
@@ -1975,12 +2273,17 @@ fn reserve_for_memory(
         .transpose()
 }
 
-fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {
+fn create_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    name: &str,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Capture)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Capture, job_id)?;
     let layout = Layout::new(&data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
@@ -2012,11 +2315,16 @@ fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), Str
     result.map(|_| ())
 }
 
-fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn restore_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    checkpoint_id: &str,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Restore)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Restore, job_id)?;
     let layout = Layout::new(&data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
@@ -2066,11 +2374,16 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
     Ok(())
 }
 
-fn delete_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn delete_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    checkpoint_id: &str,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Delete)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Delete, job_id)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
     if checkpoints::journal_pins(&layout, &target.id) {
@@ -2103,6 +2416,7 @@ fn fork_checkpoint(
     id: &str,
     checkpoint_id: &str,
     new_name: &str,
+    job_id: silo_api::jobs::JobId,
 ) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
@@ -2111,7 +2425,7 @@ fn fork_checkpoint(
     // Held until the fork is registered and saved, so a Linux creation sees it.
     let reservation =
         crate::computer_names::reserve(&[new_name.clone()], &|| app.linux_computer_names())?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Fork)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Fork, job_id)?;
     let source = Layout::new(&data, id);
     let checkpoint = checkpoints::find(&source, checkpoint_id)?;
     let space = templates::reserve_space(&data, templates::COPY_ESTIMATE)?;

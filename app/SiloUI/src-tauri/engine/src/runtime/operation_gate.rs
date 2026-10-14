@@ -14,6 +14,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use silo_api::jobs::JobId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Scope {
@@ -95,6 +96,8 @@ pub enum OperationKind {
 #[serde(rename_all = "camelCase")]
 pub struct OperationEntry {
     pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<JobId>,
     pub label: String,
     pub kind: OperationKind,
     /// Stable computer id this operation is scoped to; `None` for device-wide operations.
@@ -127,6 +130,7 @@ pub struct OperationQueue {
 
 struct Entry {
     id: u64,
+    job_id: Option<JobId>,
     scope: Scope,
     /// Computer display name for per-computer entries; `None` for device-wide entries.
     computer_name: Option<String>,
@@ -159,6 +163,7 @@ impl Entry {
     fn public(&self, running: bool) -> OperationEntry {
         OperationEntry {
             id: self.id,
+            job_id: self.job_id.clone(),
             label: self.label.clone(),
             kind: self.kind,
             computer_id: match &self.scope {
@@ -254,6 +259,7 @@ impl State {
         }
         Entry {
             id: self.next_id,
+            job_id: None,
             scope,
             computer_name,
             label: label.to_owned(),
@@ -350,6 +356,57 @@ impl<'a> Kinded<'a> {
             None,
             self.retry_after,
             self.hidden,
+            None,
+            None,
+        )
+    }
+
+    /// Acquire with a cancellation token already linked before queue admission.
+    /// This lets a job cancel promptly even while it is still waiting for its turn.
+    pub fn acquire_with_cancel_token(
+        &self,
+        scope: Scope,
+        computer_name: Option<String>,
+        label: &str,
+        key: Option<String>,
+        token: Arc<AtomicBool>,
+    ) -> Result<OperationGuard<'a>, GateError> {
+        self.gate.acquire_inner(
+            scope,
+            computer_name,
+            self.kind,
+            label,
+            key,
+            None,
+            self.retry_after,
+            self.hidden,
+            Some(token),
+            None,
+        )
+    }
+
+    /// Acquire a gate entry owned by a durable job. Its ID appears in queue
+    /// snapshots while waiting, and the optional token survives retries.
+    pub fn acquire_for_job(
+        &self,
+        scope: Scope,
+        computer_name: Option<String>,
+        label: &str,
+        key: Option<String>,
+        job_id: JobId,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Result<OperationGuard<'a>, GateError> {
+        self.gate.acquire_inner(
+            scope,
+            computer_name,
+            self.kind,
+            label,
+            key,
+            None,
+            self.retry_after,
+            self.hidden,
+            cancellation,
+            Some(job_id),
         )
     }
 
@@ -369,6 +426,8 @@ impl<'a> Kinded<'a> {
             Some(keep_waiting),
             self.retry_after,
             self.hidden,
+            None,
+            None,
         )
     }
 }
@@ -636,6 +695,28 @@ impl OperationGate {
         guard
     }
 
+    /// Device-wide configuration admission linked to its durable job before it waits.
+    pub fn removing_for_job(
+        &self,
+        ids: &[String],
+        label: &str,
+        job_id: JobId,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Result<OperationGuard<'_>, GateError> {
+        REMOVES.with(|removes| *removes.borrow_mut() = ids.to_vec());
+        let key = job_id.as_str().to_owned();
+        let guard = self.kind(OperationKind::ComputerConfiguration).acquire_for_job(
+            Scope::Device,
+            None,
+            label,
+            Some(key),
+            job_id,
+            cancellation,
+        );
+        REMOVES.with(|removes| removes.borrow_mut().clear());
+        guard
+    }
+
     /// Whether a deletion of computer `id` is waiting for its turn.
     pub fn removal_queued(&self, id: &str) -> bool {
         self.lock()
@@ -687,6 +768,8 @@ impl OperationGate {
             None,
             None,
             false,
+            None,
+            None,
         )
     }
 
@@ -708,6 +791,8 @@ impl OperationGate {
             Some(keep_waiting),
             None,
             false,
+            None,
+            None,
         )
     }
 
@@ -722,6 +807,8 @@ impl OperationGate {
         keep_waiting: Option<&dyn Fn() -> bool>,
         retry_after: Option<u64>,
         hidden: bool,
+        external_cancel: Option<Arc<AtomicBool>>,
+        job_id: Option<JobId>,
     ) -> Result<OperationGuard<'_>, GateError> {
         if HELD.with(Cell::get) > 0 {
             return Err(GateError::Nested);
@@ -738,6 +825,10 @@ impl OperationGate {
             return Err(GateError::AlreadyQueued);
         }
         let mut entry = state.entry(scope, computer_name, kind, label, key);
+        entry.job_id = job_id;
+        if let Some(token) = external_cancel {
+            entry.cancel = token;
+        }
         entry.removes = REMOVES.with(|removes| std::mem::take(&mut *removes.borrow_mut()));
         entry.hidden = hidden;
         let id = entry.id;
@@ -1065,6 +1156,65 @@ impl OperationGate {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .0;
         }
+    }
+
+    /// Cancel a queued or running entry by its private admission key. Domain adapters
+    /// use this when a durable job exists before the gate allocates its process-local id.
+    pub fn cancel_key(&self, key: &str) -> Result<(), GateError> {
+        let id = {
+            let state = self.lock();
+            state
+                .waiting
+                .iter()
+                .chain(state.running.iter())
+                .find(|entry| entry.key.as_deref() == Some(key))
+                .map(|entry| entry.id)
+        };
+        if let Some(id) = id {
+            self.cancel(id)?;
+        }
+        Ok(())
+    }
+
+    /// Cancel a specific queued/running entry, reporting a missing key as non-cancellable.
+    pub fn cancel_existing_key(&self, key: &str) -> Result<(), GateError> {
+        let id = {
+            let state = self.lock();
+            state
+                .waiting
+                .iter()
+                .chain(state.running.iter())
+                .find(|entry| entry.key.as_deref() == Some(key))
+                .map(|entry| entry.id)
+        }
+        .ok_or(GateError::NotCancellable)?;
+        self.cancel(id)
+    }
+
+    /// Cancel a queue entry by its owning durable job ID.
+    pub fn cancel_job(&self, job_id: &JobId) -> Result<(), GateError> {
+        let id = {
+            let state = self.lock();
+            state
+                .waiting
+                .iter()
+                .chain(state.running.iter())
+                .find(|entry| entry.job_id.as_ref() == Some(job_id))
+                .map(|entry| entry.id)
+        };
+        if let Some(id) = id {
+            self.cancel(id)?;
+        }
+        Ok(())
+    }
+
+    pub fn contains_job(&self, job_id: &JobId) -> bool {
+        let state = self.lock();
+        state
+            .waiting
+            .iter()
+            .chain(state.running.iter())
+            .any(|entry| entry.job_id.as_ref() == Some(job_id))
     }
 
     /// Signal every waiting entry to leave the queue with `GateError::Cancelled`.
@@ -1626,6 +1776,61 @@ mod tests {
         gate.cancel(waiting_id).unwrap();
         assert_eq!(waiter.join().unwrap(), GateError::Cancelled);
         assert!(gate.snapshot().waiting.is_empty());
+        drop(running);
+        assert!(gate.is_idle());
+    }
+
+    #[test]
+    fn job_cancellation_token_is_linked_before_the_gate_admits_work() {
+        let gate = leak();
+        let running = gate.device("Update").unwrap();
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let cancellation = cancellation.clone();
+            thread::spawn(move || {
+                gate.kind(OperationKind::Push)
+                    .acquire_with_cancel_token(
+                        Scope::Device,
+                        None,
+                        "Push",
+                        Some("push-job:operation-7".into()),
+                        cancellation,
+                    )
+                    .unwrap_err()
+            })
+        };
+        wait_until(gate, |queue| queue.waiting.len() == 1);
+        cancellation.store(true, Ordering::SeqCst);
+        gate.cancel_key("push-job:operation-7").unwrap();
+        assert_eq!(waiter.join().unwrap(), GateError::Cancelled);
+        drop(running);
+        assert!(gate.is_idle());
+    }
+
+    #[test]
+    fn durable_job_id_is_visible_and_cancellable_while_waiting() {
+        let gate = leak();
+        let running = gate.device("Update").unwrap();
+        let job_id = JobId::new("job:23").unwrap();
+        let waiter = {
+            let job_id = job_id.clone();
+            thread::spawn(move || {
+                gate.kind(OperationKind::Lifecycle)
+                    .acquire_for_job(
+                        Scope::Device,
+                        None,
+                        "Lifecycle",
+                        Some("computer:abc:start".into()),
+                        job_id,
+                        None,
+                    )
+                    .unwrap_err()
+            })
+        };
+        wait_until(gate, |queue| queue.waiting.len() == 1);
+        assert_eq!(gate.snapshot().waiting[0].job_id, Some(job_id.clone()));
+        gate.cancel_job(&job_id).unwrap();
+        assert_eq!(waiter.join().unwrap(), GateError::Cancelled);
         drop(running);
         assert!(gate.is_idle());
     }
@@ -2275,6 +2480,7 @@ mod contract_tests {
             .enumerate()
             .map(|(index, kind)| OperationEntry {
                 id: index as u64 + 1,
+                job_id: None,
                 label: format!("Contract operation {}", index + 1),
                 kind,
                 computer_id: (kind != Shutdown)
@@ -2290,6 +2496,7 @@ mod contract_tests {
             running: entries,
             waiting: vec![OperationEntry {
                 id: 16,
+                job_id: None,
                 label: "Waiting contract operation".into(),
                 kind: Lifecycle,
                 computer_id: Some("00000000-0000-4000-8000-000000000002".into()),

@@ -69,12 +69,20 @@ impl RuntimeHost for TauriRuntimeHost {
     }
 
     fn notify(&self, notice: crate::notifications::Notice) {
-        crate::commands::notifications::notify_native(&self.0, notice);
+        publish_engine_notice(&notice);
     }
 
     fn clear_computer_notices(&self, computer_ids: &[String]) {
         for computer_id in computer_ids {
-            crate::commands::notifications::clear_computer(&self.0, computer_id);
+            if let Some(context) = silo_engine::context::current() {
+                if let Err(error) = silo_engine::notices::clear_for_computer(
+                    context.as_ref(),
+                    computer_id,
+                    silo_engine::context::Audience::All,
+                ) {
+                    eprintln!("Silo could not clear retained notices: {error}");
+                }
+            }
         }
     }
 
@@ -105,9 +113,39 @@ impl RuntimeHost for TauriRuntimeHost {
         if let Some(notice) =
             crate::notifications::lifecycle_notice(action, name, computer, elapsed, outcome)
         {
-            crate::commands::notifications::notify_native(&self.0, notice);
+            publish_engine_notice(&notice);
         }
     }
+}
+
+fn publish_engine_notice(notice: &crate::notifications::Notice) {
+    let Some(context) = silo_engine::context::current() else {
+        return;
+    };
+    let payload = match serde_json::to_value(notice) {
+        Ok(payload) => payload,
+        Err(error) => {
+            eprintln!("Silo could not encode a notice: {error}");
+            return;
+        }
+    };
+    match serde_json::from_value::<silo_api::methods::notifications::Notice>(payload.clone()) {
+        Ok(api_notice) => {
+            if let Err(error) = silo_engine::notices::retain(
+                context.as_ref(),
+                &api_notice,
+                silo_engine::context::Audience::All,
+            ) {
+                eprintln!("Silo could not retain a notice: {error}");
+            }
+        }
+        Err(error) => eprintln!("Silo could not map a notice to the API contract: {error}"),
+    }
+    // Keep the existing Silo UI toast until its client switches to the engine API.
+    context.publish(
+        silo_engine::context::Event::new(crate::notifications::NOTICE_EVENT, payload),
+        silo_engine::context::Audience::All,
+    );
 }
 
 pub(crate) fn package_kind(bundle: Option<BundleType>) -> RuntimePackageKind {

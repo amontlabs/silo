@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use crate::channel::Channel;
+use crate::jobs::JobRegistry;
 
 /// Everything engine logic receives from its host process instead of a UI framework handle.
 pub trait EngineContext: Send + Sync + 'static {
@@ -10,6 +11,27 @@ pub trait EngineContext: Send + Sync + 'static {
     fn publish(&self, event: Event, audience: Audience);
     fn main_thread(&self) -> Option<&dyn MainThread>;
     fn process(&self) -> &dyn ProcessControl;
+
+    /// Opens or returns this engine's durable job and notice registry.
+    /// Hosts may call this during startup to reconcile interrupted jobs before
+    /// accepting requests.
+    fn job_registry(&self) -> Result<Arc<JobRegistry>, String> {
+        let paths = self.paths();
+        let engine_data = if paths.home.as_os_str().is_empty() {
+            paths.app_data.join("engine")
+        } else {
+            paths
+                .home
+                .join(self.identity().channel.state_dir_name())
+                .join("engine")
+        };
+        crate::jobs::registry_for_engine_data(&engine_data)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Publishes the current operations queue after any job state transition.
+    /// Hosts without a socket queue projection can leave this as a no-op.
+    fn job_queue_changed(&self) {}
 
     /// Ends client-owned remote display sessions. `None` closes all sessions.
     fn close_remote_displays(&self, _device: Option<&str>) {}
