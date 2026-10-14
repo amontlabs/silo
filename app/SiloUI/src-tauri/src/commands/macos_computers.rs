@@ -408,6 +408,18 @@ pub(crate) fn proxy_is_pending_restore(app: &AppHandle, computer: &str) -> bool 
     new_context(app).is_ok_and(|context| engine::proxy_is_pending_restore(&context, computer))
 }
 
+pub(crate) fn computer_ids(app: &AppHandle) -> Vec<String> {
+    new_context(app).map_or_else(|_| Vec::new(), |context| engine::computer_ids(&context))
+}
+
+pub(crate) fn start_at_launch(
+    app: &AppHandle,
+    id: &str,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<bool, String> {
+    engine::start_at_launch(&new_context(app)?, id, cancelled)
+}
+
 pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, PathBuf)> {
     engine::log_target(&new_context(app).ok()?, id)
 }

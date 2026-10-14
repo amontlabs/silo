@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "supportedGuestBuilds": ["25G83"],
+  "appleSigner": {
+    "identity": "Software Update",
+    "leafCertificateSha256": "E074D204AC2498E9DC904A7BC7CED8464119B79D05668028920583B1E896EBB4"
+  },
+  "clt": {
+    "version": "26.6",
+    "packages": [
+      {
+        "file": "CLTools_Executables_Universal.pkg",
+        "url": "https://swcdn.apple.com/content/downloads/33/19/140-17812-A_21ZLMMLY4E/zu3xwktttpoe71qiawhzgzvqss6rovawsa/CLTools_Executables_Universal.pkg",
+        "bytes": 775796124,
+        "sha256": "a1486ac20337956d9553de7c4cc6bf58fe7bd1ad7c1d76dec68901c96fb4572e",
+        "receiptId": "com.apple.pkg.CLTools_Executables",
+        "receiptVersion": "26.6.0.0.1781586589"
+      },
+      {
+        "file": "CLTools_macOSNMOS_SDK.pkg",
+        "url": "https://swcdn.apple.com/content/downloads/33/19/140-17812-A_21ZLMMLY4E/zu3xwktttpoe71qiawhzgzvqss6rovawsa/CLTools_macOSNMOS_SDK.pkg",
+        "bytes": 61622368,
+        "sha256": "debe353b27a13cd678b26ab216a040acf07b62c0639d8ac522df4ca07d121eb2",
+        "receiptId": "com.apple.pkg.CLTools_SDK_macOS_NMOS",
+        "receiptVersion": "26.6.0.0.1781586415"
+      },
+      {
+        "file": "CLTools_macOSLMOS_SDK.pkg",
+        "url": "https://swcdn.apple.com/content/downloads/33/19/140-17812-A_21ZLMMLY4E/zu3xwktttpoe71qiawhzgzvqss6rovawsa/CLTools_macOSLMOS_SDK.pkg",
+        "bytes": 55803148,
+        "sha256": "07835d08fcdc4a57b930c9a7f5c91df18666d4fa246ae994c8850cfe5aab9753",
+        "receiptId": "com.apple.pkg.CLTools_SDK_macOS_LMOS",
+        "receiptVersion": "26.6.0.0.1781586411"
+      },
+      {
+        "file": "CLTools_macOS_SDK.pkg",
+        "url": "https://swcdn.apple.com/content/downloads/33/19/140-17812-A_21ZLMMLY4E/zu3xwktttpoe71qiawhzgzvqss6rovawsa/CLTools_macOS_SDK.pkg",
+        "bytes": 39967,
+        "sha256": "5832a2626db5b0ae8dcae14caaaa0020f9e328a1babb7e58113cb4c1ff9ab18e",
+        "receiptId": "com.apple.pkg.CLTools_macOS_SDK",
+        "receiptVersion": "26.6.0.0.1781586369"
+      },
+      {
+        "file": "CLTools_SwiftBackDeploy.pkg",
+        "url": "https://swcdn.apple.com/content/downloads/33/19/140-17812-A_21ZLMMLY4E/zu3xwktttpoe71qiawhzgzvqss6rovawsa/CLTools_SwiftBackDeploy.pkg",
+        "bytes": 49100608,
+        "sha256": "1c3242d9ffb9cbde2853d2362913e7c367269b1ab9766d2e22b89fdd61377fcf",
+        "receiptId": "com.apple.pkg.CLTools_SwiftBackDeploy",
+        "receiptVersion": "26.6.0.0.1781586382"
+      }
+    ]
+  },
+  "gitLfs": {
+    "version": "3.8.0",
+    "file": "git-lfs-darwin-arm64-v3.8.0.zip",
+    "url": "https://github.com/git-lfs/git-lfs/releases/download/v3.8.0/git-lfs-darwin-arm64-v3.8.0.zip",
+    "bytes": 5550634,
+    "sha256": "caff76a7d070d8160c89bc39b6e85d98f24135b6fed038a3b4de2590d25102d8"
+  },
+  "gh": {
+    "version": "2.102.0",
+    "file": "gh_2.102.0_macOS_arm64.zip",
+    "url": "https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_macOS_arm64.zip",
+    "bytes": 14359983,
+    "sha256": "da922c20d1792e5b2cbf375593d7a658acf034c12c84e007e71c76ef959c337e"
+  }
+}
