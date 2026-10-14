@@ -676,7 +676,10 @@ pub fn classify_refusal(message: &str) -> Option<Refusal> {
         || message.contains("Screen Sharing accepted TCP")
     {
         Some(Refusal::ScreenSharingUnavailable)
-    } else if message.contains("Setup has not finished") || message.contains("still being set up") {
+    } else if message.contains("Setup has not finished")
+        || message.contains("still being set up")
+        || message.contains(store::SETUP_UNFINISHED_FOR_RESOURCES)
+    {
         Some(Refusal::SetupIncomplete)
     } else if message.contains("isn't running") || message.contains("is not running") {
         Some(Refusal::NotRunning)
@@ -5968,6 +5971,38 @@ mod tests {
         for (message, refusal) in cases {
             assert_eq!(classify_refusal(message), Some(refusal), "{message}");
         }
+        // The resource edit's own refusal, as the store produces it.
+        let unfinished = store::change_resources(
+            &store::new_record(
+                &CreateRequest {
+                    name: "half-done".into(),
+                    cpus: 2,
+                    memory_gib: 4,
+                    disk_gib: 64,
+                },
+                engine::random_mac(),
+            ),
+            State::Stopped,
+            false,
+            2,
+            4,
+            ExpectedResources {
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            engine::host_limits(),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_refusal(&unfinished),
+            Some(Refusal::SetupIncomplete)
+        );
+        assert_eq!(
+            job_error_code(&unfinished),
+            silo_api::jobs::ErrorCode::SetupIncomplete
+        );
         assert_eq!(classify_refusal("Stop the computer first."), None);
         assert_eq!(
             job_error_code("This computer isn't running."),

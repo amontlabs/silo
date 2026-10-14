@@ -13,6 +13,10 @@ const MIN_MEMORY_GIB: u64 = 4;
 const HOST_MEMORY_RESERVE_GIB: u64 = 4;
 pub(super) const MIN_DISK_GIB: u64 = 32;
 const MAX_DISK_GIB: u64 = 1024;
+/// Refused when the CPU or memory of a computer that never finished setting up is edited.
+pub(super) const SETUP_UNFINISHED_FOR_RESOURCES: &str =
+    "Finish setting up the computer before changing its CPU or memory.";
+
 pub(super) const NEEDS_PERSONALIZING: &str =
     "This computer is not ready yet. Use Retry setup to finish it, or delete it.";
 pub(super) const INTERRUPTED_INSTALL: &str =
@@ -257,7 +261,7 @@ pub(super) fn change_resources(
         return Err("Stop the computer before changing its CPU or memory.".into());
     }
     if !record.installed || !record.setup_complete() {
-        return Err("Finish setting up the computer before changing its CPU or memory.".into());
+        return Err(SETUP_UNFINISHED_FOR_RESOURCES.into());
     }
     if restore_unfinished {
         return Err(
