@@ -530,22 +530,25 @@ fn arm_publication_pause(
 }
 
 /// Publishes a typed snapshot for clients that subscribe to the exports topic.
+/// The state in its public shape, with the remembered export folder a client that draws
+/// its own chooser needs. Decoding through the API type keeps this contract checked.
+pub fn api_state(
+    controller: &Controller,
+) -> Result<silo_api::methods::exports::BackupState, String> {
+    let state = backup_state(controller)?;
+    let mut value = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    if let (Some(object), Ok(Some(destination))) = (value.as_object_mut(), destination(controller))
+    {
+        object.insert(
+            "destination".into(),
+            Value::String(selected_path_text(&destination)?),
+        );
+    }
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
 fn publish_backup_state(controller: &Controller, context: &dyn EngineContext) {
-    let state = match backup_state(controller) {
-        Ok(state) => state,
-        Err(error) => {
-            eprintln!("Silo could not read backup state for exports.changed: {error}");
-            return;
-        }
-    };
-    // Decode through the public API type so this topic remains contract checked,
-    // including fields owned by the client such as the remembered destination.
-    let state = match serde_json::to_value(state)
-        .map_err(|error| error.to_string())
-        .and_then(|value| {
-            serde_json::from_value::<silo_api::methods::exports::BackupState>(value)
-                .map_err(|error| error.to_string())
-        }) {
+    let state = match api_state(controller) {
         Ok(state) => state,
         Err(error) => {
             eprintln!("Silo could not map backup state to the API contract: {error}");
@@ -556,6 +559,35 @@ fn publish_backup_state(controller: &Controller, context: &dyn EngineContext) {
         Ok(payload) => context.publish(Event::new("exports.changed", payload), Audience::All),
         Err(error) => eprintln!("Silo could not encode exports.changed state: {error}"),
     }
+}
+
+/// Starts an export of the computers with these ids. The ids are resolved to the names the
+/// export works with on this device, so a computer renamed since the client read it is still
+/// found by its stable id.
+pub fn begin_export_for_ids(
+    controller: Arc<Controller>,
+    destination: String,
+    computer_ids: Vec<String>,
+    checkpoint_id: Option<String>,
+) -> Result<String, String> {
+    let paths = runtime::runtime_paths(controller.runtime_host()?)?;
+    let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
+    let names = computer_ids
+        .iter()
+        .map(|id| {
+            metadata
+                .computers
+                .iter()
+                .find(|configuration| configuration.id() == id)
+                .map(|configuration| configuration.name().to_owned())
+                .ok_or_else(|| {
+                    format!(
+                        "Computer '{id}' is not managed by Silo. Choose a Silo computer to export."
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    begin_export(controller, destination, names, checkpoint_id)
 }
 
 /// Publishes the current backup operation through the durable job contract.
@@ -2869,7 +2901,9 @@ mod tests {
             .try_iter()
             .find(|event| event.name == "exports.changed")
             .expect("pending recovery must publish exports.changed");
-        let actual = serde_json::to_value(backup_state(&controller).unwrap()).unwrap();
+        // The public state adds the remembered destination to what the controller reads.
+        let mut actual = serde_json::to_value(backup_state(&controller).unwrap()).unwrap();
+        actual["destination"] = serde_json::json!("/backups");
         assert_eq!(published.payload, actual);
         assert_eq!(published.payload["availability"], "unavailable");
         assert_eq!(published.payload["operation"]["kind"], "result");

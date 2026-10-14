@@ -21,6 +21,7 @@ pub mod desktop_bridge;
 pub mod desktop_proxy;
 pub mod desktop_viewer;
 pub mod desktop_viewer_media;
+pub mod device_facts;
 pub mod device_identity;
 pub mod editor;
 pub mod events;
