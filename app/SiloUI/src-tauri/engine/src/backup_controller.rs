@@ -3221,7 +3221,17 @@ mod tests {
         let controller = install(host, runtime.handle().clone()).unwrap();
         wait_for_recovery(&controller, &|| false).unwrap();
 
-        assert!(!controller.busy.load(Ordering::Acquire));
+        // Recovery settles the journal first, then publishes the outcome while it
+        // still holds `busy`, and only then releases it. Waiting for the journal
+        // therefore does not imply the slot is free; wait for the release itself.
+        let released = std::time::Instant::now();
+        while controller.busy.load(Ordering::Acquire) {
+            assert!(
+                released.elapsed() < Duration::from_secs(120),
+                "recovery never released the transfer slot"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(!recovery::pending(&controller).unwrap());
         assert!(matches!(
             recovery::snapshot(&controller)
