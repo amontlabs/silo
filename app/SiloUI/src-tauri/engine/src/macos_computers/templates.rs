@@ -887,6 +887,20 @@ mod tests {
         let without_developer_tools =
             hash_inputs([offline_setup::setup_inputs().as_str(), revision.as_str()]);
         assert_ne!(setup_version(), without_developer_tools);
+        // A template built before the agent tools were pinned is stale: its base differs, so it
+        // is refreshed instead of copied. Any change to either pin moves the base.
+        for changed in [
+            developer_tools::setup_inputs()[1].replace("2.1.287", "2.1.288"),
+            developer_tools::setup_inputs()[1].replace("24.21.0", "24.21.1"),
+        ] {
+            let inputs = developer_tools::setup_inputs();
+            let moved = hash_inputs(
+                std::iter::once(offline_setup::setup_inputs().as_str())
+                    .chain([inputs[0], changed.as_str(), inputs[2]])
+                    .chain(std::iter::once(revision.as_str())),
+            );
+            assert_ne!(setup_version(), moved);
+        }
         // A template made before the split has no computer-use part.
         let json = serde_json::to_value(meta("25G83", "a", "2026-10-01")).unwrap();
         let mut old = json.clone();

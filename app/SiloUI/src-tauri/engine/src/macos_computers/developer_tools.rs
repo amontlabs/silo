@@ -688,6 +688,23 @@ mod tests {
     }
 
     #[test]
+    fn the_developer_tools_step_installs_and_verifies_node_and_claude() {
+        // main's agent-tools change: the macOS template must carry both.
+        for needle in [
+            "/usr/local/bin/$node_tool",
+            "/usr/local/bin/claude",
+            "node --version && claude --version",
+            "\"nodeVersion\"",
+            "\"claudeVersion\"",
+        ] {
+            assert!(SCRIPT.contains(needle), "{needle}");
+        }
+        let installer = script(&lock().unwrap());
+        assert!(installer.contains("NODE_VERSION='24.21.0'"));
+        assert!(installer.contains("CLAUDE_VERSION='2.1.287'"));
+    }
+
+    #[test]
     fn install_failure_prefers_the_guest_error_over_stdout_progress() {
         assert_eq!(
             failure_reason(
