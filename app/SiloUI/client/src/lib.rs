@@ -2,6 +2,7 @@
 //! session event feed. It knows nothing about engine domains and does not depend on
 //! `silo-engine`; the wire types come from `silo-api`.
 
+pub mod channel;
 mod codec;
 mod session;
 

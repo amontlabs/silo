@@ -5,6 +5,7 @@ pub(crate) use silo_engine::*;
 mod command_permissions_tests;
 #[cfg(debug_assertions)]
 mod desktop_viewer_bench;
+mod engine_client;
 mod engine_context;
 #[cfg(test)]
 mod github_build_tests;

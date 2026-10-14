@@ -3,7 +3,7 @@ use std::{
     fmt, io,
     path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -99,6 +99,7 @@ struct Inner<W> {
     writer: tokio::sync::Mutex<W>,
     pending: Mutex<HashMap<String, oneshot::Sender<Reply>>>,
     closed: AtomicBool,
+    sent: AtomicU64,
     handshake: Handshake,
 }
 
@@ -145,6 +146,12 @@ where
         &self.inner.handshake
     }
 
+    /// Requests issued on this connection. The engine refuses new ids after 65,536, so
+    /// callers reconnect well before that.
+    pub fn requests_sent(&self) -> u64 {
+        self.inner.sent.load(Ordering::SeqCst)
+    }
+
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::SeqCst)
     }
@@ -174,6 +181,7 @@ where
             return Err(ClientError::Disconnected);
         }
         let id = uuid::Uuid::new_v4().to_string();
+        self.inner.sent.fetch_add(1, Ordering::SeqCst);
         let mut frame = json!({"id": id, "method": method, "params": params});
         if let Some(operation_id) = options.operation_id {
             frame["operationId"] = Value::String(operation_id);
@@ -243,6 +251,7 @@ where
         writer: tokio::sync::Mutex::new(writer),
         pending: Mutex::new(HashMap::new()),
         closed: AtomicBool::new(false),
+        sent: AtomicU64::new(0),
         handshake,
     });
     let (events, receiver) = mpsc::unbounded_channel();
