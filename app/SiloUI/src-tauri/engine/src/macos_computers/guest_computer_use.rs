@@ -19,7 +19,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    sync::{atomic::Ordering, Mutex},
+    sync::{atomic::Ordering, Arc, Mutex},
     time::Duration,
 };
 
@@ -452,26 +452,91 @@ pub(super) fn update_wanted(record: &store::Record) -> bool {
 /// again, or Silo quits, and a failure only leaves the old version recorded (it is tried
 /// again at the next Start) and a line in the computer's log.
 pub(super) fn update_in_background(app: &MacosContext, id: &str, attempt: u64) {
+    let _ = spawn_update(app, id, attempt, Arc::new(GuestSteps));
+}
+
+/// What an update needs from the guest. The real steps log in over SSH and run the
+/// installation; tests replace them.
+pub(super) trait UpdateSteps: Send + Sync {
+    /// Waits until the guest accepts SSH logins, or until `cancelled` says to stop.
+    fn wait_for_ssh(
+        &self,
+        layout: &Layout,
+        record: &store::Record,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String>;
+    /// Installs computer use with `approval`.
+    fn install(
+        &self,
+        app: &MacosContext,
+        id: &str,
+        approval: computer_use::Approval,
+        job: &Job,
+    ) -> Result<(), String>;
+}
+
+struct GuestSteps;
+
+impl UpdateSteps for GuestSteps {
+    fn wait_for_ssh(
+        &self,
+        layout: &Layout,
+        record: &store::Record,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
+        access::wait_for_ssh(layout, record, UPDATE_SSH_WAIT, cancelled).map(|_| ())
+    }
+
+    fn install(
+        &self,
+        app: &MacosContext,
+        id: &str,
+        approval: computer_use::Approval,
+        job: &Job,
+    ) -> Result<(), String> {
+        install_with(app, id, approval, job)
+    }
+}
+
+/// Starts the update thread when computer use is stale and nothing else is updating the
+/// computer. The handle lets a test wait for the thread, which ends when no update is
+/// queued behind the last one.
+pub(super) fn spawn_update(
+    app: &MacosContext,
+    id: &str,
+    attempt: u64,
+    steps: Arc<dyn UpdateSteps>,
+) -> Option<std::thread::JoinHandle<()>> {
     let wanted = registry()
         .entries
         .iter()
         .find(|entry| entry.record.id == id)
         .is_some_and(|entry| update_wanted(&entry.record));
     if !wanted {
-        return;
+        return None;
     }
     let Request::Run(claim) = UpdateClaim::request(id, attempt, update_may_run(id, attempt)) else {
-        return;
+        return None;
     };
     let (app, id) = (app.clone(), id.to_string());
-    let _ = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("macos-computer-use-update".into())
         .spawn(move || {
-            run_update(&app, &id, attempt);
-            while let Some(next) = claim.next_or_release() {
-                run_update(&app, &id, next);
+            let mut attempt = attempt;
+            loop {
+                // An approval changed while the update ran, also back to the one the guest
+                // had before, leaves the record stale again: the guest is updated once
+                // more, for the latest desired approval, before the claim is given up.
+                if run_update(&app, &id, attempt, steps.as_ref()) {
+                    continue;
+                }
+                match claim.next_or_release() {
+                    Some(next) => attempt = next,
+                    None => break,
+                }
             }
-        });
+        })
+        .ok()
 }
 
 fn update_may_run(id: &str, attempt: u64) -> bool {
@@ -479,11 +544,14 @@ fn update_may_run(id: &str, attempt: u64) -> bool {
         && registry().update_may_run(id, attempt)
 }
 
-fn run_update(app: &MacosContext, id: &str, attempt: u64) {
+/// Runs one update of computer `id` for Start number `attempt`. Returns whether the
+/// update was recorded but the desired approval is no longer the one it installed, so another
+/// update must follow at once.
+fn run_update(app: &MacosContext, id: &str, attempt: u64, steps: &dyn UpdateSteps) -> bool {
     let live = || update_may_run(id, attempt);
     // Nothing below may touch the computer's folder once the computer is not this Start's.
     if !live() {
-        return;
+        return false;
     }
     let log = setup_log::SetupLog::open(app, id);
     let say = |line: &str| {
@@ -504,22 +572,22 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
         });
     };
     let Ok((layout, record)) = layout_and_record(app, id) else {
-        return;
+        return false;
     };
     if !update_wanted(&record) {
-        return;
+        return false;
     }
     let approval = record
         .computer_use_desired_approval
         .or(record.computer_use_approval)
         .unwrap_or_else(computer_use::initial_approval);
     let version = templates::computer_use_version_for(approval);
-    if access::wait_for_ssh(&layout, &record, UPDATE_SSH_WAIT, &|| !live()).is_err() {
+    if steps.wait_for_ssh(&layout, &record, &|| !live()).is_err() {
         say("computer use update skipped: the computer did not accept SSH logins while it was running");
-        return;
+        return false;
     }
     if !live() {
-        return;
+        return false;
     }
     say("computer use update started");
     let announce = |step: &str| {
@@ -530,7 +598,7 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
         });
     };
     announce("starting");
-    let result = install_with(
+    let result = steps.install(
         app,
         id,
         approval,
@@ -539,6 +607,7 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
             announce: &announce,
         },
     );
+    let mut again = false;
     match result {
         Ok(()) => {
             let recorded =
@@ -546,7 +615,24 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
                     store::save(&layout, record)
                 });
             match recorded {
-                Ok(true) => say("computer use updated"),
+                Ok(true) => {
+                    say("computer use updated");
+                    // The guest now has `approval`. A request that came in meanwhile and
+                    // asked for the approval it had before found the record not stale and
+                    // queued nothing, so the latest desired approval is checked here.
+                    again = registry()
+                        .entries
+                        .iter()
+                        .find(|entry| entry.record.id == id)
+                        .is_some_and(|entry| {
+                            entry
+                                .record
+                                .computer_use_desired_approval
+                                .is_some_and(|desired| desired != approval)
+                                && update_wanted(&entry.record)
+                        })
+                        && live();
+                }
                 Ok(false) => say(
                     "computer use was updated, but the computer changed meanwhile; it is checked again at the next start",
                 ),
@@ -563,6 +649,7 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
         )),
     }
     clear(app);
+    again
 }
 
 /// Fails when the setup of computer `id` was cancelled.
