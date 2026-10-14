@@ -51,6 +51,37 @@ pub(crate) enum Stopped {
     Cancelled,
 }
 
+/// How long cleanup waits for output threads after a stop. A descendant that outlived the
+/// command in another process group could hold the pipes open for good, so the wait ends and
+/// the threads are left to finish on their own.
+#[cfg(not(test))]
+pub(crate) const CLEANUP_GRACE: Duration = Duration::from_secs(2);
+#[cfg(test)]
+pub(crate) const CLEANUP_GRACE: Duration = Duration::from_millis(300);
+
+/// Marks a thread as ended when dropped, even if it panicked.
+struct Done(Arc<AtomicBool>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Waits until every flag is set or `grace` passed; true when all are set.
+fn wait_all(flags: &[Arc<AtomicBool>], grace: Duration) -> bool {
+    let deadline = Instant::now() + grace;
+    loop {
+        if flags.iter().all(|flag| flag.load(Ordering::SeqCst)) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// Runs `plan` to completion.
 ///
 /// Standard output is read only up to `max_stdout` bytes: one byte more stops the run
@@ -58,6 +89,10 @@ pub(crate) enum Stopped {
 /// a limit into a private temporary file and read back up to `stderr_keep` bytes.
 /// `before_stop` runs once, before the host process is killed, so the caller can end the
 /// guest process tree first.
+///
+/// The deadline, the overflow check and `cancel` apply until the process has ended and its
+/// output has reached end-of-file, so a descendant that keeps a pipe open cannot outlast
+/// them.
 pub(crate) fn run_collect(
     plan: &Plan,
     stdin: Option<&[u8]>,
@@ -79,9 +114,16 @@ pub(crate) fn run_collect(
     let mut child = command.spawn().map_err(|error| {
         GuestError::internal(format!("Silo could not run the guest command: {error}"))
     })?;
+    let mut flags = Vec::new();
+    let mut flag = || {
+        let flag = Arc::new(AtomicBool::new(false));
+        flags.push(flag.clone());
+        flag
+    };
     let writer = stdin.map(|bytes| {
-        let (mut pipe, bytes) = (child.stdin.take(), bytes.to_vec());
+        let (mut pipe, bytes, done) = (child.stdin.take(), bytes.to_vec(), flag());
         thread::spawn(move || {
+            let _done = Done(done);
             if let Some(pipe) = pipe.as_mut() {
                 let _ = pipe.write_all(&bytes);
             }
@@ -89,8 +131,9 @@ pub(crate) fn run_collect(
     });
     let exceeded = Arc::new(AtomicBool::new(false));
     let stdout = {
-        let (mut stream, exceeded) = (child.stdout.take(), exceeded.clone());
+        let (mut stream, exceeded, done) = (child.stdout.take(), exceeded.clone(), flag());
         thread::spawn(move || {
+            let _done = Done(done);
             let mut bytes = Vec::new();
             if let Some(stream) = stream.as_mut() {
                 let _ = stream.take(max_stdout as u64 + 1).read_to_end(&mut bytes);
@@ -102,8 +145,9 @@ pub(crate) fn run_collect(
         })
     };
     let stderr = {
-        let mut stream = child.stderr.take();
+        let (mut stream, done) = (child.stderr.take(), flag());
         thread::spawn(move || -> std::io::Result<File> {
+            let _done = Done(done);
             let mut spool = tempfile::tempfile()?;
             if let Some(stream) = stream.as_mut() {
                 std::io::copy(stream, &mut spool)?;
@@ -112,6 +156,7 @@ pub(crate) fn run_collect(
         })
     };
     let deadline = Instant::now() + timeout;
+    let mut status = None;
     let stopped = loop {
         if exceeded.load(Ordering::SeqCst) {
             break Some(Stopped::Overflow);
@@ -119,31 +164,40 @@ pub(crate) fn run_collect(
         if cancel.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
             break Some(Stopped::Cancelled);
         }
-        match child.try_wait() {
-            Ok(Some(_)) => break None,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => break Some(Stopped::Timeout),
-            Err(error) => {
-                kill(&mut child);
-                return Err(GuestError::internal(format!(
-                    "Silo lost the guest command: {error}"
-                )));
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(exited) => status = exited,
+                Err(error) => {
+                    kill(&mut child);
+                    return Err(GuestError::internal(format!(
+                        "Silo lost the guest command: {error}"
+                    )));
+                }
             }
         }
+        // The command is done once it ended and its output reached end-of-file.
+        if status.is_some() && flags.iter().all(|flag| flag.load(Ordering::SeqCst)) {
+            break None;
+        }
+        if Instant::now() >= deadline {
+            break Some(Stopped::Timeout);
+        }
+        thread::sleep(Duration::from_millis(5));
     };
     if let Some(reason) = stopped {
         before_stop();
         kill(&mut child);
-        let _ = stdout.join();
-        let _ = stderr.join();
-        if let Some(writer) = writer {
-            let _ = writer.join();
+        // Abandoned threads end with their pipes; they only hold their own buffers.
+        if wait_all(&flags, CLEANUP_GRACE) {
+            let _ = stdout.join();
+            let _ = stderr.join();
+            if let Some(writer) = writer {
+                let _ = writer.join();
+            }
         }
         return Ok(Err(reason));
     }
-    let status = child
-        .wait()
-        .map_err(|error| GuestError::internal(format!("Silo lost the guest command: {error}")))?;
+    let status = status.expect("the loop only completes with an exit status");
     if let Some(writer) = writer {
         let _ = writer.join();
     }
@@ -253,4 +307,80 @@ fn reader<R: Read + Send + 'static>(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shell(script: &str) -> Plan {
+        Plan {
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), script.into()],
+            envs: Vec::new(),
+        }
+    }
+
+    /// The pid a script wrote into `file`, once it is complete.
+    fn wait_for_pid(file: &std::path::Path) -> i32 {
+        loop {
+            if let Some(pid) = std::fs::read_to_string(file)
+                .ok()
+                .filter(|text| text.ends_with('\n'))
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn cancelling_after_the_process_exited_but_before_end_of_output_stops_the_run() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("pid");
+        // The shell ends at once; the background process keeps both output pipes open.
+        let script = format!("sleep 300 & echo $! > '{}'", file.display());
+        let cancel = AtomicBool::new(false);
+        let outcome = thread::scope(|scope| {
+            scope.spawn(|| {
+                let pid = wait_for_pid(&file);
+                PID.store(pid, Ordering::SeqCst);
+                cancel.store(true, Ordering::SeqCst);
+            });
+            run_collect(
+                &shell(&script),
+                None,
+                Duration::from_secs(300),
+                1024,
+                1024,
+                Some(&cancel),
+                &|| {},
+            )
+            .unwrap()
+        });
+        unsafe { libc::kill(PID.load(Ordering::SeqCst), libc::SIGKILL) };
+        assert!(matches!(outcome, Err(Stopped::Cancelled)));
+    }
+
+    static PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+    #[test]
+    fn a_run_whose_output_ends_with_the_process_still_completes() {
+        let outcome = run_collect(
+            &shell("printf out; printf err >&2; exit 3"),
+            None,
+            Duration::from_secs(60),
+            1024,
+            1024,
+            None,
+            &|| {},
+        )
+        .unwrap()
+        .ok()
+        .unwrap();
+        assert_eq!(outcome.status.code(), Some(3));
+        assert_eq!(outcome.stdout, b"out");
+        assert_eq!(outcome.stderr, b"err");
+    }
 }
