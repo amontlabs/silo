@@ -201,35 +201,3 @@ pub(crate) fn names(app: &AppHandle) -> Vec<String> {
 pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, PathBuf)> {
     engine::log_target(&new_context(app).ok()?, id)
 }
-
-pub(crate) fn state_for_remote(app: &AppHandle) -> Result<engine::MacosComputersState, String> {
-    engine::state_for_remote(&new_context(app)?)
-}
-
-pub(crate) fn create_for_remote(
-    app: &AppHandle,
-    request: CreateRequest,
-) -> Result<engine::MacosComputer, String> {
-    engine::create_for_remote(&new_context(app)?, request)
-}
-
-pub(crate) fn action_for_remote(app: &AppHandle, id: &str, action: Action) -> Result<(), String> {
-    engine::action_for_remote(&new_context(app)?, id, action)
-}
-
-pub(crate) fn display_session(app: &AppHandle, id: &str) -> Result<engine::DisplaySession, String> {
-    engine::display_session(&new_context(app)?, id)
-}
-
-pub(crate) fn display_stream(app: &AppHandle, id: &str) -> Result<std::net::TcpStream, String> {
-    engine::display_stream(&new_context(app)?, id)
-}
-
-pub(crate) fn resize_display(
-    app: &AppHandle,
-    id: &str,
-    width: u64,
-    height: u64,
-) -> Result<(u32, u32), String> {
-    engine::resize_display(&new_context(app)?, id, width, height)
-}

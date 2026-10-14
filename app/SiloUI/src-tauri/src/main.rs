@@ -44,8 +44,10 @@ mod log_retention;
 #[path = "macos_computers.rs"]
 mod macos_computers_engine;
 mod macos_display_gateway;
-mod macos_remote;
+#[path = "macos_remote.rs"]
+mod macos_remote_engine;
 pub(crate) use commands::macos_computers;
+pub(crate) use commands::macos_remote;
 pub(crate) use commands::macos_remote_viewer;
 mod network;
 mod notifications;
@@ -157,9 +159,9 @@ fn main() {
             commands::macos_computers::restore_macos_checkpoint,
             commands::macos_computers::fork_macos_checkpoint,
             commands::macos_computers::delete_macos_checkpoint,
-            macos_remote::remote_macos_snapshot,
-            macos_remote::remote_macos_create,
-            macos_remote::remote_macos_action,
+            commands::macos_remote::remote_macos_snapshot,
+            commands::macos_remote::remote_macos_create,
+            commands::macos_remote::remote_macos_action,
             commands::macos_remote_viewer::open_macos_remote_display,
             commands::macos_remote_viewer::macos_display_session,
             commands::macos_remote_viewer::macos_display_resize,
