@@ -106,7 +106,7 @@ pub(crate) async fn open_macos_remote_display(
     if window.label() != "main" {
         return Err("Open screens from the main Silo window.".to_string().into());
     }
-    tauri::async_runtime::spawn_blocking(move || open(&app, &device_id, &computer_id))
+    tokio::task::spawn_blocking(move || open(&app, &device_id, &computer_id))
         .await
         .map_err(|_| BridgeError::from("Silo could not open the screen."))?
 }
@@ -202,7 +202,7 @@ pub(crate) async fn macos_display_session(
 ) -> Result<Session, String> {
     let (device, computer) = target_of(&window)?;
     let label = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         session(&app, &label, &device, &computer).map_err(|error| error.message)
     })
     .await
@@ -285,7 +285,7 @@ pub(crate) async fn macos_display_resize(
     height_px: u64,
 ) -> Result<Value, String> {
     let (device, computer) = target_of(&window)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         remote::call_remote_typed(
             &app,
             &device,
