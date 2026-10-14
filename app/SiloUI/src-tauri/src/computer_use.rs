@@ -15,6 +15,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use silo_engine::{Audience, Event};
 use std::{
     collections::BTreeMap,
     fs,
@@ -27,7 +28,6 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
 
 /// Where the guest sees the device's published ChatGPT app folder.
 pub(crate) const GUEST_MOUNT: &str = "/opt/silo/chatgpt";
@@ -1296,7 +1296,7 @@ fn apply_once(
 /// LCU is not the pinned one up to date. The host never reads the guest to decide:
 /// its own record of the last attempt is enough. Returns the threads started, one per
 /// Computer that needs it (for tests).
-fn reconcile_in(
+pub(crate) fn reconcile_in(
     gate: &'static runtime::operation_gate::OperationGate,
     runner: &SharedRunner,
     paths: &RuntimePaths,
@@ -1328,43 +1328,15 @@ fn pin_is_stale(known: Option<&Known>) -> bool {
 }
 
 /// `reconcile_in` for every running computer of this device. Returns at once.
-pub(crate) fn reconcile(app: &AppHandle) {
-    let Ok(paths) = runtime::runtime_paths(app) else {
-        return;
-    };
-    let Ok(running) = runtime::update_recovery::running_names(app) else {
-        return;
-    };
-    let runner: SharedRunner = Arc::new(runtime::ProcessRunner);
-    let handles = reconcile_in(&runtime::OPERATIONS, &runner, &paths, &running);
-    if handles.is_empty() {
-        return;
-    }
-    let app = app.clone();
-    std::thread::spawn(move || {
-        for handle in handles {
-            let _ = handle.join();
-        }
-        let _ = app.emit("silo://application-state-changed", ());
-    });
-}
+pub(crate) use crate::commands::computer_use::{app_ready, install, reconcile};
 
-/// The ChatGPT app became ready: running built-in computers set up computer use now instead
-/// of at their next boot. Stopped computers do it when they start.
-pub(crate) fn app_ready(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let Ok(paths) = runtime::runtime_paths(&app) else {
-            return;
-        };
-        let Ok(running) = runtime::update_recovery::running_names(&app) else {
-            return;
-        };
-        for name in running {
-            let _ = after_boot(Arc::new(runtime::ProcessRunner), &paths, &name);
-        }
-        let _ = app.emit("silo://application-state-changed", ());
-    });
+pub(crate) fn publish_application_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            Event::new("silo://application-state-changed", Value::Null),
+            Audience::All,
+        );
+    }
 }
 
 // ------------------------------------------------------- reported state
@@ -1729,19 +1701,5 @@ fn apply_approval_in(
 
 /// Prepares the shared folder and the status cache at app start, then downloads the
 /// pinned ChatGPT app in the background when it is not published yet.
-pub(crate) fn install(app: &AppHandle) {
-    let Ok(root) = chatgpt_app::storage_root(app) else {
-        return;
-    };
-    // Cheap (two directories), and a computer created right after launch needs it. A failure
-    // here is retried before every preparation attempt and when a computer needs the folder.
-    if let Err(error) = register_published(&root) {
-        eprintln!("ChatGPT app folder unavailable: {}", error.message);
-    }
-    // Verifying the app tree the first time reads every byte (seconds): off the main thread.
-    let app = app.clone();
-    std::thread::spawn(move || chatgpt_app::start_automatic(&app));
-}
-
 #[cfg(test)]
 mod tests;
