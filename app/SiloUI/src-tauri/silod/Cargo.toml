@@ -33,3 +33,4 @@ security-framework = "3.7"
 silo-engine = { path = "../engine", features = ["test-support"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27"
+silo-client = { path = "../../client" }

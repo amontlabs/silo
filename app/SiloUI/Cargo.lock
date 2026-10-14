@@ -4867,6 +4867,7 @@ dependencies = [
  "serde",
  "serde_json",
  "silo-api",
+ "silo-client",
  "silo-engine",
  "tempfile",
  "tokio",
