@@ -14,3 +14,4 @@ pub(crate) mod system_integrations;
 pub(crate) mod system_shutdown;
 pub(crate) mod viewer_clipboard;
 pub(crate) mod viewer_shortcuts;
+pub(crate) mod pre_upgrade_backup;
