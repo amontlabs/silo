@@ -743,6 +743,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(super::developer_tools::version());
         let layout = Layout::new(data.path(), &record.id);

@@ -180,6 +180,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         }
     }
 

@@ -2304,6 +2304,8 @@ fn copy_template(
         computer_use: true,
         clipboard: true,
         needs_personalizing: true,
+        // The copy has the template's network identity; personalization stages its own.
+        proxy_bootstrap: false,
     };
     Ok(true)
 }
@@ -2639,7 +2641,10 @@ pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), Stri
                     continue;
                 }
             };
-            if !record.installed || !record.setup.complete() {
+            if !record.installed
+                || !record.setup.guest_steps_complete()
+                || record.setup.needs_personalizing
+            {
                 continue;
             }
             if checkpoints::restore_unfinished(&layout) {
@@ -2660,7 +2665,9 @@ pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), Stri
                 ));
                 continue;
             }
-            if let Err(error) = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout) {
+            let migrated = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout)
+                .and_then(|()| mark_proxy_bootstrap(app, &layout, record.clone()));
+            if let Err(error) = migrated {
                 // Never move to another guest until Virtualization.framework has
                 // released this one's machine, even after a timeout or stop error.
                 let samples = engine::machine_samples(app).map_err(|_| {
@@ -2685,6 +2692,25 @@ pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), Stri
     } else {
         Err(failures.join("\n"))
     }
+}
+
+/// Records that the computer's network bootstrap exists, making it set up.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn mark_proxy_bootstrap(
+    app: &MacosContext,
+    layout: &Layout,
+    mut record: Record,
+) -> Result<(), String> {
+    if record.setup.proxy_bootstrap {
+        return Ok(());
+    }
+    record.setup.proxy_bootstrap = true;
+    store::save(layout, &record)?;
+    update(app, &record.id, |entry| {
+        entry.record.setup.proxy_bootstrap = true;
+    });
+    emit(app);
+    Ok(())
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -3904,6 +3930,7 @@ fn copy_for_fork(
         computer_use: true,
         clipboard: true,
         needs_personalizing: true,
+        proxy_bootstrap: false,
     };
     // Persist while the fork is still in its creation state, where nothing else can start it.
     if !registry().creation_continues(fork_id) {
@@ -4432,6 +4459,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         source.developer_tools_version = Some(developer_tools::version());
         let source_layout = Layout::new(data, &source.id);
@@ -5916,6 +5944,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         done.record.developer_tools_version = Some(developer_tools::version());
         let json = serde_json::to_value(done.row()).unwrap();
@@ -6465,6 +6494,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         entry.record.developer_tools_version = Some("stale-tools".into());
         assert!(!entry.row().setup_complete);
@@ -6492,6 +6522,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
         let old = record.clone();
@@ -6758,6 +6789,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: true,
+            proxy_bootstrap: false,
         };
         record.template = Some("25G83-abcd".into());
         assert!(!registry.entries[0].row().setup_complete);

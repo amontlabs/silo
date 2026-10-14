@@ -890,8 +890,15 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 
 // MARK: Running
 
+/// Only a computer whose setup, personalization and network bootstrap all finished runs behind
+/// its gateway. Any other one, including a computer whose bootstrap is still being retried,
+/// boots over the temporary Apple NAT so the bootstrap can be staged.
+pub(super) fn boots_behind_gateway(record: &Record) -> bool {
+    record.setup.complete()
+}
+
 pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Result<(), String> {
-    if !record.setup.complete() || record.setup.needs_personalizing {
+    if !boots_behind_gateway(record) {
         return start_machine(app, record, layout, &Boot::BootstrapNat);
     }
     super::proxy::require_guest_bootstrap(record, layout)?;

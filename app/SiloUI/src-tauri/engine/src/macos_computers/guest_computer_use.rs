@@ -782,6 +782,7 @@ mod tests {
             computer_use: true,
             clipboard: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         // A record from before the fingerprint split is stale.
         assert!(update_wanted(&record));
