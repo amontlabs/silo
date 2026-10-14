@@ -252,6 +252,17 @@ mod macos_proxy {
         context().ok()
     }
 
+    /// The context of the macOS store when `computer_id` is a macOS computer on this device.
+    pub(super) fn owning_context(computer_id: &str) -> Option<engine::MacosContext> {
+        let context = context().ok()?;
+        engine::name_for_id(&context, computer_id).map(|_| context)
+    }
+
+    /// Published ports of the macOS computers, read and repaired by the engine.
+    pub(super) fn network_state() -> Result<silo_api::methods::network::NetworkState, String> {
+        engine::read_network_state(&context()?)
+    }
+
     /// Whether `computer` (a name) is a macOS computer served by the host proxy.
     pub(super) fn contains_name(computer: &str) -> bool {
         context().is_ok_and(|context| engine::proxy_contains_name(&context, computer))
@@ -1861,6 +1872,17 @@ fn local_network_state() -> Result<Value, String> {
     let paths = local_paths()?;
     let state = silo_engine::network::read_network_state(&paths)?;
     let mut value = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    // The macOS computers' published ports are kept by the macOS store, not by the Linux
+    // runtime metadata, so their rows are read there.
+    if let Ok(macos) = macos_proxy::network_state() {
+        let rows = serde_json::to_value(macos.computers).map_err(|error| error.to_string())?;
+        if let (Some(existing), Value::Array(rows)) = (
+            value.get_mut("computers").and_then(Value::as_array_mut),
+            rows,
+        ) {
+            existing.extend(rows);
+        }
+    }
     project_name_rows_to_ids(&mut value, &paths, &["computers"]);
     Ok(value)
 }
@@ -1895,6 +1917,28 @@ async fn network_change(
         }
         None => {
             let state = blocking(move || {
+                if let Some(context) = macos_proxy::owning_context(&computer_id) {
+                    let state = if publishing {
+                        silo_engine::macos_computers::publish_network_port(
+                            &context,
+                            &computer_id,
+                            port,
+                            host_port,
+                            scheme_name(scheme),
+                        )?
+                    } else {
+                        silo_engine::macos_computers::remove_network_port(
+                            &context,
+                            &computer_id,
+                            port,
+                        )?
+                    };
+                    let mut value =
+                        serde_json::to_value(state).map_err(|error| error.to_string())?;
+                    let paths = local_paths()?;
+                    project_name_rows_to_ids(&mut value, &paths, &["computers"]);
+                    return Ok(value);
+                }
                 let paths = local_paths()?;
                 let name = computer_name(&paths, &computer_id)?;
                 let state = if publishing {
@@ -1982,6 +2026,13 @@ async fn network_open(
         }
         None => {
             blocking(move || {
+                if let Some(context) = macos_proxy::owning_context(&typed.computer_id) {
+                    return silo_engine::macos_computers::open_network_port(
+                        &context,
+                        &typed.computer_id,
+                        typed.port,
+                    );
+                }
                 let paths = local_paths()?;
                 let name = computer_name(&paths, &typed.computer_id)?;
                 silo_engine::network::network_port_url(&paths, name, typed.port)

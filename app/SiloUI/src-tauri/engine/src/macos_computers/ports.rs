@@ -944,19 +944,6 @@ pub(super) fn publish(
                 guest_address,
             });
             let key = (computer_id.to_string(), port);
-            let staged_tunnel = if state == super::store::State::Running {
-                if let Some(target) = tunnel_target {
-                    if tunnel_is_live(&key, target) {
-                        None
-                    } else {
-                        Some(start_tunnel_for(app, computer_id, &key, target)?)
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
             let mapping = Mapping {
                 computer_id: computer_id.into(),
                 port,
@@ -965,7 +952,10 @@ pub(super) fn publish(
                 enabled: true,
             };
             validate_mapping(&mapping)?;
-            {
+            // The mapping is saved before its tunnel starts: the tunnel's SSH stream is
+            // refused for a port that is not published, so a tunnel started first always died
+            // ("Could not publish this port."). A tunnel that cannot start undoes the save.
+            let previous = {
                 let _lock = configuration_lock();
                 config = read_configuration_unlocked(&app.paths().app_data)?;
                 if config.mappings.iter().any(|saved| {
@@ -979,12 +969,36 @@ pub(super) fn publish(
                             .into(),
                     );
                 }
+                let previous = config.mappings.clone();
                 config
                     .mappings
                     .retain(|saved| saved.computer_id != computer_id || saved.port != port);
                 config.mappings.push(mapping);
                 write_configuration_unlocked(&app.paths().app_data, &config)?;
-            }
+                previous
+            };
+            let staged_tunnel = if state == super::store::State::Running {
+                if let Some(target) = tunnel_target {
+                    if tunnel_is_live(&key, target) {
+                        None
+                    } else {
+                        match start_tunnel_for(app, computer_id, &key, target) {
+                            Ok(tunnel) => Some(tunnel),
+                            Err(error) => {
+                                let _lock = configuration_lock();
+                                config.mappings = previous;
+                                let _ =
+                                    write_configuration_unlocked(&app.paths().app_data, &config);
+                                return Err(error);
+                            }
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             if let Some(tunnel) = staged_tunnel {
                 install_tunnel(key.clone(), tunnel);
             } else if tunnel_target.is_none() {

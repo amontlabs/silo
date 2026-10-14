@@ -1,6 +1,6 @@
 use super::{guest_access, ports, run_marker, store};
 use std::{
-    net::{Ipv4Addr, SocketAddr, TcpStream},
+    net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -19,13 +19,15 @@ fn eligible_record(app_data: &Path, computer_id: &str) -> Result<store::Record, 
     Ok(record)
 }
 
+/// Where the guest's SSH port is reachable now: behind the private gateway once the guest
+/// boots on its FileHandle network, on the address Apple's NAT leased only during setup.
 fn guest_address(
     app_data: &Path,
     computer_id: &str,
-    lookup: impl FnOnce(&str) -> Result<Ipv4Addr, String>,
-) -> Result<Ipv4Addr, String> {
+    lookup: impl FnOnce(&store::Record) -> Result<SocketAddr, String>,
+) -> Result<SocketAddr, String> {
     let record = eligible_record(app_data, computer_id)?;
-    lookup(&record.mac_address)
+    lookup(&record)
 }
 
 /// The guest's SSH port. A `guest.ssh` stream is always an SSH transport to this port: the
@@ -77,7 +79,7 @@ pub(super) fn open(
         computer_id,
         port,
         run_marker::process_is_alive,
-        guest_access::guest_address,
+        |record| guest_access::endpoint(record, GUEST_SSH_PORT),
         |address| TcpStream::connect_timeout(&address, CONNECT_TIMEOUT),
     )
 }
@@ -87,7 +89,7 @@ fn open_with(
     computer_id: &str,
     port: Option<u16>,
     alive: fn(u32) -> bool,
-    lookup: impl FnOnce(&str) -> Result<Ipv4Addr, String>,
+    lookup: impl FnOnce(&store::Record) -> Result<SocketAddr, String>,
     connect: impl FnOnce(SocketAddr) -> std::io::Result<TcpStream>,
 ) -> Result<GuestSshStream, String> {
     if port == Some(0) {
@@ -101,8 +103,8 @@ fn open_with(
     }
     // Register before connecting so an unpublish during the connect is not missed.
     let registration = port.map(|port| crate::remote::PortRegistration::open(computer_id, port));
-    let stream = connect(SocketAddr::from((address, GUEST_SSH_PORT)))
-        .map_err(|_| "Could not open the computer's SSH connection.".to_owned())?;
+    let stream =
+        connect(address).map_err(|_| "Could not open the computer's SSH connection.".to_owned())?;
     let guard = GuestSshGuard {
         registration,
         app_data: app_data.to_path_buf(),
@@ -151,13 +153,13 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let record = complete_record(directory.path());
         let called = AtomicBool::new(false);
-        let address = guest_address(directory.path(), &record.id, |mac| {
+        let address = guest_address(directory.path(), &record.id, |found| {
             called.store(true, Ordering::Release);
-            assert_eq!(mac, record.mac_address);
-            Ok(Ipv4Addr::LOCALHOST)
+            assert_eq!(found.mac_address, record.mac_address);
+            Ok(SocketAddr::from(([127, 0, 0, 1], 43211)))
         })
         .unwrap();
-        assert_eq!(address, Ipv4Addr::LOCALHOST);
+        assert_eq!(address, SocketAddr::from(([127, 0, 0, 1], 43211)));
         assert!(called.load(Ordering::Acquire));
     }
 
@@ -216,7 +218,7 @@ mod tests {
             let called = AtomicBool::new(false);
             assert!(guest_address(directory.path(), id, |_| {
                 called.store(true, Ordering::Release);
-                Ok(Ipv4Addr::LOCALHOST)
+                Ok(SocketAddr::from(([127, 0, 0, 1], GUEST_SSH_PORT)))
             })
             .is_err());
             assert!(!called.load(Ordering::Acquire), "lookup ran for {id}");
@@ -250,7 +252,7 @@ mod tests {
             &record.id,
             port,
             |_| true,
-            |_| Ok(Ipv4Addr::LOCALHOST),
+            |_| Ok(SocketAddr::from(([127, 0, 0, 1], GUEST_SSH_PORT))),
             |address| {
                 seen.set(Some(address.port()));
                 TcpStream::connect(target)
@@ -344,7 +346,7 @@ mod tests {
             &record.id,
             None,
             |_| false,
-            |_| Ok(Ipv4Addr::LOCALHOST),
+            |_| Ok(SocketAddr::from(([127, 0, 0, 1], GUEST_SSH_PORT))),
             |address| TcpStream::connect(address),
         )
         .is_err());
