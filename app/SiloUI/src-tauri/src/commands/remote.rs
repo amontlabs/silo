@@ -131,7 +131,9 @@ pub(crate) async fn device_list() -> Result<Vec<remote::Device>, String> {
 
 #[tauri::command]
 pub(crate) async fn remove_device(device_id: String) -> Result<(), String> {
-    remote::remove_device(device_id).await
+    remote::remove_device(device_id)
+        .await
+        .map_err(|error| error.message)
 }
 
 #[tauri::command]

@@ -262,6 +262,28 @@ impl EventBus {
         barrier
     }
 
+    /// Whether `client_id` still has a connected event stream.
+    pub fn is_connected(&self, client_id: &ClientId) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .get(client_id.as_str())
+            .is_some_and(|subscriber| subscriber.strong_count() > 0)
+    }
+
+    /// The clients that currently have a connected event stream.
+    pub fn connected_clients(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .iter()
+            .filter(|(_, subscriber)| subscriber.strong_count() > 0)
+            .map(|(client, _)| client.clone())
+            .collect()
+    }
+
     pub fn disconnect(&self, client_id: &ClientId) {
         let subscriber = self
             .inner
