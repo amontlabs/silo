@@ -1081,10 +1081,7 @@ fn finish_admission(
 fn fail_macos_job(context: &dyn EngineContext, job: &AcceptedMacosJob, message: String) {
     publish_macos_job_finished(
         context,
-        macos_job_finished(
-            job.job_id.clone(),
-            Err((silo_api::jobs::ErrorCode::Internal, message)),
-        ),
+        macos_job_finished(job.job_id.clone(), Err((job_error_code(&message), message))),
     );
 }
 
@@ -1109,10 +1106,24 @@ fn admit_and_track_computer_workflow(
     Ok(operation)
 }
 
+/// The stable API code of a failed macOS job: an actionable refusal keeps its own code.
+fn job_error_code(message: &str) -> silo_api::jobs::ErrorCode {
+    use silo_api::jobs::ErrorCode;
+    match classify_refusal(message) {
+        Some(Refusal::NotRunning) => ErrorCode::NotRunning,
+        Some(Refusal::NeedsPersonalizing) => ErrorCode::NeedsPersonalizing,
+        Some(Refusal::SetupIncomplete) => ErrorCode::SetupIncomplete,
+        Some(Refusal::ScreenSharingUnavailable) => ErrorCode::ScreenSharingUnavailable,
+        Some(Refusal::RunningLimit) => ErrorCode::RunningLimit,
+        None if message.contains("no longer exists") => ErrorCode::NotFound,
+        None => ErrorCode::Internal,
+    }
+}
+
 fn lifecycle_job_outcome(
     result: Result<(), String>,
 ) -> Result<(), (silo_api::jobs::ErrorCode, String)> {
-    result.map_err(|message| (silo_api::jobs::ErrorCode::Internal, message))
+    result.map_err(|message| (job_error_code(&message), message))
 }
 
 fn macos_job_finished(
@@ -1204,7 +1215,7 @@ fn finish_workflow_job(
                 silo_api::jobs::ErrorCode::Cancelled,
                 "The macOS operation was cancelled.".to_owned(),
             )),
-            Err(Stop::Failed(message)) => Err((silo_api::jobs::ErrorCode::Internal, message)),
+            Err(Stop::Failed(message)) => Err((job_error_code(&message), message)),
         }
     };
     publish_macos_job_finished(app.engine.as_ref(), macos_job_finished(job_id, outcome));
@@ -4267,6 +4278,18 @@ mod tests {
             assert_eq!(classify_refusal(message), Some(refusal), "{message}");
         }
         assert_eq!(classify_refusal("Stop the computer first."), None);
+        assert_eq!(
+            job_error_code("This computer isn't running."),
+            silo_api::jobs::ErrorCode::NotRunning
+        );
+        assert_eq!(
+            job_error_code("This computer no longer exists."),
+            silo_api::jobs::ErrorCode::NotFound
+        );
+        assert_eq!(
+            job_error_code("Stop the computer first."),
+            silo_api::jobs::ErrorCode::Internal
+        );
     }
 
     struct JobTestContext {

@@ -38,7 +38,8 @@ impl StartupState {
             .clone()
     }
 
-    fn record_pass(&self, failures: Vec<String>) {
+    /// Records how a launch pass ended, for `computers.launch`.
+    pub fn record_pass(&self, failures: Vec<String>) {
         let finished_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
