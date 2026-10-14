@@ -2,7 +2,6 @@
 //! Snapshot data and its reference graph remain owned by MicroSandbox.
 use super::*;
 use std::collections::{HashMap, HashSet};
-use tauri::{AppHandle, Emitter};
 
 pub(crate) const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
@@ -775,41 +774,24 @@ fn ensure_no_unfinished_restore(record: &Record, action: &str) -> Result<(), Run
     Ok(())
 }
 
-#[tauri::command]
-pub async fn create_checkpoint(
-    app: AppHandle,
-    computer_id: String,
-    name: String,
-) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    super::operation_gate::spawn_blocking(move || {
-        let paths = runtime_paths(&worker_app)?;
-        // Capture touches only this computer's own snapshot store and per-computer checkpoint
-        // record, not the shared inventory, so it is ordered per computer by stable id.
-        let computer_name = computer_configuration(&paths, &computer_id)
-            .map_err(|error| error.to_string())?
-            .name()
-            .to_owned();
-        let guard = OPERATIONS
-            .kind(super::operation_gate::OperationKind::CheckpointCapture)
-            .computer(&computer_id, &computer_name, "Creating checkpoint")
-            .map_err(|error| error.to_string())?;
-        // Checkpoint capture is cancellable and expected to finish within 15 minutes.
-        guard.allow_cancel();
-        guard.expect_within(std::time::Duration::from_secs(15 * 60));
-        shutdown::ensure_accepting_operations()?;
-        let result = capture_with(&ProcessRunner, &paths, &computer_id, &name, "manual");
-        drop(guard);
-        let result = result.and_then(|_| application_state_response(&worker_app, &paths));
-        let _ = worker_app.emit("silo://application-state-changed", ());
-        result.map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish creating the checkpoint. Refresh its history before trying again."
-            .to_string()
-    })?
+pub(crate) fn create(paths: &RuntimePaths, computer_id: &str, name: &str) -> Result<(), String> {
+    // Capture touches only this computer's own snapshot store and per-computer checkpoint
+    // record, not the shared inventory, so it is ordered per computer by stable id.
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(super::operation_gate::OperationKind::CheckpointCapture)
+        .computer(computer_id, &computer_name, "Creating checkpoint")
+        .map_err(|error| error.to_string())?;
+    // Checkpoint capture is cancellable and expected to finish within 15 minutes.
+    guard.allow_cancel();
+    guard.expect_within(std::time::Duration::from_secs(15 * 60));
+    shutdown::ensure_accepting_operations()?;
+    let result = capture_with(&ProcessRunner, paths, computer_id, name, "manual");
+    drop(guard);
+    result.map_err(|error| error.to_string())
 }
 
 pub(super) fn is_pending(paths: &RuntimePaths, id: &str) -> Result<bool, RuntimeError> {
@@ -1468,28 +1450,11 @@ fn pending_current_fork_point(
 
 /// Host-side settings a fork copies from its source computer. Production uses the GitHub and
 /// secret stores; tests inject failures to prove the rollback (E-17).
-pub(super) trait ForkAssignments {
+pub(crate) trait ForkAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String>;
     fn forget_github(&self, target: &str) -> Result<(), String>;
     fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String>;
     fn forget_secrets(&self, target: &str) -> Result<(), String>;
-}
-
-struct AppForkAssignments<'a>(&'a AppHandle);
-
-impl ForkAssignments for AppForkAssignments<'_> {
-    fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::github::fork_assignment(source, target)
-    }
-    fn forget_github(&self, target: &str) -> Result<(), String> {
-        crate::github::forget_fork_assignment(target)
-    }
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::secrets::fork_assignments(source, target)
-    }
-    fn forget_secrets(&self, target: &str) -> Result<(), String> {
-        crate::secrets::computer_removed(target)
-    }
 }
 
 /// The native member a fork starts from, resolved while the source's own lane is held.
@@ -1773,36 +1738,25 @@ fn reserve_fork_name(
         .map_err(RuntimeError::Invalid)
 }
 
-#[tauri::command]
-pub async fn fork_checkpoint(
-    app: AppHandle,
-    computer_id: String,
-    checkpoint_id: Option<String>,
-    new_name: String,
-) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    super::operation_gate::spawn_blocking(move || {
-        let paths = runtime_paths(&worker_app)?;
-        let result = fork_in_lanes(
-            &OPERATIONS,
-            &ProcessRunner,
-            &paths,
-            &AppForkAssignments(&worker_app),
-            &computer_id,
-            checkpoint_id.as_deref(),
-            &new_name,
-            &|| crate::macos_computers::names(&worker_app),
-        )
-        .and_then(|_| application_state_response(&worker_app, &paths));
-        let _ = worker_app.emit("silo://application-state-changed", ());
-        result.map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish creating the fork. Refresh the computer list before trying again."
-            .to_string()
-    })?
+pub(crate) fn fork(
+    paths: &RuntimePaths,
+    assignments: &dyn ForkAssignments,
+    computer_id: &str,
+    checkpoint_id: Option<&str>,
+    new_name: &str,
+    macos_names: &dyn Fn() -> Vec<String>,
+) -> Result<(), String> {
+    fork_in_lanes(
+        &OPERATIONS,
+        &ProcessRunner,
+        paths,
+        assignments,
+        computer_id,
+        checkpoint_id,
+        new_name,
+        macos_names,
+    )
+    .map_err(|error| error.to_string())
 }
 
 /// Persist a failure record without letting a save failure replace the real error.
@@ -2180,37 +2134,27 @@ fn restore_steps(
     save(paths, computer_id, &record)
 }
 
-#[tauri::command]
-pub async fn restore_checkpoint(
-    app: AppHandle,
-    computer_id: String,
-    checkpoint_id: String,
-) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    super::operation_gate::spawn_blocking(move || {
-        let paths = runtime_paths(&worker_app)?;
-        // Restore rewrites only this computer's runtime state and per-computer checkpoint record,
-        // not the shared inventory, so it is ordered per computer by stable id.
-        let computer_name = computer_configuration(&paths, &computer_id)
-            .map_err(|error| error.to_string())?
-            .name()
-            .to_owned();
-        let guard = OPERATIONS
-            .kind(super::operation_gate::OperationKind::CheckpointRestore)
-            .computer(&computer_id, &computer_name, "Restoring checkpoint")
-            .map_err(|error| error.to_string())?;
-        // Restore is deliberately not cancellable; flag it slow after the restore window.
-        guard.expect_within(RESTORE_EXPECTED_DURATION);
-        let _guard = guard;
-        shutdown::ensure_accepting_operations()?;
-        let result = restore_with(&ProcessRunner, &paths, &computer_id, &checkpoint_id)
-            .and_then(|_| application_state_response(&worker_app, &paths));
-        let _ = worker_app.emit("silo://application-state-changed", ());
-        result.map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| "Silo could not finish Restore. Open the Checkpoints tab to review recovery and retry Restore.".to_string())?
+pub(crate) fn restore(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+) -> Result<(), String> {
+    // Restore rewrites only this computer's runtime state and per-computer checkpoint record,
+    // not the shared inventory, so it is ordered per computer by stable id.
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(super::operation_gate::OperationKind::CheckpointRestore)
+        .computer(computer_id, &computer_name, "Restoring checkpoint")
+        .map_err(|error| error.to_string())?;
+    // Restore is deliberately not cancellable; flag it slow after the restore window.
+    guard.expect_within(RESTORE_EXPECTED_DURATION);
+    let _guard = guard;
+    shutdown::ensure_accepting_operations()?;
+    restore_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+        .map_err(|error| error.to_string())
 }
 
 fn inspect_capture_source(
@@ -2469,36 +2413,19 @@ fn abandon_restore_with(
     save(paths, computer_id, &record)
 }
 
-#[tauri::command]
-pub async fn abandon_restore(
-    app: AppHandle,
-    computer_id: String,
-) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    super::operation_gate::spawn_blocking(move || {
-        let paths = runtime_paths(&worker_app)?;
-        let computer_name = computer_configuration(&paths, &computer_id)
-            .map_err(|error| error.to_string())?
-            .name()
-            .to_owned();
-        let guard = OPERATIONS
-            .kind(super::operation_gate::OperationKind::CheckpointRestore)
-            .computer(&computer_id, &computer_name, "Abandoning Restore")
-            .map_err(|error| error.to_string())?;
-        guard.expect_within(std::time::Duration::from_secs(5 * 60));
-        let _guard = guard;
-        shutdown::ensure_accepting_operations()?;
-        let result = abandon_restore_with(&ProcessRunner, &paths, &computer_id)
-            .and_then(|_| application_state_response(&worker_app, &paths));
-        let _ = worker_app.emit("silo://application-state-changed", ());
-        result.map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not abandon Restore. Open the Checkpoints tab to review recovery and retry."
-            .to_string()
-    })?
+pub(crate) fn abandon_restore(paths: &RuntimePaths, computer_id: &str) -> Result<(), String> {
+    let computer_name = computer_configuration(paths, computer_id)
+        .map_err(|error| error.to_string())?
+        .name()
+        .to_owned();
+    let guard = OPERATIONS
+        .kind(super::operation_gate::OperationKind::CheckpointRestore)
+        .computer(computer_id, &computer_name, "Abandoning Restore")
+        .map_err(|error| error.to_string())?;
+    guard.expect_within(std::time::Duration::from_secs(5 * 60));
+    let _guard = guard;
+    shutdown::ensure_accepting_operations()?;
+    abandon_restore_with(&ProcessRunner, paths, computer_id).map_err(|error| error.to_string())
 }
 
 /// Quit stops computers gracefully, which a paused computer cannot take. Release a computer an unfinished
@@ -2745,35 +2672,22 @@ fn delete_checkpoint_with(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn delete_checkpoint(
-    app: AppHandle,
-    computer_id: String,
-    checkpoint_id: String,
-) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    let worker_app = app.clone();
-    super::operation_gate::spawn_blocking(move || {
-        let paths = runtime_paths(&worker_app)?;
-        // A deleted child can release a deleted source's member in another computer's
-        // lineage group. Serialize the shared cleanup journal and native store changes.
-        let guard = OPERATIONS
-            .kind(super::operation_gate::OperationKind::CheckpointDelete)
-            .device("Deleting checkpoint")
-            .map_err(|error| error.to_string())?;
-        guard.expect_within(std::time::Duration::from_secs(5 * 60));
-        let _guard = guard;
-        shutdown::ensure_accepting_operations()?;
-        let result = delete_checkpoint_with(&ProcessRunner, &paths, &computer_id, &checkpoint_id)
-            .and_then(|_| application_state_response(&worker_app, &paths));
-        let _ = worker_app.emit("silo://application-state-changed", ());
-        result.map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish deleting the checkpoint. Refresh its history before trying again."
-            .to_string()
-    })?
+pub(crate) fn delete(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+) -> Result<(), String> {
+    // A deleted child can release a deleted source's member in another computer's
+    // lineage group. Serialize the shared cleanup journal and native store changes.
+    let guard = OPERATIONS
+        .kind(super::operation_gate::OperationKind::CheckpointDelete)
+        .device("Deleting checkpoint")
+        .map_err(|error| error.to_string())?;
+    guard.expect_within(std::time::Duration::from_secs(5 * 60));
+    let _guard = guard;
+    shutdown::ensure_accepting_operations()?;
+    delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Per-checkpoint storage and whether Delete is possible, for the Checkpoints panel.
@@ -2894,20 +2808,11 @@ fn usage_with(
     })
 }
 
-#[tauri::command]
-pub async fn read_checkpoint_usage(
-    app: AppHandle,
-    computer_id: String,
+pub(crate) fn read_usage(
+    paths: &RuntimePaths,
+    computer_id: &str,
 ) -> Result<CheckpointUsage, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        usage_with(&ProcessRunner, &paths, &computer_id)
-            .map_err(|error| safe_activity_error(&error))
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not read checkpoint disk usage. Refresh the Storage tab and retry.".to_string()
-    })?
+    usage_with(&ProcessRunner, paths, computer_id).map_err(|error| safe_activity_error(&error))
 }
 
 /// Host allocation of one computer's checkpoints and how many it has, for the Storage tab.

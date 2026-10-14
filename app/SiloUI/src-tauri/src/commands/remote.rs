@@ -66,7 +66,7 @@ fn checkpoint_handler(app: AppHandle) -> Arc<remote_access::CheckpointHandler> {
         let result = runtime.block_on(async move {
             match method.as_str() {
                 "checkpoint.create" => {
-                    crate::runtime::checkpoints::create_checkpoint(
+                    crate::commands::runtime_checkpoints::create_checkpoint(
                         app,
                         computer_id,
                         name.ok_or("Missing checkpoint name.")?,
@@ -74,7 +74,7 @@ fn checkpoint_handler(app: AppHandle) -> Arc<remote_access::CheckpointHandler> {
                     .await
                 }
                 "checkpoint.fork" => {
-                    crate::runtime::checkpoints::fork_checkpoint(
+                    crate::commands::runtime_checkpoints::fork_checkpoint(
                         app,
                         computer_id,
                         checkpoint_id,
@@ -83,7 +83,7 @@ fn checkpoint_handler(app: AppHandle) -> Arc<remote_access::CheckpointHandler> {
                     .await
                 }
                 "checkpoint.restore" => {
-                    crate::runtime::checkpoints::restore_checkpoint(
+                    crate::commands::runtime_checkpoints::restore_checkpoint(
                         app,
                         computer_id,
                         checkpoint_id.ok_or("Missing checkpoint identity.")?,
