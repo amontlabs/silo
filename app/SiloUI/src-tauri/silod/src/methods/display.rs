@@ -371,25 +371,27 @@ async fn desktop_action(
             .filter(|device| *device != local_id)
         {
             let action = serde_json::to_value(params.action).map_err(|error| error.to_string())?;
-            link.registry
-                .mark_running(&link.job_id)
-                .map_err(|error| error.to_string())?;
-            return silo_engine::remote::call_remote(
-                device,
-                "desktop.action",
-                json!({"computerId": params.computer_id, "action": action}),
-            );
+            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
+            return relay_remote(link, move || {
+                silo_engine::remote::call_remote(
+                    &device,
+                    "desktop.action",
+                    json!({"computerId": computer_id, "action": action}),
+                )
+            });
         }
         let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
         let action = desktop_action_name(params.action);
-        silo_engine::desktop::local_for_job(
+        let status = silo_engine::desktop::local_for_job(
             &paths,
             &name,
             Some(action),
             Some(&params.computer_id),
             Some(link),
-        )
+        )?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok(status)
     })
     .await
 }
@@ -494,13 +496,17 @@ async fn computer_use_approval(
         );
     }
     let paths = local_runtime_paths(context).await?;
+    let host = runtime_host(context);
     let mode = match params.mode {
         ApprovalMode::Ask => "ask",
         ApprovalMode::Auto => "auto",
     };
     let result = tokio::task::spawn_blocking(move || {
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        silo_engine::desktop::local_approval(&paths, &name, mode, Some(&params.computer_id))
+        let state =
+            silo_engine::desktop::local_approval(&paths, &name, mode, Some(&params.computer_id))?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok::<_, String>(state)
     })
     .await
     .map_err(|error| DispatchError::internal(error.to_string()))?
@@ -533,24 +539,26 @@ async fn computer_use_setup(
             .as_deref()
             .filter(|device| *device != local_id)
         {
-            link.registry
-                .mark_running(&link.job_id)
-                .map_err(|error| error.to_string())?;
-            return silo_engine::remote::call_remote(
-                device,
-                "desktop.action",
-                json!({"computerId": params.computer_id, "action": "setup-computer-use"}),
-            );
+            let (device, computer_id) = (device.to_owned(), params.computer_id.clone());
+            return relay_remote(link, move || {
+                silo_engine::remote::call_remote(
+                    &device,
+                    "desktop.action",
+                    json!({"computerId": computer_id, "action": "setup-computer-use"}),
+                )
+            });
         }
         let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
         let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        silo_engine::desktop::local_for_job(
+        let status = silo_engine::desktop::local_for_job(
             &paths,
             &name,
             Some("setup-computer-use"),
             Some(&params.computer_id),
             Some(link),
-        )
+        )?;
+        runtime::publish_computers_changed(&host, &paths);
+        Ok(status)
     })
     .await
 }
@@ -950,6 +958,16 @@ async fn clipboard_transfer(
         DispatchError::internal("Invalid params: connectionId is required for a Linux computer.")
     })?;
     let action = params.action;
+    // The viewer must show the computer on the device the request names; a connection id
+    // alone does not select the computer a transfer reaches.
+    let local_device = context.silod_context().local_device().device_id.clone();
+    silo_engine::desktop_viewer_api::ensure_target(
+        &context.client_identity().client_id,
+        &connection,
+        params.device_id.as_deref().unwrap_or(&local_device),
+        &params.computer_id,
+    )
+    .map_err(map_error)?;
     // One transfer per viewer: a second one reports `busy`.
     let label = format!("api-viewer-{connection}");
     let result = run_bridge(context, connection, move |bridge| {
@@ -1051,6 +1069,58 @@ async fn clipboard_write(
     Ok(output_value(Value::Null))
 }
 
+/// How often a relayed remote call looks at the job's cancellation flag.
+const REMOTE_CANCEL_POLL: Duration = Duration::from_millis(50);
+
+/// Runs a call to the computer's owner for a job. A job for a remote computer never enters
+/// this device's gate, so `operations.cancel` reaches it only through the job's flag: a
+/// cancellation before the call starts it never makes, and one while it runs ends the job
+/// as cancelled at once. The owner's bridge has no cancel method yet, so a request it has
+/// already accepted runs to its end there; its result is dropped.
+fn relay_remote(
+    link: &silo_engine::desktop::JobLink,
+    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
+) -> Result<Value, String> {
+    relay_cancellable(&link.cancellation, REMOTE_CANCEL_POLL, call, || {
+        link.registry
+            .mark_running(&link.job_id)
+            .map_err(|error| error.to_string())
+    })
+}
+
+fn relay_cancellable(
+    cancellation: &AtomicBool,
+    poll: Duration,
+    call: impl FnOnce() -> Result<Value, String> + Send + 'static,
+    start: impl FnOnce() -> Result<(), String>,
+) -> Result<Value, String> {
+    let cancelled = || "The operation was cancelled.".to_owned();
+    if cancellation.load(Ordering::SeqCst) {
+        return Err(cancelled());
+    }
+    start()?;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("desktop-remote-relay".into())
+        .spawn(move || {
+            let _ = sender.send(call());
+        })
+        .map_err(|error| error.to_string())?;
+    loop {
+        match receiver.recv_timeout(poll) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if cancellation.load(Ordering::SeqCst) {
+                    return Err(cancelled());
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("The remote action stopped unexpectedly.".to_owned());
+            }
+        }
+    }
+}
+
 /// Starts a durable job that runs `work` on a blocking thread and publishes its outcome.
 /// `work` receives the job's link; it marks the job running when its queue turn arrives.
 async fn start_job(
@@ -1068,14 +1138,17 @@ async fn start_job(
         job_id.clone(),
         silo_engine::jobs::CancelRoute::JobGate,
         move || {
-            if silo_engine::runtime::OPERATIONS.contains_job(&cancel_id) {
-                silo_engine::runtime::OPERATIONS
-                    .cancel_job(&cancel_id)
-                    .map_err(|error| error.to_string())
-            } else {
+            // Before the gate admits the work (or when it never enters the gate, as for a
+            // remote computer) the request is recorded in the job's flag, which the gate
+            // admission and the remote relay both observe. That accepts the cancellation,
+            // so it is reported as accepted. Once the work holds a gate entry, the gate
+            // decides.
+            if !silo_engine::runtime::OPERATIONS.contains_job(&cancel_id) {
                 cancel_flag.store(true, Ordering::SeqCst);
-                Err("This operation can't be cancelled.".to_owned())
             }
+            silo_engine::runtime::OPERATIONS
+                .cancel_job(&cancel_id)
+                .map_err(|error| error.to_string())
         },
     );
     let engine: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
@@ -1110,6 +1183,112 @@ async fn start_job(
         let _ = silo_engine::jobs::publish_finished(engine.as_ref(), finished, Audience::All);
     });
     output(accepted)
+}
+
+/// The parts of showing a native window that do not need AppKit: the protocol with the main
+/// thread and the window table with its rollback. They are separate so tests can inject a
+/// failing activation policy and a main thread that runs late.
+mod window_core {
+    use std::{
+        collections::HashMap,
+        sync::{
+            atomic::{AtomicU8, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+
+    const PENDING: u8 = 0;
+    const RUNNING: u8 = 1;
+    const ABANDONED: u8 = 2;
+
+    /// One piece of work handed to the main thread. Either the main thread starts it or the
+    /// caller gives up on it, never both: work the caller gave up on is skipped when the
+    /// main thread reaches it, so it cannot create a window nobody is waiting for.
+    #[derive(Default)]
+    pub(super) struct MainRequest {
+        state: AtomicU8,
+    }
+
+    impl MainRequest {
+        /// The main thread asks to start. False when the caller gave up.
+        pub(super) fn begin(&self) -> bool {
+            self.state
+                .compare_exchange(PENDING, RUNNING, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        }
+
+        /// The caller gives up. False when the main thread already started: its result is
+        /// then awaited, since the work is under way and will report.
+        pub(super) fn abandon(&self) -> bool {
+            self.state
+                .compare_exchange(PENDING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        }
+    }
+
+    /// Runs `work` on the main thread through `run` and returns its result. After `timeout`
+    /// without a start the work is cancelled and the call fails; work that has started is
+    /// waited for.
+    pub(super) fn run_on_main<T: Send + 'static>(
+        run: impl FnOnce(Box<dyn FnOnce() + Send>) -> Result<(), String>,
+        timeout: Duration,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<T, String> {
+        let request = Arc::new(MainRequest::default());
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let main_request = request.clone();
+        run(Box::new(move || {
+            if main_request.begin() {
+                let _ = sender.send(work());
+            }
+        }))?;
+        match receiver.recv_timeout(timeout) {
+            Ok(result) => Ok(result),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if request.abandon() {
+                    Err("Timed out waiting for the AppKit display window.".to_owned())
+                } else {
+                    receiver
+                        .recv()
+                        .map_err(|_| "The AppKit display window work stopped.".to_owned())
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                Err("The AppKit display window work was dropped.".to_owned())
+            }
+        }
+    }
+
+    pub(super) enum Shown<W> {
+        Existing(W),
+        Created(W),
+    }
+
+    /// Shows the window of `id`: the table's own when there is one, else a created one that is
+    /// entered into the table before the activation policy follows it. When the policy
+    /// refuses, the window leaves the table again and is discarded, and the policy is set
+    /// for the windows that remain, so a failed show leaves nothing behind.
+    pub(super) fn show_window<W: Clone>(
+        windows: &mut HashMap<String, W>,
+        id: &str,
+        create: impl FnOnce() -> W,
+        set_policy: &dyn Fn(bool) -> Result<(), String>,
+        discard: impl FnOnce(W),
+    ) -> Result<Shown<W>, String> {
+        if let Some(window) = windows.get(id) {
+            return Ok(Shown::Existing(window.clone()));
+        }
+        let window = create();
+        windows.insert(id.to_owned(), window.clone());
+        if let Err(error) = set_policy(true) {
+            windows.remove(id);
+            discard(window);
+            let _ = set_policy(!windows.is_empty());
+            return Err(error);
+        }
+        Ok(Shown::Created(window))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1147,7 +1326,8 @@ mod native_display {
                 // state: keep the entry alive until the end of the callback.
                 let _entry = WINDOWS.with(|windows| windows.borrow_mut().remove(&state.id));
                 if let Some(mtm) = MainThreadMarker::new() {
-                    let _ = apply_policy(mtm);
+                    let open = WINDOWS.with(|windows| !windows.borrow().is_empty());
+                    let _ = apply_policy(mtm, open);
                 }
                 silo_engine::macos_computers_engine::display_window_closed(
                     &state.context,
@@ -1172,8 +1352,8 @@ mod native_display {
         static WINDOWS: RefCell<HashMap<String, (Retained<NSWindow>, Retained<DisplayDelegate>)>> = RefCell::new(HashMap::new());
     }
 
-    fn apply_policy(mtm: MainThreadMarker) -> Result<(), String> {
-        let open = WINDOWS.with(|windows| !windows.borrow().is_empty());
+    /// Follows the activation policy to whether any window is open.
+    fn apply_policy(mtm: MainThreadMarker, open: bool) -> Result<(), String> {
         let policy = if open {
             NSApplicationActivationPolicy::Regular
         } else {
@@ -1185,6 +1365,38 @@ mod native_display {
         } else {
             Err("NSApplication refused the display window activation policy".into())
         }
+    }
+
+    /// Builds the window of computer `id` with its delegate.
+    fn build_window(
+        mtm: MainThreadMarker,
+        context: &silo_engine::macos_computers_engine::MacosContext,
+        id: &str,
+        title: &str,
+    ) -> (Retained<NSWindow>, Retained<DisplayDelegate>) {
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0));
+        let style = NSWindowStyleMask::Titled
+            | NSWindowStyleMask::Closable
+            | NSWindowStyleMask::Miniaturizable
+            | NSWindowStyleMask::Resizable;
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                mtm.alloc(),
+                frame,
+                style,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        // The registry owns the window; AppKit must not release it again on close.
+        unsafe { window.setReleasedWhenClosed(false) };
+        window.setTitle(&NSString::from_str(title));
+        window.setMinSize(NSSize::new(640.0, 400.0));
+        let content = NSView::initWithFrame(mtm.alloc(), frame);
+        window.setContentView(Some(&content));
+        let delegate = DisplayDelegate::new(mtm, context.clone(), id.to_owned());
+        window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        (window, delegate)
     }
 
     pub(super) fn show(
@@ -1201,63 +1413,36 @@ mod native_display {
         let main = engine
             .main_thread()
             .ok_or("The AppKit main-thread runner is unavailable.")?;
-        let id_for_main = id.clone();
-        let context_for_main = context.clone();
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        main.run(Box::new(move || {
-            let result = (|| -> Result<(), String> {
+        let (id_for_main, context_for_main) = (id.clone(), context.clone());
+        // The main thread skips this work when the wait below gave up, so a late run never
+        // creates a window that no caller attached.
+        super::window_core::run_on_main(
+            |work| main.run(work),
+            std::time::Duration::from_secs(10),
+            move || -> Result<(), String> {
                 let mtm = MainThreadMarker::new()
                     .ok_or("Could not open the display on AppKit's main thread.")?;
-                if let Some(window) = WINDOWS.with(|windows| {
-                    windows
-                        .borrow()
-                        .get(&id_for_main)
-                        .map(|(window, _)| window.clone())
-                }) {
-                    window.makeKeyAndOrderFront(None);
-                    #[allow(deprecated)]
-                    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
-                    return Ok(());
-                }
-                let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0));
-                let style = NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Closable
-                    | NSWindowStyleMask::Miniaturizable
-                    | NSWindowStyleMask::Resizable;
-                let window = unsafe {
-                    NSWindow::initWithContentRect_styleMask_backing_defer(
-                        mtm.alloc(),
-                        frame,
-                        style,
-                        NSBackingStoreType::Buffered,
-                        false,
+                let shown = WINDOWS.with(|windows| {
+                    super::window_core::show_window(
+                        &mut windows.borrow_mut(),
+                        &id_for_main,
+                        || build_window(mtm, &context_for_main, &id_for_main, &title),
+                        &|open| apply_policy(mtm, open),
+                        |(window, _delegate)| {
+                            // Without its delegate the close reports nothing back.
+                            window.setDelegate(None);
+                            window.close();
+                        },
                     )
-                };
-                // The registry owns the window; AppKit must not release it again on close.
-                unsafe { window.setReleasedWhenClosed(false) };
-                window.setTitle(&NSString::from_str(&title));
-                window.setMinSize(NSSize::new(640.0, 400.0));
-                let content = NSView::initWithFrame(mtm.alloc(), frame);
-                window.setContentView(Some(&content));
-                let delegate =
-                    DisplayDelegate::new(mtm, context_for_main.clone(), id_for_main.clone());
-                window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-                WINDOWS.with(|windows| {
-                    windows
-                        .borrow_mut()
-                        .insert(id_for_main.clone(), (window.clone(), delegate));
-                });
-                apply_policy(mtm)?;
+                })?;
+                let (super::window_core::Shown::Existing((window, _))
+                | super::window_core::Shown::Created((window, _))) = shown;
                 #[allow(deprecated)]
                 NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
                 window.makeKeyAndOrderFront(None);
                 Ok(())
-            })();
-            let _ = sender.send(result);
-        }))?;
-        receiver
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .map_err(|_| "Timed out waiting for the AppKit display window.".to_owned())??;
+            },
+        )??;
 
         let resolving_id = id.clone();
         if let Err(error) = silo_engine::macos_computers_engine::attach_display(
@@ -1365,20 +1550,24 @@ mod tests {
             self.directory.path().join("data")
         }
 
-        async fn call(
-            &self,
-            client: &str,
-            method: MethodName,
-            params: Value,
-        ) -> Result<Value, DispatchError> {
-            let context = HandlerContext::new(
+        fn context(&self, client: &str) -> HandlerContext {
+            HandlerContext::new(
                 self.engine.clone(),
                 RequestContext {
                     client_id: client.into(),
                     protocol: 6,
                     client: None,
                 },
-            );
+            )
+        }
+
+        async fn call(
+            &self,
+            client: &str,
+            method: MethodName,
+            params: Value,
+        ) -> Result<Value, DispatchError> {
+            let context = self.context(client);
             handle(method, &params, &context)
                 .await
                 .expect("the display module owns this method")
@@ -1416,12 +1605,25 @@ mod tests {
     /// Registers a healthy viewer connection the way a finished `display.viewer.open` does,
     /// without a guest: a proxy on a loopback port and a tunnel process that only sleeps.
     fn hold_viewer(client: &str, computer: &str) -> (String, String, String, u16) {
-        use silo_engine::desktop_viewer_api::{claim, finish, OpenPlan};
+        hold_viewer_on(client, "local-device", computer)
+    }
+
+    /// Like [`hold_viewer`], for a computer of `device`.
+    fn hold_viewer_on(client: &str, device: &str, computer: &str) -> (String, String, String, u16) {
+        use silo_engine::desktop_viewer_api::{claim, finish, open_client, OpenPlan};
+        open_client(client);
         let OpenPlan::Connect {
             connection_id,
             generation,
             ..
-        } = claim(client, "local-device", computer, "Fixture", true).unwrap()
+        } = claim(
+            client,
+            device,
+            computer,
+            "Fixture",
+            device == "local-device",
+        )
+        .unwrap()
         else {
             panic!("expected a new connection");
         };
@@ -1548,6 +1750,167 @@ mod tests {
             fixture.finished_error(started).await,
             Some(ErrorCode::NotFound)
         );
+    }
+
+    /// Starts a job whose work waits for `release`, and reports on `started` that it runs.
+    async fn blocked_job(
+        fixture: &Fixture,
+    ) -> (
+        silo_api::jobs::JobId,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (started, running) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let accepted = start_job(&fixture.context("a"), "desktop.action", move |link| {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+            if link.cancellation.load(Ordering::SeqCst) {
+                Err("The operation was cancelled.".to_owned())
+            } else {
+                Ok(Value::Null)
+            }
+        })
+        .await
+        .unwrap();
+        let job_id = serde_json::from_value(accepted.value["jobId"].clone()).unwrap();
+        (job_id, running, release)
+    }
+
+    /// The error code of the next finished job.
+    async fn next_finished(events: &mut silo_engine::events::EventReceiver) -> (String, Value) {
+        let Some(EventDelivery::Event(event)) =
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap()
+        else {
+            panic!("expected a job event");
+        };
+        assert_eq!(event.event.name, "operations.job.finished");
+        let payload = event.event.payload;
+        (payload["jobId"].as_str().unwrap().to_owned(), payload)
+    }
+
+    fn watch_finished_jobs(fixture: &Fixture) -> silo_engine::events::EventReceiver {
+        let watcher = silo_engine::context::ClientId::new("job-watcher");
+        let events = fixture.engine.connect_event_stream(watcher.clone());
+        let subscription = fixture
+            .engine
+            .subscribe_events(&watcher, vec!["operations.job.finished".into()])
+            .unwrap();
+        fixture
+            .engine
+            .activate_events(&watcher, &subscription)
+            .unwrap();
+        events
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_job_that_has_not_been_admitted_is_accepted_and_ends_it_cancelled() {
+        let fixture = fixture();
+        let mut events = watch_finished_jobs(&fixture);
+        let (job_id, running, release) = blocked_job(&fixture).await;
+        tokio::task::spawn_blocking(move || running.recv().unwrap())
+            .await
+            .unwrap();
+        // The work is not in the gate (it may never enter it): the request is accepted, not
+        // reported as refused while it takes effect.
+        fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .expect("the cancellation is accepted");
+        release.send(()).unwrap();
+        let (finished, payload) = next_finished(&mut events).await;
+        assert_eq!(finished, job_id.as_str());
+        assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
+    }
+
+    #[test]
+    fn a_relayed_remote_call_observes_the_cancellation_flag() {
+        let calls = Arc::new(AtomicBool::new(false));
+        let poll = Duration::from_millis(1);
+        // Cancelled before it starts: the call is never made.
+        let cancelled = AtomicBool::new(true);
+        let made = calls.clone();
+        let result = relay_cancellable(
+            &cancelled,
+            poll,
+            move || {
+                made.store(true, Ordering::SeqCst);
+                Ok(Value::Null)
+            },
+            || panic!("a cancelled job does not start"),
+        );
+        assert!(result.unwrap_err().contains("was cancelled"));
+        assert!(!calls.load(Ordering::SeqCst));
+        // A call that finishes returns its value.
+        let flag = AtomicBool::new(false);
+        let result = relay_cancellable(&flag, poll, || Ok(json!({"state": "running"})), || Ok(()));
+        assert_eq!(result.unwrap(), json!({"state": "running"}));
+        // Cancelled while the call is outstanding: the job ends at once, whatever the call
+        // does afterwards.
+        let (entered, inside) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let flag = Arc::new(AtomicBool::new(false));
+        let waiter = {
+            let flag = flag.clone();
+            std::thread::spawn(move || {
+                relay_cancellable(
+                    &flag,
+                    poll,
+                    move || {
+                        entered.send(()).unwrap();
+                        let _ = released.recv();
+                        Ok(Value::Null)
+                    },
+                    || Ok(()),
+                )
+            })
+        };
+        inside.recv().unwrap();
+        flag.store(true, Ordering::SeqCst);
+        let result = waiter.join().unwrap();
+        assert!(result.unwrap_err().contains("was cancelled"));
+        release.send(()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_remote_job_is_cancellable_and_ends_cancelled() {
+        let fixture = fixture();
+        let mut events = watch_finished_jobs(&fixture);
+        let (entered, inside) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let accepted = start_job(&fixture.context("a"), "desktop.action", move |link| {
+            relay_cancellable(
+                &link.cancellation,
+                Duration::from_millis(1),
+                move || {
+                    entered.send(()).unwrap();
+                    let _ = released.recv();
+                    Ok(Value::Null)
+                },
+                || Ok(()),
+            )
+        })
+        .await
+        .unwrap();
+        let job_id: silo_api::jobs::JobId =
+            serde_json::from_value(accepted.value["jobId"].clone()).unwrap();
+        tokio::task::spawn_blocking(move || inside.recv().unwrap())
+            .await
+            .unwrap();
+        fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .expect("a remote job accepts cancellation");
+        let (finished, payload) = next_finished(&mut events).await;
+        assert_eq!(finished, job_id.as_str());
+        assert_eq!(payload["error"]["code"], "cancelled", "{payload}");
+        release.send(()).unwrap();
     }
 
     #[tokio::test]
@@ -1898,6 +2261,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clipboard_transfer_refuses_a_viewer_of_another_computer_or_device() {
+        let fixture = fixture();
+        let (first, second) = (unknown(), unknown());
+        let (shows_first, ..) = hold_viewer("clip-owner", &first);
+        let (shows_second, ..) = hold_viewer("clip-owner", &second);
+        let (shows_remote, ..) = hold_viewer_on("clip-owner", "other-device", &first);
+        // The connection ids are all owned by the caller, but each shows another target
+        // than the request names: nothing is transferred and nothing is learned.
+        for (computer, connection) in [
+            (&first, &shows_second),
+            (&second, &shows_first),
+            // A viewer of a remote computer cannot be used under a local target.
+            (&first, &shows_remote),
+        ] {
+            let refused = fixture
+                .call(
+                    "clip-owner",
+                    MethodName::ClipboardTransfer,
+                    json!({"computerId": computer, "action": "copy", "connectionId": connection}),
+                )
+                .await;
+            assert_eq!(code(refused).await, ErrorCode::NotFound);
+        }
+        // Another client's matching viewer is refused as before.
+        let foreign = fixture
+            .call(
+                "clip-other",
+                MethodName::ClipboardTransfer,
+                json!({"computerId": first, "action": "copy", "connectionId": shows_first}),
+            )
+            .await;
+        assert_eq!(code(foreign).await, ErrorCode::NotFound);
+        for connection in [shows_first, shows_second, shows_remote] {
+            silo_engine::desktop_viewer_api::close("clip-owner", &connection).unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn clipboard_read_and_write_need_a_running_macos_computer() {
         let fixture = fixture();
         let stopped = fixture.macos(TestComputerState::Stopped, Approval::Ask);
@@ -1937,6 +2338,104 @@ mod tests {
             )
             .await;
         assert_eq!(code(remote).await, ErrorCode::UnsupportedRemoteOperation);
+    }
+
+    #[test]
+    fn a_window_whose_activation_policy_fails_is_rolled_back() {
+        use std::{cell::RefCell, collections::HashMap};
+        let mut windows: HashMap<String, u32> = HashMap::new();
+        let policies = RefCell::new(Vec::new());
+        let discarded = RefCell::new(Vec::new());
+        let failing = |open: bool| {
+            policies.borrow_mut().push(open);
+            if open && policies.borrow().len() == 1 {
+                Err("NSApplication refused the activation policy".to_owned())
+            } else {
+                Ok(())
+            }
+        };
+        let refused = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 7,
+            &failing,
+            |window| discarded.borrow_mut().push(window),
+        );
+        assert_eq!(
+            refused.err().unwrap(),
+            "NSApplication refused the activation policy"
+        );
+        // Nothing stays registered, the window was discarded once, and the policy was set
+        // back for the windows that remain (none).
+        assert!(windows.is_empty());
+        assert_eq!(*discarded.borrow(), [7]);
+        assert_eq!(*policies.borrow(), [true, false]);
+        // The next show starts clean, and a second show of the same id reuses its window.
+        let shown = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 8,
+            &failing,
+            |_| panic!("nothing to discard"),
+        );
+        assert!(matches!(shown, Ok(window_core::Shown::Created(8))));
+        let again = window_core::show_window(
+            &mut windows,
+            "mac",
+            || 9,
+            &failing,
+            |_| panic!("nothing to discard"),
+        );
+        assert!(matches!(again, Ok(window_core::Shown::Existing(8))));
+        assert_eq!(windows.len(), 1);
+    }
+
+    #[test]
+    fn a_main_thread_request_that_timed_out_never_creates_its_window() {
+        use std::sync::Mutex;
+        // A main thread that has not got to the work yet: the closure is only kept.
+        let late: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>> = Arc::new(Mutex::new(None));
+        let created = Arc::new(AtomicBool::new(false));
+        let result = window_core::run_on_main(
+            |work| {
+                *late.lock().unwrap() = Some(work);
+                Ok(())
+            },
+            Duration::ZERO,
+            {
+                let created = created.clone();
+                move || created.store(true, Ordering::SeqCst)
+            },
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "Timed out waiting for the AppKit display window."
+        );
+        // The main thread reaches the work afterwards: it is skipped.
+        let work = late.lock().unwrap().take().unwrap();
+        work();
+        assert!(!created.load(Ordering::SeqCst));
+        // On time, the result comes back.
+        let on_time = window_core::run_on_main(
+            |work| {
+                work();
+                Ok(())
+            },
+            Duration::from_secs(5),
+            || 42,
+        );
+        assert_eq!(on_time.unwrap(), 42);
+    }
+
+    #[test]
+    fn a_request_is_either_started_by_the_main_thread_or_abandoned_by_the_caller() {
+        let started_first = window_core::MainRequest::default();
+        assert!(started_first.begin());
+        // Work that has started cannot be abandoned: the caller waits for its result.
+        assert!(!started_first.abandon());
+        let abandoned_first = window_core::MainRequest::default();
+        assert!(abandoned_first.abandon());
+        assert!(!abandoned_first.begin());
     }
 
     #[tokio::test]
