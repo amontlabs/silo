@@ -33,23 +33,25 @@ impl RuntimeHost for AppHandle {
     }
 
     fn schedule_secret_revocations(&self) {
-        crate::secrets::schedule_revocations(self);
+        crate::secrets::schedule_revocations();
     }
 
     fn repository_push_operations(&self, local: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
-        crate::host_push_operations::merge(self, local.clone()).unwrap_or(local)
+        runtime::runtime_paths(self)
+            .and_then(|paths| crate::host_push_operations::merge(&paths, local.clone()))
+            .unwrap_or(local)
     }
 
     fn github_snapshot(&self) -> Result<serde_json::Value, String> {
-        crate::github::snapshot(self)
+        crate::github::snapshot()
     }
 
     fn open_terminal(&self, name: &str) -> Result<(), String> {
-        crate::terminal::open(self, name)
+        crate::commands::terminal::open(self, name)
     }
 
     fn open_editor(&self, name: &str, path: Option<&str>) -> Result<(), String> {
-        crate::editor::open(self, name, path)
+        crate::commands::editor::open(self, name, path)
     }
 
     fn macos_computer_names(&self) -> Vec<String> {

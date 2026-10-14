@@ -2,6 +2,7 @@
 //! Snapshot data and its reference graph remain owned by MicroSandbox.
 use super::*;
 use std::collections::{HashMap, HashSet};
+use tauri::{AppHandle, Emitter};
 
 pub(crate) const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
@@ -1478,10 +1479,10 @@ struct AppForkAssignments<'a>(&'a AppHandle);
 
 impl ForkAssignments for AppForkAssignments<'_> {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::github::fork_assignment(self.0, source, target)
+        crate::github::fork_assignment(source, target)
     }
     fn forget_github(&self, target: &str) -> Result<(), String> {
-        crate::github::forget_fork_assignment(self.0, target)
+        crate::github::forget_fork_assignment(target)
     }
     fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String> {
         crate::secrets::fork_assignments(source, target)
