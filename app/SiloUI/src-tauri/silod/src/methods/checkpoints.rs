@@ -29,7 +29,7 @@ use silo_api::{
 use silo_engine::{
     checkpoints::{Failure, Service},
     context::EngineContext,
-    macos_computers_engine::{MacosContext, MacosHost},
+    macos_computers_engine::MacosContext,
 };
 
 use crate::dispatcher::{method_name, DispatchError, HandlerOutput};
@@ -151,37 +151,8 @@ pub(super) fn engine_context(context: &HandlerContext) -> Arc<dyn EngineContext>
     Arc::new(context.silod_context().clone())
 }
 
-/// The macOS side reaches no display window from checkpoint work; the Linux names it
-/// reserves fork names against come from this device's inventory.
-struct CheckpointMacosHost {
-    host: Arc<dyn silo_engine::runtime::RuntimeHost>,
-}
-
-impl MacosHost for CheckpointMacosHost {
-    fn show_display(
-        &self,
-        _context: &MacosContext,
-        _id: &str,
-        _title: &str,
-        _toolbar: bool,
-    ) -> Result<(), String> {
-        Err("This operation does not open a display.".to_owned())
-    }
-
-    fn close_display(&self, _id: &str) {}
-
-    fn linux_computer_names(&self) -> Vec<String> {
-        silo_engine::runtime::computer_names(self.host.as_ref())
-    }
-}
-
 pub(super) fn macos_context(context: &HandlerContext) -> MacosContext {
-    MacosContext::new(
-        engine_context(context),
-        Arc::new(CheckpointMacosHost {
-            host: context.silod_context().runtime_host(),
-        }),
-    )
+    context.silod_context().macos_context()
 }
 
 /// The two-platform checkpoint service, reading the owner's retention setting from the

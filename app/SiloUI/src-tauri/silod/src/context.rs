@@ -84,6 +84,17 @@ impl SilodContext {
         })
     }
 
+    /// The macOS computer adapter for work that opens no display: checkpoints, and export
+    /// and import through the runtime host.
+    pub fn macos_context(&self) -> silo_engine::macos_computers_engine::MacosContext {
+        silo_engine::macos_computers_engine::MacosContext::new(
+            Arc::new(self.clone()),
+            Arc::new(NoDisplayMacosHost {
+                host: self.runtime_host(),
+            }),
+        )
+    }
+
     pub fn backup_controller(
         &self,
     ) -> Result<Arc<silo_engine::backup_controller::Controller>, String> {
@@ -285,6 +296,30 @@ impl SilodContext {
     }
 }
 
+/// The macOS side reaches no display window from checkpoint, export or import work; the
+/// Linux names it reserves fork names against come from this device's inventory.
+struct NoDisplayMacosHost {
+    host: Arc<dyn silo_engine::runtime::RuntimeHost>,
+}
+
+impl silo_engine::macos_computers_engine::MacosHost for NoDisplayMacosHost {
+    fn show_display(
+        &self,
+        _context: &silo_engine::macos_computers_engine::MacosContext,
+        _id: &str,
+        _title: &str,
+        _toolbar: bool,
+    ) -> Result<(), String> {
+        Err("This operation does not open a display.".to_owned())
+    }
+
+    fn close_display(&self, _id: &str) {}
+
+    fn linux_computer_names(&self) -> Vec<String> {
+        silo_engine::runtime::computer_names(self.host.as_ref())
+    }
+}
+
 struct SilodRuntimeHost {
     context: Arc<SilodContext>,
     migration: Arc<silo_engine::runtime_migration::Controller>,
@@ -293,6 +328,10 @@ struct SilodRuntimeHost {
 impl silo_engine::runtime::RuntimeHost for SilodRuntimeHost {
     fn engine_context(&self) -> Arc<dyn EngineContext> {
         self.context.clone()
+    }
+
+    fn macos_context(&self) -> Option<silo_engine::macos_computers_engine::MacosContext> {
+        Some(self.context.macos_context())
     }
 
     fn runtime_storage(&self) -> Result<PathBuf, String> {

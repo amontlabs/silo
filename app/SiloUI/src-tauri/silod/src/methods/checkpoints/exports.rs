@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use serde_json::Value;
 use silo_api::{
-    jobs::{ErrorCode, JobId},
+    jobs::JobId,
     methods::{
         common::JobStartResult,
         exports::{
@@ -15,11 +15,11 @@ use silo_api::{
         },
     },
 };
-use silo_engine::{backup_controller as engine, checkpoints::Platform};
+use silo_engine::backup_controller as engine;
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
-use super::{blocking, message_error, output, require_local_device, service, HandlerContext};
+use super::{blocking, message_error, output, require_local_device, HandlerContext};
 
 /// The export controller, installed on first use. It settles an interrupted operation's
 /// journal as it installs, before any new operation can begin.
@@ -117,18 +117,7 @@ pub(super) async fn create(
     let params: ExportCreateParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let controller = controller(context)?;
-    let service = service(context);
     let operation_id = blocking(move || {
-        for computer_id in &params.computer_ids {
-            // The archive format carries Linux snapshots only; a macOS computer has no
-            // export mechanism yet (20 Q4), so it is refused by name, not mistaken for missing.
-            if service.platform(computer_id) == Ok(Platform::Macos) {
-                return Err(DispatchError {
-                    code: ErrorCode::UnsupportedRemoteOperation,
-                    message: "macOS computers cannot be exported yet.".to_owned(),
-                });
-            }
-        }
         engine::begin_export_for_ids(
             controller,
             params.destination,

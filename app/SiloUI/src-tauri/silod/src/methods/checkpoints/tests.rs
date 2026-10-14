@@ -498,7 +498,7 @@ async fn exports_inspect_returns_an_inspect_job_that_reports_an_invalid_file_as_
 }
 
 #[tokio::test]
-async fn exports_create_needs_the_remembered_destination_and_refuses_macos_computers() {
+async fn exports_create_needs_the_remembered_destination() {
     let fixture = fixture();
     let refused = call(
         &fixture,
@@ -511,17 +511,50 @@ async fn exports_create_needs_the_remembered_destination_and_refuses_macos_compu
         .message
         .contains("Choose the export destination again"));
 
-    let macos = call(
+    let unknown = call(
         &fixture,
         MethodName::ExportsCreate,
-        json!({"destination": fixture.directory.path(), "computerIds": [fixture.macos_id]}),
+        json!({
+            "destination": fixture.directory.path(),
+            "computerIds": ["99999999-9999-4999-8999-999999999999"]
+        }),
     )
     .await
     .unwrap_err();
-    assert_eq!(macos.code, ErrorCode::UnsupportedRemoteOperation);
-    assert!(macos
-        .message
-        .contains("macOS computers cannot be exported yet"));
+    assert!(unknown.message.contains("is not managed by Silo"));
+}
+
+#[tokio::test]
+async fn exports_create_resolves_a_macos_computer_and_hands_it_to_the_archive_writer() {
+    let fixture = fixture();
+    let folder = fixture.directory.path().join("exports");
+    std::fs::create_dir_all(&folder).unwrap();
+    call(
+        &fixture,
+        MethodName::ExportsDestinationSet,
+        json!({"path": folder}),
+    )
+    .await
+    .unwrap();
+
+    // The macOS id is found in the Apple Virtualization registry, not refused by platform
+    // and not mistaken for a missing Linux computer: an export job is accepted.
+    let started = call(
+        &fixture,
+        MethodName::ExportsCreate,
+        json!({"destination": folder, "computerIds": [fixture.macos_id]}),
+    )
+    .await
+    .unwrap();
+    let id = job_id(started);
+    assert!(id.as_str().starts_with("exports:"));
+    let outcome = finished(&fixture, &id).await.outcome.unwrap();
+    // The test binary is not signed with the virtualization entitlement, so the writer
+    // itself reports the failure; it was reached for the named macOS computer.
+    let result = outcome.result.expect("the export ends in a result");
+    assert_eq!(result["outcome"], "failed");
+    assert_eq!(result["archive"]["computers"], json!(["mac-dev"]));
+    assert!(!result.to_string().contains("cannot be exported yet"));
 }
 
 #[tokio::test]

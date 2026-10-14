@@ -572,21 +572,38 @@ pub fn begin_export_for_ids(
     computer_ids: Vec<String>,
     checkpoint_id: Option<String>,
 ) -> Result<String, String> {
-    let paths = runtime::runtime_paths(controller.runtime_host()?)?;
-    let metadata = runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
-    let names = computer_ids
+    let macos = controller.runtime_host()?.macos_context();
+    // macOS computers are not in the Linux inventory; the Apple Virtualization registry
+    // resolves their ids first, and the Linux metadata is read only when an id is left.
+    let mut names: Vec<Option<String>> = computer_ids
         .iter()
         .map(|id| {
-            metadata
-                .computers
-                .iter()
-                .find(|configuration| configuration.id() == id)
-                .map(|configuration| configuration.name().to_owned())
-                .ok_or_else(|| {
-                    format!(
-                        "Computer '{id}' is not managed by Silo. Choose a Silo computer to export."
-                    )
-                })
+            macos
+                .as_ref()
+                .and_then(|context| crate::macos_computers::name_for_id(context, id))
+        })
+        .collect();
+    if names.iter().any(Option::is_none) {
+        let paths = runtime::runtime_paths(controller.runtime_host()?)?;
+        let metadata =
+            runtime::read_metadata(&paths.metadata).map_err(|error| error.to_string())?;
+        for (slot, id) in names.iter_mut().zip(&computer_ids) {
+            if slot.is_none() {
+                *slot = metadata
+                    .computers
+                    .iter()
+                    .find(|configuration| configuration.id() == id)
+                    .map(|configuration| configuration.name().to_owned());
+            }
+        }
+    }
+    let names = names
+        .into_iter()
+        .zip(&computer_ids)
+        .map(|(name, id)| {
+            name.ok_or_else(|| {
+                format!("Computer '{id}' is not managed by Silo. Choose a Silo computer to export.")
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     begin_export(controller, destination, names, checkpoint_id)

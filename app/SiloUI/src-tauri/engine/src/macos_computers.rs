@@ -1304,6 +1304,12 @@ pub fn has_computer(app: &MacosContext, id: &str) -> bool {
     ensure_loaded(app).is_ok() && registry().entry(id).is_some()
 }
 
+/// The name of the macOS computer with this id, or `None` when the registry holds none.
+pub(crate) fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
+    ensure_loaded(app).ok()?;
+    registry().entry(id).map(|entry| entry.record.name.clone())
+}
+
 fn prune_macos_automatic_checkpoints(
     app: &MacosContext,
     computer_id: &str,
