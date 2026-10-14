@@ -1,6 +1,7 @@
 //! Durable desired state for explicit local computer actions. Detached runtime children
 //! own MicroSandbox's transition/lifecycle guards, not Silo's command-worker lock.
 use super::*;
+use silo_engine::context::{Audience, Event};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -439,14 +440,17 @@ pub(crate) struct Recovered {
     pub(crate) failures: Vec<String>,
 }
 
-pub(crate) fn recover(app: &AppHandle) -> Result<Recovered, String> {
-    let paths = runtime_paths(app)?;
+pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<Recovered, String> {
+    let paths = runtime_paths(host)?;
     let _guard = OPERATIONS
         .device("Resuming computer actions")
         .map_err(|_| "Computer action recovery is busy.")?;
     let resources = device_resources().map_err(|e| e.to_string())?;
     let result = recover_with(&ProcessRunner, &paths, &resources);
-    let _ = app.emit("silo://application-state-changed", ());
+    host.engine_context().publish(
+        Event::new("silo://application-state-changed", Value::Null),
+        Audience::All,
+    );
     result.map_err(|e| e.to_string())
 }
 /// Settle every saved action. Only a failure to list them is an error; every other

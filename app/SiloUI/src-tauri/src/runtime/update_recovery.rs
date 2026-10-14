@@ -173,22 +173,22 @@ fn running(
     }
     Ok(result)
 }
-pub(crate) fn running_names(app: &AppHandle) -> Result<Vec<String>, String> {
+pub(crate) fn running_names(host: &dyn RuntimeHost) -> Result<Vec<String>, String> {
     // An unfinished storage migration holds the runtime back: nothing is running, and
     // it must not stop an update from installing.
-    let Some(paths) = runtime_paths_if_in_use(app)? else {
+    let Some(paths) = runtime_paths_if_in_use(host)? else {
         return Ok(Vec::new());
     };
     running(&ProcessRunner, &paths).map(|v| v.into_iter().map(|m| m.name).collect())
 }
 /// Caller holds the operation gate (device scope) for the whole installation,
 /// including every stop.
-pub(crate) fn prepare(app: &AppHandle, consent: bool) -> Result<(), String> {
+pub(crate) fn prepare(host: &dyn RuntimeHost, consent: bool) -> Result<(), String> {
     debug_assert!(
         operation_gate::held(),
         "update preparation requires the operation gate"
     );
-    let Some(paths) = runtime_paths_if_in_use(app)? else {
+    let Some(paths) = runtime_paths_if_in_use(host)? else {
         return Ok(());
     };
     if load(&paths)?.is_some() {
@@ -229,12 +229,12 @@ fn stop_selected(
 }
 
 /// Caller holds the operation gate. Each success is persisted, making replay idempotent.
-pub(crate) fn restore_locked(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn restore_locked(host: &dyn RuntimeHost) -> Result<(), String> {
     debug_assert!(
         operation_gate::held(),
         "update restore requires the operation gate"
     );
-    let Some(paths) = runtime_paths_if_in_use(app)? else {
+    let Some(paths) = runtime_paths_if_in_use(host)? else {
         return Ok(());
     };
     let device = device_resources().map_err(|e| e.to_string())?;
@@ -297,15 +297,15 @@ fn restore_pending(
         .map_err(|_| "Completed update recovery could not be synced.".into())
 }
 
-pub(crate) fn recover(app: &AppHandle) -> Result<bool, String> {
+pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<bool, String> {
     let _guard = OPERATIONS
         .device("Resuming computers after update")
         .map_err(|_| "Computer operations are unavailable.")?;
-    let Some(paths) = runtime_paths_if_in_use(app)? else {
+    let Some(paths) = runtime_paths_if_in_use(host)? else {
         return Ok(false);
     };
     let existed = load(&paths)?.is_some();
-    restore_locked(app)?;
+    restore_locked(host)?;
     Ok(existed)
 }
 

@@ -1,6 +1,7 @@
 //! Quit takes the same operation gate as normal computer operations. It never
 //! follows saved SSH connections or sends commands to another device.
 use super::*;
+use silo_engine::context::{Audience, Event};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static QUITTING: AtomicBool = AtomicBool::new(false);
@@ -94,7 +95,7 @@ fn drain_then<T>(drain: impl FnOnce(), stop: impl FnOnce() -> T) -> T {
 }
 
 pub(crate) fn stop_local_computers(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     deadline: Option<Instant>,
 ) -> Result<(), String> {
     let result = drain_then(
@@ -108,10 +109,10 @@ pub(crate) fn stop_local_computers(
                 crate::macos_remote_viewer::close_all();
                 // macOS computers live in this process. Quit runs on a worker thread, so the
                 // main thread stays free for the framework's callbacks while they stop.
-                let macos = crate::macos_computers::stop_all(app, deadline);
+                let macos = host.stop_macos_computers(deadline);
                 // With the storage migration unfinished no runtime is in use, so no computer of this
                 // Silo can be running and Quit has nothing to stop.
-                let Some(paths) = runtime_paths_if_in_use(app)? else {
+                let Some(paths) = runtime_paths_if_in_use(host)? else {
                     return macos;
                 };
                 // The quit overlay follows the queue and shows which computer is stopping (D-29).
@@ -124,7 +125,10 @@ pub(crate) fn stop_local_computers(
             })
         },
     );
-    let _ = app.emit("silo://application-state-changed", ());
+    host.engine_context().publish(
+        Event::new("silo://application-state-changed", Value::Null),
+        Audience::All,
+    );
     result
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use silo_engine::context::{Audience, Event};
 use std::os::fd::AsRawFd;
 
 const OWNER: &str = ".silo-configuration-owner";
@@ -595,18 +596,29 @@ fn blocks_snapshot(paths: &RuntimePaths, no_live_attempt: bool) -> Result<bool, 
         .map_err(|e| e.to_string())
 }
 
-pub(crate) fn recover(app: &AppHandle) -> Result<(), String> {
+fn publish_application_state_changed(context: &dyn silo_engine::context::EngineContext) {
+    context.publish(
+        Event::new("silo://application-state-changed", Value::Null),
+        Audience::All,
+    );
+}
+
+pub(crate) fn recover(host: &dyn RuntimeHost) -> Result<(), String> {
+    let context = host.engine_context();
     let result = {
         let _attempt = attempt();
         STARTUP_SETTLED.store(true, Ordering::SeqCst);
-        recover_inner(app)
+        recover_inner(host, context.as_ref())
     };
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed(context.as_ref());
     result
 }
 
-fn recover_inner(app: &AppHandle) -> Result<(), String> {
-    let paths = runtime_paths(app)?;
+fn recover_inner(
+    host: &dyn RuntimeHost,
+    context: &dyn silo_engine::context::EngineContext,
+) -> Result<(), String> {
+    let paths = runtime_paths(host)?;
     if load(&paths).map_err(|e| e.to_string())?.is_none() {
         return Ok(());
     }
@@ -617,8 +629,7 @@ fn recover_inner(app: &AppHandle) -> Result<(), String> {
     // reserve from is read now. Replaying must not add a name a macOS computer took
     // since the interruption.
     let journal = load(&paths).map_err(|e| e.to_string())?;
-    let Some(_reservation) =
-        reserve_replay(journal.as_ref(), &|| crate::macos_computers::names(app))?
+    let Some(_reservation) = reserve_replay(journal.as_ref(), &|| host.macos_computer_names())?
     else {
         return Ok(());
     };
@@ -629,7 +640,13 @@ fn recover_inner(app: &AppHandle) -> Result<(), String> {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .append(computer_progress(&request_id, step, name, fraction));
-        let _ = app.emit_to("main", "silo://computer-configuration-progress", event);
+        if let Ok(payload) = serde_json::to_value(event) {
+            // window:main
+            context.publish(
+                Event::new("silo://computer-configuration-progress", payload),
+                Audience::All,
+            );
+        }
     };
     progress("setup-started", "", 0);
     let result = device_resources()
@@ -643,7 +660,7 @@ fn recover_inner(app: &AppHandle) -> Result<(), String> {
         "",
         0,
     );
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed(context);
     result.map_err(|e| e.to_string())
 }
 
