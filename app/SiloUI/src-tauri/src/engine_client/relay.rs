@@ -8,25 +8,7 @@
 use serde_json::{json, Value};
 
 /// Every event the client subscribes to. One subscription carries them all.
-pub(crate) const SUBSCRIBED: &[&str] = &[
-    "computers.*",
-    "checkpoints.*",
-    "exports.*",
-    "migration.*",
-    "github.*",
-    "secrets.*",
-    "push.*",
-    "operations.*",
-    "network.*",
-    "editor.*",
-    "engine.*",
-    "settings.*",
-    "updates.*",
-    "preparation.*",
-    "notifications.*",
-    "connections.*",
-    "display.*",
-];
+pub(crate) use silo_client::APP_EVENTS as SUBSCRIBED;
 
 pub(crate) const ENGINE_EVENT: &str = "silo://engine-event";
 pub(crate) const ENGINE_CONNECTION: &str = "silo://engine-connection";
