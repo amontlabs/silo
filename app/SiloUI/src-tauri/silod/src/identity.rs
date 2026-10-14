@@ -85,6 +85,14 @@ fn read_config(path: &Path, euid: u32) -> io::Result<Option<ConnectionsConfig>> 
 }
 
 fn create_config(path: &Path, euid: u32) -> Result<ConnectionsConfig, String> {
+    create_config_with_directory_sync(path, euid, sync_directory)
+}
+
+fn create_config_with_directory_sync(
+    path: &Path,
+    euid: u32,
+    mut sync_parent: impl FnMut(&Path) -> io::Result<()>,
+) -> Result<ConnectionsConfig, String> {
     let config = ConnectionsConfig {
         device_id: Uuid::new_v4().to_string(),
         enabled: false,
@@ -108,7 +116,9 @@ fn create_config(path: &Path, euid: u32) -> Result<ConnectionsConfig, String> {
     match fs::hard_link(&temporary, path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            let _ = fs::remove_file(&temporary);
+            fs::remove_file(&temporary).map_err(|remove_error| remove_error.to_string())?;
+            sync_parent(path.parent().unwrap_or_else(|| Path::new(".")))
+                .map_err(|sync_error| sync_error.to_string())?;
             return read_config(path, euid)
                 .map_err(|read_error| read_error.to_string())?
                 .ok_or_else(|| {
@@ -126,7 +136,13 @@ fn create_config(path: &Path, euid: u32) -> Result<ConnectionsConfig, String> {
     if unsafe { libc::geteuid() } != euid {
         return Err("effective uid changed while creating Connections identity".to_owned());
     }
+    sync_parent(path.parent().unwrap_or_else(|| Path::new(".")))
+        .map_err(|error| error.to_string())?;
     Ok(config)
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
 }
 
 fn host_name() -> String {
@@ -150,7 +166,34 @@ fn host_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::{ffi::OsString, os::unix::fs::PermissionsExt};
+
+    #[test]
+    fn identity_publication_syncs_parent_after_link_and_temp_cleanup() {
+        let root = tempfile::tempdir().unwrap();
+        let euid = unsafe { libc::geteuid() };
+        let config_path = root.path().join("config.json");
+        let mut sync_called = false;
+
+        let result = create_config_with_directory_sync(&config_path, euid, |parent| {
+            sync_called = true;
+            assert_eq!(parent, root.path());
+            assert!(config_path.is_file(), "config must be published before sync");
+            let mut names = fs::read_dir(parent)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<OsString>>();
+            names.sort();
+            assert_eq!(names, [OsString::from("config.json")]);
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "directory sync failed",
+            ))
+        });
+
+        assert!(sync_called, "the containing directory must be synced");
+        assert!(matches!(result, Err(error) if error == "directory sync failed"));
+    }
 
     #[test]
     fn creates_and_reuses_the_channel_connections_identity() {
