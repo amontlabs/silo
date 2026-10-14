@@ -282,6 +282,20 @@ pub struct JobLookupResult {
     pub state: JobState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<JobOutcome>,
+    /// Present when the retained outcome is too large for one response. `data`
+    /// is an exact UTF-8 slice of the persisted JobOutcome JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_chunk: Option<JobOutcomeChunk>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JobOutcomeChunk {
+    pub data: String,
+    pub total_bytes: u64,
+    pub offset_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset_bytes: Option<u64>,
 }
 
 /// Kept in this module as a re-export for callers that model the shared job

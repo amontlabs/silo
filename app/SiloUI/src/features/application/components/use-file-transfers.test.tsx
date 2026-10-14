@@ -69,6 +69,7 @@ describe("file transfers on the Files page", () => {
     await user.click(screen.getByRole("button", { name: "Keep both" }))
     expect(await screen.findByText("Uploaded “report (1).pdf” to dev")).toBeInTheDocument()
     expect(upload.mock.calls.map(([request]) => request.conflict)).toEqual(["ask", "keepBoth"])
+    expect(upload.mock.calls[1][0].id).not.toBe(upload.mock.calls[0][0].id)
   })
 
   it("replaces on request and sends nothing more when the dialog is cancelled", async () => {
@@ -178,9 +179,12 @@ describe("file transfers on the Files page", () => {
     await user.click(screen.getByRole("button", { name: "Keep both" }))
     await screen.findByText("Uploading “report.pdf” to dev")
     const { id } = upload.mock.calls[1][0]
+    expect(id).not.toBe(upload.mock.calls[0][0].id)
     emit({ id, computer: "dev", direction: "upload", state: "transferring", name: "report.pdf", fileIndex: 0, fileCount: 1, bytesDone: 500, bytesTotal: 1000 })
     expect(await screen.findByText(/500 bytes of 1\.0 KB/)).toBeInTheDocument()
-    await act(async () => finish({ status: "done", names: ["report (1).pdf"] }))
-    expect(await screen.findByText("Uploaded “report (1).pdf” to dev")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(actions.cancel).toHaveBeenCalledWith(id)
+    await act(async () => finish({ status: "cancelled" }))
+    await waitFor(() => expect(screen.queryByText("Uploading “report.pdf” to dev")).toBeNull())
   })
 })

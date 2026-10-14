@@ -3,7 +3,8 @@
 mod registry;
 
 pub use registry::{
-    Acceptance, CancelRoute, JobRegistry, RegistryError, DISCOVERY_ID_BUDGET_BYTES,
+    Acceptance, CancelRoute, JobRegistry, RegistryError, RegistryErrorKind,
+    DISCOVERY_ID_BUDGET_BYTES, MAX_INLINE_JOB_OUTCOME_BYTES, MAX_JOB_OUTCOME_CHUNK_BYTES,
 };
 
 pub(crate) fn registry_for_engine_data(
@@ -27,18 +28,19 @@ pub fn accept_domain_id(
 ) -> Result<Acceptance, RegistryError> {
     let id = JobId::new(format!("{space}:{domain_id}"))
         .map_err(|error| RegistryError::invalid(error.to_string()))?;
-    let accepted = context.job_registry()?.accept(id, method)?;
+    let registry = context.job_registry()?;
+    retry_pending_outcomes(context, registry.as_ref())?;
+    let accepted = registry.accept(id, method)?;
     if accepted.created {
         context.job_queue_changed();
     }
     Ok(accepted)
 }
 
-pub fn allocate(
-    context: &dyn EngineContext,
-    method: &str,
-) -> Result<Acceptance, RegistryError> {
-    let accepted = context.job_registry()?.allocate(method)?;
+pub fn allocate(context: &dyn EngineContext, method: &str) -> Result<Acceptance, RegistryError> {
+    let registry = context.job_registry()?;
+    retry_pending_outcomes(context, registry.as_ref())?;
+    let accepted = registry.allocate(method)?;
     if accepted.created {
         context.job_queue_changed();
     }
@@ -50,9 +52,7 @@ pub fn associate_active_key(
     key: impl Into<String>,
     job_id: JobId,
 ) -> Result<(), RegistryError> {
-    context
-        .job_registry()?
-        .associate_active_key(key, job_id);
+    context.job_registry()?.associate_active_key(key, job_id);
     Ok(())
 }
 
@@ -74,8 +74,7 @@ pub fn publish_source_progress(
     match source_event {
         "silo://computer-configuration-progress" => {
             let data: silo_api::methods::computers::ComputerConfigurationProgress =
-                serde_json::from_value(payload.clone())
-                    .map_err(RegistryError::serialization)?;
+                serde_json::from_value(payload.clone()).map_err(RegistryError::serialization)?;
             let id = JobId::new(format!("setup:{}", data.request_id))
                 .map_err(|error| RegistryError::invalid(error.to_string()))?;
             publish_progress(
@@ -148,8 +147,24 @@ pub fn publish_finished(
 ) -> Result<(), RegistryError> {
     let payload = serde_json::to_value(&finished).map_err(RegistryError::serialization)?;
     let registry = context.job_registry()?;
-    if registry.finish(&finished.job_id, &finished)? {
+    if registry.finish_with_audience(&finished, audience.clone())? {
         context.publish(Event::new("operations.job.finished", payload), audience);
+        context.job_queue_changed();
+    }
+    Ok(())
+}
+
+fn retry_pending_outcomes(
+    context: &dyn EngineContext,
+    registry: &JobRegistry,
+) -> Result<(), RegistryError> {
+    while let Some(pending) = registry.retry_pending_outcome()? {
+        let payload =
+            serde_json::to_value(&pending.finished).map_err(RegistryError::serialization)?;
+        context.publish(
+            Event::new("operations.job.finished", payload),
+            pending.audience,
+        );
         context.job_queue_changed();
     }
     Ok(())

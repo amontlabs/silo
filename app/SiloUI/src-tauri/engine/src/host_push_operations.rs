@@ -225,9 +225,9 @@ pub(crate) fn start(
         if let Some(context) = context.as_ref() {
             // claim() can coalesce a new request onto an already active push for
             // this repository. The journal's operation id remains canonical.
-            let canonical_id = value["operationId"]
-                .as_str()
-                .ok_or_else(|| "Push journal returned an invalid operation identifier.".to_string())?;
+            let canonical_id = value["operationId"].as_str().ok_or_else(|| {
+                "Push journal returned an invalid operation identifier.".to_string()
+            })?;
             let acceptance = silo_engine::jobs::accept_domain_id(
                 context.as_ref(),
                 "push",
@@ -341,11 +341,11 @@ pub(crate) fn start(
             value["message"] = json!(error);
             record_completion_locked(&journal, &id, value.clone(), write);
             let _ = silo_engine::jobs::finish_with_result(
-                        context.as_ref(),
-                        acceptance.job_id,
-                        value.clone(),
-                        silo_engine::context::Audience::All,
-                    );
+                context.as_ref(),
+                acceptance.job_id,
+                value.clone(),
+                silo_engine::context::Audience::All,
+            );
             publish_application_state_changed();
             return Err(error);
         }
@@ -646,6 +646,53 @@ pub(crate) fn start_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::{
+        Audience, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+        MainThread, PackageKind, ProcessControl,
+    };
+
+    struct PushRecoveryContext {
+        registry: Arc<silo_engine::jobs::JobRegistry>,
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+    }
+
+    impl EngineContext for PushRecoveryContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: Event, _audience: Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+
+        fn job_registry(&self) -> Result<Arc<silo_engine::jobs::JobRegistry>, String> {
+            Ok(self.registry.clone())
+        }
+    }
+
+    impl ProcessControl for PushRecoveryContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("push recovery test must not restart the process")
+        }
+    }
 
     #[test]
     fn migrated_push_operations_load() {
@@ -769,6 +816,58 @@ mod tests {
             serde_json::json!({"computer":"dev","repositoryPath":"/workspace/repo","status":"pushing"}),
         ];
         assert_eq!(merge_journal(&path, legacy.clone()), legacy);
+    }
+
+    #[test]
+    fn a_crash_after_the_push_claim_reconciles_before_startup_serves_requests() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let job_id = silo_api::jobs::JobId::new("push:crash-before-progress").unwrap();
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        let operation = json!({
+            "operationId": "crash-before-progress",
+            "computer": "dev",
+            "repositoryPath": "/workspace/repo",
+            "status": "pushing",
+            "commitCount": 0
+        });
+        let journal = Journal::from([(
+            "crash-before-progress".to_owned(),
+            Job {
+                session: "previous-engine-session".into(),
+                updated: 1,
+                dismissed: false,
+                operation,
+            },
+        )]);
+        write(
+            &runtime_home.join("repository-push-operations.json"),
+            &journal,
+        )
+        .unwrap();
+
+        reconcile_jobs_before_serving(&context, &runtime_home).unwrap();
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        let outcome = retained.outcome.unwrap();
+        assert_eq!(outcome.result.unwrap()["status"], "unknown");
+        assert!(outcome.error.is_none());
     }
     #[test]
     fn lost_acknowledgement_and_concurrent_clicks_share_one_job() {
