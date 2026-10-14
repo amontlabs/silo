@@ -8,6 +8,13 @@
 //! stopped computer under a hidden try-lock on the gate. Work that finds its computer busy
 //! is skipped and retried by the next timer pass.
 //!
+//! A fourth pass keeps device health honest with no client connected (60 `connections`): every
+//! 10 s it asks the saved devices that are due whether they still answer, one at a time, each
+//! within 20 s, at most 16 per pass, none for longer than 90 s in all. A device that answers is
+//! left alone for 30 s after any contact; one that fails waits twice as long after each
+//! failure, up to five minutes. The results are recorded and published as
+//! `connections.devices.changed` when something visible changed.
+//!
 //! The intervals are not sourced in the decisions (05 §10 OQ23); they are chosen here:
 //! revocations every minute (the pass returns at once when none is pending), ports every 30 s
 //! (macOS repair also keeps its own 10 s floor per computer), logs every 10 minutes (the
@@ -29,12 +36,21 @@ pub const START_DELAY: Duration = Duration::from_secs(30);
 pub const REVOCATION_INTERVAL: Duration = Duration::from_secs(60);
 pub const PORT_REPAIR_INTERVAL: Duration = Duration::from_secs(30);
 pub const LOG_EXPIRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// How often the device pass looks for devices that are due. Each device answers to its own
+/// schedule inside the pass: [`DEVICE_QUIET_FOR`], doubling after each failure.
+pub const DEVICE_PROBE_INTERVAL: Duration = Duration::from_secs(10);
+/// A device that answers is probed again after this long without any other contact.
+pub const DEVICE_QUIET_FOR: Duration = Duration::from_secs(30);
+/// Devices one pass probes at most.
+pub const DEVICES_PER_PASS: usize = 16;
 
 /// The three passes, and whether the engine may run them now.
 pub trait Upkeep: Send + Sync + 'static {
     fn retry_revocations(&self);
     fn expire_logs(&self);
     fn repair_ports(&self);
+    /// Asks the saved devices that are due whether they still answer.
+    fn probe_devices(&self);
     /// True while the engine is shutting down or the storage migration blocks operations.
     fn paused(&self) -> bool;
 }
@@ -46,6 +62,7 @@ pub struct Schedule {
     pub revocations: Duration,
     pub ports: Duration,
     pub logs: Duration,
+    pub devices: Duration,
 }
 
 impl Schedule {
@@ -54,6 +71,7 @@ impl Schedule {
         revocations: REVOCATION_INTERVAL,
         ports: PORT_REPAIR_INTERVAL,
         logs: LOG_EXPIRY_INTERVAL,
+        devices: DEVICE_PROBE_INTERVAL,
     };
 }
 
@@ -67,7 +85,7 @@ impl Timers {
     /// Starts one thread per pass, so a slow pass never delays another.
     pub fn start(upkeep: Arc<dyn Upkeep>, schedule: Schedule) -> Timers {
         let stop = Arc::new(AtomicBool::new(false));
-        let passes: [(&str, Duration, fn(&dyn Upkeep)); 3] = [
+        let passes: [(&str, Duration, fn(&dyn Upkeep)); 4] = [
             ("silod-timer-revocations", schedule.revocations, |upkeep| {
                 upkeep.retry_revocations()
             }),
@@ -76,6 +94,9 @@ impl Timers {
             }),
             ("silod-timer-logs", schedule.logs, |upkeep| {
                 upkeep.expire_logs()
+            }),
+            ("silod-timer-devices", schedule.devices, |upkeep| {
+                upkeep.probe_devices()
             }),
         ];
         let mut threads = Vec::new();
@@ -169,6 +190,13 @@ impl Upkeep for SilodUpkeep {
         let _ = silo_engine::macos_computers::repair_published_ports(&host.macos_context());
     }
 
+    fn probe_devices(&self) {
+        silo_engine::remote::probe_devices(silo_engine::remote::ProbeSchedule {
+            interval: DEVICE_QUIET_FOR,
+            max_devices: DEVICES_PER_PASS,
+        });
+    }
+
     fn paused(&self) -> bool {
         use silo_engine::runtime::RuntimeHost;
         self.context.engine_state().shutting_down || self.host().blocks_operations()
@@ -190,6 +218,7 @@ mod tests {
         revocations: AtomicUsize,
         logs: AtomicUsize,
         ports: AtomicUsize,
+        devices: AtomicUsize,
         paused: AtomicBool,
         panic_in_logs: AtomicBool,
     }
@@ -207,6 +236,9 @@ mod tests {
         fn repair_ports(&self) {
             self.ports.fetch_add(1, Ordering::SeqCst);
         }
+        fn probe_devices(&self) {
+            self.devices.fetch_add(1, Ordering::SeqCst);
+        }
         fn paused(&self) -> bool {
             self.paused.load(Ordering::SeqCst)
         }
@@ -217,6 +249,7 @@ mod tests {
         revocations: Duration::from_millis(20),
         ports: Duration::from_millis(20),
         logs: Duration::from_millis(20),
+        devices: Duration::from_millis(20),
     };
 
     fn wait_until(condition: impl Fn() -> bool) {
@@ -237,6 +270,7 @@ mod tests {
             upkeep.revocations.load(Ordering::SeqCst) >= 2
                 && upkeep.logs.load(Ordering::SeqCst) >= 2
                 && upkeep.ports.load(Ordering::SeqCst) >= 2
+                && upkeep.devices.load(Ordering::SeqCst) >= 2
         });
         timers.stop();
     }
@@ -250,6 +284,7 @@ mod tests {
         assert_eq!(upkeep.revocations.load(Ordering::SeqCst), 0);
         assert_eq!(upkeep.logs.load(Ordering::SeqCst), 0);
         assert_eq!(upkeep.ports.load(Ordering::SeqCst), 0);
+        assert_eq!(upkeep.devices.load(Ordering::SeqCst), 0);
         upkeep.paused.store(false, Ordering::SeqCst);
         wait_until(|| upkeep.revocations.load(Ordering::SeqCst) >= 1);
         timers.stop();
@@ -327,5 +362,6 @@ mod tests {
         upkeep.retry_revocations();
         upkeep.repair_ports();
         upkeep.expire_logs();
+        upkeep.probe_devices();
     }
 }
