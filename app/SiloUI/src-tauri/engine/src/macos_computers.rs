@@ -1347,6 +1347,27 @@ fn accept_checkpoint_job(app: &MacosContext, method: &str) -> Result<AcceptedMac
     accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)
 }
 
+fn accept_loaded_lifecycle_job(
+    app: &MacosContext,
+    id: &str,
+    method: &str,
+) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
+    let job = accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?;
+    let prepared: Result<(PathBuf, String), String> = (|| {
+        ensure_loaded(app)?;
+        let data = app_data(app)?;
+        let name = computer(id)?.0.name;
+        Ok((data, name))
+    })();
+    match prepared {
+        Ok((data, name)) => Ok((job, data, name)),
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            Err(message)
+        }
+    }
+}
+
 pub async fn create_macos_computer(
     app: MacosContext,
     request: CreateRequest,
@@ -2009,12 +2030,14 @@ static DOWNLOAD_TURN: Mutex<()> = Mutex::new(());
 // MARK: Actions
 
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
-    ensure_loaded(app)?;
     match action {
         Action::Start => start(app, id),
         Action::Stop => stop(app, id),
         Action::ForceStop => force_stop(app, id),
-        Action::Delete => delete(app, id),
+        Action::Delete => {
+            ensure_loaded(app)?;
+            delete(app, id)
+        }
         Action::Setup => begin_setup(app, id),
     }
 }
@@ -2036,9 +2059,7 @@ fn computer(id: &str) -> Result<(Record, State), String> {
 
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
-    let data = app_data(app)?;
-    let name = computer(id)?.0.name;
-    let job = accept_macos_job(app.engine.as_ref(), "computers.start", &runtime::OPERATIONS)?;
+    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "computers.start")?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -2268,13 +2289,7 @@ fn start_machine(
 
 fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
-    let data = app_data(app)?;
-    let name = computer(id)?.0.name;
-    let job = accept_macos_job(
-        app.engine.as_ref(),
-        "macos.setup.retry",
-        &runtime::OPERATIONS,
-    )?;
+    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "macos.setup.retry")?;
     let (sender, receiver) = std::sync::mpsc::channel();
     let app = app.clone();
     let worker_id = id.to_owned();
@@ -2435,8 +2450,7 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let name = computer(id)?.0.name;
-    let job = accept_macos_job(app.engine.as_ref(), "computers.stop", &runtime::OPERATIONS)?;
+    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.stop")?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -2513,12 +2527,7 @@ fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
 }
 
 fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let name = computer(id)?.0.name;
-    let job = accept_macos_job(
-        app.engine.as_ref(),
-        "computers.forceStop",
-        &runtime::OPERATIONS,
-    )?;
+    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.forceStop")?;
     let _operation = match admit_macos_job(
         app.engine.as_ref(),
         &job,
@@ -3785,6 +3794,57 @@ mod tests {
         assert!(
             !registry().loaded,
             "failed job acceptance must not load the computer inventory"
+        );
+        assert!(registry().entries.is_empty());
+    }
+
+    #[test]
+    fn macos_remote_lifecycle_acceptance_precedes_first_restore_recovery() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), true);
+        let layout = Layout::new(directory.path(), &source.id);
+        let restore_journal = layout.dir.join("restore-journal.json");
+        std::fs::write(
+            &restore_journal,
+            format!(r#"{{"phase":"staging","target":"{checkpoint_id}","memory":false}}"#),
+        )
+        .unwrap();
+        let job_registry = context.job_registry().unwrap();
+        let connection = rusqlite::Connection::open(job_registry.path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_acceptance BEFORE INSERT ON jobs
+                 BEGIN SELECT RAISE(ABORT, 'injected allocation failure'); END;",
+            )
+            .unwrap();
+
+        let result = action_for_remote(&app, &source.id, Action::Stop);
+
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|message| message.contains("injected allocation failure")),
+            "unexpected remote Stop result: {result:?}"
+        );
+        assert!(
+            restore_journal.exists(),
+            "failed lifecycle job acceptance must not recover a Restore journal"
+        );
+        assert!(
+            !registry().loaded,
+            "failed lifecycle job acceptance must not load the computer inventory"
         );
         assert!(registry().entries.is_empty());
     }
