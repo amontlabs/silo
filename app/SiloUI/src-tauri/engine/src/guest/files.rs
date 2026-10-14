@@ -434,6 +434,22 @@ mod tests {
     }
 
     #[test]
+    fn unusual_file_names_are_data_not_syntax() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let name = "odd 'name' $(x)\nwith newline";
+        let path = directory.path().join(name);
+        put(&target, &path, b"ok", Replace::Always).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"ok");
+        let read = read(&target, &path.to_string_lossy(), None, None).unwrap();
+        assert_eq!(read.data, b"ok");
+        let listed = list(&target, &directory.path().to_string_lossy()).unwrap();
+        assert!(listed.iter().any(|entry| entry.name == name));
+        remove(&target, &[path.to_string_lossy().into_owned()]).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
     fn create_only_has_one_winner_and_a_null_hash_means_must_not_exist() {
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::target(directory.path());

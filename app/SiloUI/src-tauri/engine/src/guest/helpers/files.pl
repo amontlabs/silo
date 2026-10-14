@@ -91,7 +91,7 @@ if ($command eq 'remove') {
 if ($command eq 'write') {
     my ($path, $mode, $parents, $replace, $expected) = @args;
     my $data = do { local $/; my $text = <STDIN>; defined $text ? $text : '' };
-    my ($directory) = $path =~ m{^(.*)/[^/]*$};
+    my ($directory) = $path =~ m{^(.*)/[^/]*\z}s;
     $directory = '/' if !defined $directory || $directory eq '';
     if ($parents eq '1') {
         my $built = '';
@@ -103,7 +103,7 @@ if ($command eq 'write') {
             umask($old);
         }
     }
-    my $name = ($path =~ m{([^/]*)$})[0];
+    my $name = ($path =~ m{([^/]*)\z}s)[0];
     fail(66, "$path: not a file") if $name eq '' || -d $path;
     my $temporary;
     my $handle;
