@@ -1902,31 +1902,17 @@ async fn network_change(
         (typed.computer_id, typed.device_id, typed.port, None, None)
     };
     let engine = context.silod_context().clone();
-    let state = match remote_target(context, device_id.as_deref()) {
+    let (state, local) = match remote_target(context, device_id.as_deref()) {
         Some(device) => {
             let mut state = blocking_bridge(move || {
-                if publishing {
-                    silo_engine::remote_network::remote_save_network_port(
-                        device,
-                        computer_id,
-                        port,
-                        host_port,
-                        scheme_name(scheme),
-                    )
-                } else {
-                    silo_engine::remote_network::remote_remove_network_port(
-                        device,
-                        computer_id,
-                        port,
-                    )
-                }
+                owner_network_change(device, computer_id, port, host_port, scheme, publishing)
             })
             .await?;
             restore_owner_names(&mut state);
-            state
+            (state, false)
         }
         None => {
-            blocking(move || {
+            let state = blocking(move || {
                 let paths = local_paths()?;
                 let name = computer_name(&paths, &computer_id)?;
                 let state = if publishing {
@@ -1944,12 +1930,56 @@ async fn network_change(
                 project_name_rows_to_ids(&mut value, &paths, &["computers"]);
                 Ok(value)
             })
-            .await?
+            .await?;
+            (state, true)
         }
     };
     let state = canonical::<network::NetworkState>(state, "network state").map_err(failure)?;
-    publish(&engine, "network.changed", state.clone());
+    announce_network_state(&engine, local, &state);
     Ok(output(state))
+}
+
+/// Publishes `network.changed` for state this engine owns. An event carries this engine's
+/// device identity, so another device's state is only ever answered to the caller: it
+/// reaches other clients through that device's own events, never under this identity.
+fn announce_network_state(ctx: &SilodContext, local: bool, state: &Value) {
+    if local {
+        publish(ctx, "network.changed", state.clone());
+    }
+}
+
+/// The owner's port change, carried over Connections.
+fn owner_network_change(
+    device: String,
+    computer_id: String,
+    port: u16,
+    host_port: Option<u16>,
+    scheme: Option<network::NetworkScheme>,
+    publishing: bool,
+) -> Result<Value, BridgeError> {
+    #[cfg(test)]
+    if let Some(reply) = tests::stubbed_owner(
+        &device,
+        if publishing {
+            "network.publish"
+        } else {
+            "network.unpublish"
+        },
+        &json!({"computerId": computer_id, "port": port}),
+    ) {
+        return reply;
+    }
+    if publishing {
+        silo_engine::remote_network::remote_save_network_port(
+            device,
+            computer_id,
+            port,
+            host_port,
+            scheme_name(scheme),
+        )
+    } else {
+        silo_engine::remote_network::remote_remove_network_port(device, computer_id, port)
+    }
 }
 
 async fn network_open(
@@ -2019,24 +2049,14 @@ async fn ssh_access_save(
 ) -> Result<HandlerOutput, DispatchError> {
     let typed = context.decode_params::<ssh_access::SshAccessSaveParams>(params)?;
     let engine = context.silod_context().clone();
-    let value = match remote_target(context, typed.device_id.as_deref()) {
+    let (value, local) = match remote_target(context, typed.device_id.as_deref()) {
         Some(device) => {
-            let mut value = blocking_bridge(move || {
-                silo_engine::remote_ssh_access::remote_save_ssh_access(
-                    &device,
-                    typed.computer_id,
-                    typed.enabled,
-                    typed.port,
-                    typed.bind_address,
-                    typed.keys,
-                )
-            })
-            .await?;
+            let mut value = blocking_bridge(move || owner_ssh_access_save(device, typed)).await?;
             restore_owner_names(&mut value);
-            value
+            (value, false)
         }
         None => {
-            blocking(move || {
+            let value = blocking(move || {
                 let paths = local_paths()?;
                 let name = computer_name(&paths, &typed.computer_id)?;
                 let state = silo_engine::ssh_access::save(
@@ -2051,19 +2071,46 @@ async fn ssh_access_save(
                 project_name_rows_to_ids(&mut value, &paths, &["computers"]);
                 Ok(value)
             })
-            .await?
+            .await?;
+            (value, true)
         }
     };
     let value =
         canonical::<ssh_access::SshAccessState>(value, "SSH access state").map_err(failure)?;
-    // `network.changed` carries the published-port state; a listener change is its hint
-    // to re-read `sshAccess.state` too.
-    if let Ok(network) = blocking(local_network_state).await {
-        if let Ok(network) = canonical::<network::NetworkState>(network, "network state") {
-            publish(&engine, "network.changed", network);
+    // `network.changed` carries this device's published-port state; a listener change is
+    // its hint to re-read `sshAccess.state` too. Another device's change says nothing
+    // about this device's network, so it publishes nothing here.
+    if local {
+        if let Ok(network) = blocking(local_network_state).await {
+            if let Ok(network) = canonical::<network::NetworkState>(network, "network state") {
+                announce_network_state(&engine, true, &network);
+            }
         }
     }
     Ok(output(value))
+}
+
+/// The owner's SSH access change, carried over Connections.
+fn owner_ssh_access_save(
+    device: String,
+    typed: ssh_access::SshAccessSaveParams,
+) -> Result<Value, BridgeError> {
+    #[cfg(test)]
+    if let Some(reply) = tests::stubbed_owner(
+        &device,
+        "ssh.access.save",
+        &json!({"computerId": typed.computer_id}),
+    ) {
+        return reply;
+    }
+    silo_engine::remote_ssh_access::remote_save_ssh_access(
+        &device,
+        typed.computer_id,
+        typed.enabled,
+        typed.port,
+        typed.bind_address,
+        typed.keys,
+    )
 }
 
 async fn ssh_access_connection(
@@ -2257,7 +2304,7 @@ mod tests {
     };
 
     use silo_engine::context::{
-        EngineIdentity, EnginePaths, MainThread, PackageKind, ProcessControl,
+        EngineIdentity, EnginePaths, Event, MainThread, PackageKind, ProcessControl,
     };
 
     use super::*;
@@ -3266,6 +3313,83 @@ mod tests {
         });
         let error = expect_error(MethodName::PushStart, params).await;
         assert_eq!(error.message, "Invalid commit for this push.");
+    }
+
+    fn published_network_events(
+        receiver: &mut tokio::sync::mpsc::Receiver<Event>,
+    ) -> Vec<(String, Value)> {
+        std::iter::from_fn(|| receiver.try_recv().ok())
+            .filter(|event| event.name == "network.changed")
+            .map(|event| (event.name, event.payload))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn another_devices_network_change_is_never_published_as_this_devices_state() {
+        let owner = "77777777-7777-4777-8777-77777777777d";
+        let engine = fixture().context.clone();
+        let mut events = engine.subscribe(silo_engine::context::ClientId::new("network-events"));
+        let owner_network = json!({"computers": [{
+            "computer": "owner-box", "error": null, "ports": [],
+        }]});
+        let owner_ssh = json!({"computers": [{
+            "computer": "owner-box", "computerId": COMPUTER, "enabled": false, "port": 2222,
+            "bindAddress": "127.0.0.1", "keys": [], "state": "disabled", "message": null,
+            "fingerprint": null, "deviceName": "Owner", "addresses": [], "user": "owner",
+        }]});
+        let (network, ssh) = (owner_network.clone(), owner_ssh.clone());
+        let _stub = stub_owner(owner, move |method, _| match method {
+            "network.publish" | "network.unpublish" => Ok(network.clone()),
+            "ssh.access.save" => Ok(ssh.clone()),
+            other => panic!("unexpected owner request {other}"),
+        });
+
+        // The caller gets the owner's state in the reply.
+        let published = call(
+            MethodName::NetworkPublish,
+            json!({"computerId": COMPUTER, "deviceId": owner, "port": 8080}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(published["computers"][0]["computer"], "owner-box");
+        call(
+            MethodName::NetworkUnpublish,
+            json!({"computerId": COMPUTER, "deviceId": owner, "port": 8080}),
+        )
+        .await
+        .unwrap();
+        let saved = call(
+            MethodName::SshAccessSave,
+            json!({
+                "computerId": COMPUTER, "deviceId": owner, "enabled": false, "port": 2222,
+                "bindAddress": "127.0.0.1",
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved["computers"][0]["deviceName"], "Owner");
+
+        // But this engine's event stream carries only this engine's own state: neither
+        // the owner's rows nor this device's network read as a consequence of its change.
+        let leaked: Vec<_> = published_network_events(&mut events)
+            .into_iter()
+            .filter(|(_, payload)| payload.to_string().contains("owner-box"))
+            .collect();
+        assert!(leaked.is_empty(), "{leaked:?}");
+
+        // State this engine owns is announced, with its own rows.
+        let controller = canonical::<network::NetworkState>(
+            json!({"computers": [{"computer": "controller-box", "error": null, "ports": []}]}),
+            "network state",
+        )
+        .unwrap();
+        announce_network_state(&engine, false, &controller);
+        announce_network_state(&engine, true, &controller);
+        let announced: Vec<_> = published_network_events(&mut events)
+            .into_iter()
+            .filter(|(_, payload)| payload.to_string().contains("controller-box"))
+            .collect();
+        assert_eq!(announced.len(), 1);
     }
 
     #[tokio::test]
