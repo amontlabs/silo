@@ -287,8 +287,8 @@ async fn the_computers_domain_over_the_engine_socket() {
         "internal"
     );
 
-    // The CPU and memory edit is a `setup:` job; this test engine cannot run macOS
-    // computers, and the refusal ends the job.
+    // The CPU and memory edit is a `job:` like every macOS job, not a `setup:` job; this
+    // test engine cannot run macOS computers, and the refusal ends the job.
     let edit = engine
         .result(
             "computers.configuration.change",
@@ -299,8 +299,9 @@ async fn the_computers_domain_over_the_engine_socket() {
             }}),
         )
         .await;
-    assert_eq!(edit, json!({"jobId": "setup:resources-1"}));
-    let edited = engine.finished("setup:resources-1").await;
+    let edit_job = edit["jobId"].as_str().unwrap().to_owned();
+    assert!(edit_job.starts_with("job:"), "{edit_job}");
+    let edited = engine.finished(&edit_job).await;
     assert!(edited["error"]["message"].is_string(), "{edited}");
 
     // A Linux computer that is not saved is not found, before any job exists.

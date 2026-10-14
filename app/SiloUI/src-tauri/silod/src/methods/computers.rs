@@ -940,8 +940,10 @@ async fn begin_configuration_change(
     } = params.change
     {
         require_macos(&host, &computer_id)?;
-        let request_id = new_request_id(Some(request_id))?;
-        let job = accept_setup_job(context, "computers.configuration.change", &request_id)?;
+        // The request id only has to be usable: every macOS job is a `job:<n>` (05 job
+        // spaces), and `setup:` is the Linux setup namespace.
+        new_request_id(Some(request_id))?;
+        let job = context.start_job("computers.configuration.change")?;
         let action = Action::ChangeResources {
             cpus,
             memory_gib,
