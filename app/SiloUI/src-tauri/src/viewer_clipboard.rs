@@ -13,7 +13,6 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter};
 
 /// How long Copy from Computer waits for the guest to announce a new selection.
 const COPY_WAIT: Duration = Duration::from_millis(1000);
@@ -227,32 +226,6 @@ impl Drop for ActiveGuard {
             active.remove(&self.0);
         }
     }
-}
-
-/// Runs one transfer for a viewer. Blocks on the page and the device clipboard, so call it from
-/// a worker thread.
-pub(crate) fn run_blocking(app: &AppHandle, label: &str, action: Action) -> Report {
-    let Some(_guard) = ActiveGuard::acquire(label) else {
-        return Report::new(action, Status::Busy, None);
-    };
-    let device = crate::clipboard::system();
-    crate::desktop_viewer::with_bridge(app, label, |bridge| {
-        Ok(match action {
-            Action::Paste => paste(bridge, device),
-            Action::Copy => copy(bridge, device),
-        })
-    })
-    .unwrap_or_else(|_| Report::new(action, Status::NotConnected, None))
-}
-
-/// Starts a transfer from a shortcut or menu item and reports the outcome to the viewer's shell
-/// window, which shows it in the toolbar.
-pub(crate) fn spawn(app: &AppHandle, label: &str, action: Action) {
-    let (app, label) = (app.clone(), label.to_string());
-    tauri::async_runtime::spawn_blocking(move || {
-        let report = run_blocking(&app, &label, action);
-        let _ = app.emit_to(label.as_str(), EVENT, report);
-    });
 }
 
 #[cfg(test)]

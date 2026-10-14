@@ -139,16 +139,16 @@ fn main() {
             desktop::set_computer_use_approval,
             chatgpt_app::chatgpt_app_status,
             chatgpt_app::chatgpt_app_retry,
-            preparation::read_preparation_status,
-            preparation::retry_preparation,
+            commands::preparation::read_preparation_status,
+            commands::preparation::retry_preparation,
             desktop_viewer::open_desktop,
             desktop_viewer::desktop_viewer_attach,
             desktop_viewer::desktop_viewer_detach,
-            desktop_viewer_media::desktop_viewer_sound_support,
-            desktop_viewer_media::desktop_viewer_sound_cancel,
-            desktop_viewer_media::desktop_viewer_set_audio,
-            desktop_viewer_media::desktop_viewer_reset_screen,
-            desktop_viewer::desktop_viewer_clipboard,
+            commands::desktop_viewer_media::desktop_viewer_sound_support,
+            commands::desktop_viewer_media::desktop_viewer_sound_cancel,
+            commands::desktop_viewer_media::desktop_viewer_set_audio,
+            commands::desktop_viewer_media::desktop_viewer_reset_screen,
+            commands::viewer_clipboard::desktop_viewer_clipboard,
             commands::macos_computers::read_macos_computers,
             commands::macos_computers::create_macos_computer,
             commands::macos_computers::macos_computer_action,
@@ -240,17 +240,17 @@ fn main() {
             remote::remote_checkpoint_action,
             remote::remote_upsert_computer,
             remote::remote_delete_computer,
-            system_integrations::read_system_integrations,
-            system_integrations::set_login_item,
-            system_integrations::request_notification_authorization,
-            notifications::deliver_notice,
-            notifications::clear_computer_notices,
-            system_integrations::open_integration_settings,
-            system_integrations::show_integration_error,
+            commands::system_integrations::read_system_integrations,
+            commands::system_integrations::set_login_item,
+            commands::system_integrations::request_notification_authorization,
+            commands::notifications::deliver_notice,
+            commands::notifications::clear_computer_notices,
+            commands::system_integrations::open_integration_settings,
+            commands::system_integrations::show_integration_error,
             editor::read_editor_include_notice,
-            applications::list_applications,
-            applications::choose_application,
-            dependencies::read_dependencies,
+            commands::applications::list_applications,
+            commands::applications::choose_application,
+            commands::dependencies::read_dependencies,
             backup_controller::read_backup_state,
             runtime_migration::read_runtime_migration_state,
             runtime_migration::retry_runtime_migration,
@@ -300,7 +300,7 @@ fn main() {
                 engine_context::install(app)?;
                 runtime_migration::vocabulary::run(app.handle())?;
                 settings::install(app.handle());
-                system_shutdown::install(app.handle());
+                commands::system_shutdown::install(app.handle());
                 let queue_app = app.handle().clone();
                 runtime::OPERATIONS.set_listener(move || {
                     let _ = queue_app.emit("silo://operation-queue-changed", ());
@@ -344,7 +344,7 @@ fn main() {
                 window.show()?;
                 #[cfg(target_os = "macos")]
                 titlebar::install(&window)?;
-                notifications::install(app.handle());
+                commands::notifications::install(app.handle());
                 updates::install(app.handle())?;
                 ssh_access::start_monitor(app.handle());
                 editor::refresh_transports(app.handle());
@@ -365,7 +365,7 @@ fn main() {
     // tao installs its AppKit delegate while the event loop is created; add the
     // terminate handler before AppKit finishes launching.
     #[cfg(target_os = "macos")]
-    system_shutdown::install_terminate_handler(app.handle());
+    commands::system_shutdown::install_terminate_handler(app.handle());
     app.run(|_app, _event| {
         if let tauri::RunEvent::Exit = &_event {
             settings::exit_backstop(_app);

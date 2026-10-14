@@ -4,14 +4,12 @@
 //! decisions live in functions over the small [`Media`] trait so tests can run
 //! them without a webview.
 use crate::desktop_bridge::{Bridge, Capabilities};
-use crate::desktop_viewer::{is_viewer_label, require_computer, with_bridge};
 use serde::Serialize;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Window};
 
 /// The screen size the toolbar's reset item requests.
 pub(crate) const RESET_WIDTH: u32 = 1440;
@@ -21,14 +19,14 @@ pub(crate) const RESET_HEIGHT: u32 = 900;
 const PROBE_WAIT: Duration = Duration::from_secs(2);
 /// The transport opens shortly after the page loads; probing stops after this
 /// many attempts spaced by `PROBE_PAUSE`.
-const PROBE_ATTEMPTS: u32 = 20;
-const PROBE_PAUSE: Duration = Duration::from_millis(500);
+pub(crate) const PROBE_ATTEMPTS: u32 = 20;
+pub(crate) const PROBE_PAUSE: Duration = Duration::from_millis(500);
 
 /// The longest one viewer's sound check keeps probing, however many times the page
 /// reloads and restarts it.
-const PROBE_DEADLINE: Duration = Duration::from_secs(60);
+pub(crate) const PROBE_DEADLINE: Duration = Duration::from_secs(60);
 
-const SUPERSEDED: &str = "The desktop sound check was cancelled.";
+pub(crate) const SUPERSEDED: &str = "The desktop sound check was cancelled.";
 const NOT_READY: &str = "The desktop display is not ready.";
 
 /// The operations on a viewer's page that sound and resizing need.
@@ -257,14 +255,14 @@ impl Probes {
 
 static PROBES: OnceLock<Probes> = OnceLock::new();
 
-fn probes() -> &'static Probes {
+pub(crate) fn probes() -> &'static Probes {
     PROBES.get_or_init(Default::default)
 }
 
 /// The newest sound revision applied for each viewer window.
 static SOUND_REVISIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<u64>>>>> = OnceLock::new();
 
-fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
+pub(crate) fn sound_revision(label: &str) -> Result<Arc<Mutex<u64>>, String> {
     let mut slots = SOUND_REVISIONS
         .get_or_init(Default::default)
         .lock()
@@ -288,85 +286,7 @@ pub(crate) fn reset_screen(media: &dyn Media) -> Result<(), String> {
 
 #[derive(Serialize)]
 pub(crate) struct SoundSupport {
-    sound: bool,
-}
-
-fn require_viewer(window: &Window, computer: &str) -> Result<String, String> {
-    if !is_viewer_label(window.label()) {
-        return Err("Only a desktop viewer can use this command.".into());
-    }
-    require_computer(window, computer)?;
-    Ok(window.label().to_string())
-}
-
-/// Reports whether this device can play the computer's sound, waiting briefly
-/// for the page's connection. An unsupported engine also stops the audio stream.
-#[tauri::command]
-pub(crate) async fn desktop_viewer_sound_support(
-    app: AppHandle,
-    window: Window,
-    computer: String,
-) -> Result<SoundSupport, String> {
-    let label = require_viewer(&window, &computer)?;
-    let (answer, start) = probes().enlist(&label)?;
-    if start {
-        tauri::async_runtime::spawn_blocking(move || {
-            probes().work(&label, PROBE_DEADLINE, |obsolete| {
-                probe(
-                    || with_bridge(&app, &label, |bridge| probe_step(bridge)),
-                    PROBE_ATTEMPTS,
-                    PROBE_PAUSE,
-                    obsolete,
-                )
-            })
-        });
-    }
-    answer
-        .await
-        .map_err(|_| SUPERSEDED)?
-        .map(|sound| SoundSupport { sound })
-}
-
-/// Abandons the viewer's sound check, for a page or connection that is gone.
-#[tauri::command]
-pub(crate) fn desktop_viewer_sound_cancel(window: Window, computer: String) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    probes().cancel(&label);
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn desktop_viewer_set_audio(
-    app: AppHandle,
-    window: Window,
-    computer: String,
-    muted: bool,
-    active: bool,
-    revision: u64,
-) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    let latest = sound_revision(&label)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        with_bridge(&app, &label, |bridge| {
-            apply_audio_ordered(&latest, revision, bridge, muted, active)
-        })
-    })
-    .await
-    .map_err(|_| "Desktop sound change failed.")?
-}
-
-#[tauri::command]
-pub(crate) async fn desktop_viewer_reset_screen(
-    app: AppHandle,
-    window: Window,
-    computer: String,
-) -> Result<(), String> {
-    let label = require_viewer(&window, &computer)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        with_bridge(&app, &label, |bridge| reset_screen(bridge))
-    })
-    .await
-    .map_err(|_| "Desktop screen reset failed.")?
+    pub(crate) sound: bool,
 }
 
 #[cfg(test)]

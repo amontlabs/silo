@@ -436,9 +436,9 @@ mod tests {
             let png = thumbnail_png(&image).unwrap();
             assert_eq!(NSGraphicsContext::currentContext(), before);
             assert!(png.length() <= 64 * 1024);
-            let decoded = tauri::image::Image::from_bytes(&png.to_vec()).unwrap();
+            let decoded = image::load_from_memory(&png.to_vec()).unwrap().to_rgba8();
             assert_eq!((decoded.width(), decoded.height()), (64, 64));
-            assert!(decoded.rgba().iter().all(|component| *component == 255));
+            assert!(decoded.as_raw().iter().all(|component| *component == 255));
         });
     }
 
@@ -707,11 +707,7 @@ mod tests {
     }
 }
 
-pub fn open_terminal(
-    _app: &tauri::AppHandle,
-    application: &Application,
-    command: &str,
-) -> Result<(), String> {
+pub fn open_terminal(application: &Application, command: &str) -> Result<(), String> {
     let id = autoreleasepool(|_| {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&application.path));
         NSBundle::bundleWithURL(&url)

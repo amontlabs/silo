@@ -395,7 +395,7 @@ pub(crate) async fn open_desktop(
         let shortcut_label = label.clone();
         viewer.on_window_event(move |event| match event {
             tauri::WindowEvent::Destroyed => {
-                crate::viewer_shortcuts::uninstall(&shortcut_label);
+                crate::commands::viewer_shortcuts::uninstall(&shortcut_label);
                 crate::desktop_viewer_media::forget_viewer(&shortcut_label);
                 let others = menu_app
                     .webview_windows()
@@ -420,7 +420,7 @@ pub(crate) async fn open_desktop(
         });
         let (shortcut_app, shortcut_window) = (app.clone(), viewer.clone());
         let _ = viewer.run_on_main_thread(move || {
-            crate::viewer_shortcuts::install(&shortcut_app, &shortcut_window);
+            crate::commands::viewer_shortcuts::install(&shortcut_app, &shortcut_window);
         });
         Ok(())
     })
@@ -691,27 +691,6 @@ pub(crate) async fn desktop_viewer_attach(
     .await
     .map_err(|_| "Desktop connection failed.")?
 }
-/// Pastes the device clipboard into the computer, or copies the computer's clipboard to the
-/// device. Only the viewer's own shell window can start it, from its toolbar.
-#[tauri::command]
-pub(crate) async fn desktop_viewer_clipboard(
-    app: AppHandle,
-    window: Window,
-    computer: String,
-    action: crate::viewer_clipboard::Action,
-) -> Result<crate::viewer_clipboard::Report, String> {
-    if !is_viewer_label(window.label()) {
-        return Err("Use the clipboard from a desktop viewer.".into());
-    }
-    require_computer(&window, &computer)?;
-    let label = window.label().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::viewer_clipboard::run_blocking(&app, &label, action)
-    })
-    .await
-    .map_err(|_| "Clipboard transfer failed.".into())
-}
-
 #[tauri::command]
 pub(crate) async fn desktop_viewer_detach(app: AppHandle, window: Window) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {

@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use serde::Serialize;
+use silo_engine::{Audience, Event};
 use std::{
     fs,
     os::unix::fs::PermissionsExt,
@@ -22,7 +23,6 @@ use std::{
     },
     time::SystemTime,
 };
-use tauri::{Emitter, Manager};
 
 const STATUS_EVENT: &str = "silo://preparation-status";
 const LCU_LOCK: &str = include_str!("../guest/lcu-lock.json");
@@ -217,9 +217,10 @@ impl Job {
 
 static IMAGE: Job = Job::new();
 static LCU: Job = Job::new();
-static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static PATHS: OnceLock<RuntimePaths> = OnceLock::new();
 static LCU_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+pub(crate) use crate::commands::preparation::start;
 
 pub fn snapshot() -> PreparationStatus {
     PreparationStatus {
@@ -229,21 +230,24 @@ pub fn snapshot() -> PreparationStatus {
 }
 
 fn emit() {
-    if let Some(app) = APP.get() {
-        let _ = app.emit_to("main", STATUS_EVENT, snapshot());
+    if let Some(context) = silo_engine::context::current() {
+        if let Ok(payload) = serde_json::to_value(snapshot()) {
+            // window:main; no client id is available in the desktop host.
+            context.publish(Event::new(STATUS_EVENT, payload), Audience::All);
+        }
     }
 }
 
-/// Called once from app setup after the runtime paths are known. Returns at once; the
-/// image import and the LCU download run on their own threads.
-pub fn start(app: &tauri::AppHandle, paths: RuntimePaths) {
-    if APP.set(app.clone()).is_err() {
+/// Called once after the runtime paths are known. Returns at once; the image import and
+/// the LCU download run on their own threads.
+pub(crate) fn start_with_paths(paths: RuntimePaths) {
+    let Some(context) = silo_engine::context::current() else {
+        return;
+    };
+    if PATHS.set(paths.clone()).is_err() {
         return;
     }
-    if let Ok(dir) = app.path().app_data_dir() {
-        let _ = LCU_ROOT.set(dir.join("lcu"));
-    }
-    let _ = PATHS.set(paths);
+    let _ = LCU_ROOT.set(context.paths().app_data.join("lcu"));
     kick();
 }
 
@@ -352,14 +356,8 @@ pub fn ensure_lcu(report: &dyn Fn(Option<u8>)) -> Result<PathBuf, String> {
     published(root, &spec).ok_or_else(|| "The LCU download is no longer available. Retry.".into())
 }
 
-#[tauri::command]
-pub(crate) fn read_preparation_status() -> PreparationStatus {
-    snapshot()
-}
-
 /// Starts again whatever failed. Resolves at once; progress follows as events.
-#[tauri::command]
-pub(crate) fn retry_preparation() -> PreparationStatus {
+pub(crate) fn retry() -> PreparationStatus {
     kick();
     snapshot()
 }

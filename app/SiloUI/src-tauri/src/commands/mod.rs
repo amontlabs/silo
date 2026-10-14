@@ -1,3 +1,16 @@
 pub(crate) mod macos_computers;
 pub(crate) mod macos_remote;
 pub(crate) mod macos_remote_viewer;
+pub(crate) mod applications;
+pub(crate) mod bundled_tools;
+pub(crate) mod computer_use;
+pub(crate) mod dependencies;
+pub(crate) mod desktop_bridge;
+pub(crate) mod desktop_viewer_bench;
+pub(crate) mod desktop_viewer_media;
+pub(crate) mod notifications;
+pub(crate) mod preparation;
+pub(crate) mod system_integrations;
+pub(crate) mod system_shutdown;
+pub(crate) mod viewer_clipboard;
+pub(crate) mod viewer_shortcuts;

@@ -1,11 +1,11 @@
 use serde::Serialize;
-use tauri::{AppHandle, WebviewWindow};
-use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+pub(crate) const ROUTE_KEY: &str = "route";
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(any(test, target_os = "linux"))]
 mod notification_ids;
 #[cfg(target_os = "linux")]
@@ -44,11 +44,7 @@ pub struct SystemIntegrations {
     pub notifications: IntegrationStatus,
 }
 
-fn require_main(window: &WebviewWindow) -> Result<(), String> {
-    require_main_label(window.label())
-}
-
-fn require_main_label(label: &str) -> Result<(), String> {
+pub(crate) fn require_main_label(label: &str) -> Result<(), String> {
     if label == "main" {
         Ok(())
     } else {
@@ -56,74 +52,25 @@ fn require_main_label(label: &str) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub async fn read_system_integrations(
-    _app: AppHandle,
-    window: WebviewWindow,
-) -> Result<SystemIntegrations, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || Ok(platform::read()))
-        .await
-        .map_err(|error| error.to_string())?
+pub(crate) fn read() -> SystemIntegrations {
+    platform::read()
 }
 
-#[tauri::command]
-pub async fn set_login_item(
-    _app: AppHandle,
-    window: WebviewWindow,
-    enabled: bool,
-) -> Result<IntegrationStatus, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || platform::set_login_item(enabled))
-        .await
-        .map_err(|error| error.to_string())?
+pub(crate) fn set_login_item(enabled: bool) -> Result<IntegrationStatus, String> {
+    platform::set_login_item(enabled)
 }
 
-#[tauri::command]
-pub async fn request_notification_authorization(
-    _app: AppHandle,
-    window: WebviewWindow,
-) -> Result<IntegrationStatus, String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || platform::request_notifications())
-        .await
-        .map_err(|error| error.to_string())?
+pub(crate) fn request_notification_authorization() -> Result<IntegrationStatus, String> {
+    platform::request_notifications()
 }
 
-#[tauri::command]
-pub async fn open_integration_settings(
-    _app: AppHandle,
-    window: WebviewWindow,
-    integration: String,
-) -> Result<(), String> {
-    require_main(&window)?;
-    tauri::async_runtime::spawn_blocking(move || platform::open_settings(&integration))
-        .await
-        .map_err(|error| error.to_string())?
+pub(crate) fn open_settings(integration: &str) -> Result<(), String> {
+    platform::open_settings(integration)
 }
 
-#[tauri::command]
-pub fn show_integration_error(
-    app: AppHandle,
-    window: WebviewWindow,
-    message: String,
-) -> Result<(), String> {
-    require_main(&window)?;
-    app.dialog()
-        .message(message)
-        .title("Silo couldn’t complete the request")
-        .kind(MessageDialogKind::Error)
-        .parent(&window)
-        .show(|_| {});
-    Ok(())
-}
-
-pub(crate) fn install_notifications(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    platform::install_notifications(app);
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
-}
+pub(crate) use crate::commands::system_integrations::{
+    install_notifications, show_integration_error,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NotificationDelivery {

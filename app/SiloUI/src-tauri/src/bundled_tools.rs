@@ -1,42 +1,48 @@
 //! Resolve only Silo-owned tools. Debian's global /usr/bin belongs to the package
 //! manager and must never contain, or substitute for, Silo's private Git/runtime.
 use std::path::{Path, PathBuf};
-use tauri::{utils::config::BundleType, AppHandle, Manager};
 
-pub(crate) fn directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let executable = std::env::current_exe()
-        .map_err(|_| "Silo could not locate its bundled tools.".to_string())?;
-    let resources = app
-        .path()
-        .resource_dir()
-        .map_err(|_| "Silo could not locate its bundled resources.".to_string())?;
-    let appimage_root = std::env::var_os("APPDIR").map(PathBuf::from);
-    resolve(
-        &executable,
-        &resources,
-        tauri::utils::platform::bundle_type(),
-        appimage_root.as_deref(),
-    )
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BundleKind {
+    App,
+    AppImage,
+    Deb,
+    Rpm,
+    Other,
 }
 
-pub(crate) fn is_packaged_linux(bundle: Option<BundleType>) -> bool {
+/// Keeps package-framework types at the UI boundary while allowing existing call sites
+/// to pass their package kind until their owning tracks move to EngineIdentity.
+pub(crate) trait BundleKindSource {
+    fn bundle_kind(self) -> Option<BundleKind>;
+}
+
+impl BundleKindSource for Option<BundleKind> {
+    fn bundle_kind(self) -> Option<BundleKind> {
+        self
+    }
+}
+
+pub(crate) use crate::commands::bundled_tools::directory;
+
+pub(crate) fn is_packaged_linux(bundle: impl BundleKindSource) -> bool {
     matches!(
-        bundle,
-        Some(BundleType::AppImage | BundleType::Deb | BundleType::Rpm)
+        bundle.bundle_kind(),
+        Some(BundleKind::AppImage | BundleKind::Deb | BundleKind::Rpm)
     )
 }
 
 pub(crate) fn resolve(
     executable: &Path,
     _resources: &Path,
-    bundle: Option<BundleType>,
+    bundle: impl BundleKindSource,
     appimage_root: Option<&Path>,
 ) -> Result<PathBuf, String> {
-    match bundle {
-        Some(BundleType::AppImage) => appimage_root
+    match bundle.bundle_kind() {
+        Some(BundleKind::AppImage) => appimage_root
             .map(|root| root.join("usr/libexec/silo/tools"))
             .ok_or_else(|| "Silo could not locate its AppImage tools directory.".into()),
-        Some(BundleType::Deb | BundleType::Rpm) => Ok(PathBuf::from("/usr/libexec/silo/tools")),
+        Some(BundleKind::Deb | BundleKind::Rpm) => Ok(PathBuf::from("/usr/libexec/silo/tools")),
         _ => executable
             .parent()
             .map(Path::to_path_buf)
@@ -54,16 +60,11 @@ mod tests {
         let resources = root.path().join("usr/lib/Silo");
         std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
         std::fs::write(executable.with_file_name("git"), "unrelated system Git").unwrap();
-        for bundle in [BundleType::AppImage, BundleType::Deb, BundleType::Rpm] {
+        for bundle in [BundleKind::AppImage, BundleKind::Deb, BundleKind::Rpm] {
             let appimage_root = root.path().join("Silo.AppDir");
-            let directory = resolve(
-                &executable,
-                &resources,
-                Some(bundle.clone()),
-                Some(&appimage_root),
-            )
-            .unwrap();
-            let expected = if bundle == BundleType::AppImage {
+            let directory =
+                resolve(&executable, &resources, Some(bundle), Some(&appimage_root)).unwrap();
+            let expected = if bundle == BundleKind::AppImage {
                 appimage_root.join("usr/libexec/silo/tools")
             } else {
                 PathBuf::from("/usr/libexec/silo/tools")
@@ -72,7 +73,7 @@ mod tests {
             // Never the executable's own directory, whose tool is unrelated. The fixed
             // package path is not inspected: a computer with Silo installed has files there.
             assert_ne!(directory, executable.parent().unwrap());
-            if bundle == BundleType::AppImage {
+            if bundle == BundleKind::AppImage {
                 assert!(!directory.join("git").exists());
             }
         }
@@ -83,7 +84,7 @@ mod tests {
     }
     #[test]
     fn appimage_macos_and_development_keep_their_existing_sibling_tools() {
-        for bundle in [Some(BundleType::App), None] {
+        for bundle in [Some(BundleKind::App), None] {
             assert_eq!(
                 resolve(
                     Path::new("/bundle/bin/silo-ui"),
@@ -102,7 +103,7 @@ mod tests {
         let error = resolve(
             Path::new("/tmp/AppDir/usr/bin/silo-ui"),
             Path::new("/tmp/AppDir/usr/lib/Silo"),
-            Some(BundleType::AppImage),
+            Some(BundleKind::AppImage),
             None,
         )
         .unwrap_err();
