@@ -1,7 +1,7 @@
 //! Durable notice retention. Delivery is left to clients; the engine never posts OS notices.
 
-use crate::context::{Audience, EngineContext, Event};
-use silo_api::methods::notifications::{Notice, NotificationsClearedPayload};
+use crate::context::{Audience, EngineContext};
+use silo_api::methods::notifications::Notice;
 
 const MAX_NOTICE_BYTES: usize = 64 * 1024;
 const MAX_NOTICE_LIST_BYTES: usize = 3 * 1024 * 1024;
@@ -15,18 +15,7 @@ pub fn retain(
     if bytes.len() > MAX_NOTICE_BYTES {
         return Err("Notice exceeds the retained notice size limit.".to_owned());
     }
-    context
-        .job_registry()?
-        .upsert_notice(notice)
-        .map_err(|error| error.to_string())?;
-    context.publish(
-        Event::new(
-            "notifications.notice",
-            serde_json::to_value(notice).map_err(|error| error.to_string())?,
-        ),
-        audience,
-    );
-    Ok(())
+    context.retain_notice(notice, audience)
 }
 
 pub fn list(context: &dyn EngineContext) -> Result<Vec<Notice>, String> {
@@ -52,19 +41,5 @@ pub fn clear_for_computer(
     computer_id: &str,
     audience: Audience,
 ) -> Result<(), String> {
-    context
-        .job_registry()?
-        .clear_notices_for_computer(computer_id)
-        .map_err(|error| error.to_string())?;
-    let payload = NotificationsClearedPayload {
-        computer_id: computer_id.to_owned(),
-    };
-    context.publish(
-        Event::new(
-            "notifications.cleared",
-            serde_json::to_value(payload).map_err(|error| error.to_string())?,
-        ),
-        audience,
-    );
-    Ok(())
+    context.clear_notices_for_computer(computer_id, audience)
 }

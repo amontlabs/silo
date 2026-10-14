@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use silo_api::methods::notifications::{Notice, NotificationsClearedPayload};
+
 use crate::channel::Channel;
 use crate::jobs::JobRegistry;
 
@@ -33,6 +35,36 @@ pub trait EngineContext: Send + Sync + 'static {
     /// Publishes the current operations queue after any job state transition.
     /// Hosts without a socket queue projection can leave this as a no-op.
     fn job_queue_changed(&self) {}
+
+    /// Atomically retains the latest notice for its key and publishes that
+    /// committed projection. Socket hosts override this to share the same
+    /// projection lock used by `notifications.list` barriers.
+    fn retain_notice(&self, notice: &Notice, audience: Audience) -> Result<(), String> {
+        self.job_registry()?
+            .upsert_notice(notice)
+            .map_err(|error| error.to_string())?;
+        let payload = serde_json::to_value(notice).map_err(|error| error.to_string())?;
+        self.publish(Event::new("notifications.notice", payload), audience);
+        Ok(())
+    }
+
+    /// Removes retained notices for a deleted computer and publishes the clear
+    /// event only after the deletion commits.
+    fn clear_notices_for_computer(
+        &self,
+        computer_id: &str,
+        audience: Audience,
+    ) -> Result<(), String> {
+        self.job_registry()?
+            .clear_notices_for_computer(computer_id)
+            .map_err(|error| error.to_string())?;
+        let payload = serde_json::to_value(NotificationsClearedPayload {
+            computer_id: computer_id.to_owned(),
+        })
+        .map_err(|error| error.to_string())?;
+        self.publish(Event::new("notifications.cleared", payload), audience);
+        Ok(())
+    }
 
     /// Ends client-owned remote display sessions. `None` closes all sessions.
     fn close_remote_displays(&self, _device: Option<&str>) {}

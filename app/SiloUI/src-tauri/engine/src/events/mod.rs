@@ -2,7 +2,11 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, Weak},
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, Weak,
+    },
 };
 
 use silo_api::events::EVENT_NAMES;
@@ -31,7 +35,30 @@ pub struct SequencedEvent {
     /// Per-subscription sequence after topic and audience filtering.
     pub seq: u64,
     pub event: Event,
+    /// Holds the event's subscription and session backlog reservation until the
+    /// socket writes or discards the corresponding frame.
+    pub backlog_reservation: BacklogReservation,
 }
+
+#[derive(Clone)]
+pub struct BacklogReservation(Arc<ReservationLease>);
+
+impl fmt::Debug for BacklogReservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BacklogReservation")
+            .field("bytes", &self.0.bytes)
+            .finish()
+    }
+}
+
+impl PartialEq for BacklogReservation {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for BacklogReservation {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EventDelivery {
@@ -65,15 +92,37 @@ struct Subscriber {
     client_id: ClientId,
     state: Mutex<SubscriberState>,
     notify: Notify,
+    session_backlog_bytes: Arc<AtomicUsize>,
 }
 
 #[derive(Default)]
 struct SubscriberState {
     subscriptions: HashMap<String, SubscriptionState>,
     queue: VecDeque<SequencedEvent>,
-    queued_bytes: usize,
     gap: Option<GapSignal>,
     closed: bool,
+}
+
+#[derive(Default)]
+struct SubscriptionBacklog {
+    events: AtomicUsize,
+    bytes: AtomicUsize,
+}
+
+struct ReservationLease {
+    subscription: Arc<SubscriptionBacklog>,
+    session_bytes: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for ReservationLease {
+    fn drop(&mut self) {
+        self.subscription.events.fetch_sub(1, Ordering::AcqRel);
+        self.subscription
+            .bytes
+            .fetch_sub(self.bytes, Ordering::AcqRel);
+        self.session_bytes.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
 }
 
 struct SubscriptionState {
@@ -81,10 +130,9 @@ struct SubscriptionState {
     active: bool,
     closing: bool,
     next_seq: u64,
-    latest_operations_seq: u64,
+    latest_by_domain: HashMap<String, u64>,
     last_delivered: u64,
-    queued_events: usize,
-    queued_bytes: usize,
+    backlog: Arc<SubscriptionBacklog>,
     pending: VecDeque<SequencedEvent>,
 }
 
@@ -100,6 +148,7 @@ impl EventBus {
             client_id: client_id.clone(),
             state: Mutex::new(SubscriberState::default()),
             notify: Notify::new(),
+            session_backlog_bytes: Arc::new(AtomicUsize::new(0)),
         });
         self.inner
             .lock()
@@ -131,7 +180,9 @@ impl EventBus {
             return Err(EventError("The event session is closed.".to_owned()));
         }
         if state.subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_SESSION {
-            return Err(EventError("The event session has too many subscriptions.".to_owned()));
+            return Err(EventError(
+                "The event session has too many subscriptions.".to_owned(),
+            ));
         }
         state.subscriptions.insert(
             id.clone(),
@@ -140,10 +191,9 @@ impl EventBus {
                 active: false,
                 closing: false,
                 next_seq: 1,
-                latest_operations_seq: 0,
+                latest_by_domain: HashMap::new(),
                 last_delivered: 0,
-                queued_events: 0,
-                queued_bytes: 0,
+                backlog: Arc::new(SubscriptionBacklog::default()),
                 pending: VecDeque::new(),
             },
         );
@@ -158,7 +208,9 @@ impl EventBus {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let pending = {
             let Some(subscription_state) = state.subscriptions.get_mut(subscription) else {
-                return Err(EventError("The event subscription no longer exists.".to_owned()));
+                return Err(EventError(
+                    "The event subscription no longer exists.".to_owned(),
+                ));
             };
             subscription_state.active = true;
             subscription_state.pending.drain(..).collect::<Vec<_>>()
@@ -189,9 +241,10 @@ impl EventBus {
             .then(|| HashMap::from([(subscription.to_owned(), last_seq)]))
             .unwrap_or_default();
         state.queue.extend(pending);
-        let removable = state.subscriptions.get(subscription).is_some_and(|subscription| {
-            subscription.queued_events == 0 && subscription.pending.is_empty()
-        });
+        let removable = state
+            .subscriptions
+            .get(subscription)
+            .is_some_and(|subscription| subscription.pending.is_empty());
         if removable {
             state.subscriptions.remove(subscription);
         }
@@ -201,7 +254,14 @@ impl EventBus {
     }
 
     pub fn disconnect(&self, client_id: &ClientId) {
-        if let Ok(subscriber) = self.find_subscriber(client_id) {
+        let subscriber = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .subscribers
+            .remove(client_id.as_str())
+            .and_then(|weak| weak.upgrade());
+        if let Some(subscriber) = subscriber {
             let mut state = subscriber
                 .state
                 .lock()
@@ -209,15 +269,9 @@ impl EventBus {
             state.closed = true;
             state.subscriptions.clear();
             state.queue.clear();
-            state.queued_bytes = 0;
             drop(state);
             subscriber.notify.notify_waiters();
         }
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .subscribers
-            .remove(client_id.as_str());
     }
 
     /// Captures each matching operations subscription's last sequence while a
@@ -225,6 +279,14 @@ impl EventBus {
     pub fn operations_barrier(
         &self,
         client_id: &ClientId,
+    ) -> Result<HashMap<String, u64>, EventError> {
+        self.domain_barrier(client_id, "operations")
+    }
+
+    pub fn domain_barrier(
+        &self,
+        client_id: &ClientId,
+        domain: &str,
     ) -> Result<HashMap<String, u64>, EventError> {
         let subscriber = self.find_subscriber(client_id)?;
         let state = subscriber
@@ -235,33 +297,45 @@ impl EventBus {
             .subscriptions
             .iter()
             .filter_map(|(id, subscription)| {
-                (subscription.latest_operations_seq > 0)
-                    .then(|| (id.clone(), subscription.latest_operations_seq))
+                subscription
+                    .latest_by_domain
+                    .get(domain)
+                    .copied()
+                    .map(|seq| (id.clone(), seq))
             })
             .collect())
     }
 
     pub fn publish(&self, event: Event, audience: Audience) -> u64 {
-        let (engine_seq, subscribers) = {
-            let mut state = self
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.next_engine_seq = state.next_engine_seq.saturating_add(1);
-            let seq = state.next_engine_seq;
-            state.subscribers.retain(|_, weak| weak.strong_count() > 0);
-            let subscribers = state
-                .subscribers
-                .values()
-                .filter_map(Weak::upgrade)
-                .collect::<Vec<_>>();
-            (seq, subscribers)
-        };
-        for subscriber in subscribers {
+        self.publish_with_fanout_hook(event, audience, || {})
+    }
+
+    fn publish_with_fanout_hook(
+        &self,
+        event: Event,
+        audience: Audience,
+        after_first_fanout: impl FnOnce(),
+    ) -> u64 {
+        // Sequence allocation and fanout are one critical section. Releasing
+        // the bus lock between them allowed a later publisher to reach some
+        // subscribers first, with contiguous per-subscription seq values
+        // concealing the engine-wide inversion.
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.next_engine_seq = state.next_engine_seq.saturating_add(1);
+        let engine_seq = state.next_engine_seq;
+        state.subscribers.retain(|_, weak| weak.strong_count() > 0);
+        let mut after_first_fanout = Some(after_first_fanout);
+        for subscriber in state.subscribers.values().filter_map(Weak::upgrade) {
             if matches!(&audience, Audience::Client(target) if target != &subscriber.client_id) {
                 continue;
             }
             subscriber.publish(engine_seq, &event);
+            if let Some(hook) = after_first_fanout.take() {
+                hook();
+            }
         }
         engine_seq
     }
@@ -291,17 +365,11 @@ impl EventReceiver {
                     return Some(EventDelivery::Gap(gap));
                 }
                 if let Some(event) = state.queue.pop_front() {
-                    state.queued_bytes = state.queued_bytes.saturating_sub(event_size(&event.event));
                     let remove_subscription = if let Some(subscription) =
                         state.subscriptions.get_mut(&event.subscription)
                     {
-                        subscription.queued_events = subscription.queued_events.saturating_sub(1);
-                        subscription.queued_bytes =
-                            subscription.queued_bytes.saturating_sub(event_size(&event.event));
                         subscription.last_delivered = event.seq;
-                        subscription.closing
-                            && subscription.queued_events == 0
-                            && subscription.pending.is_empty()
+                        subscription.closing && subscription.pending.is_empty()
                     } else {
                         false
                     };
@@ -345,29 +413,40 @@ impl Subscriber {
             })
             .collect::<Vec<_>>();
         for id in matching {
-            let queued_bytes = state.queued_bytes;
             let prepared = {
                 let Some(subscription) = state.subscriptions.get_mut(&id) else {
                     continue;
                 };
                 let seq = subscription.next_seq;
                 subscription.next_seq = subscription.next_seq.saturating_add(1);
-                if event.name.starts_with("operations.") {
-                    subscription.latest_operations_seq = seq;
-                }
-                let overflow = subscription.queued_events >= MAX_EVENTS_PER_SUBSCRIPTION
-                    || subscription.queued_bytes.saturating_add(bytes)
-                        > MAX_BYTES_PER_SUBSCRIPTION
-                    || queued_bytes.saturating_add(bytes) > MAX_BYTES_PER_SESSION;
+                let domain = event.name.split('.').next().unwrap_or(&event.name);
+                subscription.latest_by_domain.insert(domain.to_owned(), seq);
+                let queued_events = subscription.backlog.events.load(Ordering::Acquire);
+                let subscription_bytes = subscription.backlog.bytes.load(Ordering::Acquire);
+                let session_bytes = self.session_backlog_bytes.load(Ordering::Acquire);
+                let overflow = queued_events >= MAX_EVENTS_PER_SUBSCRIPTION
+                    || subscription_bytes.saturating_add(bytes) > MAX_BYTES_PER_SUBSCRIPTION
+                    || session_bytes.saturating_add(bytes) > MAX_BYTES_PER_SESSION;
                 let expected_seq = subscription.last_delivered.saturating_add(1);
                 let active = subscription.active;
                 if !overflow {
-                    subscription.queued_events += 1;
-                    subscription.queued_bytes += bytes;
+                    subscription.backlog.events.fetch_add(1, Ordering::AcqRel);
+                    subscription
+                        .backlog
+                        .bytes
+                        .fetch_add(bytes, Ordering::AcqRel);
+                    self.session_backlog_bytes
+                        .fetch_add(bytes, Ordering::AcqRel);
                 }
-                (seq, expected_seq, active, overflow)
+                (
+                    seq,
+                    expected_seq,
+                    active,
+                    overflow,
+                    subscription.backlog.clone(),
+                )
             };
-            let (seq, expected_seq, active, overflow) = prepared;
+            let (seq, expected_seq, active, overflow, subscription_backlog) = prepared;
             if overflow {
                 let gap = GapSignal {
                     subscription: id,
@@ -375,11 +454,8 @@ impl Subscriber {
                     dropped_seq: seq,
                 };
                 state.queue.clear();
-                state.queued_bytes = 0;
                 for subscription in state.subscriptions.values_mut() {
                     subscription.pending.clear();
-                    subscription.queued_bytes = 0;
-                    subscription.queued_events = 0;
                 }
                 state.gap = Some(gap);
                 state.closed = true;
@@ -392,8 +468,12 @@ impl Subscriber {
                 engine_seq,
                 seq,
                 event: event.clone(),
+                backlog_reservation: BacklogReservation(Arc::new(ReservationLease {
+                    subscription: subscription_backlog,
+                    session_bytes: self.session_backlog_bytes.clone(),
+                    bytes,
+                })),
             };
-            state.queued_bytes += bytes;
             if active {
                 state.queue.push_back(delivery);
             } else {
@@ -412,7 +492,9 @@ impl Subscriber {
 
 fn validate_selectors(selectors: &[String]) -> Result<(), EventError> {
     if selectors.is_empty() {
-        return Err(EventError("At least one event selector is required.".to_owned()));
+        return Err(EventError(
+            "At least one event selector is required.".to_owned(),
+        ));
     }
     for selector in selectors {
         let valid = if selector.ends_with(".*") {
@@ -493,8 +575,71 @@ mod tests {
             Event::new("operations.job.progress", serde_json::json!({"step": 1})),
             Audience::Client(selected.clone()),
         );
-        assert!(matches!(selected_events.recv().await, Some(EventDelivery::Event(_))));
-        assert!(other_events.subscriber.state.lock().unwrap().queue.is_empty());
+        assert!(matches!(
+            selected_events.recv().await,
+            Some(EventDelivery::Event(_))
+        ));
+        assert!(other_events
+            .subscriber
+            .state
+            .lock()
+            .unwrap()
+            .queue
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn engine_sequence_and_fanout_share_one_serial_order() {
+        let bus = EventBus::default();
+        let first_client = client();
+        let second_client = ClientId::new("client-b");
+        let mut first = bus.connect(first_client.clone());
+        let mut second = bus.connect(second_client.clone());
+        for client_id in [&first_client, &second_client] {
+            let subscription = bus
+                .subscribe(client_id, vec!["computers.changed".to_owned()])
+                .unwrap();
+            bus.activate(client_id, &subscription).unwrap();
+        }
+
+        let nested_bus = bus.clone();
+        let nested_published = std::cell::Cell::new(false);
+        bus.publish_with_fanout_hook(
+            Event::new("computers.changed", serde_json::json!({"value": 1})),
+            Audience::All,
+            || {
+                // Before the fix, sequence allocation released the bus mutex
+                // before fanout. This hook then publishes sequence 2 after
+                // the first subscriber but before the second one.
+                if nested_bus.inner.try_lock().is_ok() {
+                    nested_published.set(true);
+                    nested_bus.publish(
+                        Event::new("computers.changed", serde_json::json!({"value": 2})),
+                        Audience::All,
+                    );
+                }
+            },
+        );
+        if !nested_published.get() {
+            bus.publish(
+                Event::new("computers.changed", serde_json::json!({"value": 2})),
+                Audience::All,
+            );
+        }
+
+        let first_order = [first.recv().await.unwrap(), first.recv().await.unwrap()];
+        let second_order = [second.recv().await.unwrap(), second.recv().await.unwrap()];
+        let engine_sequences = |deliveries: &[EventDelivery; 2]| {
+            deliveries
+                .iter()
+                .map(|delivery| match delivery {
+                    EventDelivery::Event(event) => event.engine_seq,
+                    EventDelivery::Gap(_) => panic!("unexpected event gap"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(engine_sequences(&first_order), vec![1, 2]);
+        assert_eq!(engine_sequences(&second_order), vec![1, 2]);
     }
 
     #[test]
@@ -507,7 +652,10 @@ mod tests {
             .unwrap();
         bus.activate(&client, &subscription).unwrap();
         bus.publish(
-            Event::new("operations.job.progress", serde_json::json!({"progress": 1})),
+            Event::new(
+                "operations.job.progress",
+                serde_json::json!({"progress": 1}),
+            ),
             Audience::All,
         );
         assert_eq!(
@@ -519,7 +667,10 @@ mod tests {
             Audience::All,
         );
         bus.publish(
-            Event::new("operations.queue.changed", serde_json::json!({"running": []})),
+            Event::new(
+                "operations.queue.changed",
+                serde_json::json!({"running": []}),
+            ),
             Audience::All,
         );
         assert_eq!(
@@ -538,7 +689,10 @@ mod tests {
             .unwrap();
         bus.activate(&client, &subscription).unwrap();
         bus.publish(
-            Event::new("operations.job.finished", serde_json::json!({"jobId": "job:1"})),
+            Event::new(
+                "operations.job.finished",
+                serde_json::json!({"jobId": "job:1"}),
+            ),
             Audience::All,
         );
 
@@ -548,7 +702,13 @@ mod tests {
             receiver.recv().await,
             Some(EventDelivery::Event(SequencedEvent { seq: 1, .. }))
         ));
-        assert!(receiver.subscriber.state.lock().unwrap().subscriptions.is_empty());
+        assert!(receiver
+            .subscriber
+            .state
+            .lock()
+            .unwrap()
+            .subscriptions
+            .is_empty());
     }
 
     #[tokio::test]
@@ -568,7 +728,10 @@ mod tests {
         }
         assert!(matches!(
             receiver.recv().await,
-            Some(EventDelivery::Gap(GapSignal { dropped_seq: 257, .. }))
+            Some(EventDelivery::Gap(GapSignal {
+                dropped_seq: 257,
+                ..
+            }))
         ));
         assert!(receiver.recv().await.is_none());
 
@@ -615,6 +778,63 @@ mod tests {
             }))
         ));
         assert!(receiver.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn subscription_event_limit_includes_events_already_taken_by_the_consumer() {
+        let bus = EventBus::default();
+        let client = client();
+        let mut receiver = bus.connect(client.clone());
+        let subscription = bus
+            .subscribe(&client, vec!["computers.changed".to_owned()])
+            .unwrap();
+        bus.activate(&client, &subscription).unwrap();
+        bus.publish(
+            Event::new("computers.changed", serde_json::json!({"revision": 0})),
+            Audience::All,
+        );
+        let in_flight = receiver.recv().await.unwrap();
+        for revision in 1..MAX_EVENTS_PER_SUBSCRIPTION {
+            bus.publish(
+                Event::new(
+                    "computers.changed",
+                    serde_json::json!({"revision": revision}),
+                ),
+                Audience::All,
+            );
+        }
+
+        bus.publish(
+            Event::new(
+                "computers.changed",
+                serde_json::json!({"revision": MAX_EVENTS_PER_SUBSCRIPTION}),
+            ),
+            Audience::All,
+        );
+        assert!(matches!(receiver.recv().await, Some(EventDelivery::Gap(_))));
+        drop(in_flight);
+    }
+
+    #[tokio::test]
+    async fn session_byte_limit_includes_events_already_taken_by_other_subscriptions() {
+        let bus = EventBus::default();
+        let client = client();
+        let mut receiver = bus.connect(client.clone());
+        let topics = ["computers.changed", "settings.changed", "updates.changed"];
+        for topic in topics {
+            let subscription = bus.subscribe(&client, vec![topic.to_owned()]).unwrap();
+            bus.activate(&client, &subscription).unwrap();
+        }
+        let payload = || serde_json::json!({"data": "x".repeat(6 * 1024 * 1024)});
+        let mut in_flight = Vec::new();
+        for topic in &topics[..2] {
+            bus.publish(Event::new(*topic, payload()), Audience::All);
+            in_flight.push(receiver.recv().await.unwrap());
+        }
+        bus.publish(Event::new(topics[2], payload()), Audience::All);
+
+        assert!(matches!(receiver.recv().await, Some(EventDelivery::Gap(_))));
+        drop(in_flight);
     }
 
     #[test]
