@@ -889,13 +889,12 @@ fn event_precedes_barrier(event: &OutboundEvent, barrier: Option<&HashMap<String
 }
 
 fn event_frame(event: SequencedEvent, device_id: &str) -> Result<Value, String> {
-    let candidate = serde_json::json!({
-        "event": event.event.name,
-        "subscription": event.subscription,
-        "deviceId": device_id,
-        "seq": event.seq,
-        "payload": event.event.payload,
-    });
+    let candidate = silo_engine::events::wire_event_envelope(
+        &event.event,
+        &event.subscription,
+        device_id,
+        event.seq,
+    );
     let typed = serde_json::from_value::<EventEnvelope>(candidate)
         .map_err(|error| format!("event payload does not match silo-api: {error}"))?;
     serde_json::to_value(typed).map_err(|error| error.to_string())

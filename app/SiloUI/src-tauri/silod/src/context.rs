@@ -39,13 +39,14 @@ impl SilodContext {
         main_thread: Arc<dyn MainThread>,
         process: Arc<dyn ProcessControl>,
     ) -> Self {
+        let wire_events = EventBus::with_device_id(local_device.device_id.clone());
         Self {
             paths,
             identity,
             runtime_state: Arc::new(EngineRuntimeState::default()),
             local_device,
             events: EventSubscriptions::default(),
-            wire_events: EventBus::default(),
+            wire_events,
             main_thread,
             process,
             state: Arc::new(Mutex::new(EngineState {

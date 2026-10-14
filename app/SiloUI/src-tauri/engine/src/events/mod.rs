@@ -19,6 +19,7 @@ pub const MAX_EVENTS_PER_SUBSCRIPTION: usize = 256;
 pub const MAX_BYTES_PER_SUBSCRIPTION: usize = 8 * 1024 * 1024;
 pub const MAX_BYTES_PER_SESSION: usize = 16 * 1024 * 1024;
 pub const MAX_SUBSCRIPTIONS_PER_SESSION: usize = 16;
+const FRAME_LENGTH_PREFIX_BYTES: usize = std::mem::size_of::<u32>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GapSignal {
@@ -77,9 +78,10 @@ impl std::fmt::Display for EventError {
 
 impl std::error::Error for EventError {}
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EventBus {
     inner: Arc<Mutex<BusState>>,
+    device_id: Arc<str>,
 }
 
 #[derive(Default)]
@@ -143,6 +145,13 @@ pub struct EventReceiver {
 }
 
 impl EventBus {
+    pub fn with_device_id(device_id: impl Into<String>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(BusState::default())),
+            device_id: Arc::from(device_id.into()),
+        }
+    }
+
     pub fn connect(&self, client_id: ClientId) -> EventReceiver {
         let subscriber = Arc::new(Subscriber {
             client_id: client_id.clone(),
@@ -332,7 +341,7 @@ impl EventBus {
             if matches!(&audience, Audience::Client(target) if target != &subscriber.client_id) {
                 continue;
             }
-            subscriber.publish(engine_seq, &event);
+            subscriber.publish(engine_seq, &event, &self.device_id);
             if let Some(hook) = after_first_fanout.take() {
                 hook();
             }
@@ -348,6 +357,12 @@ impl EventBus {
             .get(client_id.as_str())
             .and_then(Weak::upgrade)
             .ok_or_else(|| EventError("The event client session is not connected.".to_owned()))
+    }
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::with_device_id("")
     }
 }
 
@@ -392,8 +407,9 @@ impl EventReceiver {
 }
 
 impl Subscriber {
-    fn publish(&self, engine_seq: u64, event: &Event) {
-        let bytes = event_size(event);
+    fn publish(&self, engine_seq: u64, event: &Event, device_id: &str) {
+        let payload_bytes =
+            serde_json::to_vec(&event.payload).map_or(usize::MAX, |value| value.len());
         let mut state = self
             .state
             .lock()
@@ -419,6 +435,7 @@ impl Subscriber {
                 };
                 let seq = subscription.next_seq;
                 subscription.next_seq = subscription.next_seq.saturating_add(1);
+                let bytes = encoded_frame_size(event, &id, device_id, seq, payload_bytes);
                 let domain = event.name.split('.').next().unwrap_or(&event.name);
                 subscription.latest_by_domain.insert(domain.to_owned(), seq);
                 let queued_events = subscription.backlog.events.load(Ordering::Acquire);
@@ -443,10 +460,11 @@ impl Subscriber {
                     expected_seq,
                     active,
                     overflow,
+                    bytes,
                     subscription.backlog.clone(),
                 )
             };
-            let (seq, expected_seq, active, overflow, subscription_backlog) = prepared;
+            let (seq, expected_seq, active, overflow, bytes, subscription_backlog) = prepared;
             if overflow {
                 let gap = GapSignal {
                     subscription: id,
@@ -518,8 +536,51 @@ fn selector_matches(selector: &str, event: &str) -> bool {
     }
 }
 
-fn event_size(event: &Event) -> usize {
-    event.name.len() + serde_json::to_vec(&event.payload).map_or(0, |value| value.len()) + 128
+/// Counts the four-byte frame length prefix and encoded JSON event envelope.
+fn encoded_frame_size(
+    event: &Event,
+    subscription: &str,
+    device_id: &str,
+    seq: u64,
+    payload_bytes: usize,
+) -> usize {
+    FRAME_LENGTH_PREFIX_BYTES.saturating_add(
+        [
+            b"{\"deviceId\":".len(),
+            json_string_size(device_id),
+            b",\"event\":".len(),
+            json_string_size(&event.name),
+            b",\"payload\":".len(),
+            payload_bytes,
+            b",\"seq\":".len(),
+            seq.to_string().len(),
+            b",\"subscription\":".len(),
+            json_string_size(subscription),
+            b"}".len(),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add),
+    )
+}
+
+fn json_string_size(value: &str) -> usize {
+    serde_json::to_vec(value).map_or(usize::MAX, |encoded| encoded.len())
+}
+
+/// Builds the JSON event envelope that `silod` validates and sends to clients.
+pub fn wire_event_envelope(
+    event: &Event,
+    subscription: &str,
+    device_id: &str,
+    seq: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "event": &event.name,
+        "subscription": subscription,
+        "deviceId": device_id,
+        "seq": seq,
+        "payload": &event.payload,
+    })
 }
 
 #[cfg(test)]
@@ -841,5 +902,87 @@ mod tests {
     fn rejects_unknown_selectors_instead_of_silently_subscribing() {
         assert!(validate_selectors(&["not.real".to_owned()]).is_err());
         assert!(validate_selectors(&["operations.*".to_owned()]).is_ok());
+    }
+
+    #[tokio::test]
+    async fn backlog_byte_limit_counts_the_encoded_wire_envelope_exactly() {
+        let device_id = "01234567-89ab-cdef-0123-456789abcdef";
+        let bus = EventBus::with_device_id(device_id);
+        let client = client();
+        let mut receiver = bus.connect(client.clone());
+        let subscription = bus
+            .subscribe(&client, vec!["checkpoints.changed".to_owned()])
+            .unwrap();
+        bus.activate(&client, &subscription).unwrap();
+
+        let empty = Event::new("checkpoints.changed", serde_json::json!({"blob": ""}));
+        let empty_frame_bytes = FRAME_LENGTH_PREFIX_BYTES
+            + serde_json::to_vec(&wire_event_envelope(&empty, &subscription, device_id, 1))
+                .unwrap()
+                .len();
+        let payload_len = MAX_BYTES_PER_SUBSCRIPTION - empty_frame_bytes;
+        let at_limit = Event::new(
+            "checkpoints.changed",
+            serde_json::json!({"blob": "x".repeat(payload_len)}),
+        );
+        let at_limit_bytes = FRAME_LENGTH_PREFIX_BYTES
+            + serde_json::to_vec(&wire_event_envelope(&at_limit, &subscription, device_id, 1))
+                .unwrap()
+                .len();
+        assert_eq!(at_limit_bytes, MAX_BYTES_PER_SUBSCRIPTION);
+        let payload_bytes = serde_json::to_vec(&at_limit.payload).unwrap().len();
+        assert_eq!(
+            encoded_frame_size(&at_limit, &subscription, device_id, 1, payload_bytes),
+            at_limit_bytes
+        );
+
+        bus.publish(at_limit, Audience::All);
+        let Some(EventDelivery::Event(delivery)) = receiver.recv().await else {
+            panic!("an envelope exactly at the byte limit must be delivered");
+        };
+        assert_eq!(delivery.backlog_reservation.0.bytes, at_limit_bytes);
+        drop(delivery);
+
+        let over_limit = Event::new(
+            "checkpoints.changed",
+            serde_json::json!({"blob": "x".repeat(payload_len + 1)}),
+        );
+        let over_limit_bytes = FRAME_LENGTH_PREFIX_BYTES
+            + serde_json::to_vec(&wire_event_envelope(
+                &over_limit,
+                &subscription,
+                device_id,
+                2,
+            ))
+            .unwrap()
+            .len();
+        assert_eq!(over_limit_bytes, MAX_BYTES_PER_SUBSCRIPTION + 1);
+        bus.publish(over_limit, Audience::All);
+        assert!(matches!(receiver.recv().await, Some(EventDelivery::Gap(_))));
+    }
+
+    #[test]
+    fn encoded_wire_size_tracks_json_escaping_and_sequence_digits() {
+        let event = Event::new(
+            "checkpoints.changed",
+            serde_json::json!({"message": "quotes: \\\" and unicode: café"}),
+        );
+        let subscription = "subscription-\\\"-id";
+        let device_id = "device-\\\"-id";
+        let payload_bytes = serde_json::to_vec(&event.payload).unwrap().len();
+        for seq in [1, 9, 10, 10_000_000_000_000_000] {
+            assert_eq!(
+                encoded_frame_size(&event, subscription, device_id, seq, payload_bytes),
+                FRAME_LENGTH_PREFIX_BYTES
+                    + serde_json::to_vec(&wire_event_envelope(
+                        &event,
+                        subscription,
+                        device_id,
+                        seq,
+                    ))
+                    .unwrap()
+                    .len()
+            );
+        }
     }
 }
