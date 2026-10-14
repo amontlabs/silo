@@ -16,10 +16,10 @@ use silo_engine::{
         ProcessControl,
     },
     engine_update::{
-        journal::{CaptureRef, ComputerKind, MacCapture},
+        journal::{CaptureRef, ComputerKind, MacCapture, RuntimeIdentity},
         updater::{CheckFailure, Provider},
-        HeldGuards, Platform, Reconciled, ResumeHeldError, RunningComputer, SaveAdapter,
-        SaveContext,
+        HeldGuards, OriginalState, Platform, Reconciled, RestoreError, ResumeHeldError,
+        RunningComputer, SaveAdapter, SaveContext,
     },
     updates::{CheckErrorKind, UpdateInfo},
 };
@@ -174,6 +174,10 @@ impl SaveAdapter for FakeAdapter {
             .collect())
     }
 
+    fn identity(&self, _: &RunningComputer) -> Result<RuntimeIdentity, String> {
+        Ok(RuntimeIdentity::default())
+    }
+
     fn check_support(&self, _: &RunningComputer) -> Result<(), String> {
         Ok(())
     }
@@ -208,7 +212,7 @@ impl SaveAdapter for FakeAdapter {
     fn resume_held(
         &self,
         computer: &RunningComputer,
-        _: Option<&CaptureRef>,
+        _: &RuntimeIdentity,
     ) -> Result<(), ResumeHeldError> {
         self.0
             .calls
@@ -218,7 +222,12 @@ impl SaveAdapter for FakeAdapter {
         Ok(())
     }
 
-    fn release(&self, computer: &RunningComputer, _: &CaptureRef) -> Result<(), String> {
+    fn release(
+        &self,
+        computer: &RunningComputer,
+        _: &CaptureRef,
+        _: &RuntimeIdentity,
+    ) -> Result<(), String> {
         self.0
             .calls
             .lock()
@@ -230,7 +239,11 @@ impl SaveAdapter for FakeAdapter {
         }
     }
 
-    fn reconcile_unsaved(&self, computer: &RunningComputer) -> Result<Reconciled, String> {
+    fn reconcile_unsaved(
+        &self,
+        computer: &RunningComputer,
+        _: &RuntimeIdentity,
+    ) -> Result<Reconciled, String> {
         Ok(Reconciled::Lost(format!("{} was lost", computer.name)))
     }
 
@@ -238,21 +251,37 @@ impl SaveAdapter for FakeAdapter {
         &self,
         computer: &RunningComputer,
         _: &CaptureRef,
+        _: &RuntimeIdentity,
         _: &str,
-        arm: &mut dyn FnMut() -> Result<(), String>,
-    ) -> Result<(), String> {
+        arm: &mut dyn FnMut(Option<&RuntimeIdentity>) -> Result<(), String>,
+    ) -> Result<(), RestoreError> {
         self.0
             .calls
             .lock()
             .unwrap()
             .push(format!("restore:{}", computer.id));
         if let Some(why) = self.0.restore_failure.lock().unwrap().clone() {
-            return Err(why);
+            return Err(RestoreError::Failed(why));
         }
-        arm()
+        Ok(arm(None)?)
     }
 
-    fn probe_armed(&self, _: &RunningComputer, _: &CaptureRef, _: &str) -> Result<bool, String> {
+    fn probe_original(
+        &self,
+        computer: &RunningComputer,
+        _: &RuntimeIdentity,
+    ) -> Result<OriginalState, String> {
+        Ok(OriginalState::Held)
+    }
+
+    fn probe_armed(
+        &self,
+        _: &RunningComputer,
+        _: &CaptureRef,
+        _: &RuntimeIdentity,
+        _: &str,
+        _: Option<&RuntimeIdentity>,
+    ) -> Result<bool, String> {
         Ok(true)
     }
 
@@ -568,9 +597,13 @@ async fn a_failed_preparation_ends_its_job_with_the_error_and_releases_admission
             .contains("previous update still has computers"),
         "{error:?}"
     );
-    assert!(!engine_state(&fixture).update_pending);
+    // The earlier owner's journal is still there, so the update stays pending (and its
+    // computers reserved) until abort settles it; the refused attempt itself saved nothing.
+    assert!(engine_state(&fixture).update_pending);
     assert_eq!(world.calls("save:"), 0);
     assert!(world.calls("guards released") >= 1);
+    ok(&fixture, MethodName::EngineUpdateAbort, json!({})).await;
+    assert!(!engine_state(&fixture).update_pending);
 }
 
 #[tokio::test]

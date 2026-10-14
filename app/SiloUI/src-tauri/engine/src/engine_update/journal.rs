@@ -60,6 +60,10 @@ pub enum ComputerPhase {
     /// The restored guest is about to execute. Written before the first instruction runs,
     /// so a crash after it can never be replayed from the same capture.
     ResumeArmed,
+    /// The original, held generation is about to be resumed in place (an abort, a rollback
+    /// or a failed preparation). Written before the guest can execute again, so a crash
+    /// after it is probed and never replayed from the capture over the disk it advanced.
+    ResumingOriginal,
     Resumed,
     /// The computer's memory could not be brought back (its owner died before the save was
     /// durable, or a resumed guest's outcome is unknown). Its disk is preserved and nothing
@@ -73,6 +77,38 @@ impl ComputerPhase {
     pub fn settled(self) -> bool {
         matches!(self, Self::Resumed | Self::Lost)
     }
+}
+
+/// Which run of a computer a journal entry is about. A replacement run of the same computer
+/// never matches, so a capture is never settled, resumed or discarded on its behalf.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeIdentity {
+    /// The engine process that owns the machine (macOS machines live inside it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// The owner's generation counter for the machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
+    /// The runtime's own instance id (Linux).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
+}
+
+impl RuntimeIdentity {
+    /// Whether `observed` is the run this identity names. Fields this identity does not
+    /// record are not compared.
+    pub fn matches(&self, observed: &RuntimeIdentity) -> bool {
+        (self.owner.is_none() || self.owner == observed.owner)
+            && (self.generation.is_none() || self.generation == observed.generation)
+            && (self.instance.is_none() || self.instance == observed.instance)
+    }
+}
+
+/// The identifier of the current engine process, used as the owner of macOS machines.
+pub fn boot_id() -> &'static str {
+    static BOOT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BOOT.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -102,6 +138,9 @@ pub struct LinuxCapture {
     /// held runtime is gone.
     pub network_policy: Value,
     pub integrity_verified: bool,
+    /// The runtime instance that was captured, when the runtime reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_instance: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -127,10 +166,16 @@ pub struct SavedComputer {
     pub name: String,
     pub kind: ComputerKind,
     pub phase: ComputerPhase,
+    /// The run that was running when the update was planned (the held generation).
+    #[serde(default)]
+    pub original: RuntimeIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<CaptureRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restore_attempt_id: Option<String>,
+    /// The restored run of the armed attempt, when it was known before the guest executed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_restore: Option<RuntimeIdentity>,
     /// False once a restore may have executed guest code and its outcome is unknown.
     #[serde(default = "default_true")]
     pub retryable: bool,
@@ -367,8 +412,10 @@ mod tests {
             name: format!("computer-{id}"),
             kind: ComputerKind::Macos,
             phase,
+            original: RuntimeIdentity::default(),
             capture: None,
             restore_attempt_id: None,
+            active_restore: None,
             retryable: true,
             last_error: None,
         }

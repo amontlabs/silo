@@ -355,7 +355,7 @@ fn engine_update_prepare(
     let started = match context.start_job("engine.update.prepare") {
         Ok(started) => started,
         Err(error) => {
-            state.prepare_failed();
+            state.prepare_failed(context.engine_context());
             return Err(error);
         }
     };
@@ -391,6 +391,7 @@ fn run_prepare(context: &Arc<SilodContext>, state: &Arc<UpdateState>, job: JobId
         Ok((hold, computers)) => {
             // Admission stays closed from here until shutdown or abort: the state keeps the hold.
             state.prepared(job.clone(), hold);
+            spawn_watchdog(context.clone(), state.clone());
             let result = EngineUpdatePrepareFinishedResult {
                 resuming: computers
                     .into_iter()
@@ -406,7 +407,9 @@ fn run_prepare(context: &Arc<SilodContext>, state: &Arc<UpdateState>, job: JobId
             }
         }
         Err(message) => {
-            state.prepare_failed();
+            // A rollback that could not resume everything leaves its journal: the update stays
+            // pending and those computers stay reserved until abort or the next start.
+            state.prepare_failed(context.as_ref());
             let code = if message.starts_with("Wait ") {
                 ErrorCode::Busy
             } else {
@@ -624,7 +627,20 @@ pub fn start(context: Arc<SilodContext>) {
 
 /// Resumes the set a previous engine update saved, and reports what could not resume.
 fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>) {
-    let failure = match state.recover(context.as_ref()) {
+    let result = state.recover(context.as_ref());
+    if matches!(result, Ok(None)) && state.watching_installer() {
+        // An installer still owns the saved set: this engine waits with admission closed.
+        spawn_watchdog(context.clone(), state.clone());
+    }
+    report_recovery(context, state, result);
+}
+
+fn report_recovery(
+    context: &Arc<SilodContext>,
+    state: &Arc<UpdateState>,
+    result: Result<Option<engine_update::Recovery>, String>,
+) {
+    let failure = match result {
         Ok(None) => return,
         Ok(Some(recovery)) => {
             let mut notes: Vec<String> = recovery
@@ -651,6 +667,34 @@ fn recover_saved_computers(context: &Arc<SilodContext>, state: &Arc<UpdateState>
             );
             publish_updates(context.as_ref(), &snapshot);
         }
+    }
+}
+
+/// While an update is held for the installer, probes the installer's lock every
+/// [`installer::PROBE_INTERVAL`]; a coordinator that stays gone for
+/// [`installer::ABANDONED_AFTER`] has the update aborted (or a deferred set restored).
+fn spawn_watchdog(context: Arc<SilodContext>, state: Arc<UpdateState>) {
+    let spawned = std::thread::Builder::new()
+        .name("silod-update-watchdog".into())
+        .spawn(move || {
+            while state.watching_installer() {
+                std::thread::sleep(engine_update::installer::PROBE_INTERVAL);
+                let present = engine_update::installer::coordinator_present(
+                    &engine_update::engine_directory(context.as_ref()),
+                );
+                match state.watchdog_tick(context.as_ref(), present, std::time::Instant::now()) {
+                    engine_update::WatchdogOutcome::Recovered(result) => {
+                        report_recovery(&context, &state, result)
+                    }
+                    engine_update::WatchdogOutcome::Aborted(Err(message)) => {
+                        eprintln!("silod: the abandoned update could not be aborted: {message}");
+                    }
+                    _ => {}
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("silod: could not start the update watchdog: {error}");
     }
 }
 
