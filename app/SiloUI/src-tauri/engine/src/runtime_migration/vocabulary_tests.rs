@@ -218,6 +218,18 @@ fn write_old_storage(storage: &Path) {
         &storage.join("storage-maintenance/x.json"),
         &json!({"history": []}),
     );
+    // Reclaim history from before the trigger catalogue: tagged `legacy`, or only a last trim.
+    put(
+        &storage.join(format!("storage-maintenance/{ID}.json")),
+        &json!({"history": [
+            {"at": 5, "trigger": "legacy", "reclaimedBytes": 10, "error": null},
+            {"at": 6, "trigger": "scheduled", "reclaimedBytes": null, "error": "e"}
+        ], "lastTrimAt": 6}),
+    );
+    put(
+        &storage.join(format!("storage-maintenance/{OTHER}.json")),
+        &json!({"history": [], "lastTrimAt": 7, "lastReclaimedBytes": 20}),
+    );
 }
 
 fn assert_new_storage(storage: &Path) {
@@ -301,6 +313,23 @@ fn assert_new_storage(storage: &Path) {
     assert_eq!(
         get(&storage.join("computer-use/x.json")),
         json!({"approval": "ask"})
+    );
+    assert_eq!(
+        get(&storage.join("storage-maintenance/x.json")),
+        json!({"history": []})
+    );
+    assert_eq!(
+        get(&storage.join(format!("storage-maintenance/{ID}.json"))),
+        json!({"history": [
+            {"at": 5, "trigger": "manual", "reclaimedBytes": 10, "error": null},
+            {"at": 6, "trigger": "scheduled", "reclaimedBytes": null, "error": "e"}
+        ], "lastTrimAt": 6})
+    );
+    assert_eq!(
+        get(&storage.join(format!("storage-maintenance/{OTHER}.json"))),
+        json!({"history": [
+            {"at": 7, "trigger": "manual", "reclaimedBytes": 20, "error": null}
+        ], "lastTrimAt": 7, "lastReclaimedBytes": 20})
     );
 }
 

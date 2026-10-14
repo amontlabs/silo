@@ -97,17 +97,6 @@ fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeError> {
     };
     let mut record: Record = serde_json::from_reader(file.take(65536))
         .map_err(|_| failure("Storage maintenance history is invalid; it was preserved."))?;
-    if record.history.is_empty() {
-        if let Some(at) = record.last_trim_at {
-            record.history.push(ReclaimEntry {
-                at,
-                trigger: "legacy".into(),
-                reclaimed_bytes: record.last_reclaimed_bytes,
-                error: None,
-                extra: serde_json::Map::new(),
-            });
-        }
-    }
     record.history.truncate(HISTORY_LIMIT);
     Ok(record)
 }

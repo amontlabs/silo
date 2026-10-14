@@ -756,17 +756,19 @@ async fn read_storage(
     .await
     .map_err(join_failure)?
     .map_err(invalid)?;
-    let mut value = encode(state)?;
-    // The engine reads history written before the catalogue existed, tagged `legacy`; the
-    // API has no such trigger (95 §3), so the entry keeps its amount and time as a manual one.
-    if let Some(history) = value.get_mut("history").and_then(Value::as_array_mut) {
-        for entry in history {
-            if entry["trigger"] == "legacy" {
-                entry["trigger"] = Value::String("manual".to_owned());
-            }
-        }
-    }
-    Ok(plain(value))
+    Ok(plain(
+        canonical_storage(state).map_err(DispatchError::internal)?,
+    ))
+}
+
+/// The one encoding of a computer's storage state for clients: read results and reclaim
+/// job results both pass through the API type, so a value outside its catalogue (a trigger
+/// it does not list) is an error instead of reaching a client.
+fn canonical_storage(state: impl Serialize) -> Result<Value, String> {
+    let value = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    let state: silo_api::methods::storage::StorageState = serde_json::from_value(value)
+        .map_err(|error| format!("The storage state does not match the API: {error}"))?;
+    serde_json::to_value(state).map_err(|error| error.to_string())
 }
 
 // MARK: Lifecycle
@@ -1192,6 +1194,7 @@ async fn begin_storage_reclaim(
             worker_job,
             cancellation,
         )
+        .and_then(canonical_storage)
     });
     job_output(job)
 }
@@ -2388,6 +2391,26 @@ pub(crate) mod tests {
         }
         close_displays(Some("d"));
         assert!(!display_gateways().contains_key(&(b, "d".into(), "c".into())));
+    }
+
+    #[test]
+    fn storage_state_is_checked_against_the_api_for_reads_and_reclaim_results() {
+        let state = |trigger: &str| {
+            json!({
+                "history": [{"at": 1, "trigger": trigger, "reclaimedBytes": 5, "error": null}],
+                "workspaceHostBytes": null, "runtimeHostBytes": null, "checkpointHostBytes": null,
+                "checkpointCount": 0, "workspaceUsedBytes": null, "workspaceCapacityBytes": null,
+                "lastReclaimedBytes": 5, "lastTrimAt": 1, "lastError": null,
+            })
+        };
+        for trigger in ["manual", "afterStart", "beforeStop", "scheduled"] {
+            let value = canonical_storage(state(trigger)).unwrap();
+            assert_eq!(value["history"][0]["trigger"], trigger);
+        }
+        // Nothing is translated on the way out: history that was not converted at launch
+        // fails here instead of being quietly relabelled.
+        let error = canonical_storage(state("legacy")).unwrap_err();
+        assert!(error.contains("does not match the API"), "{error}");
     }
 
     #[tokio::test]
