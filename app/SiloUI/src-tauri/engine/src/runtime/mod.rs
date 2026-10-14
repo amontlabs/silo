@@ -162,6 +162,11 @@ pub fn release_setup_audience(request_id: &str) {
         .remove(request_id);
 }
 
+/// Where the progress and outcome of setup request `request_id` go.
+pub fn setup_audience(request_id: &str) -> Audience {
+    setup_progress_audience(request_id)
+}
+
 fn setup_progress_audience(request_id: &str) -> Audience {
     let bound = SETUP_AUDIENCES
         .get_or_init(Default::default)

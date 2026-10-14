@@ -464,13 +464,30 @@ fn accept_linux_setup_job(
 /// A fallback for failures before the engine accepted its work. After acceptance the engine
 /// has already ended the job, and a second, different outcome is refused by the registry.
 fn finish_job_error(context: &SilodContext, job_id: JobId, message: String) {
+    finish_job_error_to(context, job_id, message, Audience::All);
+}
+
+fn finish_job_error_to(context: &SilodContext, job_id: JobId, message: String, audience: Audience) {
     let _ = silo_engine::jobs::finish_with_error(
         context,
         job_id,
         error_code(&message),
         message,
-        Audience::All,
+        audience,
     );
+}
+
+/// Ends a job whose work failed before the engine took it over. A setup job's outcome
+/// belongs to the client that asked, so the binding is released only after it was sent.
+fn fail_engine_job(context: &SilodContext, job_id: JobId, message: String) {
+    let request_id = job_id.as_str().strip_prefix("setup:").map(str::to_owned);
+    let audience = request_id
+        .as_deref()
+        .map_or(Audience::All, silo_engine::runtime::setup_audience);
+    finish_job_error_to(context, job_id, message, audience);
+    if let Some(request_id) = request_id {
+        silo_engine::runtime::release_setup_audience(&request_id);
+    }
 }
 
 fn finish_job_result(context: &SilodContext, job_id: JobId, value: Value) {
@@ -488,10 +505,7 @@ fn run_engine_job(
 ) {
     tokio::task::spawn_blocking(move || {
         if let Err(message) = work() {
-            if let Some(request_id) = job_id.as_str().strip_prefix("setup:") {
-                silo_engine::runtime::release_setup_audience(request_id);
-            }
-            finish_job_error(&context, job_id, message);
+            fail_engine_job(&context, job_id, message);
         }
     });
 }
@@ -2417,6 +2431,67 @@ mod tests {
                 descriptor.name
             );
         }
+    }
+
+    /// A second connected client of the same engine, subscribed like the fixture's own.
+    fn another_client(f: &Fixture) -> EventReceiver {
+        let silod = f.context.silod_context();
+        let client = ClientId::new(format!("other-{}", uuid::Uuid::new_v4()));
+        let events = silod.connect_event_stream(client.clone());
+        let subscription = silod
+            .subscribe_events(&client, vec!["operations.*".into()])
+            .unwrap();
+        silod.activate_events(&client, &subscription).unwrap();
+        events
+    }
+
+    #[tokio::test]
+    async fn an_early_setup_failure_reaches_only_the_client_that_asked() {
+        let mut requester = fixture();
+        let mut bystander = another_client(&requester);
+        let request = "early-failure";
+        let job = accept_linux_setup_job(&requester.context, "computers.create", request).unwrap();
+        // The work fails before the engine took the job over, as a runtime that is not
+        // ready does: the fallback ends the job.
+        fail_engine_job(
+            requester.context.silod_context(),
+            job.job_id.clone(),
+            "The runtime is not ready.".into(),
+        );
+        let finished = requester.next_event("operations.job.finished").await;
+        assert_eq!(finished["jobId"], "setup:early-failure");
+        assert_eq!(finished["error"]["message"], "The runtime is not ready.");
+
+        // The other client receives neither the job nor its error: the next job outcome it
+        // sees is one sent to everyone afterwards.
+        let everyone = requester
+            .context
+            .start_job("computers.start")
+            .unwrap()
+            .job_id;
+        finish_job_result(
+            requester.context.silod_context(),
+            everyone.clone(),
+            json!({}),
+        );
+        // Both outcomes are already queued, so this never waits.
+        let seen = loop {
+            match bystander.recv().await {
+                Some(EventDelivery::Event(event))
+                    if event.event.name == "operations.job.finished" =>
+                {
+                    break event.event.payload;
+                }
+                Some(_) => continue,
+                None => panic!("the event stream ended"),
+            }
+        };
+        assert_eq!(seen["jobId"], everyone.as_str());
+        // The binding ended with the outcome.
+        assert_eq!(
+            silo_engine::runtime::setup_audience(request),
+            Audience::Client(ClientId::new("main"))
+        );
     }
 
     #[tokio::test]
