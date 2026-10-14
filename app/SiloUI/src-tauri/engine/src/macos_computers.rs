@@ -3405,6 +3405,12 @@ fn ensure_transfer_target(
     Ok(())
 }
 
+/// One engine-timer pass of macOS published-port repair (95 A-26): the same repair a network
+/// state read schedules, with the same one-at-a-time and minimum-interval guards.
+pub fn repair_published_ports(app: &MacosContext) -> Result<(), String> {
+    ports::repair_running(app)
+}
+
 /// Observe and repair macOS guest listeners and their loopback SSH tunnels.
 pub fn read_network_state(
     app: &MacosContext,
