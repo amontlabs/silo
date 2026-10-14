@@ -113,6 +113,8 @@ fn run_appkit(
     context.job_registry()?;
     context::install(context.clone())?;
     context.install_queue_events();
+    // The engine watches its computers whether or not a client is connected (95 A-26).
+    crate::methods::computers::install_health_watch(context.clone());
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
     let runtime_home =

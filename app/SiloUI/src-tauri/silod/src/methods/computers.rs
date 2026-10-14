@@ -79,6 +79,10 @@ impl SilodRuntimeHost {
         }
     }
 
+    fn for_engine(context: Arc<SilodContext>) -> Self {
+        Self { context }
+    }
+
     fn migration(&self) -> silo_engine::runtime_migration::Controller {
         silo_engine::runtime_migration::Controller::new(self.context.paths().app_data.clone())
     }
@@ -203,6 +207,54 @@ impl RuntimeHost for SilodRuntimeHost {
             self.notify(notice);
         }
     }
+}
+
+/// The health watch of Linux computers: it compares readings of the runtime and reports a
+/// change nobody asked for as a retained notice and as `computers.unexpectedChange`.
+struct SilodHealthWatch {
+    host: SilodRuntimeHost,
+}
+
+impl silo_engine::health_watch::HealthWatchServices for SilodHealthWatch {
+    fn observe(&self) -> silo_engine::health_watch::Reading {
+        silo_engine::runtime::health_observations(&self.host)
+    }
+
+    fn wait_for_computer_exit(&self, name: &str) -> bool {
+        silo_engine::runtime::wait_for_computer_exit(&self.host, name)
+    }
+
+    fn notify(&self, notice: silo_engine::notifications::Notice) {
+        self.host.notify(notice);
+    }
+
+    fn unexpected_change(&self, change: silo_engine::health_watch::UnexpectedChange) {
+        publish_unexpected_change(self.host.context.as_ref(), change);
+    }
+}
+
+fn publish_unexpected_change(
+    context: &dyn EngineContext,
+    change: silo_engine::health_watch::UnexpectedChange,
+) {
+    context.publish(
+        silo_engine::context::Event::new(
+            "computers.unexpectedChange",
+            json!({
+                "computerId": change.computer_id,
+                "name": change.name,
+                "state": change.state,
+            }),
+        ),
+        Audience::All,
+    );
+}
+
+/// Starts the engine's own health watch, which needs no client to be connected (95 A-26).
+pub fn install_health_watch(context: Arc<SilodContext>) {
+    silo_engine::health_watch::install_services(Arc::new(SilodHealthWatch {
+        host: SilodRuntimeHost::for_engine(context),
+    }));
 }
 
 /// The engine-owned VM window belongs to the display domain (95 A-21). The computers domain
@@ -1814,7 +1866,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(started, json!({"jobId": "setup:request-stale"}));
-        // The outcome reaches this socket client, not the in-process "main" client.
+        // The outcome reaches this socket client, not the in-process "main" one.
         let finished = f.next_event("operations.job.finished").await;
         assert_eq!(finished["jobId"], "setup:request-stale");
         assert!(finished["error"]["message"]
@@ -2235,6 +2287,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unexpected_change_is_published_on_its_topic() {
+        let mut f = fixture();
+        publish_unexpected_change(
+            f.context.silod_context(),
+            silo_engine::health_watch::UnexpectedChange {
+                computer_id: LINUX.into(),
+                name: "dev".into(),
+                state: "stopped".into(),
+            },
+        );
+        let payload = f.next_event("computers.unexpectedChange").await;
+        assert_eq!(
+            payload,
+            json!({"computerId": LINUX, "name": "dev", "state": "stopped"})
+        );
+        let typed: silo_api::events::UnexpectedComputerChange =
+            serde_json::from_value(payload).unwrap();
+        assert_eq!(typed.state, "stopped");
+    }
+
+    #[tokio::test]
     async fn each_clients_screens_end_on_their_own() {
         fn gateway() -> silo_engine::macos_display_gateway::Gateway {
             let open: silo_engine::macos_display_gateway::Open =
@@ -2334,5 +2407,29 @@ mod tests {
                 descriptor.name
             );
         }
+    }
+
+    #[tokio::test]
+    async fn creating_a_linux_computer_is_a_setup_job_that_ends_with_its_reason() {
+        let mut f = fixture();
+        let started = f
+            .call(
+                MethodName::ComputersCreate,
+                json!({
+                    "kind": "linux",
+                    "configuration": linux_configuration(),
+                    "requestId": "create-1"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(started, json!({"jobId": "setup:create-1"}));
+        // The engine has no creation inputs here, so the job ends with that reason.
+        let finished = f.next_event("operations.job.finished").await;
+        assert_eq!(finished["jobId"], "setup:create-1");
+        assert!(finished["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Creation inputs"));
     }
 }
