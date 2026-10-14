@@ -11,7 +11,6 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
 
 const REINSTALL_GUIDANCE: &str = "Reinstall Silo from its original download or package manager, keeping its app data. Your computers and settings are stored separately from the app.";
 const RETRY_GUIDANCE: &str =
@@ -226,10 +225,12 @@ struct GitExecutableHashes {
     git_remote_https: String,
 }
 
-struct ProbePaths {
-    executable_dir: PathBuf,
-    resource_dir: PathBuf,
-    frameworks_dir: Option<PathBuf>,
+pub(crate) struct ProbePaths {
+    pub(crate) executable_dir: PathBuf,
+    pub(crate) resource_dir: PathBuf,
+    pub(crate) frameworks_dir: Option<PathBuf>,
+    #[cfg(target_os = "linux")]
+    pub(crate) runtime_library: Option<PathBuf>,
 }
 
 fn expected_target() -> Option<&'static str> {
@@ -887,11 +888,12 @@ fn microsandbox_check(paths: &ProbePaths, deadline: Instant) -> DependencyCheck 
         .expect("macOS frameworks path")
         .join(&manifest.library.bundled_name);
     #[cfg(target_os = "linux")]
-    let library = crate::runtime::bundled_runtime_library(
-        &executable,
-        &paths.resource_dir,
-        tauri::utils::platform::bundle_type(),
-    );
+    let library = paths
+        .runtime_library
+        .as_ref()
+        .expect("Linux dependency probes receive the resolved runtime library");
+    #[cfg(target_os = "linux")]
+    let library = library.as_path();
     for candidate in [&executable, &library] {
         if let Err(error) = readable_file(candidate) {
             return error.to_check(id, title, true);
@@ -1256,40 +1258,18 @@ fn collect(request_id: String, paths: ProbePaths) -> DependencyReport {
     )
 }
 
-#[tauri::command]
-pub async fn read_dependencies(
-    app: AppHandle,
-    request_id: String,
-) -> Result<DependencyReport, String> {
-    eprintln!("dependency check request: {request_id}");
+pub(crate) fn validate_request_id(request_id: &str) -> Result<(), String> {
     if request_id.trim().is_empty() || request_id.len() > 128 {
-        return Err("Invalid dependency-check request ID".into());
+        Err("Invalid dependency-check request ID".into())
+    } else {
+        Ok(())
     }
-    let executable_dir = crate::bundled_tools::directory(&app)?;
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("Silo resource directory is unavailable: {error}"))?;
-    #[cfg(target_os = "macos")]
-    let frameworks_dir = executable_dir
-        .parent()
-        .map(|contents| contents.join("Frameworks"));
-    #[cfg(not(target_os = "macos"))]
-    let frameworks_dir = None;
-    let report = tauri::async_runtime::spawn_blocking(move || {
-        collect(
-            request_id,
-            ProbePaths {
-                executable_dir,
-                resource_dir,
-                frameworks_dir,
-            },
-        )
-    })
-    .await
-    .map_err(|error| format!("Dependency checks could not run: {error}"))?;
+}
+
+pub(crate) fn read_report(request_id: String, paths: ProbePaths) -> DependencyReport {
+    let report = collect(request_id, paths);
     eprintln!("dependency check response: {}", report.checks.len());
-    Ok(report)
+    report
 }
 
 #[cfg(test)]
@@ -1439,6 +1419,8 @@ mod tests {
             executable_dir: directory.path().join("bin"),
             resource_dir: directory.path().join("resources"),
             frameworks_dir: Some(directory.path().join("Frameworks")),
+            #[cfg(target_os = "linux")]
+            runtime_library: None,
         };
         let check = microsandbox_check(&paths, Instant::now() + MICROSANDBOX_BUDGET);
         assert_eq!(check.id, "runtime-microsandbox");

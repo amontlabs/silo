@@ -246,7 +246,7 @@ fn main() {
             editor::read_editor_include_notice,
             applications::list_applications,
             applications::choose_application,
-            dependencies::read_dependencies,
+            commands::dependencies::read_dependencies,
             backup_controller::read_backup_state,
             runtime_migration::read_runtime_migration_state,
             runtime_migration::retry_runtime_migration,
