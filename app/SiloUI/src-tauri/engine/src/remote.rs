@@ -2214,7 +2214,6 @@ fn execute(
         };
         return handshake_key_in(&current_home()?.join(".ssh/authorized_keys"), Some(public));
     }
-    let paths = paths().map_err(BridgeError::from)?;
     match method {
         _ if method.starts_with("runtime.") => {
             crate::runtime::remote_ops::dispatch(runtime_host, method, params.clone())
@@ -2222,8 +2221,13 @@ fn execute(
         _ if method.starts_with("macos.") => {
             crate::macos_remote_engine::dispatch(macos, method, params)
         }
-        _ => crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
-            .map_err(BridgeError::from),
+        "chatgpt.status" => local_access.chatgpt_status().map_err(BridgeError::from),
+        "chatgpt.retry" => local_access.chatgpt_retry().map_err(BridgeError::from),
+        _ => {
+            let paths = paths().map_err(BridgeError::from)?;
+            crate::remote_access::dispatch(&paths, method, params, checkpoints, local_access)
+                .map_err(BridgeError::from)
+        }
     }
 }
 /// The methods this device serves, reported in the handshake.
@@ -4787,6 +4791,112 @@ mod dispatch_tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct PathIndependentContext {
+        paths: crate::context::EnginePaths,
+        identity: crate::context::EngineIdentity,
+        runtime_state: Arc<crate::context::EngineRuntimeState>,
+    }
+
+    impl crate::context::EngineContext for PathIndependentContext {
+        fn paths(&self) -> &crate::context::EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &crate::context::EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<crate::context::EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: crate::context::Event, _audience: crate::context::Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn crate::context::MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn crate::context::ProcessControl {
+            self
+        }
+    }
+
+    impl crate::context::ProcessControl for PathIndependentContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("remote dispatch test context cannot restart")
+        }
+    }
+
+    struct PathIndependentMacosHost;
+
+    impl crate::macos_computers_engine::MacosHost for PathIndependentMacosHost {
+        fn show_display(
+            &self,
+            _context: &crate::macos_computers_engine::MacosContext,
+            _id: &str,
+            _title: &str,
+            _toolbar: bool,
+        ) -> Result<(), String> {
+            Err("Display windows are unavailable in this test.".into())
+        }
+
+        fn close_display(&self, _id: &str) {}
+
+        fn linux_computer_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    struct PathIndependentRuntimeHost(Arc<PathIndependentContext>);
+
+    impl crate::runtime::RuntimeHost for PathIndependentRuntimeHost {
+        fn engine_context(&self) -> Arc<dyn crate::context::EngineContext> {
+            self.0.clone()
+        }
+
+        fn runtime_storage(&self) -> Result<PathBuf, String> {
+            Err("Runtime storage is unavailable in this test.".into())
+        }
+
+        fn blocks_operations(&self) -> bool {
+            false
+        }
+
+        fn bundled_tools_directory(&self) -> Result<PathBuf, String> {
+            Err("Bundled tools are unavailable in this test.".into())
+        }
+
+        fn ensure_runtime_ready(&self) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn runtime_package_kind(&self) -> crate::runtime::RuntimePackageKind {
+            crate::runtime::RuntimePackageKind::MacApp
+        }
+    }
+
+    struct PathIndependentLocalAccess;
+
+    impl crate::remote_access::LocalAccess for PathIndependentLocalAccess {
+        fn desktop_connection(&self, _computer: &str, _computer_id: &str) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+
+        fn desktop_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, String> {
+            Ok(Value::Null)
+        }
+
+        fn chatgpt_status(&self) -> Result<Value, String> {
+            Ok(json!({"operation": "status"}))
+        }
+
+        fn chatgpt_retry(&self) -> Result<Value, String> {
+            Ok(json!({"operation": "retry"}))
+        }
+    }
+
     /// A private owner directory (never the real `~/.silo`) with management enabled.
     fn owner() -> (tempfile::TempDir, PathBuf, Config) {
         let home = tempfile::tempdir().unwrap();
@@ -4824,6 +4934,68 @@ mod dispatch_tests {
             .filter(|(_, a)| *a == access)
             .map(|(m, _)| *m)
             .collect()
+    }
+
+    #[test]
+    fn linux_path_resolution_does_not_block_macos_or_chatgpt_handlers() {
+        let path_calls = Arc::new(AtomicUsize::new(0));
+        let resolver_calls = path_calls.clone();
+        let paths: Arc<RuntimePathsResolver> = Arc::new(move || {
+            resolver_calls.fetch_add(1, Ordering::SeqCst);
+            Err("Linux runtime migration is pending.".into())
+        });
+        let context = Arc::new(PathIndependentContext {
+            paths: crate::context::EnginePaths::default(),
+            identity: crate::context::EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "0.11.1".into(),
+                package_kind: crate::context::PackageKind::MacApp,
+            },
+            runtime_state: Arc::new(crate::context::EngineRuntimeState::default()),
+        });
+        let runtime_host = PathIndependentRuntimeHost(context.clone());
+        let macos = crate::macos_computers_engine::MacosContext::new(
+            context,
+            Arc::new(PathIndependentMacosHost),
+        );
+        let local_access = PathIndependentLocalAccess;
+        let checkpoints: Arc<crate::remote_access::CheckpointHandler> =
+            Arc::new(|_, _| Ok(Value::Null));
+
+        for (method, expected) in [
+            ("chatgpt.status", json!({"operation": "status"})),
+            ("chatgpt.retry", json!({"operation": "retry"})),
+        ] {
+            assert_eq!(
+                execute(
+                    paths.as_ref(),
+                    checkpoints.as_ref(),
+                    &runtime_host,
+                    &macos,
+                    &local_access,
+                    method,
+                    &Value::Null,
+                )
+                .unwrap(),
+                expected
+            );
+        }
+
+        let macos_error = execute(
+            paths.as_ref(),
+            checkpoints.as_ref(),
+            &runtime_host,
+            &macos,
+            &local_access,
+            "macos.display.resize",
+            &Value::Null,
+        )
+        .unwrap_err();
+        assert_eq!(
+            macos_error.message,
+            "Invalid macOS computer request: missing computer identity."
+        );
+        assert_eq!(path_calls.load(Ordering::SeqCst), 0);
     }
     /// Quoted `word.word` literals: the method names a dispatcher source matches on.
     fn method_literals(source: &str) -> std::collections::BTreeSet<String> {
