@@ -140,6 +140,19 @@ const WORKER_MAX_SLEEP: Duration = Duration::from_secs(60);
 const WORKER_MIN_SLEEP: Duration = Duration::from_millis(100);
 /// How long the worker leaves a Keychain refusal alone before it asks again.
 const REFUSED_RETRY_SECS: u64 = 300;
+/// The refresh time after a pass the Keychain refused: never sooner than the retry delay.
+fn defer_refused(refresh_at: u64, now: u64) -> u64 {
+    refresh_at.max(now + REFUSED_RETRY_SECS)
+}
+/// How long the worker waits after a pass. The pass's operation lock is released before it
+/// sleeps, so a refusal's long wait never holds off an update.
+fn pass_wait(refused: bool) -> Duration {
+    if refused {
+        Duration::from_secs(REFUSED_RETRY_SECS)
+    } else {
+        WORKER_MIN_SLEEP
+    }
+}
 fn wake_worker() {
     *WORKER_WOKEN.lock().unwrap_or_else(PoisonError::into_inner) = true;
     WORKER_WAKE.notify_all();
@@ -3062,19 +3075,14 @@ pub fn install() -> Result<(), String> {
                                     .min(c.expires_at.saturating_sub(120).max(now() + 30));
                             }
                             if refused {
-                                current.refresh_at =
-                                    current.refresh_at.max(now() + REFUSED_RETRY_SECS);
+                                current.refresh_at = defer_refused(current.refresh_at, now());
                             }
                             let _ = save(&current);
                         }
                     }
                     // Re-evaluate promptly against the document this pass saved, unless the
                     // Keychain refused: then look again later.
-                    wait = if refused {
-                        Duration::from_secs(REFUSED_RETRY_SECS)
-                    } else {
-                        WORKER_MIN_SLEEP
-                    };
+                    wait = pass_wait(refused);
                 } else {
                     wait = worker_wait(&d, pending_deadline, now(), Instant::now());
                 }
@@ -4061,6 +4069,35 @@ mod tests {
         // A new app session is due at once (never faster than the minimum sleep).
         d.session = "older".into();
         assert_eq!(worker_wait(&d, None, 1_000, instant), WORKER_MIN_SLEEP);
+    }
+    #[test]
+    fn a_refused_credential_item_backs_the_worker_off_and_frees_the_operation_lock() {
+        let _test_state = crate::test_support::global_state();
+        let instant = Instant::now();
+        // No 100 ms spin: the pass waits the full retry delay.
+        assert_eq!(pass_wait(true), Duration::from_secs(300));
+        assert_eq!(pass_wait(false), WORKER_MIN_SLEEP);
+        // The saved refresh time is pushed out, so the next pass is not due and the worker's
+        // computed sleep is far above the minimum.
+        let mut d = Document {
+            session: session().into(),
+            refresh_at: 1_000,
+            ..Default::default()
+        };
+        assert!(worker_due(&d, None, 1_000, instant));
+        d.refresh_at = defer_refused(d.refresh_at, 1_000);
+        assert_eq!(d.refresh_at, 1_300);
+        assert!(!worker_due(&d, None, 1_001, instant));
+        assert!(worker_wait(&d, None, 1_001, instant) > WORKER_MIN_SLEEP);
+        // A later refresh time is kept.
+        assert_eq!(defer_refused(5_000, 1_000), 5_000);
+        // A pass holds the operation lock only while it runs; a refused one gives it back, so
+        // an update can take it at once.
+        {
+            let _pass = try_serialize(&OPERATION).expect("the worker pass takes the lock");
+            assert!(try_serialize(&OPERATION).is_none());
+        }
+        assert!(try_serialize(&OPERATION).is_some());
     }
     #[test]
     fn scheduling_wakes_a_sleeping_worker() {
