@@ -4,11 +4,10 @@
 //! encodes and verifies the ordered component stream within each computer row.
 
 use super::{
-    BackupError, BackupResult, BackupService, Cancellation, MsbRunner, PackageComputer,
-    PackageManifest, RuntimeManifest, FORMAT_VERSION,
-    FREE_SPACE_RESERVE, MAX_MANIFEST_BYTES, MAGIC, DEFAULT_MAX_ARCHIVE_BYTES,
     check_cancelled, format_bytes, now_ms, open_regular_file, pending_digest,
-    read_and_verify_package, validate_manifest, write_immutable_package,
+    read_and_verify_package, validate_manifest, write_immutable_package, BackupError, BackupResult,
+    BackupService, Cancellation, MsbRunner, PackageComputer, PackageManifest, RuntimeManifest,
+    DEFAULT_MAX_ARCHIVE_BYTES, FORMAT_VERSION, FREE_SPACE_RESERVE, MAGIC, MAX_MANIFEST_BYTES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -176,10 +175,7 @@ pub(crate) struct MacosArchiveConfiguration {
 }
 
 impl MacosArchiveConfiguration {
-    fn from_source(
-        source: MacosArchiveConfig,
-        components: Vec<MacosArchiveComponent>,
-    ) -> Self {
+    fn from_source(source: MacosArchiveConfig, components: Vec<MacosArchiveComponent>) -> Self {
         Self {
             payload_version: source.payload_version,
             architecture: source.architecture,
@@ -599,10 +595,14 @@ pub(super) fn validate_computer(
     validate_configuration(&config, name)?;
     validate_computer_configuration(computer_configuration)?;
     if !volumes.is_empty() {
-        return Err(invalid_archive("Apple Virtualization archives cannot contain Linux volumes"));
+        return Err(invalid_archive(
+            "Apple Virtualization archives cannot contain Linux volumes",
+        ));
     }
     if stream_size(&config)? != payload_size {
-        return Err(invalid_archive("the component payload length does not match its manifest"));
+        return Err(invalid_archive(
+            "the component payload length does not match its manifest",
+        ));
     }
     Ok(())
 }
@@ -651,7 +651,11 @@ pub(super) fn verify_payloads(
             Some(BTreeMap::new())
         }
         (None, None, None) => None,
-        _ => return Err(invalid_archive("the component extraction request is inconsistent")),
+        _ => {
+            return Err(invalid_archive(
+                "the component extraction request is inconsistent",
+            ))
+        }
     };
     let mut selected_paths = selected_paths;
 
@@ -687,11 +691,15 @@ pub(super) fn verify_payloads(
             }
         }
         if payload.remaining != 0 {
-            return Err(invalid_archive("the component payload has extra or missing bytes"));
+            return Err(invalid_archive(
+                "the component payload has extra or missing bytes",
+            ));
         }
         let digest = format!("sha256:{:x}", payload.hasher.finalize());
         if digest != computer.payload_sha256 {
-            return Err(invalid_archive("a computer payload failed its integrity check"));
+            return Err(invalid_archive(
+                "a computer payload failed its integrity check",
+            ));
         }
         if should_extract {
             selected_paths = Some(paths);
@@ -733,7 +741,9 @@ fn validate_config_base(config: &MacosArchiveConfig, row_name: &str) -> Result<(
             &config.hardware_model_digest,
         )?;
         if configuration_digest != &expected {
-            return Err("saved memory configuration digest does not match its archived computer".into());
+            return Err(
+                "saved memory configuration digest does not match its archived computer".into(),
+            );
         }
     }
     Ok(())
@@ -756,7 +766,10 @@ pub(crate) fn memory_configuration_digest(
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
-fn validate_configuration(config: &MacosArchiveConfiguration, row_name: &str) -> Result<(), BackupError> {
+fn validate_configuration(
+    config: &MacosArchiveConfiguration,
+    row_name: &str,
+) -> Result<(), BackupError> {
     validate_config_base(&config.source_config(), row_name)
         .map_err(|_| invalid_archive("the macOS archive configuration is invalid"))?;
     let expected = expected_roles(&config.memory);
@@ -800,18 +813,24 @@ fn validate_configuration(config: &MacosArchiveConfiguration, row_name: &str) ->
 
     let disk = component(config, MacosComponentRole::Disk)?;
     if disk.logical_length != config.disk_gib.checked_mul(GIB).unwrap_or(0) {
-        return Err(invalid_archive("the disk component size does not match diskGiB"));
+        return Err(invalid_archive(
+            "the disk component size does not match diskGiB",
+        ));
     }
     let model = component(config, MacosComponentRole::HardwareModel)?;
     if model.sha256 != config.hardware_model_digest {
-        return Err(invalid_archive("the hardware model digest does not match its component"));
+        return Err(invalid_archive(
+            "the hardware model digest does not match its component",
+        ));
     }
     match &config.memory {
         MacosArchiveMemory::None => {}
         MacosArchiveMemory::Saved { size, sha256, .. } => {
             let saved = component(config, MacosComponentRole::Memory)?;
             if saved.logical_length != *size || saved.sha256 != *sha256 {
-                return Err(invalid_archive("the saved memory metadata does not match its component"));
+                return Err(invalid_archive(
+                    "the saved memory metadata does not match its component",
+                ));
             }
         }
     }
@@ -1003,9 +1022,10 @@ fn write_stream_header(
         output.write_all(&component.role.index().to_be_bytes())?;
         output.write_all(&component.logical_length.to_be_bytes())?;
         output.write_all(&component.stored_length.to_be_bytes())?;
-        output.write_all(&digest_bytes(&component.sha256).ok_or_else(|| {
-            invalid_archive("a component digest cannot be encoded")
-        })?)?;
+        output.write_all(
+            &digest_bytes(&component.sha256)
+                .ok_or_else(|| invalid_archive("a component digest cannot be encoded"))?,
+        )?;
     }
     Ok(())
 }
@@ -1023,18 +1043,21 @@ fn read_stream_header(
         cancellation,
     )?;
     if &magic != STREAM_MAGIC {
-        return Err(invalid_archive("the component stream header is not recognized"));
+        return Err(invalid_archive(
+            "the component stream header is not recognized",
+        ));
     }
     let version = read_archive_u32(input, cancellation)?;
     if version != STREAM_VERSION {
         return Err(BackupError::UnsupportedArchive(
-            "This Apple Virtualization export uses an unsupported component stream version."
-                .into(),
+            "This Apple Virtualization export uses an unsupported component stream version.".into(),
         ));
     }
     let count = read_archive_u32(input, cancellation)? as usize;
     if count != config.components.len() {
-        return Err(invalid_archive("the component index count does not match its manifest"));
+        return Err(invalid_archive(
+            "the component index count does not match its manifest",
+        ));
     }
     for expected in &config.components {
         let role = role_from_index(read_archive_u32(input, cancellation)?)
@@ -1053,7 +1076,9 @@ fn read_stream_header(
             || stored_length != expected.stored_length
             || Some(digest) != digest_bytes(&expected.sha256)
         {
-            return Err(invalid_archive("the component index does not match its manifest"));
+            return Err(invalid_archive(
+                "the component index does not match its manifest",
+            ));
         }
     }
     Ok(())
@@ -1079,9 +1104,12 @@ fn verify_component_frame(
     let mut buffer = [0_u8; 128 * 1024];
     loop {
         check_cancelled(cancellation)?;
-        let count = decoder
-            .read(&mut buffer)
-            .map_err(|_| frame_error(cancellation, "a component zstd frame is truncated or invalid"))?;
+        let count = decoder.read(&mut buffer).map_err(|_| {
+            frame_error(
+                cancellation,
+                "a component zstd frame is truncated or invalid",
+            )
+        })?;
         if count == 0 {
             break;
         }
@@ -1089,7 +1117,9 @@ fn verify_component_frame(
             .checked_add(count as u64)
             .ok_or_else(|| invalid_archive("a component expanded length overflows"))?;
         if expanded > component.logical_length {
-            return Err(invalid_archive("a component expands beyond its declared length"));
+            return Err(invalid_archive(
+                "a component expands beyond its declared length",
+            ));
         }
         hasher.update(&buffer[..count]);
         if let Some(output) = output.as_deref_mut() {
@@ -1100,23 +1130,32 @@ fn verify_component_frame(
             }
         }
     }
-    decoder
-        .finish_frame()
-        .map_err(|_| frame_error(cancellation, "a component zstd frame is truncated or invalid"))?;
+    decoder.finish_frame().map_err(|_| {
+        frame_error(
+            cancellation,
+            "a component zstd frame is truncated or invalid",
+        )
+    })?;
     let mut remaining = decoder.finish();
     let trailing = remaining
         .fill_buf()
         .map_err(|_| frame_error(cancellation, "a component frame has unread compressed data"))?;
     if !trailing.is_empty() || remaining.get_ref().limit() != 0 {
-        return Err(invalid_archive("a component contains extra zstd frames or bytes"));
+        return Err(invalid_archive(
+            "a component contains extra zstd frames or bytes",
+        ));
     }
 
     if expanded != component.logical_length {
-        return Err(invalid_archive("a component does not expand to its declared length"));
+        return Err(invalid_archive(
+            "a component does not expand to its declared length",
+        ));
     }
     let digest = format!("sha256:{:x}", hasher.finalize());
     if digest != component.sha256 {
-        return Err(invalid_archive("a component failed its logical integrity check"));
+        return Err(invalid_archive(
+            "a component failed its logical integrity check",
+        ));
     }
     if let Some(output) = output {
         output.set_len(component.logical_length)?;
@@ -1169,7 +1208,9 @@ impl Read for HashingLimitReader<'_> {
         if self.remaining == 0 || buffer.is_empty() {
             return Ok(0);
         }
-        let read_len = buffer.len().min(self.remaining.min(usize::MAX as u64) as usize);
+        let read_len = buffer
+            .len()
+            .min(self.remaining.min(usize::MAX as u64) as usize);
         let count = self.input.read(&mut buffer[..read_len])?;
         self.remaining -= count as u64;
         self.hasher.update(&buffer[..count]);
@@ -1233,7 +1274,11 @@ fn role_from_index(index: u32) -> Option<MacosComponentRole> {
 
 fn digest_bytes(value: &str) -> Option<[u8; 32]> {
     let digest = value.strip_prefix("sha256:")?;
-    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) {
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
         return None;
     }
     let mut output = [0_u8; 32];
@@ -1255,9 +1300,7 @@ fn valid_fingerprint(value: &str) -> bool {
 }
 
 fn safe_text(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_TEXT_BYTES
-        && !value.chars().any(char::is_control)
+    !value.is_empty() && value.len() <= MAX_TEXT_BYTES && !value.chars().any(char::is_control)
 }
 
 fn invalid_archive(detail: &str) -> BackupError {
@@ -1289,8 +1332,8 @@ mod tests {
     }
 
     fn oversized_window_frame(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 3)
-            .expect("create zstd test encoder");
+        let mut encoder =
+            zstd::stream::write::Encoder::new(Vec::new(), 3).expect("create zstd test encoder");
         encoder.window_log(MAX_WINDOW_LOG + 1).unwrap();
         encoder.include_contentsize(false).unwrap();
         encoder.write_all(bytes).unwrap();
@@ -1412,9 +1455,11 @@ mod tests {
         {
             *configuration_digest = format!("sha256:{}", "1".repeat(64));
         }
-        assert!(validate_config_base(&invalid.source_config(), &invalid.source_name)
-            .unwrap_err()
-            .contains("configuration digest"));
+        assert!(
+            validate_config_base(&invalid.source_config(), &invalid.source_name)
+                .unwrap_err()
+                .contains("configuration digest")
+        );
         assert!(validate_configuration(&invalid, &invalid.source_name).is_err());
     }
 
@@ -1465,7 +1510,12 @@ mod tests {
         let mut extra_frame = frame.clone();
         extra_frame.extend(encoded_frame(b"unindexed second frame"));
         assert!(matches!(
-            verify_frame(&extra_frame, logical, logical.len() as u64, &digest(logical)),
+            verify_frame(
+                &extra_frame,
+                logical,
+                logical.len() as u64,
+                &digest(logical)
+            ),
             Err(BackupError::InvalidArchive(_))
         ));
 
@@ -1688,11 +1738,17 @@ mod tests {
         ) else {
             panic!("extraction ignored the insufficient free-space budget");
         };
-        assert!(matches!(error, BackupError::InsufficientSpace(_)), "{error}");
+        assert!(
+            matches!(error, BackupError::InsufficientSpace(_)),
+            "{error}"
+        );
         let children = fs::read_dir(temp.path())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
             .collect::<Vec<_>>();
-        assert_eq!(children, [std::ffi::OsStr::new("oversized-components.silo-backup")]);
+        assert_eq!(
+            children,
+            [std::ffi::OsStr::new("oversized-components.silo-backup")]
+        );
     }
 }

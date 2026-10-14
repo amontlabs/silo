@@ -9,7 +9,10 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -740,7 +743,25 @@ fn perform(
     path: &str,
     target: &PushTarget,
 ) -> Result<u64, String> {
+    perform_for_job(paths, computer, path, target, None, None, None)
+}
+
+fn perform_for_job(
+    paths: &RuntimePaths,
+    computer: &str,
+    path: &str,
+    target: &PushTarget,
+    cancellation: Option<Arc<AtomicBool>>,
+    gate_key: Option<String>,
+    job_id: Option<silo_api::jobs::JobId>,
+) -> Result<u64, String> {
     let _update = crate::updates::operation_guard()?;
+    if cancellation
+        .as_ref()
+        .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+    {
+        return Err(CANCELLED.into());
+    }
     if !valid_path(path) {
         return Err("Choose a repository inside /workspace.".into());
     }
@@ -776,12 +797,49 @@ fn perform(
     }
     // Revoked when this function returns, whatever the outcome.
     let credential = crate::github::host_push_credential(computer, &target.repository)?;
-    let guard = runtime::OPERATIONS
-        .kind(runtime::operation_gate::OperationKind::Push)
-        .computer(&computer_id, computer, &format!("Pushing from {computer}"))
-        .map_err(|e| e.to_string())?;
+    let kind = runtime::OPERATIONS.kind(runtime::operation_gate::OperationKind::Push);
+    let label = format!("Pushing from {computer}");
+    let guard = if let (Some(key), Some(cancellation), Some(job_id)) =
+        (gate_key.clone(), cancellation.clone(), job_id.clone())
+    {
+        kind.acquire_for_job(
+            runtime::operation_gate::Scope::Computer {
+                id: computer_id.clone(),
+            },
+            Some(computer.to_owned()),
+            &label,
+            Some(key),
+            job_id,
+            Some(cancellation),
+        )
+    } else if let (Some(key), Some(cancellation)) = (gate_key.clone(), cancellation.clone()) {
+        kind.acquire_with_cancel_token(
+            runtime::operation_gate::Scope::Computer {
+                id: computer_id.clone(),
+            },
+            Some(computer.to_owned()),
+            &label,
+            Some(key),
+            cancellation,
+        )
+    } else if let Some(key) = gate_key {
+        kind.acquire(
+            runtime::operation_gate::Scope::Computer {
+                id: computer_id.clone(),
+            },
+            Some(computer.to_owned()),
+            &label,
+            Some(key),
+        )
+    } else {
+        kind.computer(&computer_id, computer, &label)
+    }
+    .map_err(|e| e.to_string())?;
     // A push can run for a long time; the user may stop it (and Quit may cancel it).
     guard.allow_cancel();
+    if runtime::operation_gate::cancel_requested() {
+        return Err(CANCELLED.into());
+    }
     let result = (|| {
         runtime::shutdown::ensure_accepting_operations()?;
         require_running(&paths, computer)?;
@@ -1195,7 +1253,13 @@ pub(crate) async fn push_repository(
     computer: String,
     repository_path: String,
     target: PushTarget,
+    cancellation: Arc<AtomicBool>,
+    gate_key: String,
+    job_id: Option<silo_api::jobs::JobId>,
 ) -> Result<Value, String> {
+    if cancellation.load(Ordering::SeqCst) {
+        return Err(CANCELLED.into());
+    }
     let key = format!("{computer}\0{repository_path}");
     let planned_count = {
         let (paths, computer, repository_path) =
@@ -1207,6 +1271,9 @@ pub(crate) async fn push_repository(
         .map_err(|_| "Host push task failed.".to_string())?
     };
     {
+        if cancellation.load(Ordering::SeqCst) {
+            return Err(CANCELLED.into());
+        }
         let mut r = results().lock().map_err(|_| "Push state unavailable.")?;
         if r.get(&key).is_some_and(|(v, _)| v["status"] == "pushing") {
             return Err("This repository is already being pushed.".into());
@@ -1215,14 +1282,25 @@ pub(crate) async fn push_repository(
     }
     publish_application_state_changed();
     let task = {
-        let (paths, computer, repository_path, target) = (
+        let (paths, computer, repository_path, target, cancellation, gate_key, job_id) = (
             paths.clone(),
             computer.clone(),
             repository_path.clone(),
             target.clone(),
+            cancellation,
+            gate_key,
+            job_id,
         );
         runtime::operation_gate::spawn_blocking(move || {
-            perform(&paths, &computer, &repository_path, &target)
+            perform_for_job(
+                &paths,
+                &computer,
+                &repository_path,
+                &target,
+                Some(cancellation),
+                Some(gate_key),
+                job_id,
+            )
         })
     };
     // A panicked task must still resolve the entry, or it would stay

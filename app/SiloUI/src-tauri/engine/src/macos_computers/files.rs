@@ -5,7 +5,10 @@ use crate::files::{DirectoryPage, Entry};
 use base64::Engine as _;
 use std::{
     collections::HashMap,
-    sync::{atomic::{AtomicU64, Ordering}, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -75,9 +78,12 @@ pub(crate) fn valid_path(path: &str) -> bool {
     path.len() <= 4096
         && !path.bytes().any(|byte| byte.is_ascii_control())
         && (path == WORKSPACE
-            || path.strip_prefix("/Users/silo/workspace/").is_some_and(|tail| {
-                tail.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
-            }))
+            || path
+                .strip_prefix("/Users/silo/workspace/")
+                .is_some_and(|tail| {
+                    tail.split('/')
+                        .all(|part| !part.is_empty() && part != "." && part != "..")
+                }))
 }
 
 pub(crate) fn transfer_roots() -> Vec<String> {
@@ -129,11 +135,11 @@ fn parse_listing(output: &str, path: &str) -> Result<Vec<Entry>, String> {
             .map(str::to_owned)
             .map_err(|_| "This folder contains a file name Silo cannot display.")?;
         let kind = match kind {
-                "d" => "folder",
-                "l" => "symlink",
-                "f" => "file",
-                _ => return Err(FAILED.into()),
-            };
+            "d" => "folder",
+            "l" => "symlink",
+            "f" => "file",
+            _ => return Err(FAILED.into()),
+        };
         bytes = bytes.saturating_add(name.len().saturating_mul(2) + path.len() + 96);
         if bytes > MAX_LISTING_BYTES {
             return Err(TOO_LARGE.into());
@@ -197,24 +203,46 @@ fn insert_snapshot(
 ) -> Result<(), String> {
     let mut cache = snapshots().lock().map_err(|_| FAILED)?;
     cache.retain(|_, snapshot| snapshot.created.elapsed() < Duration::from_secs(120));
-    let new_bytes = entries.iter().map(|entry| entry.name.len() + entry.path.len() + 96).sum::<usize>();
+    let new_bytes = entries
+        .iter()
+        .map(|entry| entry.name.len() + entry.path.len() + 96)
+        .sum::<usize>();
     while cache.len() >= MAX_SNAPSHOTS
-        || cache.values().map(|snapshot| snapshot.entries.iter().map(|entry| entry.name.len() + entry.path.len() + 96).sum::<usize>()).sum::<usize>() + new_bytes > MAX_SNAPSHOT_BYTES
+        || cache
+            .values()
+            .map(|snapshot| {
+                snapshot
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name.len() + entry.path.len() + 96)
+                    .sum::<usize>()
+            })
+            .sum::<usize>()
+            + new_bytes
+            > MAX_SNAPSHOT_BYTES
     {
-        let oldest = cache.iter().min_by_key(|(_, snapshot)| snapshot.created).map(|(id, _)| id.clone());
+        let oldest = cache
+            .iter()
+            .min_by_key(|(_, snapshot)| snapshot.created)
+            .map(|(id, _)| id.clone());
         match oldest {
-            Some(oldest) => { cache.remove(&oldest); }
+            Some(oldest) => {
+                cache.remove(&oldest);
+            }
             None => return Err(TOO_LARGE.into()),
         }
     }
-    cache.insert(id.into(), Snapshot {
-        computer_id: computer_id.into(),
-        generation,
-        caller: caller.into(),
-        path: path.into(),
-        created: Instant::now(),
-        entries,
-    });
+    cache.insert(
+        id.into(),
+        Snapshot {
+            computer_id: computer_id.into(),
+            generation,
+            caller: caller.into(),
+            path: path.into(),
+            created: Instant::now(),
+            entries,
+        },
+    );
     Ok(())
 }
 
@@ -263,7 +291,14 @@ pub(super) fn list(
         None,
         Duration::from_secs(10),
         Some(MAX_LISTING_BYTES),
-    ).map_err(|error| if error == guest_access::OUTPUT_TOO_LARGE { TOO_LARGE.to_string() } else { error })?;
+    )
+    .map_err(|error| {
+        if error == guest_access::OUTPUT_TOO_LARGE {
+            TOO_LARGE.to_string()
+        } else {
+            error
+        }
+    })?;
     if output.status != 0 {
         return Err(FAILED.into());
     }
@@ -282,7 +317,16 @@ mod tests {
     fn macos_workspace_paths_are_normalized_and_downloads_are_transfer_only() {
         assert!(valid_path(WORKSPACE));
         assert!(valid_path("/Users/silo/workspace/folder name/日本語"));
-        for path in ["/", "/workspace", "/Users/silo/Downloads", "/Users/silo/workspace2", "/Users/silo/workspace/../etc", "/Users/silo/workspace//x", "/Users/silo/workspace/a/./b", "/Users/silo/workspace/a\n"] {
+        for path in [
+            "/",
+            "/workspace",
+            "/Users/silo/Downloads",
+            "/Users/silo/workspace2",
+            "/Users/silo/workspace/../etc",
+            "/Users/silo/workspace//x",
+            "/Users/silo/workspace/a/./b",
+            "/Users/silo/workspace/a\n",
+        ] {
             assert!(!valid_path(path), "{path:?}");
         }
         assert_eq!(transfer_roots(), [WORKSPACE, DOWNLOADS]);
@@ -290,7 +334,14 @@ mod tests {
 
     #[test]
     fn guest_listing_parser_preserves_odd_names_and_never_opens_links() {
-        let output = concat!("ok\0d\0", "Zm9sZGVy\0", "l\0", "bGluaw==\0", "f\0", "YTtiCg==\0");
+        let output = concat!(
+            "ok\0d\0",
+            "Zm9sZGVy\0",
+            "l\0",
+            "bGluaw==\0",
+            "f\0",
+            "YTtiCg==\0"
+        );
         let entries = parse_listing(output, WORKSPACE).unwrap();
         assert_eq!(entries[0].name, "folder");
         assert_eq!(entries[0].kind, "folder");
@@ -335,7 +386,15 @@ mod tests {
 
     #[test]
     fn listing_errors_and_malformed_records_do_not_look_empty() {
-        for listing in ["", "ok", "ok\0d\0", "ok\0q\0eA==\0", "ok\0f\0Li4=\0", "missing\0", "denied\0"] {
+        for listing in [
+            "",
+            "ok",
+            "ok\0d\0",
+            "ok\0q\0eA==\0",
+            "ok\0f\0Li4=\0",
+            "missing\0",
+            "denied\0",
+        ] {
             assert!(parse_listing(listing, WORKSPACE).is_err(), "{listing:?}");
         }
         assert!(parse_listing("ok\0", WORKSPACE).unwrap().is_empty());

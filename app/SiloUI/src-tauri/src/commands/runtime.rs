@@ -82,13 +82,11 @@ impl RuntimeHost for TauriRuntimeHost {
     }
 
     fn notify(&self, notice: crate::notifications::Notice) {
-        crate::commands::notifications::notify_native(&self.0, notice);
+        deliver_runtime_notice(self, notice);
     }
 
     fn clear_computer_notices(&self, computer_ids: &[String]) {
-        for computer_id in computer_ids {
-            crate::commands::notifications::clear_computer(&self.0, computer_id);
-        }
+        withdraw_runtime_notices(self, computer_ids);
     }
 
     fn stop_macos_computers(&self, deadline: Option<std::time::Instant>) -> Result<(), String> {
@@ -118,8 +116,36 @@ impl RuntimeHost for TauriRuntimeHost {
         if let Some(notice) =
             crate::notifications::lifecycle_notice(action, name, computer, elapsed, outcome)
         {
-            crate::commands::notifications::notify_native(&self.0, notice);
+            deliver_runtime_notice(self, notice);
         }
+    }
+}
+
+trait RuntimeNoticeDelivery {
+    fn notify_native(&self, notice: crate::notifications::Notice);
+    fn clear_computer(&self, computer_id: &str);
+}
+
+impl RuntimeNoticeDelivery for TauriRuntimeHost {
+    fn notify_native(&self, notice: crate::notifications::Notice) {
+        crate::commands::notifications::notify_native(&self.0, notice);
+    }
+
+    fn clear_computer(&self, computer_id: &str) {
+        crate::commands::notifications::clear_computer(&self.0, computer_id);
+    }
+}
+
+fn deliver_runtime_notice(
+    delivery: &impl RuntimeNoticeDelivery,
+    notice: crate::notifications::Notice,
+) {
+    delivery.notify_native(notice);
+}
+
+fn withdraw_runtime_notices(delivery: &impl RuntimeNoticeDelivery, computer_ids: &[String]) {
+    for computer_id in computer_ids {
+        delivery.clear_computer(computer_id);
     }
 }
 
@@ -314,6 +340,23 @@ pub async fn change_computer_configuration(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingNoticeDelivery {
+        native: Mutex<Vec<crate::notifications::Notice>>,
+        cleared: Mutex<Vec<String>>,
+    }
+
+    impl RuntimeNoticeDelivery for RecordingNoticeDelivery {
+        fn notify_native(&self, notice: crate::notifications::Notice) {
+            self.native.lock().unwrap().push(notice);
+        }
+
+        fn clear_computer(&self, computer_id: &str) {
+            self.cleared.lock().unwrap().push(computer_id.to_owned());
+        }
+    }
 
     #[test]
     fn launcher_worker_failure_keeps_the_launcher_error() {
@@ -323,5 +366,33 @@ mod tests {
                 "The application launcher failed."
             );
         }
+    }
+
+    #[test]
+    fn runtime_notice_uses_native_only_delivery() {
+        let notice = crate::notifications::Notice {
+            category: crate::notifications::Category::Failures,
+            key: "lifecycle:dev".into(),
+            title: "Couldn’t start dev".into(),
+            body: "The framework rejected the start.".into(),
+            computer: None,
+        };
+        let delivery = RecordingNoticeDelivery::default();
+
+        deliver_runtime_notice(&delivery, notice.clone());
+
+        assert_eq!(*delivery.native.lock().unwrap(), vec![notice]);
+        assert!(delivery.cleared.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn runtime_notice_withdrawal_uses_native_notification_clear() {
+        let delivery = RecordingNoticeDelivery::default();
+        let computer_ids = vec!["local:dev".to_owned(), "remote:dev".to_owned()];
+
+        withdraw_runtime_notices(&delivery, &computer_ids);
+
+        assert_eq!(*delivery.cleared.lock().unwrap(), computer_ids);
+        assert!(delivery.native.lock().unwrap().is_empty());
     }
 }

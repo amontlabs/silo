@@ -22,6 +22,8 @@ wire_struct! {
         job_id: crate::jobs::JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset_bytes: Option<u64>,
     }
 }
 

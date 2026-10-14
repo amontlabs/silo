@@ -19,7 +19,8 @@ static LOCK: Mutex<()> = Mutex::new(());
 static PROXY_HELPER_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn validate_id(id: &str) -> Result<(), String> {
@@ -46,11 +47,9 @@ fn known_hosts(layout: &super::store::Layout) -> PathBuf {
 
 fn proxy_helper() -> Result<PathBuf, String> {
     #[cfg(test)]
-    if let Some(helper) = crate::sync::lock_or_recover(
-        &PROXY_HELPER_OVERRIDE,
-        "SSH proxy helper test override",
-    )
-    .clone()
+    if let Some(helper) =
+        crate::sync::lock_or_recover(&PROXY_HELPER_OVERRIDE, "SSH proxy helper test override")
+            .clone()
     {
         if !launch::executable_file(&helper) {
             return Err("The Silo engine SSH helper is unavailable. Update Silo and retry.".into());
@@ -75,7 +74,44 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn config_text(device_id: &str, computer_id: &str, identity: &Path, known_hosts: &Path, helper: &Path) -> Result<String, String> {
+fn proxy_text(helper: &str, device_id: &str, computer_id: &str, port: Option<u16>) -> String {
+    let mut command = format!(
+        "{} --remote-guest {} {}",
+        shell_quote(helper),
+        shell_quote(device_id),
+        shell_quote(computer_id)
+    );
+    if let Some(port) = port {
+        command.push_str(&format!(" {}", shell_quote(&port.to_string())));
+    }
+    command
+}
+
+/// The command `ssh` runs to reach the guest, as the alias's `ProxyCommand` but with a
+/// published-port label when `port` is given. The label names the forward on the stream so
+/// that unpublishing it ends the stream; the stream still carries SSH to the guest.
+pub(super) fn proxy_command(computer_id: &str, port: Option<u16>) -> Result<String, String> {
+    validate_id(computer_id)?;
+    if port == Some(0) {
+        return Err(FAILED.into());
+    }
+    let device_id = crate::remote::log_identity()?.0;
+    validate_id(&device_id)?;
+    let helper = proxy_helper()?;
+    let helper = helper.to_str().ok_or(FAILED)?;
+    if helper.chars().any(char::is_control) {
+        return Err(FAILED.into());
+    }
+    Ok(proxy_text(helper, &device_id, computer_id, port))
+}
+
+fn config_text(
+    device_id: &str,
+    computer_id: &str,
+    identity: &Path,
+    known_hosts: &Path,
+    helper: &Path,
+) -> Result<String, String> {
     validate_id(device_id)?;
     validate_id(computer_id)?;
     let identity = editor::ssh_quote(identity)?;
@@ -85,21 +121,27 @@ fn config_text(device_id: &str, computer_id: &str, identity: &Path, known_hosts:
         return Err(FAILED.into());
     }
     let alias = alias(computer_id);
-    let proxy = format!(
-        "{} --remote-guest {} {}",
-        shell_quote(helper),
-        shell_quote(device_id),
-        shell_quote(computer_id)
-    );
+    let proxy = proxy_text(helper, device_id, computer_id, None);
     Ok(format!(
         "Host {alias}\n  HostName {alias}\n  Port 22\n  User silo\n  IdentityFile {identity}\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile {known_hosts}\n  GlobalKnownHostsFile /dev/null\n  HostKeyAlias {alias}\n  StrictHostKeyChecking yes\n  UpdateHostKeys no\n  ForwardAgent no\n  ForwardX11 no\n  ClearAllForwardings yes\n  PermitLocalCommand no\n  ConnectTimeout 10\n  ServerAliveInterval 15\n  LogLevel ERROR\n  ProxyCommand {proxy}\n"
     ))
 }
 
-fn check_guest_path(layout: &super::store::Layout, record: &super::store::Record, path: &str) -> Result<(), String> {
+fn check_guest_path(
+    layout: &super::store::Layout,
+    record: &super::store::Record,
+    path: &str,
+) -> Result<(), String> {
     editor::validate_macos_path(path)?;
     let command = format!("test -d {}", shell_quote(path));
-    let output = guest_access::run_capped(layout, record, &command, None, Duration::from_secs(8), Some(1024))?;
+    let output = guest_access::run_capped(
+        layout,
+        record,
+        &command,
+        None,
+        Duration::from_secs(8),
+        Some(1024),
+    )?;
     if output.status == 0 {
         Ok(())
     } else {
@@ -110,12 +152,23 @@ fn check_guest_path(layout: &super::store::Layout, record: &super::store::Record
 fn probe(config: &Path, alias: &str) -> Result<(), String> {
     let mut command = Command::new(SSH);
     launch::sanitize_child(&mut command)
-        .args(["-F", config.to_str().ok_or(FAILED)?, "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", alias, "true"])
+        .args([
+            "-F",
+            config.to_str().ok_or(FAILED)?,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=5",
+            alias,
+            "true",
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    let mut task = crate::owned_tunnel::Tunnel::spawn_task(&command, None)
-        .map_err(|_| "Could not connect to this computer over SSH. Retry after checking that it is running.".to_string())?;
+    let mut task = crate::owned_tunnel::Tunnel::spawn_task(&command, None).map_err(|_| {
+        "Could not connect to this computer over SSH. Retry after checking that it is running."
+            .to_string()
+    })?;
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match task.try_wait() {
@@ -190,7 +243,9 @@ pub(super) fn remove(app: &MacosContext, computer_id: &str) -> Result<(), String
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
             fs::remove_file(&path).map_err(|_| FAILED)?;
             if let Some(parent) = path.parent() {
-                fs::File::open(parent).and_then(|directory| directory.sync_all()).map_err(|_| FAILED)?;
+                fs::File::open(parent)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|_| FAILED)?;
             }
             Ok(())
         }
@@ -200,7 +255,10 @@ pub(super) fn remove(app: &MacosContext, computer_id: &str) -> Result<(), String
     }
 }
 
-pub(super) fn terminal_command(app: &MacosContext, computer_id: &str) -> Result<CommandResult, String> {
+pub(super) fn terminal_command(
+    app: &MacosContext,
+    computer_id: &str,
+) -> Result<CommandResult, String> {
     let connection = ensure(app, computer_id, None, Some(true))?;
     Ok(CommandResult {
         argv: terminal_argv(Path::new(&connection.config_path), &connection.alias)?,
@@ -260,12 +318,23 @@ mod tests {
 
     #[test]
     fn alias_config_rejects_non_id_keys() {
-        assert!(config_text("../escape", "d1c418da-7f4d-49f5-a490-340365b0d8fb", Path::new("/tmp/key"), Path::new("/tmp/known"), Path::new("/tmp/silod")).is_err());
+        assert!(config_text(
+            "../escape",
+            "d1c418da-7f4d-49f5-a490-340365b0d8fb",
+            Path::new("/tmp/key"),
+            Path::new("/tmp/known"),
+            Path::new("/tmp/silod")
+        )
+        .is_err());
     }
 
     #[test]
     fn terminal_command_is_an_argv_for_the_client_to_launch() {
-        let argv = terminal_argv(Path::new("/tmp/Silo Dev/ssh/macos.conf"), &alias("e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f")).unwrap();
+        let argv = terminal_argv(
+            Path::new("/tmp/Silo Dev/ssh/macos.conf"),
+            &alias("e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f"),
+        )
+        .unwrap();
         assert_eq!(
             argv,
             [

@@ -1810,11 +1810,9 @@ fn local_engine_for_device_at(
         Ok(reply) => reply,
         Err(_) => return Ok(None),
     };
-    let Ok(silo_api::transport::ResponseEnvelope::Success { id, result }) =
-        serde_json::from_value::<silo_api::transport::ResponseEnvelope<silo_api::transport::HandshakeResult>>(
-            reply,
-        )
-    else {
+    let Ok(silo_api::transport::ResponseEnvelope::Success { id, result }) = serde_json::from_value::<
+        silo_api::transport::ResponseEnvelope<silo_api::transport::HandshakeResult>,
+    >(reply) else {
         return Ok(None);
     };
     if id != "local-engine-handshake" || result.protocol != silo_api::transport::PROTOCOL_VERSION {
@@ -2866,7 +2864,7 @@ fn guest_stream_kind(params: &Value) -> Result<GuestStream, String> {
 }
 
 /// An open published-port stream. Dropping it removes the registry entry.
-struct PortRegistration {
+pub(crate) struct PortRegistration {
     id: u64,
     revoked: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -2887,7 +2885,7 @@ fn port_streams() -> std::sync::MutexGuard<'static, Vec<PortStream>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 impl PortRegistration {
-    fn open(computer: &str, port: u16) -> Self {
+    pub(crate) fn open(computer: &str, port: u16) -> Self {
         use std::sync::atomic::{AtomicBool, Ordering};
         let id = NEXT_PORT_STREAM.fetch_add(1, Ordering::Relaxed);
         let revoked = Arc::new(AtomicBool::new(false));
@@ -2899,7 +2897,7 @@ impl PortRegistration {
         });
         Self { id, revoked }
     }
-    fn revoked(&self) -> bool {
+    pub(crate) fn revoked(&self) -> bool {
         self.revoked.load(std::sync::atomic::Ordering::Acquire)
     }
 }
@@ -3400,7 +3398,9 @@ mod port_stream_tests {
         }
     }
 
-    fn mock_engine_socket(device_id: &'static str) -> (tempfile::TempDir, thread::JoinHandle<Value>) {
+    fn mock_engine_socket(
+        device_id: &'static str,
+    ) -> (tempfile::TempDir, thread::JoinHandle<Value>) {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("engine.sock");
         let listener = UnixListener::bind(path).unwrap();
@@ -3447,9 +3447,11 @@ mod port_stream_tests {
     #[test]
     fn a_different_device_identity_does_not_select_engine_sock() {
         let (root, server) = mock_engine_socket("local-device");
-        assert!(local_engine_for_device_at("remote-device", &root.path().join("engine.sock"))
-            .unwrap()
-            .is_none());
+        assert!(
+            local_engine_for_device_at("remote-device", &root.path().join("engine.sock"))
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(server.join().unwrap()["method"], "engine.handshake");
     }
 }

@@ -25,6 +25,50 @@ fn modify(app: &AppHandle, f: impl FnOnce(&mut State)) -> Result<Snapshot, Strin
     modify_managed(app, |state| f(&mut state.policy))
 }
 
+fn update_snapshot_payload(snapshot: &Snapshot) -> Result<serde_json::Value, serde_json::Error> {
+    let mut payload = serde_json::to_value(snapshot)?;
+    // `UpdateSnapshot` omits the legacy Debian helper field while job progress
+    // intentionally carries the complete source Snapshot.
+    if let Some(fields) = payload.as_object_mut() {
+        fields.remove("installStatus");
+    }
+    Ok(payload)
+}
+
+fn publish_job_progress(
+    context: &dyn silo_engine::EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    snapshot: &Snapshot,
+) -> Result<(), String> {
+    let value = serde_json::to_value(snapshot).map_err(|error| error.to_string())?;
+    let data = serde_json::from_value::<silo_api::methods::updates::UpdateProgressData>(value)
+        .map_err(|error| error.to_string())?;
+    silo_engine::jobs::publish_progress(
+        context,
+        silo_api::jobs::JobProgress::Update {
+            job_id: job_id.clone(),
+            kind: None,
+            computer_id: None,
+            data,
+        },
+        silo_engine::context::Audience::All,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn emit_update_state(app: &AppHandle, snapshot: &Snapshot) {
+    let _ = app.emit("silo://update-state", snapshot);
+    if let (Some(context), Ok(payload)) = (
+        silo_engine::context::current(),
+        update_snapshot_payload(snapshot),
+    ) {
+        context.publish(
+            silo_engine::context::Event::new("updates.changed", payload),
+            silo_engine::context::Audience::All,
+        );
+    }
+}
+
 fn modify_managed(app: &AppHandle, f: impl FnOnce(&mut ManagedState)) -> Result<Snapshot, String> {
     let controller = app.state::<Controller>();
     let mut state = controller
@@ -33,7 +77,7 @@ fn modify_managed(app: &AppHandle, f: impl FnOnce(&mut ManagedState)) -> Result<
         .map_err(|_| "Update state is unavailable.")?;
     f(&mut state);
     let snapshot = state.policy.snapshot.clone();
-    let _ = app.emit("silo://update-state", &snapshot);
+    emit_update_state(app, &snapshot);
     Ok(snapshot)
 }
 
@@ -190,9 +234,7 @@ pub(crate) async fn set_update_automatic_checks(
             &controller.preferences,
             enabled,
             engine::save_preferences,
-            |snapshot| {
-                let _ = app.emit("silo://update-state", snapshot);
-            },
+            |snapshot| emit_update_state(&app, snapshot),
         )
     })
     .await
@@ -263,7 +305,7 @@ async fn check(app: AppHandle, automatic: bool) -> Result<Snapshot, String> {
         }
         // Keep a discovered update and verified bytes until the result is known.
         let previous = engine::begin_check(&mut state.policy)?;
-        let _ = app.emit("silo://update-state", &state.policy.snapshot);
+        emit_update_state(&app, &state.policy.snapshot);
         previous
     };
     let result = async {
@@ -334,20 +376,62 @@ fn check_error_message(error: &tauri_plugin_updater::Error) -> &'static str {
 }
 #[tauri::command]
 pub(crate) async fn download_update(app: AppHandle) -> Result<Snapshot, String> {
-    let mut update = {
+    let context = silo_engine::context::current();
+    let (mut update, job, initial_snapshot) = {
         let controller = app.state::<Controller>();
         let mut state = controller
             .state
             .lock()
             .map_err(|_| "Update state is unavailable.")?;
+        if matches!(
+            state.policy.snapshot.phase.as_str(),
+            "checking" | "downloading" | "installing"
+        ) {
+            return Err("An update operation is already running.".into());
+        }
+        if matches!(
+            state.policy.snapshot.package_kind.as_str(),
+            "manual" | "debian"
+        ) {
+            return Err("Download the package from Releases to update this installation.".into());
+        }
+        if state.policy.update.is_none() {
+            return Err("Check for an update before downloading.".into());
+        }
         let update = state
             .update
             .clone()
             .ok_or("Check for an update before downloading.")?;
-        engine::begin_download(&mut state.policy)?;
-        let _ = app.emit("silo://update-state", &state.policy.snapshot);
-        update
+        let job = if let Some(context) = context.as_ref() {
+            let acceptance = silo_engine::jobs::allocate(context.as_ref(), "updates.download")
+                .map_err(|error| error.to_string())?;
+            Some((context.clone(), acceptance.job_id))
+        } else {
+            None
+        };
+        if let Err(error) = engine::begin_download(&mut state.policy) {
+            if let Some((job_context, job_id)) = job.as_ref() {
+                if let Err(persist_error) = silo_engine::jobs::finish_with_error(
+                    job_context.as_ref(),
+                    job_id.clone(),
+                    silo_api::jobs::ErrorCode::Internal,
+                    error.clone(),
+                    silo_engine::context::Audience::All,
+                ) {
+                    return Err(persist_error.to_string());
+                }
+            }
+            return Err(error);
+        }
+        let initial_snapshot = state.policy.snapshot.clone();
+        emit_update_state(&app, &state.policy.snapshot);
+        (update, job, initial_snapshot)
     };
+    if let Some((context, job_id)) = job.as_ref() {
+        if let Err(error) = publish_job_progress(context.as_ref(), job_id, &initial_snapshot) {
+            eprintln!("Silo could not persist initial update progress: {error}");
+        }
+    }
     update.timeout = Some(Duration::from_secs(30 * 60));
     let limit = tokio::sync::Notify::new();
     let mut received = 0u64;
@@ -358,7 +442,14 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<Snapshot, String> 
             received = received.saturating_add(bytes as u64);
             if received > MAX_DOWNLOAD_BYTES || total.is_some_and(|size| size > MAX_DOWNLOAD_BYTES) { limit.notify_one(); }
             if last_report.elapsed() >= Duration::from_millis(100) {
-                let _ = modify(&app, |state| engine::download_progress(state, received, total)); last_report = std::time::Instant::now();
+                if let Ok(snapshot) = modify(&app, |state| engine::download_progress(state, received, total)) {
+                    if let Some((context, job_id)) = job.as_ref() {
+                        if let Err(error) = publish_job_progress(context.as_ref(), job_id, &snapshot) {
+                            eprintln!("Silo could not persist update progress: {error}");
+                        }
+                    }
+                }
+                last_report = std::time::Instant::now();
             }
         }, || {}) => result.map_err(|e| e.to_string()),
     };
@@ -368,10 +459,50 @@ pub(crate) async fn download_update(app: AppHandle) -> Result<Snapshot, String> 
         engine::validate_download_size(bytes.len() as u64)?;
         Ok(bytes)
     });
-    match result {
-        Ok(bytes) => { modify(&app, |state| engine::download_ready(state, bytes))?; get_update_state(app).await },
-        Err(e) => fail(&app, "The update could not be downloaded or verified. Your installation was not changed. Try again.", e),
+    let result = match result {
+        Ok(bytes) => match modify(&app, |state| engine::download_ready(state, bytes)) {
+            Ok(_) => get_update_state(app).await,
+            Err(error) => fail(
+                &app,
+                "The update could not be downloaded or verified. Your installation was not changed. Try again.",
+                error,
+            ),
+        },
+        Err(error) => fail(
+            &app,
+            "The update could not be downloaded or verified. Your installation was not changed. Try again.",
+            error,
+        ),
+    };
+    if let Some((context, job_id)) = job {
+        let finish = match &result {
+            Ok(snapshot) => update_snapshot_payload(snapshot)
+                .map_err(|error| error.to_string())
+                .and_then(|value| {
+                    silo_engine::jobs::finish_with_result(
+                        context.as_ref(),
+                        job_id,
+                        value,
+                        silo_engine::context::Audience::All,
+                    )
+                    .map_err(|error| error.to_string())
+                }),
+            Err(message) => silo_engine::jobs::finish_with_error(
+                context.as_ref(),
+                job_id,
+                silo_api::jobs::ErrorCode::Internal,
+                message.clone(),
+                silo_engine::context::Audience::All,
+            )
+            .map_err(|error| error.to_string()),
+        };
+        if let Err(error) = finish {
+            return Err(format!(
+                "The update finished but its job outcome could not be saved: {error}"
+            ));
+        }
     }
+    result
 }
 fn installation_preflight(bytes: &[u8]) -> Result<(), String> {
     let executable =
@@ -519,7 +650,7 @@ pub(crate) async fn install_update(
             .clone()
             .ok_or("Download and verify an update before installing.")?;
         let (bytes, is_debian) = engine::begin_install(&mut state.policy, true)?;
-        let _ = app.emit("silo://update-state", &state.policy.snapshot);
+        emit_update_state(&app, &state.policy.snapshot);
         (update, bytes, is_debian)
     };
     let worker = app.clone();

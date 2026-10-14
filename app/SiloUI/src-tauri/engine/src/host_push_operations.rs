@@ -11,7 +11,10 @@ use std::{
     fs,
     io::{Read, Write},
     path::Path,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -101,6 +104,30 @@ fn operation(job: &Job) -> Value {
     }
     value
 }
+fn durable_terminal_journal_value(
+    retained: &silo_api::jobs::JobLookupResult,
+    operation_id: &str,
+) -> Option<Value> {
+    if retained.state != silo_api::jobs::JobState::Finished {
+        return None;
+    }
+    if let Some(result) = retained
+        .outcome
+        .as_ref()
+        .filter(|outcome| outcome.error.is_none())
+        .and_then(|outcome| outcome.result.as_ref())
+    {
+        let operation: Option<silo_api::methods::push::PushOperation> =
+            serde_json::from_value(result.clone()).ok();
+        if operation.as_ref().is_some_and(|operation| {
+            operation.operation_id == operation_id
+                && operation.status != silo_api::methods::push::PushOperationStatus::Pushing
+        }) {
+            return Some(result.clone());
+        }
+    }
+    None
+}
 /// Finished history is bounded: keep active work, the latest job for each
 /// repository, and recent undismissed results; drop the rest.
 fn prune(jobs: &mut Journal, now: u64) {
@@ -186,6 +213,25 @@ fn persist_claim(
     }
     Ok(())
 }
+fn publish_job_progress(
+    context: &dyn silo_engine::EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    value: &Value,
+    computer_id: Option<String>,
+) -> Result<(), String> {
+    let data = serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+    silo_engine::jobs::publish_progress(
+        context,
+        silo_api::jobs::JobProgress::Push {
+            job_id: job_id.clone(),
+            kind: Some(silo_api::methods::operations::OperationKind::Push),
+            computer_id,
+            data,
+        },
+        silo_engine::context::Audience::All,
+    )
+    .map_err(|error| error.to_string())
+}
 pub(crate) fn start(
     paths: &RuntimePaths,
     computer: String,
@@ -198,7 +244,57 @@ pub(crate) fn start(
     let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
     let mut jobs = read(&journal)?;
     let (mut value, created) = claim(&mut jobs, &id, &computer, &path, &target)?;
+    let context = silo_engine::context::current();
     if !created {
+        if let Some(context) = context.as_ref() {
+            // claim() can coalesce a new request onto an already active push for
+            // this repository. The journal's operation id remains canonical.
+            let canonical_id = value["operationId"].as_str().ok_or_else(|| {
+                "Push journal returned an invalid operation identifier.".to_string()
+            })?;
+            let acceptance = silo_engine::jobs::accept_domain_id(
+                context.as_ref(),
+                "push",
+                canonical_id,
+                "push.start",
+            )
+            .map_err(|error| error.to_string())?;
+            if acceptance.created {
+                if value["status"] == "pushing" {
+                    let computer_id = runtime::resolve_computer_id(paths, &computer).ok();
+                    publish_job_progress(
+                        context.as_ref(),
+                        &acceptance.job_id,
+                        &value,
+                        computer_id,
+                    )?;
+                } else {
+                    let _ = silo_engine::jobs::reconcile_finished(
+                        context.as_ref(),
+                        silo_api::jobs::JobFinished {
+                            job_id: acceptance.job_id,
+                            result: Some(value.clone()),
+                            error: None,
+                            outcome_chunked: false,
+                        },
+                        silo_engine::context::Audience::All,
+                    );
+                }
+            } else if value["status"] != "pushing" {
+                // The domain journal may contain a result committed just before the
+                // engine crashed while committing its generic job record.
+                let _ = silo_engine::jobs::reconcile_finished(
+                    context.as_ref(),
+                    silo_api::jobs::JobFinished {
+                        job_id: acceptance.job_id,
+                        result: Some(value.clone()),
+                        error: None,
+                        outcome_chunked: false,
+                    },
+                    silo_engine::context::Audience::All,
+                );
+            }
+        }
         return Ok(value);
     }
     let planned = host_push::planned_count(paths, &computer, &path);
@@ -208,25 +304,130 @@ pub(crate) fn start(
     }
     // Persist before acknowledging or starting: retrying a lost reply never starts a second job.
     persist_claim(&journal, &jobs, &id, write)?;
+    let job = if let Some(context) = context {
+        let acceptance = match silo_engine::jobs::accept_domain_id(
+            context.as_ref(),
+            "push",
+            &id,
+            "push.start",
+        ) {
+            Ok(acceptance) => acceptance,
+            Err(error) => {
+                let message = error.to_string();
+                value["status"] = json!("failed");
+                value["message"] = json!(message);
+                record_completion_locked(&journal, &id, value.clone(), write);
+                publish_application_state_changed();
+                return Err(message);
+            }
+        };
+        if !acceptance.created {
+            // A retained registry identity is authoritative even when the domain
+            // journal no longer contains its row. Never launch the operation twice.
+            value["status"] = json!("unknown");
+            value["message"] = json!("This push operation id was already accepted.");
+            record_completion_locked(&journal, &id, value.clone(), write);
+            let _ = silo_engine::jobs::reconcile_finished(
+                context.as_ref(),
+                silo_api::jobs::JobFinished {
+                    job_id: acceptance.job_id,
+                    result: Some(value.clone()),
+                    error: None,
+                    outcome_chunked: false,
+                },
+                silo_engine::context::Audience::All,
+            );
+            publish_application_state_changed();
+            return Ok(value);
+        }
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let gate_key = format!("push-job:{id}");
+        let cancel_flag = cancellation.clone();
+        let cancel_key = gate_key.clone();
+        context
+            .job_registry()
+            .map_err(|error| error.to_string())?
+            .register_cancel(
+                acceptance.job_id.clone(),
+                silo_engine::jobs::CancelRoute::PushGate,
+                move || {
+                    let result = runtime::OPERATIONS
+                        .cancel_key(&cancel_key)
+                        .map_err(|error| error.to_string());
+                    if result.is_ok() {
+                        cancel_flag.store(true, Ordering::SeqCst);
+                    }
+                    result
+                },
+            );
+        let computer_id = runtime::resolve_computer_id(paths, &computer).ok();
+        if let Err(error) =
+            publish_job_progress(context.as_ref(), &acceptance.job_id, &value, computer_id)
+        {
+            value["status"] = json!("failed");
+            value["message"] = json!(error);
+            record_completion_locked(&journal, &id, value.clone(), write);
+            let _ = silo_engine::jobs::finish_with_result(
+                context.as_ref(),
+                acceptance.job_id,
+                value.clone(),
+                silo_engine::context::Audience::All,
+            );
+            publish_application_state_changed();
+            return Err(error);
+        }
+        Some((context, acceptance.job_id, cancellation, gate_key))
+    } else {
+        None
+    };
     let paths = paths.clone();
     let failure_journal = journal.clone();
     let failure_id = id.clone();
     let failure_computer = computer.clone();
     let failure_path = path.clone();
     let failure_target = target.clone();
+    let failure_job = job.clone();
+    let (push_cancellation, push_gate_key, push_job_id) = job
+        .as_ref()
+        .map(|(_, job_id, cancellation, gate_key)| {
+            (cancellation.clone(), gate_key.clone(), Some(job_id.clone()))
+        })
+        .unwrap_or_else(|| {
+            (
+                Arc::new(AtomicBool::new(false)),
+                format!("push-job:{id}"),
+                None,
+            )
+        });
     std::thread::spawn(move || {
         let task = async move {
-            let result =
-                host_push::push_repository(paths, computer.clone(), path.clone(), target.clone())
-                    .await;
+            let result = host_push::push_repository(
+                paths,
+                computer.clone(),
+                path.clone(),
+                target.clone(),
+                push_cancellation,
+                push_gate_key,
+                push_job_id,
+            )
+            .await;
             let mut value = result.unwrap_or_else(|message| json!({"computer":computer,"repositoryPath":path,"status":"failed","commitCount":0,"message":message,"target":target}));
             value["operationId"] = json!(id);
+            let finished_value = value.clone();
             // The std lock and fsync'd journal write block; keep them off the async workers.
             let _ = runtime::operation_gate::spawn_blocking(move || {
                 record_completion(&journal, &id, value)
             })
             .await;
             publish_application_state_changed();
+            if let Some((context, job_id, _, _)) = job {
+                let _ = silo_engine::jobs::finish_with_result(
+                    context.as_ref(),
+                    job_id,
+                    finished_value,
+                    silo_engine::context::Audience::All,
+                );
+            }
         };
         match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -243,8 +444,17 @@ pub(crate) fn start(
                     "target": failure_target
                 });
                 value["operationId"] = json!(failure_id);
+                let finished_value = value.clone();
                 record_completion(&failure_journal, &failure_id, value);
                 publish_application_state_changed();
+                if let Some((context, job_id, _, _)) = failure_job {
+                    let _ = silo_engine::jobs::finish_with_result(
+                        context.as_ref(),
+                        job_id,
+                        finished_value,
+                        silo_engine::context::Audience::All,
+                    );
+                }
             }
         }
     });
@@ -302,6 +512,125 @@ pub fn merge(paths: &RuntimePaths, legacy: Vec<Value>) -> Result<Vec<Value>, Str
     let journal = paths.home.join("repository-push-operations.json");
     Ok(merge_journal(&journal, legacy))
 }
+
+/// Reconciles retained push outcomes before silod accepts requests. The generic
+/// registry first marks unfinished jobs as interrupted; this pass replaces that
+/// placeholder with the durable push journal result before get/ack is exposed.
+pub fn reconcile_jobs_before_serving(
+    context: &dyn silo_engine::EngineContext,
+    runtime_home: &Path,
+) -> Result<(), String> {
+    let journal = runtime_home.join("repository-push-operations.json");
+    let journal_result = match LOCK.lock() {
+        Ok(_guard) => read(&journal),
+        Err(_) => Err("Push state unavailable.".to_owned()),
+    };
+    let registry = context.job_registry()?;
+    let mut jobs = match journal_result {
+        Ok(jobs) => jobs,
+        Err(error) => {
+            eprintln!(
+                "Push recovery journal could not be read; retained push outcomes will be marked unknown: {error}"
+            );
+            let retained = match registry.list_unacknowledged() {
+                Ok(jobs) => jobs,
+                Err(error) => {
+                    eprintln!("Could not enumerate retained push outcomes during startup recovery: {error}");
+                    return Ok(());
+                }
+            };
+            for job_id in retained {
+                if job_id.space() != silo_api::jobs::JobSpace::Push {
+                    continue;
+                }
+                let finished = silo_api::jobs::JobFinished {
+                    job_id: job_id.clone(),
+                    result: None,
+                    error: Some(silo_api::transport::ErrorObject {
+                        code: silo_api::jobs::ErrorCode::Internal,
+                        message: "The push outcome is unknown because the saved push journal could not be read."
+                            .to_owned(),
+                        diagnostics: None,
+                    }),
+                    outcome_chunked: false,
+                };
+                if let Err(error) = silo_engine::jobs::reconcile_finished(
+                    context,
+                    finished,
+                    silo_engine::context::Audience::All,
+                ) {
+                    eprintln!("Could not reconcile retained push job {job_id} during startup recovery: {error}");
+                }
+            }
+            return Ok(());
+        }
+    };
+    let mut journal_repaired = false;
+    for job in jobs.values_mut() {
+        let Some(operation_id) = job.operation["operationId"].as_str() else {
+            continue;
+        };
+        let job_id = silo_api::jobs::JobId::new(format!("push:{operation_id}"))
+            .map_err(|error| error.to_string())?;
+        let retained = registry.get(&job_id).map_err(|error| error.to_string())?;
+        let Some(retained) = retained else {
+            continue;
+        };
+        // A push can finish durably before its domain journal write. Keep the
+        // registry's committed result and repair the stale journal row instead
+        // of trying to replace that terminal outcome with a restart placeholder.
+        if let Some(result) = durable_terminal_journal_value(&retained, operation_id) {
+            if job.operation != result {
+                job.operation = result;
+                job.updated = now();
+                journal_repaired = true;
+            }
+            continue;
+        }
+        let mut value = operation(job);
+        match silo_engine::jobs::reconcile_finished(
+            context,
+            silo_api::jobs::JobFinished {
+                job_id: job_id.clone(),
+                result: Some(value.clone()),
+                error: None,
+                outcome_chunked: false,
+            },
+            silo_engine::context::Audience::All,
+        ) {
+            Ok(()) => {}
+            Err(error) if error.kind() == silo_engine::jobs::RegistryErrorKind::Conflict => {
+                // The registry already has an immutable terminal outcome. Keep
+                // it and repair the domain journal from its best available
+                // projection instead of blocking silod startup.
+                if let Some(message) = retained
+                    .outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.error.as_ref())
+                    .map(|error| error.message.as_str())
+                {
+                    value["message"] = json!(message);
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+        if job.operation != value {
+            job.operation = value;
+            job.updated = now();
+            journal_repaired = true;
+        }
+    }
+    if journal_repaired {
+        let _guard = LOCK.lock().map_err(|_| "Push state unavailable.")?;
+        if let Err(error) = write(&journal, &jobs) {
+            eprintln!(
+                "Could not repair the push recovery journal from durable job outcomes; startup will continue: {error}"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// A damaged push journal must not hide the rest of the application state:
 /// fall back to the in-memory pushes and report the journal problem.
 fn merge_journal(journal: &Path, legacy: Vec<Value>) -> Vec<Value> {
@@ -422,6 +751,53 @@ pub(crate) fn start_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::{
+        Audience, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
+        MainThread, PackageKind, ProcessControl,
+    };
+
+    struct PushRecoveryContext {
+        registry: Arc<silo_engine::jobs::JobRegistry>,
+        paths: EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+    }
+
+    impl EngineContext for PushRecoveryContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, _event: Event, _audience: Audience) {}
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+
+        fn job_registry(&self) -> Result<Arc<silo_engine::jobs::JobRegistry>, String> {
+            Ok(self.registry.clone())
+        }
+    }
+
+    impl ProcessControl for PushRecoveryContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("push recovery test must not restart the process")
+        }
+    }
 
     #[test]
     fn migrated_push_operations_load() {
@@ -545,6 +921,244 @@ mod tests {
             serde_json::json!({"computer":"dev","repositoryPath":"/workspace/repo","status":"pushing"}),
         ];
         assert_eq!(merge_journal(&path, legacy.clone()), legacy);
+    }
+
+    #[test]
+    fn a_crash_after_the_push_claim_reconciles_before_startup_serves_requests() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let job_id = silo_api::jobs::JobId::new("push:crash-before-progress").unwrap();
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        let operation = json!({
+            "operationId": "crash-before-progress",
+            "computer": "dev",
+            "repositoryPath": "/workspace/repo",
+            "status": "pushing",
+            "commitCount": 0
+        });
+        let journal = Journal::from([(
+            "crash-before-progress".to_owned(),
+            Job {
+                session: "previous-engine-session".into(),
+                updated: 1,
+                dismissed: false,
+                operation,
+            },
+        )]);
+        write(
+            &runtime_home.join("repository-push-operations.json"),
+            &journal,
+        )
+        .unwrap();
+
+        reconcile_jobs_before_serving(&context, &runtime_home).unwrap();
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        let outcome = retained.outcome.unwrap();
+        assert_eq!(outcome.result.unwrap()["status"], "unknown");
+        assert!(outcome.error.is_none());
+    }
+
+    #[test]
+    fn a_stale_pushing_journal_is_repaired_from_the_durable_terminal_job() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let operation_id = "durable-push-result";
+        let job_id = silo_api::jobs::JobId::new(format!("push:{operation_id}")).unwrap();
+        let durable_result = json!({
+            "operationId": operation_id,
+            "computer": "dev",
+            "repositoryPath": "/workspace/repo",
+            "status": "succeeded",
+            "commitCount": 1,
+            "target": target(),
+        });
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+            registry
+                .finish(
+                    &job_id,
+                    &silo_api::jobs::JobFinished {
+                        job_id: job_id.clone(),
+                        result: Some(durable_result.clone()),
+                        error: None,
+                        outcome_chunked: false,
+                    },
+                )
+                .unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        let stale_journal = Journal::from([(
+            operation_id.to_owned(),
+            Job {
+                session: "previous-engine-session".into(),
+                updated: 1,
+                dismissed: false,
+                operation: json!({
+                    "operationId": operation_id,
+                    "computer": "dev",
+                    "repositoryPath": "/workspace/repo",
+                    "status": "pushing",
+                    "commitCount": 1,
+                    "target": target(),
+                }),
+            },
+        )]);
+        write(
+            &runtime_home.join("repository-push-operations.json"),
+            &stale_journal,
+        )
+        .unwrap();
+
+        reconcile_jobs_before_serving(&context, &runtime_home).unwrap();
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            retained.outcome.unwrap().result,
+            Some(durable_result.clone())
+        );
+        let repaired = read(&runtime_home.join("repository-push-operations.json")).unwrap();
+        assert_eq!(repaired[operation_id].operation, durable_result);
+    }
+
+    #[test]
+    fn a_durable_push_error_is_kept_without_blocking_startup() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let operation_id = "durable-push-error";
+        let job_id = silo_api::jobs::JobId::new(format!("push:{operation_id}")).unwrap();
+        let durable_error = silo_api::transport::ErrorObject {
+            code: silo_api::jobs::ErrorCode::Internal,
+            message: "The engine could not record the push result.".into(),
+            diagnostics: None,
+        };
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+            registry
+                .finish(
+                    &job_id,
+                    &silo_api::jobs::JobFinished {
+                        job_id: job_id.clone(),
+                        result: None,
+                        error: Some(durable_error.clone()),
+                        outcome_chunked: false,
+                    },
+                )
+                .unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        let stale_journal = Journal::from([(
+            operation_id.to_owned(),
+            Job {
+                session: "previous-engine-session".into(),
+                updated: 1,
+                dismissed: false,
+                operation: json!({
+                    "operationId": operation_id,
+                    "computer": "dev",
+                    "repositoryPath": "/workspace/repo",
+                    "status": "pushing",
+                    "commitCount": 1,
+                    "target": target(),
+                }),
+            },
+        )]);
+        write(
+            &runtime_home.join("repository-push-operations.json"),
+            &stale_journal,
+        )
+        .unwrap();
+
+        reconcile_jobs_before_serving(&context, &runtime_home).unwrap();
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(retained.outcome.unwrap().error, Some(durable_error.clone()));
+        let repaired = read(&runtime_home.join("repository-push-operations.json")).unwrap();
+        assert_eq!(repaired[operation_id].operation["status"], "unknown");
+        assert_eq!(
+            repaired[operation_id].operation["message"],
+            durable_error.message
+        );
+    }
+
+    #[test]
+    fn an_unreadable_push_journal_records_uncertainty_without_blocking_startup() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry_path = temporary.path().join("engine-data");
+        let job_id = silo_api::jobs::JobId::new("push:corrupt-journal").unwrap();
+        {
+            let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();
+            registry.accept(job_id.clone(), "push.start").unwrap();
+        }
+        let registry = Arc::new(silo_engine::jobs::JobRegistry::open(&registry_path).unwrap());
+        let context = PushRecoveryContext {
+            registry: registry.clone(),
+            paths: EnginePaths::default(),
+            identity: EngineIdentity {
+                channel: crate::channel::Channel::Production,
+                version: "test".into(),
+                package_kind: PackageKind::Other,
+            },
+            runtime_state: Arc::new(EngineRuntimeState::default()),
+        };
+        let runtime_home = temporary.path().join("runtime-home");
+        fs::create_dir_all(&runtime_home).unwrap();
+        fs::write(
+            runtime_home.join("repository-push-operations.json"),
+            b"{not valid JSON",
+        )
+        .unwrap();
+
+        assert!(reconcile_jobs_before_serving(&context, &runtime_home).is_ok());
+
+        let retained = registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(retained.state, silo_api::jobs::JobState::Finished);
+        let error = retained.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
+        assert!(error.message.contains("unknown"));
+        assert!(error.message.contains("journal could not be read"));
     }
     #[test]
     fn lost_acknowledgement_and_concurrent_clicks_share_one_job() {

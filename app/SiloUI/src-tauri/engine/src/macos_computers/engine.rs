@@ -610,6 +610,29 @@ fn read_hardware_model(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// Whether this Mac can run an archived computer's hardware model. Reads at most the allowed
+/// number of bytes; the file is a verified component of an archive.
+pub(super) fn validate_hardware_model_file(path: &Path) -> Result<(), String> {
+    let bytes = read_hardware_model(path)?;
+    validate_hardware_model(&bytes)
+}
+
+fn validate_hardware_model(bytes: &[u8]) -> Result<(), String> {
+    // SAFETY: Initializes a framework object from data; the object is not retained.
+    let model = unsafe {
+        VZMacHardwareModel::initWithDataRepresentation(
+            VZMacHardwareModel::alloc(),
+            &NSData::with_bytes(bytes),
+        )
+    }
+    .ok_or("The computer's hardware model is damaged.")?;
+    // SAFETY: A read-only query on a valid model.
+    if unsafe { !model.isSupported() } {
+        return Err("This Mac can no longer run this computer's macOS.".into());
+    }
+    Ok(())
+}
+
 fn machine_identifier_from(bytes: &[u8]) -> Result<Retained<VZMacMachineIdentifier>, String> {
     // SAFETY: Initializes a framework object from data.
     unsafe {
@@ -1957,6 +1980,27 @@ mod tests {
         let host = host_limits();
         assert!(host.cpus >= 1);
         assert!(host.memory_gib >= 4);
+    }
+
+    #[test]
+    fn archive_hardware_model_validation_is_bounded_and_rejects_unreadable_models() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("hardware-model.bin");
+        std::fs::write(
+            &path,
+            vec![0_u8; crate::backup::MAX_HARDWARE_MODEL_BYTES as usize + 1],
+        )
+        .unwrap();
+        let error = validate_hardware_model_file(&path).unwrap_err();
+        assert!(
+            error.contains("exceeds the supported size limit"),
+            "{error}"
+        );
+
+        std::fs::write(&path, b"not a hardware model").unwrap();
+        let error = validate_hardware_model_file(&path).unwrap_err();
+        assert!(error.contains("hardware model is damaged"), "{error}");
+        assert!(validate_hardware_model_file(&temp.path().join("missing")).is_err());
     }
 
     #[test]

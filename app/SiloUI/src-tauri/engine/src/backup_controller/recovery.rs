@@ -87,6 +87,10 @@ impl Journal {
     pub(super) fn identity(&self) -> &str {
         &self.id
     }
+    #[cfg(test)]
+    pub(super) fn archive_path(&self) -> String {
+        self.archive.archive_path.clone()
+    }
     pub(super) fn backup(
         archive: Archive,
         names: Vec<String>,
@@ -252,6 +256,22 @@ pub(super) fn try_load(history: &Path) -> Result<Option<Journal>, LoadFailure> {
     validate(&journal).map_err(LoadFailure::Unusable)?;
     Ok(Some(journal))
 }
+
+/// Returns a terminal operation already committed in the domain journal. The
+/// socket host calls this before serving job get/ack requests after restart.
+pub(super) fn retained_terminal_operation(
+    history: &Path,
+) -> Result<Option<(String, Value)>, String> {
+    let Some(journal) = try_load(history).map_err(LoadFailure::into_message)? else {
+        return Ok(None);
+    };
+    if journal.terminal.is_none() {
+        return Ok(None);
+    }
+    let operation = serde_json::to_value(journal.operation()).map_err(|error| error.to_string())?;
+    Ok(Some((journal.identity().to_owned(), operation)))
+}
+
 /// [`try_load`] with its failure as a message, for tests that only read what was saved.
 #[cfg(test)]
 pub(super) fn load(history: &Path) -> Result<Option<Journal>, String> {
@@ -636,13 +656,31 @@ fn cleanup_archive_partial(journal: &Journal) -> Result<(), String> {
     };
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_name().to_string_lossy().starts_with(&prefix)
-            && entry.file_type().map_err(|e| e.to_string())?.is_file()
-        {
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        // A mixed export also stages whole archives in a folder with this prefix.
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if file_type.is_file() {
             fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+        } else if file_type.is_dir() && !file_type.is_symlink() {
+            fs::remove_dir_all(entry.path()).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
+}
+
+/// Removes the capture folders an interrupted macOS export left under the macOS computers
+/// folder. They carry this operation's id, so no other operation's captures are touched.
+fn cleanup_macos_export_captures(controller: &Controller, journal: &Journal) -> Result<(), String> {
+    if !matches!(journal.request, Request::Backup { .. }) {
+        return Ok(());
+    }
+    let Ok(host) = controller.runtime_host() else {
+        return Ok(());
+    };
+    let context = host.engine_context();
+    crate::macos_computers::remove_export_captures(&context.paths().app_data, &journal.id)
 }
 
 /// Own the new group and its suffix as the deterministic `--stage-id` before
@@ -962,13 +1000,10 @@ pub(super) fn resume(
                     .operation = None;
             }
         }
-        finish(&controller);
-        publish(&controller);
+        super::publish_and_finish(&controller, || publish(&controller));
     };
     runtime.spawn_blocking(move || {
-        if super::contain_worker_panic(&outer_controller, kind, &archive, target, work) {
-            publish(&outer_controller);
-        }
+        super::contain_worker_panic(&outer_controller, kind, &archive, target, work);
     });
     Ok(())
 }
@@ -1004,10 +1039,7 @@ fn recover(
     // only the runtime can clean up waits for the converted storage. After the
     // migration, this is the ordinary recovery in the storage in use.
     let host = controller.runtime_host()?;
-    if matches!(
-        &journal.request,
-        Request::Restore { macos: true, .. }
-    ) {
+    if matches!(&journal.request, Request::Restore { macos: true, .. }) {
         return recover_macos_archive(controller, journal).map(Settlement::Settled);
     }
     if before_upgrade {
@@ -1023,10 +1055,7 @@ fn recover(
     .map(Settlement::Settled)
 }
 
-fn recover_macos_archive(
-    controller: &Controller,
-    journal: &Journal,
-) -> Result<Operation, String> {
+fn recover_macos_archive(controller: &Controller, journal: &Journal) -> Result<Operation, String> {
     let _guard = runtime::OPERATIONS
         .device("Recovering macOS archive import")
         .map_err(|_| "Computer operations unavailable.")?;
@@ -1162,10 +1191,7 @@ pub(super) fn settle_before_migration(
     journal: &Journal,
     cancellation: &backup::Cancellation,
 ) -> Result<Settlement, String> {
-    if matches!(
-        &journal.request,
-        Request::Restore { macos: true, .. }
-    ) {
+    if matches!(&journal.request, Request::Restore { macos: true, .. }) {
         return recover_macos_archive(controller, journal).map(Settlement::Settled);
     }
     let _guard = runtime::OPERATIONS
@@ -1182,7 +1208,8 @@ pub(super) fn settle_before_migration(
     // Files outside the previous generation. Leaving some behind harms nothing, so a
     // failure here never keeps the migration waiting; the result says so.
     let staging = controller.service.cleanup_interrupted_staging();
-    let partial = cleanup_archive_partial(journal);
+    let partial = cleanup_archive_partial(journal)
+        .and_then(|()| cleanup_macos_export_captures(controller, journal));
     drop(command);
     let archive = journal.archive.clone();
     if let Request::Restore { id: Some(id), .. } = &journal.request {
@@ -1357,10 +1384,7 @@ pub(super) fn recover_at_paths_with(
     journal: &Journal,
     cancellation: &backup::Cancellation,
 ) -> Result<Operation, String> {
-    if matches!(
-        &journal.request,
-        Request::Restore { macos: true, .. }
-    ) {
+    if matches!(&journal.request, Request::Restore { macos: true, .. }) {
         return recover_macos_archive(controller, journal);
     }
     let _guard = runtime::OPERATIONS
@@ -1377,6 +1401,7 @@ pub(super) fn recover_at_paths_with(
         .cleanup_interrupted_staging()
         .map_err(|e| format!("Could not clear interrupted working files: {e}"))?;
     cleanup_archive_partial(journal)?;
+    cleanup_macos_export_captures(controller, journal)?;
     // The previous process's command has finished. Release the lock so the
     // snapshot commands that remove an unfinished import can take it.
     drop(command);
@@ -2624,11 +2649,17 @@ mod tests {
         let other = directory
             .path()
             .join(".silo-backup-other-operation-partial");
+        let owned_folder = directory
+            .path()
+            .join(format!(".silo-backup-{}-mixed-1234", journal.id));
+        fs::create_dir_all(owned_folder.join("nested")).unwrap();
+        fs::write(owned_folder.join("nested/linux.silo-backup"), b"incomplete").unwrap();
         fs::write(&owned, b"incomplete").unwrap();
         fs::write(&other, b"preserve").unwrap();
         fs::write(&journal.archive.archive_path, b"completed archive").unwrap();
         cleanup_archive_partial(&journal).unwrap();
         assert!(!owned.exists());
+        assert!(!owned_folder.exists());
         assert_eq!(fs::read(other).unwrap(), b"preserve");
         assert_eq!(
             fs::read(&journal.archive.archive_path).unwrap(),

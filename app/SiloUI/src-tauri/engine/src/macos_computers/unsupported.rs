@@ -55,6 +55,10 @@ pub(super) fn validate_archive_configuration(
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn validate_hardware_model_file(_path: &std::path::Path) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn fetch_latest() -> Result<LatestImage, String> {
     Err(UNSUPPORTED.into())
 }

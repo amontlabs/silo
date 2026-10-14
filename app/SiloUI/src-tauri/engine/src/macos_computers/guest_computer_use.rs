@@ -28,7 +28,8 @@ const LCU_LOCK: &str = include_str!("../../../guest/macos/lcu-lock.json");
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-computer-use.zsh");
 const RECORDER_SOURCE: &str = include_str!("../../../guest/macos/SiloGuestRecorder.swift");
 const RECORDER_INFO: &str = include_str!("../../../guest/macos/SiloGuestRecorder-Info.plist");
-const RECORDER_AGENT: &str = include_str!("../../../guest/macos/SiloGuestRecorder-LaunchAgent.plist");
+const RECORDER_AGENT: &str =
+    include_str!("../../../guest/macos/SiloGuestRecorder-LaunchAgent.plist");
 const SCRIPT_NAME: &str = "silo-computer-use.zsh";
 const RECORDER_SOURCE_NAME: &str = "SiloGuestRecorder.swift";
 const RECORDER_INFO_NAME: &str = "SiloGuestRecorder-Info.plist";

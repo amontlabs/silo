@@ -3786,6 +3786,14 @@
         },
         "jobId": {
           "$ref": "#/$defs/JobId"
+        },
+        "offsetBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5247,6 +5255,10 @@
         "jobId": {
           "$ref": "#/$defs/JobId"
         },
+        "outcomeChunked": {
+          "description": "The complete outcome is retained and available through `operations.job.get` chunks.",
+          "type": "boolean"
+        },
         "result": true
       },
       "required": [
@@ -5274,6 +5286,17 @@
             }
           ]
         },
+        "outcomeChunk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobOutcomeChunk"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present when the retained outcome is too large for one response. `data`\nis an exact UTF-8 slice of the persisted JobOutcome JSON."
+        },
         "state": {
           "$ref": "#/$defs/JobState"
         }
@@ -5298,6 +5321,37 @@
         },
         "result": true
       },
+      "type": "object"
+    },
+    "JobOutcomeChunk": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "nextOffsetBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offsetBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "totalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "data",
+        "totalBytes",
+        "offsetBytes"
+      ],
       "type": "object"
     },
     "JobProgress": {

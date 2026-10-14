@@ -8,8 +8,8 @@
 use super::setup_log::SetupLog;
 use super::MacosContext;
 use super::{
-    app_data, checkpoints, developer_tools, engine, guest_access, guest_clipboard, guest_computer_use,
-    layout_and_record, offline_setup, personalize, recovery, set_detail,
+    app_data, checkpoints, developer_tools, engine, guest_access, guest_clipboard,
+    guest_computer_use, layout_and_record, offline_setup, personalize, recovery, set_detail,
     store::{self, Layout, Record, SetupProgress},
     templates, Stop, RUN,
 };
@@ -241,7 +241,9 @@ impl Provision<'_> {
             )?;
             self.log_command("workspace folders", &output);
             if output.status != 0 {
-                return Err(Stop::Failed("Silo could not create the computer's workspace folders.".into()));
+                return Err(Stop::Failed(
+                    "Silo could not create the computer's workspace folders.".into(),
+                ));
             }
             self.mark(record, |setup| setup.roots = true)?;
         }
@@ -808,9 +810,8 @@ fn finalize_import_guest(
     let script = base64_encode(
         offline_setup::import_finalization_script(&public_key, &record.name).as_bytes(),
     );
-    let command = format!(
-        "/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'"
-    );
+    let command =
+        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
     let password = format!("{}\n", account.password);
     let output = guest_access::run_with_password(
         layout,
@@ -885,7 +886,10 @@ mod tests {
         setup.sip = true;
         setup.developer_tools = true;
         setup.roots = true;
-        assert_eq!(setup_summary(&setup), "account, sip, developer tools, workspace folders done");
+        assert_eq!(
+            setup_summary(&setup),
+            "account, sip, developer tools, workspace folders done"
+        );
     }
 
     #[test]
@@ -900,7 +904,10 @@ mod tests {
         std::fs::write(&known_hosts, b"inherited guest host key").unwrap();
 
         let first_boot = boot_import_with_host_key_reset(&layout, || {
-            assert!(!known_hosts.exists(), "the inherited key must not pin this boot");
+            assert!(
+                !known_hosts.exists(),
+                "the inherited key must not pin this boot"
+            );
             std::fs::write(&known_hosts, b"host key learned from the guest").unwrap();
             Ok(())
         });
@@ -908,10 +915,15 @@ mod tests {
         assert!(known_hosts.is_file());
 
         let result = boot_import_with_host_key_reset(&layout, || {
-            assert!(!known_hosts.exists(), "a retry must discard a stale pin first");
+            assert!(
+                !known_hosts.exists(),
+                "a retry must discard a stale pin first"
+            );
             Err(Stop::Failed("simulated interrupted finalization".into()))
         });
-        assert!(matches!(result, Err(Stop::Failed(message)) if message == "simulated interrupted finalization"));
+        assert!(
+            matches!(result, Err(Stop::Failed(message)) if message == "simulated interrupted finalization")
+        );
     }
 
     #[test]

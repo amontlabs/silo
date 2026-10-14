@@ -98,36 +98,33 @@ pub fn stop_local_computers(
     host: &dyn RuntimeHost,
     deadline: Option<Instant>,
 ) -> Result<(), String> {
-    let result = prepare_before_quit(
-        crate::macos_computers::prepare_stop_all,
-        || {
-            drain_transfers(deadline);
-            while_quitting(&OPERATIONS, |guard| {
-                // Quit has stopped admission and holds the operation gate: the SSH monitor
-                // cannot restore listeners while local computer shutdown is in progress.
-                crate::ssh_access::close_all();
-                crate::desktop_viewer::close_all();
-                if let Some(context) = silo_engine::context::current() {
-                    context.close_remote_displays(None);
-                }
-                // macOS computers live in this process. Quit runs on a worker thread, so the
-                // main thread stays free for the framework's callbacks while they stop.
-                let macos = host.stop_macos_computers(deadline);
-                // With the storage migration unfinished no runtime is in use, so no computer of this
-                // Silo can be running and Quit has nothing to stop.
-                let Some(paths) = runtime_paths_if_in_use(host)? else {
-                    return macos;
-                };
-                // The quit overlay follows the queue and shows which computer is stopping (D-29).
-                let progress = |name: &str, index: usize, total: usize| {
-                    guard.relabel(&format!("Stopping {name} ({index} of {total})"));
-                };
-                stop_local_computers_with(&ProcessRunner, &paths, &progress)
-                    .map_err(|error| safe_activity_error(&error))?;
-                macos
-            })
-        },
-    );
+    let result = prepare_before_quit(crate::macos_computers::prepare_stop_all, || {
+        drain_transfers(deadline);
+        while_quitting(&OPERATIONS, |guard| {
+            // Quit has stopped admission and holds the operation gate: the SSH monitor
+            // cannot restore listeners while local computer shutdown is in progress.
+            crate::ssh_access::close_all();
+            crate::desktop_viewer::close_all();
+            if let Some(context) = silo_engine::context::current() {
+                context.close_remote_displays(None);
+            }
+            // macOS computers live in this process. Quit runs on a worker thread, so the
+            // main thread stays free for the framework's callbacks while they stop.
+            let macos = host.stop_macos_computers(deadline);
+            // With the storage migration unfinished no runtime is in use, so no computer of this
+            // Silo can be running and Quit has nothing to stop.
+            let Some(paths) = runtime_paths_if_in_use(host)? else {
+                return macos;
+            };
+            // The quit overlay follows the queue and shows which computer is stopping (D-29).
+            let progress = |name: &str, index: usize, total: usize| {
+                guard.relabel(&format!("Stopping {name} ({index} of {total})"));
+            };
+            stop_local_computers_with(&ProcessRunner, &paths, &progress)
+                .map_err(|error| safe_activity_error(&error))?;
+            macos
+        })
+    });
     host.engine_context().publish(
         Event::new("silo://application-state-changed", Value::Null),
         Audience::All,
@@ -569,7 +566,10 @@ mod tests {
         let cancelled_before_release = cancelled.load(Ordering::SeqCst) != 0;
         drop(blocker);
         worker.join().unwrap().unwrap();
-        assert!(cancelled_before_release, "Quit waited before aborting provisioning");
+        assert!(
+            cancelled_before_release,
+            "Quit waited before aborting provisioning"
+        );
     }
 
     #[test]

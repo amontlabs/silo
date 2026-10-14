@@ -12,24 +12,18 @@
 //! computer's disk and memory and forks new computers from them.
 #[path = "macos_computers/checkpoints.rs"]
 mod checkpoints;
+#[path = "macos_computers/developer_tools.rs"]
+mod developer_tools;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "macos_computers/engine.rs"]
 mod engine;
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 #[path = "macos_computers/unsupported.rs"]
 mod engine;
-#[path = "macos_computers/guest_access.rs"]
-mod guest_access;
 #[path = "macos_computers/files.rs"]
 pub(crate) mod files;
-#[path = "macos_computers/ssh_alias.rs"]
-mod ssh_alias;
-#[path = "macos_computers/ssh_stream.rs"]
-mod ssh_stream;
-#[path = "macos_computers/ports.rs"]
-mod ports;
-#[path = "macos_computers/developer_tools.rs"]
-mod developer_tools;
+#[path = "macos_computers/guest_access.rs"]
+mod guest_access;
 #[path = "macos_computers/guest_clipboard.rs"]
 mod guest_clipboard;
 #[path = "macos_computers/guest_computer_use.rs"]
@@ -43,6 +37,8 @@ mod input;
 mod offline_setup;
 #[path = "macos_computers/personalize.rs"]
 mod personalize;
+#[path = "macos_computers/ports.rs"]
+mod ports;
 #[path = "macos_computers/provision.rs"]
 mod provision;
 #[path = "macos_computers/recovery.rs"]
@@ -51,8 +47,14 @@ mod recovery;
 mod remote_display;
 #[path = "macos_computers/restore_image.rs"]
 mod restore_image;
+#[path = "macos_computers/run_marker.rs"]
+mod run_marker;
 #[path = "macos_computers/setup_log.rs"]
 mod setup_log;
+#[path = "macos_computers/ssh_alias.rs"]
+mod ssh_alias;
+#[path = "macos_computers/ssh_stream.rs"]
+mod ssh_stream;
 #[path = "macos_computers/store.rs"]
 mod store;
 #[path = "macos_computers/templates.rs"]
@@ -61,14 +63,15 @@ mod templates;
 use crate::runtime;
 pub use guest_clipboard::Direction as ClipboardDirection;
 pub(crate) use remote_display::DisplaySession;
-use sha2::{Digest, Sha256};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use silo_engine::{Audience, EngineContext, Event};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU8, Ordering},
-        Arc, Mutex, Once,
+        Arc, Mutex, Once, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -79,6 +82,17 @@ const CHANGED_EVENT: &str = "silo://macos-computers-changed";
 const NOT_SUPPORTED: &str = "macOS computers need a Mac with Apple silicon.";
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
+static MACOS_JOBS: OnceLock<Mutex<HashMap<String, silo_api::jobs::JobId>>> = OnceLock::new();
+static MACOS_CHECKPOINT_JOBS: OnceLock<Mutex<HashMap<String, silo_api::jobs::JobId>>> =
+    OnceLock::new();
+static MACOS_PENDING_CHECKPOINT_JOBS: OnceLock<
+    Mutex<HashMap<silo_api::jobs::JobId, (String, silo_api::jobs::JobFinished)>>,
+> = OnceLock::new();
+static MACOS_PENDING_FORK_WORKFLOWS: OnceLock<
+    Mutex<HashMap<silo_api::jobs::JobId, ForkContinuation>>,
+> = OnceLock::new();
+static MACOS_CHECKPOINT_RETRY_WORKER: Once = Once::new();
+static MACOS_JOB_EVENT_PUBLISH_LOCK: Mutex<()> = Mutex::new(());
 /// How long a guest may ignore a stop request before the computer counts as running again.
 const STOP_IGNORED_AFTER: Duration = Duration::from_secs(20);
 const GRACEFUL_QUIT: Duration = Duration::from_secs(60);
@@ -650,6 +664,8 @@ fn ensure_loaded(app: &MacosContext) -> Result<(), String> {
             .map(|record| {
                 let (state, detail) = store::initial_state(&record);
                 let layout = Layout::new(&data, &record.id);
+                // A marker from an earlier run of this app is not a running computer.
+                run_marker::clear(&layout);
                 checkpoints::sweep(&layout);
                 let record = settle_restore(&layout, record);
                 let mut entry = Entry::new(record, state, detail);
@@ -759,10 +775,605 @@ fn snapshot() -> MacosComputersState {
     }
 }
 
+/// The running generation this process last published per computer (`None`: cleared).
+static PUBLISHED_RUNS: Mutex<Option<HashMap<String, Option<u64>>>> = Mutex::new(None);
+
+/// Publishes which computers are Running, and in which Start generation, for processes that
+/// cannot read this registry (the engine socket's guest streams). Clears markers of every
+/// other state. Only changes touch the disk.
+fn sync_run_markers(app: &MacosContext) {
+    let Ok(data) = app_data(app) else {
+        return;
+    };
+    let desired: Vec<(String, Option<u64>)> = registry()
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.record.id.clone(),
+                (entry.state == State::Running).then_some(entry.attempt),
+            )
+        })
+        .collect();
+    let mut published = PUBLISHED_RUNS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let published = published.get_or_insert_with(HashMap::new);
+    for (id, generation) in desired {
+        if published.get(&id) == Some(&generation) {
+            continue;
+        }
+        let layout = Layout::new(&data, &id);
+        let done = match generation {
+            Some(generation) => run_marker::publish(&layout, generation).is_ok(),
+            None => {
+                run_marker::clear(&layout);
+                true
+            }
+        };
+        if done {
+            published.insert(id, generation);
+        }
+    }
+}
+
 fn emit(app: &MacosContext) {
-    if let Ok(payload) = serde_json::to_value(snapshot()) {
+    sync_run_markers(app);
+    let state = snapshot();
+    publish_job_activity(app, &state);
+    if let Ok(payload) = serde_json::to_value(&state) {
+        app.publish(
+            Event::new("computers.changed", serde_json::json!({"macos": payload})),
+            Audience::All,
+        );
         app.publish(Event::new(CHANGED_EVENT, payload), Audience::All);
     }
+}
+
+fn publish_job_activity(app: &MacosContext, state: &MacosComputersState) {
+    retry_pending_checkpoint_completions(app);
+    let jobs = MACOS_JOBS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut progress = Vec::new();
+    {
+        let active = jobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for computer in &state.computers {
+            if is_macos_job_state(computer.state) {
+                if let Some(job_id) = active.get(&computer.id) {
+                    progress.push((job_id.clone(), computer));
+                }
+            }
+
+            if computer.checkpoint_operation.is_some() {
+                let checkpoint_job = MACOS_CHECKPOINT_JOBS
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&computer.id)
+                    .cloned();
+                if let Some(job_id) = checkpoint_job {
+                    progress.push((job_id, computer));
+                }
+            }
+        }
+    }
+    for (job_id, computer) in progress {
+        let progress = serde_json::json!({
+            "computerId": computer.id,
+            "state": computer.state,
+            "progress": computer.progress,
+            "detail": computer.detail,
+            "checkpointOperation": computer.checkpoint_operation,
+        });
+        let data = match serde_json::from_value::<silo_api::jobs::MacosJobProgress>(progress) {
+            Ok(data) => data,
+            Err(error) => {
+                eprintln!("silo-engine: could not encode macOS job progress: {error}");
+                continue;
+            }
+        };
+        let event = silo_api::jobs::JobProgress::Macos {
+            job_id: job_id.clone(),
+            kind: None,
+            computer_id: Some(data.computer_id.clone()),
+            data,
+        };
+        publish_macos_job_progress(app.engine.as_ref(), &job_id, event);
+    }
+}
+
+fn publish_macos_job_progress(
+    context: &dyn EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    progress: silo_api::jobs::JobProgress,
+) {
+    publish_macos_job_progress_with_hook(context, job_id, progress, || {});
+}
+
+fn publish_macos_job_progress_with_hook(
+    context: &dyn EngineContext,
+    job_id: &silo_api::jobs::JobId,
+    progress: silo_api::jobs::JobProgress,
+    before_lock: impl FnOnce(),
+) {
+    before_lock();
+    let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !macos_job_progress_is_active(job_id) {
+        return;
+    }
+    if let Err(error) = crate::jobs::publish_progress(context, progress, Audience::All) {
+        eprintln!("silo-engine: could not persist macOS job progress: {error}");
+    }
+}
+
+fn macos_job_progress_is_active(job_id: &silo_api::jobs::JobId) -> bool {
+    let pending_finish = MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains_key(job_id);
+    if pending_finish {
+        return false;
+    }
+    let lifecycle_active = MACOS_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .any(|active| active == job_id);
+    let checkpoint_active = MACOS_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .values()
+        .any(|active| active == job_id);
+    lifecycle_active || checkpoint_active
+}
+
+#[derive(Clone)]
+struct AcceptedMacosJob {
+    registry: Arc<crate::jobs::JobRegistry>,
+    job_id: silo_api::jobs::JobId,
+    cancellation: Arc<AtomicBool>,
+    gate: &'static runtime::operation_gate::OperationGate,
+}
+
+/// Accepts a macOS job durably before the caller queues work or changes state.
+/// Admitted Virtualization.framework work has no safe generic cancellation seam;
+/// creation remains cancellable through the existing `computers.delete` path.
+fn accept_macos_job(
+    context: &dyn EngineContext,
+    method: &str,
+    gate: &'static runtime::operation_gate::OperationGate,
+) -> Result<AcceptedMacosJob, String> {
+    let registry = context.job_registry()?;
+    let accepted = crate::jobs::allocate(context, method).map_err(|error| error.to_string())?;
+    let job_id = accepted.job_id;
+    let cancellation = Arc::new(AtomicBool::new(false));
+    register_macos_job_cancel(&registry, job_id.clone(), cancellation.clone(), gate);
+    Ok(AcceptedMacosJob {
+        registry,
+        job_id,
+        cancellation,
+        gate,
+    })
+}
+
+/// Do not start a worker unless durable job acceptance succeeded.
+fn launch_macos_job<T>(
+    context: &dyn EngineContext,
+    method: &str,
+    gate: &'static runtime::operation_gate::OperationGate,
+    launch: impl FnOnce(AcceptedMacosJob) -> Result<T, String>,
+) -> Result<T, String> {
+    let job = accept_macos_job(context, method, gate)?;
+    launch(job)
+}
+
+fn register_macos_job_cancel(
+    registry: &crate::jobs::JobRegistry,
+    job_id: silo_api::jobs::JobId,
+    cancellation: Arc<AtomicBool>,
+    gate: &'static runtime::operation_gate::OperationGate,
+) {
+    let cancel_job_id = job_id.clone();
+    registry.register_cancel(job_id, crate::jobs::CancelRoute::MacosGate, move || {
+        // The durable job is accepted just before it is submitted to the gate.
+        // Preserve cancellation in that short gap, then let the gate decide whether
+        // the now queued or running operation can be cancelled.
+        if !gate.contains_job(&cancel_job_id) {
+            cancellation.store(true, Ordering::SeqCst);
+        }
+        gate.cancel_job(&cancel_job_id)
+            .map_err(|error| error.to_string())
+    });
+}
+
+fn admit_macos_job(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    kind: runtime::operation_gate::OperationKind,
+    scope: runtime::operation_gate::Scope,
+    computer_name: Option<String>,
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    admit_macos_job_with_completion(context, job, kind, scope, computer_name, label, true)
+}
+
+/// Checkpoint command wrappers own their command result, so their admission helper leaves
+/// terminal persistence to that wrapper instead of publishing a second finish here.
+fn admit_checkpoint_job(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    kind: runtime::operation_gate::OperationKind,
+    scope: runtime::operation_gate::Scope,
+    computer_name: Option<String>,
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    admit_macos_job_with_completion(context, job, kind, scope, computer_name, label, false)
+}
+
+fn admit_macos_job_with_completion(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    kind: runtime::operation_gate::OperationKind,
+    scope: runtime::operation_gate::Scope,
+    computer_name: Option<String>,
+    label: &str,
+    finish_on_error: bool,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let guard = match job.gate.kind(kind).acquire_for_job(
+        scope,
+        computer_name,
+        label,
+        Some(job.job_id.as_str().to_owned()),
+        job.job_id.clone(),
+        Some(job.cancellation.clone()),
+    ) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let message = error.to_string();
+            let code = match error {
+                runtime::operation_gate::GateError::Cancelled => {
+                    job.cancellation.store(true, Ordering::SeqCst);
+                    silo_api::jobs::ErrorCode::Cancelled
+                }
+                runtime::operation_gate::GateError::AlreadyQueued => {
+                    silo_api::jobs::ErrorCode::AlreadyQueued
+                }
+                runtime::operation_gate::GateError::Busy => silo_api::jobs::ErrorCode::Busy,
+                _ => silo_api::jobs::ErrorCode::Internal,
+            };
+            if finish_on_error {
+                publish_macos_job_finished(
+                    context,
+                    macos_job_finished(job.job_id.clone(), Err((code, message.clone()))),
+                );
+            }
+            return Err(message);
+        }
+    };
+    if let Err(error) = job.registry.mark_running(&job.job_id) {
+        let message = error.to_string();
+        if finish_on_error {
+            fail_macos_job(context, job, message.clone());
+        }
+        return Err(message);
+    }
+    job.registry
+        .associate_gate(guard.request_id(), job.job_id.clone());
+    Ok(guard)
+}
+
+fn fail_macos_job(context: &dyn EngineContext, job: &AcceptedMacosJob, message: String) {
+    publish_macos_job_finished(
+        context,
+        macos_job_finished(
+            job.job_id.clone(),
+            Err((silo_api::jobs::ErrorCode::Internal, message)),
+        ),
+    );
+}
+
+fn admit_and_track_computer_workflow(
+    context: &dyn EngineContext,
+    job: &AcceptedMacosJob,
+    computer_id: &str,
+    computer_name: &str,
+    label: &str,
+) -> Result<runtime::operation_gate::OperationGuard<'static>, String> {
+    let operation = admit_macos_job(
+        context,
+        job,
+        runtime::operation_gate::OperationKind::ComputerConfiguration,
+        runtime::operation_gate::Scope::Computer {
+            id: computer_id.to_owned(),
+        },
+        Some(computer_name.to_owned()),
+        label,
+    )?;
+    track_macos_job(computer_id, job.job_id.clone());
+    Ok(operation)
+}
+
+fn lifecycle_job_outcome(
+    result: Result<(), String>,
+) -> Result<(), (silo_api::jobs::ErrorCode, String)> {
+    result.map_err(|message| (silo_api::jobs::ErrorCode::Internal, message))
+}
+
+fn macos_job_finished(
+    job_id: silo_api::jobs::JobId,
+    outcome: Result<(), (silo_api::jobs::ErrorCode, String)>,
+) -> silo_api::jobs::JobFinished {
+    match outcome {
+        Ok(()) => silo_api::jobs::JobFinished {
+            job_id,
+            result: Some(serde_json::Value::Null),
+            error: None,
+            outcome_chunked: false,
+        },
+        Err((code, message)) => silo_api::jobs::JobFinished {
+            job_id,
+            result: None,
+            error: Some(silo_api::transport::ErrorObject {
+                code,
+                message,
+                diagnostics: None,
+            }),
+            outcome_chunked: false,
+        },
+    }
+}
+
+fn publish_macos_job_finished(context: &dyn EngineContext, finished: silo_api::jobs::JobFinished) {
+    let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Err(error) = crate::jobs::publish_finished(context, finished, Audience::All) {
+        eprintln!("silo-engine: could not persist macOS job outcome: {error}");
+    }
+}
+
+fn track_macos_job(computer_id: &str, job_id: silo_api::jobs::JobId) {
+    MACOS_JOBS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(computer_id.to_owned(), job_id);
+}
+
+fn untrack_macos_job(computer_id: &str, job_id: &silo_api::jobs::JobId) {
+    let mut jobs = MACOS_JOBS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if jobs.get(computer_id) == Some(job_id) {
+        jobs.remove(computer_id);
+    }
+}
+
+fn finish_macos_job(
+    context: &dyn EngineContext,
+    computer_id: Option<&str>,
+    job_id: silo_api::jobs::JobId,
+    outcome: Result<(), (silo_api::jobs::ErrorCode, String)>,
+) {
+    if let Some(computer_id) = computer_id {
+        untrack_macos_job(computer_id, &job_id);
+    }
+    publish_macos_job_finished(context, macos_job_finished(job_id, outcome));
+}
+
+fn finish_workflow_job(
+    app: &MacosContext,
+    computer_id: &str,
+    deleted: bool,
+    result: Result<(), Stop>,
+) {
+    let Some(job_id) = MACOS_JOBS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(computer_id)
+    else {
+        return;
+    };
+    let outcome = if deleted {
+        Err((
+            silo_api::jobs::ErrorCode::Cancelled,
+            "Computer creation was cancelled by delete.".to_owned(),
+        ))
+    } else {
+        match result {
+            Ok(()) => Ok(()),
+            Err(Stop::Cancelled) => Err((
+                silo_api::jobs::ErrorCode::Cancelled,
+                "The macOS operation was cancelled.".to_owned(),
+            )),
+            Err(Stop::Failed(message)) => Err((silo_api::jobs::ErrorCode::Internal, message)),
+        }
+    };
+    publish_macos_job_finished(app.engine.as_ref(), macos_job_finished(job_id, outcome));
+}
+
+fn publish_checkpoint_completion<T: serde::Serialize>(
+    app: &MacosContext,
+    job_id: silo_api::jobs::JobId,
+    computer_id: &str,
+    result: &Result<T, String>,
+    cancelled: bool,
+) {
+    let finished = match result {
+        Ok(value) => match serde_json::to_value(value) {
+            Ok(result) => silo_api::jobs::JobFinished {
+                job_id: job_id.clone(),
+                result: Some(result),
+                error: None,
+                outcome_chunked: false,
+            },
+            Err(error) => silo_api::jobs::JobFinished {
+                job_id: job_id.clone(),
+                result: None,
+                error: Some(silo_api::transport::ErrorObject {
+                    code: silo_api::jobs::ErrorCode::Internal,
+                    message: format!("Could not encode the macOS checkpoint result: {error}"),
+                    diagnostics: None,
+                }),
+                outcome_chunked: false,
+            },
+        },
+        Err(message) => silo_api::jobs::JobFinished {
+            job_id: job_id.clone(),
+            result: None,
+            error: Some(silo_api::transport::ErrorObject {
+                code: if cancelled {
+                    silo_api::jobs::ErrorCode::Cancelled
+                } else {
+                    silo_api::jobs::ErrorCode::Internal
+                },
+                message: message.clone(),
+                diagnostics: None,
+            }),
+            outcome_chunked: false,
+        },
+    };
+    MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(job_id, (computer_id.to_owned(), finished));
+    retry_pending_checkpoint_completions(app);
+    let pending = !MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_empty();
+    if pending {
+        ensure_checkpoint_retry_worker(app.clone());
+    }
+}
+
+fn finish_fork_command(
+    app: &MacosContext,
+    job_id: silo_api::jobs::JobId,
+    computer_id: &str,
+    result: &Result<(), String>,
+    cancelled: bool,
+    continuation: Option<ForkContinuation>,
+) {
+    if result.is_ok() {
+        if let Some(continuation) = continuation {
+            MACOS_PENDING_FORK_WORKFLOWS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(job_id.clone(), continuation);
+        }
+    }
+    publish_checkpoint_completion(app, job_id, computer_id, result, cancelled);
+}
+
+fn ensure_checkpoint_retry_worker(app: MacosContext) {
+    MACOS_CHECKPOINT_RETRY_WORKER.call_once(move || {
+        let result = std::thread::Builder::new()
+            .name("silo-checkpoint-job-retry".to_owned())
+            .spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                retry_pending_checkpoint_completions(&app);
+            });
+        if let Err(error) = result {
+            eprintln!("silo-engine: could not start checkpoint outcome retry: {error}");
+        }
+    });
+}
+
+fn retry_pending_checkpoint_completions(app: &MacosContext) {
+    retry_pending_checkpoint_completions_with_hook(app, || {});
+}
+
+fn retry_pending_checkpoint_completions_with_hook(
+    app: &MacosContext,
+    mut after_pending_removed: impl FnMut(),
+) {
+    let registry = match app.engine.job_registry() {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("silo-engine: could not open job registry for retry: {error}");
+            return;
+        }
+    };
+    if let Err(error) = crate::jobs::retry_pending_outcomes(app.engine.as_ref(), registry.as_ref())
+    {
+        eprintln!("silo-engine: could not retry pending job outcomes: {error}");
+        return;
+    }
+    let pending = MACOS_PENDING_CHECKPOINT_JOBS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|(job_id, (computer_id, finished))| {
+            (job_id.clone(), computer_id.clone(), finished.clone())
+        })
+        .collect::<Vec<_>>();
+    for (job_id, computer_id, finished) in pending {
+        let publication = {
+            let _publication = MACOS_JOB_EVENT_PUBLISH_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match crate::jobs::publish_finished(app.engine.as_ref(), finished, Audience::All) {
+                Ok(()) => {
+                    MACOS_PENDING_CHECKPOINT_JOBS
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&job_id);
+                    after_pending_removed();
+                    let mut checkpoint_jobs = MACOS_CHECKPOINT_JOBS
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if checkpoint_jobs.get(&computer_id) == Some(&job_id) {
+                        checkpoint_jobs.remove(&computer_id);
+                    }
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
+        };
+        match publication {
+            Ok(()) => {
+                let continuation = MACOS_PENDING_FORK_WORKFLOWS
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&job_id);
+                if let Some(continuation) = continuation {
+                    start_fork_continuation(app, continuation);
+                }
+            }
+            Err(error) => {
+                eprintln!("silo-engine: could not persist macOS checkpoint outcome: {error}");
+            }
+        }
+    }
+}
+
+fn is_macos_job_state(state: State) -> bool {
+    matches!(
+        state,
+        State::Preparing
+            | State::Copying
+            | State::Downloading
+            | State::Installing
+            | State::SettingUp
+            | State::Starting
+            | State::Stopping
+    )
 }
 
 /// Applies `change` to one computer and tells the UI. Returns `None` for an unknown id.
@@ -893,6 +1504,31 @@ pub async fn delete_macos_template(app: MacosContext) -> Result<(), String> {
     .await
 }
 
+fn accept_checkpoint_job(app: &MacosContext, method: &str) -> Result<AcceptedMacosJob, String> {
+    accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)
+}
+
+fn accept_loaded_lifecycle_job(
+    app: &MacosContext,
+    id: &str,
+    method: &str,
+) -> Result<(AcceptedMacosJob, PathBuf, String), String> {
+    let job = accept_macos_job(app.engine.as_ref(), method, &runtime::OPERATIONS)?;
+    let prepared: Result<(PathBuf, String), String> = (|| {
+        ensure_loaded(app)?;
+        let data = app_data(app)?;
+        let name = computer(id)?.0.name;
+        Ok((data, name))
+    })();
+    match prepared {
+        Ok((data, name)) => Ok((job, data, name)),
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            Err(message)
+        }
+    }
+}
+
 pub async fn create_macos_computer(
     app: MacosContext,
     request: CreateRequest,
@@ -906,7 +1542,10 @@ pub async fn macos_computer_action(
     id: String,
     action: Action,
 ) -> Result<(), String> {
-    if matches!(action, Action::Start | Action::Setup | Action::ChangeResources { .. }) {
+    if matches!(
+        action,
+        Action::Start | Action::Setup | Action::ChangeResources { .. }
+    ) {
         runtime::shutdown::ensure_accepting_operations()?;
     }
     blocking(move || perform(&app, &id, action)).await
@@ -924,16 +1563,58 @@ pub async fn create_macos_checkpoint(
     name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || {
-        with_macos_computer_operation(
-            &app,
-            &id,
-            runtime::operation_gate::OperationKind::CheckpointCapture,
-            "Creating checkpoint",
-            || create_checkpoint(&app, &id, &name),
-        )
-    })
-    .await
+
+    let job = accept_checkpoint_job(&app, "checkpoints.create")?;
+    let job_id = job.job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let result = blocking(move || create_checkpoint(&worker_app, &worker_id, &name, job)).await;
+    publish_checkpoint_create_completion(
+        &app,
+        job_id,
+        &id,
+        &result,
+        cancelled.load(Ordering::SeqCst),
+    );
+    result.map(|_| ())
+}
+
+fn publish_checkpoint_create_completion(
+    app: &MacosContext,
+    job_id: silo_api::jobs::JobId,
+    computer_id: &str,
+    result: &Result<checkpoints::Meta, String>,
+    cancelled: bool,
+) {
+    let outcome = result.clone().map(checkpoint_created_job_result);
+    publish_checkpoint_completion(app, job_id, computer_id, &outcome, cancelled);
+}
+
+fn checkpoint_created_job_result(
+    meta: checkpoints::Meta,
+) -> silo_api::methods::checkpoints::CheckpointCreatedResult {
+    use silo_api::methods::checkpoints::{
+        Checkpoint, CheckpointCreatedResult, CheckpointKind, CheckpointReason, CheckpointScope,
+    };
+
+    CheckpointCreatedResult {
+        checkpoint: Checkpoint {
+            id: meta.id,
+            name: meta.name,
+            created_at: meta.created_at,
+            scope: match meta.kind {
+                checkpoints::Kind::Memory => CheckpointScope::Full,
+                checkpoints::Kind::Disk => CheckpointScope::Disk,
+            },
+            reason: match meta.reason {
+                checkpoints::Reason::Manual => CheckpointReason::Manual,
+                checkpoints::Reason::BeforeRestore => CheckpointReason::BeforeRestore,
+            },
+            kind: CheckpointKind::Manual,
+            size_bytes: meta.size_bytes,
+        },
+    }
 }
 
 /// Rewinds a computer to a checkpoint. The computer stays stopped.
@@ -943,16 +1624,16 @@ pub async fn restore_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || {
-        with_macos_computer_operation(
-            &app,
-            &id,
-            runtime::operation_gate::OperationKind::CheckpointRestore,
-            "Restoring checkpoint",
-            || restore_checkpoint(&app, &id, &checkpoint_id),
-        )
-    })
-    .await
+
+    let job = accept_checkpoint_job(&app, "checkpoints.restore")?;
+    let job_id = job.job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let result =
+        blocking(move || restore_checkpoint(&worker_app, &worker_id, &checkpoint_id, job)).await;
+    publish_checkpoint_completion(&app, job_id, &id, &result, cancelled.load(Ordering::SeqCst));
+    result
 }
 
 /// Creates a new stopped computer from a checkpoint's disk. It is set up in the background.
@@ -963,16 +1644,28 @@ pub async fn fork_macos_checkpoint(
     new_name: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || {
-        with_macos_computer_operation(
-            &app,
-            &id,
-            runtime::operation_gate::OperationKind::CheckpointFork,
-            "Forking checkpoint",
-            || fork_checkpoint(&app, &id, &checkpoint_id, &new_name),
-        )
-    })
-    .await
+
+    let job = accept_checkpoint_job(&app, "checkpoints.fork")?;
+    let job_id = job.job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let fork =
+        blocking(move || fork_checkpoint(&worker_app, &worker_id, &checkpoint_id, &new_name, job))
+            .await;
+    let (result, continuation) = match fork {
+        Ok(continuation) => (Ok(()), Some(continuation)),
+        Err(message) => (Err(message), None),
+    };
+    finish_fork_command(
+        &app,
+        job_id,
+        &id,
+        &result,
+        cancelled.load(Ordering::SeqCst),
+        continuation,
+    );
+    result
 }
 
 pub async fn delete_macos_checkpoint(
@@ -981,16 +1674,16 @@ pub async fn delete_macos_checkpoint(
     checkpoint_id: String,
 ) -> Result<(), String> {
     runtime::shutdown::ensure_accepting_operations()?;
-    blocking(move || {
-        with_macos_computer_operation(
-            &app,
-            &id,
-            runtime::operation_gate::OperationKind::CheckpointDelete,
-            "Deleting checkpoint",
-            || delete_checkpoint(&app, &id, &checkpoint_id),
-        )
-    })
-    .await
+
+    let job = accept_checkpoint_job(&app, "checkpoints.delete")?;
+    let job_id = job.job_id.clone();
+    let cancelled = job.cancellation.clone();
+    let worker_app = app.clone();
+    let worker_id = id.clone();
+    let result =
+        blocking(move || delete_checkpoint(&worker_app, &worker_id, &checkpoint_id, job)).await;
+    publish_checkpoint_completion(&app, job_id, &id, &result, cancelled.load(Ordering::SeqCst));
+    result
 }
 
 /// Pastes this Mac's clipboard into a running computer, or copies the computer's
@@ -1063,15 +1756,17 @@ pub(crate) fn display_stream(app: &MacosContext, id: &str) -> Result<std::net::T
     remote_display::connect(app, id)
 }
 
-/// Opens the direct SSH or published-port connection used by the local engine socket's
-/// one-shot `guest.ssh` stream method.
-pub fn connect_guest_ssh_stream(
+/// Opens the SSH transport to a running computer for the local engine socket's one-shot
+/// `guest.ssh` stream method. `port` is the published-port label of a forward, used only to
+/// revoke the stream; the stream itself always reaches the guest's SSH port.
+pub fn open_guest_ssh_stream(
     app_data: &std::path::Path,
     computer_id: &str,
-    port: u16,
-) -> Result<std::net::TcpStream, String> {
-    ssh_stream::connect(app_data, computer_id, port)
+    port: Option<u16>,
+) -> Result<GuestSshStream, String> {
+    ssh_stream::open(app_data, computer_id, port)
 }
+pub use ssh_stream::{GuestSshGuard, GuestSshStream};
 
 /// Resizes a running computer's display to a viewer's window size (pixels, clamped).
 pub(crate) fn resize_display(
@@ -1096,7 +1791,9 @@ pub fn names(app: &MacosContext) -> Vec<String> {
 
 /// Whether a selected transfer name belongs to the Apple Virtualization runtime.
 pub(crate) fn owns_name(app: &MacosContext, name: &str) -> bool {
-    names(app).iter().any(|candidate| candidate.eq_ignore_ascii_case(name))
+    names(app)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }
 
 /// Resolve a checkpoint title for the export review phase.
@@ -1153,12 +1850,10 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
             .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
             .map(|entry| entry.record.clone())
             .ok_or_else(|| format!("Computer '{name}' is not managed by Silo."))?;
-        let held = begin_operation(app, &record.id, checkpoints::OperationKind::Capture)?;
+        let held = begin_operation_for(app, &record.id, checkpoints::OperationKind::Capture, None)?;
         let record = held.record.clone();
         let layout = Layout::new(&data, &record.id);
-        let capture = tempfile::Builder::new()
-            .prefix("silo-macos-export-")
-            .tempdir_in(store::root(&data))
+        let capture = export_capture_dir(&data, token)
             .map_err(|error| store::io_error("prepare the macOS export", &error))?;
         let mut source_kind = crate::backup::MacosArchiveSourceKind::WholeComputer;
         let mut saved_memory = false;
@@ -1186,7 +1881,10 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
             source_host_build = meta.host_build.clone();
             source_guest = meta.macos_version.as_deref().and_then(parse_macos_version);
             if source_guest.is_none() {
-                return Err("This checkpoint predates saved macOS version details and cannot be exported.".into());
+                return Err(
+                    "This checkpoint predates saved macOS version details and cannot be exported."
+                        .into(),
+                );
             }
             saved_memory = meta.kind == checkpoints::Kind::Memory;
             source_kind = crate::backup::MacosArchiveSourceKind::Checkpoint {
@@ -1205,15 +1903,28 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
                 &checkpoints::dir(&layout, checkpoint_id).join("auxiliary-storage.img"),
                 &capture.path().join("auxiliary-storage.img"),
             )?;
-            clone_archive_component(&layout.hardware_model(), &capture.path().join("hardware-model.bin"))?;
-            clone_archive_component(&layout.machine_identifier(), &capture.path().join("machine-identifier.bin"))?;
+            clone_archive_component(
+                &layout.hardware_model(),
+                &capture.path().join("hardware-model.bin"),
+            )?;
+            clone_archive_component(
+                &layout.machine_identifier(),
+                &capture.path().join("machine-identifier.bin"),
+            )?;
             if saved_memory {
                 let expected = meta.size_bytes.ok_or_else(|| {
                     "This memory checkpoint has no saved size and cannot be exported.".to_string()
                 })?;
                 let state = checkpoints::state_file(&layout, checkpoint_id);
-                if std::fs::metadata(&state).map(|metadata| metadata.len()).ok() != Some(expected) {
-                    return Err("This checkpoint's saved memory is incomplete and cannot be exported.".into());
+                if std::fs::metadata(&state)
+                    .map(|metadata| metadata.len())
+                    .ok()
+                    != Some(expected)
+                {
+                    return Err(
+                        "This checkpoint's saved memory is incomplete and cannot be exported."
+                            .into(),
+                    );
                 }
                 clone_archive_component(&state, &capture.path().join("state.vzvmsave"))?;
             }
@@ -1256,10 +1967,12 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         }
 
         let guest = source_guest.take().ok_or_else(|| {
-            "This computer has no saved macOS restore image details and cannot be exported.".to_string()
+            "This computer has no saved macOS restore image details and cannot be exported."
+                .to_string()
         })?;
         let setup_fingerprint = source_setup_fingerprint.ok_or_else(|| {
-            "This computer has no setup fingerprint. Use Retry setup before exporting it.".to_string()
+            "This computer has no setup fingerprint. Use Retry setup before exporting it."
+                .to_string()
         })?;
         let computer_use_fingerprint = source_computer_use_fingerprint.ok_or_else(|| {
             "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
@@ -1267,7 +1980,9 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
         let memory = if saved_memory {
             if source_host_build.is_empty() {
-                return Err("This memory checkpoint has no host build and cannot be exported.".into());
+                return Err(
+                    "This memory checkpoint has no host build and cannot be exported.".into(),
+                );
             }
             let state = capture.path().join("state.vzvmsave");
             let size = std::fs::metadata(&state)
@@ -1306,9 +2021,18 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         };
         let mut components = vec![
             (crate::backup::MacosComponentRole::Disk, "disk.img"),
-            (crate::backup::MacosComponentRole::Auxiliary, "auxiliary-storage.img"),
-            (crate::backup::MacosComponentRole::HardwareModel, "hardware-model.bin"),
-            (crate::backup::MacosComponentRole::MachineIdentifier, "machine-identifier.bin"),
+            (
+                crate::backup::MacosComponentRole::Auxiliary,
+                "auxiliary-storage.img",
+            ),
+            (
+                crate::backup::MacosComponentRole::HardwareModel,
+                "hardware-model.bin",
+            ),
+            (
+                crate::backup::MacosComponentRole::MachineIdentifier,
+                "machine-identifier.bin",
+            ),
         ];
         if saved_memory {
             components.push((crate::backup::MacosComponentRole::Memory, "state.vzvmsave"));
@@ -1336,6 +2060,58 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
     result
 }
 
+/// Capture folders carry the saved operation's id, so a relaunch can find and remove what an
+/// interrupted export left. The id is journaled before the export starts; RAII cleans up
+/// only when the process lives to run it.
+const EXPORT_CAPTURE_PREFIX: &str = ".silo-macos-export-";
+
+fn export_capture_dir(
+    data: &std::path::Path,
+    token: Option<&str>,
+) -> std::io::Result<tempfile::TempDir> {
+    let prefix = match token {
+        Some(token) => export_capture_prefix(token)
+            .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?,
+        None => EXPORT_CAPTURE_PREFIX.to_owned(),
+    };
+    tempfile::Builder::new()
+        .prefix(&prefix)
+        .tempdir_in(store::root(data))
+}
+
+fn export_capture_prefix(token: &str) -> Result<String, String> {
+    let token = uuid::Uuid::parse_str(token)
+        .map_err(|_| "The export operation identity is invalid.".to_owned())?;
+    Ok(format!("{EXPORT_CAPTURE_PREFIX}{token}-"))
+}
+
+/// Removes the capture folders an export with this saved operation id left behind: disk
+/// clones and saved memory it copied before the process ended. Other operations' folders
+/// stay.
+pub(crate) fn remove_export_captures(data: &std::path::Path, token: &str) -> Result<(), String> {
+    let prefix = export_capture_prefix(token)?;
+    let entries = match std::fs::read_dir(store::root(data)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(store::io_error("inspect macOS export captures", &error)),
+    };
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| store::io_error("inspect macOS export captures", &error))?;
+        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| store::io_error("inspect a macOS export capture", &error))?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            std::fs::remove_dir_all(entry.path())
+                .map_err(|error| store::io_error("remove a macOS export capture", &error))?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_macos_version(value: &str) -> Option<store::RestoreImageInfo> {
     let (version, build) = value.rsplit_once(" (")?;
     let build = build.strip_suffix(')')?;
@@ -1359,6 +2135,39 @@ pub(crate) fn archive_memory_warning(
         )),
         _ => None,
     }
+}
+
+/// Whether this Mac's limits allow an archived computer's CPUs, memory, and disk. Imported
+/// computers are created from exactly these values, so inspection checks them up front.
+pub(crate) fn validate_archive_resources(
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Result<(), String> {
+    require_supported()?;
+    check_archive_resources(engine::host_limits(), config)
+}
+
+fn check_archive_resources(
+    limits: store::HostLimits,
+    config: &crate::backup::MacosArchiveConfiguration,
+) -> Result<(), String> {
+    store::validate_request(
+        &CreateRequest {
+            name: "archive-check".into(),
+            cpus: config.cpus,
+            memory_gib: config.memory_gib,
+            disk_gib: config.disk_gib,
+        },
+        limits,
+        &[],
+        store::MIN_DISK_GIB,
+    )
+}
+
+/// Whether this Mac supports the archived computer's hardware model, read from the bounded
+/// component file extracted from the archive.
+pub(crate) fn validate_archive_hardware_model(path: &std::path::Path) -> Result<(), String> {
+    require_supported()?;
+    engine::validate_hardware_model_file(path)
 }
 
 pub(crate) fn supports_archive_guest_build(build: &str) -> Result<bool, String> {
@@ -1449,7 +2258,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
         .map_err(|error| store::io_error("prepare the macOS import", &error))?;
     let stage = root.join(format!(".partial-import-{id}"));
     let final_dir = root.join(&id);
-    remove_archive_import_folder(&stage)?;
+    discard_import_folder(&stage, &detach_import_disk)?;
     if std::fs::symlink_metadata(&final_dir).is_ok() {
         return Err("The imported computer identity already exists. Choose the export file again and retry.".into());
     }
@@ -1464,7 +2273,11 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     let _reservation = crate::computer_names::reserve(&[new_name.to_string()], &taken)?;
     let existing = {
         let registry = registry();
-        registry.entries.iter().map(|entry| entry.record.clone()).collect::<Vec<_>>()
+        registry
+            .entries
+            .iter()
+            .map(|entry| entry.record.clone())
+            .collect::<Vec<_>>()
     };
     let mut builder = std::fs::DirBuilder::new();
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -1487,7 +2300,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     ) {
         Ok(prepared) => prepared,
         Err(error) => {
-            let _ = remove_archive_import_folder(&stage);
+            let _ = discard_import_folder(&stage, &detach_import_disk);
             return Err(error.into());
         }
     };
@@ -1499,13 +2312,15 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
         || prepared.computer_configuration != serde_json::json!({})
     {
         drop(prepared);
-        let _ = remove_archive_import_folder(&stage);
-        return Err("The selected computer identity does not match the verified export file.".into());
+        let _ = discard_import_folder(&stage, &detach_import_disk);
+        return Err(
+            "The selected computer identity does not match the verified export file.".into(),
+        );
     }
     if !developer_tools::supports_guest_build(&prepared.config.guest_build)? {
         let build = prepared.config.guest_build.clone();
         drop(prepared);
-        let _ = remove_archive_import_folder(&stage);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
         return Err(format!(
             "The export uses macOS build {build}, which this Silo version cannot finish setting up."
         )
@@ -1525,7 +2340,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
         store::MIN_DISK_GIB,
     ) {
         drop(prepared);
-        let _ = remove_archive_import_folder(&stage);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
         return Err(error.into());
     }
     let stage_layout = Layout {
@@ -1534,7 +2349,10 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     };
     for (role, destination) in [
         (crate::backup::MacosComponentRole::Disk, stage_layout.disk()),
-        (crate::backup::MacosComponentRole::Auxiliary, stage_layout.auxiliary_storage()),
+        (
+            crate::backup::MacosComponentRole::Auxiliary,
+            stage_layout.auxiliary_storage(),
+        ),
         (
             crate::backup::MacosComponentRole::HardwareModel,
             stage_layout.hardware_model(),
@@ -1555,7 +2373,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     let actual_hardware_digest = digest_file(&stage_layout.hardware_model())?;
     if actual_hardware_digest != prepared.config.hardware_model_digest {
         drop(prepared);
-        let _ = remove_archive_import_folder(&stage);
+        let _ = discard_import_folder(&stage, &detach_import_disk);
         return Err("The hardware model does not match the verified export metadata.".into());
     }
 
@@ -1593,7 +2411,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     store::sync_dir(&stage).map_err(|error| store::io_error("save the macOS import", &error))?;
     drop(prepared);
     if let Err(message) = before_publish() {
-        remove_archive_import_folder(&stage)?;
+        discard_import_folder(&stage, &detach_import_disk)?;
         return Err(if cancellation.cancelled() {
             MacosArchiveImportError::Cancelled
         } else {
@@ -1602,11 +2420,15 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     }
     std::fs::rename(&stage, &final_dir)
         .map_err(|error| store::io_error("publish the imported computer", &error))?;
-    store::sync_dir(&root).map_err(|error| store::io_error("save the imported computer", &error))?;
+    store::sync_dir(&root)
+        .map_err(|error| store::io_error("save the imported computer", &error))?;
     {
         let mut registry = registry();
         if registry.entries.iter().any(|entry| entry.record.id == id) {
-            return Err("The imported computer was saved and needs recovery. Relaunch Silo to finish.".into());
+            return Err(
+                "The imported computer was saved and needs recovery. Relaunch Silo to finish."
+                    .into(),
+            );
         }
         registry.entries.push(Entry::new(
             record,
@@ -1619,26 +2441,55 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
 }
 
 /// Settle a journaled archive import. Returns true only when the final record
-/// proves that its atomic directory rename committed.
+/// proves that its atomic directory rename committed. Any folder this import left is
+/// removed only after its disk image is detached from this Mac; if a detach fails, the
+/// folders stay and so does the caller's journal.
 pub(crate) fn recover_archive_import(app: &MacosContext, id: &str) -> Result<bool, String> {
+    recover_archive_import_in(&app_data(app)?, id, &detach_import_disk)
+}
+
+fn recover_archive_import_in(
+    data: &std::path::Path,
+    id: &str,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+) -> Result<bool, String> {
     let id = uuid::Uuid::parse_str(id)
         .map_err(|_| "The imported computer identity is invalid.")?
         .to_string();
-    let data = app_data(app)?;
-    let root = store::root(&data);
+    let root = store::root(data);
     let stage = root.join(format!(".partial-import-{id}"));
     let final_dir = root.join(&id);
-    let committed = match store::read_record(&Layout::new(&data, &id)) {
+    let committed = match store::read_record(&Layout::new(data, &id)) {
         Ok(record) if record.id == id => true,
         _ => false,
     };
     if committed {
-        remove_archive_import_folder(&stage)?;
+        discard_import_folder(&stage, detach)?;
         return Ok(true);
     }
-    remove_archive_import_folder(&stage)?;
-    remove_archive_import_folder(&final_dir)?;
+    discard_import_folder(&stage, detach)?;
+    discard_import_folder(&final_dir, detach)?;
     Ok(false)
+}
+
+fn detach_import_disk(disk: &std::path::Path) -> Result<(), String> {
+    offline_setup::ensure_detached(disk)
+}
+
+/// Removes an import's folder after its disk image is detached. The rekey attaches the image
+/// persistently, so deleting the folder first would delete an attached disk. When the image
+/// cannot be detached the folder is left in place.
+fn discard_import_folder(
+    path: &std::path::Path,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let disk = path.join("disk.img");
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+        && std::fs::symlink_metadata(&disk).is_ok()
+    {
+        detach(&disk)?;
+    }
+    remove_archive_import_folder(path)
 }
 
 fn remove_archive_import_folder(path: &std::path::Path) -> Result<(), String> {
@@ -1753,15 +2604,11 @@ fn acquire_transfer_operation(
         return Err("Start this computer to transfer files.".into());
     }
     let generation = computer_generation(computer_id)?;
-    let operation = acquire_macos_transfer_turn(
-        &runtime::OPERATIONS,
-        computer_id,
-        &record.name,
-        || {
+    let operation =
+        acquire_macos_transfer_turn(&runtime::OPERATIONS, computer_id, &record.name, || {
             runtime::shutdown::ensure_accepting_operations()?;
             revalidate_transfer_target(computer_id, generation)
-        },
-    )?;
+        })?;
     Ok((operation, generation))
 }
 
@@ -1788,7 +2635,11 @@ fn revalidate_transfer_target(computer_id: &str, generation: u64) -> Result<(), 
     ensure_transfer_target(state, computer_generation(computer_id)?, generation)
 }
 
-fn ensure_transfer_target(state: State, current_generation: u64, expected_generation: u64) -> Result<(), String> {
+fn ensure_transfer_target(
+    state: State,
+    current_generation: u64,
+    expected_generation: u64,
+) -> Result<(), String> {
     if state != State::Running {
         return Err("Start this computer to transfer files.".into());
     }
@@ -1799,7 +2650,9 @@ fn ensure_transfer_target(state: State, current_generation: u64, expected_genera
 }
 
 /// Observe and repair macOS guest listeners and their loopback SSH tunnels.
-pub fn read_network_state(app: &MacosContext) -> Result<silo_api::methods::network::NetworkState, String> {
+pub fn read_network_state(
+    app: &MacosContext,
+) -> Result<silo_api::methods::network::NetworkState, String> {
     ports::state(app)
 }
 
@@ -1830,34 +2683,112 @@ pub fn open_network_port(
 }
 
 fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, String> {
-    require_supported()?;
-    ensure_loaded(app)?;
-    let data = app_data(app)?;
-    // Held until the computer is registered and saved, so a Linux creation sees it.
-    let reservation =
-        crate::computer_names::reserve(&[request.name.clone()], &|| app.linux_computer_names())?;
-    let (record, cancel, row) = {
-        let _admitted = admission()?;
-        let mut registry = registry();
-        let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
-        registry.refresh_template(&data);
-        let min_disk = registry.min_disk_gib;
-        store::validate_request(&request, engine::host_limits(), &existing, min_disk)?;
-        let record = store::new_record(&request, engine::random_mac());
-        // A crash after this point leaves a visible computer that reports the interruption.
-        store::save(&Layout::new(&data, &record.id), &record)?;
-        let entry = Entry::new(record.clone(), State::Preparing, None);
-        let (cancel, row) = (entry.cancel.clone(), entry.row());
-        registry.entries.push(entry);
-        (record, cancel, row)
-    };
-    drop(reservation);
-    emit(app);
-    let app = app.clone();
-    std::thread::spawn(move || create_workflow(&app, &data, record, &cancel));
-    Ok(row)
+    create_with_support_check(app, request, require_supported)
 }
 
+fn create_with_support_check(
+    app: &MacosContext,
+    request: CreateRequest,
+    support_check: impl FnOnce() -> Result<(), String>,
+) -> Result<MacosComputer, String> {
+    support_check()?;
+    let data = app_data(app)?;
+    create_after_acceptance(app, data, request, &runtime::OPERATIONS, create_workflow)
+}
+
+fn create_after_acceptance(
+    app: &MacosContext,
+    data: PathBuf,
+    request: CreateRequest,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+) -> Result<MacosComputer, String> {
+    launch_macos_job(app.engine.as_ref(), "computers.create", gate, move |job| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let app = app.clone();
+        std::thread::spawn(move || create_job_worker(&app, data, request, job, sender, workflow));
+        receiver
+            .recv()
+            .map_err(|_| "The macOS computer creation worker stopped unexpectedly.".to_owned())?
+    })
+}
+
+fn create_job_worker(
+    app: &MacosContext,
+    data: PathBuf,
+    request: CreateRequest,
+    job: AcceptedMacosJob,
+    response: std::sync::mpsc::Sender<Result<MacosComputer, String>>,
+    workflow: impl FnOnce(&MacosContext, &std::path::Path, Record, &AtomicU8) + Send + 'static,
+) {
+    let operation = match admit_macos_job(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::ComputerConfiguration,
+        runtime::operation_gate::Scope::Device,
+        None,
+        &format!("Creating {}", request.name),
+    ) {
+        Ok(operation) => operation,
+        Err(message) => {
+            let _ = response.send(Err(message));
+            return;
+        }
+    };
+    let mut workflow_finished = false;
+    let result: Result<(), String> = (|| {
+        let admitted = admission()?;
+        // Loading can settle an interrupted Restore and rewrite its journal. Keep that
+        // recovery behind the durable creation acceptance and device gate.
+        ensure_loaded(app)?;
+        let reservation = crate::computer_names::reserve(&[request.name.clone()], &|| {
+            app.linux_computer_names()
+        })?;
+        let mut computers = registry();
+        let existing: Vec<Record> = computers
+            .entries
+            .iter()
+            .map(|entry| entry.record.clone())
+            .collect();
+        computers.refresh_template(&data);
+        let min_disk = computers.min_disk_gib;
+        store::validate_request(&request, engine::host_limits(), &existing, min_disk)?;
+        let record = store::new_record(&request, engine::random_mac());
+        // Durable job acceptance and gate admission precede the computer record and installer.
+        store::save(&Layout::new(&data, &record.id), &record)?;
+        let entry = Entry::new(record.clone(), State::Preparing, None);
+        let cancel = entry.cancel.clone();
+        let row = entry.row();
+        computers.entries.push(entry);
+        track_macos_job(&record.id, job.job_id.clone());
+        drop(computers);
+        drop(reservation);
+        drop(admitted);
+        if !operation.narrow_to_computer(&record.id, &record.name) {
+            let message = "Could not narrow the computer creation operation scope.".to_owned();
+            end_workflow(
+                app,
+                &record.id,
+                &Layout::new(&data, &record.id),
+                Err(Stop::Failed(message.clone())),
+            );
+            workflow_finished = true;
+            return Err(message);
+        }
+        emit(app);
+        let _ = response.send(Ok(row));
+        workflow(app, &data, record, &cancel);
+        Ok(())
+    })();
+    if let Err(message) = result {
+        if !workflow_finished {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+        }
+        let _ = response.send(Err(message));
+    }
+}
+
+#[derive(Clone)]
 enum Stop {
     Cancelled,
     Failed(String),
@@ -1890,35 +2821,11 @@ impl From<engine::InstallError> for Stop {
 fn create_workflow(app: &MacosContext, data: &std::path::Path, record: Record, cancel: &AtomicU8) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
-    let _guard = match acquire_workflow_operation(
-        &runtime::OPERATIONS,
-        &id,
-        &record.name,
-        &format!("Creating {}", record.name),
-        &keep_waiting,
-    ) {
-        Ok(guard) => guard,
-        Err(runtime::operation_gate::GateError::Cancelled) => {
-            creation_queue_cancelled(cancel);
-            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
-            return;
-        }
-        Err(runtime::operation_gate::GateError::Abandoned) => {
-            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
-            return;
-        }
-        Err(error) => {
-            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
-            return;
-        }
-    };
     let result = run_creation(app, data, record, &layout, cancel);
     end_workflow(app, &id, &layout, result);
 }
 
-/// A queued Create can be cancelled without deleting the saved computer. Only Delete
-/// sets `CANCEL_AND_REMOVE`; Quit aborts the worker while keeping the incomplete record.
+/// Cancelling a queued Create aborts its work but keeps the incomplete computer record.
 fn creation_queue_cancelled(cancel: &AtomicU8) {
     request_abort(cancel);
 }
@@ -1927,53 +2834,20 @@ fn creation_queue_cancelled(cancel: &AtomicU8) {
 fn setup_workflow(
     app: &MacosContext,
     data: &std::path::Path,
-    id: String,
-    name: String,
+    mut record: Record,
     cancel: &AtomicU8,
 ) {
+    let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
-    match acquire_workflow_operation(
-        &runtime::OPERATIONS,
-        &id,
-        &name,
-        &format!("Setting up {name}"),
-        &keep_waiting,
-    ) {
-        Ok(_guard) => {
-            let record = (|| {
-                let _admitted = admission()?;
-                let mut registry = registry();
-                let entry = registry
-                    .entries
-                    .iter_mut()
-                    .find(|entry| entry.record.id == id)
-                    .ok_or("This computer no longer exists.")?;
-                admit_queued_setup(entry)
-            })();
-            let result = match record {
-                Ok(mut record) => {
-                    emit(app);
-                    run_setup(app, &layout, &mut record, cancel, None)
-                }
-                Err(message) => Err(Stop::Failed(message)),
-            };
-            end_workflow(app, &id, &layout, result);
-        }
-        Err(runtime::operation_gate::GateError::Cancelled)
-        | Err(runtime::operation_gate::GateError::Abandoned) => {
-            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
-        }
-        Err(error) => {
-            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
-        }
-    }
+    let result = run_setup(app, &layout, &mut record, cancel, None);
+    end_workflow(app, &id, &layout, result);
 }
 
 fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<(), Stop>) {
     // The outcome is decided under the lock a Delete takes, so a Delete accepted
     // before it is never lost.
-    let finish = registry().finish_workflow(id, result);
+    let finish = registry().finish_workflow(id, result.clone());
+    let deleted = matches!(&finish, Finish::Remove);
     match &finish {
         Finish::Remove => {
             let removal = remove_computer(layout);
@@ -1986,6 +2860,7 @@ fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<()
     // An installation that held a restore image may have been the last reason to keep it.
     remove_restore_images(app, matches!(finish, Finish::Kept).then_some(id));
     emit(app);
+    finish_workflow_job(app, id, deleted, result);
 }
 
 /// Deletes a computer's files, after making sure this Mac no longer holds its disk image.
@@ -2002,9 +2877,8 @@ fn run_creation(
     cancel: &AtomicU8,
 ) -> Result<(), Stop> {
     let id = record.id.clone();
-    let cancelled = || {
-        cancel.load(Ordering::SeqCst) != RUN || runtime::OPERATIONS.removal_queued(&id)
-    };
+    let cancelled =
+        || cancel.load(Ordering::SeqCst) != RUN || runtime::OPERATIONS.removal_queued(&id);
     let check = || {
         if cancelled() {
             Err(Stop::Cancelled)
@@ -2261,22 +3135,6 @@ fn acquire_computer_operation<'a>(
         .map_err(|error| error.to_string())
 }
 
-fn acquire_workflow_operation<'a>(
-    gate: &'a runtime::operation_gate::OperationGate,
-    id: &str,
-    name: &str,
-    label: &str,
-    keep_waiting: &dyn Fn() -> bool,
-) -> Result<runtime::operation_gate::OperationGuard<'a>, runtime::operation_gate::GateError> {
-    gate.kind(runtime::operation_gate::OperationKind::ComputerConfiguration)
-        .acquire_while(
-            runtime::operation_gate::Scope::Computer { id: id.into() },
-            Some(name.into()),
-            label,
-            keep_waiting,
-        )
-}
-
 fn with_computer_operation<T>(
     id: &str,
     name: &str,
@@ -2301,31 +3159,13 @@ fn with_macos_computer_operation<T>(
 }
 
 fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
-    ensure_loaded(app)?;
-    let (record, _) = computer(id)?;
     match action {
-        Action::Start => with_computer_operation(
-            id,
-            &record.name,
-            runtime::operation_gate::OperationKind::Lifecycle,
-            &format!("Starting {}", record.name),
-            || start(app, id),
-        ),
-        Action::Stop => with_computer_operation(
-            id,
-            &record.name,
-            runtime::operation_gate::OperationKind::Lifecycle,
-            &format!("Stopping {}", record.name),
-            || stop(app, id),
-        ),
-        Action::ForceStop => with_computer_operation(
-            id,
-            &record.name,
-            runtime::operation_gate::OperationKind::Lifecycle,
-            &format!("Force stopping {}", record.name),
-            || force_stop(app, id),
-        ),
+        Action::Start => start(app, id),
+        Action::Stop => stop(app, id),
+        Action::ForceStop => force_stop(app, id),
         Action::Delete => {
+            ensure_loaded(app)?;
+            let (record, _) = computer(id)?;
             let _guard = runtime::OPERATIONS
                 .removing(&[id.to_owned()], &format!("Deleting {}", record.name))
                 .map_err(|error| error.to_string())?;
@@ -2336,11 +3176,11 @@ fn perform(app: &MacosContext, id: &str, action: Action) -> Result<(), String> {
             cpus,
             memory_gib,
             expected,
-        } => with_computer_operation(
+        } => with_macos_computer_operation(
+            app,
             id,
-            &record.name,
             runtime::operation_gate::OperationKind::ComputerConfiguration,
-            &format!("Saving settings for {}", record.name),
+            "Saving computer settings",
             || change_resource_configuration(app, id, cpus, memory_gib, expected),
         ),
     }
@@ -2474,7 +3314,12 @@ fn launch_start_after_queue<T>(
 /// The stored macOS computer IDs available to the launch settings.
 pub fn computer_ids(app: &MacosContext) -> Vec<String> {
     app_data(app)
-        .map(|data| store::load_all(&data).into_iter().map(|record| record.id).collect())
+        .map(|data| {
+            store::load_all(&data)
+                .into_iter()
+                .map(|record| record.id)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -2504,16 +3349,28 @@ fn computer_generation(id: &str) -> Result<u64, String> {
 
 fn start(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
-    let data = app_data(app)?;
-    // The state check and the change to `starting` happen under one lock.
-    let record = {
-        let _admitted = admission()?;
-        let mut registry = registry();
-        let entry = registry
+    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "computers.start")?;
+    let _operation = match admit_macos_job(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::Lifecycle,
+        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+        Some(name),
+        "Starting Mac",
+    ) {
+        Ok(operation) => operation,
+        Err(message) => return Err(message),
+    };
+    // A queued operation must re-read and validate the row after it reaches the gate.
+    let begin: Result<_, String> = (|| {
+        let admitted = admission()?;
+        let mut computers = registry();
+        let index = computers
             .entries
-            .iter_mut()
-            .find(|entry| entry.record.id == id)
+            .iter()
+            .position(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        let entry = &computers.entries[index];
         if entry.deleting {
             return Err("This computer is being deleted.".into());
         }
@@ -2529,18 +3386,30 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
         // deleted, until the start has read it.
         let mut started = entry.record.clone();
         started.pristine = false;
+        let pending = entry.record.pending_restore.clone();
         if started != entry.record {
             store::save(&Layout::new(&data, id), &started)?;
         }
-        let pending = entry.record.pending_restore.clone();
+        let entry = &mut computers.entries[index];
         entry.record = started;
         entry.state = State::Starting;
         entry.attempt += 1;
         entry.detail = None;
         entry.since = Instant::now();
-        (entry.record.clone(), pending, entry.attempt)
+        let attempt = entry.attempt;
+        let record = entry.record.clone();
+        track_macos_job(id, job.job_id.clone());
+        drop(computers);
+        drop(admitted);
+        Ok((record, pending, attempt))
+    })();
+    let (record, pending, attempt) = match begin {
+        Ok(begin) => begin,
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            return Err(message);
+        }
     };
-    let (record, pending, attempt) = record;
     emit(app);
     watch(app);
     let layout = Layout::new(&data, id);
@@ -2573,6 +3442,12 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
                 ports::computer_started(app, id);
             }
             guest_computer_use::update_in_background(app, id, attempt);
+            finish_macos_job(
+                app.engine.as_ref(),
+                Some(id),
+                job.job_id,
+                lifecycle_job_outcome(Ok(())),
+            );
             Ok(())
         }
         Err(message) => {
@@ -2580,6 +3455,12 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
             let released = ensure_released(app, id, attempt);
             registry().settle_failed_start(id, attempt, released);
             emit(app);
+            finish_macos_job(
+                app.engine.as_ref(),
+                Some(id),
+                job.job_id,
+                lifecycle_job_outcome(Err(message.clone())),
+            );
             Err(message)
         }
     }
@@ -2705,21 +3586,77 @@ fn start_machine(
 
 fn begin_setup(app: &MacosContext, id: &str) -> Result<(), String> {
     require_supported()?;
-    let data = app_data(app)?;
-    let (name, cancel) = {
-        let _admitted = admission()?;
-        let mut registry = registry();
-        let entry = registry
-            .entries
-            .iter_mut()
-            .find(|entry| entry.record.id == id)
-            .ok_or("This computer no longer exists.")?;
-        reserve_setup(entry)?
-    };
+
+    let (job, data, name) = accept_loaded_lifecycle_job(app, id, "macos.setup.retry")?;
+    let (sender, receiver) = std::sync::mpsc::channel();
     let app = app.clone();
-    let id = id.to_owned();
-    std::thread::spawn(move || setup_workflow(&app, &data, id, name, &cancel));
-    Ok(())
+    let worker_id = id.to_owned();
+    std::thread::spawn(move || setup_job_worker(&app, data, worker_id, name, job, sender));
+    receiver
+        .recv()
+        .map_err(|_| "The macOS setup worker stopped unexpectedly.".to_owned())?
+}
+
+fn setup_job_worker(
+    app: &MacosContext,
+    data: PathBuf,
+    id: String,
+    name: String,
+    job: AcceptedMacosJob,
+    response: std::sync::mpsc::Sender<Result<(), String>>,
+) {
+    let _operation = match admit_macos_job(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::ComputerConfiguration,
+        runtime::operation_gate::Scope::Computer { id: id.clone() },
+        Some(name),
+        "Setting up Mac",
+    ) {
+        Ok(operation) => operation,
+        Err(message) => {
+            let _ = response.send(Err(message));
+            return;
+        }
+    };
+    let begin: Result<_, String> = (|| {
+        let admitted = admission()?;
+        let mut computers = registry();
+        let index = computers
+            .entries
+            .iter()
+            .position(|entry| entry.record.id == id)
+            .ok_or("This computer no longer exists.")?;
+
+        let entry = &computers.entries[index];
+        if entry.deleting {
+            return Err("This computer is being deleted.".into());
+        }
+        store::setup_allowed(entry.state, &entry.record)?;
+        let entry = &mut computers.entries[index];
+        entry.cancel.store(RUN, Ordering::SeqCst);
+        entry.state = State::SettingUp;
+        entry.detail = None;
+        entry.progress = None;
+        entry.since = Instant::now();
+        let record = entry.record.clone();
+        let cancel = entry.cancel.clone();
+        track_macos_job(&id, job.job_id.clone());
+        drop(computers);
+        drop(admitted);
+        Ok((record, cancel))
+    })();
+    let (record, cancel) = match begin {
+        Ok(begin) => begin,
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            let _ = response.send(Err(message));
+            return;
+        }
+    };
+    emit(app);
+    let _ = response.send(Ok(()));
+    setup_workflow(app, &data, record, &cancel);
 }
 
 /// Reserves a Retry request without publishing `SettingUp` before the operation queue admits it.
@@ -2842,12 +3779,26 @@ fn request_graceful_stop(
 }
 
 fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    // The ownership check and the claim of the transition happen under one lock.
-    let (record, before) = {
-        let mut registry = registry();
-        let entry = registry
-            .entry(id)
+    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.stop")?;
+    let _operation = match admit_macos_job(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::Lifecycle,
+        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+        Some(name),
+        "Stopping Mac",
+    ) {
+        Ok(operation) => operation,
+        Err(message) => return Err(message),
+    };
+    let begin: Result<_, String> = (|| {
+        let mut computers = registry();
+        let index = computers
+            .entries
+            .iter()
+            .position(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        let entry = &computers.entries[index];
         if !matches!(entry.state, State::Running | State::Stopping) {
             return Err("This computer isn't running.".into());
         }
@@ -2855,11 +3806,21 @@ fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
             return Err(checkpoints::BUSY.into());
         }
         let before = entry.state;
+        let entry = &mut computers.entries[index];
         if before == State::Running {
             entry.state = State::Stopping;
             entry.since = Instant::now();
         }
-        (entry.record.clone(), before)
+        let record = entry.record.clone();
+        track_macos_job(id, job.job_id.clone());
+        Ok((record, before))
+    })();
+    let (record, before) = match begin {
+        Ok(begin) => begin,
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            return Err(message);
+        }
     };
     emit(app);
     let note = match request_graceful_stop(app, &record, SSH_SHUTDOWN_TIMEOUT) {
@@ -2867,6 +3828,12 @@ fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
         Err(message) => {
             registry().undo_force_stop(id, before);
             emit(app);
+            finish_macos_job(
+                app.engine.as_ref(),
+                Some(id),
+                job.job_id,
+                lifecycle_job_outcome(Err(message.clone())),
+            );
             return Err(message);
         }
     };
@@ -2879,17 +3846,80 @@ fn stop(app: &MacosContext, id: &str) -> Result<(), String> {
             entry.detail = note.map(str::to_string);
         }
     });
+    finish_macos_job(
+        app.engine.as_ref(),
+        Some(id),
+        job.job_id,
+        lifecycle_job_outcome(Ok(())),
+    );
     Ok(())
 }
 
 fn force_stop(app: &MacosContext, id: &str) -> Result<(), String> {
-    let before = registry().begin_force_stop(id)?;
+    let (job, _, name) = accept_loaded_lifecycle_job(app, id, "computers.forceStop")?;
+    let _operation = match admit_macos_job(
+        app.engine.as_ref(),
+        &job,
+        runtime::operation_gate::OperationKind::Lifecycle,
+        runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+        Some(name),
+        "Force stopping Mac",
+    ) {
+        Ok(operation) => operation,
+        Err(message) => return Err(message),
+    };
+    let begin: Result<_, String> = (|| {
+        let mut computers = registry();
+        let index = computers
+            .entries
+            .iter()
+            .position(|entry| entry.record.id == id)
+            .ok_or("This computer no longer exists.")?;
+        let entry = &computers.entries[index];
+        if !matches!(
+            entry.state,
+            State::Running | State::Starting | State::Stopping
+        ) {
+            return Err("This computer isn't running.".into());
+        }
+        if entry.operation.is_some() {
+            return Err(checkpoints::BUSY.into());
+        }
+        let before = entry.state;
+        let entry = &mut computers.entries[index];
+        if entry.state == State::Running {
+            entry.state = State::Stopping;
+            entry.since = Instant::now();
+        }
+        entry.detail = None;
+        track_macos_job(id, job.job_id.clone());
+        Ok(before)
+    })();
+    let before = match begin {
+        Ok(before) => before,
+        Err(message) => {
+            fail_macos_job(app.engine.as_ref(), &job, message.clone());
+            return Err(message);
+        }
+    };
     emit(app);
     if let Err(message) = engine::force_stop(app, id) {
         registry().undo_force_stop(id, before);
         emit(app);
+        finish_macos_job(
+            app.engine.as_ref(),
+            Some(id),
+            job.job_id,
+            lifecycle_job_outcome(Err(message.clone())),
+        );
         return Err(message);
     }
+    finish_macos_job(
+        app.engine.as_ref(),
+        Some(id),
+        job.job_id,
+        lifecycle_job_outcome(Ok(())),
+    );
     Ok(())
 }
 
@@ -3010,6 +4040,7 @@ struct Held<'a> {
     record: Record,
     state: State,
     cancel: Arc<AtomicU8>,
+    _operation: Option<runtime::operation_gate::OperationGuard<'static>>,
 }
 
 impl Drop for Held<'_> {
@@ -3027,12 +4058,66 @@ fn first_stage(kind: checkpoints::OperationKind) -> &'static str {
     }
 }
 
+fn checkpoint_gate_kind(
+    kind: checkpoints::OperationKind,
+) -> runtime::operation_gate::OperationKind {
+    match kind {
+        checkpoints::OperationKind::Capture => {
+            runtime::operation_gate::OperationKind::CheckpointCapture
+        }
+        checkpoints::OperationKind::Restore => {
+            runtime::operation_gate::OperationKind::CheckpointRestore
+        }
+        checkpoints::OperationKind::Fork => runtime::operation_gate::OperationKind::CheckpointFork,
+        checkpoints::OperationKind::Delete => {
+            runtime::operation_gate::OperationKind::CheckpointDelete
+        }
+    }
+}
+
 /// Claims the computer for one checkpoint operation, if nothing else is using it.
 fn begin_operation<'a>(
     app: &'a MacosContext,
     id: &str,
     kind: checkpoints::OperationKind,
+    job: &AcceptedMacosJob,
 ) -> Result<Held<'a>, String> {
+    begin_operation_for(app, id, kind, Some(job))
+}
+
+/// Claims the computer for `kind`. A checkpoint job admits through the operation queue; an
+/// export holds its own export operation for the whole archive and passes no job.
+fn begin_operation_for<'a>(
+    app: &'a MacosContext,
+    id: &str,
+    kind: checkpoints::OperationKind,
+    job: Option<&AcceptedMacosJob>,
+) -> Result<Held<'a>, String> {
+    drop(admission()?);
+    let operation = match job {
+        Some(job) => {
+            let computer_name = registry()
+                .entry(id)
+                .map(|entry| entry.record.name.clone())
+                .ok_or("This computer no longer exists.")?;
+            let gate_kind = checkpoint_gate_kind(kind);
+            let label = match kind {
+                checkpoints::OperationKind::Capture => "Creating checkpoint",
+                checkpoints::OperationKind::Restore => "Restoring checkpoint",
+                checkpoints::OperationKind::Fork => "Forking checkpoint",
+                checkpoints::OperationKind::Delete => "Deleting checkpoint",
+            };
+            Some(admit_checkpoint_job(
+                app.engine.as_ref(),
+                job,
+                gate_kind,
+                runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+                Some(computer_name),
+                label,
+            )?)
+        }
+        None => None,
+    };
     let _admitted = admission()?;
     let (record, state, cancel) = {
         let mut registry = registry();
@@ -3050,6 +4135,13 @@ fn begin_operation<'a>(
         entry.operation = Some(checkpoints::Operation::running(kind, first_stage(kind)));
         (entry.record.clone(), entry.state, entry.cancel.clone())
     };
+    if let Some(job) = job {
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.to_owned(), job.job_id.clone());
+    }
     emit(app);
     Ok(Held {
         app,
@@ -3057,6 +4149,7 @@ fn begin_operation<'a>(
         record,
         state,
         cancel,
+        _operation: operation,
     })
 }
 
@@ -3131,12 +4224,17 @@ fn reserve_for_memory(
         .transpose()
 }
 
-fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {
+fn create_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    name: &str,
+    job: AcceptedMacosJob,
+) -> Result<checkpoints::Meta, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Capture)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Capture, &job)?;
     let layout = Layout::new(&data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
@@ -3171,14 +4269,19 @@ fn create_checkpoint(app: &MacosContext, id: &str, name: &str) -> Result<(), Str
     };
     let result = checkpoints::create(&subject, &name, checkpoints::Reason::Manual);
     refresh_checkpoints(app, id, &layout);
-    result.map(|_| ())
+    result
 }
 
-fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn restore_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    checkpoint_id: &str,
+    job: AcceptedMacosJob,
+) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Restore)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Restore, &job)?;
     let layout = Layout::new(&data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
@@ -3235,11 +4338,16 @@ fn restore_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resu
     Ok(())
 }
 
-fn delete_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Result<(), String> {
+fn delete_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    checkpoint_id: &str,
+    job: AcceptedMacosJob,
+) -> Result<(), String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Delete)?;
+    let held = begin_operation(app, id, checkpoints::OperationKind::Delete, &job)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
     if checkpoints::journal_pins(&layout, &target.id) {
@@ -3267,24 +4375,76 @@ fn delete_checkpoint(app: &MacosContext, id: &str, checkpoint_id: &str) -> Resul
 
 /// Creates a stopped computer with a copy of a checkpoint's disk, and sets it up in the
 /// background: it gets its own password, keys and name, like a copy of a template.
+type ForkWorkflow = Box<
+    dyn FnOnce(
+            &MacosContext,
+            &Layout,
+            &mut Record,
+            &AtomicU8,
+            Option<templates::SpaceReservation>,
+        ) -> Result<(), Stop>
+        + Send
+        + 'static,
+>;
+
+struct ForkContinuation {
+    data: PathBuf,
+    record: Record,
+    cancel: Arc<AtomicU8>,
+    space: templates::SpaceReservation,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: ForkWorkflow,
+}
+
 fn fork_checkpoint(
     app: &MacosContext,
     id: &str,
     checkpoint_id: &str,
     new_name: &str,
-) -> Result<(), String> {
+    job: AcceptedMacosJob,
+) -> Result<ForkContinuation, String> {
     require_supported()?;
     ensure_loaded(app)?;
     let data = app_data(app)?;
+    fork_checkpoint_with_workflow(
+        app,
+        &data,
+        id,
+        checkpoint_id,
+        new_name,
+        job,
+        &runtime::OPERATIONS,
+        run_setup,
+    )
+}
+
+fn fork_checkpoint_with_workflow(
+    app: &MacosContext,
+    data: &std::path::Path,
+    id: &str,
+    checkpoint_id: &str,
+    new_name: &str,
+    job: AcceptedMacosJob,
+    gate: &'static runtime::operation_gate::OperationGate,
+    workflow: impl FnOnce(
+            &MacosContext,
+            &Layout,
+            &mut Record,
+            &AtomicU8,
+            Option<templates::SpaceReservation>,
+        ) -> Result<(), Stop>
+        + Send
+        + 'static,
+) -> Result<ForkContinuation, String> {
     let new_name = new_name.trim().to_string();
     // Held until the fork is registered and saved, so a Linux creation sees it.
     let reservation =
         crate::computer_names::reserve(&[new_name.clone()], &|| app.linux_computer_names())?;
-    let held = begin_operation(app, id, checkpoints::OperationKind::Fork)?;
-    let source = Layout::new(&data, id);
+    let held = begin_operation(app, id, checkpoints::OperationKind::Fork, &job)?;
+    let source = Layout::new(data, id);
     let checkpoint = checkpoints::find(&source, checkpoint_id)?;
-    let space = templates::reserve_space(&data, templates::COPY_ESTIMATE)?;
-    let (record, cancel) = {
+    let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
+    let prepared: Result<(Record, Arc<AtomicU8>), String> = (|| {
         let _admitted = admission()?;
         let mut registry = registry();
         let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
@@ -3306,12 +4466,16 @@ fn fork_checkpoint(
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);
-        (record, cancel)
+        Ok((record, cancel))
+    })();
+    let (record, cancel) = match prepared {
+        Ok(prepared) => prepared,
+        Err(message) => return Err(message),
     };
     drop(reservation);
-    emit(app);
     let fork_id = record.id.clone();
-    let layout = Layout::new(&data, &fork_id);
+    emit(app);
+    let layout = Layout::new(data, &fork_id);
     log_line(
         app,
         id,
@@ -3321,14 +4485,20 @@ fn fork_checkpoint(
         ),
     );
     let copied = copy_for_fork(&source, &checkpoint.id, &layout, record, &fork_id);
-    // The source is free again; the rest happens on the fork.
+    // The source command owns the copy. The setup continuation gets its own gate job only
+    // after the source guard is released, so the two scopes never nest on this thread.
     drop(held);
     match copied {
         Ok(record) => {
-            let (app, data) = (app.clone(), data.clone());
-            emit(&app);
-            std::thread::spawn(move || fork_workflow(&app, &data, record, &cancel, space));
-            Ok(())
+            emit(app);
+            Ok(ForkContinuation {
+                data: data.to_path_buf(),
+                record,
+                cancel,
+                space,
+                gate,
+                workflow: Box::new(workflow),
+            })
         }
         Err(stop) => {
             let message = match &stop {
@@ -3339,6 +4509,33 @@ fn fork_checkpoint(
             Err(message)
         }
     }
+}
+
+/// The source checkpoint job is durable before this function runs. Accept the continuation's
+/// own job before starting its worker; the worker enters the operation gate before it invokes
+/// the personalization callback.
+fn start_fork_continuation(app: &MacosContext, continuation: ForkContinuation) {
+    let id = continuation.record.id.clone();
+    let job = match accept_macos_job(app.engine.as_ref(), "checkpoints.fork", continuation.gate) {
+        Ok(job) => job,
+        Err(message) => {
+            let layout = Layout::new(&continuation.data, &id);
+            end_workflow(app, &id, &layout, Err(Stop::Failed(message)));
+            return;
+        }
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        fork_workflow(
+            &app,
+            &continuation.data,
+            continuation.record,
+            &continuation.cancel,
+            continuation.space,
+            job,
+            continuation.workflow,
+        )
+    });
 }
 
 /// Clones the checkpoint into the fork's folder and publishes the fork as installed.
@@ -3387,29 +4584,33 @@ fn fork_workflow(
     mut record: Record,
     cancel: &AtomicU8,
     space: templates::SpaceReservation,
+    job: AcceptedMacosJob,
+    workflow: ForkWorkflow,
 ) {
     let id = record.id.clone();
     let layout = Layout::new(data, &id);
-    let keep_waiting = || !runtime::OPERATIONS.removal_queued(&id);
-    match acquire_workflow_operation(
-        &runtime::OPERATIONS,
+
+    let _operation = match admit_and_track_computer_workflow(
+        app.engine.as_ref(),
+        &job,
         &id,
         &record.name,
-        &format!("Setting up {}", record.name),
-        &keep_waiting,
+        "Setting up forked Mac",
     ) {
-        Ok(_guard) => {
-            let result = run_setup(app, &layout, &mut record, cancel, Some(space));
-            end_workflow(app, &id, &layout, result);
+        Ok(operation) => operation,
+        Err(message) => {
+            untrack_macos_job(&id, &job.job_id);
+            let result = if job.cancellation.load(Ordering::SeqCst) {
+                Stop::Cancelled
+            } else {
+                Stop::Failed(message)
+            };
+            end_workflow(app, &id, &layout, Err(result));
+            return;
         }
-        Err(runtime::operation_gate::GateError::Cancelled)
-        | Err(runtime::operation_gate::GateError::Abandoned) => {
-            end_workflow(app, &id, &layout, Err(Stop::Cancelled));
-        }
-        Err(error) => {
-            end_workflow(app, &id, &layout, Err(Stop::Failed(error.to_string())));
-        }
-    }
+    };
+    let result = workflow(app, &layout, &mut record, cancel, Some(space));
+    end_workflow(app, &id, &layout, result);
 }
 
 // MARK: Display
@@ -3775,6 +4976,1719 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use silo_engine::context::{
+        EngineIdentity, EnginePaths, EngineRuntimeState, MainThread, PackageKind, ProcessControl,
+    };
+    use std::sync::atomic::AtomicUsize;
+
+    struct JobTestContext {
+        paths: silo_engine::EnginePaths,
+        identity: EngineIdentity,
+        runtime_state: Arc<EngineRuntimeState>,
+        published_events: std::sync::Mutex<Vec<Event>>,
+    }
+
+    struct JobTestHost;
+
+    impl MacosHost for JobTestHost {
+        fn show_display(
+            &self,
+            _context: &MacosContext,
+            _id: &str,
+            _title: &str,
+            _toolbar: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn close_display(&self, _id: &str) {}
+
+        fn linux_computer_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    impl JobTestContext {
+        fn new(app_data: PathBuf) -> Self {
+            Self {
+                paths: EnginePaths {
+                    app_data,
+                    ..EnginePaths::default()
+                },
+                identity: EngineIdentity {
+                    channel: silo_engine::channel::Channel::Production,
+                    version: "test".into(),
+                    package_kind: PackageKind::MacApp,
+                },
+                runtime_state: Arc::new(EngineRuntimeState::default()),
+                published_events: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl EngineContext for JobTestContext {
+        fn paths(&self) -> &EnginePaths {
+            &self.paths
+        }
+
+        fn identity(&self) -> &EngineIdentity {
+            &self.identity
+        }
+
+        fn runtime_state(&self) -> Arc<EngineRuntimeState> {
+            self.runtime_state.clone()
+        }
+
+        fn publish(&self, event: Event, _audience: Audience) {
+            self.published_events
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(event);
+        }
+
+        fn main_thread(&self) -> Option<&dyn MainThread> {
+            None
+        }
+
+        fn process(&self) -> &dyn ProcessControl {
+            self
+        }
+    }
+
+    impl ProcessControl for JobTestContext {
+        fn exit(&self, _code: i32) {}
+
+        fn restart(&self) -> ! {
+            panic!("macOS job tests must not restart the process")
+        }
+    }
+
+    fn isolated_operation_gate() -> &'static runtime::operation_gate::OperationGate {
+        Box::leak(Box::new(runtime::operation_gate::OperationGate::new()))
+    }
+
+    fn macos_context(engine: Arc<dyn EngineContext>) -> MacosContext {
+        MacosContext::new(engine, Arc::new(JobTestHost))
+    }
+
+    fn checkpoint_fixture(data: &std::path::Path, include_access: bool) -> (Record, String) {
+        let mut source = store::new_record(
+            &CreateRequest {
+                name: "source-mac".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:01".into(),
+        );
+        source.installed = true;
+        source.setup = store::SetupProgress {
+            account: true,
+            sip: true,
+            developer_tools: true,
+            computer_use: true,
+            clipboard: true,
+            roots: true,
+            needs_personalizing: false,
+        };
+        source.developer_tools_version = Some(developer_tools::version());
+        let source_layout = Layout::new(data, &source.id);
+        store::save(&source_layout, &source).unwrap();
+        std::fs::write(source_layout.disk(), b"source disk").unwrap();
+        std::fs::write(source_layout.auxiliary_storage(), b"source auxiliary").unwrap();
+        std::fs::write(source_layout.hardware_model(), b"source hardware").unwrap();
+        if include_access {
+            let source_access = guest_access::credentials_dir(&source_layout);
+            std::fs::create_dir_all(&source_access).unwrap();
+            std::fs::write(source_access.join("password"), b"fixture-password").unwrap();
+            std::fs::write(source_access.join("id_ed25519"), b"fixture-private-key").unwrap();
+            std::fs::write(source_access.join("id_ed25519.pub"), b"fixture-public-key").unwrap();
+        }
+
+        let checkpoint_id = uuid::Uuid::new_v4().to_string();
+        let checkpoint_dir = checkpoints::dir(&source_layout, &checkpoint_id);
+        std::fs::create_dir_all(&checkpoint_dir).unwrap();
+        std::fs::write(checkpoint_dir.join("disk.img"), b"checkpoint disk").unwrap();
+        std::fs::write(
+            checkpoint_dir.join("auxiliary-storage.img"),
+            b"checkpoint auxiliary",
+        )
+        .unwrap();
+        let checkpoint_meta = checkpoints::Meta {
+            schema_version: 1,
+            id: checkpoint_id.clone(),
+            name: "Before fork".into(),
+            created_at: "2026-10-14T00:00:00Z".into(),
+            kind: checkpoints::Kind::Disk,
+            reason: checkpoints::Reason::Manual,
+            macos_version: None,
+            host_build: String::new(),
+            size_bytes: None,
+            cpus: Some(source.cpus),
+            memory_gib: Some(source.memory_gib),
+            disk_gib: Some(source.disk_gib),
+            setup_fingerprint: source.setup_version.clone(),
+            computer_use_version: source.computer_use_version.clone(),
+            developer_tools: true,
+            developer_tools_version: source.developer_tools_version.clone(),
+        };
+        std::fs::write(
+            checkpoint_dir.join("checkpoint.json"),
+            serde_json::to_vec(&checkpoint_meta).unwrap(),
+        )
+        .unwrap();
+        (source, checkpoint_id)
+    }
+
+    #[test]
+    fn import_cleanup_detaches_the_disk_before_removing_its_folder() {
+        use std::cell::RefCell;
+
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("disk.img"), b"attached disk").unwrap();
+
+        // The rekey could not detach: recovery must keep the folder and say so, so the caller
+        // keeps its journal and the next launch tries again.
+        let detached_when_asked = RefCell::new(Vec::new());
+        let refuse = |disk: &std::path::Path| {
+            detached_when_asked.borrow_mut().push(disk.exists());
+            Err("The computer's disk is still attached to this Mac.".to_string())
+        };
+        let error = recover_archive_import_in(directory.path(), &id, &refuse).unwrap_err();
+        assert!(error.contains("still attached"));
+        assert!(
+            stage.join("disk.img").exists(),
+            "an attached disk was deleted"
+        );
+        assert_eq!(*detached_when_asked.borrow(), [true]);
+
+        // Once the detach works, the folder goes, after the detach, and nothing was committed.
+        let detached = RefCell::new(Vec::new());
+        let accept = |disk: &std::path::Path| {
+            detached.borrow_mut().push(disk.exists());
+            Ok(())
+        };
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(*detached.borrow(), [true], "removal must follow the detach");
+        assert!(!stage.exists());
+        // Nothing left: recovery is repeatable and detaches nothing.
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(detached.borrow().len(), 1);
+    }
+
+    #[test]
+    fn import_cleanup_keeps_a_published_folder_whose_disk_will_not_detach() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        let published = root.join(&id);
+        for folder in [&stage, &published] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("disk.img"), b"disk").unwrap();
+        }
+        let refuse = |_: &std::path::Path| Err("still attached".to_string());
+        // No record proves the rename committed, so both folders are leftovers.
+        assert!(recover_archive_import_in(directory.path(), &id, &refuse).is_err());
+        assert!(stage.join("disk.img").exists());
+        assert!(published.join("disk.img").exists());
+        let detached = std::cell::RefCell::new(Vec::new());
+        let accept = |disk: &std::path::Path| {
+            detached.borrow_mut().push(disk.to_path_buf());
+            Ok(())
+        };
+        assert!(!recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert_eq!(detached.borrow().len(), 2);
+        assert!(!stage.exists() && !published.exists());
+    }
+
+    #[test]
+    fn import_cleanup_of_a_committed_import_detaches_its_leftover_staging_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let root = store::root(directory.path());
+        let stage = root.join(format!(".partial-import-{id}"));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("disk.img"), b"disk").unwrap();
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "imported".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:09".into(),
+        );
+        record.id = id.clone();
+        store::save(&Layout::new(directory.path(), &id), &record).unwrap();
+
+        let refuse = |_: &std::path::Path| Err("still attached".to_string());
+        assert!(recover_archive_import_in(directory.path(), &id, &refuse).is_err());
+        assert!(stage.join("disk.img").exists());
+        assert!(root.join(&id).join("computer.json").exists());
+        let accept = |_: &std::path::Path| Ok(());
+        assert!(recover_archive_import_in(directory.path(), &id, &accept).unwrap());
+        assert!(!stage.exists());
+        assert!(root.join(&id).join("computer.json").exists());
+    }
+
+    #[test]
+    fn interrupted_export_captures_are_found_by_their_operation_and_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = store::root(directory.path());
+        std::fs::create_dir_all(&root).unwrap();
+        let operation = uuid::Uuid::new_v4().to_string();
+        let other = uuid::Uuid::new_v4().to_string();
+
+        // Process termination skips the destructors that would remove a capture.
+        let mut left = Vec::new();
+        for token in [&operation, &operation, &other] {
+            let capture = export_capture_dir(directory.path(), Some(token)).unwrap();
+            std::fs::write(capture.path().join("disk.img"), b"cloned disk").unwrap();
+            std::fs::write(capture.path().join("state.vzvmsave"), b"saved memory").unwrap();
+            left.push(capture.keep());
+        }
+        // A computer folder and a file that merely resembles a capture are never touched.
+        let computer = root.join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&computer).unwrap();
+        let lookalike = root.join(format!(".silo-macos-export-{operation}-file"));
+        std::fs::write(&lookalike, b"not a directory").unwrap();
+
+        remove_export_captures(directory.path(), &operation).unwrap();
+        assert!(!left[0].exists() && !left[1].exists());
+        assert!(
+            left[2].join("disk.img").exists(),
+            "another operation's capture was removed"
+        );
+        assert!(computer.exists());
+        assert!(lookalike.exists());
+        // Reconciling again, or on a folder that never existed, is harmless.
+        remove_export_captures(directory.path(), &operation).unwrap();
+        remove_export_captures(&directory.path().join("missing"), &operation).unwrap();
+        assert!(remove_export_captures(directory.path(), "../escape").is_err());
+    }
+
+    #[test]
+    fn a_live_export_capture_is_named_for_its_operation_and_removed_on_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(store::root(directory.path())).unwrap();
+        let operation = uuid::Uuid::new_v4().to_string();
+        let capture = export_capture_dir(directory.path(), Some(&operation)).unwrap();
+        let path = capture.path().to_path_buf();
+        assert!(path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(&format!(".silo-macos-export-{operation}-")));
+        drop(capture);
+        assert!(!path.exists());
+        assert!(export_capture_dir(directory.path(), Some("not-an-id")).is_err());
+    }
+
+    #[test]
+    fn archive_resources_are_checked_against_this_macs_limits() {
+        let config = |cpus, memory_gib, disk_gib| crate::backup::MacosArchiveConfiguration {
+            payload_version: 1,
+            architecture: "aarch64".into(),
+            source_computer_id: uuid::Uuid::new_v4().to_string(),
+            source_name: "source".into(),
+            cpus,
+            memory_gib,
+            disk_gib,
+            guest_version: "26.0".into(),
+            guest_build: "25A1".into(),
+            host_build: "25F1".into(),
+            hardware_model_digest: String::new(),
+            setup_fingerprint: String::new(),
+            computer_use_fingerprint: String::new(),
+            source: crate::backup::MacosArchiveSourceKind::WholeComputer,
+            memory: crate::backup::MacosArchiveMemory::None,
+            components: Vec::new(),
+        };
+        let small_mac = store::HostLimits {
+            cpus: 4,
+            memory_gib: 16,
+        };
+        assert!(check_archive_resources(small_mac, &config(4, 8, 64)).is_ok());
+        // Twelve CPUs or 64 GiB of memory do not fit this Mac; neither does a leaner Mac's disk floor.
+        assert!(check_archive_resources(small_mac, &config(12, 8, 64))
+            .unwrap_err()
+            .contains("CPUs"));
+        assert!(check_archive_resources(small_mac, &config(4, 64, 64))
+            .unwrap_err()
+            .contains("Memory"));
+        assert!(check_archive_resources(small_mac, &config(4, 8, 8))
+            .unwrap_err()
+            .contains("Disk"));
+    }
+
+    #[test]
+    fn run_markers_follow_the_registry_state_and_start_generation() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        *PUBLISHED_RUNS.lock().unwrap() = None;
+        let mut record = store::new_record(
+            &CreateRequest {
+                name: "marked".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:0a".into(),
+        );
+        record.installed = true;
+        let id = record.id.clone();
+        let layout = Layout::new(directory.path(), &id);
+        store::save(&layout, &record).unwrap();
+        {
+            let mut computers = registry();
+            let mut entry = Entry::new(record, State::Running, None);
+            entry.attempt = 4;
+            computers.entries = vec![entry];
+            computers.loaded = true;
+        }
+        let current = || run_marker::current(directory.path(), &id, |_| true);
+
+        sync_run_markers(&app);
+        assert_eq!(current(), Some(4));
+
+        registry().entries[0].state = State::Stopping;
+        sync_run_markers(&app);
+        assert_eq!(current(), None);
+
+        let mut restarted = registry();
+        restarted.entries[0].state = State::Running;
+        restarted.entries[0].attempt = 5;
+        drop(restarted);
+        sync_run_markers(&app);
+        assert_eq!(current(), Some(5));
+
+        registry().entries.clear();
+        *PUBLISHED_RUNS.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn macos_create_acceptance_precedes_first_restore_recovery() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), true);
+        let layout = Layout::new(directory.path(), &source.id);
+        let restore_journal = layout.dir.join("restore-journal.json");
+        std::fs::write(
+            &restore_journal,
+            format!(r#"{{"phase":"staging","target":"{checkpoint_id}","memory":false}}"#),
+        )
+        .unwrap();
+        let job_registry = context.job_registry().unwrap();
+        let connection = rusqlite::Connection::open(job_registry.path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_acceptance BEFORE INSERT ON jobs
+                 BEGIN SELECT RAISE(ABORT, 'injected allocation failure'); END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let result = create_with_support_check(
+            &app,
+            CreateRequest {
+                name: "new-mac".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            || Ok(()),
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("injected allocation failure"));
+        assert!(
+            restore_journal.exists(),
+            "failed job acceptance must not recover a journal"
+        );
+        assert!(
+            !registry().loaded,
+            "failed job acceptance must not load the computer inventory"
+        );
+        assert!(registry().entries.is_empty());
+    }
+
+    #[test]
+    fn macos_remote_lifecycle_acceptance_precedes_first_restore_recovery() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), true);
+        let layout = Layout::new(directory.path(), &source.id);
+        let restore_journal = layout.dir.join("restore-journal.json");
+        std::fs::write(
+            &restore_journal,
+            format!(r#"{{"phase":"staging","target":"{checkpoint_id}","memory":false}}"#),
+        )
+        .unwrap();
+        let job_registry = context.job_registry().unwrap();
+        let connection = rusqlite::Connection::open(job_registry.path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_acceptance BEFORE INSERT ON jobs
+                 BEGIN SELECT RAISE(ABORT, 'injected allocation failure'); END;",
+            )
+            .unwrap();
+
+        let result = action_for_remote(&app, &source.id, Action::Stop);
+
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|message| message.contains("injected allocation failure")),
+            "unexpected remote Stop result: {result:?}"
+        );
+        assert!(
+            restore_journal.exists(),
+            "failed lifecycle job acceptance must not recover a Restore journal"
+        );
+        assert!(
+            !registry().loaded,
+            "failed lifecycle job acceptance must not load the computer inventory"
+        );
+        assert!(registry().entries.is_empty());
+    }
+
+    #[test]
+    fn macos_checkpoint_jobs_wait_on_the_computer_gate_and_cancel_before_admission() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_PENDING_FORK_WORKFLOWS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        let (source, _) = checkpoint_fixture(directory.path(), true);
+        let source_id = source.id.clone();
+        ensure_loaded(&app).unwrap();
+
+        let gate = isolated_operation_gate();
+        let blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Lifecycle)
+            .acquire(
+                runtime::operation_gate::Scope::Computer {
+                    id: source_id.clone(),
+                },
+                Some(source.name),
+                "Holding source Mac",
+                None,
+            )
+            .unwrap();
+        let job = accept_macos_job(context.as_ref(), "checkpoints.create", gate).unwrap();
+        let job_id = job.job_id.clone();
+        let cancellation = job.cancellation.clone();
+        let worker_app = app.clone();
+        let worker = std::thread::spawn(move || {
+            begin_operation(
+                &worker_app,
+                &source_id,
+                checkpoints::OperationKind::Capture,
+                &job,
+            )
+            .map(|held| drop(held))
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let waiting_entry = loop {
+            let snapshot = gate.snapshot();
+            if let Some(entry) = snapshot
+                .waiting
+                .into_iter()
+                .find(|entry| entry.job_id.as_ref() == Some(&job_id))
+            {
+                break Some(entry);
+            }
+            if worker.is_finished() || Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::yield_now();
+        };
+        let queued_on_expected_scope = waiting_entry.as_ref().is_some_and(|entry| {
+            entry.kind == runtime::operation_gate::OperationKind::CheckpointCapture
+                && entry.computer_id.as_deref() == Some(source.id.as_str())
+        });
+        let cancel_result = waiting_entry
+            .as_ref()
+            .map(|_| job_id.clone())
+            .map(|id| context.job_registry().unwrap().cancel(&id));
+        drop(blocker);
+        let operation_result = worker.join().unwrap();
+        let completion_result: Result<(), String> = operation_result;
+        publish_checkpoint_completion(
+            &app,
+            job_id.clone(),
+            &source.id,
+            &completion_result,
+            cancellation.load(Ordering::SeqCst),
+        );
+        let finished = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap();
+        let no_waiter_remains = !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.job_id.as_ref() == Some(&job_id));
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+
+        assert!(
+            queued_on_expected_scope,
+            "checkpoint capture must wait in its typed, computer-scoped queue"
+        );
+        assert!(matches!(cancel_result, Some(Ok(()))));
+        assert!(no_waiter_remains, "cancel must remove the waiting job");
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        let outcome = finished.outcome.unwrap();
+        assert_eq!(outcome.result, None);
+        assert_eq!(
+            outcome.error.unwrap().code,
+            silo_api::jobs::ErrorCode::Cancelled
+        );
+    }
+
+    #[test]
+    fn macos_checkpoint_operations_use_typed_computer_scopes_while_running() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        let (source, _) = checkpoint_fixture(directory.path(), true);
+        ensure_loaded(&app).unwrap();
+
+        let gate = isolated_operation_gate();
+        let cases = [
+            (
+                checkpoints::OperationKind::Capture,
+                "checkpoints.create",
+                runtime::operation_gate::OperationKind::CheckpointCapture,
+            ),
+            (
+                checkpoints::OperationKind::Restore,
+                "checkpoints.restore",
+                runtime::operation_gate::OperationKind::CheckpointRestore,
+            ),
+            (
+                checkpoints::OperationKind::Fork,
+                "checkpoints.fork",
+                runtime::operation_gate::OperationKind::CheckpointFork,
+            ),
+            (
+                checkpoints::OperationKind::Delete,
+                "checkpoints.delete",
+                runtime::operation_gate::OperationKind::CheckpointDelete,
+            ),
+        ];
+
+        for (operation_kind, method, expected_gate_kind) in cases {
+            let job = accept_macos_job(context.as_ref(), method, gate).unwrap();
+            let job_id = job.job_id.clone();
+            let held = begin_operation(&app, &source.id, operation_kind, &job).unwrap();
+            let running = gate
+                .snapshot()
+                .running
+                .into_iter()
+                .find(|entry| entry.job_id.as_ref() == Some(&job_id))
+                .expect("checkpoint operation must remain admitted while its guard is held");
+
+            assert_eq!(running.kind, expected_gate_kind);
+            assert_eq!(running.computer_id.as_deref(), Some(source.id.as_str()));
+            assert!(
+                !running.cancellable,
+                "admitted checkpoint work is NotCancellable"
+            );
+            assert_eq!(
+                job.registry.get(&job_id).unwrap().unwrap().state,
+                silo_api::jobs::JobState::Running
+            );
+
+            drop(held);
+            let result: Result<(), String> = Ok(());
+            publish_checkpoint_completion(&app, job_id.clone(), &source.id, &result, false);
+            assert_eq!(
+                job.registry.get(&job_id).unwrap().unwrap().state,
+                silo_api::jobs::JobState::Finished
+            );
+        }
+
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+    }
+
+    #[test]
+    fn checkpoint_create_job_returns_the_created_checkpoint() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), true);
+        let meta =
+            checkpoints::find(&Layout::new(directory.path(), &source.id), &checkpoint_id).unwrap();
+        let job = accept_macos_job(
+            context.as_ref(),
+            "checkpoints.create",
+            isolated_operation_gate(),
+        )
+        .unwrap();
+        let job_id = job.job_id.clone();
+        job.registry.mark_running(&job_id).unwrap();
+        let result = Ok(meta);
+        publish_checkpoint_create_completion(&app, job_id.clone(), &source.id, &result, false);
+
+        let finished = job.registry.get(&job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            finished.outcome.unwrap().result,
+            Some(serde_json::json!({
+                "checkpoint": {
+                    "id": checkpoint_id,
+                    "name": "Before fork",
+                    "createdAt": "2026-10-14T00:00:00Z",
+                    "scope": "disk",
+                    "reason": "manual",
+                    "kind": "manual"
+                }
+            }))
+        );
+    }
+
+    #[test]
+    fn creation_scope_narrows_atomically_and_wakes_unrelated_computer_waiters() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = JobTestContext::new(directory.path().to_path_buf());
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(&context, "computers.create", gate).unwrap();
+        let operation = admit_macos_job(
+            &context,
+            &accepted,
+            runtime::operation_gate::OperationKind::ComputerConfiguration,
+            runtime::operation_gate::Scope::Device,
+            None,
+            "Creating forked Mac",
+        )
+        .unwrap();
+
+        let (same_started, same_started_rx) = std::sync::mpsc::channel();
+        let same_gate = gate;
+        let same_job = std::thread::spawn(move || {
+            let _operation = same_gate
+                .kind(runtime::operation_gate::OperationKind::Lifecycle)
+                .acquire(
+                    runtime::operation_gate::Scope::Computer {
+                        id: "forked-id".into(),
+                    },
+                    Some("Forked Mac".into()),
+                    "Starting forked Mac",
+                    None,
+                )
+                .unwrap();
+            same_started.send(()).unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting forked Mac")
+        {
+            assert!(
+                Instant::now() < deadline,
+                "same-computer waiter was not queued"
+            );
+            std::thread::yield_now();
+        }
+
+        let (unrelated_started, unrelated_started_rx) = std::sync::mpsc::channel();
+        let (release_unrelated, release_unrelated_rx) = std::sync::mpsc::channel();
+        let unrelated_gate = gate;
+        let unrelated_job = std::thread::spawn(move || {
+            let _operation = unrelated_gate
+                .kind(runtime::operation_gate::OperationKind::Lifecycle)
+                .acquire(
+                    runtime::operation_gate::Scope::Computer {
+                        id: "existing-id".into(),
+                    },
+                    Some("Existing Mac".into()),
+                    "Starting existing Mac",
+                    None,
+                )
+                .unwrap();
+            unrelated_started.send(()).unwrap();
+            release_unrelated_rx.recv().unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting existing Mac")
+        {
+            assert!(Instant::now() < deadline, "unrelated waiter was not queued");
+            std::thread::yield_now();
+        }
+
+        let before_narrow = gate.generations();
+        assert!(operation.narrow_to_computer("forked-id", "Forked Mac"));
+        assert_eq!(
+            gate.generation("forked-id"),
+            before_narrow.of("forked-id") + 2,
+            "narrowing touches the old Device and new Computer generations"
+        );
+        assert_eq!(
+            gate.generation("untouched-id"),
+            before_narrow.of("untouched-id") + 1,
+            "the old Device scope still invalidates other-computer reads"
+        );
+        let creator = gate
+            .snapshot()
+            .running
+            .into_iter()
+            .find(|entry| entry.job_id.as_ref() == Some(&accepted.job_id))
+            .expect("creation keeps its same running queue entry");
+        assert_eq!(creator.computer_id.as_deref(), Some("forked-id"));
+        assert_eq!(creator.computer_name.as_deref(), Some("Forked Mac"));
+        assert!(!creator.cancellable, "narrowing preserves cancel semantics");
+
+        unrelated_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("unrelated computer waiter should wake and pass");
+        let queue = gate.snapshot();
+        assert!(queue
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting forked Mac"));
+        assert!(!queue
+            .running
+            .iter()
+            .any(|entry| entry.label == "Starting forked Mac"));
+
+        drop(operation);
+        same_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("same-computer waiter should run after creation releases its scope");
+        release_unrelated.send(()).unwrap();
+        same_job.join().unwrap();
+        unrelated_job.join().unwrap();
+        assert!(gate.is_idle());
+    }
+
+    #[test]
+    fn create_worker_narrows_device_scope_before_running_the_long_workflow() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        ensure_loaded(&app).unwrap();
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(context.as_ref(), "computers.create", gate).unwrap();
+        let job_id = accepted.job_id.clone();
+        let (response, response_rx) = std::sync::mpsc::channel();
+        let (workflow_started, workflow_started_rx) = std::sync::mpsc::channel();
+        let (release_workflow, release_workflow_rx) = std::sync::mpsc::channel();
+        let worker_app = app.clone();
+        let worker_data = directory.path().to_path_buf();
+        let worker = std::thread::spawn(move || {
+            create_job_worker(
+                &worker_app,
+                worker_data,
+                CreateRequest {
+                    name: "created-mac".into(),
+                    cpus: 2,
+                    memory_gib: 4,
+                    disk_gib: 64,
+                },
+                accepted,
+                response,
+                move |app, data, record, _cancel| {
+                    workflow_started.send(record.id.clone()).unwrap();
+                    release_workflow_rx.recv().unwrap();
+                    end_workflow(
+                        app,
+                        &record.id,
+                        &Layout::new(data, &record.id),
+                        Err(Stop::Failed("test workflow stopped".into())),
+                    );
+                },
+            )
+        });
+        let row = response_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker must register the computer before entering provisioning")
+            .unwrap();
+        let started_id = workflow_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the injected workflow must hold the creation operation");
+        assert_eq!(row.id, started_id);
+
+        let (same_started, same_started_rx) = std::sync::mpsc::channel();
+        let same_gate = gate;
+        let same_id = row.id.clone();
+        let same_name = row.name.clone();
+        let same_job = std::thread::spawn(move || {
+            let _operation = same_gate
+                .kind(runtime::operation_gate::OperationKind::Lifecycle)
+                .acquire(
+                    runtime::operation_gate::Scope::Computer { id: same_id },
+                    Some(same_name),
+                    "Starting created Mac",
+                    None,
+                )
+                .unwrap();
+            same_started.send(()).unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting created Mac")
+            && Instant::now() < deadline
+        {
+            std::thread::yield_now();
+        }
+        let same_queued = gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting created Mac");
+
+        let (unrelated_started, unrelated_started_rx) = std::sync::mpsc::channel();
+        let (release_unrelated, release_unrelated_rx) = std::sync::mpsc::channel();
+        let unrelated_gate = gate;
+        let unrelated_job = std::thread::spawn(move || {
+            let _operation = unrelated_gate
+                .kind(runtime::operation_gate::OperationKind::Lifecycle)
+                .acquire(
+                    runtime::operation_gate::Scope::Computer {
+                        id: "existing-computer".into(),
+                    },
+                    Some("Existing Mac".into()),
+                    "Starting existing Mac during creation",
+                    None,
+                )
+                .unwrap();
+            unrelated_started.send(()).unwrap();
+            release_unrelated_rx.recv().unwrap();
+        });
+        let unrelated_admitted_while_workflow_runs = unrelated_started_rx
+            .recv_timeout(Duration::from_millis(250))
+            .is_ok();
+        let queue = gate.snapshot();
+        let creator = queue
+            .running
+            .iter()
+            .find(|entry| entry.job_id.as_ref() == Some(&job_id));
+        let creator_scope_is_narrowed = creator.is_some_and(|entry| {
+            entry.computer_id.as_deref() == Some(row.id.as_str())
+                && entry.computer_name.as_deref() == Some(row.name.as_str())
+        });
+        let creator_remains_non_cancellable = creator.is_some_and(|entry| !entry.cancellable);
+        let same_started_before_release = same_started_rx.try_recv().is_ok();
+        let same_computer_waiter_stays_blocked = queue
+            .waiting
+            .iter()
+            .any(|entry| entry.label == "Starting created Mac")
+            && !same_started_before_release;
+
+        release_workflow.send(()).unwrap();
+        worker.join().unwrap();
+        release_unrelated.send(()).unwrap();
+        let same_admitted_after_workflow = same_started_before_release
+            || same_started_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+        same_job.join().unwrap();
+        let unrelated_finished = unrelated_job.join().is_ok();
+        assert!(gate.is_idle());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        assert!(same_queued, "same-computer waiter was not queued");
+        assert!(
+            unrelated_admitted_while_workflow_runs,
+            "creation must narrow to its computer and wake unrelated lifecycle work"
+        );
+        assert!(
+            same_computer_waiter_stays_blocked,
+            "same-computer work must remain blocked during creation"
+        );
+        assert!(
+            creator_scope_is_narrowed,
+            "creator entry must name its computer"
+        );
+        assert!(
+            creator_remains_non_cancellable,
+            "creation remains cancellable through Delete"
+        );
+        assert!(
+            same_admitted_after_workflow,
+            "same-computer operation must run afterward"
+        );
+        assert!(
+            unrelated_finished,
+            "unrelated operation must finish after release"
+        );
+    }
+
+    #[test]
+    fn fork_workflow_job_records_setup_failure_without_overwriting_fork_command() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), true);
+        let source_id = source.id.clone();
+        ensure_loaded(&app).unwrap();
+        MACOS_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        let gate = isolated_operation_gate();
+        let command = accept_macos_job(context.as_ref(), "checkpoints.fork", gate).unwrap();
+        let command_job_id = command.job_id.clone();
+        let command_cancellation = command.cancellation.clone();
+        let command_registry = command.registry.clone();
+        let (workflow_started, workflow_started_rx) = std::sync::mpsc::channel();
+        let (release_workflow, release_workflow_rx) = std::sync::mpsc::channel();
+        let workflow_registry = command_registry.clone();
+        let workflow_parent_id = command_job_id.clone();
+        let continuation = fork_checkpoint_with_workflow(
+            &app,
+            directory.path(),
+            &source_id,
+            &checkpoint_id,
+            "forked-mac",
+            command,
+            gate,
+            move |_app, _layout, record, _cancel, _space| {
+                let parent_state = workflow_registry
+                    .get(&workflow_parent_id)
+                    .unwrap()
+                    .map(|job| job.state);
+                workflow_started
+                    .send((record.id.clone(), parent_state))
+                    .unwrap();
+                release_workflow_rx.recv().unwrap();
+                Err(Stop::Failed("Personalization failed.".into()))
+            },
+        )
+        .unwrap();
+
+        let connection = rusqlite::Connection::open(command_registry.path()).unwrap();
+        connection
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_fork_finish BEFORE UPDATE OF state ON jobs \
+                 WHEN OLD.job_id = '{}' AND NEW.state = 'finished' \
+                 BEGIN SELECT RAISE(ABORT, 'injected finish persistence failure'); END;",
+                command_job_id.as_str()
+            ))
+            .unwrap();
+        let source_result: Result<(), String> = Ok(());
+        finish_fork_command(
+            &app,
+            command_job_id.clone(),
+            &source_id,
+            &source_result,
+            command_cancellation.load(Ordering::SeqCst),
+            Some(continuation),
+        );
+        let source_while_finish_is_blocked = command_registry.get(&command_job_id).unwrap();
+        let accepted_jobs_while_finish_is_blocked: i64 = connection
+            .query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            source_while_finish_is_blocked.unwrap().state,
+            silo_api::jobs::JobState::Running
+        );
+        assert_eq!(
+            accepted_jobs_while_finish_is_blocked, 1,
+            "the fork continuation must not be accepted before source completion is durable"
+        );
+        assert!(workflow_started_rx.try_recv().is_err());
+        connection
+            .execute_batch("DROP TRIGGER reject_fork_finish;")
+            .unwrap();
+        retry_pending_checkpoint_completions(&app);
+
+        let workflow_start = workflow_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .ok();
+        let fork_id = workflow_start.as_ref().map(|(fork_id, _)| fork_id.clone());
+        let parent_state_at_setup_start = workflow_start.map(|(_, state)| state);
+        let fork_job_id = fork_id.as_ref().and_then(|fork_id| {
+            MACOS_JOBS
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .get(fork_id)
+                .cloned()
+        });
+        let fork_operation_is_tracked = fork_id.as_ref().is_some_and(|fork_id| {
+            fork_job_id.as_ref().is_some_and(|fork_job_id| {
+                gate.snapshot().running.into_iter().any(|entry| {
+                    entry.job_id.as_ref() == Some(fork_job_id)
+                        && entry.computer_id.as_deref() == Some(fork_id.as_str())
+                        && entry.label == "Setting up forked Mac"
+                })
+            })
+        });
+        let command_result_before_setup_failure = command_registry.get(&command_job_id).unwrap();
+
+        let _ = release_workflow.send(());
+        let fork_result = if let Some(fork_job_id) = fork_job_id.as_ref() {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(result) = command_registry.get(fork_job_id).unwrap() {
+                    if result.state == silo_api::jobs::JobState::Finished {
+                        break Some(result);
+                    }
+                }
+                if Instant::now() >= deadline {
+                    break None;
+                }
+                std::thread::yield_now();
+            }
+        } else {
+            None
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !gate.is_idle() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        let command_result_after_setup_failure = command_registry.get(&command_job_id).unwrap();
+
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_PENDING_FORK_WORKFLOWS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+
+        let command_before = command_result_before_setup_failure
+            .as_ref()
+            .expect("source command must finish before personalization is released");
+        assert_eq!(command_before.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            parent_state_at_setup_start,
+            Some(Some(silo_api::jobs::JobState::Finished)),
+            "the parent source result must be durable before personalization starts"
+        );
+        assert!(
+            command_before.outcome.as_ref().unwrap().error.is_none(),
+            "the copy command succeeds before personalization starts"
+        );
+        assert_eq!(
+            command_before.outcome,
+            command_result_after_setup_failure
+                .as_ref()
+                .expect("source command remains discoverable after personalization")
+                .outcome,
+            "fork personalization must not overwrite the source command outcome: {command_result_before_setup_failure:?} -> {command_result_after_setup_failure:?}"
+        );
+        assert_ne!(fork_job_id.as_ref(), Some(&command_job_id));
+        assert!(
+            fork_result.is_some(),
+            "fork setup outcome was not persisted"
+        );
+        let error = fork_result.unwrap().outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
+        assert_eq!(error.message, "Personalization failed.");
+        assert!(
+            gate.is_idle(),
+            "fork workflow must release its operation scope"
+        );
+        assert!(
+            fork_operation_is_tracked,
+            "fork workflow must enter the operation gate before setup"
+        );
+    }
+
+    #[test]
+    fn fork_copy_failure_finishes_the_source_command_without_a_setup_job() {
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        let (source, checkpoint_id) = checkpoint_fixture(directory.path(), false);
+        let source_id = source.id.clone();
+        ensure_loaded(&app).unwrap();
+        let gate = isolated_operation_gate();
+        let command = accept_macos_job(context.as_ref(), "checkpoints.fork", gate).unwrap();
+        let command_job_id = command.job_id.clone();
+        let command_cancellation = command.cancellation.clone();
+        let command_registry = command.registry.clone();
+
+        let result = fork_checkpoint_with_workflow(
+            &app,
+            directory.path(),
+            &source_id,
+            &checkpoint_id,
+            "fork-without-source-credentials",
+            command,
+            gate,
+            run_setup,
+        );
+        let message = match result {
+            Err(message) => message,
+            Ok(_) => panic!("copy must fail because the source credentials are absent"),
+        };
+        let source_result: Result<(), String> = Err(message.clone());
+        finish_fork_command(
+            &app,
+            command_job_id.clone(),
+            &source_id,
+            &source_result,
+            command_cancellation.load(Ordering::SeqCst),
+            None,
+        );
+
+        let job_ids: Vec<String> = {
+            let connection = rusqlite::Connection::open(command_registry.path()).unwrap();
+            let mut statement = connection
+                .prepare(
+                    "SELECT job_id FROM jobs WHERE method = 'checkpoints.fork' ORDER BY accepted_order",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(job_ids, vec![command_job_id.as_str().to_owned()]);
+        let command_result = command_registry.get(&command_job_id).unwrap().unwrap();
+        assert_eq!(command_result.state, silo_api::jobs::JobState::Finished);
+        let error = command_result.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
+        assert!(error.message.contains("copy"));
+
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        MACOS_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+    }
+
+    #[test]
+    fn admission_persistence_failure_finishes_the_job_before_returning() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = JobTestContext::new(directory.path().to_path_buf());
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(&context, "computers.start", gate).unwrap();
+        let connection = rusqlite::Connection::open(accepted.registry.path()).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_running BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.state = 'running'
+                 BEGIN SELECT RAISE(ABORT, 'injected mark_running failure'); END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = match admit_macos_job(
+            &context,
+            &accepted,
+            runtime::operation_gate::OperationKind::Lifecycle,
+            runtime::operation_gate::Scope::Device,
+            None,
+            "Starting Mac",
+        ) {
+            Ok(_) => panic!("injected persistence failure must reject admission"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("injected mark_running failure"));
+        let finished = accepted.registry.get(&accepted.job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::Internal
+        );
+    }
+
+    #[test]
+    fn failed_lifecycle_command_is_not_overridden_by_the_stopped_row_snapshot() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(context.as_ref(), "computers.start", gate).unwrap();
+        accepted.registry.mark_running(&accepted.job_id).unwrap();
+        let computer_id = accepted.job_id.as_str().replace(':', "-");
+        track_macos_job(&computer_id, accepted.job_id.clone());
+        let state = MacosComputersState {
+            supported: true,
+            unsupported_reason: None,
+            computers: vec![MacosComputer {
+                id: computer_id.clone(),
+                name: "Dev Mac".into(),
+                cpus: 4,
+                memory_gib: 8,
+                disk_gib: 64,
+                os_version: None,
+                state: State::Stopped,
+                progress: None,
+                detail: None,
+                display_open: false,
+                installed: false,
+                setup_complete: false,
+                needs_personalizing: false,
+                checkpoints: Vec::new(),
+                checkpoint_operation: None,
+                pending_restore: None,
+            }],
+            template: None,
+            min_disk_gib: 1,
+        };
+
+        // A failed Start settles its row back to Stopped. A snapshot is progress only;
+        // it must not finish the command successfully before its real result is recorded.
+        publish_job_activity(&app, &state);
+        let before_result = accepted.registry.get(&accepted.job_id).unwrap().unwrap();
+        assert_eq!(before_result.state, silo_api::jobs::JobState::Running);
+
+        finish_macos_job(
+            context.as_ref(),
+            Some(&computer_id),
+            accepted.job_id.clone(),
+            lifecycle_job_outcome(Err("The framework rejected the start.".into())),
+        );
+        let finished = accepted.registry.get(&accepted.job_id).unwrap().unwrap();
+        assert_eq!(finished.state, silo_api::jobs::JobState::Finished);
+        let error = finished.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, silo_api::jobs::ErrorCode::Internal);
+        assert_eq!(error.message, "The framework rejected the start.");
+        assert_eq!(state_after_failed_start(Ok(())).0, State::Stopped);
+    }
+
+    #[test]
+    fn stale_macos_progress_snapshot_is_not_published_after_job_finish() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = JobTestContext::new(directory.path().to_path_buf());
+        let gate = isolated_operation_gate();
+        let accepted = accept_macos_job(&context, "computers.start", gate).unwrap();
+        accepted.registry.mark_running(&accepted.job_id).unwrap();
+        let computer_id = format!("computer-for-{}", accepted.job_id);
+        track_macos_job(&computer_id, accepted.job_id.clone());
+
+        let stale = silo_api::jobs::JobProgress::Macos {
+            job_id: accepted.job_id.clone(),
+            kind: None,
+            computer_id: Some(computer_id.clone()),
+            data: silo_api::jobs::MacosJobProgress {
+                computer_id: computer_id.clone(),
+                state: silo_api::methods::computers::MacosComputerState::Starting,
+                progress: Some(0.5),
+                detail: None,
+                checkpoint_operation: None,
+            },
+        };
+
+        finish_macos_job(
+            &context,
+            Some(&computer_id),
+            accepted.job_id.clone(),
+            lifecycle_job_outcome(Ok(())),
+        );
+        publish_macos_job_progress(&context, &accepted.job_id, stale);
+
+        let published = context
+            .published_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let names = published
+            .iter()
+            .map(|event| event.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["operations.job.finished"]);
+    }
+
+    #[test]
+    fn checkpoint_completion_removes_both_progress_guards_under_the_publication_lock() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let accepted =
+            crate::jobs::allocate(context.as_ref(), "computers.checkpoint.create").unwrap();
+        context
+            .job_registry()
+            .unwrap()
+            .mark_running(&accepted.job_id)
+            .unwrap();
+        let computer_id = "computer-checkpoint-completion-race".to_owned();
+        let finished = macos_job_finished(accepted.job_id.clone(), Ok(()));
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(computer_id.clone(), accepted.job_id.clone());
+        MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(accepted.job_id.clone(), (computer_id, finished));
+
+        let (at_gap_tx, at_gap_rx) = std::sync::mpsc::channel();
+        let (resume_completion_tx, resume_completion_rx) = std::sync::mpsc::channel();
+        let completion_app = app.clone();
+        let completion = std::thread::spawn(move || {
+            retry_pending_checkpoint_completions_with_hook(&completion_app, || {
+                // This is the reviewed gap: the pending guard has been removed,
+                // but the active checkpoint mapping is the last progress guard.
+                at_gap_tx.send(()).unwrap();
+                resume_completion_rx.recv().unwrap();
+            });
+        });
+        at_gap_rx.recv().unwrap();
+
+        let stale = silo_api::jobs::JobProgress::Macos {
+            job_id: accepted.job_id.clone(),
+            kind: None,
+            computer_id: Some("computer-checkpoint-completion-race".into()),
+            data: silo_api::jobs::MacosJobProgress {
+                computer_id: "computer-checkpoint-completion-race".into(),
+                state: silo_api::methods::computers::MacosComputerState::Starting,
+                progress: Some(0.5),
+                detail: None,
+                checkpoint_operation: None,
+            },
+        };
+        let (progress_waiting_tx, progress_waiting_rx) = std::sync::mpsc::channel();
+        let (allow_progress_tx, allow_progress_rx) = std::sync::mpsc::channel();
+        let (progress_done_tx, progress_done_rx) = std::sync::mpsc::channel();
+        let progress_context = context.clone();
+        let progress_job = accepted.job_id.clone();
+        let progress = std::thread::spawn(move || {
+            publish_macos_job_progress_with_hook(
+                progress_context.as_ref(),
+                &progress_job,
+                stale,
+                || {
+                    progress_waiting_tx.send(()).unwrap();
+                    allow_progress_rx.recv().unwrap();
+                },
+            );
+            progress_done_tx.send(()).unwrap();
+        });
+        progress_waiting_rx.recv().unwrap();
+        let publication_lock_held = match MACOS_JOB_EVENT_PUBLISH_LOCK.try_lock() {
+            Ok(guard) => {
+                drop(guard);
+                false
+            }
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                panic!("the macOS job publication lock was poisoned")
+            }
+        };
+        allow_progress_tx.send(()).unwrap();
+        // In the reviewed ordering the lock is free, so wait for stale progress
+        // to publish before allowing active-map cleanup to continue. In the fix,
+        // it is held across both removals and the progress thread waits on it.
+        if !publication_lock_held {
+            progress_done_rx.recv().unwrap();
+        }
+        resume_completion_tx.send(()).unwrap();
+        completion.join().unwrap();
+        progress.join().unwrap();
+
+        let names = context
+            .published_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|event| event.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec!["operations.job.finished"],
+            "stale checkpoint progress must not publish after the terminal result"
+        );
+        assert!(
+            publication_lock_held,
+            "checkpoint result publication and both active-map removals must share the progress lock"
+        );
+        assert!(!MACOS_PENDING_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&accepted.job_id));
+        assert!(!MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|job_id| job_id == &accepted.job_id));
+    }
+
+    #[test]
+    fn generic_cancel_of_admitted_creation_does_not_delete_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = JobTestContext::new(directory.path().to_path_buf());
+        let gate = isolated_operation_gate();
+        let accepted =
+            accept_macos_job(&context, "computers.create", gate).expect("job should be accepted");
+        let _operation = admit_macos_job(
+            &context,
+            &accepted,
+            runtime::operation_gate::OperationKind::ComputerConfiguration,
+            runtime::operation_gate::Scope::Device,
+            None,
+            "Creating Mac",
+        )
+        .expect("job should be admitted");
+
+        let error = accepted.registry.cancel(&accepted.job_id).unwrap_err();
+
+        assert_eq!(error.message(), "This operation can't be cancelled.");
+        assert!(!accepted.cancellation.load(Ordering::SeqCst));
+        assert_eq!(
+            store::delete_mode(State::Preparing),
+            Ok(DeleteMode::Cancel),
+            "creation cancellation remains available through computers.delete"
+        );
+    }
+
+    #[test]
+    fn a_waiting_macos_job_can_be_cancelled_before_its_effect() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let gate = isolated_operation_gate();
+        let _blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .acquire(
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Blocking test operation",
+                None,
+            )
+            .unwrap();
+        let accepted = accept_macos_job(context.as_ref(), "computers.create", gate).unwrap();
+        let job_id = accepted.job_id.clone();
+        let effects = Arc::new(AtomicUsize::new(0));
+        let worker_context = context.clone();
+        let worker_effects = effects.clone();
+        let worker = std::thread::spawn(move || {
+            let operation = admit_macos_job(
+                worker_context.as_ref(),
+                &accepted,
+                runtime::operation_gate::OperationKind::ComputerConfiguration,
+                runtime::operation_gate::Scope::Device,
+                None,
+                "Creating Mac",
+            );
+            if operation.is_ok() {
+                worker_effects.fetch_add(1, Ordering::SeqCst);
+            }
+            operation.map(drop)
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !gate
+            .snapshot()
+            .waiting
+            .iter()
+            .any(|entry| entry.job_id.as_ref() == Some(&job_id))
+        {
+            assert!(
+                Instant::now() < deadline,
+                "macOS job did not enter the wait queue"
+            );
+            std::thread::yield_now();
+        }
+        context
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .expect("waiting job cancellation should be accepted");
+
+        let error = worker.join().unwrap().unwrap_err();
+        assert_eq!(error, "The operation was cancelled.");
+        assert_eq!(effects.load(Ordering::SeqCst), 0);
+        assert!(!gate.contains_job(&job_id));
+        let result = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::Cancelled
+        );
+    }
 
     #[test]
     fn macos_transfer_turn_waits_with_stop_restore_and_export_then_holds_the_scope() {
@@ -3846,21 +6760,20 @@ mod tests {
 
             std::thread::scope(|scope| {
                 scope.spawn(|| {
-                    let result = acquire_macos_transfer_turn(
-                        &gate,
-                        "computer-id",
-                        "dev",
-                        || {
-                            let (state, generation) = *waiter_state.lock().unwrap();
-                            ensure_transfer_target(state, generation, 7)
-                        },
-                    );
+                    let result = acquire_macos_transfer_turn(&gate, "computer-id", "dev", || {
+                        let (state, generation) = *waiter_state.lock().unwrap();
+                        ensure_transfer_target(state, generation, 7)
+                    });
                     result_tx.send(result.map(drop)).unwrap();
                 });
 
                 notifications.recv().unwrap();
                 let queue = gate.snapshot();
-                assert_eq!(queue.waiting.len(), 1, "transfer should be visible while waiting");
+                assert_eq!(
+                    queue.waiting.len(),
+                    1,
+                    "transfer should be visible while waiting"
+                );
                 *observed.lock().unwrap() = (current_state, current_generation);
                 drop(stop);
                 assert_eq!(result_rx.recv().unwrap().unwrap_err(), expected_error);
@@ -3938,7 +6851,9 @@ mod tests {
     impl Drop for ProbeCleanup {
         fn drop(&mut self) {
             if let (Some(port), Some(pid)) = (self.guest_port, self.guest_pid) {
-                if let Ok(alias) = ensure_ssh_alias(&self.context, &self.computer_id, None, Some(false)) {
+                if let Ok(alias) =
+                    ensure_ssh_alias(&self.context, &self.computer_id, None, Some(false))
+                {
                     let _ = probe_ssh_command(
                         &alias.config_path,
                         &alias.alias,
@@ -4013,24 +6928,28 @@ mod tests {
         let layout = Layout::new(&app_data, &computer_id);
         let record = store::read_record(&layout).expect("read the disposable computer record");
         assert!(record.setup.roots, "the guest must have workspace roots");
-        assert!(record.setup_complete(), "the guest must be set up before probing");
+        assert!(
+            record.setup_complete(),
+            "the guest must be set up before probing"
+        );
 
         {
             let mut registry = registry();
-            assert!(!registry.loaded, "run this focused probe in a fresh test process");
+            assert!(
+                !registry.loaded,
+                "run this focused probe in a fresh test process"
+            );
             registry.entries = vec![Entry::new(record, State::Running, None)];
             registry.loaded = true;
         }
 
         let port_config = app_data.join("network/macos-ports.json");
-        let original_port_config = std::fs::read(&port_config)
-            .ok()
-            .map(|bytes| {
-                let permissions = std::fs::metadata(&port_config)
-                    .expect("read port config permissions")
-                    .permissions();
-                (bytes, permissions)
-            });
+        let original_port_config = std::fs::read(&port_config).ok().map(|bytes| {
+            let permissions = std::fs::metadata(&port_config)
+                .expect("read port config permissions")
+                .permissions();
+            (bytes, permissions)
+        });
         let mut cleanup = ProbeCleanup {
             context: context.clone(),
             computer_id: computer_id.clone(),
@@ -4066,7 +6985,12 @@ mod tests {
             .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
             .expect("find the disposable computer in network state");
         let guest_port = (49152..=49215)
-            .find(|port| !initial.ports.iter().any(|candidate| candidate.port == *port))
+            .find(|port| {
+                !initial
+                    .ports
+                    .iter()
+                    .any(|candidate| candidate.port == *port)
+            })
             .expect("find an unused disposable guest port");
         cleanup.guest_port = Some(guest_port);
         let start = probe_ssh_command(
@@ -4097,16 +7021,27 @@ mod tests {
             "lsof should report the disposable guest listener"
         );
 
-        let published = publish_network_port(&context, &computer_id, guest_port, None, Some("http".into()))
-            .expect("publish the live guest listener through SSH");
+        let published = publish_network_port(
+            &context,
+            &computer_id,
+            guest_port,
+            None,
+            Some("http".into()),
+        )
+        .expect("publish the live guest listener through SSH");
         let published = published
             .computers
             .iter()
             .find(|computer| computer.computer_id.as_deref() == Some(&computer_id))
             .and_then(|computer| computer.ports.iter().find(|port| port.port == guest_port))
             .expect("find the published guest port");
-        assert_eq!(published.state, silo_api::methods::network::PublishedPortState::Reachable);
-        let host_port = published.host_port.expect("published port has a host endpoint");
+        assert_eq!(
+            published.state,
+            silo_api::methods::network::PublishedPortState::Reachable
+        );
+        let host_port = published
+            .host_port
+            .expect("published port has a host endpoint");
         let socket = std::net::TcpStream::connect_timeout(
             &std::net::SocketAddr::from(([127, 0, 0, 1], host_port)),
             Duration::from_secs(3),
@@ -4122,8 +7057,10 @@ mod tests {
                 "sudo -n /sbin/shutdown -h now",
             );
             let shutdown_stderr = String::from_utf8_lossy(&shutdown.stderr);
-            assert!(shutdown.status.success() || shutdown_stderr.contains("closed by remote host"),
-                "gracefully shut down the disposable guest: {shutdown_stderr}");
+            assert!(
+                shutdown.status.success() || shutdown_stderr.contains("closed by remote host"),
+                "gracefully shut down the disposable guest: {shutdown_stderr}"
+            );
             eprintln!(
                 "live_guest_shutdown=ssh_exit_{}",
                 shutdown.status.code().unwrap_or(-1),
@@ -4345,19 +7282,30 @@ mod tests {
             )
             .map(drop)
         });
-        let waiting = (0..100).find_map(|_| {
-            let waiting = gate.snapshot().waiting;
-            if waiting.iter().any(|entry| entry.computer_id.as_deref() == Some(id)) {
-                Some(waiting)
-            } else {
-                std::thread::sleep(Duration::from_millis(5));
-                None
-            }
-        }).expect("the macOS operation should be visible while waiting");
-        let queued = waiting.iter().find(|entry| entry.computer_id.as_deref() == Some(id)).unwrap();
+        let waiting = (0..100)
+            .find_map(|_| {
+                let waiting = gate.snapshot().waiting;
+                if waiting
+                    .iter()
+                    .any(|entry| entry.computer_id.as_deref() == Some(id))
+                {
+                    Some(waiting)
+                } else {
+                    std::thread::sleep(Duration::from_millis(5));
+                    None
+                }
+            })
+            .expect("the macOS operation should be visible while waiting");
+        let queued = waiting
+            .iter()
+            .find(|entry| entry.computer_id.as_deref() == Some(id))
+            .unwrap();
         assert_eq!(queued.computer_name.as_deref(), Some("builder"));
         assert_eq!(queued.label, "Setting up builder");
-        assert_eq!(queued.kind, runtime::operation_gate::OperationKind::ComputerConfiguration);
+        assert_eq!(
+            queued.kind,
+            runtime::operation_gate::OperationKind::ComputerConfiguration
+        );
         gate.cancel(queued.id).unwrap();
         assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
     }
@@ -4891,10 +7839,16 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("injected directory sync failure"));
-        assert_eq!((registry_record.cpus, registry_record.memory_gib), (old.cpus, old.memory_gib));
+        assert_eq!(
+            (registry_record.cpus, registry_record.memory_gib),
+            (old.cpus, old.memory_gib)
+        );
         let reloaded = store::load_all(data.path());
         assert_eq!(reloaded, [old.clone()]);
-        assert_eq!((reloaded[0].cpus, reloaded[0].memory_gib), (old.cpus, old.memory_gib));
+        assert_eq!(
+            (reloaded[0].cpus, reloaded[0].memory_gib),
+            (old.cpus, old.memory_gib)
+        );
     }
 
     #[test]
@@ -4902,7 +7856,9 @@ mod tests {
         for cancel_startup in [true, false] {
             let gate: &'static runtime::operation_gate::OperationGate =
                 Box::leak(Box::new(runtime::operation_gate::OperationGate::new()));
-            let blocker = gate.computer("mac-id", "Mac", "Blocking computer operation").unwrap();
+            let blocker = gate
+                .computer("mac-id", "Mac", "Blocking computer operation")
+                .unwrap();
             let cancelled = Arc::new(AtomicBool::new(false));
             let accepting = Arc::new(AtomicBool::new(true));
             let started = Arc::new(AtomicBool::new(false));
@@ -4928,7 +7884,10 @@ mod tests {
             while gate.snapshot().waiting.is_empty() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(2));
             }
-            assert!(!gate.snapshot().waiting.is_empty(), "launch Start did not queue");
+            assert!(
+                !gate.snapshot().waiting.is_empty(),
+                "launch Start did not queue"
+            );
             if cancel_startup {
                 cancelled.store(true, Ordering::SeqCst);
             } else {
@@ -5015,7 +7974,9 @@ mod tests {
         registry.entries[0].state = State::Running;
         let _ = registry.finish_workflow(
             &id,
-            Err(Stop::Failed("Stop the computer before setting it up.".into())),
+            Err(Stop::Failed(
+                "Stop the computer before setting it up.".into(),
+            )),
         );
 
         assert_eq!(registry.entries[0].state, State::Running);

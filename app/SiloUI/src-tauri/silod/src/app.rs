@@ -11,7 +11,7 @@ use objc2::{rc::autoreleasepool, MainThreadMarker};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
 };
-use silo_engine::context::{self, MainThread, ProcessControl};
+use silo_engine::context::{self, EngineContext, MainThread, ProcessControl};
 use tokio::{runtime::Builder, sync::oneshot};
 
 use crate::{
@@ -125,7 +125,18 @@ fn run_appkit(
         Arc::new(AppKitMainThread),
         process.clone(),
     ));
+    context.job_registry()?;
     context::install(context.clone())?;
+    context.install_queue_events();
+
+    let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
+    let runtime_home =
+        silo_engine::runtime::runtime_home_alias(&paths.engine.home, &storage.join("microsandbox"));
+    silo_engine::host_push_operations::reconcile_jobs_before_serving(
+        context.as_ref(),
+        &runtime_home,
+    )?;
+    silo_engine::backup_controller::reconcile_jobs_before_serving(context.as_ref())?;
 
     let runtime = Builder::new_multi_thread()
         .enable_all()

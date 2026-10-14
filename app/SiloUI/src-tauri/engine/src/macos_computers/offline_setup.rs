@@ -326,10 +326,19 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
         ("Library/Preferences/com.apple.loginwindow.plist", true),
         ("private/etc/kcpassword", true),
         (LAUNCHD_DISABLED, true),
-        ("private/var/db/com.apple.xpc.launchd/disabled.migrated", true),
+        (
+            "private/var/db/com.apple.xpc.launchd/disabled.migrated",
+            true,
+        ),
         ("Users/silo/.ssh/authorized_keys", false),
-        ("Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist", true),
-        ("Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist", true),
+        (
+            "Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist",
+            true,
+        ),
+        (
+            "Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist",
+            true,
+        ),
         (
             "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
             true,
@@ -349,7 +358,10 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
     let salt = random_bytes(SALT_BYTES)?;
     user.insert(
         "ShadowHashData".into(),
-        Value::Array(vec![Value::Data(shadow_hash_data(&account.password, &salt)?)]),
+        Value::Array(vec![Value::Data(shadow_hash_data(
+            &account.password,
+            &salt,
+        )?)]),
     );
     normalize_import_shadow_hash_authority(&mut user);
     write_plist(&user, &path, 0o600, true, Format::Binary)?;
@@ -423,20 +435,23 @@ fn validate_import_data_path(
         let leaf = index + 1 == components.len();
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
-            Err(error)
-                if allow_missing && error.kind() == std::io::ErrorKind::NotFound =>
-            {
+            Err(error) if allow_missing && error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(root.join(relative));
             }
             Err(error) => {
-                return Err(fs_error("inspect the imported computer's account files", &error));
+                return Err(fs_error(
+                    "inspect the imported computer's account files",
+                    &error,
+                ));
             }
         };
         if metadata.file_type().is_symlink()
             || (leaf && !metadata.is_file())
             || (!leaf && !metadata.is_dir())
         {
-            return Err("Silo could not safely access the imported computer's account files.".into());
+            return Err(
+                "Silo could not safely access the imported computer's account files.".into(),
+            );
         }
     }
     Ok(path)
@@ -450,7 +465,9 @@ fn validate_import_account_identity(user: &Dictionary) -> Result<(), String> {
         || required_import_account_field(user, "gid")? != GID
         || required_import_account_field(user, "home")? != "/Users/silo"
     {
-        return Err("Silo could not verify the imported computer's managed account identity.".into());
+        return Err(
+            "Silo could not verify the imported computer's managed account identity.".into(),
+        );
     }
     validate_import_authentication_authorities(user)?;
     Ok(())
@@ -467,9 +484,8 @@ fn validate_import_authentication_authorities(user: &Dictionary) -> Result<(), S
         ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2,SRP-RFC5054-4096-SHA512-PBKDF2>";
     const SECURE_TOKEN: &str = ";SecureToken;";
 
-    let invalid = || {
-        Err("Silo could not verify the imported computer's managed account identity.".into())
-    };
+    let invalid =
+        || Err("Silo could not verify the imported computer's managed account identity.".into());
     let authorities = user
         .get("authentication_authority")
         .and_then(Value::as_array)
@@ -620,7 +636,7 @@ fn ensure_uid_available(users: &Path) -> Result<(), String> {
         {
             continue;
         }
-        let uid = Value::from_file(&path).ok().and_then(|record| {
+        let uid = read_plist_value(&path).ok().and_then(|record| {
             let record = record.into_dictionary()?;
             let list = record.get("uid")?.as_array()?;
             list.first()?.as_string().map(String::from)
@@ -1008,10 +1024,36 @@ fn fs_error(action: &str, error: &std::io::Error) -> String {
     super::store::io_error(action, error)
 }
 
+/// The largest property list Silo decodes from a guest disk. The account, group, and setup
+/// lists it edits are a few kilobytes; an imported disk is archive-controlled, so a larger file
+/// is refused before it is decoded.
+const MAX_PLIST_BYTES: u64 = 1024 * 1024;
+
+fn read_plist_value(path: &Path) -> Result<Value, String> {
+    read_plist_value_limited(path, MAX_PLIST_BYTES)
+}
+
+fn read_plist_value_limited(path: &Path, limit: u64) -> Result<Value, String> {
+    use std::io::Read as _;
+
+    let unreadable = || format!("Silo could not read {}.", path.display());
+    let file = fs::File::open(path).map_err(|_| unreadable())?;
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| unreadable())?;
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "{} is larger than Silo reads from a computer's disk.",
+            path.display()
+        ));
+    }
+    Value::from_reader(std::io::Cursor::new(bytes)).map_err(|_| unreadable())
+}
+
 fn read_plist(path: &Path) -> Result<Dictionary, String> {
-    Value::from_file(path)
-        .ok()
-        .and_then(Value::into_dictionary)
+    read_plist_value(path)?
+        .into_dictionary()
         .ok_or_else(|| format!("Silo could not read {}.", path.display()))
 }
 
@@ -1185,6 +1227,39 @@ mod tests {
             .map(|(index, byte)| byte ^ KCPASSWORD_KEY[index % 11])
             .collect();
         assert_eq!(decoded, b"lume\0\0\0\0\0\0\0\0");
+    }
+
+    #[test]
+    fn plist_reads_are_capped_before_decoding() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("user.plist");
+        let mut small = Dictionary::new();
+        small.insert("name".into(), Value::String("silo".into()));
+        write_plist(&small, &path, 0o600, false, Format::Xml).unwrap();
+        let size = fs::metadata(&path).unwrap().len();
+        // A file at the limit decodes; one byte over is refused without being parsed.
+        assert_eq!(
+            read_plist_value_limited(&path, size)
+                .unwrap()
+                .into_dictionary()
+                .unwrap(),
+            small
+        );
+        let error = read_plist_value_limited(&path, size - 1).unwrap_err();
+        assert!(error.contains("larger than Silo reads"), "{error}");
+
+        // The real cap applies to every account and group read of an imported disk.
+        let oversized = directory.path().join("oversized.plist");
+        let file = fs::File::create(&oversized).unwrap();
+        file.set_len(MAX_PLIST_BYTES + 1).unwrap();
+        drop(file);
+        assert!(read_plist(&oversized)
+            .unwrap_err()
+            .contains("larger than Silo reads"));
+        assert!(read_plist_value(&oversized).is_err());
+        // An oversized neighbour never counts as a match when checking user IDs.
+        fs::copy(&oversized, directory.path().join("neighbour.plist")).unwrap();
+        ensure_uid_available(directory.path()).unwrap();
     }
 
     #[test]
@@ -1497,8 +1572,11 @@ mod tests {
         fs::create_dir_all(home.join("Documents")).unwrap();
         fs::write(home.join("Documents/original.txt"), b"archive home marker").unwrap();
         fs::create_dir_all(home.join(".ssh")).unwrap();
-        fs::write(home.join(".ssh/authorized_keys"), b"ssh-ed25519 AAAA source-device\n")
-            .unwrap();
+        fs::write(
+            home.join(".ssh/authorized_keys"),
+            b"ssh-ed25519 AAAA source-device\n",
+        )
+        .unwrap();
         fs::create_dir_all(home.join("Library/LaunchAgents")).unwrap();
         fs::write(
             home.join("Library/LaunchAgents/org.silo.computer-use-reconcile.plist"),
@@ -1694,6 +1772,21 @@ mod tests {
     }
 
     #[test]
+    fn import_rekey_refuses_an_oversized_account_plist_and_leaves_it_untouched() {
+        let (root, _, _) = imported_volume();
+        let user_path = root
+            .path()
+            .join("private/var/db/dslocal/nodes/Default/users/silo.plist");
+        let file = fs::OpenOptions::new().write(true).open(&user_path).unwrap();
+        file.set_len(MAX_PLIST_BYTES + 1).unwrap();
+        drop(file);
+
+        let error = rekey_import_data_volume(root.path(), &account()).unwrap_err();
+        assert!(error.contains("larger than Silo reads"), "{error}");
+        assert_eq!(fs::metadata(&user_path).unwrap().len(), MAX_PLIST_BYTES + 1);
+    }
+
+    #[test]
     fn import_rekey_accepts_macos_authorities_in_any_order_and_clears_source_auth_state() {
         let (root, _, _) = imported_volume();
         let user_path = root
@@ -1707,8 +1800,7 @@ mod tests {
         let authorities = Value::Array(vec![
             Value::String(";SecureToken;".into()),
             Value::String(
-                ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2,SRP-RFC5054-4096-SHA512-PBKDF2>"
-                    .into(),
+                ";ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2,SRP-RFC5054-4096-SHA512-PBKDF2>".into(),
             ),
             kerberos.clone(),
         ]);
@@ -1949,10 +2041,8 @@ mod tests {
 
         let mut attached = Attached::attach(Path::new(&disk)).unwrap();
         let root = attached.mount_data_volume().unwrap();
-        let user = read_plist(
-            &root.join("private/var/db/dslocal/nodes/Default/users/silo.plist"),
-        )
-        .unwrap();
+        let user = read_plist(&root.join("private/var/db/dslocal/nodes/Default/users/silo.plist"))
+            .unwrap();
         assert_eq!(user["name"], string_list(USER));
         assert_eq!(
             user["authentication_authority"],

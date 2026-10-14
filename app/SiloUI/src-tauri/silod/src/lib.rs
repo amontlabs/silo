@@ -10,6 +10,7 @@ pub mod dispatcher;
 pub mod framing;
 pub mod identity;
 pub mod manifest;
+pub mod methods;
 pub mod ownership;
 pub mod paths;
 pub mod service;

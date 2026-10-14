@@ -49,7 +49,11 @@ fn require_openssh_at(ssh: &Path, keygen: &Path, purpose: &str) -> Result<(), St
 }
 
 pub fn validate_path(path: &str) -> Result<(), String> {
-    validate_path_in(path, "/workspace", "Choose a folder inside /workspace with no control characters.")
+    validate_path_in(
+        path,
+        "/workspace",
+        "Choose a folder inside /workspace with no control characters.",
+    )
 }
 
 fn validate_path_in(path: &str, root: &str, message: &str) -> Result<(), String> {
@@ -57,7 +61,8 @@ fn validate_path_in(path: &str, root: &str, message: &str) -> Result<(), String>
         || path.bytes().any(|byte| byte.is_ascii_control())
         || !(path == root
             || path.strip_prefix(&format!("{root}/")).is_some_and(|tail| {
-                tail.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+                tail.split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
             }))
     {
         return Err(message.into());
@@ -100,7 +105,12 @@ pub(crate) fn macos_editor_launch(
     let mut launch = Command::new(&command.program);
     launch.args(&command.args);
     if command.zed {
-        launch.arg(remote_uri_for_root(alias, path, true, "/Users/silo/workspace")?);
+        launch.arg(remote_uri_for_root(
+            alias,
+            path,
+            true,
+            "/Users/silo/workspace",
+        )?);
     } else {
         launch
             .args(["--profile", crate::channel::current().vscode_profile()])
@@ -221,7 +231,8 @@ fn vscode_workspace_for_root(
     if !document.is_object() {
         return Err(invalid());
     }
-    document["folders"] = serde_json::json!([{ "uri": remote_uri_for_root(alias, path, false, root)? }]);
+    document["folders"] =
+        serde_json::json!([{ "uri": remote_uri_for_root(alias, path, false, root)? }]);
     document["remoteAuthority"] = serde_json::json!(format!("ssh-remote+{alias}"));
     if !document["settings"].is_object() {
         document["settings"] = serde_json::json!({});
@@ -1579,11 +1590,21 @@ mod tests {
     #[test]
     fn macos_editor_paths_use_the_provisioned_workspace_root() {
         validate_macos_path("/Users/silo/workspace/project").unwrap();
-        for path in ["/workspace", "/Users/silo/Downloads", "/Users/silo/workspace/../Library"] {
+        for path in [
+            "/workspace",
+            "/Users/silo/Downloads",
+            "/Users/silo/workspace/../Library",
+        ] {
             assert!(validate_macos_path(path).is_err(), "{path}");
         }
         assert_eq!(
-            remote_uri_for_root("silo-id", "/Users/silo/workspace/a b", true, "/Users/silo/workspace").unwrap(),
+            remote_uri_for_root(
+                "silo-id",
+                "/Users/silo/workspace/a b",
+                true,
+                "/Users/silo/workspace"
+            )
+            .unwrap(),
             "ssh://silo-id/Users/silo/workspace/a%20b"
         );
     }
@@ -1611,7 +1632,8 @@ mod tests {
         assert_eq!(args[0], "--new-window");
         assert_eq!(args[1], "--profile");
         let workspace = Path::new(args.last().unwrap());
-        let document: serde_json::Value = serde_json::from_slice(&fs::read(workspace).unwrap()).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(workspace).unwrap()).unwrap();
         assert_eq!(
             document["folders"][0]["uri"],
             "vscode-remote://ssh-remote+silo-e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f/Users/silo/workspace/project"
