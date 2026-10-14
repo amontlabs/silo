@@ -69,7 +69,7 @@ pub struct HandshakeResult {
     pub device_id: String,
     pub name: String,
     pub protocol: u32,
-    pub capabilities: Vec<MethodName>,
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
 }

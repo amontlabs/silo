@@ -9,7 +9,7 @@ pub type ClipboardReadParams = ComputerTargetParams;
 /// The specification does not yet fix the exact fields of all clipboard
 /// payloads. This tagged union keeps text and PNG bytes explicit.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "lowercase")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ClipboardContent {
     Text { text: String },
     Image { mime: String, bytes: Vec<u8> },

@@ -87,7 +87,7 @@ pub struct Checkpoint {
 /// The Linux and macOS forms described in 20 §1.4. Their field names and
 /// optionality match `runtime/checkpoints.rs` and `macos_computers/checkpoints.rs`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
-#[serde(untagged)]
+#[serde(untagged, rename_all_fields = "camelCase")]
 pub enum PendingRestore {
     Linux {
         checkpoint_id: String,

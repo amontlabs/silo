@@ -12,7 +12,7 @@ wire_struct! {
     MigrationState {
         version: u32,
         status: String,
-        stage: Option<String>,
+        stage: String,
         logs: Vec<String>,
         migrated_count: u64,
         failed_count: u64,

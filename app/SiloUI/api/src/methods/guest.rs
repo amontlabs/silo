@@ -133,7 +133,15 @@ pub enum GuestFileReplace {
     IfSha256,
 }
 
-wire_struct! { GuestFilesWriteParams { computer_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String>, path: String, data: Vec<u8>, mode: u32, #[serde(default, skip_serializing_if = "Option::is_none")] create_parents: Option<bool>, replace: GuestFileReplace, #[serde(default, skip_serializing_if = "Option::is_none")] expected_sha256: Option<String> } }
+wire_struct! { GuestFilesWriteParams { computer_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String>, path: String, data: Vec<u8>, mode: u32, #[serde(default, skip_serializing_if = "Option::is_none")] create_parents: Option<bool>, replace: GuestFileReplace, #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] #[schemars(with = "Option<String>")] expected_sha256: Option<Option<String>> } }
+
+fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
 wire_struct! { GuestFilesWriteResult { size: u64, mtime_ms: u64, inode: u64 } }
 wire_struct! { GuestFilesRemoveParams { computer_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String>, paths: Vec<String> } }
 wire_struct! { GuestFilesRemoveResult { removed: Vec<String> } }

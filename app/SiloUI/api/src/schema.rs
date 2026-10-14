@@ -370,7 +370,8 @@ mod tests {
     #[test]
     fn computer_use_and_network_state_round_trip_wire_enums() {
         let state = crate::methods::computer_use::ComputerUseState {
-            state: crate::methods::computer_use::ComputerUseInstallState::Ready,
+            schema_version: Some(1),
+            state: Some(crate::methods::computer_use::ComputerUseInstallState::Ready),
             reason: None,
             cause: None,
             compatibility: Some(crate::methods::computer_use::ComputerUseCompatibility::Unknown),
@@ -382,9 +383,11 @@ mod tests {
             ),
             approval_apply_reason: None,
             app_version: Some("1.2".into()),
+            chatgpt_version: None,
             runtime_version: None,
             lcu_version: None,
             agents: Some(vec!["agent-a".into()]),
+            at: None,
         };
         let state_json = serde_json::to_value(&state).unwrap();
         assert_eq!(state_json["state"], "ready");
@@ -428,5 +431,277 @@ mod tests {
         );
         assert!(DisplayAxis::new(32_768).is_err());
         assert!(serde_json::from_value::<DisplayAxis>(serde_json::json!(32_768)).is_err());
+    }
+
+    #[test]
+    fn log_flags_and_optional_page_values_match_native_serde_shapes() {
+        use crate::methods::logs::LogPage;
+
+        let payload = serde_json::json!({
+            "entries": [{
+                "id": "log-1",
+                "line": "kernel: started",
+                "occurredAt": "2026-10-14T08:15:00Z",
+                "computerId": "computer-1",
+                "computerName": "Builder",
+                "deviceId": "device-1",
+                "deviceName": "Mac",
+                "source": "kernel",
+                "session": null,
+                "guestTimestamp": true
+            }],
+            "nextCursor": null,
+            "oldestAvailableTimestamp": null,
+            "newestAvailableTimestamp": null,
+            "totalMatches": 1,
+            "timestampEstimated": false,
+            "unreadableRecords": true,
+            "snapshot": null
+        });
+        let page: LogPage = serde_json::from_value(payload).unwrap();
+        let output = serde_json::to_value(page).unwrap();
+        assert_eq!(output["entries"][0]["guestTimestamp"], true);
+        assert_eq!(output["unreadableRecords"], true);
+        assert!(output.get("unsupported").is_none());
+        assert_eq!(output["nextCursor"], serde_json::Value::Null);
+        assert_eq!(output["oldestAvailableTimestamp"], serde_json::Value::Null);
+        assert_eq!(output["newestAvailableTimestamp"], serde_json::Value::Null);
+
+        let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
+        for (definition, field) in [
+            ("LogPage", "unsupported"),
+            ("LogPage", "unreadableRecords"),
+            ("LogEntry", "guestTimestamp"),
+        ] {
+            assert_eq!(
+                schema["$defs"][definition]["properties"][field]["type"],
+                "boolean"
+            );
+        }
+
+        let without_false_flags: LogPage = serde_json::from_value(serde_json::json!({
+            "entries": [{
+                "id": "log-2", "line": "ready", "occurredAt": "2026-10-14T08:15:01Z",
+                "computerId": "computer-1", "computerName": "Builder",
+                "deviceId": "device-1", "deviceName": "Mac", "source": "stdout",
+                "session": null
+            }],
+            "totalMatches": 1,
+            "timestampEstimated": false
+        }))
+        .unwrap();
+        let output = serde_json::to_value(without_false_flags).unwrap();
+        assert!(output.get("unsupported").is_none());
+        assert!(output.get("unreadableRecords").is_none());
+        assert!(output["entries"][0].get("guestTimestamp").is_none());
+    }
+
+    #[test]
+    fn storage_timestamps_are_numeric_and_nullable_outputs_stay_present() {
+        use crate::methods::storage::StorageState;
+
+        let payload = serde_json::json!({
+            "history": [{"at": 1_728_896_100, "trigger": "manual", "reclaimedBytes": null, "error": null}],
+            "workspaceHostBytes": null,
+            "runtimeHostBytes": null,
+            "checkpointHostBytes": null,
+            "checkpointCount": 0,
+            "workspaceUsedBytes": null,
+            "workspaceCapacityBytes": null,
+            "lastReclaimedBytes": null,
+            "lastTrimAt": 1_728_896_100,
+            "lastError": null
+        });
+        let state: StorageState = serde_json::from_value(payload.clone()).unwrap();
+        let output = serde_json::to_value(state).unwrap();
+        assert_eq!(output, payload);
+        assert!(serde_json::from_value::<StorageState>(serde_json::json!({
+            "history": [{"at": "2026-10-14T08:15:00Z", "trigger": "manual"}],
+            "checkpointCount": 0
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn passing_dependency_check_preserves_null_remediation() {
+        use crate::methods::device::DependencyCheck;
+
+        let payload = serde_json::json!({
+            "id": "ssh", "title": "OpenSSH", "status": "pass",
+            "detail": "Available", "remediation": null
+        });
+        let check: DependencyCheck = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(check).unwrap(), payload);
+    }
+
+    #[test]
+    fn pending_restore_variants_use_native_camel_case_fields() {
+        use crate::methods::checkpoints::PendingRestore;
+
+        let linux_payload = serde_json::json!({
+            "checkpointId": "checkpoint-1", "sourceComputer": "Builder", "state": "full"
+        });
+        let linux: PendingRestore = serde_json::from_value(linux_payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(linux).unwrap(), linux_payload);
+
+        let macos_payload = serde_json::json!({"checkpointId": "checkpoint-2", "memory": true});
+        let macos: PendingRestore = serde_json::from_value(macos_payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(macos).unwrap(), macos_payload);
+    }
+
+    #[test]
+    fn unavailable_github_catalog_uses_camel_case_retry_field() {
+        use crate::methods::github::GitHubRepositoryCatalogStatus;
+
+        let payload = serde_json::json!({
+            "status": "unavailable", "message": "Catalog unavailable", "canRetry": true
+        });
+        let status: GitHubRepositoryCatalogStatus =
+            serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(status).unwrap(), payload);
+    }
+
+    #[test]
+    fn macos_resize_uses_pixel_names_and_native_integer_widths() {
+        use crate::methods::macos::{MacosDisplayResizeParams, MacosDisplayResizeResult};
+
+        let request = serde_json::json!({
+            "computerId": "computer-1", "widthPx": 4_294_967_296_u64, "heightPx": 1080
+        });
+        let params: MacosDisplayResizeParams = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(serde_json::to_value(params).unwrap(), request);
+
+        let response = serde_json::json!({"widthPx": 1920, "heightPx": 1080});
+        let result: MacosDisplayResizeResult = serde_json::from_value(response.clone()).unwrap();
+        assert_eq!(serde_json::to_value(result).unwrap(), response);
+    }
+
+    #[test]
+    fn desktop_status_accepts_nullable_component_and_display_fields() {
+        use crate::methods::desktop::DesktopStatus;
+
+        let payload = serde_json::json!({
+            "installed": true, "state": "stopped", "autoStart": false,
+            "version": null, "user": null, "display": null, "backend": null,
+            "sessionState": null, "streamState": null,
+            "updateRequired": false, "updateAvailable": false, "streamerVersion": null,
+            "computerUse": null, "name": null
+        });
+        let status: DesktopStatus = serde_json::from_value(payload.clone()).unwrap();
+        let output = serde_json::to_value(status).unwrap();
+        assert_eq!(output, payload);
+        assert!(serde_json::from_value::<DesktopStatus>(serde_json::json!({
+            "installed": true, "state": "running", "autoStart": false,
+            "display": {"name": ":1"}, "updateRequired": false, "updateAvailable": false
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn expected_sha256_distinguishes_omitted_null_and_string() {
+        use crate::methods::guest::GuestFilesWriteParams;
+
+        let base = serde_json::json!({
+            "computerId": "computer-1", "path": "/workspace/output.txt", "data": [1, 2],
+            "mode": 420, "replace": "ifSha256"
+        });
+        let omitted: GuestFilesWriteParams = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(omitted.expected_sha256, None);
+        assert!(serde_json::to_value(omitted)
+            .unwrap()
+            .get("expectedSha256")
+            .is_none());
+
+        let mut absent_payload = base.clone();
+        absent_payload["expectedSha256"] = serde_json::Value::Null;
+        let absent: GuestFilesWriteParams = serde_json::from_value(absent_payload.clone()).unwrap();
+        assert_eq!(absent.expected_sha256, Some(None));
+        assert_eq!(serde_json::to_value(absent).unwrap(), absent_payload);
+
+        let mut matched_payload = base;
+        matched_payload["expectedSha256"] = serde_json::json!("a".repeat(64));
+        let matched: GuestFilesWriteParams =
+            serde_json::from_value(matched_payload.clone()).unwrap();
+        assert_eq!(matched.expected_sha256, Some(Some("a".repeat(64))));
+        assert_eq!(serde_json::to_value(matched).unwrap(), matched_payload);
+    }
+
+    #[test]
+    fn force_stop_uses_canonical_null_result_without_retired_remote_snapshot() {
+        let result = MethodResults::ComputersForceStop(());
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"method": "computers.forceStop", "result": null})
+        );
+        assert_eq!(
+            serde_json::from_value::<MethodResults>(value).unwrap(),
+            result
+        );
+    }
+
+    #[test]
+    fn clipboard_too_large_discriminator_is_kebab_case() {
+        use crate::methods::clipboard::ClipboardContent;
+
+        let value = serde_json::to_value(ClipboardContent::TooLarge).unwrap();
+        assert_eq!(value, serde_json::json!({"kind": "too-large"}));
+        assert_eq!(
+            serde_json::from_value::<ClipboardContent>(value).unwrap(),
+            ClipboardContent::TooLarge
+        );
+    }
+
+    #[test]
+    fn handshake_capabilities_accept_unrecognized_strings() {
+        let payload = serde_json::json!({
+            "deviceId": "device-1", "name": "Mac", "protocol": 1,
+            "capabilities": ["engine.handshake", "future.experimental"]
+        });
+        let result: HandshakeResult = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(result).unwrap(), payload);
+    }
+
+    #[test]
+    fn computer_use_state_round_trips_macos_receipt_and_unread_state() {
+        use crate::methods::computer_use::ComputerUseState;
+
+        let receipt = serde_json::json!({
+            "schemaVersion": 1, "state": "ready", "reason": "",
+            "chatgptVersion": "1.2026.101", "lcuVersion": "0.11.0",
+            "approval": "ask", "at": "2026-10-14T08:15:00Z"
+        });
+        let state: ComputerUseState = serde_json::from_value(receipt).unwrap();
+        let value = serde_json::to_value(state).unwrap();
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["chatgptVersion"], "1.2026.101");
+        assert_eq!(value["at"], "2026-10-14T08:15:00Z");
+        assert_eq!(value["state"], "ready");
+
+        let before_receipt: ComputerUseState = serde_json::from_value(serde_json::json!({
+            "schemaVersion": null, "state": null, "chatgptVersion": null, "at": null
+        }))
+        .unwrap();
+        let before_receipt = serde_json::to_value(before_receipt).unwrap();
+        assert!(before_receipt["schemaVersion"].is_null());
+        assert!(before_receipt["state"].is_null());
+        assert!(before_receipt["chatgptVersion"].is_null());
+        assert!(before_receipt["at"].is_null());
+    }
+
+    #[test]
+    fn migration_stage_is_a_required_native_string() {
+        use crate::methods::migration::MigrationState;
+
+        let payload = serde_json::json!({
+            "version": 1, "status": "scanning", "stage": "Checking existing computers",
+            "logs": [], "migratedCount": 0, "failedCount": 0, "totalCount": 0,
+            "canContinue": false
+        });
+        let state: MigrationState = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(serde_json::to_value(state).unwrap(), payload);
+        let mut invalid = payload;
+        invalid["stage"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<MigrationState>(invalid).is_err());
     }
 }

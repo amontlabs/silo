@@ -24,7 +24,7 @@ wire_struct! {
         title: String,
         status: DependencyStatus,
         detail: String,
-        remediation: String,
+        remediation: Option<String>,
     }
 }
 

@@ -42,18 +42,18 @@ pub enum LogSource {
 wire_struct! {
     LogPage {
         entries: Vec<LogEntry>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         next_cursor: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         oldest_available_timestamp: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         newest_available_timestamp: Option<String>,
         total_matches: u64,
         timestamp_estimated: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        unsupported: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        unreadable_records: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unsupported: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unreadable_records: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         snapshot: Option<String>,
     }
@@ -71,8 +71,8 @@ wire_struct! {
         source: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        guest_timestamp: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        guest_timestamp: bool,
     }
 }
 

@@ -907,7 +907,7 @@
         {
           "properties": {
             "kind": {
-              "const": "toolarge",
+              "const": "too-large",
               "type": "string"
             }
           },
@@ -1766,6 +1766,13 @@
             "null"
           ]
         },
+        "at": {
+          "description": "RFC 3339 receipt time on macOS; null until the receipt has been read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cause": {
           "anyOf": [
             {
@@ -1774,6 +1781,13 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "chatgptVersion": {
+          "description": "macOS receipt field; Linux projections use `appVersion` instead.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "compatibility": {
@@ -1804,8 +1818,26 @@
             "null"
           ]
         },
+        "schemaVersion": {
+          "description": "Nullable before the macOS guest receipt has been read.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "state": {
-          "$ref": "#/$defs/ComputerUseInstallState"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerUseInstallState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nullable before the macOS guest receipt has been read."
         },
         "warning": {
           "type": [
@@ -1814,9 +1846,6 @@
           ]
         }
       },
-      "required": [
-        "state"
-      ],
       "type": "object"
     },
     "ComputerUseStateParams": {
@@ -1958,7 +1987,10 @@
           "type": "string"
         },
         "remediation": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "status": {
           "$ref": "#/$defs/DependencyStatus"
@@ -1971,8 +2003,7 @@
         "id",
         "title",
         "status",
-        "detail",
-        "remediation"
+        "detail"
       ],
       "type": "object"
     },
@@ -2111,6 +2142,7 @@
           "type": "boolean"
         },
         "backend": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2126,7 +2158,13 @@
             }
           ]
         },
-        "display": true,
+        "display": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "installed": {
           "type": "boolean"
         },
@@ -2137,13 +2175,19 @@
           ]
         },
         "sessionState": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "state": {
           "type": "string"
         },
         "streamState": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "streamerVersion": {
           "type": [
@@ -2158,12 +2202,14 @@
           "type": "boolean"
         },
         "user": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "version": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -2174,8 +2220,6 @@
         "installed",
         "state",
         "autoStart",
-        "sessionState",
-        "streamState",
         "updateRequired",
         "updateAvailable"
       ],
@@ -4027,7 +4071,7 @@
         },
         {
           "properties": {
-            "can_retry": {
+            "canRetry": {
               "type": "boolean"
             },
             "message": {
@@ -4041,7 +4085,7 @@
           "required": [
             "status",
             "message",
-            "can_retry"
+            "canRetry"
           ],
           "type": "object"
         }
@@ -5094,7 +5138,7 @@
       "properties": {
         "capabilities": {
           "items": {
-            "$ref": "#/$defs/MethodName"
+            "type": "string"
           },
           "type": "array"
         },
@@ -5660,10 +5704,7 @@
           "type": "string"
         },
         "guestTimestamp": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "boolean"
         },
         "id": {
           "type": "string"
@@ -5705,18 +5746,21 @@
           "type": "array"
         },
         "newestAvailableTimestamp": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "nextCursor": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "oldestAvailableTimestamp": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -5737,18 +5781,10 @@
           "type": "integer"
         },
         "unreadableRecords": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": "boolean"
         },
         "unsupported": {
-          "type": [
-            "boolean",
-            "null"
-          ]
+          "type": "boolean"
         }
       },
       "required": [
@@ -6099,12 +6135,12 @@
           "type": "string"
         },
         "heightPx": {
-          "format": "uint32",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
         "widthPx": {
-          "format": "uint32",
+          "format": "uint64",
           "minimum": 0,
           "type": "integer"
         }
@@ -6118,20 +6154,20 @@
     },
     "MacosDisplayResizeResult": {
       "properties": {
-        "height": {
+        "heightPx": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         },
-        "width": {
+        "widthPx": {
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
         }
       },
       "required": [
-        "width",
-        "height"
+        "widthPx",
+        "heightPx"
       ],
       "type": "object"
     },
@@ -11168,10 +11204,7 @@
           "type": "integer"
         },
         "stage": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "status": {
           "type": "string"
@@ -11190,6 +11223,7 @@
       "required": [
         "version",
         "status",
+        "stage",
         "logs",
         "migratedCount",
         "failedCount",
@@ -11825,10 +11859,10 @@
       "anyOf": [
         {
           "properties": {
-            "checkpoint_id": {
+            "checkpointId": {
               "type": "string"
             },
-            "source_computer": {
+            "sourceComputer": {
               "type": "string"
             },
             "state": {
@@ -11836,15 +11870,15 @@
             }
           },
           "required": [
-            "checkpoint_id",
-            "source_computer",
+            "checkpointId",
+            "sourceComputer",
             "state"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "checkpoint_id": {
+            "checkpointId": {
               "type": "string"
             },
             "memory": {
@@ -11852,7 +11886,7 @@
             }
           },
           "required": [
-            "checkpoint_id",
+            "checkpointId",
             "memory"
           ],
           "type": "object"
@@ -12233,15 +12267,19 @@
     "ReclaimEntry": {
       "properties": {
         "at": {
-          "type": "string"
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         },
         "error": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "reclaimedBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12911,6 +12949,7 @@
           "type": "integer"
         },
         "checkpointHostBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12925,12 +12964,14 @@
           "type": "array"
         },
         "lastError": {
+          "default": null,
           "type": [
             "string",
             "null"
           ]
         },
         "lastReclaimedBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12939,12 +12980,16 @@
           ]
         },
         "lastTrimAt": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
           "type": [
-            "string",
+            "integer",
             "null"
           ]
         },
         "runtimeHostBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12953,6 +12998,7 @@
           ]
         },
         "workspaceCapacityBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12961,6 +13007,7 @@
           ]
         },
         "workspaceHostBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -12969,6 +13016,7 @@
           ]
         },
         "workspaceUsedBytes": {
+          "default": null,
           "format": "uint64",
           "minimum": 0,
           "type": [

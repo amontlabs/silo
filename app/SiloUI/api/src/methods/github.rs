@@ -160,7 +160,11 @@ pub struct GitHubDeviceIdentity {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
-#[serde(tag = "status", rename_all = "lowercase")]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum GitHubRepositoryCatalogStatus {
     Available,
     Unavailable { message: String, can_retry: bool },

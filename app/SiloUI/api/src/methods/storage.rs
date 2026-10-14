@@ -16,33 +16,33 @@ pub type StorageReclaimResult = JobStartResult;
 wire_struct! {
     StorageState {
         history: Vec<ReclaimEntry>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         workspace_host_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         runtime_host_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         checkpoint_host_bytes: Option<u64>,
         checkpoint_count: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         workspace_used_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         workspace_capacity_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         last_reclaimed_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        last_trim_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        last_trim_at: Option<u64>,
+        #[serde(default)]
         last_error: Option<String>,
     }
 }
 
 wire_struct! {
     ReclaimEntry {
-        at: String,
+        at: u64,
         trigger: ReclaimTrigger,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         reclaimed_bytes: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         error: Option<String>,
     }
 }

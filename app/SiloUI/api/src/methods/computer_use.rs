@@ -35,7 +35,10 @@ wire_struct! {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ComputerUseState {
-    pub state: ComputerUseInstallState,
+    /// Nullable before the macOS guest receipt has been read.
+    pub schema_version: Option<u8>,
+    /// Nullable before the macOS guest receipt has been read.
+    pub state: Option<ComputerUseInstallState>,
     pub reason: Option<String>,
     pub cause: Option<ComputerUseCause>,
     pub compatibility: Option<ComputerUseCompatibility>,
@@ -45,9 +48,13 @@ pub struct ComputerUseState {
     pub approval_apply: Option<ComputerUseApprovalApplyState>,
     pub approval_apply_reason: Option<String>,
     pub app_version: Option<String>,
+    /// macOS receipt field; Linux projections use `appVersion` instead.
+    pub chatgpt_version: Option<String>,
     pub runtime_version: Option<String>,
     pub lcu_version: Option<String>,
     pub agents: Option<Vec<String>>,
+    /// RFC 3339 receipt time on macOS; null until the receipt has been read.
+    pub at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]

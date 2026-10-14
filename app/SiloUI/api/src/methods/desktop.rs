@@ -47,16 +47,16 @@ wire_struct! {
         installed: bool,
         state: String,
         auto_start: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         version: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         user: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        display: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        display: Option<String>,
+        #[serde(default)]
         backend: Option<String>,
-        session_state: String,
-        stream_state: String,
+        session_state: Option<String>,
+        stream_state: Option<String>,
         update_required: bool,
         update_available: bool,
         streamer_version: Option<String>,
