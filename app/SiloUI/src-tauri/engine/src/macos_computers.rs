@@ -37,6 +37,12 @@ mod offline_setup;
 mod personalize;
 #[path = "macos_computers/provision.rs"]
 mod provision;
+#[path = "macos_computers/proxy/mod.rs"]
+mod proxy;
+#[path = "macos_computers/proxy_address.rs"]
+mod proxy_address;
+#[path = "macos_computers/proxy_ca.rs"]
+mod proxy_ca;
 #[path = "macos_computers/recovery.rs"]
 mod recovery;
 #[path = "macos_computers/remote_display.rs"]
@@ -575,6 +581,27 @@ static CLOSED: Mutex<Closed> = Mutex::new(Closed {
     update: false,
 });
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+static PROXY_BOOTSTRAP_MIGRATION_READY: AtomicBool = AtomicBool::new(true);
+
+/// Closes macOS Start and computer-changing work until the launch migration has
+/// staged the legacy guest bootstrap. Called synchronously during app setup.
+pub fn begin_proxy_bootstrap_migration() {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    PROXY_BOOTSTRAP_MIGRATION_READY.store(false, Ordering::SeqCst);
+}
+
+fn ensure_proxy_bootstrap_migration_ready() -> Result<(), String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if !PROXY_BOOTSTRAP_MIGRATION_READY.load(Ordering::SeqCst) {
+        return Err(
+            "Silo is preparing macOS network access. Wait for startup to finish, then retry."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn closed() -> std::sync::MutexGuard<'static, Closed> {
     CLOSED
         .lock()
@@ -584,6 +611,7 @@ fn closed() -> std::sync::MutexGuard<'static, Closed> {
 fn admission() -> Result<std::sync::MutexGuard<'static, Closed>, String> {
     let closed = closed();
     closed.check()?;
+    ensure_proxy_bootstrap_migration_ready()?;
     Ok(closed)
 }
 
@@ -1618,6 +1646,179 @@ pub async fn open_macos_display(app: MacosContext, id: String) -> Result<(), Str
     blocking(move || open_display(&app, &id)).await
 }
 
+/// Closes this computer's engine-owned screen window without stopping its VM.
+pub async fn close_macos_display(app: MacosContext, id: String) -> Result<(), String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        if state == State::SettingUp {
+            return Err("The display cannot close while computer setup is using it.".into());
+        }
+        app.close_display(&id);
+        Ok(())
+    })
+    .await
+}
+
+/// One macOS computer's row as `computers.list` shows it, or `None` when `id` is not one. It
+/// reads the inventory only: unlike [`read_macos_computers`] it never looks for new builds.
+pub async fn read_macos_computer(
+    app: MacosContext,
+    id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let registry = registry();
+        registry
+            .entries
+            .iter()
+            .find(|entry| entry.record.id == id)
+            .map(|entry| serde_json::to_value(entry.row()).map_err(|error| error.to_string()))
+            .transpose()
+    })
+    .await
+}
+
+/// Whether `id` names a macOS computer of this engine.
+pub async fn has_macos_computer(app: MacosContext, id: String) -> Result<bool, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        Ok(computer(&id).is_ok())
+    })
+    .await
+}
+
+/// The computer-use state a record alone can answer: the desired and applied approval and
+/// whether the guest still has to be updated. The receipt fields stay null until the guest
+/// receipt is read.
+fn computer_use_projection(record: &Record) -> serde_json::Value {
+    let desired = record
+        .computer_use_desired_approval
+        .or(record.computer_use_approval)
+        .unwrap_or_else(crate::computer_use::initial_approval);
+    let applied = record
+        .computer_use_approval
+        .filter(|_| !record.computer_use_stale());
+    let updating = guest_computer_use::update_running(&record.id);
+    serde_json::json!({
+        "schemaVersion": null,
+        "state": null,
+        "reason": null,
+        "cause": null,
+        "compatibility": null,
+        "warning": null,
+        "approval": desired.as_str(),
+        "appliedApproval": applied.map_or("unknown", |approval| approval.as_str()),
+        "approvalApply": if applied.is_some() && !updating { "applied" } else { "pending" },
+        "approvalApplyReason": null,
+        "appVersion": null,
+        "chatgptVersion": null,
+        "runtimeVersion": null,
+        "lcuVersion": null,
+        "agents": null,
+        "at": null,
+    })
+}
+
+/// macOS computer-use state that can be projected without entering the guest.
+pub async fn macos_computer_use_state(
+    app: MacosContext,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (record, _) = computer(&id)?;
+        Ok(computer_use_projection(&record))
+    })
+    .await
+}
+
+/// Stores desired computer-use approval and schedules the existing guest updater when running.
+/// It returns at once; the guest update runs in the background and a stopped computer applies
+/// the change at its next Start.
+pub async fn set_macos_computer_use_approval(
+    app: MacosContext,
+    id: String,
+    approval: crate::computer_use::Approval,
+) -> Result<serde_json::Value, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let data = app_data(&app)?;
+        let (mut record, state) = computer(&id)?;
+        record.computer_use_desired_approval = Some(approval);
+        store::save(&Layout::new(&data, &id), &record)?;
+        let (attempt, projection) = {
+            let mut registry = registry();
+            let entry = registry
+                .entry(&id)
+                .ok_or("This computer no longer exists.")?;
+            entry.record = record;
+            (entry.attempt, computer_use_projection(&entry.record))
+        };
+        emit(&app);
+        if state == State::Running {
+            guest_computer_use::update_in_background(&app, &id, attempt);
+        }
+        Ok(projection)
+    })
+    .await
+}
+
+/// The state of a computer added by [`install_test_computer`].
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TestComputerState {
+    Stopped,
+    Running,
+    SettingUp,
+}
+
+/// Adds a finished computer to the shared inventory, for tests of the layers above the engine.
+/// Its record is saved under `app_data`, and the inventory counts as loaded.
+#[cfg(any(test, feature = "test-support"))]
+pub fn install_test_computer(
+    app_data: &std::path::Path,
+    name: &str,
+    state: TestComputerState,
+    approval: crate::computer_use::Approval,
+) -> String {
+    let mut record = store::new_record(
+        &CreateRequest {
+            name: name.into(),
+            cpus: 4,
+            memory_gib: 8,
+            disk_gib: 64,
+        },
+        engine::random_mac(),
+    );
+    record.installed = true;
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: true,
+        computer_use: true,
+        clipboard: true,
+        needs_personalizing: false,
+    };
+    record.computer_use_approval = Some(approval);
+    record.computer_use_desired_approval = Some(approval);
+    record.computer_use_version = Some(templates::computer_use_version_for(approval));
+    store::save(&Layout::new(app_data, &record.id), &record).unwrap();
+    let id = record.id.clone();
+    let state = match state {
+        TestComputerState::Stopped => State::Stopped,
+        TestComputerState::Running => State::Running,
+        TestComputerState::SettingUp => State::SettingUp,
+    };
+    let mut computers = registry();
+    let mut entry = Entry::new(record, state, None);
+    entry.attempt = 1;
+    computers.entries.push(entry);
+    computers.loaded = true;
+    id
+}
+
 /// Saves a checkpoint of a computer: its memory too when it runs.
 pub async fn create_macos_checkpoint(
     app: MacosContext,
@@ -1768,6 +1969,23 @@ pub async fn macos_computer_clipboard(
     .await
 }
 
+/// Reads explicit clipboard content from a running macOS computer for a remote API client.
+pub async fn macos_clipboard_read(
+    app: MacosContext,
+    id: String,
+) -> Result<silo_api::methods::clipboard::ClipboardContent, String> {
+    blocking(move || guest_clipboard::read_explicit(&app, &id)).await
+}
+
+/// Writes explicit clipboard content to a running macOS computer.
+pub async fn macos_clipboard_write(
+    app: MacosContext,
+    id: String,
+    content: silo_api::methods::clipboard::ClipboardWritableContent,
+) -> Result<(), String> {
+    blocking(move || guest_clipboard::write_explicit(&app, &id, content)).await
+}
+
 // MARK: For other devices
 
 /// The state of this device's macOS computers as another device reads it. A device that cannot
@@ -1837,6 +2055,217 @@ pub fn names(app: &MacosContext) -> Vec<String> {
     app_data(app)
         .map(|data| store::names(&data))
         .unwrap_or_default()
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String> {
+    ensure_loaded(app)?;
+    Ok(registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
+        .map(|entry| entry.record.clone()))
+}
+
+pub fn proxy_contains_name(app: &MacosContext, name: &str) -> bool {
+    names(app)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_validate_computers(app: &MacosContext, computers: &[String]) -> Result<(), String> {
+    for name in computers {
+        let record = proxy_record(app, name)?
+            .ok_or("Secrets can only be assigned to local Silo computers.")?;
+        if !record.setup.complete() {
+            return Err(
+                "Finish setting up the selected macOS computer before assigning secrets.".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_secrets(app: &MacosContext, computer: &str) -> Result<Vec<String>, String> {
+    let record = proxy_record(app, computer)?.ok_or("This macOS computer no longer exists.")?;
+    let pending = proxy::with_policy_lock(&record.id, || {
+        let material = crate::secrets::runtime_material(computer)?;
+        proxy::apply_secrets(&record.id, material)
+    })?;
+    proxy::sync_guest_placeholders(
+        app,
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+    )?;
+    Ok(pending)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_revoke_secret(app: &MacosContext, computer: &str, name: &str) -> Result<bool, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(true);
+    };
+    let removed = proxy::with_policy_lock(&record.id, || proxy::revoke_secret(&record.id, name))?;
+    proxy::sync_guest_placeholders(
+        app,
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+    )?;
+    Ok(removed)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_scoped_cached_tokens(
+    app: &MacosContext,
+    computer: &str,
+) -> Result<Vec<String>, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(Vec::new());
+    };
+    proxy::scoped_cached_tokens(&record.id)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_github_policy_is_cached(
+    app: &MacosContext,
+    computer: &str,
+    profile: &serde_json::Value,
+) -> Result<bool, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(false);
+    };
+    proxy::github_profile_is_cached(&record.id, profile)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_github_policy(
+    app: &MacosContext,
+    computer: &str,
+    revision: u64,
+    profile: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(());
+    };
+    proxy::with_policy_lock(&record.id, || {
+        proxy::apply_github_profile(&record.id, revision, profile)
+    })
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_github_identity(
+    app: &MacosContext,
+    computer: &str,
+    identity: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Err("This macOS computer no longer exists.".into());
+    };
+    if !identity["apply"].as_bool().unwrap_or(false) {
+        return Ok(());
+    }
+    let name = identity["name"]
+        .as_str()
+        .ok_or("Invalid Git author configuration.")?;
+    let email = identity["email"]
+        .as_str()
+        .ok_or("Invalid Git author configuration.")?;
+    if name.trim().is_empty()
+        || email.trim().is_empty()
+        || name.len() > 1024
+        || email.len() > 1024
+        || name.chars().any(char::is_control)
+        || email.chars().any(char::is_control)
+    {
+        return Err("Invalid Git author configuration.".into());
+    }
+    let command = format!(
+        "git config --global --replace-all user.name {}; git config --global --replace-all user.email {}; test \"$(git config --global user.name)\" = {} && test \"$(git config --global user.email)\" = {}",
+        guest_access::shell_quote(name),
+        guest_access::shell_quote(email),
+        guest_access::shell_quote(name),
+        guest_access::shell_quote(email),
+    );
+    let output = guest_access::run(
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+        &command,
+        None,
+        Duration::from_secs(20),
+    )?;
+    if output.status == 0 {
+        Ok(())
+    } else {
+        Err("The macOS computer rejected its Git author configuration.".into())
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_is_pending_restore(app: &MacosContext, computer: &str) -> bool {
+    proxy_record(app, computer)
+        .is_ok_and(|record| record.is_some_and(|record| record.pending_restore.is_some()))
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_validate_computers(_app: &MacosContext, _computers: &[String]) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_secrets(_app: &MacosContext, _computer: &str) -> Result<Vec<String>, String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_revoke_secret(
+    _app: &MacosContext,
+    _computer: &str,
+    _name: &str,
+) -> Result<bool, String> {
+    Ok(true)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_scoped_cached_tokens(
+    _app: &MacosContext,
+    _computer: &str,
+) -> Result<Vec<String>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_github_policy_is_cached(
+    _app: &MacosContext,
+    _computer: &str,
+    _profile: &serde_json::Value,
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_github_policy(
+    _app: &MacosContext,
+    _computer: &str,
+    _revision: u64,
+    _profile: &serde_json::Value,
+) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_github_identity(
+    _app: &MacosContext,
+    _computer: &str,
+    _identity: &serde_json::Value,
+) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_is_pending_restore(_app: &MacosContext, _computer: &str) -> bool {
+    false
 }
 
 fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, String> {
@@ -2352,6 +2781,7 @@ fn with_macos_computer_operation<T>(
     label: &str,
     work: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    ensure_proxy_bootstrap_migration_ready()?;
     ensure_loaded(app)?;
     let (record, _) = computer(id)?;
     with_computer_operation(id, &record.name, kind, label, work)
@@ -2401,6 +2831,7 @@ fn delete_action(
         })
         .transpose()?;
     let result = (|| {
+        ensure_proxy_bootstrap_migration_ready().map_err(|message| (false, message))?;
         ensure_loaded(app).map_err(|message| (false, message))?;
         let (record, _) = computer(id).map_err(|message| (false, message))?;
         let label = format!("Deleting {}", record.name);
@@ -2549,6 +2980,7 @@ pub fn start_at_launch(
     id: &str,
     cancelled: &AtomicBool,
 ) -> Result<bool, String> {
+    ensure_proxy_bootstrap_migration_ready()?;
     ensure_loaded(app)?;
     let Some(record) = registry()
         .entries
@@ -2619,6 +3051,92 @@ pub fn computer_ids(app: &MacosContext) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Runs the sole conversion path for installed macOS computers created before the
+/// proxy bootstrap existed. The caller invokes this from startup after backup and
+/// configuration recovery, before lifecycle recovery or launch preferences.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), String> {
+    let failures = {
+        let _migration = runtime::OPERATIONS
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .hidden()
+            .device("Preparing macOS network access")
+            .map_err(|error| error.to_string())?;
+        ensure_loaded(app)?;
+        let data = app_data(app)?;
+        let mut failures = Vec::new();
+        for id in store::computer_ids(&data) {
+            let layout = Layout::new(&data, &id);
+            let record = match store::read_record(&layout) {
+                Ok(record) if record.id == id => record,
+                Ok(_) => {
+                    failures.push(format!(
+                        "A macOS computer record in {} has a different identity.",
+                        layout.dir.display()
+                    ));
+                    continue;
+                }
+                Err(_) => {
+                    failures.push(format!(
+                        "A macOS computer record in {} could not be read.",
+                        layout.dir.display()
+                    ));
+                    continue;
+                }
+            };
+            if !record.installed || !record.setup.complete() {
+                continue;
+            }
+            if checkpoints::restore_unfinished(&layout) {
+                failures.push(format!(
+                    "{} has an unfinished Restore. Silo left its computer files untouched.",
+                    record.name
+                ));
+                continue;
+            }
+            if record
+                .pending_restore
+                .as_ref()
+                .is_some_and(|restore| restore.memory)
+            {
+                failures.push(format!(
+                    "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
+                    record.name
+                ));
+                continue;
+            }
+            if let Err(error) = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout) {
+                // Never move to another guest until Virtualization.framework has
+                // released this one's machine, even after a timeout or stop error.
+                let samples = engine::machine_samples(app).map_err(|_| {
+                    "Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string()
+                })?;
+                if samples.iter().any(|sample| sample.id == id) {
+                    return Err(format!(
+                        "{} could not be stopped after network setup failed: {error}",
+                        record.name
+                    ));
+                }
+                failures.push(format!("{}: {error}", record.name));
+            }
+        }
+        failures
+    };
+    // Per-computer failures remain fail-closed at `require_guest_bootstrap`; valid
+    // computers can still start while the user retries this launch migration later.
+    PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn migrate_proxy_bootstraps_at_launch(_app: &MacosContext) -> Result<(), String> {
+    Ok(())
+}
+
 /// The name and retained-log folder of the macOS computer `id`, for the Logs page.
 pub fn log_target(app: &MacosContext, id: &str) -> Option<(String, std::path::PathBuf)> {
     let (record, _) = computer(id).ok()?;
@@ -2644,6 +3162,7 @@ fn start_with_job(
     requested_job_id: Option<silo_api::jobs::JobId>,
 ) -> Result<(), String> {
     require_supported()?;
+    ensure_proxy_bootstrap_migration_ready()?;
     let (job, data, name) =
         accept_loaded_lifecycle_job_with_id(app, id, "computers.start", requested_job_id)?;
     let _operation = match admit_macos_job(
@@ -2669,6 +3188,9 @@ fn start_with_job(
         let entry = &computers.entries[index];
         if entry.deleting {
             return Err("This computer is being deleted.".into());
+        }
+        if !entry.record.setup.complete() {
+            return Err(store::NEEDS_PERSONALIZING.into());
         }
         store::start_allowed(entry.state, &entry.record)?;
         if entry.operation.is_some() {
@@ -2883,6 +3405,7 @@ fn begin_setup_with_job(
     requested_job_id: Option<silo_api::jobs::JobId>,
 ) -> Result<(), String> {
     require_supported()?;
+    ensure_proxy_bootstrap_migration_ready()?;
 
     let (job, data, name) =
         accept_loaded_lifecycle_job_with_id(app, id, "macos.setup.retry", requested_job_id)?;
@@ -3300,6 +3823,17 @@ fn slot_is_current(current: Option<u64>, event: u64) -> bool {
 
 /// The machine ended on its own or at Silo's request.
 fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<String>) {
+    machine_stopped_with_lifecycle(app, id, generation, error, true);
+}
+
+/// Ends a machine while respecting whether the boot contributes to the user's state.
+fn machine_stopped_with_lifecycle(
+    app: &MacosContext,
+    id: &str,
+    generation: u64,
+    error: Option<String>,
+    lifecycle_managed: bool,
+) {
     let (app, id) = (app.clone(), id.to_string());
     // Deferred so the framework callback that reported the stop has returned before
     // its machine is released.
@@ -3309,6 +3843,9 @@ fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<
             return;
         }
         close_display(&app, &id);
+        if !lifecycle_managed {
+            return;
+        }
         update(&app, &id, |entry| {
             if matches!(
                 entry.state,
@@ -3736,6 +4273,7 @@ fn fork_checkpoint_with_workflow(
         record.setup_version = held.record.setup_version.clone();
         record.computer_use_version = checkpoint.computer_use_version.clone();
         record.computer_use_approval = held.record.computer_use_approval;
+        record.computer_use_desired_approval = held.record.computer_use_desired_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
         let entry = Entry::new(record.clone(), State::Copying, None);
@@ -3947,7 +4485,12 @@ fn watch(app: &MacosContext) {
 
 fn reconcile(app: &MacosContext, samples: &[engine::Sample]) {
     for sample in samples {
-        let (id, machine, generation) = (&sample.id, &sample.state, sample.generation);
+        let (id, machine, generation, lifecycle_managed) = (
+            &sample.id,
+            &sample.state,
+            sample.generation,
+            sample.lifecycle_managed,
+        );
         let Some((_, state)) = computer(id).ok() else {
             continue;
         };
@@ -3958,7 +4501,7 @@ fn reconcile(app: &MacosContext, samples: &[engine::Sample]) {
             ) => {
                 let detail = (*machine == engine::MachineState::Failed)
                     .then(|| "The computer stopped unexpectedly.".to_string());
-                machine_stopped(app, id, generation, detail);
+                machine_stopped_with_lifecycle(app, id, generation, detail, lifecycle_managed);
             }
             (engine::MachineState::Paused, State::Running | State::Stopping) => {
                 let (operating, unconsumed) = (has_operation(id), has_pending_restore(id));
@@ -6881,6 +7424,135 @@ mod tests {
         let mut open = Closed::default();
         assert!(open.close_for_update(true).is_err());
         assert!(open.check().is_ok());
+    }
+
+    /// Replaces the shared computer inventory with one finished computer in `state`.
+    fn install_computer(
+        directory: &std::path::Path,
+        state: State,
+        approval: crate::computer_use::Approval,
+    ) -> String {
+        registry().entries.clear();
+        let id = install_test_computer(
+            directory,
+            "mac-approval",
+            TestComputerState::Stopped,
+            approval,
+        );
+        registry().entries[0].state = state;
+        id
+    }
+
+    #[test]
+    fn computer_use_state_reports_desired_and_applied_approval() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(macos_computer_use_state(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(state["approval"], "ask");
+        assert_eq!(state["appliedApproval"], "ask");
+        assert_eq!(state["approvalApply"], "applied");
+        assert!(state["state"].is_null() && state["lcuVersion"].is_null());
+        assert!(runtime
+            .block_on(has_macos_computer(app.clone(), id))
+            .unwrap());
+        assert!(!runtime
+            .block_on(has_macos_computer(app, "missing".into()))
+            .unwrap());
+    }
+
+    #[test]
+    fn setting_the_approval_of_a_stopped_computer_waits_for_its_next_start() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        let id = install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(
+                app.clone(),
+                id.clone(),
+                Approval::Auto,
+            ))
+            .unwrap();
+        assert_eq!(state["approval"], "auto");
+        assert_eq!(state["appliedApproval"], "unknown");
+        assert_eq!(state["approvalApply"], "pending");
+        let (record, _) = computer(&id).unwrap();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Auto));
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(record.computer_use_stale());
+        let saved = store::load_all(directory.path());
+        assert_eq!(saved[0].computer_use_desired_approval, Some(Approval::Auto));
+        assert!(!guest_computer_use::update_running(&id));
+        // Putting the applied mode back is already applied.
+        let state = runtime
+            .block_on(set_macos_computer_use_approval(app, id, Approval::Ask))
+            .unwrap();
+        assert_eq!(state["approvalApply"], "applied");
+    }
+
+    #[test]
+    fn setting_the_approval_of_an_unknown_computer_fails() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        install_computer(directory.path(), State::Stopped, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(set_macos_computer_use_approval(
+                app,
+                "missing".into(),
+                Approval::Auto,
+            ))
+            .unwrap_err();
+        assert_eq!(error, "This computer no longer exists.");
+    }
+
+    #[test]
+    fn closing_a_display_is_refused_during_setup_and_leaves_the_computer_running() {
+        use crate::computer_use::Approval;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        let id = install_computer(directory.path(), State::SettingUp, Approval::Ask);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let refused = runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap_err();
+        assert!(refused.contains("setup"), "{refused}");
+        registry().entries[0].state = State::Running;
+        runtime
+            .block_on(close_macos_display(app.clone(), id.clone()))
+            .unwrap();
+        assert_eq!(computer(&id).unwrap().1, State::Running);
+        let missing = runtime
+            .block_on(close_macos_display(app, "missing".into()))
+            .unwrap_err();
+        assert_eq!(missing, "This computer no longer exists.");
     }
 
     #[test]

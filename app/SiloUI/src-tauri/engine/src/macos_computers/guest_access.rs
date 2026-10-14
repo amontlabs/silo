@@ -8,7 +8,7 @@ use super::store::{self, Layout, Record};
 use std::{
     fs,
     io::{Read, Write},
-    net::Ipv4Addr,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -264,6 +264,16 @@ pub(crate) fn guest_address(mac_address: &str) -> Result<Ipv4Addr, String> {
         .ok_or_else(|| "The computer has no network address yet.".to_string())
 }
 
+/// Select the private gateway listener once a ready guest has a FileHandle network.
+/// Setup and Recovery still use the address leased by Apple NAT.
+pub(crate) fn endpoint(record: &Record, guest_port: u16) -> Result<SocketAddr, String> {
+    if let Some(endpoint) = super::proxy::endpoint(&record.id, guest_port)? {
+        return Ok(endpoint);
+    }
+    let address = guest_address(&record.mac_address)?;
+    Ok(SocketAddr::V4(SocketAddrV4::new(address, guest_port)))
+}
+
 // MARK: Commands
 
 fn quote_option(path: &Path) -> String {
@@ -362,11 +372,16 @@ fn ssh_args(
     layout: &Layout,
     record: &Record,
     account: &GuestAccount,
-    address: Ipv4Addr,
+    address: SocketAddr,
     command: &str,
     auth: Auth,
 ) -> Vec<String> {
     let mut args = tool_options(layout, record, account, auth);
+    let (address, port) = match address {
+        SocketAddr::V4(address) => (address.ip().to_string(), address.port()),
+        SocketAddr::V6(_) => unreachable!("macOS guest endpoints are IPv4"),
+    };
+    args.extend(["-p".into(), port.to_string()]);
     args.push(format!("{}@{address}", account.user));
     args.push(command.into());
     args
@@ -376,12 +391,17 @@ fn scp_args(
     layout: &Layout,
     record: &Record,
     account: &GuestAccount,
-    address: Ipv4Addr,
+    address: SocketAddr,
     local: &Path,
     remote: &str,
 ) -> Vec<String> {
     let mut args = vec!["-q".to_string()];
     args.extend(tool_options(layout, record, account, Auth::Key));
+    let (address, port) = match address {
+        SocketAddr::V4(address) => (address.ip().to_string(), address.port()),
+        SocketAddr::V6(_) => unreachable!("macOS guest endpoints are IPv4"),
+    };
+    args.extend(["-P".into(), port.to_string()]);
     args.push(local.to_string_lossy().into_owned());
     args.push(format!("{}@{address}:{remote}", account.user));
     args
@@ -393,7 +413,7 @@ pub(crate) fn wait_for_ssh(
     record: &Record,
     timeout: Duration,
     cancel: &dyn Fn() -> bool,
-) -> Result<Ipv4Addr, String> {
+) -> Result<SocketAddr, String> {
     wait(layout, record, timeout, cancel, Auth::Key)
 }
 
@@ -404,7 +424,7 @@ pub(super) fn wait_for_password_ssh(
     record: &Record,
     timeout: Duration,
     cancel: &dyn Fn() -> bool,
-) -> Result<Ipv4Addr, String> {
+) -> Result<SocketAddr, String> {
     wait(layout, record, timeout, cancel, Auth::Password)
 }
 
@@ -413,10 +433,7 @@ pub(super) fn probe(layout: &Layout, record: &Record) -> bool {
     let Ok(account) = account(layout) else {
         return false;
     };
-    let (Ok(address), Ok(envs)) = (
-        guest_address(&record.mac_address),
-        environment(layout, Auth::Key),
-    ) else {
+    let (Ok(address), Ok(envs)) = (endpoint(record, 22), environment(layout, Auth::Key)) else {
         return false;
     };
     let args = ssh_args(layout, record, &account, address, "true", Auth::Key);
@@ -429,7 +446,7 @@ fn wait(
     timeout: Duration,
     cancel: &dyn Fn() -> bool,
     auth: Auth,
-) -> Result<Ipv4Addr, String> {
+) -> Result<SocketAddr, String> {
     let account = account(layout)?;
     let envs = environment(layout, auth)?;
     let deadline = Instant::now() + timeout;
@@ -437,7 +454,7 @@ fn wait(
         if cancel() {
             return Err(CANCELLED.into());
         }
-        if let Ok(address) = guest_address(&record.mac_address) {
+        if let Ok(address) = endpoint(record, 22) {
             let args = ssh_args(layout, record, &account, address, "true", auth);
             if exec(SSH, &args, None, SSH_PROBE, &envs, None).is_ok_and(|output| output.status == 0)
             {
@@ -511,7 +528,7 @@ pub(crate) fn run_cancellable(
     cancel: &dyn Fn() -> bool,
 ) -> Result<CommandOutput, String> {
     let account = account(layout)?;
-    let address = guest_address(&record.mac_address)?;
+    let address = endpoint(record, 22)?;
     exec_until(
         SSH,
         &ssh_args(layout, record, &account, address, command, Auth::Key),
@@ -534,7 +551,7 @@ pub(crate) fn run_cancellable_with_input(
     cancel: &dyn Fn() -> bool,
 ) -> Result<CommandOutput, String> {
     let account = account(layout)?;
-    let address = guest_address(&record.mac_address)?;
+    let address = endpoint(record, 22)?;
     exec_until(
         SSH,
         &ssh_args(layout, record, &account, address, command, Auth::Key),
@@ -556,7 +573,7 @@ fn run_as(
     max_stdout: Option<usize>,
 ) -> Result<CommandOutput, String> {
     let account = account(layout)?;
-    let address = guest_address(&record.mac_address)?;
+    let address = endpoint(record, 22)?;
     exec(
         SSH,
         &ssh_args(layout, record, &account, address, command, auth),
@@ -590,7 +607,7 @@ pub(crate) fn copy_cancellable(
     cancel: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     let account = account(layout)?;
-    let address = guest_address(&record.mac_address)?;
+    let address = endpoint(record, 22)?;
     let output = exec_until(
         SCP,
         &scp_args(layout, record, &account, address, local, remote),
@@ -810,7 +827,7 @@ mod tests {
             &layout,
             &record,
             &account,
-            Ipv4Addr::new(192, 168, 64, 9),
+            "192.168.64.9:2222".parse().unwrap(),
             "sudo -n true",
             Auth::Key,
         );
@@ -824,6 +841,10 @@ mod tests {
             assert!(args.iter().any(|arg| arg == option), "{option}");
         }
         assert!(args.contains(&format!("HostKeyAlias=silo-{}", record.id)));
+        assert_eq!(
+            args[args.iter().position(|arg| arg == "-p").unwrap() + 1],
+            "2222"
+        );
         assert!(args
             .iter()
             .any(|arg| arg.starts_with("UserKnownHostsFile=\"")
@@ -840,7 +861,7 @@ mod tests {
             &layout,
             &record,
             &account,
-            Ipv4Addr::new(192, 168, 64, 9),
+            "192.168.64.9:2222".parse().unwrap(),
             "true",
             Auth::Password,
         );
@@ -881,11 +902,15 @@ mod tests {
             &layout,
             &record,
             &account,
-            Ipv4Addr::new(192, 168, 64, 9),
+            "192.168.64.9:2222".parse().unwrap(),
             Path::new("/tmp/a b"),
             "/tmp/b",
         );
         assert_eq!(args[0], "-q");
+        assert_eq!(
+            args[args.iter().position(|arg| arg == "-P").unwrap() + 1],
+            "2222"
+        );
         assert_eq!(args[args.len() - 2], "/tmp/a b");
         assert_eq!(args[args.len() - 1], "silo@192.168.64.9:/tmp/b");
     }

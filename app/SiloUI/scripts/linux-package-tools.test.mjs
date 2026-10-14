@@ -89,6 +89,7 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
   const configRoot = join(appRoot, "src-tauri")
   const base = JSON.parse(await readFile(join(configRoot, "tauri.conf.json"), "utf8"))
   const linux = JSON.parse(await readFile(join(configRoot, "tauri.linux.conf.json"), "utf8"))
+  const macos = JSON.parse(await readFile(join(configRoot, "tauri.macos.conf.json"), "utf8"))
   const packaged = JSON.parse(await readFile(join(configRoot, "tauri.linux.package.conf.json"), "utf8"))
   assert.deepEqual(Object.keys(base.bundle.resources), [
     "runtime/microsandbox/manifest.json",
@@ -104,6 +105,11 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
   assert.deepEqual(base.bundle.externalBin, [
     "binaries/msb", "binaries/git", "binaries/git-lfs",
     "binaries/git-remote-http", "binaries/git-remote-https",
+  ])
+  assert.deepEqual(macos.bundle.externalBin, [
+    "binaries/msb", "binaries/git", "binaries/git-lfs",
+    "binaries/git-remote-http", "binaries/git-remote-https",
+    "binaries/silo-macos-gateway", "binaries/silo-network-bootstrap",
   ])
   assert.deepEqual(linux.bundle.resources, {
     "runtime/git/ssl/": "git-support/ssl/",

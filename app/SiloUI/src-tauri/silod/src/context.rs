@@ -326,6 +326,13 @@ impl EngineContext for SilodContext {
     fn process(&self) -> &dyn ProcessControl {
         self.process.as_ref()
     }
+
+    fn close_remote_displays(&self, device: Option<&str>) {
+        match device {
+            Some(device) => silo_engine::desktop_viewer_api::close_device(device),
+            None => silo_engine::desktop_viewer_api::close_all(),
+        }
+    }
 }
 
 #[derive(Clone, Default)]

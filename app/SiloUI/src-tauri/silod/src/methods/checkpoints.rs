@@ -8,7 +8,13 @@ use super::{ownership::owns_prefix, HandlerContext};
 pub(super) fn owns(method: MethodName) -> bool {
     owns_prefix(
         method,
-        &["checkpoints.", "exports.", "migration.", "preparation.", "device."],
+        &[
+            "checkpoints.",
+            "exports.",
+            "migration.",
+            "preparation.",
+            "device.",
+        ],
     )
 }
 

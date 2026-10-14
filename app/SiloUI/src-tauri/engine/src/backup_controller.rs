@@ -628,12 +628,12 @@ fn publish_job_state(controller: &Controller, context: &dyn EngineContext) {
                 outcome_chunked: false,
             };
             let journal_pending = match recovery::snapshot(controller) {
-                Ok(Some(journal)) => {
-                    journal.identity() == operation_id && journal.is_pending()
-                }
+                Ok(Some(journal)) => journal.identity() == operation_id && journal.is_pending(),
                 Ok(None) => false,
                 Err(error) => {
-                    eprintln!("Silo could not inspect backup recovery before publishing its job: {error}");
+                    eprintln!(
+                        "Silo could not inspect backup recovery before publishing its job: {error}"
+                    );
                     true
                 }
             };
@@ -797,9 +797,7 @@ pub fn backup_state(controller: &Controller) -> Result<BackupState, String> {
     let journal_matches_view = journal
         .as_ref()
         .is_some_and(|journal| view.operation_id.as_deref() == Some(journal.identity()));
-    let active_running_operation = journal
-        .as_ref()
-        .is_some_and(recovery::Journal::is_pending)
+    let active_running_operation = journal.as_ref().is_some_and(recovery::Journal::is_pending)
         && busy
         && (!journal_matches_view || matches!(view.operation, Some(Operation::Running { .. })));
     let operation = match (&view.operation, &journal) {
@@ -2557,10 +2555,7 @@ mod tests {
 
     fn pause_terminal_publication(
         controller: &Controller,
-    ) -> (
-        std::sync::mpsc::Receiver<()>,
-        std::sync::mpsc::Sender<()>,
-    ) {
+    ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (reached_tx, reached_rx) = std::sync::mpsc::channel();
         let (resume_tx, resume_rx) = std::sync::mpsc::channel();
         arm_publication_pause(controller, reached_tx, resume_rx);
@@ -2635,7 +2630,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(completed.state, silo_api::jobs::JobState::Finished);
-        assert_eq!(completed.outcome.unwrap().result.unwrap()["operation"], "backup");
+        assert_eq!(
+            completed.outcome.unwrap().result.unwrap()["operation"],
+            "backup"
+        );
     }
 
     #[test]
@@ -2654,11 +2652,8 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
         };
-        let journal = recovery::Journal::restore(
-            archive.clone(),
-            "copy".into(),
-            Some("source".into()),
-        );
+        let journal =
+            recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
         let operation_id = journal.identity().to_owned();
         let cancellation = backup::Cancellation::default();
         controller.busy.store(true, Ordering::Release);
@@ -2735,7 +2730,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(completed.state, silo_api::jobs::JobState::Finished);
-        assert_eq!(completed.outcome.unwrap().result.unwrap()["operation"], "restore");
+        assert_eq!(
+            completed.outcome.unwrap().result.unwrap()["operation"],
+            "restore"
+        );
     }
 
     #[test]
@@ -2753,11 +2751,8 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
         };
-        let journal = recovery::Journal::restore(
-            archive.clone(),
-            "copy".into(),
-            Some("source".into()),
-        );
+        let journal =
+            recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
         let operation_id = journal.identity().to_owned();
         let job_id = JobId::new(format!("exports:{operation_id}")).unwrap();
         let engine_data = context
@@ -2766,7 +2761,9 @@ mod tests {
             .join(context.identity.channel.state_dir_name())
             .join("engine");
         let first_registry = silo_engine::jobs::JobRegistry::open(&engine_data).unwrap();
-        first_registry.accept(job_id.clone(), "exports.import").unwrap();
+        first_registry
+            .accept(job_id.clone(), "exports.import")
+            .unwrap();
         first_registry.mark_running(&job_id).unwrap();
         drop(first_registry);
 
@@ -2820,7 +2817,10 @@ mod tests {
         let result = final_job.outcome.unwrap().result.unwrap();
         assert_eq!(result["operation"], "restore");
         assert_eq!(result["outcome"], "failed");
-        assert_eq!(result["message"], "Silo closed before this import finished.");
+        assert_eq!(
+            result["message"],
+            "Silo closed before this import finished."
+        );
     }
 
     #[test]
@@ -2891,7 +2891,9 @@ mod tests {
             .join(context.identity.channel.state_dir_name())
             .join("engine");
         let first_registry = silo_engine::jobs::JobRegistry::open(&engine_data).unwrap();
-        first_registry.accept(job_id.clone(), "exports.import").unwrap();
+        first_registry
+            .accept(job_id.clone(), "exports.import")
+            .unwrap();
         first_registry.mark_running(&job_id).unwrap();
         drop(first_registry);
 

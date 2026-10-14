@@ -1454,6 +1454,7 @@ fn run_msb_process(
             .find(|argument| !argument.starts_with('-'))
         {
             crate::ssh_access::close_computer(computer);
+            crate::desktop_viewer_api::close_computer(computer);
         }
     }
     ensure_runtime_files(paths)?;
@@ -13703,6 +13704,13 @@ fn revoke_secret_with(
 
 #[cfg(test)]
 pub(crate) fn validate_secret_material_for_tests(
+    material: &[(String, String, Vec<String>)],
+) -> Result<(), String> {
+    secrets_runtime::validate_material(&material.to_vec())
+}
+
+/// Validate material before passing it to any host runtime adapter.
+pub(crate) fn validate_secret_material(
     material: &[(String, String, Vec<String>)],
 ) -> Result<(), String> {
     secrets_runtime::validate_material(&material.to_vec())
