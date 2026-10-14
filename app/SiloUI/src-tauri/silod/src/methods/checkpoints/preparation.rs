@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use silo_api::methods::{
-    common::EmptyParams,
-    preparation::{ChatGptPreparationStatus, ChatGptPreparationStatusParams, PreparationStatus},
+use silo_api::methods::preparation::{
+    ChatGptPreparationStatus, ChatGptPreparationStatusParams, PreparationRetryParams,
+    PreparationStatus, PreparationStatusParams,
 };
 use silo_engine::{
     chatgpt_app,
@@ -31,7 +31,8 @@ pub(super) async fn status(
     context: &HandlerContext,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
-    let _: EmptyParams = context.decode_params(params)?;
+    let params: PreparationStatusParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     output(to_api::<PreparationStatus>(preparation::snapshot())?)
 }
 
@@ -39,7 +40,8 @@ pub(super) async fn retry(
     context: &HandlerContext,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
-    let _: EmptyParams = context.decode_params(params)?;
+    let params: PreparationRetryParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     output(to_api::<PreparationStatus>(preparation::retry())?)
 }
 

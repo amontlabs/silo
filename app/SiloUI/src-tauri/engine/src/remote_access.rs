@@ -112,7 +112,7 @@ pub(crate) fn dispatch_typed(
     checkpoints: &CheckpointHandler,
     local: &dyn LocalAccess,
 ) -> Result<Value, BridgeError> {
-    if ACCESS_METHODS.contains(&method) {
+    if ACCESS_METHODS.contains(&method) || crate::remote::is_owner_method(method) {
         return local.access_dispatch(method, params);
     }
     dispatch_untyped(paths, method, params, checkpoints, local).map_err(BridgeError::from)
@@ -147,24 +147,6 @@ fn dispatch_untyped(
         "chatgpt.retry" => local.chatgpt_retry(),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {
             crate::ssh_access::remote_dispatch(paths, method, params)
-        }
-        "files.list" => {
-            // A file listing observes one computer's guest without starting or changing it
-            // (`--no-start`), so it takes no gate and stays available during operations.
-            let name = computer_name(paths, params)?;
-            let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0);
-            let offset = usize::try_from(offset).map_err(|_| "Invalid folder offset.")?;
-            let page = crate::files::list_computer_directory(
-                paths,
-                name,
-                string(params, "path")?.into(),
-                offset,
-                params
-                    .get("snapshotId")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            )?;
-            serde_json::to_value(page).map_err(|_| "Could not encode folder listing.".into())
         }
         "guest.prepare" => {
             // Authorizes a remote key inside one computer's guest; wait its turn per computer.

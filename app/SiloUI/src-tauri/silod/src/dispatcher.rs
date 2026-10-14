@@ -233,7 +233,14 @@ impl MethodRegistry for CoreMethodRegistry {
                         Ok(Value::Null)
                     }
                     MethodName::NotificationsList => {
-                        let _: NotificationsListParams = parse_params(params)?;
+                        let _: NotificationsListParams = parse_params(params.clone())?;
+                        // Another device's notices are read from that device.
+                        let handler_context = HandlerContext::new(context.clone(), request.clone());
+                        if let Some(remote) =
+                            methods::remote::route(method, &params, &handler_context).await
+                        {
+                            return remote.map(|output| output.value);
+                        }
                         let snapshot = context
                             .notifications_snapshot(&silo_engine::context::ClientId::new(
                                 request.client_id.clone(),

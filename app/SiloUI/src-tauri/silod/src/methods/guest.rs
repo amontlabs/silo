@@ -126,7 +126,8 @@ fn engine_of(context: &HandlerContext) -> Arc<SilodContext> {
     Arc::new(context.silod_context().clone())
 }
 
-/// This engine routes only to its own computers; a request naming another device is refused.
+/// For the methods `remote::route` does not forward (launchers, SSH wiring, uploads and
+/// downloads, watches): a request naming another device is refused.
 fn local_device(context: &HandlerContext, device_id: Option<&str>) -> Result<(), DispatchError> {
     if device_id
         .is_some_and(|device_id| device_id != context.silod_context().local_device().device_id)

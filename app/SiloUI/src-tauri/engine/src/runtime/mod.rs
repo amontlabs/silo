@@ -143,16 +143,26 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
 /// The socket clients that started a setup request. Setup progress and its outcome go only
 /// to the starting client (10 `computers.configuration.change`); a request nobody bound
 /// keeps the in-process Tauri target while that client still uses it.
-static SETUP_AUDIENCES: OnceLock<Mutex<HashMap<String, silo_engine::context::ClientId>>> =
-    OnceLock::new();
+static SETUP_AUDIENCES: OnceLock<Mutex<HashMap<String, Audience>>> = OnceLock::new();
 
 /// Directs the progress and outcome of setup request `request_id` to `client`.
 pub fn bind_setup_audience(request_id: &str, client: silo_engine::context::ClientId) {
+    bind_setup_audience_to(request_id, Audience::Client(client));
+}
+
+/// Directs the progress and outcome of setup request `request_id` to every subscriber. For a
+/// request another device's engine sent here: its controller has no socket client on this
+/// engine, and reads the events through its relay of this engine's.
+pub fn bind_setup_audience_to_all(request_id: &str) {
+    bind_setup_audience_to(request_id, Audience::All);
+}
+
+fn bind_setup_audience_to(request_id: &str, audience: Audience) {
     SETUP_AUDIENCES
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(request_id.to_owned(), client);
+        .insert(request_id.to_owned(), audience);
 }
 
 pub fn release_setup_audience(request_id: &str) {
@@ -175,7 +185,7 @@ fn setup_progress_audience(request_id: &str) -> Audience {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(request_id)
         .cloned();
-    Audience::Client(bound.unwrap_or_else(|| silo_engine::context::ClientId::new("main")))
+    bound.unwrap_or_else(|| Audience::Client(silo_engine::context::ClientId::new("main")))
 }
 
 /// Publishes one setup stage, warning or failure detail: the canonical job progress to
@@ -6963,6 +6973,33 @@ mod tests {
             "silo://computer-configuration-progress"
         );
         assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
+    }
+
+    #[test]
+    fn a_setup_request_from_another_device_is_announced_to_every_subscriber() {
+        use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
+
+        let context = RecordingContext::default();
+        let request = format!("owner-{}", uuid::Uuid::new_v4());
+        bind_setup_audience_to_all(&request);
+        assert_eq!(setup_audience(&request), Audience::All);
+        publish_creation_wait_with_context(
+            &context,
+            &request,
+            &crate::creation_inputs::Step::Image,
+        );
+        assert_eq!(context.published()[0].1, Audience::All);
+        // Binding again to a client replaces it, and releasing falls back to the main client.
+        bind_setup_audience(&request, ClientId::new("socket-client"));
+        assert_eq!(
+            setup_audience(&request),
+            Audience::Client(ClientId::new("socket-client"))
+        );
+        release_setup_audience(&request);
+        assert_eq!(
+            setup_audience(&request),
+            Audience::Client(ClientId::new("main"))
+        );
     }
 
     #[test]

@@ -21,6 +21,11 @@ pub struct BridgeError {
     /// The remote protocol version the other device reported; never serialized to the UI.
     #[serde(skip)]
     pub peer_version: Option<u32>,
+    /// The canonical API error code (`silo-api`) the owner reported when it is finer than
+    /// `code`, such as `not_running`. The controller keeps it so the user sees the owner's
+    /// reason; a device that predates it sends none and `code` stands alone.
+    #[serde(skip)]
+    pub api_code: Option<String>,
 }
 
 /// The message an unreleased-protocol (version 3) device sends for any version mismatch.
@@ -33,7 +38,14 @@ impl BridgeError {
             code,
             message: message.into(),
             peer_version: None,
+            api_code: None,
         }
+    }
+
+    /// Carries the canonical API code of an owner-side failure across the bridge.
+    pub fn with_api_code(mut self, api_code: impl Into<String>) -> Self {
+        self.api_code = Some(api_code.into());
+        self
     }
 
     pub fn incompatible_version(message: impl Into<String>, peer_version: Option<u32>) -> Self {
@@ -88,6 +100,10 @@ impl BridgeError {
             code
         };
         let mut error = Self::new(code, message);
+        error.api_code = reply
+            .get("apiCode")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
         if code == ErrorCode::IncompatibleVersion {
             error.peer_version = peer_version;
         }

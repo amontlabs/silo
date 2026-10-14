@@ -6,9 +6,9 @@
 //! engine publishes `operations.job.progress`, `operations.job.finished` and
 //! `computers.changed` on the catalogue topics.
 //!
-//! Requests that name a computer on another device answer `unsupported_remote_operation`:
-//! routing through the local engine is the connections domain's work (95 A-3), and the
-//! owner-side bridge still serves the legacy names.
+//! A request that names another device is forwarded to its owner before it reaches these
+//! handlers (`remote::route`, 95 A-3, A-14); a handler that is still handed one refuses it
+//! with `unsupported_remote_operation`.
 
 use std::{
     collections::HashMap,
@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 use silo_api::{
     jobs::{ErrorCode, JobId},
     methods::{
-        common::{ComputerTargetParams, DeviceParams, EmptyParams, JobStartResult},
+        common::{ComputerTargetParams, DeviceParams, JobStartResult},
         computers::{
             ApplicationSource, ComputerConfigurationChange as ApiChange,
             ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
@@ -364,7 +364,7 @@ fn with_kind(mut state: Value, kind: &str) -> Value {
 }
 
 /// `deviceId` absent, `"local"` or this device means this engine. Anything else is another
-/// device, which the local engine does not route to yet.
+/// device, which `remote::route` forwards before a handler runs.
 fn require_local_device(
     context: &HandlerContext,
     device_id: Option<&str>,
@@ -460,7 +460,11 @@ fn accept_linux_setup_job(
     request_id: &str,
 ) -> Result<JobStartResult, DispatchError> {
     let job = accept_setup_job(context, method, request_id)?;
-    silo_engine::runtime::bind_setup_audience(request_id, context.client_id().clone());
+    if context.is_owner_bridge() {
+        silo_engine::runtime::bind_setup_audience_to_all(request_id);
+    } else {
+        silo_engine::runtime::bind_setup_audience(request_id, context.client_id().clone());
+    }
     Ok(job)
 }
 
@@ -568,10 +572,17 @@ async fn read_computers(
     require_local_device(context, params.device_id.as_deref())?;
     // The barrier comes first: an event published while the state is read is delivered
     // afterwards (a harmless repeat), never lost.
-    let barrier = context
-        .event_bus()
-        .domain_barrier(context.client_id(), "computers")
-        .map_err(|error| DispatchError::internal(error.to_string()))?;
+    let barrier = if context.is_owner_bridge() {
+        // A controller's request has no subscription on this engine to order against.
+        None
+    } else {
+        Some(
+            context
+                .event_bus()
+                .domain_barrier(context.client_id(), "computers")
+                .map_err(|error| DispatchError::internal(error.to_string()))?,
+        )
+    };
     let host = SilodRuntimeHost::new(context);
     let refresh = params.refresh_repositories;
     let linux_host = host.clone();
@@ -593,7 +604,7 @@ async fn read_computers(
     .map_err(|error| DispatchError::internal(error.to_string()))?;
     Ok(HandlerOutput {
         value: encode(result)?,
-        event_barrier: Some(barrier),
+        event_barrier: barrier,
     })
 }
 
@@ -723,6 +734,36 @@ fn query_logs(
     }
     let paths = silo_engine::runtime::runtime_paths(host)?;
     silo_engine::runtime::runtime_logs::query_local(&paths, query, device_id, device_name)
+}
+
+/// The other device a log request is for: `deviceId` naming neither this engine nor `local`.
+fn owner_of_log_query(
+    query: &silo_engine::runtime::runtime_logs::Query,
+    local_device: &str,
+) -> Option<String> {
+    query
+        .device_id
+        .as_deref()
+        .filter(|device| *device != "local" && *device != local_device)
+        .map(str::to_owned)
+}
+
+/// One log page of a computer on another device, read from its owner and checked against the
+/// canonical page before an export writes it.
+fn remote_log_page(
+    owner: &str,
+    query: silo_engine::runtime::runtime_logs::Query,
+) -> Result<silo_engine::runtime::runtime_logs::Page, String> {
+    let mut params = serde_json::to_value(&query).map_err(|error| error.to_string())?;
+    if let Some(object) = params.as_object_mut() {
+        object.remove("deviceId");
+    }
+    let reply =
+        super::access::call_owner(owner, "logs.query", params).map_err(|error| error.message)?;
+    serde_json::from_value::<silo_api::methods::logs::LogPage>(reply.clone())
+        .map_err(|error| format!("The other device returned an invalid log page: {error}"))?;
+    serde_json::from_value(reply)
+        .map_err(|error| format!("The other device returned an invalid log page: {error}"))
 }
 
 async fn read_logs(
@@ -1089,8 +1130,10 @@ async fn begin_delete(
 }
 
 fn skip_creation_wait(
+    context: &HandlerContext,
     params: ComputerCreationSkipWaitParams,
 ) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
     silo_engine::runtime::skip_computer_use_wait_request(params.request_id);
     Ok(plain(Value::Null))
 }
@@ -1208,9 +1251,8 @@ async fn begin_logs_export(
     context: &HandlerContext,
     params: LogsExportParams,
 ) -> Result<HandlerOutput, DispatchError> {
-    for request in &params.requests {
-        require_local_device(context, request.device_id.as_deref())?;
-    }
+    // A request may name another device: its page is read from that owner, and the one file
+    // is written here, on the engine that exports.
     let requests: Vec<_> = params.requests.into_iter().map(runtime_log_query).collect();
     silo_engine::log_export::validate_requests(&requests).map_err(invalid)?;
     let job = context.start_job("logs.export")?;
@@ -1237,7 +1279,10 @@ async fn begin_logs_export(
             permit,
             requests,
             destination,
-            move |query| query_logs(&query_host, query, &device.device_id, &device.name),
+            move |query| match owner_of_log_query(&query, &device.device_id) {
+                Some(owner) => remote_log_page(&owner, query),
+                None => query_logs(&query_host, query, &device.device_id, &device.name),
+            },
             move || is_cancelled.load(Ordering::SeqCst),
         )
     });
@@ -1557,7 +1602,8 @@ async fn route(
         MethodName::ComputersShell => read_shell(context, decoded!()).await,
         MethodName::ComputersConfigurationRead => read_configuration(context, decoded!()).await,
         MethodName::ActivitySetupRead => {
-            let _: EmptyParams = decoded!();
+            let params: DeviceParams = decoded!();
+            require_local_device(context, params.device_id.as_deref())?;
             read_setup_activity(context).await
         }
         MethodName::ComputersLaunch => read_launch_status(context, decoded!()).await,
@@ -1580,7 +1626,7 @@ async fn route(
         }
         MethodName::ComputersCreate => begin_create(context, decoded!()).await,
         MethodName::ComputersDelete => begin_delete(context, decoded!()).await,
-        MethodName::ComputersCreationSkipComputerUseWait => skip_creation_wait(decoded!()),
+        MethodName::ComputersCreationSkipComputerUseWait => skip_creation_wait(context, decoded!()),
         MethodName::ComputersIdentitiesConfigure => {
             begin_identity_configuration(context, decoded!()).await
         }
@@ -1834,7 +1880,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn requests_for_another_device_are_refused_by_every_device_aware_method() {
+    async fn the_domain_itself_refuses_another_device_because_the_router_forwards_it_first() {
         let f = fixture();
         let device = json!("other-device");
         let target = json!({"computerId": LINUX, "deviceId": device});
@@ -1873,10 +1919,6 @@ pub(crate) mod tests {
             (
                 MethodName::ComputersConfigurationRetry,
                 json!({"deviceId": device}),
-            ),
-            (
-                MethodName::LogsExport,
-                json!({"requests": [{"computerId": LINUX, "deviceId": device}], "destination": "/tmp/x"}),
             ),
         ];
         for (method, params) in cases {
@@ -2233,6 +2275,53 @@ pub(crate) mod tests {
         assert_eq!(finished["result"], json!(true), "{finished}");
         let text = std::fs::read_to_string(&destination).unwrap();
         assert!(text.lines().next().unwrap().contains("silo-log-export"));
+    }
+
+    #[tokio::test]
+    async fn a_log_export_reads_another_devices_pages_from_its_owner_and_writes_one_file() {
+        const OWNER: &str = "88888888-8888-4888-8888-8888888888a1";
+        let _turn = EXPORTS.lock().await;
+        let mut f = fixture();
+        seed_linux(&f);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        let _owner = crate::methods::access::tests::stub_owner(OWNER, move |method, params| {
+            log.lock()
+                .unwrap()
+                .push((method.to_owned(), params.clone()));
+            Ok(json!({
+                "entries": [{
+                    "id": "e1", "line": "remote line", "occurredAt": "2026-10-14T10:00:00Z",
+                    "computerId": LINUX, "computerName": "remote-dev", "deviceId": OWNER,
+                    "deviceName": "Studio", "source": "system"
+                }],
+                "nextCursor": null,
+                "totalMatches": 1,
+                "timestampEstimated": false
+            }))
+        });
+        let destination = f._root.path().join("remote-export.jsonl");
+        let started = f
+            .call(
+                MethodName::LogsExport,
+                json!({
+                    "requests": [{"computerId": LINUX, "deviceId": OWNER}],
+                    "destination": destination.to_string_lossy()
+                }),
+            )
+            .await
+            .unwrap();
+        let finished = f.next_event("operations.job.finished").await;
+        assert_eq!(finished["jobId"], started["jobId"]);
+        assert_eq!(finished["result"], json!(true), "{finished}");
+        let text = std::fs::read_to_string(&destination).unwrap();
+        assert!(text.contains("remote line"), "{text}");
+        // The owner is asked for the page in the canonical name, and not told the device.
+        let asked = asked.lock().unwrap();
+        assert!(!asked.is_empty());
+        assert_eq!(asked[0].0, "logs.query");
+        assert_eq!(asked[0].1["computerId"], LINUX);
+        assert!(asked[0].1.get("deviceId").is_none());
     }
 
     #[tokio::test]
