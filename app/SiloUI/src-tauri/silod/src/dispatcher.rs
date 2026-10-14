@@ -176,9 +176,11 @@ impl MethodRegistry for CoreMethodRegistry {
                 }
                 MethodName::OperationsJobGet => {
                     let params: GetJobParams = parse_params(params)?;
-                    let registry = context.job_registry().map_err(DispatchError::internal)?;
-                    let result = registry
-                        .get_at(&params.job_id, params.offset_bytes)
+                    let result = silo_engine::jobs::get_at(
+                        context.as_ref(),
+                        &params.job_id,
+                        params.offset_bytes,
+                    )
                         .map_err(registry_error)?
                         .ok_or_else(|| DispatchError {
                             code: ErrorCode::NotFound,
@@ -702,6 +704,97 @@ mod tests {
         assert!(capabilities.contains(&"events.subscribe".to_owned()));
         assert!(capabilities.contains(&"operations.job.get".to_owned()));
         assert!(capabilities.contains(&"notifications.list".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn operations_job_get_retries_pending_completion_before_reading() {
+        let temporary = tempfile::tempdir().unwrap();
+        let context = Arc::new(SilodContext::new(
+            EnginePaths {
+                app_data: temporary.path().to_path_buf(),
+                ..EnginePaths::default()
+            },
+            EngineIdentity {
+                channel: Channel::Development,
+                version: "0.1.0".into(),
+                package_kind: PackageKind::MacApp,
+            },
+            LocalDeviceIdentity {
+                device_id: "device-1".into(),
+                name: "Test Mac".into(),
+            },
+            Arc::new(NoopMainThread),
+            Arc::new(NoopProcess),
+        ));
+        let registry = context.job_registry().unwrap();
+        let job_id = silo_api::jobs::JobId::new("transfer:dispatcher-get-retry").unwrap();
+        registry.accept(job_id.clone(), "files.upload").unwrap();
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_job_finish BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.job_id = 'transfer:dispatcher-get-retry' AND NEW.state = 'finished'
+                 BEGIN SELECT RAISE(FAIL, 'injected persistence failure'); END;",
+            )
+            .unwrap();
+        let completion = silo_api::jobs::JobFinished {
+            job_id: job_id.clone(),
+            result: Some(serde_json::json!({"status":"uploaded"})),
+            error: None,
+            outcome_chunked: false,
+        };
+        assert_eq!(
+            silo_engine::jobs::publish_finished(
+                context.as_ref(),
+                completion,
+                silo_engine::context::Audience::All,
+            )
+            .unwrap_err()
+            .kind(),
+            silo_engine::jobs::RegistryErrorKind::Storage
+        );
+
+        let dispatcher = Dispatcher::core(context);
+        let mut session = SessionState::default();
+        let handshake = dispatcher
+            .execute(dispatcher.prepare(
+                handshake("get-retry-handshake", PROTOCOL_VERSION, PROTOCOL_VERSION),
+                &mut session,
+            ))
+            .await;
+        assert!(!handshake.close);
+
+        let first_get = serde_json::json!({
+            "id": "get-retry-fails-while-storage-fails",
+            "method": "operations.job.get",
+            "params": {"jobId": job_id.as_str()}
+        });
+        let failed_retry = dispatcher
+            .execute(dispatcher.prepare(first_get, &mut session))
+            .await;
+        assert!(matches!(
+            failed_retry.response,
+            Some(ResponseEnvelope::Error { error, .. }) if error.code == ErrorCode::Internal
+        ));
+
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_job_finish;")
+            .unwrap();
+        let successful_get = serde_json::json!({
+            "id": "get-retries-retained-completion",
+            "method": "operations.job.get",
+            "params": {"jobId": job_id.as_str()}
+        });
+        let retried = dispatcher
+            .execute(dispatcher.prepare(successful_get, &mut session))
+            .await;
+        assert!(matches!(
+            retried.response,
+            Some(ResponseEnvelope::Success { result, .. })
+                if result["state"] == "finished"
+                    && result["outcome"]["result"]["status"] == "uploaded"
+        ));
     }
 
     #[tokio::test]

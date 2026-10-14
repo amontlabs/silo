@@ -30,4 +30,5 @@ objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 security-framework = "3.7"
 
 [dev-dependencies]
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 tempfile = "3.27"
