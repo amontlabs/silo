@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     os::fd::AsRawFd,
@@ -14,6 +14,14 @@ use std::{
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+mod macos_archive;
+pub(crate) use macos_archive::{
+    ArchiveRuntimeKind, MacosArchiveComponent, MacosArchiveComponentInput,
+    MacosArchiveConfiguration, MacosArchiveConfig, MacosArchiveMemory,
+    MacosArchiveSource, MacosArchiveSourceKind, MacosCheckpointKind,
+    MacosComponentRole, PreparedMacosArchive,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
@@ -1725,6 +1733,8 @@ struct VerifiedPackage {
     manifest: PackageManifest,
     /// The one payload extracted by `PayloadMode::Extract`.
     extracted: Option<ExtractedPayload>,
+    /// The selected macOS components extracted by `PayloadMode::ExtractMacos`.
+    macos_extracted: Option<MacosExtractedPayload>,
     size_bytes: u64,
 }
 
@@ -1732,6 +1742,11 @@ struct ExtractedPayload {
     index: usize,
     path: PathBuf,
     scan: PayloadScan,
+}
+
+struct MacosExtractedPayload {
+    index: usize,
+    component_paths: BTreeMap<MacosComponentRole, PathBuf>,
 }
 
 /// Free space where an import stages its payload and where the runtime
@@ -1755,6 +1770,13 @@ enum PayloadMode<'a> {
         dir: &'a Path,
         source: Option<&'a str>,
         space: SpaceBudget,
+    },
+    /// Verify every component frame and extract selected roles from one Apple
+    /// Virtualization computer into a private stage.
+    ExtractMacos {
+        dir: &'a Path,
+        source: Option<&'a str>,
+        roles: &'a [MacosComponentRole],
     },
 }
 
@@ -1819,17 +1841,59 @@ fn read_and_verify_package(
         ));
     }
 
+    if matches!(&mode, PayloadMode::Describe) {
+        return Ok(VerifiedPackage {
+            manifest,
+            extracted: None,
+            macos_extracted: None,
+            size_bytes: metadata.len(),
+        });
+    }
+
+    if manifest.runtime.name == macos_archive::RUNTIME_NAME {
+        let selection = match &mode {
+            PayloadMode::VerifyAll => None,
+            PayloadMode::ExtractMacos { dir, source, roles } => Some((
+                *dir,
+                select_restore_source(&manifest, *source)?,
+                *roles,
+            )),
+            PayloadMode::Extract { .. } => {
+                return Err(BackupError::InvalidRequest(
+                    "Apple Virtualization exports require component extraction.".into(),
+                ));
+            }
+            PayloadMode::Describe => unreachable!("describe returned above"),
+        };
+        let component_paths = macos_archive::verify_payloads(
+            &mut file,
+            &manifest,
+            selection.map(|(_, index, roles)| (index, roles)),
+            selection.map(|(dir, _, _)| dir),
+            cancellation,
+        )?;
+        let macos_extracted = selection.map(|(_, index, _)| MacosExtractedPayload {
+            index,
+            component_paths: component_paths.unwrap_or_default(),
+        });
+        return Ok(VerifiedPackage {
+            manifest,
+            extracted: None,
+            macos_extracted,
+            size_bytes: metadata.len(),
+        });
+    }
+
     let extract = match mode {
-        PayloadMode::Describe => {
-            return Ok(VerifiedPackage {
-                manifest,
-                extracted: None,
-                size_bytes: metadata.len(),
-            });
-        }
+        PayloadMode::Describe => unreachable!("describe returned above"),
         PayloadMode::VerifyAll => None,
         PayloadMode::Extract { dir, source, space } => {
             Some((dir, select_restore_source(&manifest, source)?, space))
+        }
+        PayloadMode::ExtractMacos { .. } => {
+            return Err(BackupError::InvalidRequest(
+                "Apple Virtualization component extraction requires an Apple archive.".into(),
+            ));
         }
     };
     let mut extracted = None;
@@ -1902,6 +1966,7 @@ fn read_and_verify_package(
     Ok(VerifiedPackage {
         manifest,
         extracted,
+        macos_extracted: None,
         size_bytes: metadata.len(),
     })
 }
@@ -2007,14 +2072,20 @@ fn check_runtime_compatibility(runtime: &RuntimeManifest) -> Result<(), BackupEr
 
 fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
     let architecture = manifest.runtime.guest_architecture.as_str();
-    if !matches!(architecture, "aarch64" | "x86_64") || architecture != std::env::consts::ARCH {
-        return Err(BackupError::InvalidArchive(format!(
-            "This export file requires {architecture}; Silo on this device supports {}. Import it on a device with the required architecture.",
-            std::env::consts::ARCH
-        )));
+    if manifest.runtime.name == macos_archive::RUNTIME_NAME {
+        macos_archive::validate_runtime(&manifest.runtime)?;
+    } else {
+        if !matches!(architecture, "aarch64" | "x86_64")
+            || architecture != std::env::consts::ARCH
+        {
+            return Err(BackupError::InvalidArchive(format!(
+                "This export file requires {architecture}; Silo on this device supports {}. Import it on a device with the required architecture.",
+                std::env::consts::ARCH
+            )));
+        }
+        check_runtime_compatibility(&manifest.runtime)?;
     }
     check_format_version(manifest.schema_version)?;
-    check_runtime_compatibility(&manifest.runtime)?;
     if manifest.computers.is_empty() || manifest.computers.len() > 64 {
         return Err(BackupError::InvalidArchive(
             "the computer count is outside supported limits".into(),
@@ -2043,12 +2114,22 @@ fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
                 "checkpoint metadata is invalid".into(),
             ));
         }
-        validate_snapshottable_config(&computer.name, &computer.runtime_config)
-            .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
-        validate_computer_configuration(&computer.name, &computer.computer_configuration)
-            .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
-        validate_package_volumes(&computer.volumes)?;
-        validate_volume_contract(&computer.runtime_config, &computer.computer_configuration)?;
+        if manifest.runtime.name == macos_archive::RUNTIME_NAME {
+            macos_archive::validate_computer(
+                &computer.name,
+                &computer.runtime_config,
+                &computer.computer_configuration,
+                computer.payload_size,
+                &computer.volumes,
+            )?;
+        } else {
+            validate_snapshottable_config(&computer.name, &computer.runtime_config)
+                .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+            validate_computer_configuration(&computer.name, &computer.computer_configuration)
+                .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+            validate_package_volumes(&computer.volumes)?;
+            validate_volume_contract(&computer.runtime_config, &computer.computer_configuration)?;
+        }
     }
     Ok(())
 }
