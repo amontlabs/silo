@@ -21,6 +21,6 @@ pub(super) use bootstrap::{
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub(super) use supervisor::{
     apply_github_profile, apply_github_profile_state, apply_secrets, generate_ca,
-    github_profile_is_cached, guest_secret_names, prepare, revoke_secret, scoped_cached_tokens,
-    with_policy_lock, PreparedGateway,
+    github_profile_is_cached, guest_secret_names, issue_trust_probe, prepare, revoke_secret,
+    scoped_cached_tokens, with_policy_lock, PreparedGateway,
 };

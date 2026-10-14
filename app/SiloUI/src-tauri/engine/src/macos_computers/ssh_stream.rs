@@ -139,6 +139,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(super::super::developer_tools::version());
         store::save(&store::Layout::new(app_data, &record.id), &record).unwrap();

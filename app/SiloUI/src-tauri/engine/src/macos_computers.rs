@@ -2049,6 +2049,7 @@ pub fn install_test_computer(
         clipboard: true,
         roots: true,
         needs_personalizing: false,
+        proxy_bootstrap: true,
     };
     record.computer_use_approval = Some(approval);
     record.computer_use_desired_approval = Some(approval);
@@ -3150,6 +3151,7 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
         clipboard: false,
         roots: false,
         needs_personalizing: true,
+        proxy_bootstrap: false,
     };
     record.developer_tools_version = None;
     record.pristine = false;
@@ -3871,7 +3873,24 @@ fn end_workflow(app: &MacosContext, id: &str, layout: &Layout, result: Result<()
 
 /// Deletes a computer's files, after making sure this Mac no longer holds its disk image.
 fn remove_computer(layout: &Layout) -> Result<(), String> {
-    offline_setup::ensure_detached(&layout.disk())?;
+    remove_computer_with(layout, &offline_setup::ensure_detached, &|id| {
+        proxy_ca::retire(id)
+    })
+}
+
+/// Detaches the disk, retires the computer's proxy CA, then deletes its folder, checkpoints
+/// included. The CA goes before the files so a failure of either step leaves the computer
+/// listed and the whole deletion can be repeated: the folder is the record of what remains to
+/// clean, and retiring an absent CA is not an error.
+fn remove_computer_with(
+    layout: &Layout,
+    detach: &dyn Fn(&std::path::Path) -> Result<(), String>,
+    retire_ca: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    detach(&layout.disk())?;
+    if let Some(id) = layout.id() {
+        retire_ca(id)?;
+    }
     store::remove(layout)
 }
 
@@ -4033,6 +4052,8 @@ fn copy_template(
         clipboard: true,
         roots: false,
         needs_personalizing: true,
+        // The copy has the template's network identity; personalization stages its own.
+        proxy_bootstrap: false,
     };
     Ok(true)
 }
@@ -4434,80 +4455,226 @@ pub fn computer_ids(app: &MacosContext) -> Vec<String> {
 /// configuration recovery, before lifecycle recovery or launch preferences.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub fn migrate_proxy_bootstraps_at_launch(app: &MacosContext) -> Result<(), String> {
-    let failures = {
+    let outcome = (|| -> Result<Vec<String>, MigrationAbort> {
         let _migration = runtime::OPERATIONS
             .kind(runtime::operation_gate::OperationKind::Other)
             .hidden()
             .device("Preparing macOS network access")
-            .map_err(|error| error.to_string())?;
-        ensure_loaded(app)?;
-        let data = app_data(app)?;
-        let mut failures = Vec::new();
-        for id in store::computer_ids(&data) {
-            let layout = Layout::new(&data, &id);
-            let record = match store::read_record(&layout) {
-                Ok(record) if record.id == id => record,
-                Ok(_) => {
-                    failures.push(format!(
-                        "A macOS computer record in {} has a different identity.",
-                        layout.dir.display()
-                    ));
-                    continue;
-                }
-                Err(_) => {
-                    failures.push(format!(
-                        "A macOS computer record in {} could not be read.",
-                        layout.dir.display()
-                    ));
-                    continue;
-                }
-            };
-            if !record.installed || !record.setup.complete() {
-                continue;
-            }
-            if checkpoints::restore_unfinished(&layout) {
-                failures.push(format!(
-                    "{} has an unfinished Restore. Silo left its computer files untouched.",
-                    record.name
-                ));
-                continue;
-            }
-            if record
-                .pending_restore
-                .as_ref()
-                .is_some_and(|restore| restore.memory)
-            {
-                failures.push(format!(
-                    "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
-                    record.name
-                ));
-                continue;
-            }
-            if let Err(error) = proxy::migrate_legacy_guest_bootstrap(app, &record, &layout) {
-                // Never move to another guest until Virtualization.framework has
-                // released this one's machine, even after a timeout or stop error.
-                let samples = engine::machine_samples(app).map_err(|_| {
-                    "Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string()
-                })?;
-                if samples.iter().any(|sample| sample.id == id) {
-                    return Err(format!(
-                        "{} could not be stopped after network setup failed: {error}",
-                        record.name
-                    ));
-                }
-                failures.push(format!("{}: {error}", record.name));
+            .map_err(|error| MigrationAbort::Setup(error.to_string()))?;
+        ensure_loaded(app).map_err(MigrationAbort::Setup)?;
+        let data = app_data(app).map_err(MigrationAbort::Setup)?;
+        let ids = store::computer_ids(&data);
+        migrate_launch_computers(&ids, &mut LiveLaunchMigration { app, data: &data })
+    })();
+    match outcome {
+        // Never move to another guest until Virtualization.framework has released this
+        // one's machine: the launch stays closed and the user relaunches Silo.
+        Err(MigrationAbort::Unsafe(message)) => return Err(message),
+        Err(MigrationAbort::Setup(message)) => {
+            // Nothing was converted. Each computer without a bootstrap stays not set up and
+            // refuses Start, so the rest of the launch can open.
+            PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+            return Err(message);
+        }
+        Ok(failures) => {
+            // Per-computer failures remain fail-closed at the readiness check; valid
+            // computers can still start while the user retries this launch migration later.
+            PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("\n"))
             }
         }
-        failures
-    };
-    // Per-computer failures remain fail-closed at `require_guest_bootstrap`; valid
-    // computers can still start while the user retries this launch migration later.
-    PROXY_BOOTSTRAP_MIGRATION_READY.store(true, Ordering::SeqCst);
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("\n"))
     }
+}
+
+/// Why the launch migration stopped before it visited every computer.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Debug, PartialEq, Eq)]
+enum MigrationAbort {
+    /// The migration could not begin.
+    Setup(String),
+    /// A converted computer's machine may still be held, so no other guest may start.
+    Unsafe(String),
+}
+
+/// What the launch migration does for one computer.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchMigration {
+    Skip,
+    /// The bootstrap is already staged and matches; only the record lacks the step.
+    RecordCurrent,
+    Convert,
+}
+
+/// Decides the launch migration of one computer. The existing bootstrap is checked first:
+/// a computer that already has it is never held back by Restore state, which only matters
+/// to a guest that has to be cold-booted for the conversion.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn plan_launch_migration(
+    record: &Record,
+    bootstrap_current: bool,
+    restore_unfinished: bool,
+) -> Result<LaunchMigration, String> {
+    if !record.installed || !record.setup.guest_steps_complete() || record.setup.needs_personalizing
+    {
+        return Ok(LaunchMigration::Skip);
+    }
+    if bootstrap_current {
+        return Ok(if record.setup.proxy_bootstrap {
+            LaunchMigration::Skip
+        } else {
+            LaunchMigration::RecordCurrent
+        });
+    }
+    if restore_unfinished {
+        return Err(format!(
+            "{} has an unfinished Restore. Silo left its computer files untouched.",
+            record.name
+        ));
+    }
+    if record
+        .pending_restore
+        .as_ref()
+        .is_some_and(|restore| restore.memory)
+    {
+        return Err(format!(
+            "{} has saved Restore memory that cannot be cold-booted for network setup. Silo left it untouched.",
+            record.name
+        ));
+    }
+    Ok(LaunchMigration::Convert)
+}
+
+/// What the launch migration needs from the host, so its per-computer decisions can be
+/// tested without a running guest.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+trait LaunchMigrationOps {
+    fn read(&mut self, id: &str) -> Result<Record, String>;
+    fn bootstrap_is_current(&mut self, record: &Record) -> bool;
+    fn restore_unfinished(&mut self, record: &Record) -> bool;
+    fn record_current(&mut self, record: &Record) -> Result<(), String>;
+    fn convert(&mut self, record: &Record) -> Result<(), String>;
+    /// Whether the framework holds no machine for `record`; an error means unknown.
+    fn machine_released(&mut self, record: &Record) -> Result<bool, String>;
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn migrate_launch_computers(
+    ids: &[String],
+    host: &mut impl LaunchMigrationOps,
+) -> Result<Vec<String>, MigrationAbort> {
+    let mut failures = Vec::new();
+    for id in ids {
+        let record = match host.read(id) {
+            Ok(record) => record,
+            Err(failure) => {
+                failures.push(failure);
+                continue;
+            }
+        };
+        let current = host.bootstrap_is_current(&record);
+        let restore_unfinished = !current && host.restore_unfinished(&record);
+        match plan_launch_migration(&record, current, restore_unfinished) {
+            Ok(LaunchMigration::Skip) => {}
+            Ok(LaunchMigration::RecordCurrent) => {
+                if let Err(error) = host.record_current(&record) {
+                    failures.push(format!("{}: {error}", record.name));
+                }
+            }
+            Ok(LaunchMigration::Convert) => {
+                if let Err(error) = host.convert(&record) {
+                    let released = host.machine_released(&record).map_err(|_| {
+                        MigrationAbort::Unsafe("Silo could not verify that the temporary NAT computer stopped. Relaunch Silo before starting another macOS computer.".to_string())
+                    })?;
+                    if !released {
+                        return Err(MigrationAbort::Unsafe(format!(
+                            "{} could not be stopped after network setup failed: {error}",
+                            record.name
+                        )));
+                    }
+                    failures.push(format!("{}: {error}", record.name));
+                }
+            }
+            Err(failure) => failures.push(failure),
+        }
+    }
+    Ok(failures)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+struct LiveLaunchMigration<'a> {
+    app: &'a MacosContext,
+    data: &'a std::path::Path,
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl LiveLaunchMigration<'_> {
+    fn layout(&self, record: &Record) -> Layout {
+        Layout::new(self.data, &record.id)
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl LaunchMigrationOps for LiveLaunchMigration<'_> {
+    fn read(&mut self, id: &str) -> Result<Record, String> {
+        let layout = Layout::new(self.data, id);
+        match store::read_record(&layout) {
+            Ok(record) if record.id == id => Ok(record),
+            Ok(_) => Err(format!(
+                "A macOS computer record in {} has a different identity.",
+                layout.dir.display()
+            )),
+            Err(_) => Err(format!(
+                "A macOS computer record in {} could not be read.",
+                layout.dir.display()
+            )),
+        }
+    }
+
+    fn bootstrap_is_current(&mut self, record: &Record) -> bool {
+        proxy::require_guest_bootstrap(record, &self.layout(record)).is_ok()
+    }
+
+    fn restore_unfinished(&mut self, record: &Record) -> bool {
+        checkpoints::restore_unfinished(&self.layout(record))
+    }
+
+    fn record_current(&mut self, record: &Record) -> Result<(), String> {
+        mark_proxy_bootstrap(self.app, &self.layout(record), record.clone())
+    }
+
+    fn convert(&mut self, record: &Record) -> Result<(), String> {
+        let layout = self.layout(record);
+        proxy::migrate_legacy_guest_bootstrap(self.app, record, &layout)
+            .and_then(|()| mark_proxy_bootstrap(self.app, &layout, record.clone()))
+    }
+
+    fn machine_released(&mut self, record: &Record) -> Result<bool, String> {
+        let samples = engine::machine_samples(self.app)?;
+        Ok(!samples.iter().any(|sample| sample.id == record.id))
+    }
+}
+
+/// Records that the computer's network bootstrap exists, making it set up.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn mark_proxy_bootstrap(
+    app: &MacosContext,
+    layout: &Layout,
+    mut record: Record,
+) -> Result<(), String> {
+    if record.setup.proxy_bootstrap {
+        return Ok(());
+    }
+    record.setup.proxy_bootstrap = true;
+    store::save(layout, &record)?;
+    update(app, &record.id, |entry| {
+        entry.record.setup.proxy_bootstrap = true;
+    });
+    emit(app);
+    Ok(())
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -5836,6 +6003,7 @@ fn copy_for_fork(
         clipboard: true,
         roots: false,
         needs_personalizing: true,
+        proxy_bootstrap: false,
     };
     // Persist while the fork is still in its creation state, where nothing else can start it.
     if !registry().creation_continues(fork_id) {
@@ -6309,6 +6477,7 @@ pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, St
         clipboard: true,
         roots: true,
         needs_personalizing: false,
+        proxy_bootstrap: true,
     };
     record.developer_tools_version = Some(developer_tools::version());
     let layout = Layout::new(app_data, &record.id);
@@ -6501,6 +6670,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         source.developer_tools_version = Some(developer_tools::version());
         let source_layout = Layout::new(data, &source.id);
@@ -8712,6 +8882,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         done.record.developer_tools_version = Some(developer_tools::version());
         let json = serde_json::to_value(done.row()).unwrap();
@@ -9262,6 +9433,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         entry.record.developer_tools_version = Some("stale-tools".into());
         assert!(!entry.row().setup_complete);
@@ -9290,6 +9462,7 @@ mod tests {
             clipboard: true,
             roots: true,
             needs_personalizing: false,
+            proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
         let old = record.clone();
@@ -9557,6 +9730,7 @@ mod tests {
             clipboard: true,
             roots: false,
             needs_personalizing: true,
+            proxy_bootstrap: false,
         };
         record.template = Some("25G83-abcd".into());
         assert!(!registry.entries[0].row().setup_complete);
@@ -9954,6 +10128,254 @@ mod tests {
             State::Stopping,
         ] {
             assert!(is_busy(state));
+        }
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    mod launch_migration {
+        use super::*;
+        use std::collections::{HashMap, HashSet};
+
+        fn legacy(id: &str) -> Record {
+            let mut record = store::new_record(
+                &store::CreateRequest {
+                    name: format!("mac-{id}"),
+                    cpus: 2,
+                    memory_gib: 4,
+                    disk_gib: 64,
+                },
+                "02:00:00:00:00:01".into(),
+            );
+            record.id = id.into();
+            record.installed = true;
+            record.setup = store::SetupProgress {
+                account: true,
+                sip: true,
+                developer_tools: true,
+                computer_use: true,
+                clipboard: true,
+                roots: true,
+                needs_personalizing: false,
+                proxy_bootstrap: false,
+            };
+            record
+        }
+
+        fn with_saved_memory(mut record: Record) -> Record {
+            record.pending_restore = Some(checkpoints::PendingRestore {
+                checkpoint_id: "checkpoint".into(),
+                memory: true,
+            });
+            record
+        }
+
+        #[derive(Default)]
+        struct Fake {
+            records: HashMap<String, Record>,
+            current: HashSet<String>,
+            unfinished: HashSet<String>,
+            failing: HashSet<String>,
+            held: HashSet<String>,
+            unknown_machines: bool,
+            visited: Vec<String>,
+            converted: Vec<String>,
+            recorded: Vec<String>,
+        }
+
+        impl Fake {
+            fn with(mut self, record: Record) -> Self {
+                self.records.insert(record.id.clone(), record);
+                self
+            }
+        }
+
+        impl LaunchMigrationOps for Fake {
+            fn read(&mut self, id: &str) -> Result<Record, String> {
+                self.visited.push(id.to_owned());
+                self.records
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| format!("{id} could not be read"))
+            }
+            fn bootstrap_is_current(&mut self, record: &Record) -> bool {
+                self.current.contains(&record.id)
+            }
+            fn restore_unfinished(&mut self, record: &Record) -> bool {
+                self.unfinished.contains(&record.id)
+            }
+            fn record_current(&mut self, record: &Record) -> Result<(), String> {
+                self.recorded.push(record.id.clone());
+                Ok(())
+            }
+            fn convert(&mut self, record: &Record) -> Result<(), String> {
+                if self.failing.contains(&record.id) {
+                    return Err("staging failed".into());
+                }
+                self.converted.push(record.id.clone());
+                Ok(())
+            }
+            fn machine_released(&mut self, record: &Record) -> Result<bool, String> {
+                if self.unknown_machines {
+                    Err("main thread unavailable".into())
+                } else {
+                    Ok(!self.held.contains(&record.id))
+                }
+            }
+        }
+
+        fn ids(ids: &[&str]) -> Vec<String> {
+            ids.iter().map(|id| (*id).to_owned()).collect()
+        }
+
+        #[test]
+        fn an_already_migrated_computer_with_saved_memory_is_recorded_not_rejected() {
+            let mut fake = Fake::default()
+                .with(with_saved_memory(legacy("migrated")))
+                .with(legacy("other"));
+            fake.current.insert("migrated".into());
+            fake.unfinished.insert("migrated".into());
+
+            let failures = migrate_launch_computers(&ids(&["migrated", "other"]), &mut fake)
+                .expect("the migration completes");
+
+            assert!(failures.is_empty(), "{failures:?}");
+            assert_eq!(fake.recorded, ["migrated"]);
+            assert_eq!(fake.converted, ["other"]);
+        }
+
+        #[test]
+        fn a_recorded_computer_is_left_alone() {
+            let mut done = legacy("done");
+            done.setup.proxy_bootstrap = true;
+            let mut fake = Fake::default().with(done);
+            fake.current.insert("done".into());
+            let failures = migrate_launch_computers(&ids(&["done"]), &mut fake).unwrap();
+            assert!(failures.is_empty());
+            assert!(fake.recorded.is_empty() && fake.converted.is_empty());
+        }
+
+        #[test]
+        fn a_legacy_computer_with_saved_memory_fails_alone_and_unrelated_ones_still_convert() {
+            let mut fake = Fake::default()
+                .with(with_saved_memory(legacy("legacy")))
+                .with(legacy("plain"));
+            let failures = migrate_launch_computers(&ids(&["legacy", "plain"]), &mut fake)
+                .expect("the migration completes");
+
+            assert_eq!(failures.len(), 1);
+            assert!(
+                failures[0].contains("mac-legacy") && failures[0].contains("saved Restore memory")
+            );
+            assert_eq!(fake.converted, ["plain"]);
+        }
+
+        #[test]
+        fn an_unfinished_restore_blocks_only_a_computer_that_needs_conversion() {
+            let mut fake = Fake::default().with(legacy("legacy")).with(legacy("other"));
+            fake.unfinished.insert("legacy".into());
+            let failures = migrate_launch_computers(&ids(&["legacy", "other"]), &mut fake).unwrap();
+            assert_eq!(failures.len(), 1);
+            assert!(failures[0].contains("unfinished Restore"));
+            assert_eq!(fake.converted, ["other"]);
+        }
+
+        #[test]
+        fn a_failed_conversion_with_a_released_machine_does_not_stop_the_others() {
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            let failures = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake).unwrap();
+            assert_eq!(failures, ["mac-bad: staging failed"]);
+            assert_eq!(fake.converted, ["good"]);
+        }
+
+        #[test]
+        fn a_machine_that_may_still_run_stops_the_whole_migration() {
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            fake.held.insert("bad".into());
+            let aborted = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake);
+            assert!(matches!(&aborted, Err(MigrationAbort::Unsafe(message))
+                if message.contains("could not be stopped after network setup failed")));
+            assert_eq!(fake.visited, ["bad"]);
+
+            let mut fake = Fake::default().with(legacy("bad")).with(legacy("good"));
+            fake.failing.insert("bad".into());
+            fake.unknown_machines = true;
+            let aborted = migrate_launch_computers(&ids(&["bad", "good"]), &mut fake);
+            assert!(matches!(&aborted, Err(MigrationAbort::Unsafe(message))
+                if message.contains("could not verify")));
+            assert_eq!(fake.visited, ["bad"]);
+        }
+
+        #[test]
+        fn incomplete_or_uninstalled_computers_are_skipped() {
+            let mut stopped_early = legacy("early");
+            stopped_early.setup.clipboard = false;
+            let mut copy = legacy("copy");
+            copy.setup.needs_personalizing = true;
+            let mut uninstalled = legacy("uninstalled");
+            uninstalled.installed = false;
+            for record in [stopped_early, copy, uninstalled] {
+                assert_eq!(
+                    plan_launch_migration(&record, false, true),
+                    Ok(LaunchMigration::Skip)
+                );
+            }
+        }
+    }
+
+    mod deletion {
+        use super::*;
+        use std::cell::RefCell;
+
+        #[test]
+        fn deleting_a_computer_retires_its_ca_before_removing_its_files() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(layout.dir.join("checkpoints")).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+            let retired = RefCell::new(Vec::new());
+
+            remove_computer_with(&layout, &|_| Ok(()), &|id| {
+                // The folder still exists while the CA is retired.
+                assert!(layout.dir.exists());
+                retired.borrow_mut().push(id.to_owned());
+                Ok(())
+            })
+            .unwrap();
+
+            assert_eq!(retired.into_inner(), ["computer-a"]);
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_ca_retirement_keeps_the_computer_so_the_deletion_can_be_repeated() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            std::fs::write(layout.record(), b"{}").unwrap();
+
+            let failed = remove_computer_with(&layout, &|_| Ok(()), &|_| Err("denied".into()));
+            assert_eq!(failed, Err("denied".into()));
+            assert!(layout.record().exists(), "nothing was deleted");
+
+            remove_computer_with(&layout, &|_| Ok(()), &|_| Ok(())).unwrap();
+            assert!(!layout.dir.exists());
+        }
+
+        #[test]
+        fn a_failed_detach_retires_nothing() {
+            let data = tempfile::tempdir().unwrap();
+            let layout = Layout::new(data.path(), "computer-a");
+            std::fs::create_dir_all(&layout.dir).unwrap();
+            let retired = RefCell::new(0);
+            let failed = remove_computer_with(&layout, &|_| Err("attached".into()), &|_| {
+                *retired.borrow_mut() += 1;
+                Ok(())
+            });
+            assert!(failed.is_err());
+            assert_eq!(retired.into_inner(), 0);
+            assert!(layout.dir.exists());
         }
     }
 

@@ -532,6 +532,46 @@ fn retired_environment_names(existing: &str, active: &str) -> String {
     }
 }
 
+/// Installs the staged files in the guest. The trust-probe leaf and the CA are both
+/// installed before the daemon, which is installed last, can run.
+const INSTALL_SCRIPT: &str = r#"set -eu
+/bin/launchctl bootout system/com.silo.network-bootstrap >/dev/null 2>&1 || true
+/usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools /usr/local/libexec /Library/LaunchAgents "/Library/Application Support/Silo/NetworkBootstrap"
+/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-network-bootstrap /Library/PrivilegedHelperTools/silo-network-bootstrap
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-network-bootstrap-config.json "/Library/Application Support/Silo/NetworkBootstrap/config.json"
+old_ca="/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
+if [ -s "$old_ca" ]; then
+    old_sha256=$(/usr/bin/openssl x509 -in "$old_ca" -noout -fingerprint -sha256 | /usr/bin/sed 's/^[^=]*=//' | /usr/bin/tr -d ':' | /usr/bin/tr '[:upper:]' '[:lower:]')
+    new_sha256=$(/usr/bin/openssl x509 -in /tmp/silo-proxy-ca.pem -noout -fingerprint -sha256 | /usr/bin/sed 's/^[^=]*=//' | /usr/bin/tr -d ':' | /usr/bin/tr '[:upper:]' '[:lower:]')
+    if [ "$old_sha256" != "$new_sha256" ]; then
+        /bin/sh /tmp/silo-remove-inherited-proxy-ca.sh "$old_sha256" /Library/Keychains/System.keychain
+    fi
+fi
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-ca.pem "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-ca-probe.pem "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca-probe.pem"
+/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-proxy-environment.zsh /usr/local/libexec/silo-proxy-environment.zsh
+/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-github-credential.sh /usr/local/libexec/silo-github-credential
+/usr/bin/install -o root -g wheel -m 0644 /tmp/com.silo.proxy-environment.plist /Library/LaunchAgents/com.silo.proxy-environment.plist
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-placeholders.zsh "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh"
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-placeholder-names.txt "/Library/Application Support/Silo/NetworkBootstrap/placeholder-names.txt"
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-retired-names.txt "/Library/Application Support/Silo/NetworkBootstrap/retired-names.txt"
+/usr/bin/security find-certificate -a -p /System/Library/Keychains/SystemRootCertificates.keychain > "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem"
+/bin/cat "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem" "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem" > "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp"
+/usr/bin/install -o root -g wheel -m 0644 "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp" "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem"
+/bin/rm -f "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem" "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp"
+/usr/bin/security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
+/usr/bin/git config --system --replace-all credential.https://github.com.helper /usr/local/libexec/silo-github-credential
+file=/Users/silo/.zshenv
+line='[[ -r "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh" ]] && source "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh"'
+[ ! -L "$file" ] || exit 1
+[ -e "$file" ] || /usr/bin/install -o silo -g staff -m 0644 /dev/null "$file"
+/usr/bin/grep -Fqx "$line" "$file" || /usr/bin/printf '\n%s\n' "$line" >> "$file"
+/usr/sbin/chown silo:staff "$file"
+/bin/rm -f "/Library/Application Support/Silo/NetworkBootstrap/receipt.json"
+/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-network-bootstrap.plist /Library/LaunchDaemons/com.silo.network-bootstrap.plist
+/bin/rm -f /tmp/silo-network-bootstrap /tmp/silo-network-bootstrap-config.json /tmp/silo-proxy-ca.pem /tmp/silo-proxy-ca-probe.pem /tmp/silo-remove-inherited-proxy-ca.sh /tmp/silo-network-bootstrap.plist /tmp/silo-proxy-environment.zsh /tmp/silo-github-credential.sh /tmp/com.silo.proxy-environment.plist /tmp/silo-proxy-placeholders.zsh /tmp/silo-proxy-placeholder-names.txt /tmp/silo-proxy-retired-names.txt
+"#;
+
 fn install_guest_files(
     app: &MacosContext,
     record: &Record,
@@ -542,6 +582,9 @@ fn install_guest_files(
     placeholder_names: &[String],
 ) -> Result<(), String> {
     let helper = bootstrap_binary(app)?;
+    // A leaf signed by this CA lets the guest prove its trust settings accept the CA, not
+    // just that the certificate is present.
+    let trust_probe = super::issue_trust_probe(app, ca)?;
     guest_access::wait_for_ssh(layout, record, SSH_WAIT, &|| false)?;
     let old_names = guest_access::run_capped(
         layout,
@@ -583,6 +626,7 @@ fn install_guest_files(
         .map_err(|_| "Cannot prepare macOS proxy bootstrap files.".to_owned())?;
     let config_path = temporary.path().join("config.json");
     let ca_path = temporary.path().join("proxy-ca.pem");
+    let trust_probe_path = temporary.path().join("proxy-ca-probe.pem");
     let ca_cleanup_path = temporary.path().join("remove-inherited-proxy-ca.sh");
     let plist_path = temporary.path().join("com.silo.network-bootstrap.plist");
     let environment_path = temporary.path().join("silo-proxy-environment.zsh");
@@ -597,6 +641,7 @@ fn install_guest_files(
             .map_err(|_| "Cannot encode macOS proxy bootstrap configuration.".to_owned())?,
     )?;
     write_private(&ca_path, ca.certificate_pem().as_bytes())?;
+    write_private(&trust_probe_path, trust_probe.as_bytes())?;
     write_private(
         &ca_cleanup_path,
         include_bytes!("../../../../guest/macos/remove-inherited-proxy-ca.sh"),
@@ -634,6 +679,13 @@ fn install_guest_files(
         record,
         &ca_path,
         "/tmp/silo-proxy-ca.pem",
+        SSH_COMMAND_TIMEOUT,
+    )?;
+    guest_access::copy(
+        layout,
+        record,
+        &trust_probe_path,
+        "/tmp/silo-proxy-ca-probe.pem",
         SSH_COMMAND_TIMEOUT,
     )?;
     guest_access::copy(
@@ -693,42 +745,8 @@ fn install_guest_files(
         SSH_COMMAND_TIMEOUT,
     )?;
 
-    let script = r#"set -eu
-/bin/launchctl bootout system/com.silo.network-bootstrap >/dev/null 2>&1 || true
-/usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools /usr/local/libexec /Library/LaunchAgents "/Library/Application Support/Silo/NetworkBootstrap"
-/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-network-bootstrap /Library/PrivilegedHelperTools/silo-network-bootstrap
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-network-bootstrap-config.json "/Library/Application Support/Silo/NetworkBootstrap/config.json"
-old_ca="/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
-if [ -s "$old_ca" ]; then
-    old_sha256=$(/usr/bin/openssl x509 -in "$old_ca" -noout -fingerprint -sha256 | /usr/bin/sed 's/^[^=]*=//' | /usr/bin/tr -d ':' | /usr/bin/tr '[:upper:]' '[:lower:]')
-    new_sha256=$(/usr/bin/openssl x509 -in /tmp/silo-proxy-ca.pem -noout -fingerprint -sha256 | /usr/bin/sed 's/^[^=]*=//' | /usr/bin/tr -d ':' | /usr/bin/tr '[:upper:]' '[:lower:]')
-    if [ "$old_sha256" != "$new_sha256" ]; then
-        /bin/sh /tmp/silo-remove-inherited-proxy-ca.sh "$old_sha256" /Library/Keychains/System.keychain
-    fi
-fi
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-ca.pem "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
-/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-proxy-environment.zsh /usr/local/libexec/silo-proxy-environment.zsh
-/usr/bin/install -o root -g wheel -m 0755 /tmp/silo-github-credential.sh /usr/local/libexec/silo-github-credential
-/usr/bin/install -o root -g wheel -m 0644 /tmp/com.silo.proxy-environment.plist /Library/LaunchAgents/com.silo.proxy-environment.plist
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-placeholders.zsh "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh"
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-placeholder-names.txt "/Library/Application Support/Silo/NetworkBootstrap/placeholder-names.txt"
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-proxy-retired-names.txt "/Library/Application Support/Silo/NetworkBootstrap/retired-names.txt"
-/usr/bin/security find-certificate -a -p /System/Library/Keychains/SystemRootCertificates.keychain > "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem"
-/bin/cat "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem" "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem" > "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp"
-/usr/bin/install -o root -g wheel -m 0644 "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp" "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem"
-/bin/rm -f "/Library/Application Support/Silo/NetworkBootstrap/system-roots.pem" "/Library/Application Support/Silo/NetworkBootstrap/ca-bundle.pem.tmp"
-/usr/bin/security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
-/usr/bin/git config --system --replace-all credential.https://github.com.helper /usr/local/libexec/silo-github-credential
-file=/Users/silo/.zshenv
-line='[[ -r "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh" ]] && source "/Library/Application Support/Silo/NetworkBootstrap/placeholders.zsh"'
-[ ! -L "$file" ] || exit 1
-[ -e "$file" ] || /usr/bin/install -o silo -g staff -m 0644 /dev/null "$file"
-/usr/bin/grep -Fqx "$line" "$file" || /usr/bin/printf '\n%s\n' "$line" >> "$file"
-/usr/sbin/chown silo:staff "$file"
-/bin/rm -f "/Library/Application Support/Silo/NetworkBootstrap/receipt.json"
-/usr/bin/install -o root -g wheel -m 0644 /tmp/silo-network-bootstrap.plist /Library/LaunchDaemons/com.silo.network-bootstrap.plist
-/bin/rm -f /tmp/silo-network-bootstrap /tmp/silo-network-bootstrap-config.json /tmp/silo-proxy-ca.pem /tmp/silo-remove-inherited-proxy-ca.sh /tmp/silo-network-bootstrap.plist /tmp/silo-proxy-environment.zsh /tmp/silo-github-credential.sh /tmp/com.silo.proxy-environment.plist /tmp/silo-proxy-placeholders.zsh /tmp/silo-proxy-placeholder-names.txt /tmp/silo-proxy-retired-names.txt
-"#;
+    let script = INSTALL_SCRIPT;
+
     let output = guest_access::run(
         layout,
         record,
@@ -831,6 +849,33 @@ mod tests {
         );
         assert_eq!(retired_environment_names("OLD_KEY\n", &names), "OLD_KEY\n");
         assert_eq!(retired_environment_names("API_KEY\n", &names), "");
+    }
+
+    /// The host stages the trust-probe leaf where the guest helper reads it, and the helper
+    /// evaluates it for the name the gateway signs, so a present-but-untrusted CA cannot pass.
+    #[test]
+    fn the_guest_trust_probe_is_staged_where_the_helper_evaluates_it() {
+        let swift = include_str!("../../../../guest/macos/silo-network-bootstrap.swift");
+        let gateway = include_str!("../../../../macos-gateway/src/network.rs");
+        assert!(INSTALL_SCRIPT.contains(
+            "/tmp/silo-proxy-ca-probe.pem \"/Library/Application Support/Silo/NetworkBootstrap/proxy-ca-probe.pem\""
+        ));
+        assert!(swift
+            .contains("\"/Library/Application Support/Silo/NetworkBootstrap/proxy-ca-probe.pem\""));
+        assert!(swift.contains("proxyCATrusted("));
+        assert!(
+            !swift.contains("trustedProxyCAExists"),
+            "presence of the certificate must not decide readiness"
+        );
+        let host = "silo-ca-trust-probe.invalid";
+        assert!(swift.contains(&format!("let proxyCAProbeHost = \"{host}\"")));
+        assert!(gateway.contains(&format!("TRUST_PROBE_HOST: &str = \"{host}\"")));
+        // The leaf is installed with the CA, before the daemon that reads both.
+        let leaf = INSTALL_SCRIPT.find("proxy-ca-probe.pem\"").unwrap();
+        let daemon = INSTALL_SCRIPT
+            .find("/Library/LaunchDaemons/com.silo.network-bootstrap.plist")
+            .unwrap();
+        assert!(leaf < daemon);
     }
 
     #[test]

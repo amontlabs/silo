@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import CryptoKit
+import Security
 import SystemConfiguration
 
 private struct BootstrapConfig: Decodable {
@@ -128,6 +129,10 @@ private enum BootstrapFailure: Error {
 }
 
 private let receiptPath = "/Library/Application Support/Silo/NetworkBootstrap/receipt.json"
+private let proxyCAPath = "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem"
+private let proxyCAProbePath = "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca-probe.pem"
+/// The name in the SAN of the probe leaf that the host signs with the computer's CA.
+private let proxyCAProbeHost = "silo-ca-trust-probe.invalid"
 
 @main
 private struct SiloNetworkBootstrap {
@@ -136,6 +141,23 @@ private struct SiloNetworkBootstrap {
             let rawArguments = Array(CommandLine.arguments.dropFirst())
             if rawArguments.count == 2, rawArguments[0] == "--probe-getaddrinfo" {
                 exit(nativeAddressLookup(host: rawArguments[1]) ? EXIT_SUCCESS : EXIT_FAILURE)
+            }
+            // Evaluates trust for a leaf and CA given as files, as the readiness check does.
+            // `--trust-ca-as-anchor` exists for fixtures only: it stands in for an installed
+            // trust setting, so a test can tell a trusted CA from one that is merely present.
+            if rawArguments.count >= 4, rawArguments.count <= 5, rawArguments[0] == "--evaluate-ca-trust" {
+                let anchorTest = rawArguments.count == 5
+                guard !anchorTest || rawArguments[4] == "--trust-ca-as-anchor" else {
+                    throw BootstrapFailure.invalidArguments
+                }
+                let trusted = proxyCATrusted(
+                    expectedFingerprint: rawArguments[3],
+                    leafPath: rawArguments[1],
+                    caPath: rawArguments[2],
+                    trustCAAsAnchor: anchorTest
+                )
+                print(trusted ? "trusted" : "untrusted")
+                exit(trusted ? EXIT_SUCCESS : EXIT_FAILURE)
             }
             let arguments = try parseArguments(rawArguments)
             let config = try loadConfig(at: arguments.configPath, requireRootOwner: !arguments.validateOnly)
@@ -244,7 +266,12 @@ private struct SiloNetworkBootstrap {
             var active = false
             for _ in 0..<30 {
                 activeChecks = activeNetworkChecks(config, service: service)
-                activeChecks["proxyCATrusted"] = trustedProxyCAExists(config.caFingerprint)
+                activeChecks["proxyCATrusted"] = proxyCATrusted(
+                    expectedFingerprint: config.caFingerprint,
+                    leafPath: proxyCAProbePath,
+                    caPath: proxyCAPath,
+                    trustCAAsAnchor: false
+                )
                 receipt = Receipt(
                     schemaVersion: 1,
                     computerId: config.computerId,
@@ -494,37 +521,6 @@ private struct SiloNetworkBootstrap {
         ]
     }
 
-    /// Compare the expected DER fingerprint with certificates in the System keychain.
-    /// The separate HTTPS probe below proves that the guest trust evaluator accepts
-    /// the proxy's issued leaf for the configured public host.
-    private static func trustedProxyCAExists(_ expectedFingerprint: String) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-certificate", "-a", "-p", "/Library/Keychains/System.keychain"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0,
-                  let text = String(data: data, encoding: .utf8) else { return false }
-            let expected = expectedFingerprint.lowercased()
-            let blocks = text.components(separatedBy: "-----END CERTIFICATE-----")
-            for block in blocks {
-                guard let body = block.components(separatedBy: "-----BEGIN CERTIFICATE-----").last else { continue }
-                let base64 = body.filter { $0.isLetter || $0.isNumber || $0 == "+" || $0 == "/" || $0 == "=" }
-                guard let der = Data(base64Encoded: base64) else { continue }
-                let fingerprint = SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
-                if fingerprint == expected { return true }
-            }
-        } catch {
-            return false
-        }
-        return false
-    }
-
     private static func networkProbeChecks(_ config: BootstrapConfig) async -> [String: Bool] {
         let explicitDNS = digResolves(host: config.probeHost, server: config.dnsServer)
         let plainDNS = digResolves(host: config.probeHost, server: nil)
@@ -655,6 +651,71 @@ private struct SiloNetworkBootstrap {
             throw BootstrapFailure.receiptWriteFailed
         }
     }
+}
+
+/// Whether the guest's normal trust evaluation accepts a leaf signed by the current CA.
+///
+/// A CA that is merely present proves nothing: its trust settings may have been removed or
+/// never applied. The host signs a probe leaf with the computer's CA when it stages the
+/// bootstrap, and this evaluates that leaf for the probe name with the system's trust
+/// settings. The chain must end at the CA with the expected fingerprint. The time of the
+/// evaluation is the leaf's first valid day, so the result never depends on the clock or on
+/// the leaf expiring.
+private func proxyCATrusted(
+    expectedFingerprint: String,
+    leafPath: String,
+    caPath: String,
+    trustCAAsAnchor: Bool
+) -> Bool {
+    guard let leaf = certificate(atPEMPath: leafPath),
+          let authority = certificate(atPEMPath: caPath),
+          certificateFingerprint(authority) == expectedFingerprint.lowercased(),
+          let notBefore = certificateNotBefore(leaf),
+          let policy = Optional(SecPolicyCreateSSL(true, proxyCAProbeHost as CFString)) else { return false }
+    var trust: SecTrust?
+    // The CA is offered for chain building only; it is an anchor just when a trust setting
+    // or the system roots say so.
+    guard SecTrustCreateWithCertificates([leaf, authority] as CFArray, policy, &trust) == errSecSuccess,
+          let trust else { return false }
+    if trustCAAsAnchor {
+        guard SecTrustSetAnchorCertificates(trust, [authority] as CFArray) == errSecSuccess,
+              SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess else { return false }
+    }
+    guard SecTrustSetVerifyDate(trust, notBefore.addingTimeInterval(86_400) as CFDate) == errSecSuccess else {
+        return false
+    }
+    var error: CFError?
+    guard SecTrustEvaluateWithError(trust, &error),
+          let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+          chain.count == 2,
+          let root = chain.last else { return false }
+    return certificateFingerprint(root) == expectedFingerprint.lowercased()
+}
+
+private func certificate(atPEMPath path: String) -> SecCertificate? {
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+          let text = String(data: data, encoding: .utf8) else { return nil }
+    let begin = "-----BEGIN CERTIFICATE-----"
+    let end = "-----END CERTIFICATE-----"
+    let blocks = text.components(separatedBy: end).filter { $0.contains(begin) }
+    guard blocks.count == 1,
+          let body = blocks[0].components(separatedBy: begin).last else { return nil }
+    let base64 = body.filter { $0.isLetter || $0.isNumber || $0 == "+" || $0 == "/" || $0 == "=" }
+    guard let der = Data(base64Encoded: base64) else { return nil }
+    return SecCertificateCreateWithData(nil, der as CFData)
+}
+
+private func certificateFingerprint(_ certificate: SecCertificate) -> String {
+    let der = SecCertificateCopyData(certificate) as Data
+    return SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
+}
+
+private func certificateNotBefore(_ certificate: SecCertificate) -> Date? {
+    let key = kSecOIDX509V1ValidityNotBefore
+    guard let values = SecCertificateCopyValues(certificate, [key] as CFArray, nil) as? [CFString: Any],
+          let entry = values[key] as? [CFString: Any],
+          let absoluteTime = entry[kSecPropertyKeyValue] as? NSNumber else { return nil }
+    return Date(timeIntervalSinceReferenceDate: absoluteTime.doubleValue)
 }
 
 private func normalizedMac(_ input: String) -> String {
