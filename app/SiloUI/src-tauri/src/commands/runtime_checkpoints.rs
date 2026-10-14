@@ -48,8 +48,19 @@ fn refreshed_state(
 ) -> Result<runtime::ApplicationSource, String> {
     let state = runtime::application_state_response(&crate::commands::runtime::host(app), paths)
         .map_err(|error| error.to_string())?;
-    publish_application_state_changed();
     Ok(state)
+}
+
+fn mutate_then_refresh<T>(
+    mutation: impl FnOnce() -> Result<(), String>,
+    refresh: impl FnOnce() -> Result<T, String>,
+    publish: impl FnOnce(),
+) -> Result<T, String> {
+    let mutation_result = mutation();
+    let refreshed = refresh();
+    publish();
+    mutation_result?;
+    refreshed
 }
 
 #[tauri::command]
@@ -62,8 +73,11 @@ pub(crate) async fn create_checkpoint(
     let worker_app = app.clone();
     spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        checkpoints::create(&paths, &computer_id, &name)?;
-        refreshed_state(&worker_app, &paths)
+        mutate_then_refresh(
+            || checkpoints::create(&paths, &computer_id, &name),
+            || refreshed_state(&worker_app, &paths),
+            publish_application_state_changed,
+        )
     })
     .await
     .map_err(|_| {
@@ -83,15 +97,20 @@ pub(crate) async fn fork_checkpoint(
     let worker_app = app.clone();
     spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        checkpoints::fork(
-            &paths,
-            &AppForkAssignments,
-            &computer_id,
-            checkpoint_id.as_deref(),
-            &new_name,
-            &|| crate::commands::macos_computers::names(&worker_app),
-        )?;
-        refreshed_state(&worker_app, &paths)
+        mutate_then_refresh(
+            || {
+                checkpoints::fork(
+                    &paths,
+                    &AppForkAssignments,
+                    &computer_id,
+                    checkpoint_id.as_deref(),
+                    &new_name,
+                    &|| crate::commands::macos_computers::names(&worker_app),
+                )
+            },
+            || refreshed_state(&worker_app, &paths),
+            publish_application_state_changed,
+        )
     })
     .await
     .map_err(|_| {
@@ -110,8 +129,11 @@ pub(crate) async fn restore_checkpoint(
     let worker_app = app.clone();
     spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        checkpoints::restore(&paths, &computer_id, &checkpoint_id)?;
-        refreshed_state(&worker_app, &paths)
+        mutate_then_refresh(
+            || checkpoints::restore(&paths, &computer_id, &checkpoint_id),
+            || refreshed_state(&worker_app, &paths),
+            publish_application_state_changed,
+        )
     })
     .await
     .map_err(|_| {
@@ -129,8 +151,11 @@ pub(crate) async fn abandon_restore(
     let worker_app = app.clone();
     spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        checkpoints::abandon_restore(&paths, &computer_id)?;
-        refreshed_state(&worker_app, &paths)
+        mutate_then_refresh(
+            || checkpoints::abandon_restore(&paths, &computer_id),
+            || refreshed_state(&worker_app, &paths),
+            publish_application_state_changed,
+        )
     })
     .await
     .map_err(|_| {
@@ -149,8 +174,11 @@ pub(crate) async fn delete_checkpoint(
     let worker_app = app.clone();
     spawn_checkpoint_blocking(move || {
         let paths = runtime::runtime_paths(&crate::commands::runtime::host(&worker_app))?;
-        checkpoints::delete(&paths, &computer_id, &checkpoint_id)?;
-        refreshed_state(&worker_app, &paths)
+        mutate_then_refresh(
+            || checkpoints::delete(&paths, &computer_id, &checkpoint_id),
+            || refreshed_state(&worker_app, &paths),
+            publish_application_state_changed,
+        )
     })
     .await
     .map_err(|_| {
@@ -183,6 +211,44 @@ mod tests {
         Arc,
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn failed_checkpoint_mutation_still_publishes_after_refresh() {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let result = mutate_then_refresh(
+            || {
+                calls.borrow_mut().push("mutation");
+                Err("mutation failed".into())
+            },
+            || {
+                calls.borrow_mut().push("refresh");
+                Ok("refreshed")
+            },
+            || calls.borrow_mut().push("publish"),
+        );
+
+        assert_eq!(result.unwrap_err(), "mutation failed");
+        assert_eq!(*calls.borrow(), ["mutation", "refresh", "publish"]);
+    }
+
+    #[test]
+    fn failed_checkpoint_refresh_still_publishes_after_mutation() {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let result = mutate_then_refresh(
+            || {
+                calls.borrow_mut().push("mutation");
+                Ok(())
+            },
+            || {
+                calls.borrow_mut().push("refresh");
+                Err::<(), _>("refresh failed".into())
+            },
+            || calls.borrow_mut().push("publish"),
+        );
+
+        assert_eq!(result.unwrap_err(), "refresh failed");
+        assert_eq!(*calls.borrow(), ["mutation", "refresh", "publish"]);
+    }
 
     #[test]
     fn queued_remote_checkpoint_expires_before_gate_admission() {
