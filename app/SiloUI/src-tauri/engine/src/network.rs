@@ -763,6 +763,14 @@ fn schedule_network_reconcile(paths: RuntimePaths, config: &Configuration) {
         }
     });
 }
+/// One engine-timer pass of published-port repair (95 A-26). It reuses the one-pass guard and
+/// the per-computer gate try-lock of the state-read trigger, so a busy computer is simply
+/// repaired by a later pass.
+pub fn repair_published_ports(paths: &RuntimePaths) -> Result<(), String> {
+    let config = read_config(paths)?;
+    schedule_network_reconcile(paths.clone(), &config);
+    Ok(())
+}
 /// Every local computer's observed ports, each with its computer host name.
 fn state_with(paths: &RuntimePaths, config: &Configuration) -> Result<State, String> {
     let metadata = runtime::read_metadata(&paths.metadata)

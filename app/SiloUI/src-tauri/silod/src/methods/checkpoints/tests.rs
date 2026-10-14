@@ -496,6 +496,40 @@ async fn exports_inspect_returns_an_inspect_job_that_reports_an_invalid_file_as_
 }
 
 #[tokio::test]
+async fn exports_inspect_finishes_an_accepted_job_whose_start_cannot_be_saved() {
+    let fixture = fixture();
+    let registry = silo_engine::context::EngineContext::job_registry(fixture.silod.as_ref())
+        .expect("the job registry opens");
+    rusqlite::Connection::open(registry.path())
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_running BEFORE UPDATE OF state ON jobs
+             WHEN NEW.state = 'running'
+             BEGIN SELECT RAISE(ABORT, 'injected mark_running failure'); END;",
+        )
+        .unwrap();
+
+    let started = call(
+        &fixture,
+        MethodName::ExportsInspect,
+        json!({
+            "archivePath": fixture.directory.path().join("any.silo-backup"),
+            "requestId": "stranded-1"
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(started, json!({"jobId": "inspect:stranded-1"}));
+    let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+    let error = outcome.error.expect("the startup failure is the outcome");
+    assert!(
+        error.message.contains("injected mark_running failure"),
+        "{}",
+        error.message
+    );
+}
+
+#[tokio::test]
 async fn exports_create_needs_the_remembered_destination() {
     let fixture = fixture();
     let refused = call(

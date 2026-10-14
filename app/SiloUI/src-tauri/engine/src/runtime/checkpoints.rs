@@ -180,6 +180,13 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
     }
     let record: Record = serde_json::from_slice(&bytes)
         .map_err(|_| error("Checkpoint history is invalid; it was preserved."))?;
+    validate(&record)?;
+    Ok(record)
+}
+
+/// Whether a parsed history is internally consistent. `load` refuses an inconsistent one and
+/// the launch upgrade never writes one.
+fn validate(record: &Record) -> Result<(), RuntimeError> {
     if record.version != RECORD_VERSION
         || record
             .snapshot_group
@@ -230,7 +237,7 @@ pub(super) fn load(paths: &RuntimePaths, id: &str) -> Result<Record, RuntimeErro
             "Checkpoint environment is invalid; it was preserved.",
         ));
     }
-    Ok(record)
+    Ok(())
 }
 
 fn valid_native_id(id: &str) -> bool {
@@ -869,6 +876,17 @@ pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
         mark(value.get_mut("inflightCheckpoint"));
         mark(value.pointer_mut("/restoreJournal/recoveryCheckpoint"));
         value["version"] = Value::from(RECORD_VERSION);
+        // A history that does not validate once converted keeps its original bytes and is
+        // reported; it is never rewritten into a form `load` would refuse.
+        if !serde_json::from_value::<Record>(value.clone())
+            .is_ok_and(|record| validate(&record).is_ok())
+        {
+            eprintln!(
+                "silo-engine: left damaged checkpoint history untouched: {}",
+                path.display()
+            );
+            continue;
+        }
         let mut file = tempfile::NamedTempFile::new_in(&directory)
             .map_err(|_| "Checkpoint history could not be saved for upgrade.".to_owned())?;
         serde_json::to_writer(&mut file, &value)
@@ -919,6 +937,7 @@ pub fn create_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
     shutdown::ensure_accepting_operations()?;
@@ -979,7 +998,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
 
 /// Removes this computer's automatic checkpoints beyond the newest N, oldest first, through
 /// ordinary safe deletion. It never touches manual or before-restore records. The count is
-/// read again before each deletion so turning the setting off stops later deletions, and a
+/// read again once each deletion is admitted so turning the setting off stops later deletions, and a
 /// checkpoint something still needs is kept (visible with its `deleteBlocker`).
 fn prune_automatic_with(
     gate: &super::operation_gate::OperationGate,
@@ -991,6 +1010,17 @@ fn prune_automatic_with(
 ) {
     use super::operation_gate::{OperationKind, Scope};
 
+    let entries_of = |record: &Record| -> Vec<crate::checkpoints::retention::Entry> {
+        record
+            .checkpoints
+            .iter()
+            .map(|checkpoint| crate::checkpoints::retention::Entry {
+                id: checkpoint.id.clone(),
+                created_at_ms: i128::from(checkpoint.created_at),
+                automatic: checkpoint.kind == "automatic",
+            })
+            .collect()
+    };
     let Ok(count) = retention() else { return };
     if count == 0 {
         return;
@@ -998,20 +1028,7 @@ fn prune_automatic_with(
     let Ok(record) = load(paths, computer_id) else {
         return;
     };
-    let entries: Vec<_> = record
-        .checkpoints
-        .iter()
-        .map(|checkpoint| crate::checkpoints::retention::Entry {
-            id: checkpoint.id.clone(),
-            created_at_ms: i128::from(checkpoint.created_at),
-            automatic: checkpoint.kind == "automatic",
-        })
-        .collect();
-    for candidate in crate::checkpoints::retention::plan(&entries, count).candidates {
-        // The setting is checked at the moment each deletion is admitted.
-        if !matches!(retention(), Ok(current) if current > 0) {
-            return;
-        }
+    for candidate in crate::checkpoints::retention::plan(&entries_of(&record), count).candidates {
         let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
             Scope::Device,
             None,
@@ -1022,11 +1039,55 @@ fn prune_automatic_with(
         ) else {
             return;
         };
+        // The plan is made again once the queue admits this deletion: the setting and the
+        // history may have changed while it waited, and only a candidate that the current
+        // count still drops is deleted.
+        let Ok(current) = retention() else { return };
+        if current == 0 {
+            return;
+        }
+        let Ok(record) = load(paths, computer_id) else {
+            return;
+        };
+        if !crate::checkpoints::retention::plan(&entries_of(&record), current)
+            .candidates
+            .contains(&candidate)
+        {
+            continue;
+        }
         if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
             // Dependencies and in-progress recovery defer retention. Never force-delete a
             // checkpoint the runtime says something still needs.
             eprintln!("Silo kept an older automatic checkpoint: {error}");
         }
+    }
+}
+
+thread_local! {
+    /// What the current job worker does once the queue admits its operation, before the
+    /// operation changes anything: it marks the durable job running.
+    static ADMISSION: std::cell::RefCell<Option<Box<dyn FnOnce() -> Result<(), String>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `work` with `on_admitted` armed for the checkpoint operation it starts. The first
+/// admission of a `*_for_job` operation on this thread runs it; a failure refuses the
+/// operation, so a job never reports running without having been admitted.
+pub(crate) fn with_admission<T>(
+    on_admitted: impl FnOnce() -> Result<(), String> + 'static,
+    work: impl FnOnce() -> T,
+) -> T {
+    ADMISSION.with(|hook| *hook.borrow_mut() = Some(Box::new(on_admitted)));
+    let result = work();
+    ADMISSION.with(|hook| hook.borrow_mut().take());
+    result
+}
+
+/// Called right after the queue admits a job-owned operation.
+fn admitted() -> Result<(), String> {
+    match ADMISSION.with(|hook| hook.borrow_mut().take()) {
+        Some(on_admitted) => on_admitted(),
+        None => Ok(()),
     }
 }
 
@@ -1964,6 +2025,7 @@ fn fork_in_lanes(
         } else {
             gate.computer(computer_id, &computer_name, "Forking checkpoint")?
         };
+        admitted().map_err(RuntimeError::Unavailable)?;
         // Fork is not cancellable; flag it slow after the capture window.
         guard.expect_within(Duration::from_secs(10 * 60));
         shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
@@ -2468,6 +2530,7 @@ pub fn restore_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(RESTORE_EXPECTED_DURATION);
     shutdown::ensure_accepting_operations()?;
     restore_with(&ProcessRunner, paths, computer_id, checkpoint_id)
@@ -2771,6 +2834,7 @@ pub fn abandon_restore_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
     abandon_restore_with(&ProcessRunner, paths, computer_id).map_err(|error| error.to_string())
@@ -3055,6 +3119,7 @@ pub fn delete_for_job(
             Some(cancellation),
         )
         .map_err(|error| error.to_string())?;
+    admitted()?;
     guard.expect_within(std::time::Duration::from_secs(5 * 60));
     shutdown::ensure_accepting_operations()?;
     delete_checkpoint_with(&ProcessRunner, paths, computer_id, checkpoint_id)

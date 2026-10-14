@@ -135,21 +135,7 @@ impl Default for CoreMethodRegistry {
         let capabilities = method_registry()
             .iter()
             .copied()
-            .filter(|descriptor| {
-                matches!(
-                    descriptor.name,
-                    "engine.handshake"
-                        | "engine.state"
-                        | "guest.ssh"
-                        | "events.subscribe"
-                        | "events.unsubscribe"
-                        | "notifications.list"
-                        | "operations.cancel"
-                        | "operations.job.acknowledge"
-                        | "operations.job.get"
-                        | "operations.list"
-                )
-            })
+            .filter(|descriptor| methods::serves(descriptor.method))
             .collect();
         Self {
             descriptors: method_registry().to_vec(),
@@ -826,7 +812,9 @@ mod tests {
         assert!(capabilities.contains(&"events.subscribe".to_owned()));
         assert!(capabilities.contains(&"operations.job.get".to_owned()));
         assert!(capabilities.contains(&"notifications.list".to_owned()));
-        assert!(!capabilities.contains(&"computers.list".to_owned()));
+        assert!(capabilities.contains(&"computers.list".to_owned()));
+        assert!(capabilities.contains(&"display.show".to_owned()));
+        assert!(!capabilities.contains(&"display.native.attach".to_owned()));
     }
 
     #[tokio::test]

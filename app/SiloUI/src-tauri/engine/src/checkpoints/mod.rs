@@ -420,10 +420,17 @@ impl Service {
         let host = self.host.clone();
         let response = job_id.clone();
         tokio::task::spawn_blocking(move || {
-            if let Err(error) = registry.mark_running(&job_id) {
-                eprintln!("silo-engine: could not mark checkpoint job running: {error}");
-            }
-            let outcome = work(&paths, job_id.clone(), cancellation.clone());
+            // The job runs only once the queue admits its operation: the operation marks it
+            // running then, and a failure to do so refuses the operation.
+            let (running_registry, running_id) = (registry.clone(), job_id.clone());
+            let outcome = runtime::checkpoints::with_admission(
+                move || {
+                    running_registry
+                        .mark_running(&running_id)
+                        .map_err(|error| error.to_string())
+                },
+                || work(&paths, job_id.clone(), cancellation.clone()),
+            );
             finish_linux_job(
                 host.as_ref(),
                 &paths,
@@ -721,6 +728,89 @@ mod tests {
         assert!(
             fixture.engine.published.lock().unwrap().is_empty(),
             "a refusal accepts no job"
+        );
+    }
+
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    /// Starts a Linux delete job behind a held device lane and returns once it is queued.
+    fn queued_delete(
+        fixture: &Fixture,
+    ) -> (JobId, runtime::operation_gate::OperationGuard<'static>) {
+        let hold = runtime::OPERATIONS.device("Holding the lane").unwrap();
+        let job_id = fixture
+            .service
+            .start_delete(LINUX_ID, "no-such-checkpoint")
+            .unwrap();
+        while runtime::OPERATIONS.snapshot().waiting.is_empty() {
+            std::thread::yield_now();
+        }
+        (job_id, hold)
+    }
+
+    #[test]
+    fn a_linux_job_waits_until_the_queue_admits_it_and_cancels_while_waiting() {
+        let _state = crate::test_support::global_state();
+        let fixture = fixture(3);
+        let runtime = test_runtime();
+        let _entered = runtime.enter();
+
+        let (job_id, hold) = queued_delete(&fixture);
+        let queued = jobs::get_at(fixture.engine.as_ref(), &job_id, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued.state, silo_api::jobs::JobState::Waiting);
+        drop(hold);
+        let finished = wait_finished(&fixture, &job_id);
+        assert!(finished.outcome.is_some());
+
+        // Cancelled while waiting, it never runs.
+        let (job_id, hold) = queued_delete(&fixture);
+        fixture
+            .engine
+            .job_registry()
+            .unwrap()
+            .cancel(&job_id)
+            .unwrap();
+        let cancelled = wait_finished(&fixture, &job_id);
+        assert_eq!(
+            cancelled.outcome.unwrap().error.unwrap().code,
+            ErrorCode::Cancelled
+        );
+        drop(hold);
+    }
+
+    #[test]
+    fn a_linux_job_whose_running_mark_cannot_be_saved_finishes_with_an_error_and_does_not_run() {
+        let _state = crate::test_support::global_state();
+        let fixture = fixture(3);
+        let runtime = test_runtime();
+        let _entered = runtime.enter();
+        let registry = fixture.engine.job_registry().unwrap();
+        rusqlite::Connection::open(registry.path())
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_running BEFORE UPDATE OF state ON jobs
+                 WHEN NEW.state = 'running'
+                 BEGIN SELECT RAISE(ABORT, 'injected mark_running failure'); END;",
+            )
+            .unwrap();
+
+        let (job_id, hold) = queued_delete(&fixture);
+        drop(hold);
+        let finished = wait_finished(&fixture, &job_id);
+        let error = finished.outcome.unwrap().error.unwrap();
+        assert_eq!(error.code, ErrorCode::Internal);
+        assert!(
+            error.message.contains("injected mark_running failure"),
+            "{}",
+            error.message
         );
     }
 

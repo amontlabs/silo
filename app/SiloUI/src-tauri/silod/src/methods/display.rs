@@ -194,6 +194,34 @@ impl RuntimeHost for DisplayRuntimeHost {
     }
 }
 
+/// Opens (or focuses) the engine-owned VM window of macOS computer `id` on AppKit's main
+/// thread and attaches its display. The one window table lives here, so every host that can
+/// show a window (this domain's and the computers domain's) shares it.
+pub(super) fn show_native_display(
+    context: &silo_engine::macos_computers_engine::MacosContext,
+    id: &str,
+    title: &str,
+    toolbar: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        native_display::show(context, id, title, toolbar)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (context, id, title, toolbar);
+        Err("macOS display is unavailable on this host.".into())
+    }
+}
+
+/// Asks the window of `id` to close; the close reports back through its delegate.
+pub(super) fn close_native_display(id: &str) {
+    #[cfg(target_os = "macos")]
+    native_display::close(id);
+    #[cfg(not(target_os = "macos"))]
+    let _ = id;
+}
+
 struct SilodMacosHost;
 
 impl silo_engine::macos_computers_engine::MacosHost for SilodMacosHost {
@@ -204,22 +232,11 @@ impl silo_engine::macos_computers_engine::MacosHost for SilodMacosHost {
         title: &str,
         toolbar: bool,
     ) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        {
-            native_display::show(context, id, title, toolbar)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (context, id, title, toolbar);
-            Err("macOS display is unavailable on this host.".into())
-        }
+        show_native_display(context, id, title, toolbar)
     }
 
     fn close_display(&self, id: &str) {
-        #[cfg(target_os = "macos")]
-        native_display::close(id);
-        #[cfg(not(target_os = "macos"))]
-        let _ = id;
+        close_native_display(id);
     }
 
     fn linux_computer_names(&self) -> Vec<String> {
@@ -334,26 +351,19 @@ async fn desktop_status(
     )
 }
 
+/// `desktop.connect` returns the guest's desktop credentials, which a client never holds
+/// (05 §7; 95 A-28). A peer engine reads them through the owner-side bridge, which does not
+/// pass through `engine.sock`, so every request that reaches this handler is a local client
+/// and is refused before any computer is looked up.
 async fn desktop_connect(
-    context: &HandlerContext,
-    value: &Value,
+    _context: &HandlerContext,
+    _value: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
-    let params: silo_api::methods::desktop::DesktopConnectParams = decode(context, value)?;
-    if is_macos_computer(context, &params.computer_id).await? {
-        return Err(macos_unsupported("desktop.connect"));
-    }
-    let paths = local_runtime_paths(context).await?;
-    let result = tokio::task::spawn_blocking(move || {
-        let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
-        silo_engine::desktop_viewer::local_connection(&paths, &name, Some(&params.computer_id))
+    Err(DispatchError {
+        code: silo_api::jobs::ErrorCode::PermissionDenied,
+        message: "desktop.connect is for peer engines. Open the computer with display.viewer.open."
+            .to_owned(),
     })
-    .await
-    .map_err(|error| DispatchError::internal(error.to_string()))?
-    .map_err(map_error)?;
-    output(
-        serde_json::from_value::<silo_api::methods::desktop::DesktopConnectResult>(result)
-            .map_err(|error| DispatchError::internal(error.to_string()))?,
-    )
 }
 
 async fn desktop_action(
@@ -1319,8 +1329,7 @@ mod native_display {
         MainThreadMarker, MainThreadOnly,
     };
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSView, NSWindow,
-        NSWindowDelegate, NSWindowStyleMask,
+        NSApplication, NSBackingStoreType, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
     };
     use objc2_foundation::{
         NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -1375,11 +1384,7 @@ mod native_display {
 
     /// Follows the activation policy to whether any window is open.
     fn apply_policy(mtm: MainThreadMarker, open: bool) -> Result<(), String> {
-        let policy = if open {
-            NSApplicationActivationPolicy::Regular
-        } else {
-            NSApplicationActivationPolicy::Accessory
-        };
+        let policy = crate::app::activation_policy(open);
         let application = NSApplication::sharedApplication(mtm);
         if application.activationPolicy() == policy || application.setActivationPolicy(policy) {
             Ok(())
@@ -1751,21 +1756,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn desktop_connect_never_serves_macos_or_unknown_computers() {
+    async fn desktop_connect_is_refused_for_every_local_client() {
         let fixture = fixture();
         let id = fixture.macos(TestComputerState::Running, Approval::Ask);
-        let macos = fixture
-            .call("a", MethodName::DesktopConnect, json!({"computerId": id}))
-            .await;
-        assert_eq!(code(macos).await, ErrorCode::UnsupportedRemoteOperation);
-        let missing = fixture
-            .call(
-                "a",
-                MethodName::DesktopConnect,
-                json!({"computerId": unknown()}),
-            )
-            .await;
-        assert_eq!(code(missing).await, ErrorCode::NotFound);
+        for computer in [id, unknown()] {
+            let refused = fixture
+                .call(
+                    "a",
+                    MethodName::DesktopConnect,
+                    json!({"computerId": computer}),
+                )
+                .await;
+            assert_eq!(code(refused).await, ErrorCode::PermissionDenied);
+        }
     }
 
     #[tokio::test]

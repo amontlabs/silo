@@ -49,7 +49,7 @@ fn storage_root(context: &HandlerContext) -> std::path::PathBuf {
 }
 
 /// Every status the worker reports reaches every subscribed client.
-pub(super) fn status_publisher(context: Arc<dyn EngineContext>) -> chatgpt_app::StatusPublisher {
+pub(crate) fn status_publisher(context: Arc<dyn EngineContext>) -> chatgpt_app::StatusPublisher {
     Arc::new(move |status| {
         if let Ok(payload) = chatgpt_app::to_value(status) {
             context.publish(
@@ -58,6 +58,44 @@ pub(super) fn status_publisher(context: Arc<dyn EngineContext>) -> chatgpt_app::
             );
         }
     })
+}
+
+/// What runs when the ChatGPT app becomes ready. Running built-in computers set computer use
+/// up now instead of at their next boot. Versions no computer can still be using are removed;
+/// a running computer keeps what it booted from, so that pass waits until none runs.
+pub(crate) fn ready_hook(
+    host: Arc<dyn silo_engine::runtime::RuntimeHost>,
+    root: std::path::PathBuf,
+) -> chatgpt_app::ReadyHook {
+    Arc::new(move || {
+        let setup_host = host.clone();
+        std::thread::spawn(move || set_up_running_computers(setup_host.as_ref()));
+        let idle_host = host.clone();
+        chatgpt_app::collect_unused(
+            root.clone(),
+            Arc::new(move || {
+                silo_engine::runtime::update_recovery::running_names(idle_host.as_ref())
+                    .is_ok_and(|names| names.is_empty())
+            }),
+        );
+    })
+}
+
+fn set_up_running_computers(host: &dyn silo_engine::runtime::RuntimeHost) {
+    let Ok(paths) = silo_engine::runtime::runtime_paths(host) else {
+        return;
+    };
+    let Ok(running) = silo_engine::runtime::update_recovery::running_names(host) else {
+        return;
+    };
+    for name in running {
+        let _ = silo_engine::computer_use::after_boot(
+            Arc::new(silo_engine::runtime::ProcessRunner),
+            &paths,
+            &name,
+        );
+    }
+    silo_engine::computer_use::publish_application_state_changed();
 }
 
 pub(super) async fn chatgpt_status(
@@ -86,19 +124,7 @@ pub(super) async fn chatgpt_retry(
     let engine = super::engine_context(context);
     let host = context.silod_context().runtime_host();
     let publisher = status_publisher(engine);
-    let idle_root = root.clone();
-    // Once the app is ready, versions no computer can still be using are removed. A running
-    // computer keeps what it booted from, so the pass waits until none runs.
-    let on_ready: chatgpt_app::ReadyHook = Arc::new(move || {
-        let host = host.clone();
-        chatgpt_app::collect_unused(
-            idle_root.clone(),
-            Arc::new(move || {
-                silo_engine::runtime::update_recovery::running_names(host.as_ref())
-                    .is_ok_and(|names| names.is_empty())
-            }),
-        );
-    });
+    let on_ready = ready_hook(host, root.clone());
     let status = blocking(move || {
         chatgpt_app::retry_now(&root, publisher, on_ready)
             .and_then(chatgpt_app::to_value)

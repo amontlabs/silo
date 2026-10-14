@@ -4,6 +4,7 @@
 compile_error!("silod is a macOS-host engine process");
 
 pub mod app;
+pub mod app_delegate;
 pub mod code_signature;
 pub mod context;
 pub mod dispatcher;
@@ -15,6 +16,8 @@ pub mod ownership;
 pub mod paths;
 pub mod service;
 pub mod socket;
+pub mod startup;
+pub mod timers;
 
 /// Tests that start a child process hold this while they spawn, and tests that need a
 /// closed socket hold it from creating the socket until they have used it. macOS has no

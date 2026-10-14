@@ -9,7 +9,7 @@
 mod device;
 mod exports;
 mod migration;
-mod preparation;
+pub(crate) mod preparation;
 
 use std::sync::Arc;
 

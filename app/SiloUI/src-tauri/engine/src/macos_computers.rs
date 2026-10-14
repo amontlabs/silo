@@ -1366,10 +1366,11 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
             job_id: job_id.clone(),
             result: None,
             error: Some(silo_api::transport::ErrorObject {
+                // A typed refusal (such as the automatic-off one) keeps its own code.
                 code: if cancelled {
                     silo_api::jobs::ErrorCode::Cancelled
                 } else {
-                    silo_api::jobs::ErrorCode::Internal
+                    crate::checkpoints::Failure::from_message(message.clone()).code
                 },
                 message: message.clone(),
                 diagnostics: None,
@@ -1418,6 +1419,22 @@ fn prune_macos_automatic_checkpoints(
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
 ) {
+    prune_macos_automatic_checkpoints_with(
+        &runtime::OPERATIONS,
+        app,
+        computer_id,
+        retention,
+        job_id,
+    );
+}
+
+fn prune_macos_automatic_checkpoints_with(
+    gate: &runtime::operation_gate::OperationGate,
+    app: &MacosContext,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
     use runtime::operation_gate::{OperationKind, Scope};
 
     let Ok(count) = retention() else { return };
@@ -1426,41 +1443,50 @@ fn prune_macos_automatic_checkpoints(
     }
     let Ok(data) = app_data(app) else { return };
     let layout = Layout::new(&data, computer_id);
-    let entries: Vec<_> = {
+    let entries_now = || -> Option<Vec<crate::checkpoints::retention::Entry>> {
         let mut computers = registry();
-        let Some(entry) = computers.entry(computer_id) else {
-            return;
-        };
-        entry
-            .checkpoints
-            .iter()
-            .map(|checkpoint| crate::checkpoints::retention::Entry {
-                id: checkpoint.id.clone(),
-                created_at_ms: crate::checkpoints::retention::parse_millis(&checkpoint.created_at),
-                automatic: checkpoint.policy_kind == checkpoints::PolicyKind::Automatic,
-            })
-            .collect()
+        let entry = computers.entry(computer_id)?;
+        Some(
+            entry
+                .checkpoints
+                .iter()
+                .map(|checkpoint| crate::checkpoints::retention::Entry {
+                    id: checkpoint.id.clone(),
+                    created_at_ms: crate::checkpoints::retention::parse_millis(
+                        &checkpoint.created_at,
+                    ),
+                    automatic: checkpoint.policy_kind == checkpoints::PolicyKind::Automatic,
+                })
+                .collect(),
+        )
     };
+    let Some(entries) = entries_now() else { return };
     let mut changed = false;
     for candidate in crate::checkpoints::retention::plan(&entries, count).candidates {
-        // The setting is checked at the moment each deletion is admitted.
-        if !matches!(retention(), Ok(current) if current > 0) {
-            break;
-        }
-        let Ok(_gate) = runtime::OPERATIONS
-            .kind(OperationKind::CheckpointDelete)
-            .acquire_for_job(
-                Scope::Device,
-                None,
-                "Removing an older automatic checkpoint",
-                None,
-                job_id.clone(),
-                None,
-            )
-        else {
+        let Ok(_gate) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
+            Scope::Device,
+            None,
+            "Removing an older automatic checkpoint",
+            None,
+            job_id.clone(),
+            None,
+        ) else {
             break;
         };
         let Ok(_admitted) = admission() else { break };
+        // Once the queue admits this deletion, the setting and the history are read again:
+        // only a candidate that the current count still drops is deleted.
+        let Ok(current) = retention() else { break };
+        if current == 0 {
+            break;
+        }
+        let Some(entries) = entries_now() else { break };
+        if !crate::checkpoints::retention::plan(&entries, current)
+            .candidates
+            .contains(&candidate)
+        {
+            continue;
+        }
         // Pins are rechecked immediately before each deletion; a pinned record stays
         // visible with its delete blocker.
         let pinned = {
@@ -3431,6 +3457,12 @@ fn ensure_transfer_target(
         return Err("This computer restarted while the transfer was waiting. Retry it.".into());
     }
     Ok(())
+}
+
+/// One engine-timer pass of macOS published-port repair (95 A-26): the same repair a network
+/// state read schedules, with the same one-at-a-time and minimum-interval guards.
+pub fn repair_published_ports(app: &MacosContext) -> Result<(), String> {
+    ports::repair_running(app)
 }
 
 /// Observe and repair macOS guest listeners and their loopback SSH tunnels.
@@ -5638,6 +5670,18 @@ fn create_checkpoint(
     admitted: &dyn Fn() -> Result<(), String>,
 ) -> Result<checkpoints::Meta, String> {
     require_supported()?;
+    capture_checkpoint(app, id, name, job, policy_kind, admitted)
+}
+
+/// The capture itself, once the Mac is known to support macOS computers.
+fn capture_checkpoint(
+    app: &MacosContext,
+    id: &str,
+    name: &str,
+    job: AcceptedMacosJob,
+    policy_kind: checkpoints::PolicyKind,
+    admitted: &dyn Fn() -> Result<(), String>,
+) -> Result<checkpoints::Meta, String> {
     ensure_loaded(app)?;
     let name = checkpoints::validate_name(name)?;
     let data = app_data(app)?;
@@ -7285,6 +7329,90 @@ mod tests {
             computers.template = None;
             computers.min_disk_gib = store::MIN_DISK_GIB;
         }
+        MACOS_CHECKPOINT_JOBS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+    }
+
+    #[test]
+    fn an_automatic_capture_refused_after_admission_keeps_its_error_code() {
+        use checkpoints::PolicyKind;
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context.clone());
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        ensure_loaded(&app).unwrap();
+        let gate = isolated_operation_gate();
+        let blocker = gate
+            .kind(runtime::operation_gate::OperationKind::Lifecycle)
+            .acquire(
+                runtime::operation_gate::Scope::Computer {
+                    id: source.id.clone(),
+                },
+                Some(source.name.clone()),
+                "Holding the Mac",
+                None,
+            )
+            .unwrap();
+        let job = accept_macos_job(context.as_ref(), "checkpoints.create", gate).unwrap();
+        let job_id = job.job_id.clone();
+        let setting = std::sync::atomic::AtomicU32::new(3);
+        let result = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                capture_checkpoint(
+                    &app,
+                    &source.id,
+                    "Before run: x, deleted automatically",
+                    job,
+                    PolicyKind::Automatic,
+                    &|| {
+                        if setting.load(Ordering::SeqCst) == 0 {
+                            return Err(crate::checkpoints::AUTOMATIC_OFF.to_owned());
+                        }
+                        Ok(())
+                    },
+                )
+            });
+            while gate.snapshot().waiting.is_empty() && !worker.is_finished() {
+                std::thread::yield_now();
+            }
+            if worker.is_finished() {
+                panic!(
+                    "the capture never queued: {:?}",
+                    worker.join().unwrap().err()
+                );
+            }
+            setting.store(0, Ordering::SeqCst);
+            drop(blocker);
+            worker.join().unwrap()
+        });
+        assert_eq!(
+            result.as_ref().unwrap_err(),
+            crate::checkpoints::AUTOMATIC_OFF
+        );
+        publish_checkpoint_create_completion(&app, job_id.clone(), &source.id, &result, false);
+
+        let finished = context
+            .job_registry()
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            finished.outcome.unwrap().error.unwrap().code,
+            silo_api::jobs::ErrorCode::PermissionDenied
+        );
+        assert!(
+            checkpoints::list(&Layout::new(directory.path(), &source.id))
+                .iter()
+                .all(|meta| meta.policy_kind != PolicyKind::Automatic)
+        );
         MACOS_CHECKPOINT_JOBS
             .get_or_init(Default::default)
             .lock()
@@ -10564,6 +10692,64 @@ mod tests {
             silo_api::jobs::JobId::new("job:2").unwrap(),
         );
         assert_eq!(checkpoints::list(&layout).len(), 6);
+    }
+
+    /// Holds the device lane, waits until retention's first deletion is queued behind it,
+    /// changes the count to `after`, releases the lane, and returns the checkpoints left.
+    fn macos_prune_while_queued(initial: u32, after: u32) -> usize {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        for second in 1..=4 {
+            add_checkpoint(
+                data,
+                &source.id,
+                &format!("2026-01-01T00:00:0{second}Z"),
+                Automatic,
+                Reason::Manual,
+            );
+        }
+        ensure_loaded(&app).unwrap();
+        let gate = isolated_operation_gate();
+        let setting = std::sync::atomic::AtomicU32::new(initial);
+        let hold = gate.device("Holding the lane").unwrap();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                prune_macos_automatic_checkpoints_with(
+                    gate,
+                    &app,
+                    &source.id,
+                    &|| Ok(setting.load(Ordering::SeqCst)),
+                    silo_api::jobs::JobId::new("job:7").unwrap(),
+                );
+            });
+            while gate.snapshot().waiting.is_empty() && !worker.is_finished() {
+                std::thread::yield_now();
+            }
+            assert!(!worker.is_finished(), "the deletion never queued");
+            setting.store(after, Ordering::SeqCst);
+            drop(hold);
+            worker.join().unwrap();
+        });
+        // The fixture's own checkpoint is manual and never counts.
+        checkpoints::list(&Layout::new(data, &source.id))
+            .into_iter()
+            .filter(|meta| meta.policy_kind == Automatic)
+            .count()
+    }
+
+    #[test]
+    fn macos_retention_rereads_the_setting_after_the_deletion_is_admitted() {
+        assert_eq!(macos_prune_while_queued(2, 0), 4, "turned off while queued");
+        assert_eq!(macos_prune_while_queued(2, 4), 4, "raised while queued");
+        assert_eq!(macos_prune_while_queued(3, 2), 3, "lowered while queued");
     }
 
     #[test]
