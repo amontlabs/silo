@@ -8,6 +8,7 @@ use silo_engine::context::{
     Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, Event, MainThread,
     ProcessControl,
 };
+use silo_engine::events::{EventBus, EventReceiver};
 use tokio::sync::mpsc;
 
 use crate::identity::LocalDeviceIdentity;
@@ -20,9 +21,11 @@ pub struct SilodContext {
     identity: EngineIdentity,
     local_device: LocalDeviceIdentity,
     events: EventSubscriptions,
+    wire_events: EventBus,
     main_thread: Arc<dyn MainThread>,
     process: Arc<dyn ProcessControl>,
     state: Arc<Mutex<EngineState>>,
+    queue_projection: Arc<Mutex<()>>,
 }
 
 impl SilodContext {
@@ -38,6 +41,7 @@ impl SilodContext {
             identity,
             local_device,
             events: EventSubscriptions::default(),
+            wire_events: EventBus::default(),
             main_thread,
             process,
             state: Arc::new(Mutex::new(EngineState {
@@ -47,6 +51,7 @@ impl SilodContext {
                 session_ending: false,
                 update_pending: false,
             })),
+            queue_projection: Arc::new(Mutex::new(())),
         }
     }
 
@@ -66,6 +71,117 @@ impl SilodContext {
     pub fn subscribe(&self, client_id: ClientId) -> mpsc::Receiver<Event> {
         self.events.subscribe(client_id)
     }
+
+    pub fn connect_event_stream(&self, client_id: ClientId) -> EventReceiver {
+        self.wire_events.connect(client_id)
+    }
+
+    pub fn subscribe_events(
+        &self,
+        client_id: &ClientId,
+        selectors: Vec<String>,
+    ) -> Result<String, String> {
+        self.wire_events
+            .subscribe(client_id, selectors)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn activate_events(&self, client_id: &ClientId, subscription: &str) -> Result<(), String> {
+        self.wire_events
+            .activate(client_id, subscription)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn unsubscribe_events(
+        &self,
+        client_id: &ClientId,
+        subscription: &str,
+    ) -> HashMap<String, u64> {
+        self.wire_events.unsubscribe(client_id, subscription)
+    }
+
+    pub fn disconnect_events(&self, client_id: &ClientId) {
+        self.wire_events.disconnect(client_id);
+    }
+
+    pub fn install_queue_events(&self) {
+        let context = self.clone();
+        silo_engine::runtime::OPERATIONS
+            .set_listener(move || context.publish_operation_queue());
+    }
+
+    pub fn operation_queue_snapshot(
+        &self,
+        client_id: &ClientId,
+    ) -> Result<OperationQueueSnapshot, String> {
+        let _projection = self
+            .queue_projection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let queue = self.operation_queue_unlocked()?;
+        let event_barrier = self
+            .wire_events
+            .operations_barrier(client_id)
+            .map_err(|error| error.to_string())?;
+        Ok(OperationQueueSnapshot {
+            queue,
+            event_barrier,
+        })
+    }
+
+    fn operation_queue_unlocked(
+        &self,
+    ) -> Result<silo_api::methods::operations::OperationQueue, String> {
+        let registry = self.job_registry()?;
+        let mut payload = serde_json::to_value(silo_engine::runtime::OPERATIONS.snapshot())
+            .map_err(|error| error.to_string())?;
+        for key in ["running", "waiting"] {
+            if let Some(entries) = payload.get_mut(key).and_then(serde_json::Value::as_array_mut) {
+                for entry in entries {
+                    let Some(gate_id) = entry.get("id").and_then(serde_json::Value::as_u64)
+                    else {
+                        continue;
+                    };
+                    if let Some(job_id) = registry.job_for_gate(gate_id) {
+                        entry["jobId"] = serde_json::json!(job_id.as_str());
+                    }
+                }
+            }
+        }
+        payload["unacknowledgedJobIds"] = serde_json::to_value(
+            registry.list_unacknowledged().map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        serde_json::from_value(payload).map_err(|error| error.to_string())
+    }
+
+    fn publish_operation_queue(&self) {
+        let _projection = self
+            .queue_projection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Ok(queue) = self.operation_queue_unlocked() else {
+            return;
+        };
+        let Ok(payload) = serde_json::to_value(queue) else {
+            return;
+        };
+        self.publish_unlocked(
+            Event::new("operations.queue.changed", payload),
+            Audience::All,
+        );
+    }
+
+    fn publish_unlocked(&self, event: Event, audience: Audience) {
+        self.wire_events.publish(event.clone(), audience.clone());
+        self.events.publish(event, audience);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OperationQueueSnapshot {
+    pub queue: silo_api::methods::operations::OperationQueue,
+    pub event_barrier: HashMap<String, u64>,
 }
 
 impl EngineContext for SilodContext {
@@ -78,7 +194,19 @@ impl EngineContext for SilodContext {
     }
 
     fn publish(&self, event: Event, audience: Audience) {
-        self.events.publish(event, audience);
+        if event.name.starts_with("operations.") {
+            let _projection = self
+                .queue_projection
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            self.publish_unlocked(event, audience);
+        } else {
+            self.publish_unlocked(event, audience);
+        }
+    }
+
+    fn job_queue_changed(&self) {
+        self.publish_operation_queue();
     }
 
     fn main_thread(&self) -> Option<&dyn MainThread> {

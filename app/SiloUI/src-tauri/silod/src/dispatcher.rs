@@ -5,7 +5,9 @@ use serde_json::Value;
 use silo_api::{
     jobs::ErrorCode,
     methods::{
-        engine::{EngineState, EngineStateParams},
+        engine::{EngineState, EngineStateParams, EventsSubscribeParams, EventsUnsubscribeParams},
+        notifications::NotificationsListParams,
+        operations::{AcknowledgeJobParams, CancelJobParams, GetJobParams, OperationsListParams},
         method_registry, MethodDescriptor, MethodName,
     },
     transport::{
@@ -22,7 +24,12 @@ use crate::context::SilodContext;
 const MAX_REQUEST_IDS: usize = 65_536;
 
 pub type HandlerFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<HandlerOutput, DispatchError>> + Send + 'a>>;
+
+pub struct HandlerOutput {
+    pub value: Value,
+    pub event_barrier: Option<std::collections::HashMap<String, u64>>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RequestContext {
@@ -92,7 +99,20 @@ impl Default for CoreMethodRegistry {
         let descriptors = method_registry()
             .iter()
             .copied()
-            .filter(|descriptor| matches!(descriptor.name, "engine.handshake" | "engine.state"))
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.name,
+                    "engine.handshake"
+                        | "engine.state"
+                        | "events.subscribe"
+                        | "events.unsubscribe"
+                        | "notifications.list"
+                        | "operations.cancel"
+                        | "operations.job.acknowledge"
+                        | "operations.job.get"
+                        | "operations.list"
+                )
+            })
             .collect();
         Self { descriptors }
     }
@@ -108,9 +128,11 @@ impl MethodRegistry for CoreMethodRegistry {
         method: MethodName,
         params: Value,
         context: Arc<SilodContext>,
-        _request: RequestContext,
+        request: RequestContext,
     ) -> HandlerFuture<'a> {
         Box::pin(async move {
+            let mut event_barrier = None;
+            let result: Result<Value, DispatchError> = async {
             match method {
                 MethodName::EngineState => {
                     serde_json::from_value::<EngineStateParams>(params).map_err(|error| {
@@ -123,8 +145,92 @@ impl MethodRegistry for CoreMethodRegistry {
                 MethodName::EngineHandshake => Err(DispatchError::internal(
                     "engine.handshake is handled by the session negotiator",
                 )),
+                MethodName::EventsSubscribe => {
+                    let params: EventsSubscribeParams = parse_params(params)?;
+                    if let Some(device_ids) = &params.device_ids {
+                        if device_ids.iter().any(|id| id != &context.local_device().device_id) {
+                            return Err(DispatchError {
+                                code: ErrorCode::UnsupportedRemoteOperation,
+                                message: "This engine does not relay subscriptions to remote devices."
+                                    .to_owned(),
+                            });
+                        }
+                    }
+                    let client_id = silo_engine::context::ClientId::new(request.client_id);
+                    let subscription = context
+                        .subscribe_events(&client_id, params.events)
+                        .map_err(DispatchError::internal)?;
+                    serde_json::to_value(silo_api::methods::engine::EventsSubscribeResult {
+                        subscription,
+                    })
+                    .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::EventsUnsubscribe => {
+                    let params: EventsUnsubscribeParams = parse_params(params)?;
+                    event_barrier = Some(context.unsubscribe_events(
+                        &silo_engine::context::ClientId::new(request.client_id),
+                        &params.subscription,
+                    ));
+                    Ok(Value::Null)
+                }
+                MethodName::OperationsJobGet => {
+                    let params: GetJobParams = parse_params(params)?;
+                    let registry = context.job_registry().map_err(registry_error)?;
+                    let result = registry
+                        .get(&params.job_id)
+                        .map_err(registry_error)?
+                        .ok_or_else(|| DispatchError {
+                            code: ErrorCode::NotFound,
+                            message: "The job was not found.".to_owned(),
+                        })?;
+                    serde_json::to_value(result)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::OperationsJobAcknowledge => {
+                    let params: AcknowledgeJobParams = parse_params(params)?;
+                    context
+                        .job_registry()
+                        .map_err(registry_error)?
+                        .acknowledge(&params.job_id)
+                        .map_err(registry_error)?;
+                    context.job_queue_changed();
+                    Ok(Value::Null)
+                }
+                MethodName::OperationsList => {
+                    let _: OperationsListParams = parse_params(params)?;
+                    let snapshot = context
+                        .operation_queue_snapshot(&silo_engine::context::ClientId::new(
+                            request.client_id.clone(),
+                        ))
+                        .map_err(DispatchError::internal)?;
+                    event_barrier = Some(snapshot.event_barrier);
+                    serde_json::to_value(snapshot.queue)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
+                MethodName::OperationsCancel => {
+                    let params: CancelJobParams = parse_params(params)?;
+                    context
+                        .job_registry()
+                        .map_err(registry_error)?
+                        .cancel(&params.job_id)
+                        .map_err(registry_error)?;
+                    Ok(Value::Null)
+                }
+                MethodName::NotificationsList => {
+                    let _: NotificationsListParams = parse_params(params)?;
+                    let notices = silo_engine::notices::list(context.as_ref())
+                        .map_err(DispatchError::internal)?;
+                    serde_json::to_value(notices)
+                        .map_err(|error| DispatchError::internal(error.to_string()))
+                }
                 _ => Err(DispatchError::unsupported(method_name(method))),
             }
+            }
+            .await;
+            result.map(|value| HandlerOutput {
+                value,
+                event_barrier,
+            })
         })
     }
 }
@@ -149,6 +255,10 @@ impl Dispatcher {
             .iter()
             .map(|descriptor| descriptor.name.to_owned())
             .collect()
+    }
+
+    pub fn context(&self) -> Arc<SilodContext> {
+        self.context.clone()
     }
 
     pub fn busy_response(&self, id: String) -> ResponseEnvelope<Value> {
@@ -267,11 +377,15 @@ impl Dispatcher {
                 response: Some(response),
                 close: false,
                 close_reason: None,
+                activate_subscription: None,
+                event_barrier: None,
             },
             PreparedRequest::Close(response, reason) => DispatchResult {
                 response,
                 close: true,
                 close_reason: Some(reason),
+                activate_subscription: None,
+                event_barrier: None,
             },
             PreparedRequest::Invoke {
                 id,
@@ -279,17 +393,37 @@ impl Dispatcher {
                 params,
                 request_context,
             } => {
+                let client_id = request_context.client_id.clone();
                 let result = self
                     .registry
                     .dispatch(method, params, self.context.clone(), request_context)
                     .await;
+                let (response, activate_subscription, event_barrier) = match result {
+                    Ok(result) => {
+                        let HandlerOutput {
+                            value,
+                            event_barrier,
+                        } = result;
+                        let activate = if method == MethodName::EventsSubscribe {
+                            value
+                                .get("subscription")
+                                .and_then(Value::as_str)
+                                .map(|subscription| {
+                                    (client_id, subscription.to_owned())
+                                })
+                        } else {
+                            None
+                        };
+                        (success_response(id, value), activate, event_barrier)
+                    }
+                    Err(error) => (error_response(id, error.code, error.message), None, None),
+                };
                 DispatchResult {
-                    response: Some(match result {
-                        Ok(result) => success_response(id, result),
-                        Err(error) => error_response(id, error.code, error.message),
-                    }),
+                    response: Some(response),
                     close: false,
                     close_reason: None,
+                    activate_subscription,
+                    event_barrier,
                 }
             }
         }
@@ -390,6 +524,28 @@ pub struct DispatchResult {
     pub response: Option<ResponseEnvelope<Value>>,
     pub close: bool,
     pub close_reason: Option<String>,
+    pub activate_subscription: Option<(String, String)>,
+    pub event_barrier: Option<std::collections::HashMap<String, u64>>,
+}
+
+fn parse_params<T: for<'de> Deserialize<'de>>(params: Value) -> Result<T, DispatchError> {
+    serde_json::from_value(params)
+        .map_err(|error| DispatchError::internal(format!("Invalid params: {error}")))
+}
+
+fn registry_error(error: impl std::fmt::Display) -> DispatchError {
+    let message = error.to_string();
+    let code = if message == "not_found" {
+        ErrorCode::NotFound
+    } else if message.starts_with("busy:")
+        || message.contains("cannot be acknowledged")
+        || message.contains("can't be cancelled")
+    {
+        ErrorCode::Busy
+    } else {
+        ErrorCode::Internal
+    };
+    DispatchError { code, message }
 }
 
 #[derive(Deserialize)]
@@ -534,10 +690,12 @@ mod tests {
             Some(ResponseEnvelope::Error { error, .. })
                 if error.code == ErrorCode::UnsupportedRemoteOperation
         ));
-        assert_eq!(
-            dispatcher.capabilities(),
-            ["engine.handshake", "engine.state"]
-        );
+        let capabilities = dispatcher.capabilities();
+        assert!(capabilities.contains(&"engine.handshake".to_owned()));
+        assert!(capabilities.contains(&"engine.state".to_owned()));
+        assert!(capabilities.contains(&"events.subscribe".to_owned()));
+        assert!(capabilities.contains(&"operations.job.get".to_owned()));
+        assert!(capabilities.contains(&"notifications.list".to_owned()));
     }
 
     #[tokio::test]
