@@ -430,7 +430,7 @@ impl Provision<'_> {
             log.hide(&account.password);
         }
         self.say("Personalizing the imported computer")?;
-        self.boot(Login::Password)?;
+        boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
         finalize_import_guest(self.layout, record, &account, self.log.as_ref())
             .map_err(Stop::Failed)?;
         let output = guest_access::run(
@@ -785,6 +785,17 @@ fn finalize_guest(
     Ok(())
 }
 
+/// Imported finalization can rotate the guest's SSH host keys before its result
+/// reaches the owner. Clear any previous pin before each retry's password boot
+/// so `accept-new` can learn the key from the current disk state.
+fn boot_import_with_host_key_reset(
+    layout: &Layout,
+    boot: impl FnOnce() -> Result<(), Stop>,
+) -> Result<(), Stop> {
+    guest_access::reset_host_keys(layout)?;
+    boot()
+}
+
 /// Finish a rekeyed archive import using the new password once, then verify the
 /// newly installed device key. The source key is never read or used.
 fn finalize_import_guest(
@@ -875,6 +886,32 @@ mod tests {
         setup.developer_tools = true;
         setup.roots = true;
         assert_eq!(setup_summary(&setup), "account, sip, developer tools, workspace folders done");
+    }
+
+    #[test]
+    fn imported_password_boot_forgets_the_previous_host_key_before_retrying() {
+        let temp = tempfile::tempdir().unwrap();
+        let layout = Layout {
+            dir: temp.path().to_path_buf(),
+            access: None,
+        };
+        let known_hosts = layout.dir.join("guest-access/known_hosts");
+        std::fs::create_dir_all(known_hosts.parent().unwrap()).unwrap();
+        std::fs::write(&known_hosts, b"inherited guest host key").unwrap();
+
+        let first_boot = boot_import_with_host_key_reset(&layout, || {
+            assert!(!known_hosts.exists(), "the inherited key must not pin this boot");
+            std::fs::write(&known_hosts, b"host key learned from the guest").unwrap();
+            Ok(())
+        });
+        assert!(first_boot.is_ok());
+        assert!(known_hosts.is_file());
+
+        let result = boot_import_with_host_key_reset(&layout, || {
+            assert!(!known_hosts.exists(), "a retry must discard a stale pin first");
+            Err(Stop::Failed("simulated interrupted finalization".into()))
+        });
+        assert!(matches!(result, Err(Stop::Failed(message)) if message == "simulated interrupted finalization"));
     }
 
     #[test]
