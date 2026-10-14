@@ -3221,6 +3221,12 @@ mod tests {
         let controller = install(host, runtime.handle().clone()).unwrap();
         wait_for_recovery(&controller, &|| false).unwrap();
 
+        // Recovery publishes its settled journal just before it releases `busy`, so the flag
+        // clears a moment after the wait returns.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while controller.busy.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(!controller.busy.load(Ordering::Acquire));
         assert!(!recovery::pending(&controller).unwrap());
         assert!(matches!(
