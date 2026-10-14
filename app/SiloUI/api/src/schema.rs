@@ -625,7 +625,7 @@ mod tests {
             "version": null, "user": null, "display": null, "backend": null,
             "sessionState": null, "streamState": null,
             "updateRequired": false, "updateAvailable": false, "streamerVersion": null,
-            "computerUse": null, "name": null
+            "computerUse": null, "name": null, "agentTools": null
         });
         let status: DesktopStatus = serde_json::from_value(payload.clone()).unwrap();
         let output = serde_json::to_value(status).unwrap();
@@ -635,6 +635,28 @@ mod tests {
             "display": {"name": ":1"}, "updateRequired": false, "updateAvailable": false
         }))
         .is_err());
+    }
+
+    #[test]
+    fn desktop_status_carries_the_agent_tools() {
+        use crate::methods::desktop::{AgentToolsState, DesktopStatus};
+
+        let payload = serde_json::json!({
+            "installed": true, "state": "running", "autoStart": true,
+            "version": null, "user": null, "display": null, "backend": null,
+            "sessionState": null, "streamState": null,
+            "updateRequired": false, "updateAvailable": false, "streamerVersion": null,
+            "computerUse": null, "name": null,
+            "agentTools": {
+                "state": "missing", "missing": ["claude"],
+                "nodeVersion": "24.21.0", "claudeVersion": null,
+                "expectedNodeVersion": "24.21.0", "expectedClaudeVersion": "2.1.287",
+                "recipeVersion": null, "expectedRecipeVersion": 1
+            }
+        });
+        let status: DesktopStatus = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(status.agent_tools.as_ref().unwrap().state, AgentToolsState::Missing);
+        assert_eq!(serde_json::to_value(status).unwrap(), payload);
     }
 
     #[test]

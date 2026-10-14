@@ -1,4 +1,4 @@
-//! Installs verified Apple Command Line Tools, Git LFS and GitHub CLI in a macOS computer.
+//! Installs verified Apple Command Line Tools, Git LFS, GitHub CLI, Node.js and the Claude Code CLI in a macOS computer.
 use super::{guest_access, layout_and_record, MacosContext};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -60,6 +60,8 @@ struct Lock {
     clt: CltPin,
     git_lfs: PinnedTool,
     gh: PinnedTool,
+    node: PinnedTool,
+    claude_code: PinnedTool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +165,18 @@ fn lock() -> Result<Lock, String> {
         || !validate_asset(&lock.gh.asset, "github.com", ".zip")
         || lock.gh.asset.file != format!("gh_{}_macOS_arm64.zip", lock.gh.version)
         || !lock.gh.asset.url.contains("/cli/cli/releases/download/")
+        || !valid_version(&lock.node.version)
+        || !validate_asset(&lock.node.asset, "nodejs.org", ".tar.gz")
+        || lock.node.asset.file != format!("node-v{}-darwin-arm64.tar.gz", lock.node.version)
+        || lock.node.asset.url
+            != format!(
+                "https://nodejs.org/dist/v{}/{}",
+                lock.node.version, lock.node.asset.file
+            )
+        || !valid_version(&lock.claude_code.version)
+        || !validate_asset(&lock.claude_code.asset, "downloads.claude.ai", ".sh")
+        || lock.claude_code.asset.url
+            != "https://downloads.claude.ai/claude-code-releases/bootstrap.sh"
     {
         return Err(invalid());
     }
@@ -225,8 +239,12 @@ fn script(lock: &Lock) -> String {
         .map_or("".to_string(), |package| package.receipt_version.clone());
     let lock_sha256 = digest(PIN.as_bytes());
     let tools_version = format!(
-        "{}-lfs-{}-gh-{}",
-        lock.clt.version, lock.git_lfs.version, lock.gh.version
+        "{}-lfs-{}-gh-{}-node-{}-claude-{}",
+        lock.clt.version,
+        lock.git_lfs.version,
+        lock.gh.version,
+        lock.node.version,
+        lock.claude_code.version
     );
     SCRIPT
         .replace("@TOOLS_VERSION@", &tools_version)
@@ -250,6 +268,14 @@ fn script(lock: &Lock) -> String {
         .replace("@GH_FILE@", &lock.gh.asset.file)
         .replace("@GH_BYTES@", &lock.gh.asset.bytes.to_string())
         .replace("@GH_SHA256@", &lock.gh.asset.sha256)
+        .replace("@NODE_VERSION@", &lock.node.version)
+        .replace("@NODE_FILE@", &lock.node.asset.file)
+        .replace("@NODE_BYTES@", &lock.node.asset.bytes.to_string())
+        .replace("@NODE_SHA256@", &lock.node.asset.sha256)
+        .replace("@CLAUDE_VERSION@", &lock.claude_code.version)
+        .replace("@CLAUDE_INSTALLER_FILE@", &lock.claude_code.asset.file)
+        .replace("@CLAUDE_INSTALLER_BYTES@", &lock.claude_code.asset.bytes.to_string())
+        .replace("@CLAUDE_INSTALLER_SHA256@", &lock.claude_code.asset.sha256)
         .replace("@LOCK_SHA256@", &lock_sha256)
 }
 
@@ -368,7 +394,7 @@ pub(super) fn install(
     let operation_cancelled = || cancelled() || crate::runtime::OPERATIONS.removal_queued(id);
     let cache = super::app_data(app)?.join(CACHE_DIR);
     let _turn = download_turn(&operation_cancelled)?;
-    let mut artifacts = Vec::with_capacity(lock.clt.packages.len() + 2);
+    let mut artifacts = Vec::with_capacity(lock.clt.packages.len() + 4);
     for package in &lock.clt.packages {
         artifacts.push(cached(
             app,
@@ -392,6 +418,9 @@ pub(super) fn install(
         &lock.gh.asset,
         &operation_cancelled,
     )?);
+    for asset in [&lock.node.asset, &lock.claude_code.asset] {
+        artifacts.push(cached(app, id, &cache, asset, &operation_cancelled)?);
+    }
     if operation_cancelled() {
         return Err(guest_access::CANCELLED.into());
     }
@@ -494,6 +523,8 @@ mod tests {
         assert_eq!(lock.gh.version, "2.102.0");
         assert_eq!(lock.git_lfs.asset.bytes, 5_550_634);
         assert_eq!(lock.gh.asset.bytes, 14_359_983);
+        assert_eq!(lock.node.version, "24.21.0");
+        assert_eq!(lock.claude_code.version, "2.1.287");
     }
 
     #[test]
@@ -507,6 +538,8 @@ mod tests {
         let inputs = setup_inputs();
         assert!(inputs[0].contains("installer -pkg"));
         assert!(inputs[1].contains("supportedGuestBuilds"));
+        assert!(inputs[1].contains("node-v24.21.0-darwin-arm64.tar.gz"));
+        assert!(inputs[1].contains("bootstrap.sh"));
         assert!(inputs[2].contains("silo-github-credential"));
         assert_eq!(version().len(), 16);
     }
@@ -535,6 +568,10 @@ mod tests {
         assert!(!script.contains("@CLT_"));
         assert!(!script.contains("@GIT_LFS_"));
         assert!(!script.contains("@GH_"));
+        assert!(!script.contains("@NODE_"));
+        assert!(!script.contains("@CLAUDE_"));
+        assert!(script.contains("node-v24.21.0-darwin-arm64.tar.gz"));
+        assert!(script.contains("-node-24.21.0-claude-2.1.287"));
         assert!(!script.contains("@LOCK_SHA256@"));
     }
 
@@ -609,6 +646,42 @@ mod tests {
         assert!(validate_asset(&asset, "github.com", ".zip"));
         asset.url = asset.url.replace("https://", "http://");
         assert!(!validate_asset(&asset, "github.com", ".zip"));
+    }
+
+    #[test]
+    fn pinned_agent_tools_must_come_from_their_official_sources() {
+        let mut node = lock().unwrap().node;
+        node.asset.url = node.asset.url.replace("nodejs.org", "example.com");
+        assert!(!validate_asset(&node.asset, "nodejs.org", ".tar.gz"));
+        let mut changed = PIN.replace(
+            "https://downloads.claude.ai/claude-code-releases/bootstrap.sh",
+            "https://downloads.claude.ai/claude-code-releases/other.sh",
+        );
+        assert_ne!(changed, PIN);
+        changed = changed.replace("bootstrap.sh", "other.sh");
+        let parsed: Lock = serde_json::from_str(&changed).unwrap();
+        assert_ne!(
+            parsed.claude_code.asset.url,
+            "https://downloads.claude.ai/claude-code-releases/bootstrap.sh"
+        );
+    }
+
+    #[test]
+    fn the_fingerprint_changes_with_the_agent_tools_pin() {
+        let hash = |pin: &str| {
+            let mut hash = Sha256::new();
+            for input in [SCRIPT, pin, GITHUB_SETUP] {
+                hash.update((input.len() as u64).to_le_bytes());
+                hash.update(input.as_bytes());
+            }
+            hash.finalize()[..8]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(hash(PIN), version());
+        assert_ne!(hash(&PIN.replace("2.1.287", "2.1.288")), version());
+        assert_ne!(hash(&PIN.replace("24.21.0", "24.21.1")), version());
     }
 
     #[test]

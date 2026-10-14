@@ -294,7 +294,9 @@ python3 /usr/local/libexec/silo-setup-lcu.py setup
 }
 
 fn action_script(action: &str) -> String {
-    if action == "setup-lcu" {
+    if action == "setup-agent-tools" {
+        crate::agent_tools::setup_script()
+    } else if action == "setup-lcu" {
         lcu_setup_script()
     } else if action == "update-streamer" {
         installer_script(action)
@@ -306,7 +308,7 @@ fn action_script(action: &str) -> String {
 fn action_timeout(action: &str) -> Duration {
     if matches!(
         action,
-        "update-streamer" | "setup-lcu" | "setup-computer-use"
+        "update-streamer" | "setup-lcu" | "setup-computer-use" | "setup-agent-tools"
     ) {
         Duration::from_secs(1800)
     } else if action == "restart-streamer" {
@@ -432,7 +434,7 @@ fn status_with(
     let settings = crate::desktop::configuration(configuration);
     let built_in = crate::computer_use::is_built_in(configuration);
     let fallback = |state: &str| {
-        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "updateAvailable":false, "streamerVersion":null, "lcuState":null, "lcuReason":null, "lcuVersion":null, "lcuAppVersion":null, "lcuRuntimeVersion":null, "lcuAgents":null, "lcuReadiness":null});
+        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "updateAvailable":false, "streamerVersion":null, "lcuState":null, "lcuReason":null, "lcuVersion":null, "lcuAppVersion":null, "lcuRuntimeVersion":null, "lcuAgents":null, "lcuReadiness":null, "agentTools":null});
         // A stopped computer still reports its approval mode and the last versions it had.
         if let Some(computer_use) =
             crate::computer_use::desktop_state(paths, configuration, false, None)
@@ -468,6 +470,7 @@ fn status_with(
     script.push('\n');
     script.push_str(&receipt_read_command(STREAMER_RECEIPT));
     script.push('\n');
+    script.push_str(&crate::agent_tools::status_command());
     let output = guest(
         runner,
         paths,
@@ -489,6 +492,7 @@ fn status_with(
         .next()
         .and_then(|line| serde_json::from_str::<Value>(line.trim()).ok());
     apply_receipt_recipe(&mut status, receipt.as_ref(), bundled_recipe_version());
+    status["agentTools"] = crate::agent_tools::linux_state(lines.next());
     if built_in {
         if let Some(computer_use) =
             crate::computer_use::desktop_state(paths, configuration, true, guest_state.as_ref())
@@ -836,10 +840,12 @@ pub fn local_for_job(
                 | "update-streamer"
                 | "setup-lcu"
                 | "setup-computer-use"
+                | "setup-agent-tools"
         ) {
             return Err("Unsupported desktop action.".into());
         }
-        if crate::desktop::configuration(&configuration).is_none() {
+        // Agent tools belong to the computer, not to its desktop.
+        if action != "setup-agent-tools" && crate::desktop::configuration(&configuration).is_none() {
             return Err("Add a Linux desktop in computer settings first.".into());
         }
         if action == "setup-computer-use" && !crate::computer_use::is_built_in(&configuration) {
@@ -1500,6 +1506,14 @@ mod tests {
     }
 
     #[test]
+    fn agent_tools_setup_is_a_long_running_action_that_does_not_start_the_computer() {
+        let setup = action_script("setup-agent-tools");
+        assert!(setup.contains("agent-tools.py\" \"$silo_tools/agent-tools-lock.json\" setup"));
+        assert_eq!(action_timeout("setup-agent-tools"), Duration::from_secs(1800));
+        assert!(!action_starts_computer("setup-agent-tools"));
+    }
+
+    #[test]
     fn lcu_setup_is_explicit_staged_and_never_starts_computer() {
         let _test_state = crate::test_support::global_state();
         let setup = action_script("setup-lcu");
@@ -1872,12 +1886,16 @@ mod tests {
                    "updateRequired":false,"updateAvailable":false,"streamerVersion":null,
                    "lcuState":null,"lcuReason":null,"lcuVersion":null,
                    "lcuAppVersion":null,"lcuRuntimeVersion":null,
-                   "lcuAgents":null,"lcuReadiness":null})
+                   "lcuAgents":null,"lcuReadiness":null,"agentTools":null})
         );
         runner.assert_finished();
     }
     fn receipt_read_suffix() -> String {
-        format!("\n{}\n", receipt_read_command(STREAMER_RECEIPT))
+        format!(
+            "\n{}\n{}",
+            receipt_read_command(STREAMER_RECEIPT),
+            crate::agent_tools::status_command()
+        )
     }
 
     fn recipe_status(helper: Value, receipt: &str) -> Value {

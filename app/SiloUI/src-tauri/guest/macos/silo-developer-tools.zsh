@@ -22,6 +22,14 @@ GH_VERSION='@GH_VERSION@'
 GH_FILE='@GH_FILE@'
 GH_BYTES='@GH_BYTES@'
 GH_SHA256='@GH_SHA256@'
+NODE_VERSION='@NODE_VERSION@'
+NODE_FILE='@NODE_FILE@'
+NODE_BYTES='@NODE_BYTES@'
+NODE_SHA256='@NODE_SHA256@'
+CLAUDE_VERSION='@CLAUDE_VERSION@'
+CLAUDE_INSTALLER_FILE='@CLAUDE_INSTALLER_FILE@'
+CLAUDE_INSTALLER_BYTES='@CLAUDE_INSTALLER_BYTES@'
+CLAUDE_INSTALLER_SHA256='@CLAUDE_INSTALLER_SHA256@'
 
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 mkdir -p "$HOME/Library/Logs" "$WORK"
@@ -124,6 +132,8 @@ logged "$WORK/hello"
 
 verify_file "$GIT_LFS_FILE" "$GIT_LFS_BYTES" "$GIT_LFS_SHA256"
 verify_file "$GH_FILE" "$GH_BYTES" "$GH_SHA256"
+verify_file "$NODE_FILE" "$NODE_BYTES" "$NODE_SHA256"
+verify_file "$CLAUDE_INSTALLER_FILE" "$CLAUDE_INSTALLER_BYTES" "$CLAUDE_INSTALLER_SHA256"
 for archive in "$STAGE/$GIT_LFS_FILE" "$STAGE/$GH_FILE"; do
   members=$(/usr/bin/unzip -Z1 "$archive") || fail "could not inspect a pinned tools archive"
   while IFS= read -r member; do
@@ -132,6 +142,13 @@ for archive in "$STAGE/$GIT_LFS_FILE" "$STAGE/$GH_FILE"; do
   done <<<"$members"
 done
 
+node_members=$(/usr/bin/tar -tzf "$STAGE/$NODE_FILE") || fail "could not inspect the pinned Node.js archive"
+while IFS= read -r member; do
+  [[ -n $member && $member != /* && $member != .. && $member != ../* && $member != */../* && $member != */.. ]] ||
+    fail "the pinned Node.js archive has an unsafe path"
+done <<<"$node_members"
+/usr/bin/tar -xzf "$STAGE/$NODE_FILE" -C "$WORK" || fail "could not unpack Node.js"
+[[ -x $WORK/node-v$NODE_VERSION-darwin-arm64/bin/node ]] || fail "the pinned Node.js executable is missing"
 /usr/bin/ditto -x -k "$STAGE/$GIT_LFS_FILE" "$WORK" || fail "could not unpack Git LFS"
 /usr/bin/ditto -x -k "$STAGE/$GH_FILE" "$WORK" || fail "could not unpack GitHub CLI"
 [[ -x $WORK/git-lfs-$GIT_LFS_VERSION/git-lfs ]] || fail "the pinned Git LFS executable is missing"
@@ -143,6 +160,12 @@ logged /usr/bin/sudo -n /usr/bin/install -m 0755 "$WORK/git-lfs-$GIT_LFS_VERSION
 logged /usr/bin/sudo -n /usr/bin/install -m 0755 "$WORK/gh_${GH_VERSION}_macOS_arm64/bin/gh" "$TOOLS/bin/gh"
 logged /usr/bin/sudo -n /bin/ln -sfn "$TOOLS/bin/git-lfs" /usr/local/bin/git-lfs
 logged /usr/bin/sudo -n /bin/ln -sfn "$TOOLS/bin/gh" /usr/local/bin/gh
+# Node.js LTS (the official tarball, checked against the lock above): node, npm and npx.
+logged /usr/bin/sudo -n /bin/rm -rf "$TOOLS/node"
+logged /usr/bin/sudo -n /usr/bin/ditto "$WORK/node-v$NODE_VERSION-darwin-arm64" "$TOOLS/node"
+for node_tool in node npm npx; do
+  logged /usr/bin/sudo -n /bin/ln -sfn "$TOOLS/node/bin/$node_tool" "/usr/local/bin/$node_tool"
+done
 
 ZSHENV=$HOME/.zshenv
 PATH_LINE='export PATH="/usr/local/bin:$PATH"'
@@ -162,10 +185,23 @@ fi
 logged /usr/bin/sudo -n /usr/bin/env "HOME=/var/root" "PATH=$PATH" /bin/sh "$STAGE/setup-github.sh"
 [[ $(/usr/bin/git config --system --get credential.https://github.com.helper) == /usr/local/libexec/silo-github-credential ]] ||
   fail "the shared GitHub credential helper is not configured"
+[[ $(/usr/local/bin/node --version) == "v$NODE_VERSION" ]] || fail "Node.js version verification failed"
+/usr/local/bin/npm --version >/dev/null 2>&1 || fail "npm did not run"
+
+# Claude Code, with Anthropic's documented installer (the staged file is the one the lock pins),
+# as the working account. The installer checks the binary against Anthropic's release manifest.
+# Auto-update stays off so the pinned version holds. Silo never signs in to it.
+logged /usr/bin/env "HOME=$HOME" "DISABLE_AUTOUPDATER=1" "PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  /bin/bash "$STAGE/$CLAUDE_INSTALLER_FILE" "$CLAUDE_VERSION"
+[[ -x $HOME/.local/bin/claude ]] || fail "the Claude Code installer did not create ~/.local/bin/claude"
+logged /usr/bin/sudo -n /bin/ln -sfn "$HOME/.local/bin/claude" /usr/local/bin/claude
+claude_version=$(/usr/bin/env "HOME=$HOME" /usr/local/bin/claude --version) || fail "Claude Code did not run"
+[[ $claude_version == "$CLAUDE_VERSION"* ]] || fail "Claude Code version verification failed"
+
 [[ $(/usr/bin/git lfs version) == "git-lfs/$GIT_LFS_VERSION"* ]] || fail "Git LFS version verification failed"
 gh_version=$(/usr/local/bin/gh --version | /usr/bin/head -n 1)
 [[ $gh_version == "gh version $GH_VERSION"* ]] || fail "GitHub CLI version verification failed"
-nonlogin=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -c 'git lfs version && gh --version | head -n 1') ||
+nonlogin=$(/usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/zsh -c 'git lfs version && gh --version | head -n 1 && node --version && claude --version') ||
   fail "the tools are not on the managed guest shell PATH"
 say "nonlogin_shell=$nonlogin"
 
@@ -174,9 +210,9 @@ lock_digest=$(/usr/bin/shasum -a 256 "$STAGE/developer-tools-lock.json" | /usr/b
 receipt_dir='/Library/Application Support/Silo'
 receipt_tmp="$WORK/developer-tools-receipt.json"
 receipt="$receipt_dir/developer-tools-receipt.json"
-printf '{\n  "schemaVersion": 1,\n  "guestBuild": "%s",\n  "lockDigest": "%s",\n  "developerDirectory": "/Library/Developer/CommandLineTools",\n  "cltVersion": "%s",\n  "gitVersion": "%s",\n  "gitLfsVersion": "%s",\n  "ghVersion": "%s",\n  "xcodeVersion": null\n}\n' \
-  "$guest_build" "$lock_digest" "$CLT_VERSION" "$git_version" "git-lfs/$GIT_LFS_VERSION" "$gh_version" >"$receipt_tmp"
+printf '{\n  "schemaVersion": 1,\n  "guestBuild": "%s",\n  "lockDigest": "%s",\n  "developerDirectory": "/Library/Developer/CommandLineTools",\n  "cltVersion": "%s",\n  "gitVersion": "%s",\n  "gitLfsVersion": "%s",\n  "ghVersion": "%s",\n  "nodeVersion": "%s",\n  "claudeVersion": "%s",\n  "xcodeVersion": null\n}\n' \
+  "$guest_build" "$lock_digest" "$CLT_VERSION" "$git_version" "git-lfs/$GIT_LFS_VERSION" "$gh_version" "$NODE_VERSION" "$CLAUDE_VERSION" >"$receipt_tmp"
 logged /usr/bin/sudo -n /usr/bin/install -d -o root -g wheel -m 0755 "$receipt_dir"
 logged /usr/bin/sudo -n /usr/bin/install -o root -g wheel -m 0644 "$receipt_tmp" "$receipt"
-say "Developer tools are ready for $guest_build: $git_version; git-lfs/$GIT_LFS_VERSION; $gh_version; $CLT_VERSION"
+say "Developer tools are ready for $guest_build: $git_version; git-lfs/$GIT_LFS_VERSION; $gh_version; node v$NODE_VERSION; claude $CLAUDE_VERSION; $CLT_VERSION"
 /bin/rm -rf "$STAGE"

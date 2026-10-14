@@ -12,6 +12,7 @@ pub mod chatgpt_app;
 pub mod checkpoints;
 pub mod clipboard;
 pub mod computer_names;
+pub mod agent_tools;
 pub mod computer_use;
 pub mod context;
 pub mod creation_inputs;

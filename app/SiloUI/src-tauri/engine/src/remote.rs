@@ -1324,7 +1324,9 @@ fn request_timeout(request: &Value) -> Duration {
         || (request["method"] == "desktop.action"
             && matches!(
                 request["params"]["action"].as_str(),
-                Some("update-streamer" | "setup-lcu" | "setup-computer-use")
+                Some(
+                    "update-streamer" | "setup-lcu" | "setup-computer-use" | "setup-agent-tools"
+                )
             ))
         || request["method"] == "computerUse.approval"
     {
