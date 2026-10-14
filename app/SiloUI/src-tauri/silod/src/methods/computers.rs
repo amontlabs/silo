@@ -1273,6 +1273,30 @@ async fn macos_display_resize(
     context: &HandlerContext,
     params: MacosDisplayResizeParams,
 ) -> Result<HandlerOutput, DispatchError> {
+    // A resize addressed to another device goes to the engine that owns the computer.
+    let local_id = context.silod_context().local_device().device_id.clone();
+    if let Some(device) = params
+        .device_id
+        .as_deref()
+        .filter(|device| *device != "local" && **device != *local_id)
+    {
+        let owner = device.to_owned();
+        let forwarded = json!({
+            "computerId": params.computer_id,
+            "widthPx": params.width_px,
+            "heightPx": params.height_px,
+        });
+        let reply = tokio::task::spawn_blocking(move || {
+            silo_engine::remote::call_remote_typed(&owner, "macos.display.resize", forwarded)
+        })
+        .await
+        .map_err(join_failure)?
+        .map_err(HandlerContext::map_engine_error)?;
+        let result: MacosDisplayResizeResult = serde_json::from_value(reply).map_err(|_| {
+            DispatchError::internal("The computer returned no size for its screen.")
+        })?;
+        return Ok(plain(encode(result)?));
+    }
     let macos = SilodRuntimeHost::new(context).macos_context();
     let (width_px, height_px) = tokio::task::spawn_blocking(move || {
         silo_engine::macos_computers::resize_display(
@@ -2260,6 +2284,36 @@ pub(crate) mod tests {
         assert_eq!(finished["jobId"], started["jobId"]);
         assert!(finished["error"].is_null(), "{finished}");
         assert!(finished["result"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn macos_display_resize_routes_by_device() {
+        let f = fixture();
+        let resize = |device: Option<&str>| {
+            let mut params = json!({"computerId": UNKNOWN, "widthPx": 1200, "heightPx": 800});
+            if let Some(device) = device {
+                params["deviceId"] = json!(device);
+            }
+            params
+        };
+        let local = f
+            .call(MethodName::MacosDisplayResize, resize(None))
+            .await
+            .unwrap_err();
+        // Naming this device, or "local", is the same as naming none.
+        for device in ["local", "test-device"] {
+            let named = f
+                .call(MethodName::MacosDisplayResize, resize(Some(device)))
+                .await
+                .unwrap_err();
+            assert_eq!(named.message, local.message, "{device}");
+        }
+        // Another device is asked instead of this one: the failure comes from reaching it.
+        let remote = f
+            .call(MethodName::MacosDisplayResize, resize(Some("ghost-device")))
+            .await
+            .unwrap_err();
+        assert_ne!(remote.message, local.message);
     }
 
     #[tokio::test]

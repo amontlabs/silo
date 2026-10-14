@@ -6267,6 +6267,13 @@
         "computerId": {
           "type": "string"
         },
+        "deviceId": {
+          "description": "The device that owns the computer. Absent or this engine's own device resizes here;\nanother device forwards the resize to its owner.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "heightPx": {
           "format": "uint64",
           "minimum": 0,
