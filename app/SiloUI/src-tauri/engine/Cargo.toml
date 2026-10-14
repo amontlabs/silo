@@ -19,6 +19,7 @@ libc = "0.2"
 microsandbox-image = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-image" }
 microsandbox-utils = { git = "https://github.com/superradcompany/microsandbox", rev = "09df3d4b9d832adaede1fb9a198cfc660bfab8cd", package = "microsandbox-utils" }
 sha2 = "0.10"
+zeroize = "1"
 hmac = "0.12"
 plist = "1"
 flate2 = "1"

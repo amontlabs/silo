@@ -82,8 +82,7 @@ fn checked(
 }
 
 fn address(record: &super::store::Record) -> Result<SocketAddr, String> {
-    let ip = guest_access::guest_address(&record.mac_address)?;
-    Ok(SocketAddr::from((ip, PORT)))
+    guest_access::endpoint(record, PORT)
 }
 
 /// Opens a connection to the guest's Screen Sharing port, for the owner to relay.

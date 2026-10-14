@@ -1,6 +1,10 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
+    "externalBin": [
+      "binaries/silo-macos-gateway",
+      "binaries/silo-network-bootstrap"
+    ],
     "macOS": {
       "entitlements": "Entitlements.plist",
       "frameworks": [

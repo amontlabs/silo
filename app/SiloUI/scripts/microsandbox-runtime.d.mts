@@ -37,13 +37,14 @@ export function sha256(bytes: ArrayBufferView): string
 export function applyRuntimePatch(sourceRoot: string, patchPath: string): void
 export function verifySha256(bytes: ArrayBufferView, expected: string, label: string): void
 export function buildPatchedExecutable(options: {
+  appRoot?: string
   targetTriple: string
   hostTriple: string
   sourceArchive: string
   patches: ArrayBufferView[]
   agentd: ArrayBufferView
   cacheRoot: string
-}): Promise<Buffer>
+}): Promise<Buffer | { executable: Buffer; macosGateway: Buffer }>
 export function stageRuntime(options: {
   appRoot: string
   targetTriple: string
@@ -60,11 +61,12 @@ export function stageRuntime(options: {
     patches: ArrayBufferView[]
     agentd: ArrayBufferView
     cacheRoot: string
-  }) => Promise<ArrayBufferView>
+  }) => Promise<ArrayBufferView | { executable: ArrayBufferView; macosGateway?: ArrayBufferView }>
   verifyExecutable?: boolean
 }): Promise<{
   targetTriple: string
   executablePath: string
+  gatewayPath: string | null
   libraryPath: string
   manifestPath: string
 }>

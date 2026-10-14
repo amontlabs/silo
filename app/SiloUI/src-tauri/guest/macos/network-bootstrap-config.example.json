@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "computerId": "example-computer-id",
+  "expectedMac": "02:00:00:00:00:02",
+  "address": "172.30.0.2",
+  "prefixLength": 30,
+  "router": "172.30.0.1",
+  "dnsServer": "172.30.0.1",
+  "caFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "probeURL": "https://github.com/"
+}

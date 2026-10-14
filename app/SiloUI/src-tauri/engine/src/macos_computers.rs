@@ -35,6 +35,12 @@ mod offline_setup;
 mod personalize;
 #[path = "macos_computers/provision.rs"]
 mod provision;
+#[path = "macos_computers/proxy/mod.rs"]
+mod proxy;
+#[path = "macos_computers/proxy_address.rs"]
+mod proxy_address;
+#[path = "macos_computers/proxy_ca.rs"]
+mod proxy_ca;
 #[path = "macos_computers/recovery.rs"]
 mod recovery;
 #[path = "macos_computers/remote_display.rs"]
@@ -1002,6 +1008,217 @@ pub fn names(app: &MacosContext) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn proxy_record(app: &MacosContext, name: &str) -> Result<Option<Record>, String> {
+    ensure_loaded(app)?;
+    Ok(registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.name.eq_ignore_ascii_case(name))
+        .map(|entry| entry.record.clone()))
+}
+
+pub fn proxy_contains_name(app: &MacosContext, name: &str) -> bool {
+    names(app)
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_validate_computers(app: &MacosContext, computers: &[String]) -> Result<(), String> {
+    for name in computers {
+        let record = proxy_record(app, name)?
+            .ok_or("Secrets can only be assigned to local Silo computers.")?;
+        if !record.setup.complete() {
+            return Err(
+                "Finish setting up the selected macOS computer before assigning secrets.".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_secrets(app: &MacosContext, computer: &str) -> Result<Vec<String>, String> {
+    let record = proxy_record(app, computer)?.ok_or("This macOS computer no longer exists.")?;
+    let pending = proxy::with_policy_lock(&record.id, || {
+        let material = crate::secrets::runtime_material(computer)?;
+        proxy::apply_secrets(&record.id, material)
+    })?;
+    proxy::sync_guest_placeholders(
+        app,
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+    )?;
+    Ok(pending)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_revoke_secret(app: &MacosContext, computer: &str, name: &str) -> Result<bool, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(true);
+    };
+    let removed = proxy::with_policy_lock(&record.id, || proxy::revoke_secret(&record.id, name))?;
+    proxy::sync_guest_placeholders(
+        app,
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+    )?;
+    Ok(removed)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_scoped_cached_tokens(
+    app: &MacosContext,
+    computer: &str,
+) -> Result<Vec<String>, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(Vec::new());
+    };
+    proxy::scoped_cached_tokens(&record.id)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_github_policy_is_cached(
+    app: &MacosContext,
+    computer: &str,
+    profile: &serde_json::Value,
+) -> Result<bool, String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(false);
+    };
+    proxy::github_profile_is_cached(&record.id, profile)
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_github_policy(
+    app: &MacosContext,
+    computer: &str,
+    revision: u64,
+    profile: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Ok(());
+    };
+    proxy::with_policy_lock(&record.id, || {
+        proxy::apply_github_profile(&record.id, revision, profile)
+    })
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_apply_github_identity(
+    app: &MacosContext,
+    computer: &str,
+    identity: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(record) = proxy_record(app, computer)? else {
+        return Err("This macOS computer no longer exists.".into());
+    };
+    if !identity["apply"].as_bool().unwrap_or(false) {
+        return Ok(());
+    }
+    let name = identity["name"]
+        .as_str()
+        .ok_or("Invalid Git author configuration.")?;
+    let email = identity["email"]
+        .as_str()
+        .ok_or("Invalid Git author configuration.")?;
+    if name.trim().is_empty()
+        || email.trim().is_empty()
+        || name.len() > 1024
+        || email.len() > 1024
+        || name.chars().any(char::is_control)
+        || email.chars().any(char::is_control)
+    {
+        return Err("Invalid Git author configuration.".into());
+    }
+    let command = format!(
+        "git config --global --replace-all user.name {}; git config --global --replace-all user.email {}; test \"$(git config --global user.name)\" = {} && test \"$(git config --global user.email)\" = {}",
+        guest_access::shell_quote(name),
+        guest_access::shell_quote(email),
+        guest_access::shell_quote(name),
+        guest_access::shell_quote(email),
+    );
+    let output = guest_access::run(
+        &Layout::new(&app.paths().app_data, &record.id),
+        &record,
+        &command,
+        None,
+        Duration::from_secs(20),
+    )?;
+    if output.status == 0 {
+        Ok(())
+    } else {
+        Err("The macOS computer rejected its Git author configuration.".into())
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn proxy_is_pending_restore(app: &MacosContext, computer: &str) -> bool {
+    proxy_record(app, computer)
+        .is_ok_and(|record| record.is_some_and(|record| record.pending_restore.is_some()))
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_validate_computers(_app: &MacosContext, _computers: &[String]) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_secrets(_app: &MacosContext, _computer: &str) -> Result<Vec<String>, String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_revoke_secret(
+    _app: &MacosContext,
+    _computer: &str,
+    _name: &str,
+) -> Result<bool, String> {
+    Ok(true)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_scoped_cached_tokens(
+    _app: &MacosContext,
+    _computer: &str,
+) -> Result<Vec<String>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_github_policy_is_cached(
+    _app: &MacosContext,
+    _computer: &str,
+    _profile: &serde_json::Value,
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_github_policy(
+    _app: &MacosContext,
+    _computer: &str,
+    _revision: u64,
+    _profile: &serde_json::Value,
+) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_apply_github_identity(
+    _app: &MacosContext,
+    _computer: &str,
+    _identity: &serde_json::Value,
+) -> Result<(), String> {
+    Err(NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn proxy_is_pending_restore(_app: &MacosContext, _computer: &str) -> bool {
+    false
+}
+
 fn create(app: &MacosContext, request: CreateRequest) -> Result<MacosComputer, String> {
     require_supported()?;
     ensure_loaded(app)?;
@@ -1394,6 +1611,9 @@ fn start(app: &MacosContext, id: &str) -> Result<(), String> {
             .ok_or("This computer no longer exists.")?;
         if entry.deleting {
             return Err("This computer is being deleted.".into());
+        }
+        if !entry.record.setup.complete() {
+            return Err(store::NEEDS_PERSONALIZING.into());
         }
         store::start_allowed(entry.state, &entry.record)?;
         if entry.operation.is_some() {
@@ -1813,6 +2033,17 @@ fn slot_is_current(current: Option<u64>, event: u64) -> bool {
 
 /// The machine ended on its own or at Silo's request.
 fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<String>) {
+    machine_stopped_with_lifecycle(app, id, generation, error, true);
+}
+
+/// Ends a machine while respecting whether the boot contributes to the user's state.
+fn machine_stopped_with_lifecycle(
+    app: &MacosContext,
+    id: &str,
+    generation: u64,
+    error: Option<String>,
+    lifecycle_managed: bool,
+) {
     let (app, id) = (app.clone(), id.to_string());
     // Deferred so the framework callback that reported the stop has returned before
     // its machine is released.
@@ -1822,6 +2053,9 @@ fn machine_stopped(app: &MacosContext, id: &str, generation: u64, error: Option<
             return;
         }
         close_display(&app, &id);
+        if !lifecycle_managed {
+            return;
+        }
         update(&app, &id, |entry| {
             if matches!(
                 entry.state,
@@ -2283,7 +2517,12 @@ fn watch(app: &MacosContext) {
 
 fn reconcile(app: &MacosContext, samples: &[engine::Sample]) {
     for sample in samples {
-        let (id, machine, generation) = (&sample.id, &sample.state, sample.generation);
+        let (id, machine, generation, lifecycle_managed) = (
+            &sample.id,
+            &sample.state,
+            sample.generation,
+            sample.lifecycle_managed,
+        );
         let Some((_, state)) = computer(id).ok() else {
             continue;
         };
@@ -2294,7 +2533,7 @@ fn reconcile(app: &MacosContext, samples: &[engine::Sample]) {
             ) => {
                 let detail = (*machine == engine::MachineState::Failed)
                     .then(|| "The computer stopped unexpectedly.".to_string());
-                machine_stopped(app, id, generation, detail);
+                machine_stopped_with_lifecycle(app, id, generation, detail, lifecycle_managed);
             }
             (engine::MachineState::Paused, State::Running | State::Stopping) => {
                 let (operating, unconsumed) = (has_operation(id), has_pending_restore(id));
