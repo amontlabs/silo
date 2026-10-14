@@ -26,6 +26,9 @@ const SSH_WAIT: Duration = Duration::from_secs(300);
 const SSH_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const GUEST_READY_WAIT: Duration = Duration::from_secs(300);
 const STOP_WAIT: Duration = Duration::from_secs(45);
+/// How long the guest gets to shut down by itself before it is stopped hard.
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(90);
+const SHUTDOWN_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const RECEIPT_LIMIT: usize = 64 * 1024;
 const RECEIPT_PATH: &str = "/Library/Application Support/Silo/NetworkBootstrap/receipt.json";
 const PROBE_URL: &str = "https://example.com/";
@@ -155,8 +158,26 @@ pub(in crate::macos_computers_engine) fn migrate_legacy_guest_bootstrap(
     }
     let generation = engine::start_bootstrap_nat(app, record, layout)?;
     let staged = stage_guest_bootstrap(app, record, layout);
-    let stop = engine::force_stop_generation(app, &record.id, generation);
-    let released = engine::wait_until_released(app, &record.id, generation, STOP_WAIT);
+    // A force stop drops the guest's recent writes: the keychain trust, the launch daemon and
+    // the git configuration the script installs last were lost that way. Ask macOS to shut
+    // down first and force the stop only when it does not.
+    let mut shut_down = false;
+    if staged.is_ok() {
+        let _ = guest_access::run(
+            layout,
+            record,
+            "/usr/bin/sudo -n /sbin/shutdown -h now",
+            None,
+            SHUTDOWN_COMMAND_TIMEOUT,
+        );
+        shut_down = engine::wait_until_released(app, &record.id, generation, SHUTDOWN_WAIT);
+    }
+    let stop = if shut_down {
+        Ok(())
+    } else {
+        engine::force_stop_generation(app, &record.id, generation)
+    };
+    let released = shut_down || engine::wait_until_released(app, &record.id, generation, STOP_WAIT);
     if !released {
         return Err("The NAT bootstrap computer could not be stopped before gateway setup.".into());
     }
@@ -757,6 +778,15 @@ fn install_guest_files(
         SSH_COMMAND_TIMEOUT,
     )?;
     if output.status != 0 {
+        // The script holds only public material, so its output is safe to keep for diagnosis.
+        if let Some(log) = super::super::setup_log::SetupLog::open(app, &record.id) {
+            log.command(
+                "proxy bootstrap install script",
+                output.status,
+                &output.stdout,
+                &output.stderr,
+            );
+        }
         return Err("Could not install the guest network bootstrap and public CA.".into());
     }
     Ok(())

@@ -968,8 +968,10 @@ pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Res
     let boot_started = time::OffsetDateTime::now_utc();
     start_machine(app, record, layout, &Boot::Normal)?;
     let policy = reconcile_start_policy(record)?;
-    super::proxy::sync_guest_placeholders(app, layout, record)?;
+    // The guest reconfigures its network while it boots: connections made before its readiness
+    // receipt are dropped, so the receipt comes first and the placeholders after.
     super::proxy::verify_guest_ready(layout, record, boot_started, true)?;
+    super::proxy::sync_guest_placeholders(app, layout, record)?;
     if policy.pending_secrets.is_empty() {
         crate::secrets::computer_started(&record.name, &policy.revision)?;
     }
@@ -1378,8 +1380,8 @@ pub(super) fn resume_if(
     })?;
     if let Some((record, layout)) = ready {
         let policy = reconcile_start_policy(&record)?;
-        super::proxy::sync_guest_placeholders(app, &layout, &record)?;
         super::proxy::verify_guest_ready(&layout, &record, resumed_at, false)?;
+        super::proxy::sync_guest_placeholders(app, &layout, &record)?;
         if policy.pending_secrets.is_empty() {
             crate::secrets::computer_started(&record.name, &policy.revision)?;
         }

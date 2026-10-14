@@ -308,6 +308,32 @@ enum UpdateOperation<'a> {
     },
 }
 
+/// Sends, and queues, whole Ethernet frames. The macOS default for a datagram socket holds about
+/// one frame, so the engine's frames were dropped while the guest could not read them and
+/// TCP through the gateway crawled (a 100 KB file took 15 s). Apple's guidance for
+/// `VZFileHandleNetworkDeviceAttachment` is a send buffer of at least 1 MiB and a receive
+/// buffer four times that. Sizes the kernel refuses are left as they are.
+const FRAME_SEND_BUFFER: libc::c_int = 1 << 20;
+const FRAME_RECEIVE_BUFFER: libc::c_int = 4 << 20;
+
+fn size_frame_socket(fd: RawFd) {
+    for (option, size) in [
+        (libc::SO_SNDBUF, FRAME_SEND_BUFFER),
+        (libc::SO_RCVBUF, FRAME_RECEIVE_BUFFER),
+    ] {
+        // SAFETY: `fd` is an open socket and `size` outlives the call.
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                option,
+                std::ptr::addr_of!(size).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 /// Start one helper with only its private frame and control descriptor handoff.
 pub(in crate::macos_computers_engine) fn prepare(
     app: &MacosContext,
@@ -323,6 +349,9 @@ pub(in crate::macos_computers_engine) fn prepare(
     let helper_generation = NEXT_HELPER_GENERATION.fetch_add(1, Ordering::SeqCst);
     let (frame_parent, frame_child) = UnixDatagram::pair()
         .map_err(|_| "Silo could not create the computer gateway frame link.".to_owned())?;
+    for socket in [&frame_parent, &frame_child] {
+        size_frame_socket(socket.as_raw_fd());
+    }
     let (mut control_parent, control_child) = UnixStream::pair()
         .map_err(|_| "Silo could not create the computer gateway control link.".to_owned())?;
     let frame_child_fd = duplicate_for_child(frame_child.as_raw_fd())?;
@@ -1047,6 +1076,29 @@ fn invalidate(child: &mut GatewayChild, computer: &str, gateway: &ActiveGateway)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_frame_link_queues_a_burst_of_ethernet_frames() {
+        let (parent, child) = UnixDatagram::pair().unwrap();
+        for socket in [&parent, &child] {
+            size_frame_socket(socket.as_raw_fd());
+        }
+        child.set_nonblocking(true).unwrap();
+        let frame = [0u8; 1514];
+        // The default queue holds about one frame; a guest that is still booting reads none.
+        for sent in 0..64 {
+            child
+                .send(&frame)
+                .unwrap_or_else(|error| panic!("frame {sent} was refused: {error}"));
+        }
+        let mut received = 0;
+        let mut buffer = [0u8; 2048];
+        parent.set_nonblocking(true).unwrap();
+        while parent.recv(&mut buffer).is_ok() {
+            received += 1;
+        }
+        assert_eq!(received, 64);
+    }
 
     fn ca() -> CaMaterial {
         CaMaterial::from_pem(
