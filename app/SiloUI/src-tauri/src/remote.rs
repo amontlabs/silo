@@ -52,6 +52,9 @@ pub(crate) type RuntimePathsResolver =
 struct RemoteRuntime {
     paths: Arc<RuntimePathsResolver>,
     checkpoints: Arc<crate::remote_access::CheckpointHandler>,
+    runtime_host: Arc<dyn crate::runtime::RuntimeHost>,
+    macos: Arc<crate::macos_computers_engine::MacosContext>,
+    local_access: Arc<dyn crate::remote_access::LocalAccess>,
 }
 static REMOTE_RUNTIME: OnceLock<Arc<RemoteRuntime>> = OnceLock::new();
 
@@ -1993,8 +1996,17 @@ fn bind_control_socket(dir: &Path) -> Result<UnixListener, String> {
 pub(crate) fn start(
     paths: Arc<RuntimePathsResolver>,
     checkpoints: Arc<crate::remote_access::CheckpointHandler>,
+    runtime_host: Arc<dyn crate::runtime::RuntimeHost>,
+    macos: Arc<crate::macos_computers_engine::MacosContext>,
+    local_access: Arc<dyn crate::remote_access::LocalAccess>,
 ) {
-    let _ = REMOTE_RUNTIME.set(Arc::new(RemoteRuntime { paths, checkpoints }));
+    let _ = REMOTE_RUNTIME.set(Arc::new(RemoteRuntime {
+        paths,
+        checkpoints,
+        runtime_host,
+        macos,
+        local_access,
+    }));
     let enabled = match read_config() {
         Ok(config) => config.enabled,
         Err(error) => return record_start_error(Some(error)),
@@ -2026,13 +2038,16 @@ fn listen() -> Result<(), String> {
             };
             let paths = remote_runtime.paths.clone();
             let checkpoints = remote_runtime.checkpoints.clone();
+            let runtime_host = remote_runtime.runtime_host.clone();
+            let macos = remote_runtime.macos.clone();
+            let local_access = remote_runtime.local_access.clone();
             thread::spawn(move || {
                 let mut permit = Some(permit);
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
                 let result = read_socket_frame(&mut stream, Duration::from_secs(15))
                     .map_err(BridgeError::from)
                     .and_then(|request| {
-                        if request["method"] == crate::macos_remote::DISPLAY_STREAM {
+                        if request["method"] == crate::macos_remote_engine::DISPLAY_STREAM {
                             authorize(&request)?;
                             serve_display_stream(
                                 &mut stream,
@@ -2040,8 +2055,7 @@ fn listen() -> Result<(), String> {
                                 &STREAMS,
                                 &request["params"],
                                 |params| {
-                                    let paths = paths()?;
-                                    crate::macos_remote::open_display_stream(&paths, params)
+                                    crate::macos_remote_engine::open_display_stream(&macos, params)
                                 },
                                 || {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
@@ -2074,6 +2088,9 @@ fn listen() -> Result<(), String> {
                         dispatch(
                             paths.as_ref(),
                             checkpoints.as_ref(),
+                            runtime_host.as_ref(),
+                            &macos,
+                            local_access.as_ref(),
                             request,
                             Arc::new(move || connection_open(&peer)),
                         )
@@ -2142,6 +2159,9 @@ fn validate_authorization(config: &Config, request: &Value) -> Result<(), Bridge
 fn dispatch(
     paths: &RuntimePathsResolver,
     checkpoints: &crate::remote_access::CheckpointHandler,
+    runtime_host: &dyn crate::runtime::RuntimeHost,
+    macos: &crate::macos_computers_engine::MacosContext,
+    local_access: &dyn crate::remote_access::LocalAccess,
     request: Value,
     connection: operations::Probe,
 ) -> Result<Value, BridgeError> {
@@ -2150,13 +2170,26 @@ fn dispatch(
         &request,
         connection,
         Arc::new(changes_allowed),
-        |method, params| execute(paths, checkpoints, method, params),
+        |method, params| {
+            execute(
+                paths,
+                checkpoints,
+                runtime_host,
+                macos,
+                local_access,
+                method,
+                params,
+            )
+        },
     )
 }
 /// Runs one authorized, classified request against this device.
 fn execute(
     paths: &RuntimePathsResolver,
     checkpoints: &crate::remote_access::CheckpointHandler,
+    runtime_host: &dyn crate::runtime::RuntimeHost,
+    macos: &crate::macos_computers_engine::MacosContext,
+    local_access: &dyn crate::remote_access::LocalAccess,
     method: &str,
     params: &Value,
 ) -> Result<Value, BridgeError> {
@@ -2170,11 +2203,19 @@ fn execute(
     let paths = paths().map_err(BridgeError::from)?;
     match method {
         _ if method.starts_with("runtime.") => {
-            crate::runtime::remote_ops::dispatch(&paths, method, params.clone())
+            crate::runtime::remote_ops::dispatch(runtime_host, method, params.clone())
         }
-        _ if method.starts_with("macos.") => crate::macos_remote::dispatch(&paths, method, params),
-        _ => crate::remote_access::dispatch(&paths, method, params, checkpoints)
-            .map_err(BridgeError::from),
+        _ if method.starts_with("macos.") => {
+            crate::macos_remote_engine::dispatch(macos, method, params)
+        }
+        _ => crate::remote_access::dispatch(
+            &paths,
+            method,
+            params,
+            checkpoints,
+            local_access,
+        )
+        .map_err(BridgeError::from),
     }
 }
 /// The methods this device serves, reported in the handshake.

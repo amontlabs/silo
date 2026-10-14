@@ -309,7 +309,7 @@ fn main() {
                 runtime_migration::install(app.handle())?;
                 computer_use::install(app.handle());
                 pre_upgrade_backup::install();
-                commands::remote::start(app.handle());
+                commands::remote::start(app.handle())?;
                 commands::secrets::install(app.handle())?;
                 commands::github::install(app.handle())?;
                 backup_controller::install(app.handle())?;

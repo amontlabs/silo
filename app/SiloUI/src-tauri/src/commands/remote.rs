@@ -3,13 +3,39 @@ use serde_json::Value;
 use std::sync::Arc;
 use tauri::AppHandle;
 
+struct TauriLocalAccess(AppHandle);
+
+impl remote_access::LocalAccess for TauriLocalAccess {
+    fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String> {
+        crate::desktop_viewer::local_connection(&self.0, computer, Some(computer_id))
+    }
+
+    fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String> {
+        crate::desktop::dispatch(&self.0, method, params)
+    }
+
+    fn chatgpt_status(&self) -> Result<Value, String> {
+        serde_json::to_value(crate::chatgpt_app::local_status(&self.0)?)
+            .map_err(|_| "Could not encode the ChatGPT app status.".to_owned())
+    }
+
+    fn chatgpt_retry(&self) -> Result<Value, String> {
+        serde_json::to_value(crate::chatgpt_app::retry_now(&self.0)?)
+            .map_err(|_| "Could not encode the ChatGPT app status.".to_owned())
+    }
+}
+
 /// Starts the owner-side Connections listener and installs its Tauri boundary adapters.
-pub(crate) fn start(app: &AppHandle) {
+pub(crate) fn start(app: &AppHandle) -> Result<(), String> {
     let resolver_app = app.clone();
     let paths: Arc<remote::RuntimePathsResolver> =
         Arc::new(move || runtime::runtime_paths(&resolver_app));
     let checkpoints = checkpoint_handler(app.clone());
-    remote::start(paths, checkpoints);
+    let runtime_host: Arc<dyn runtime::RuntimeHost> = Arc::new(app.clone());
+    let macos = Arc::new(crate::commands::macos_computers::new_context(app)?);
+    let local_access = Arc::new(TauriLocalAccess(app.clone()));
+    remote::start(paths, checkpoints, runtime_host, macos, local_access);
+    Ok(())
 }
 
 fn checkpoint_handler(app: AppHandle) -> Arc<remote_access::CheckpointHandler> {

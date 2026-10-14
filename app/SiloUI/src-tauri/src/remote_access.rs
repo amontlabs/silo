@@ -28,30 +28,37 @@ fn computer_name(paths: &runtime::RuntimePaths, params: &Value) -> Result<String
 
 pub(crate) type CheckpointHandler = dyn Fn(&str, &Value) -> Result<Value, String> + Send + Sync;
 
+/// Client services used by the local Connections adapter while their domains finish
+/// moving behind engine paths. The bridge passes only plain values through this seam.
+pub(crate) trait LocalAccess: Send + Sync {
+    fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String>;
+    fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String>;
+    fn chatgpt_status(&self) -> Result<Value, String>;
+    fn chatgpt_retry(&self) -> Result<Value, String>;
+}
+
 pub(crate) fn dispatch(
     paths: &runtime::RuntimePaths,
     method: &str,
     params: &Value,
     checkpoints: &CheckpointHandler,
+    local: &dyn LocalAccess,
 ) -> Result<Value, String> {
     match method {
-        "desktop.connect" => crate::desktop_viewer::local_connection(
-            paths,
+        "desktop.connect" => local.desktop_connection(
             &computer_name(paths, params)?,
-            Some(string(params, "computerId")?),
+            string(params, "computerId")?,
         ),
         "desktop.status" => {
-            let mut state = crate::desktop::dispatch(paths, method, params)?;
+            let mut state = local.desktop_dispatch(method, params)?;
             state["name"] = Value::String(computer_name(paths, params)?);
             Ok(state)
         }
         "desktop.action" | "computerUse.approval" => {
-            crate::desktop::dispatch(paths, method, params)
+            local.desktop_dispatch(method, params)
         }
-        "chatgpt.status" => serde_json::to_value(crate::chatgpt_app::local_status()?)
-            .map_err(|_| "Could not encode the ChatGPT app status.".to_owned()),
-        "chatgpt.retry" => serde_json::to_value(crate::chatgpt_app::retry_now()?)
-            .map_err(|_| "Could not encode the ChatGPT app status.".to_owned()),
+        "chatgpt.status" => local.chatgpt_status(),
+        "chatgpt.retry" => local.chatgpt_retry(),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {
             crate::ssh_access::remote_dispatch(paths, method, params)
         }
