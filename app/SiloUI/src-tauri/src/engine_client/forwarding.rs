@@ -7,10 +7,7 @@ use serde_json::{json, Map, Value};
 use super::{EngineClient, EngineError};
 
 pub(crate) fn not_found(message: &str) -> EngineError {
-    EngineError {
-        code: "not_found".to_owned(),
-        message: message.to_owned(),
-    }
+    EngineError::not_found(message)
 }
 
 /// `params` with `deviceId` set when the command addresses a connected device.
