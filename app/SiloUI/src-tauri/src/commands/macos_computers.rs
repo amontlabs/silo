@@ -1,12 +1,10 @@
 //! Tauri commands for macOS computers: each forwards to `silod`, which owns the VMs and
 //! hosts their display windows.
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use crate::{macos_computers_engine as engine, runtime};
-use engine::{MacosContext, MacosHost};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::Arc, time::Instant};
-use tauri::{AppHandle, Window};
+use std::sync::Arc;
+use tauri::Window;
 
 fn require_main(window: &Window) -> Result<(), String> {
     if window.label() == "main" {
@@ -298,133 +296,6 @@ pub(crate) async fn macos_computer_clipboard(
     clipboard(&engine, &id, direction)
         .await
         .map_err(String::from)
-}
-
-// MARK: Left for other callers
-//
-// The VM display window is `silod`'s. What follows is not part of the commands: the
-// Connections owner adapter, startup, updates, secrets and GitHub still reach macOS
-// computers in this process through `MacosContext`. They go with those adapters.
-
-/// A host whose displays belong to `silod`: this process opens none.
-struct EngineHostedDisplays {
-    app: AppHandle,
-}
-
-impl MacosHost for EngineHostedDisplays {
-    fn show_display(&self, _: &MacosContext, _: &str, _: &str, _: bool) -> Result<(), String> {
-        Err("Silo's engine hosts the display window.".to_string())
-    }
-
-    fn close_display(&self, _: &str) {}
-
-    fn linux_computer_names(&self) -> Vec<String> {
-        runtime::computer_names(&crate::commands::runtime::host(&self.app))
-    }
-}
-
-/// Builds the per-operation context used by the macOS computer engine.
-pub(crate) fn new_context(app: &AppHandle) -> Result<MacosContext, String> {
-    let engine = silo_engine::context::current()
-        .ok_or_else(|| "The engine context is not installed.".to_string())?;
-    Ok(MacosContext::new(
-        engine,
-        Arc::new(EngineHostedDisplays { app: app.clone() }),
-    ))
-}
-
-// Compatibility adapters for call sites owned by the runtime, logs, and remote tracks.
-pub(crate) use engine::{close_for_update, reopen_after_update};
-
-pub(crate) fn stop_all(app: &AppHandle, deadline: Option<Instant>) -> Result<(), String> {
-    engine::stop_all(&new_context(app)?, deadline)
-}
-
-pub(crate) fn names(app: &AppHandle) -> Vec<String> {
-    new_context(app).map_or_else(|_| Vec::new(), |context| engine::names(&context))
-}
-
-pub(crate) fn proxy_contains_name(app: &AppHandle, name: &str) -> bool {
-    new_context(app).is_ok_and(|context| engine::proxy_contains_name(&context, name))
-}
-
-pub(crate) fn proxy_validate_computers(
-    app: &AppHandle,
-    computers: &[String],
-) -> Result<(), String> {
-    engine::proxy_validate_computers(&new_context(app)?, computers)
-}
-
-pub(crate) fn proxy_apply_secrets(app: &AppHandle, computer: &str) -> Result<Vec<String>, String> {
-    engine::proxy_apply_secrets(&new_context(app)?, computer)
-}
-
-pub(crate) fn proxy_revoke_secret(
-    app: &AppHandle,
-    computer: &str,
-    name: &str,
-) -> Result<bool, String> {
-    engine::proxy_revoke_secret(&new_context(app)?, computer, name)
-}
-
-pub(crate) fn proxy_scoped_cached_tokens(
-    app: &AppHandle,
-    computer: &str,
-) -> Result<Vec<String>, String> {
-    engine::proxy_scoped_cached_tokens(&new_context(app)?, computer)
-}
-
-pub(crate) fn proxy_github_policy_is_cached(
-    app: &AppHandle,
-    computer: &str,
-    profile: &serde_json::Value,
-) -> Result<bool, String> {
-    engine::proxy_github_policy_is_cached(&new_context(app)?, computer, profile)
-}
-
-pub(crate) fn proxy_apply_github_policy(
-    app: &AppHandle,
-    computer: &str,
-    revision: u64,
-    profile: &serde_json::Value,
-) -> Result<(), String> {
-    engine::proxy_apply_github_policy(&new_context(app)?, computer, revision, profile)
-}
-
-pub(crate) fn proxy_apply_github_identity(
-    app: &AppHandle,
-    computer: &str,
-    identity: &serde_json::Value,
-) -> Result<(), String> {
-    engine::proxy_apply_github_identity(&new_context(app)?, computer, identity)
-}
-
-pub(crate) fn proxy_is_pending_restore(app: &AppHandle, computer: &str) -> bool {
-    new_context(app).is_ok_and(|context| engine::proxy_is_pending_restore(&context, computer))
-}
-
-pub(crate) fn begin_proxy_bootstrap_migration() {
-    engine::begin_proxy_bootstrap_migration();
-}
-
-pub(crate) fn migrate_proxy_bootstraps_at_launch(app: &AppHandle) -> Result<(), String> {
-    engine::migrate_proxy_bootstraps_at_launch(&new_context(app)?)
-}
-
-pub(crate) fn computer_ids(app: &AppHandle) -> Vec<String> {
-    new_context(app).map_or_else(|_| Vec::new(), |context| engine::computer_ids(&context))
-}
-
-pub(crate) fn start_at_launch(
-    app: &AppHandle,
-    id: &str,
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<bool, String> {
-    engine::start_at_launch(&new_context(app)?, id, cancelled)
-}
-
-pub(crate) fn log_target(app: &AppHandle, id: &str) -> Option<(String, PathBuf)> {
-    engine::log_target(&new_context(app).ok()?, id)
 }
 
 #[cfg(test)]

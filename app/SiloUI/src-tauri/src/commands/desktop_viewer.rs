@@ -512,7 +512,7 @@ pub(crate) async fn open_desktop(
                 crate::app_menu::set_viewer_focus(&menu_app, *focused);
             }
             tauri::WindowEvent::DragDrop(drag) => {
-                crate::commands::transfer::native_drop(&shortcut_label, drag);
+                crate::commands::transfer::native_drop(&menu_app, &shortcut_label, drag);
             }
             _ => {}
         });
@@ -677,9 +677,10 @@ fn build_guest(
         )
         .map_err(|_| "Could not create desktop display.".to_owned())?;
     let drag_label = shell_label.to_owned();
+    let drag_app = app.clone();
     view.on_webview_event(move |event| {
         if let tauri::WebviewEvent::DragDrop(drag) = event {
-            crate::commands::transfer::native_drop(&drag_label, drag);
+            crate::commands::transfer::native_drop(&drag_app, &drag_label, drag);
         }
     });
     let cookie = tauri::webview::Cookie::build((target.cookie_name, target.cookie_value))

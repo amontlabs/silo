@@ -20,12 +20,6 @@ pub(crate) async fn retry_preparation(engine: Engine<'_>) -> Result<Value, Engin
     retry(&engine).await
 }
 
-/// Host lifecycle adapter retained for the startup track's existing call site; the
-/// coordinator removes it with `startup.rs`. Preparation itself is the engine's.
-pub(crate) fn start(_app: &tauri::AppHandle, paths: crate::runtime::RuntimePaths) {
-    crate::preparation::start_with_paths(paths);
-}
-
 #[cfg(test)]
 mod forwarding_tests {
     use super::*;

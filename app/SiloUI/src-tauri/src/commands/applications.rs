@@ -5,29 +5,11 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::applications::{self, Application, ApplicationCatalog, ApplicationKind};
 
-/// Compatibility adapters for backend callers in other extraction tracks.
+/// Opens `url` in the browser chosen in the settings (the engine's, read through the client).
 pub(crate) fn open_browser(app: &AppHandle, url: &str) -> Result<(), String> {
     let url = applications::validated_browser_url(url)?;
     let settings = crate::engine_client::of(app).cached_settings();
     applications::open_browser_with_settings(&settings, &url)
-}
-
-pub(crate) fn selected_terminal(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::engine_client::of(app).cached_settings();
-    applications::selected_terminal_from_settings(&settings)
-}
-
-pub(crate) fn open_terminal(
-    _app: &AppHandle,
-    application: &Application,
-    command: &str,
-) -> Result<(), String> {
-    applications::open_terminal_with_application(application, command)
-}
-
-pub(crate) fn selected_editor(app: &AppHandle) -> Result<Application, String> {
-    let settings = crate::engine_client::of(app).cached_settings();
-    applications::selected_editor_from_settings(&settings)
 }
 
 #[tauri::command]

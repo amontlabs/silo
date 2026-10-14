@@ -2,21 +2,12 @@
 //! (`notifications.notice`); this app shows them in the window as toasts and, when the main
 //! window is not focused and the category is enabled, as system notifications.
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::notifications::{self, Notice, PendingDelivery};
 
 pub(crate) fn install(app: &AppHandle) {
     crate::commands::system_integrations::install_notifications(app);
-}
-
-/// A notice with no other UI owner: in-app toast and, when unfocused, a system notification.
-pub(crate) fn notify(app: &AppHandle, notice: Notice) {
-    let _ = app.emit(
-        notifications::NOTICE_EVENT,
-        serde_json::to_value(&notice).unwrap_or(serde_json::Value::Null),
-    );
-    notify_native(app, notice);
 }
 
 /// A system notification only, for notices whose toast another owner already shows.

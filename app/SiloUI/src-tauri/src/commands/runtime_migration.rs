@@ -2,52 +2,7 @@
 //! before it serves; it has no retry or continue method, so those two commands report the
 //! typed unavailable state.
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use crate::runtime_migration::{self as engine, Controller};
 use serde_json::{json, Value};
-use std::sync::Arc;
-use tauri::{AppHandle, Manager};
-
-// The functions up to `read_state` are still called by `startup.rs`, `runtime.rs`,
-// `runtime_checkpoints.rs` and `main.rs` on the in-process controller; they leave with
-// those callers.
-
-fn controller(app: &AppHandle) -> Result<Arc<Controller>, String> {
-    app.try_state::<Arc<Controller>>()
-        .map(|state| state.inner().clone())
-        .ok_or_else(|| "Migration state is unavailable.".into())
-}
-
-pub(crate) fn runtime_storage(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    controller(app)?.runtime_storage()
-}
-
-pub(crate) fn blocks_operations(app: &AppHandle) -> bool {
-    controller(app).map_or(true, |controller| controller.blocks_operations())
-}
-
-pub(crate) fn ensure_ready(app: &AppHandle) -> Result<(), String> {
-    controller(app)?.ensure_ready()
-}
-
-pub(crate) async fn ensure_ready_async(app: &AppHandle) -> Result<(), String> {
-    let controller = controller(app)?;
-    let state = engine::migration_snapshot(controller.clone()).await?;
-    controller.ensure_ready_for(&state)
-}
-
-pub(crate) fn install(app: &AppHandle) -> Result<(), String> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Silo application storage is unavailable.")?;
-    app.manage(Arc::new(Controller::new(app_data)));
-    crate::commands::macos_computers::begin_proxy_bootstrap_migration();
-    Ok(())
-}
-
-pub(crate) fn migrate_macos_proxy_bootstraps(app: &AppHandle) -> Result<(), String> {
-    crate::commands::macos_computers::migrate_proxy_bootstraps_at_launch(app)
-}
 
 // MARK: Operations
 

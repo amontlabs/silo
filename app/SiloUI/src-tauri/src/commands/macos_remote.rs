@@ -4,12 +4,10 @@ use crate::engine_client::{
     forwarding::{not_found, with_device},
     Engine, EngineClient, EngineError,
 };
-use crate::macos_remote_engine as engine;
 use serde_json::{json, Value};
 use tauri::Window;
 
 // Still read by `macos_remote_viewer.rs`, which opens the display stream itself.
-pub(crate) const DISPLAY_STREAM: &str = engine::DISPLAY_STREAM;
 
 fn require_main(window: &Window) -> Result<(), EngineError> {
     if window.label() == "main" {

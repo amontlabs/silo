@@ -123,10 +123,11 @@ pub(crate) async fn upload(
     directory: String,
     selection: &str,
     conflict: ConflictPolicy,
+    viewer_connection: Option<&str>,
 ) -> Result<Value, EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
     let paths = take_selection(selection, owner)?;
-    let params = with_device(
+    let mut params = with_device(
         json!({
             "transferId": transfer_id,
             "computerId": computer_id,
@@ -137,6 +138,11 @@ pub(crate) async fn upload(
         }),
         device_id.as_deref(),
     );
+    // A file dropped on a viewer window goes to that viewer's computer through its connection.
+    if let Some(connection) = viewer_connection {
+        params["origin"] = json!("viewer");
+        params["connectionId"] = json!(connection);
+    }
     let outcome = engine.run_job("files.upload", params).await;
     match &outcome {
         Ok(result) if result.get("status").and_then(Value::as_str) == Some("conflict") => {
@@ -238,6 +244,14 @@ pub(crate) async fn upload_files(
 ) -> Result<Value, EngineError> {
     crate::commands::desktop_viewer::require_computer(&window, &computer)
         .map_err(EngineError::internal)?;
+    let viewer_connection = if crate::commands::desktop_viewer::is_viewer_label(window.label()) {
+        Some(
+            crate::commands::desktop_viewer::connection_of(window.label())
+                .ok_or_else(|| EngineError::internal("The desktop is not connected."))?,
+        )
+    } else {
+        None
+    };
     upload(
         &engine,
         window.label(),
@@ -246,6 +260,7 @@ pub(crate) async fn upload_files(
         directory,
         &selection,
         conflict,
+        viewer_connection.as_deref(),
     )
     .await
 }
@@ -284,20 +299,35 @@ pub(crate) async fn cancel_transfer(
     cancel(&engine, &transfer_id).await
 }
 
-/// Convert a native Tauri drag into an event for the viewer shell it landed on.
-pub(crate) fn native_drop(shell: &str, event: &DragDropEvent) {
-    let event = match event {
-        DragDropEvent::Enter { .. } => crate::transfer::NativeDropEvent::Enter,
-        DragDropEvent::Leave => crate::transfer::NativeDropEvent::Leave,
-        DragDropEvent::Drop { paths, .. } => crate::transfer::NativeDropEvent::Drop(
-            paths
+const DRAG_EVENT: &str = "silo://viewer-drag";
+const DROP_EVENT: &str = "silo://viewer-drop";
+
+/// Turns a native drag onto a viewer window into the events that window's page follows: its
+/// drag state, and a one-time selection of the dropped files that its upload names.
+pub(crate) fn native_drop(app: &AppHandle, shell: &str, event: &DragDropEvent) {
+    use tauri::Emitter;
+    if !crate::commands::desktop_viewer::is_viewer_label(shell) {
+        return;
+    }
+    let emit = |name: &str, payload: Value| {
+        let _ = app.emit_to(shell, name, payload);
+    };
+    match event {
+        DragDropEvent::Enter { .. } => emit(DRAG_EVENT, json!(true)),
+        DragDropEvent::Leave => emit(DRAG_EVENT, json!(false)),
+        DragDropEvent::Drop { paths, .. } => {
+            emit(DRAG_EVENT, json!(false));
+            let paths: Vec<String> = paths
                 .iter()
                 .filter_map(|path| path.to_str().map(str::to_owned))
-                .collect(),
-        ),
-        _ => crate::transfer::NativeDropEvent::Other,
-    };
-    crate::transfer::native_drop(shell, event);
+                .collect();
+            if !paths.is_empty() {
+                let selection = issue_selection(shell, paths);
+                emit(DROP_EVENT, serde_json::to_value(selection).unwrap_or(Value::Null));
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -341,6 +371,7 @@ mod forwarding_tests {
             "/workspace".into(),
             &selection.token,
             ConflictPolicy::KeepBoth,
+            None,
         )
         .await
         .unwrap();
@@ -354,6 +385,31 @@ mod forwarding_tests {
         );
         // The token was consumed, and another window never held it.
         assert!(take_selection(&selection.token, "main").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_file_dropped_on_a_viewer_goes_through_that_viewers_connection() {
+        let fake = FakeEngine::start(|method, params| match method {
+            "operations.job.get" => Ok(finished(json!({"status": "done", "names": ["a.txt"]}))),
+            _ => replies(method, params),
+        });
+        let (engine, _) = connected_client(&fake).await;
+        let selection = issue_selection("desktop-shell-1", vec!["/tmp/a.txt".into()]);
+        upload(
+            &engine,
+            "desktop-shell-1",
+            "t9".into(),
+            "dev",
+            "/home/user/Downloads".into(),
+            &selection.token,
+            ConflictPolicy::KeepBoth,
+            Some("conn-1"),
+        )
+        .await
+        .unwrap();
+        let sent = &fake.calls("files.upload")[0];
+        assert_eq!(sent["origin"], "viewer");
+        assert_eq!(sent["connectionId"], "conn-1");
     }
 
     #[tokio::test]
@@ -378,6 +434,7 @@ mod forwarding_tests {
             "/workspace".into(),
             &selection.token,
             ConflictPolicy::Ask,
+            None,
         )
         .await
         .unwrap();
@@ -390,6 +447,7 @@ mod forwarding_tests {
             "/workspace".into(),
             &selection.token,
             ConflictPolicy::Replace,
+            None,
         )
         .await
         .unwrap();
@@ -403,6 +461,7 @@ mod forwarding_tests {
             "/workspace".into(),
             "nope",
             ConflictPolicy::Ask,
+            None,
         )
         .await
         .unwrap_err();

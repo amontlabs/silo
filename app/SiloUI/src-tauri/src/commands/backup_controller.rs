@@ -1,39 +1,18 @@
 //! Exports and imports, through `exports.*`. The pickers and revealing a file stay on this
 //! device: it picks the paths, the engine reads and writes them.
-use crate::backup_controller as engine_controller;
 use crate::engine_client::{
     forwarding::{not_found, roster},
     Engine, EngineClient, EngineError,
 };
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::Arc};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use std::path::PathBuf;
+use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
 fn require_main(window: &WebviewWindow) -> Result<(), EngineError> {
     (window.label() == "main").then_some(()).ok_or_else(|| {
         EngineError::internal("Only the main Silo window can export or import computers.")
     })
-}
-
-// The three functions below are still called by `updates.rs` and `startup.rs`, which wait on
-// the in-process controller; they leave with those callers.
-
-pub(crate) fn wait_for_recovery(app: &AppHandle) -> Result<(), String> {
-    let controller = app.state::<Arc<engine_controller::Controller>>();
-    engine_controller::wait_for_recovery(&controller, &|| crate::startup::is_cancelled(app))
-}
-
-pub(crate) fn update_ready(app: &AppHandle) -> Result<(), String> {
-    engine_controller::update_ready(&app.state::<Arc<engine_controller::Controller>>())
-}
-
-pub(crate) fn update_guard(app: &AppHandle) -> Result<engine_controller::UpdateGuard, String> {
-    engine_controller::update_guard(
-        app.state::<Arc<engine_controller::Controller>>()
-            .inner()
-            .clone(),
-    )
 }
 
 // MARK: Operations

@@ -1,6 +1,11 @@
 mod app_menu;
 mod commands;
-pub(crate) use silo_engine::*;
+// Stateless host helpers shared with the engine library: application discovery and launch,
+// notification routing, the login item, and the Quit reasons. None starts or owns engine work.
+pub(crate) use silo_client::channel;
+pub(crate) use silo_engine::{
+    applications, notifications, system_integrations, system_shutdown, terminal,
+};
 #[cfg(test)]
 mod command_permissions_tests;
 mod engine_client;
@@ -10,9 +15,6 @@ mod quit;
 mod github_build_tests;
 #[cfg(test)]
 mod github_permissions_tests;
-pub(crate) use commands::macos_computers;
-pub(crate) use commands::macos_remote;
-pub(crate) use commands::macos_remote_viewer;
 mod single_instance;
 mod status_panel;
 #[cfg(target_os = "macos")]
@@ -22,7 +24,7 @@ mod viewer_shortcuts;
 #[cfg(target_os = "macos")]
 mod window_material;
 
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{Manager, WindowEvent};
 
 fn main() {
     // The bundle identifier embedded at build time decides the channel.

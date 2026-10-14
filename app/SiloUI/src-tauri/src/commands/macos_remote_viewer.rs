@@ -107,10 +107,7 @@ fn running_computer_name(state: &Value, computer_id: &str) -> Result<String, Str
 }
 
 fn bad_request(message: impl Into<String>) -> EngineError {
-    EngineError {
-        code: "not_found".to_owned(),
-        message: message.into(),
-    }
+    EngineError::not_found(message)
 }
 
 /// The window's title name: the computer and the device it runs on. The owner confirms the
@@ -271,13 +268,6 @@ pub(crate) async fn macos_display_resize(
         .await
         .map_err(String::from)
 }
-
-/// The screen connections belong to the engine, which ends them with the device or on quit;
-/// nothing is held here to end.
-pub(crate) fn close_all() {}
-
-/// See [`close_all`].
-pub(crate) fn close_device(_device: &str) {}
 
 #[cfg(test)]
 mod tests {

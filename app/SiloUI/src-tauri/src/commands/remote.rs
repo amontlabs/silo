@@ -9,12 +9,27 @@ use crate::engine_client::{
 use serde_json::{json, Map, Value};
 use tauri::AppHandle;
 
-fn approval_from_settings(
-    settings: Result<Map<String, Value>, EngineError>,
-) -> crate::computer_use::Approval {
-    settings
-        .map(|settings| crate::computer_use::initial_approval_from(&settings))
-        .unwrap_or_default()
+/// How a new computer starts: it asks before an agent acts unless the setting says auto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Approval {
+    Ask,
+    Auto,
+}
+
+impl Approval {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+fn approval_from_settings(settings: Result<Map<String, Value>, EngineError>) -> Approval {
+    match settings.ok().and_then(|settings| settings.get("computerUseAutoApproval").cloned()) {
+        Some(Value::Bool(true)) => Approval::Auto,
+        _ => Approval::Ask,
+    }
 }
 
 // MARK: Connections
@@ -572,12 +587,12 @@ mod tests {
     #[test]
     fn a_failed_settings_read_means_ask_for_new_remote_computers() {
         let failure = approval_from_settings(Err(EngineError::internal("settings unavailable")));
-        assert_eq!(failure, crate::computer_use::Approval::Ask);
+        assert_eq!(failure, Approval::Ask);
         let mut settings = Map::new();
         settings.insert("computerUseAutoApproval".into(), Value::Bool(true));
         assert_eq!(
             approval_from_settings(Ok(settings)),
-            crate::computer_use::Approval::Auto
+            Approval::Auto
         );
     }
 
