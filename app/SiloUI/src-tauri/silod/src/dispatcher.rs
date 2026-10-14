@@ -228,6 +228,9 @@ impl MethodRegistry for CoreMethodRegistry {
                         .map_err(DispatchError::internal)?
                         .acknowledge(&params.job_id)
                         .map_err(HandlerContext::map_registry_error)?;
+                    // The outcome is saved and acknowledged: the replay of an exec job is
+                    // no longer needed (and does nothing for any other job).
+                    silo_engine::guest::forget_finished(&params.job_id);
                     context.job_queue_changed();
                     Ok(Value::Null)
                 }

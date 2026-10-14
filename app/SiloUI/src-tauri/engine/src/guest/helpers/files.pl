@@ -9,6 +9,7 @@ use Digest::SHA ();
 use Time::HiRes ();
 use POSIX ();
 use IO::Handle;
+use Cwd ();
 
 binmode(STDIN);
 binmode(STDOUT);
@@ -91,11 +92,11 @@ if ($command eq 'remove') {
 if ($command eq 'write') {
     my ($path, $mode, $parents, $replace, $expected) = @args;
     my $data = do { local $/; my $text = <STDIN>; defined $text ? $text : '' };
-    my ($directory) = $path =~ m{^(.*)/[^/]*\z}s;
-    $directory = '/' if !defined $directory || $directory eq '';
+    my ($requested) = $path =~ m{^(.*)/[^/]*\z}s;
+    $requested = '/' if !defined $requested || $requested eq '';
     if ($parents eq '1') {
         my $built = '';
-        for my $part (grep { length } split m{/}, $directory) {
+        for my $part (grep { length } split m{/}, $requested) {
             $built .= "/$part";
             next if -d $built;
             my $old = umask(0);
@@ -104,7 +105,22 @@ if ($command eq 'write') {
         }
     }
     my $name = ($path =~ m{([^/]*)\z}s)[0];
-    fail(66, "$path: not a file") if $name eq '' || -d $path;
+    fail(66, "$path: not a file") if $name eq '' || $name eq '.' || $name eq '..';
+    # The destination is identified by its resolved parent folder and its name, so every
+    # alias of one file (`/a/./f`, `/a/../a/f`, a symlinked folder) shares one identity.
+    my $directory = Cwd::abs_path($requested);
+    defined $directory or fail_errno($requested);
+    my $folder;
+    open($folder, '<', $directory) or fail_errno($directory);
+    my @pinned = stat($folder);
+    # Writers that use this helper take turns on the folder. The lock is held until exit.
+    flock($folder, LOCK_EX) or fail(69, "$path: could not lock the folder: $!");
+    my $target = ($directory eq '/' ? '' : $directory) . "/$name";
+    fail(66, "$path: not a file") if -d $target;
+    my $same_folder = sub {
+        my @now = stat($directory);
+        return @now && @pinned && $now[0] == $pinned[0] && $now[1] == $pinned[1];
+    };
     my $temporary;
     my $handle;
     for (1 .. 16) {
@@ -129,10 +145,14 @@ if ($command eq 'write') {
     my @stat = Time::HiRes::stat($handle);
     $handle->sync if $handle->can('sync');
     close($handle);
+    if (!$same_folder->()) {
+        $cleanup->();
+        fail(68, "$path: changed");
+    }
     if ($replace eq 'always') {
-        rename($temporary, $path) or do { my $saved = $!; $cleanup->(); $! = $saved; fail_errno($path); };
+        rename($temporary, $target) or do { my $saved = $!; $cleanup->(); $! = $saved; fail_errno($path); };
     } elsif ($replace eq 'never' || ($replace eq 'ifSha256' && $expected eq '')) {
-        if (!link($temporary, $path)) {
+        if (!link($temporary, $target)) {
             my $saved = $!;
             $cleanup->();
             $! = $saved;
@@ -145,7 +165,7 @@ if ($command eq 'write') {
     } elsif ($replace eq 'ifSha256') {
         my $current;
         my @before;
-        if (open(my $existing, '<:raw', $path)) {
+        if (open(my $existing, '<:raw', $target)) {
             @before = Time::HiRes::stat($existing);
             my $digest = Digest::SHA->new(256);
             $digest->addfile($existing);
@@ -156,12 +176,12 @@ if ($command eq 'write') {
             $cleanup->();
             fail(68, "$path: changed");
         }
-        my @after = Time::HiRes::stat($path);
+        my @after = Time::HiRes::stat($target);
         if (!@after || $after[1] != $before[1] || $after[0] != $before[0] || $after[7] != $before[7] || $after[9] != $before[9]) {
             $cleanup->();
             fail(68, "$path: changed");
         }
-        rename($temporary, $path) or do { my $saved = $!; $cleanup->(); $! = $saved; fail_errno($path); };
+        rename($temporary, $target) or do { my $saved = $!; $cleanup->(); $! = $saved; fail_errno($path); };
     } else {
         $cleanup->();
         fail(69, "unknown replace mode");
@@ -171,29 +191,58 @@ if ($command eq 'write') {
 }
 
 if ($command eq 'watch') {
+    # Polls every folder, but at bounded cost: at most MAX_ENTRIES names are read per folder
+    # and each folder is kept as one digest, so memory does not grow with the folder. The
+    # pause between looks grows with the time a look takes. A folder with more entries is
+    # watched by its own metadata alone (additions and removals; not in-place rewrites).
+    # The first record, a lone NUL, says the baseline is recorded and later changes count.
     $| = 1;
+    use constant MAX_ENTRIES => 4096;
     my %last;
-    my $first = 1;
+    my $armed = 0;
     while (1) {
+        my $started = Time::HiRes::time();
         for my $path (@args) {
-            my @entries;
+            my $digest = Digest::SHA->new(1);
             my @own = Time::HiRes::stat($path);
-            push @entries, @own ? "d:$own[1]:$own[9]" : 'missing';
-            if (opendir(my $directory, $path)) {
-                for my $name (sort grep { $_ ne '.' && $_ ne '..' } readdir($directory)) {
-                    my @stat = Time::HiRes::lstat("$path/$name");
-                    push @entries, @stat ? "$name:$stat[1]:$stat[7]:$stat[9]" : "$name:gone";
+            if (!@own) {
+                $digest->add('missing');
+            } else {
+                $digest->add("d:$own[1]:$own[9]");
+                if (opendir(my $directory, $path)) {
+                    my @names;
+                    my $overflow = 0;
+                    while (defined(my $name = readdir($directory))) {
+                        next if $name eq '.' || $name eq '..';
+                        if (@names >= MAX_ENTRIES) { $overflow = 1; last; }
+                        push @names, $name;
+                    }
+                    closedir($directory);
+                    if ($overflow) {
+                        $digest->add('overflow');
+                    } else {
+                        for my $name (sort @names) {
+                            my @stat = Time::HiRes::lstat("$path/$name");
+                            $digest->add(@stat ? "$name:$stat[1]:$stat[7]:$stat[9]\n" : "$name:gone\n");
+                        }
+                    }
                 }
-                closedir($directory);
             }
-            my $signature = join("\n", @entries);
-            if (!$first && (!defined $last{$path} || $last{$path} ne $signature)) {
+            my $signature = $digest->hexdigest;
+            if ($armed && (!defined $last{$path} || $last{$path} ne $signature)) {
                 print STDOUT "$path\0";
             }
             $last{$path} = $signature;
         }
-        $first = 0;
-        Time::HiRes::sleep(0.2);
+        if (!$armed) {
+            $armed = 1;
+            print STDOUT "\0";
+        }
+        my $took = Time::HiRes::time() - $started;
+        my $pause = $took * 5;
+        $pause = 0.2 if $pause < 0.2;
+        $pause = 5 if $pause > 5;
+        Time::HiRes::sleep($pause);
     }
 }
 

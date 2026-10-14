@@ -283,10 +283,12 @@ pub fn install(state: Arc<StartupState>, services: Arc<dyn StartupServices>) {
             "macOS network setup couldn’t finish",
             &message,
         );
+        // Only the computers named in the message wait for the next launch. Lifecycle
+        // recovery, update recovery and automatic starts do not depend on them: a computer
+        // without its network bootstrap refuses Start on its own.
         services.show_integration_error(format!(
-            "{message}\n\nSilo kept the computer data and will retry this migration the next time it starts."
+            "{message}\n\nSilo kept the computer data and will retry this migration the next time it starts. Other computers are not affected."
         ));
-        return;
     }
     let (recovered_stops, failure) = after_lifecycle_recovery(services.recover_lifecycle());
     if let Some(message) = failure {
@@ -368,45 +370,50 @@ mod tests {
     use serde_json::json;
 
     #[derive(Default)]
-    struct StartupOrder(Mutex<Vec<&'static str>>);
+    struct StartupOrder {
+        steps: Mutex<Vec<&'static str>>,
+        migration_error: Option<&'static str>,
+        errors: Mutex<Vec<String>>,
+    }
 
     impl StartupServices for StartupOrder {
         fn blocks_runtime_operations(&self) -> bool {
-            self.0.lock().unwrap().push("runtime-gate");
+            self.steps.lock().unwrap().push("runtime-gate");
             false
         }
 
         fn wait_for_recovery(&self) -> Result<(), String> {
-            self.0.lock().unwrap().push("backup-recovery");
+            self.steps.lock().unwrap().push("backup-recovery");
             Ok(())
         }
 
         fn prepare_runtime(&self) {
-            self.0.lock().unwrap().push("prepare-runtime");
+            self.steps.lock().unwrap().push("prepare-runtime");
         }
 
         fn recover_configuration(&self) -> Result<(), String> {
-            self.0.lock().unwrap().push("configuration-recovery");
+            self.steps.lock().unwrap().push("configuration-recovery");
             Ok(())
         }
 
         fn migrate_macos_proxy_bootstraps(&self) -> Result<(), String> {
-            self.0.lock().unwrap().push("proxy-migration");
-            Ok(())
+            self.steps.lock().unwrap().push("proxy-migration");
+            self.migration_error
+                .map_or(Ok(()), |message| Err(message.to_owned()))
         }
 
         fn recover_lifecycle(&self) -> Result<RecoveredActions, String> {
-            self.0.lock().unwrap().push("lifecycle-recovery");
+            self.steps.lock().unwrap().push("lifecycle-recovery");
             Ok(RecoveredActions::default())
         }
 
         fn recover_update(&self) -> Result<bool, String> {
-            self.0.lock().unwrap().push("update-recovery");
+            self.steps.lock().unwrap().push("update-recovery");
             Ok(false)
         }
 
         fn current_launch_settings(&self) -> Result<(Map<String, Value>, PathBuf), String> {
-            self.0.lock().unwrap().push("launch-settings");
+            self.steps.lock().unwrap().push("launch-settings");
             Ok((Map::new(), PathBuf::new()))
         }
 
@@ -418,7 +425,9 @@ mod tests {
 
         fn notify_failure(&self, _: &str, _: &str, _: &str) {}
 
-        fn show_integration_error(&self, _: String) {}
+        fn show_integration_error(&self, message: String) {
+            self.errors.lock().unwrap().push(message);
+        }
     }
 
     #[test]
@@ -426,7 +435,7 @@ mod tests {
         let services = Arc::new(StartupOrder::default());
         install(Arc::new(StartupState::default()), services.clone());
         assert_eq!(
-            services.0.lock().unwrap().as_slice(),
+            services.steps.lock().unwrap().as_slice(),
             &[
                 "runtime-gate",
                 "backup-recovery",
@@ -438,6 +447,31 @@ mod tests {
                 "launch-settings",
             ]
         );
+    }
+
+    #[test]
+    fn a_failed_proxy_migration_is_reported_without_suppressing_unrelated_recovery() {
+        let services = Arc::new(StartupOrder {
+            migration_error: Some("mac-one: staging failed"),
+            ..StartupOrder::default()
+        });
+        install(Arc::new(StartupState::default()), services.clone());
+        assert_eq!(
+            services.steps.lock().unwrap().as_slice(),
+            &[
+                "runtime-gate",
+                "backup-recovery",
+                "prepare-runtime",
+                "configuration-recovery",
+                "proxy-migration",
+                "lifecycle-recovery",
+                "update-recovery",
+                "launch-settings",
+            ]
+        );
+        let errors = services.errors.lock().unwrap();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("mac-one: staging failed"));
     }
 
     fn computer(id: &str, name: &str) -> Value {
