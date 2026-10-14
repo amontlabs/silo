@@ -115,10 +115,8 @@ fn run_appkit(
     context.install_queue_events();
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
-    let runtime_home = silo_engine::runtime::runtime_home_alias(
-        &paths.engine.home,
-        &storage.join("microsandbox"),
-    );
+    let runtime_home =
+        silo_engine::runtime::runtime_home_alias(&paths.engine.home, &storage.join("microsandbox"));
     silo_engine::host_push_operations::reconcile_jobs_before_serving(
         context.as_ref(),
         &runtime_home,

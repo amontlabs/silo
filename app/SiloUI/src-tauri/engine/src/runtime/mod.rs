@@ -126,12 +126,9 @@ fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
     } else {
         Audience::All
     };
-    if let Err(error) = crate::jobs::publish_source_progress(
-        context.as_ref(),
-        name,
-        &payload,
-        audience.clone(),
-    ) {
+    if let Err(error) =
+        crate::jobs::publish_source_progress(context.as_ref(), name, &payload, audience.clone())
+    {
         eprintln!("silo-engine: could not persist {name} job progress: {error}");
     }
     context.publish(Event::new(name, payload), audience);
@@ -3606,7 +3603,9 @@ pub fn computer_action_with_host(
                     ErrorCode::AlreadyQueued => silo_api::jobs::ErrorCode::AlreadyQueued,
                     ErrorCode::Busy => silo_api::jobs::ErrorCode::Busy,
                     ErrorCode::NotFound => silo_api::jobs::ErrorCode::NotFound,
-                    ErrorCode::IncompatibleVersion => silo_api::jobs::ErrorCode::IncompatibleVersion,
+                    ErrorCode::IncompatibleVersion => {
+                        silo_api::jobs::ErrorCode::IncompatibleVersion
+                    }
                     ErrorCode::Internal => silo_api::jobs::ErrorCode::Internal,
                 };
                 crate::jobs::finish_with_error(

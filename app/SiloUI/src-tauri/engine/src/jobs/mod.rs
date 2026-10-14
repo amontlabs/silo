@@ -423,8 +423,7 @@ mod tests {
                 None => break,
             }
         }
-        let outcome: silo_api::jobs::JobOutcome =
-            serde_json::from_slice(&stored_outcome).unwrap();
+        let outcome: silo_api::jobs::JobOutcome = serde_json::from_slice(&stored_outcome).unwrap();
         assert_eq!(outcome.result, Some(result));
         assert!(outcome.error.is_none());
     }

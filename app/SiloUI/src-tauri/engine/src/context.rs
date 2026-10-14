@@ -28,8 +28,7 @@ pub trait EngineContext: Send + Sync + 'static {
                 .join(self.identity().channel.state_dir_name())
                 .join("engine")
         };
-        crate::jobs::registry_for_engine_data(&engine_data)
-            .map_err(|error| error.to_string())
+        crate::jobs::registry_for_engine_data(&engine_data).map_err(|error| error.to_string())
     }
 
     /// Publishes the current operations queue after any job state transition.

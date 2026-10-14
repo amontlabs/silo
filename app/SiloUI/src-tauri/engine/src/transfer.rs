@@ -1397,13 +1397,9 @@ fn begin_transfer_job(
     let Some(context) = silo_engine::context::current() else {
         return Ok(None);
     };
-    let accepted = silo_engine::jobs::accept_domain_id(
-        context.as_ref(),
-        "transfer",
-        transfer_id,
-        method,
-    )
-    .map_err(|error| error.to_string())?;
+    let accepted =
+        silo_engine::jobs::accept_domain_id(context.as_ref(), "transfer", transfer_id, method)
+            .map_err(|error| error.to_string())?;
     if !accepted.created {
         return Err(if accepted.acknowledged {
             "This transfer ID was already acknowledged. Start a new transfer.".to_owned()
@@ -1444,9 +1440,10 @@ fn clear_transfer_reservation(transfer_id: &str, cancel: &Arc<AtomicBool>) {
     let mut active = ACTIVE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if active.as_ref().is_some_and(|(id, active_cancel)| {
-        id == transfer_id && Arc::ptr_eq(active_cancel, cancel)
-    }) {
+    if active
+        .as_ref()
+        .is_some_and(|(id, active_cancel)| id == transfer_id && Arc::ptr_eq(active_cancel, cancel))
+    {
         *active = None;
     }
 }
@@ -1605,11 +1602,7 @@ pub fn prepare_download(
     let result = prepare_download_inner(paths, transfer_id.clone(), computer, path, cancel);
     if let (Some((context, job_id, cancel)), Err(message)) = (tracked, &result) {
         clear_transfer_reservation(&transfer_id, &cancel);
-        finish_transfer_job::<serde_json::Value>(
-            context.as_ref(),
-            job_id,
-            &Err(message.clone()),
-        )?;
+        finish_transfer_job::<serde_json::Value>(context.as_ref(), job_id, &Err(message.clone()))?;
     }
     result
 }
@@ -2562,12 +2555,9 @@ mod tests {
         }
         cancel_transfer("main", "pending").unwrap();
         assert!(pending_cancel.load(Ordering::Acquire));
-        let adopted = Slot::take_if_accepting_with_cancel(
-            "pending",
-            Some(pending_cancel.clone()),
-            || Ok(()),
-        )
-        .unwrap();
+        let adopted =
+            Slot::take_if_accepting_with_cancel("pending", Some(pending_cancel.clone()), || Ok(()))
+                .unwrap();
         assert!(Arc::ptr_eq(&adopted.cancel, &pending_cancel));
         drop(adopted);
     }
