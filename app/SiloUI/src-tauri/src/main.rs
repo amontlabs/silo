@@ -134,9 +134,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            desktop::read_desktop_state,
-            desktop::desktop_action,
-            desktop::set_computer_use_approval,
+            commands::desktop::read_desktop_state,
+            commands::desktop::desktop_action,
+            commands::desktop::set_computer_use_approval,
             chatgpt_app::chatgpt_app_status,
             chatgpt_app::chatgpt_app_retry,
             commands::preparation::read_preparation_status,

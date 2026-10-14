@@ -3,7 +3,6 @@ use crate::runtime::{self, ComputerConfiguration, RuntimeError, RuntimePaths, Ru
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -358,14 +357,13 @@ pub(crate) fn configure_with(
 }
 
 fn computer_configuration(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: &str,
     expected_id: Option<&str>,
 ) -> Result<(RuntimePaths, ComputerConfiguration), String> {
     runtime::validate_name(computer).map_err(|e| e.to_string())?;
-    let paths = runtime::runtime_paths(app)?;
-    let configuration = computer_at(&runtime::ProcessRunner, &paths, computer, expected_id)?;
-    Ok((paths, configuration))
+    let configuration = computer_at(&runtime::ProcessRunner, paths, computer, expected_id)?;
+    Ok((paths.clone(), configuration))
 }
 
 fn computer_at(
@@ -667,21 +665,25 @@ fn safe_lcu_runtime_version(value: Option<&str>) -> Option<&str> {
     })
 }
 
-pub(crate) fn dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value, String> {
+pub(crate) fn dispatch(
+    paths: &RuntimePaths,
+    method: &str,
+    params: &Value,
+) -> Result<Value, String> {
     let computer_id = params["computerId"]
         .as_str()
         .ok_or("Missing computer identity.")?;
-    let name = runtime::remote_ops::local_computer_name(app, computer_id)?;
+    let name = runtime::remote_ops::local_computer_name_in(paths, computer_id)?;
     if method == "computerUse.approval" {
         return local_approval(
-            app,
+            paths,
             &name,
             params["mode"].as_str().ok_or("Missing approval mode.")?,
             Some(computer_id),
         );
     }
     local(
-        app,
+        paths,
         &name,
         if method == "desktop.status" {
             None
@@ -736,8 +738,17 @@ fn prepare_local<'a>(
     Ok((guard, configuration))
 }
 
-fn local(
-    app: &AppHandle,
+fn publish_application_state_changed() {
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            silo_engine::context::Event::new("silo://application-state-changed", Value::Null),
+            silo_engine::context::Audience::All,
+        );
+    }
+}
+
+pub(crate) fn local(
+    paths: &RuntimePaths,
     computer: &str,
     action: Option<&str>,
     expected_id: Option<&str>,
@@ -745,7 +756,6 @@ fn local(
     // A desktop action changes only this computer's guest (and may start the computer); it
     // waits its turn per computer. Reading desktop status observes only, so it takes
     // no gate and stays available during other operations.
-    let paths = runtime::runtime_paths(app)?;
     let (_guard, configuration) = prepare_local(
         &runtime::OPERATIONS,
         &runtime::ProcessRunner,
@@ -821,15 +831,15 @@ fn local(
             )
             .map_err(|e| e.to_string())?;
         }
-        let _ = app.emit("silo://application-state-changed", ());
+        publish_application_state_changed();
     }
-    status_with(&runtime::ProcessRunner, &paths, &configuration)
+    status_with(&runtime::ProcessRunner, paths, &configuration)
 }
 
 /// Stores a computer's computer-use approval mode and, when it runs, starts applying it in the
 /// background: the answer is the desktop state at once, with the apply `pending`.
-fn local_approval(
-    app: &AppHandle,
+pub(crate) fn local_approval(
+    paths: &RuntimePaths,
     computer: &str,
     mode: &str,
     expected_id: Option<&str>,
@@ -837,7 +847,7 @@ fn local_approval(
     let approval =
         crate::computer_use::Approval::parse(mode).ok_or("Unsupported computer-use approval.")?;
     runtime::shutdown::ensure_accepting_operations()?;
-    let (paths, configuration) = computer_configuration(app, computer, expected_id)?;
+    let (paths, configuration) = computer_configuration(paths, computer, expected_id)?;
     let status = approval_at(
         &runtime::ProcessRunner,
         &paths,
@@ -845,7 +855,7 @@ fn local_approval(
         approval,
         std::sync::Arc::new(runtime::ProcessRunner),
     )?;
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_application_state_changed();
     Ok(status)
 }
 
@@ -877,94 +887,14 @@ fn approval_at(
     status_with(runner, paths, configuration)
 }
 
-/// A computer's approval mode for computer use: "ask" (the harness asks first) or "auto".
-/// Returns the computer's desktop state. Routed to the device that owns the computer.
-#[tauri::command]
-pub async fn set_computer_use_approval(
-    app: AppHandle,
-    window: tauri::Window,
-    computer: String,
-    mode: String,
-) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some((device, computer)) = crate::remote_access::target(&computer)? {
-            crate::chatgpt_app::call_owner(
-                &device,
-                "computerUse.approval",
-                json!({"computerId":computer,"mode":mode}),
-            )
-        } else {
-            local_approval(&app, &computer, &mode, None)
-        }
-    })
-    .await
-    .map_err(|_| "Silo could not change computer use. Retry.".to_string())?
-}
-
-async fn execute(
-    app: AppHandle,
-    computer: String,
-    action: Option<String>,
-) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Some((device, computer)) = crate::remote_access::target(&computer)? {
-            let setup = action.as_deref() == Some("setup-computer-use");
-            crate::remote::call_remote(
-                &device,
-                if action.is_some() {
-                    "desktop.action"
-                } else {
-                    "desktop.status"
-                },
-                json!({"computerId":computer,"action":action}),
-            )
-            // An older Silo there rejects the action it does not know.
-            .map_err(|error| {
-                if setup && error == "Unsupported desktop action." {
-                    "Update Silo on that device to use computer use.".into()
-                } else {
-                    error
-                }
-            })
-        } else {
-            local(&app, &computer, action.as_deref(), None)
-        }
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish the Linux desktop action. Reopen the viewer and retry.".to_string()
-    })?
-}
-#[tauri::command]
-pub async fn read_desktop_state(
-    app: AppHandle,
-    window: tauri::Window,
-    computer: String,
-) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
-    execute(app, computer, None).await
-}
-#[tauri::command]
-pub async fn desktop_action(
-    app: AppHandle,
-    window: tauri::Window,
-    computer: String,
-    action: String,
-) -> Result<Value, String> {
-    crate::desktop_viewer::require_computer(&window, &computer)?;
-    execute(app, computer, Some(action)).await
-}
-
 /// Private backend-only connection material. Never register this as a UI command.
 pub(crate) fn connection_local(
-    app: &AppHandle,
+    paths: &RuntimePaths,
     computer: &str,
     expected_id: Option<&str>,
 ) -> Result<Value, String> {
     runtime::validate_name(computer).map_err(|e| e.to_string())?;
-    let paths = runtime::runtime_paths(app)?;
-    connection_with(&runtime::ProcessRunner, &paths, computer, expected_id)
+    connection_with(&runtime::ProcessRunner, paths, computer, expected_id)
 }
 
 fn connection_with(

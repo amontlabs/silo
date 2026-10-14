@@ -180,7 +180,8 @@ pub(crate) fn local_connection(
     // Reading desktop connection credentials only observes a running computer; it takes
     // no operation gate so viewing stays available during other operations.
     runtime::shutdown::ensure_accepting_operations()?;
-    crate::desktop::connection_local(app, computer, expected_id)
+    let paths = runtime::runtime_paths(app)?;
+    crate::desktop::connection_local(&paths, computer, expected_id)
 }
 
 /// `sun_path` holds 104 bytes on macOS and 108 on Linux, including the NUL.

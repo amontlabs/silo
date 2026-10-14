@@ -11,7 +11,8 @@ impl remote_access::LocalAccess for TauriLocalAccess {
     }
 
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String> {
-        crate::desktop::dispatch(&self.0, method, params)
+        let paths = runtime::runtime_paths(&self.0)?;
+        crate::desktop::dispatch(&paths, method, params)
     }
 
     fn chatgpt_status(&self) -> Result<Value, String> {
