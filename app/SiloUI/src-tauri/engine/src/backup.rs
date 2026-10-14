@@ -1932,7 +1932,7 @@ fn largest_declared_disk(computer_configuration: &Value) -> u64 {
 /// claiming the old version.
 fn bundled_runtime_version() -> &'static str {
     static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-        let inputs: Value = serde_json::from_str(include_str!("../../runtime-inputs.json"))
+        let inputs: Value = serde_json::from_str(include_str!("../../../runtime-inputs.json"))
             .expect("checked-in runtime inputs must be valid");
         inputs["microsandboxVersion"]
             .as_str()
@@ -2491,7 +2491,7 @@ pub(crate) fn default_github_network(network: &Value) -> bool {
 }
 
 fn github_network_defaults() -> Value {
-    serde_json::from_str(include_str!("../guest/github-network-default.json"))
+    serde_json::from_str(include_str!("../../guest/github-network-default.json"))
         .expect("checked-in GitHub network defaults")
 }
 
@@ -4500,7 +4500,7 @@ mod tests {
     fn default_github_network_is_restorable_but_credentials_and_policy_changes_are_not() {
         let mut config = managed_config("dev");
         config["network"] =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         assert!(validate_snapshottable_config("dev", &config).is_ok());
         let original = config.clone();
         config["network"]["secrets"]["secrets"][0]["value"] =
@@ -4519,7 +4519,7 @@ mod tests {
     fn imported_deny_network_is_restorable_but_custom_rules_are_not() {
         let mut config = managed_config("dev");
         config["network"] =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         config["network"]["policy"] = serde_json::json!({
             "default_egress": "deny",
             "default_ingress": "deny",
@@ -4580,7 +4580,7 @@ mod tests {
     fn export_strips_network_policy_and_secret_references() {
         let mut config = managed_config("dev");
         config["network"] =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         let mut assigned = config["network"]["secrets"]["secrets"][0].clone();
         assigned["env_var"] = "OPENAI_API_KEY".into();
         assigned["placeholder"] = "$MSB_OPENAI_API_KEY".into();
@@ -4611,7 +4611,7 @@ mod tests {
     fn export_names_the_setting_it_cannot_carry() {
         let mut config = managed_config("dev");
         config["network"] =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         config["network"]["tls"]["verify_upstream"] = false.into();
         let error = export_with_runtime(config).err().unwrap().to_string();
         assert!(error.contains("custom network tls settings"), "{error}");
@@ -4638,23 +4638,23 @@ mod tests {
     /// that migration runs.
     fn captured_network(origin: &str) -> Value {
         let text = match origin {
-            "created-0.7.6" => include_str!("test_support/msb-inspect/created-0.7.6.json"),
-            "restored-0.7.6" => include_str!("test_support/msb-inspect/restored-0.7.6.json"),
-            "forked-0.7.6" => include_str!("test_support/msb-inspect/forked-0.7.6.json"),
-            "imported-0.7.6" => include_str!("test_support/msb-inspect/imported-0.7.6.json"),
-            "created-0.7.4" => include_str!("test_support/msb-inspect/created-0.7.4.json"),
-            "restored-0.7.4" => include_str!("test_support/msb-inspect/restored-0.7.4.json"),
-            "forked-0.7.4" => include_str!("test_support/msb-inspect/forked-0.7.4.json"),
-            "imported-0.7.4" => include_str!("test_support/msb-inspect/imported-0.7.4.json"),
-            "created-0.7.2" => include_str!("test_support/msb-inspect/created-0.7.2.json"),
+            "created-0.7.6" => include_str!("../../src/test_support/msb-inspect/created-0.7.6.json"),
+            "restored-0.7.6" => include_str!("../../src/test_support/msb-inspect/restored-0.7.6.json"),
+            "forked-0.7.6" => include_str!("../../src/test_support/msb-inspect/forked-0.7.6.json"),
+            "imported-0.7.6" => include_str!("../../src/test_support/msb-inspect/imported-0.7.6.json"),
+            "created-0.7.4" => include_str!("../../src/test_support/msb-inspect/created-0.7.4.json"),
+            "restored-0.7.4" => include_str!("../../src/test_support/msb-inspect/restored-0.7.4.json"),
+            "forked-0.7.4" => include_str!("../../src/test_support/msb-inspect/forked-0.7.4.json"),
+            "imported-0.7.4" => include_str!("../../src/test_support/msb-inspect/imported-0.7.4.json"),
+            "created-0.7.2" => include_str!("../../src/test_support/msb-inspect/created-0.7.2.json"),
             "migrated-from-0.7.2" => {
-                include_str!("test_support/msb-inspect/migrated-from-0.7.2.json")
+                include_str!("../../src/test_support/msb-inspect/migrated-from-0.7.2.json")
             }
             "migrated-from-0.6.17" => {
-                include_str!("test_support/msb-inspect/migrated-from-0.6.17.json")
+                include_str!("../../src/test_support/msb-inspect/migrated-from-0.6.17.json")
             }
             "migrated-from-0.6.17-before-adopt-disk" => {
-                include_str!("test_support/msb-inspect/migrated-from-0.6.17-before-adopt-disk.json")
+                include_str!("../../src/test_support/msb-inspect/migrated-from-0.6.17-before-adopt-disk.json")
             }
             other => panic!("no captured network for {other}"),
         };
@@ -5123,7 +5123,7 @@ mod tests {
     #[test]
     fn exports_record_the_bundled_runtime_and_explain_other_versions() {
         let inputs: Value =
-            serde_json::from_str(include_str!("../../runtime-inputs.json")).unwrap();
+            serde_json::from_str(include_str!("../../../runtime-inputs.json")).unwrap();
         assert_eq!(bundled_runtime_version(), inputs["microsandboxVersion"]);
         assert_eq!(snapshot_format_for("0.7.2"), "msb-snapshot-tar-zstd-v0.7");
         let temp = tempfile::tempdir().unwrap();
@@ -6083,8 +6083,8 @@ mod tests {
     fn descriptor_scope_names_are_the_runtimes_and_the_index_spellings() {
         // Real descriptors written by `msb snapshot create` (see test_support/msb-descriptor).
         for fixture in [
-            include_str!("test_support/msb-descriptor/checkpoint-0.7.4.json"),
-            include_str!("test_support/msb-descriptor/checkpoint-0.7.6.json"),
+            include_str!("../../src/test_support/msb-descriptor/checkpoint-0.7.4.json"),
+            include_str!("../../src/test_support/msb-descriptor/checkpoint-0.7.6.json"),
         ] {
             let descriptor: Value = serde_json::from_str(fixture).unwrap();
             assert!(descriptor_scope_supported(

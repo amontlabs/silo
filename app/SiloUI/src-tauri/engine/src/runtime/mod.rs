@@ -1,4 +1,3 @@
-#[path = "../../../src/runtime/checkpoints.rs"]
 pub mod checkpoints;
 pub mod configuration_recovery;
 #[cfg(test)]
@@ -22,7 +21,7 @@ pub mod update_recovery;
 #[cfg(test)]
 mod engine_contract_tests;
 #[cfg(test)]
-#[path = "../../../src/runtime_github_tests.rs"]
+#[path = "../runtime_github_tests.rs"]
 mod github_integration_tests;
 /// Process-wide ordered admission for work that changes computer runtime state.
 pub static OPERATIONS: operation_gate::OperationGate = operation_gate::OperationGate::new();

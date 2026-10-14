@@ -4,9 +4,7 @@ extern crate self as silo_engine;
 
 #[path = "../../src/applications.rs"]
 pub mod applications;
-#[path = "../../src/backup.rs"]
 pub mod backup;
-#[path = "../../src/backup_controller.rs"]
 pub mod backup_controller;
 #[path = "../../src/bridge_error.rs"]
 pub mod bridge_error;
@@ -71,7 +69,6 @@ pub mod network;
 pub mod notifications;
 #[path = "../../src/owned_tunnel.rs"]
 pub mod owned_tunnel;
-#[path = "../../src/pre_upgrade_backup.rs"]
 pub mod pre_upgrade_backup;
 #[path = "../../src/preparation.rs"]
 pub mod preparation;
@@ -84,7 +81,6 @@ pub mod remote_network;
 #[path = "../../src/remote_ssh_access.rs"]
 pub mod remote_ssh_access;
 pub mod runtime;
-#[path = "../../src/runtime_migration.rs"]
 pub mod runtime_migration;
 #[path = "../../src/secrets.rs"]
 pub mod secrets;

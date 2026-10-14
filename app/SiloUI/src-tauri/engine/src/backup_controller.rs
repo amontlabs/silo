@@ -2499,7 +2499,7 @@ mod tests {
         // 0.7.4 with the argument list of `runtime::create_computer` (smaller disks),
         // including `--net-strict=true`.
         let mut inspected: Value = serde_json::from_str(include_str!(
-            "test_support/msb-inspect/created-by-silo-0.7.4-config.json"
+            "../../src/test_support/msb-inspect/created-by-silo-0.7.4-config.json"
         ))
         .unwrap();
         assert_eq!(inspected["network"]["strict"], true);
@@ -2508,7 +2508,7 @@ mod tests {
         backup::validate_snapshottable_config("e2e-new-silo", &inspected).unwrap();
         // Without any tolerance for `strict`: the computer's network is the profile.
         let profile: Value =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         assert_eq!(inspected["network"], profile);
     }
 
@@ -2518,7 +2518,7 @@ mod tests {
         // `msb inspect` of a forked (full) restore from MicroSandbox 0.7.4: it keeps the
         // interface addresses of the checkpoint, and `strict` is the runtime's default.
         let network: Value =
-            serde_json::from_str(include_str!("test_support/msb-inspect/forked-0.7.4.json"))
+            serde_json::from_str(include_str!("../../src/test_support/msb-inspect/forked-0.7.4.json"))
                 .unwrap();
         assert_eq!(network["strict"], true);
         assert_ne!(network["interface"], serde_json::json!({}));
@@ -2532,7 +2532,7 @@ mod tests {
     fn migrated_native_config_exports_only_the_current_empty_github_policy() {
         let _test_state = crate::test_support::global_state();
         let network: Value =
-            serde_json::from_str(include_str!("../guest/github-network-default.json")).unwrap();
+            serde_json::from_str(include_str!("../../guest/github-network-default.json")).unwrap();
         let mut inspected = inspected_legacy_config(network);
         inspected["network"]["interface"] = serde_json::json!({
             "ipv4_address":"172.16.0.6","ipv6_address":"fd42:6d73:62:1::2",
@@ -3141,7 +3141,7 @@ mod tests {
             result_unseen: false,
         };
         let expected: Value =
-            serde_json::from_str(include_str!("../../src/test/contracts/backup-state.json"))
+            serde_json::from_str(include_str!("../../../src/test/contracts/backup-state.json"))
                 .unwrap();
         assert_eq!(serde_json::to_value(state).unwrap(), expected);
     }
@@ -4438,7 +4438,7 @@ mod tests {
         ]);
         run(&["stop", existing_name]);
         run(&["remove", "--force", "--quiet", existing_name]);
-        let evidence = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/ui-evidence");
+        let evidence = crate::test_support::manifest_root().join("target/ui-evidence");
         fs::create_dir_all(&evidence).unwrap();
         fs::copy(
             &archive,
