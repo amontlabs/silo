@@ -72,6 +72,11 @@ fn updates() -> std::sync::MutexGuard<'static, Option<HashMap<String, Slot>>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Whether an update of computer `id`'s computer use is running or waiting to run.
+pub(super) fn update_running(id: &str) -> bool {
+    updates().as_ref().is_some_and(|map| map.contains_key(id))
+}
+
 /// The right to run the updates of one computer, one at a time. It carries a token, so a
 /// claim that has ended can never remove the place of a newer one.
 struct UpdateClaim {
@@ -505,7 +510,8 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64) {
         return;
     }
     let approval = record
-        .computer_use_approval
+        .computer_use_desired_approval
+        .or(record.computer_use_approval)
         .unwrap_or_else(computer_use::initial_approval);
     let version = templates::computer_use_version_for(approval);
     if access::wait_for_ssh(&layout, &record, UPDATE_SSH_WAIT, &|| !live()).is_err() {
@@ -781,6 +787,7 @@ mod tests {
             developer_tools: true,
             computer_use: true,
             clipboard: true,
+            roots: true,
             needs_personalizing: false,
         };
         // A record from before the fingerprint split is stale.

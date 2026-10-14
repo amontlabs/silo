@@ -27,6 +27,10 @@ impl RuntimeHost for TauriRuntimeHost {
         context::current().expect("the engine context is installed during app setup")
     }
 
+    fn macos_context(&self) -> Option<silo_engine::macos_computers::MacosContext> {
+        crate::commands::macos_computers::new_context(&self.0).ok()
+    }
+
     fn runtime_storage(&self) -> Result<PathBuf, String> {
         crate::commands::runtime_migration::runtime_storage(&self.0)
     }

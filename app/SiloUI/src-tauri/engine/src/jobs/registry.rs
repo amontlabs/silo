@@ -397,7 +397,12 @@ impl JobRegistry {
                 transaction.execute(
                     "UPDATE jobs SET outcome_json = ?2, finished_at_ms = ?3, \
                      recovery_placeholder = ?4 WHERE job_id = ?1",
-                    params![job_id.as_str(), outcome_json, now_ms(), recovery_placeholder],
+                    params![
+                        job_id.as_str(),
+                        outcome_json,
+                        now_ms(),
+                        recovery_placeholder
+                    ],
                 )?;
             }
             Some((state, _, false)) if state == "finished" => {
@@ -409,7 +414,12 @@ impl JobRegistry {
                     "UPDATE jobs SET state = 'finished', outcome_json = ?2, finished_at_ms = ?3, \
                      recovery_placeholder = ?4 \
                      WHERE job_id = ?1",
-                    params![job_id.as_str(), outcome_json, now_ms(), recovery_placeholder],
+                    params![
+                        job_id.as_str(),
+                        outcome_json,
+                        now_ms(),
+                        recovery_placeholder
+                    ],
                 )?;
             }
             None => {
@@ -443,11 +453,7 @@ impl JobRegistry {
             self.admission_suspended.store(false, Ordering::Release);
             return Ok(None);
         };
-        self.persist_finish(
-            &job_id,
-            &pending.finished,
-            pending.recovery_placeholder,
-        )?;
+        self.persist_finish(&job_id, &pending.finished, pending.recovery_placeholder)?;
         self.pending_outcomes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

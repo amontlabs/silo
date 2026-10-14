@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { History, Monitor, Play, Square } from "lucide-react"
+import { Download, History, Monitor, Play, Square } from "lucide-react"
 
 import { ActionsMenu, type MenuAction } from "@/components/actions-menu"
 import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
@@ -52,7 +52,7 @@ function actionVerb(action: MacosComputerAction) {
  * badge and has no clipboard transfer or checkpoints; while the device is offline or updating its
  * state is the last known one and its actions are disabled.
  */
-export function MacosComputerRow({ computer, store, takenNames = [], device }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[]; device?: ComputerDevice }) {
+export function MacosComputerRow({ computer, store, takenNames = [], device, onExport }: { computer: MacosComputer; store: MacosComputersStore; takenNames?: readonly string[]; device?: ComputerDevice; onExport?: (name: string, checkpoint?: { id: string; name: string }) => void | Promise<unknown> }) {
   const [pending, setPending] = useState(false)
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
   const [cpus, setCpus] = useState(String(computer.cpus))
@@ -86,6 +86,13 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
   const settled = computer.state === "stopped" || computer.state === "failed"
   const label = macosStateLabel(computer)
   const items: MenuAction[] = []
+  if (!device && onExport && canCheckpointMacos(computer)) items.push({
+    label: "Export…",
+    accessibleLabel: `Export ${computer.name}`,
+    icon: Download,
+    disabled: pending || operating || unavailable,
+    onSelect: () => { void onExport(computer.name) },
+  })
   if (computer.state === "stopped") items.push({
     label: "Edit CPU & memory",
     accessibleLabel: `Edit CPU and memory for ${computer.name}`,
@@ -195,6 +202,6 @@ export function MacosComputerRow({ computer, store, takenNames = [], device }: {
         }} />}
       </>}
     />
-    {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} onStart={() => void run("start")} /></div>}
+    {checkpointsOpen && checkpointsAvailable && <div className="border-t border-border px-3 py-2.5"><MacosCheckpointPanel computer={computer} store={store} takenNames={takenNames} onStart={() => void run("start")} onExport={onExport} /></div>}
   </ComputerListItem>
 }

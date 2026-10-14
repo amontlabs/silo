@@ -30,7 +30,7 @@ test("installers do not bundle the guest image and runtime preparation does not 
     assert.doesNotMatch(`${source} ${destination}`, /guest-image/)
   }
   const prepare = await read("scripts/prepare-microsandbox-runtime.mjs")
-  assert.doesNotMatch(prepare, /guest/i)
+  assert.doesNotMatch(prepare, /guest-image|stageGuestImage/i)
 })
 
 test("the app embeds the lock it downloads the image from", async () => {

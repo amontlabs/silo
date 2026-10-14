@@ -53,6 +53,27 @@ it("offers checkpoints only on computers that have finished setting up", async (
   }
 })
 
+it("exports a macOS computer and one of its checkpoints from the list", async () => {
+  const user = userEvent.setup()
+  const onExport = vi.fn()
+  const backend = createFixtureMacosComputersBackend(macosComputerFixtures)
+  const store = createMacosComputersStore(backend)
+  const computer = macosComputerFixtures.find(({ name }) => name === "xcode-build")!
+  render(<TooltipProvider><MacosComputerRow computer={computer} store={store} onExport={onExport} /></TooltipProvider>)
+
+  await user.click(await screen.findByRole("button", { name: "More actions for xcode-build" }))
+  await user.click(screen.getByRole("menuitem", { name: "Export xcode-build" }))
+  expect(onExport).toHaveBeenCalledExactlyOnceWith("xcode-build")
+
+  await user.click(screen.getByRole("button", { name: "Checkpoints of xcode-build" }))
+  await user.click(screen.getByRole("button", { name: "Checkpoint actions for Xcode installed" }))
+  await user.click(screen.getByRole("menuitem", { name: "Export Xcode installed" }))
+  expect(onExport).toHaveBeenLastCalledWith("xcode-build", {
+    id: "00000000-0000-4000-8000-000000000002",
+    name: "Xcode installed",
+  })
+})
+
 it("lists the saved checkpoints newest first with what each includes", async () => {
   const user = userEvent.setup()
   renderRows()
