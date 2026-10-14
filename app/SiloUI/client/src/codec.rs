@@ -42,7 +42,10 @@ where
     if payload.is_empty() || payload.len() > MAX_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("frame length {} is outside the allowed range", payload.len()),
+            format!(
+                "frame length {} is outside the allowed range",
+                payload.len()
+            ),
         ));
     }
     let header = u32::try_from(payload.len())

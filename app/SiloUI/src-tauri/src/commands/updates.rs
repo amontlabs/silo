@@ -69,7 +69,9 @@ pub(crate) async fn set_update_automatic_checks(
     engine: Engine<'_>,
     enabled: bool,
 ) -> Result<Value, String> {
-    set_automatic_checks(&engine, enabled).await.map_err(String::from)
+    set_automatic_checks(&engine, enabled)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
@@ -104,7 +106,9 @@ mod tests {
         let fake = FakeEngine::start(|method, params| match method {
             "updates.state" => Ok(snapshot("idle")),
             "updates.check" => Ok(snapshot("available")),
-            "updates.setAutomaticChecks" => Ok(json!({"phase": "idle", "automaticChecks": params["enabled"]})),
+            "updates.setAutomaticChecks" => {
+                Ok(json!({"phase": "idle", "automaticChecks": params["enabled"]}))
+            }
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -112,14 +116,19 @@ mod tests {
         assert_eq!(check(&engine).await.unwrap()["phase"], "available");
         let toggled = set_automatic_checks(&engine, false).await.unwrap();
         assert_eq!(toggled["automaticChecks"], false);
-        assert_eq!(fake.calls("updates.setAutomaticChecks"), vec![json!({"enabled": false})]);
+        assert_eq!(
+            fake.calls("updates.setAutomaticChecks"),
+            vec![json!({"enabled": false})]
+        );
     }
 
     #[tokio::test]
     async fn a_download_waits_for_its_job_then_returns_the_state() {
         let fake = FakeEngine::start(|method, _| match method {
             "updates.download" => Ok(json!({"jobId": "job:5"})),
-            "operations.job.get" => Ok(json!({"jobId": "job:5", "state": "finished", "outcome": {"result": null}})),
+            "operations.job.get" => {
+                Ok(json!({"jobId": "job:5", "state": "finished", "outcome": {"result": null}}))
+            }
             "updates.state" => Ok(snapshot("downloaded")),
             _ => Ok(json!({"subscription": "sub"})),
         });
@@ -131,7 +140,10 @@ mod tests {
     #[tokio::test]
     async fn an_engine_without_updates_reports_a_typed_unavailable_error() {
         let fake = FakeEngine::start(|method, _| match method {
-            "updates.state" => Err(("unsupported_remote_operation", "The engine does not support updates.state.".into())),
+            "updates.state" => Err((
+                "unsupported_remote_operation",
+                "The engine does not support updates.state.".into(),
+            )),
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -141,6 +153,9 @@ mod tests {
 
     #[tokio::test]
     async fn installing_in_process_is_not_offered() {
-        assert!(install_update(true).await.unwrap_err().contains("release page"));
+        assert!(install_update(true)
+            .await
+            .unwrap_err()
+            .contains("release page"));
     }
 }

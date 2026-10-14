@@ -67,7 +67,11 @@ pub(crate) trait QuitHost: Send + Sync + 'static {
 enum Phase {
     Idle,
     Asking(u64),
-    Flushing { generation: u64, acknowledged: bool, stop: bool },
+    Flushing {
+        generation: u64,
+        acknowledged: bool,
+        stop: bool,
+    },
     Exiting,
 }
 
@@ -105,7 +109,9 @@ impl Quit {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The main window can answer the Quit prompt.
@@ -283,7 +289,12 @@ impl Quit {
     fn finish(self: &Arc<Self>, frontend_completed: bool, generation: Option<u64>) {
         let (stop, session_ending) = {
             let mut inner = self.lock();
-            let Phase::Flushing { generation: current, acknowledged, stop } = inner.phase else {
+            let Phase::Flushing {
+                generation: current,
+                acknowledged,
+                stop,
+            } = inner.phase
+            else {
                 return;
             };
             let claimable = frontend_completed
@@ -301,7 +312,9 @@ impl Quit {
                 self.host.explain(format!("Silo could not save its settings.\n\n{error}\n\nResolve the storage issue and choose Quit Silo again."));
                 return;
             }
-            eprintln!("Silo is exiting because the session ended; settings were not saved: {error}");
+            eprintln!(
+                "Silo is exiting because the session ended; settings were not saved: {error}"
+            );
         }
         if stop {
             if let Err(error) = self.host.stop_computers() {
@@ -363,7 +376,11 @@ mod tests {
     impl Script {
         fn new(running: Result<Vec<&str>, &str>) -> Arc<Self> {
             Arc::new(Self {
-                running: Mutex::new(running.map(|names| names.into_iter().map(String::from).collect()).map_err(String::from)),
+                running: Mutex::new(
+                    running
+                        .map(|names| names.into_iter().map(String::from).collect())
+                        .map_err(String::from),
+                ),
                 ask_fails: false,
                 stop_error: Mutex::new(None),
                 flush_error: Mutex::new(None),
@@ -383,7 +400,10 @@ mod tests {
         }
 
         fn ask(&self, request: &QuitRequest) -> bool {
-            self.log.lock().unwrap().push(format!("ask {} {:?}", request.request_id, request.computers));
+            self.log.lock().unwrap().push(format!(
+                "ask {} {:?}",
+                request.request_id, request.computers
+            ));
             !self.ask_fails
         }
 
@@ -392,7 +412,10 @@ mod tests {
         }
 
         fn announce(&self, shutting_down: bool) {
-            self.log.lock().unwrap().push(format!("announce {shutting_down}"));
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("announce {shutting_down}"));
         }
 
         fn stop_computers(&self) -> Result<(), String> {
@@ -415,7 +438,10 @@ mod tests {
         }
 
         fn explain(&self, message: String) {
-            self.log.lock().unwrap().push(format!("explain {}", message.lines().next().unwrap_or_default()));
+            self.log.lock().unwrap().push(format!(
+                "explain {}",
+                message.lines().next().unwrap_or_default()
+            ));
         }
     }
 
@@ -433,7 +459,10 @@ mod tests {
         assert!(quit.active());
         quit.begin_flush().unwrap();
         quit.complete_flush();
-        assert_eq!(script.log(), ["announce true", "flush-request", "settings", "exit"]);
+        assert_eq!(
+            script.log(),
+            ["announce true", "flush-request", "settings", "exit"]
+        );
     }
 
     #[test]
@@ -489,7 +518,9 @@ mod tests {
         quit.begin_flush().unwrap();
         quit.complete_flush();
         let log = script.log();
-        assert!(log.iter().any(|entry| entry.starts_with("explain Silo stayed open")));
+        assert!(log
+            .iter()
+            .any(|entry| entry.starts_with("explain Silo stayed open")));
         assert!(!log.contains(&"exit".to_string()));
         assert!(!quit.active());
         assert!(quit.accepts_terminate_request());
@@ -504,7 +535,9 @@ mod tests {
         quit.answer(1, Choice::StopAndQuit).unwrap();
         quit.complete_flush();
         let log = script.log();
-        assert!(log.iter().any(|entry| entry.starts_with("explain Silo could not save")));
+        assert!(log
+            .iter()
+            .any(|entry| entry.starts_with("explain Silo could not save")));
         assert!(!log.contains(&"stop".to_string()));
         assert_eq!(script.exits.load(Ordering::SeqCst), 0);
     }

@@ -8,13 +8,15 @@ pub(crate) use silo_engine::{
 };
 #[cfg(test)]
 mod command_permissions_tests;
+#[cfg(test)]
+mod engine_boundary_tests;
 mod engine_client;
-mod host_launch;
-mod quit;
 #[cfg(test)]
 mod github_build_tests;
 #[cfg(test)]
 mod github_permissions_tests;
+mod host_launch;
+mod quit;
 mod single_instance;
 mod status_panel;
 #[cfg(target_os = "macos")]

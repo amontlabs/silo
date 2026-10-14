@@ -11,8 +11,8 @@ use std::{
 
 use serde_json::{json, Value};
 use silo_api::transport::{
-    ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult, ProtocolRange,
-    RequestEnvelope, ResponseEnvelope,
+    ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult, ProtocolRange, RequestEnvelope,
+    ResponseEnvelope,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
@@ -71,7 +71,9 @@ impl fmt::Display for ClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(message) => write!(formatter, "The engine connection failed: {message}"),
-            Self::Protocol(message) => write!(formatter, "The engine broke the protocol: {message}"),
+            Self::Protocol(message) => {
+                write!(formatter, "The engine broke the protocol: {message}")
+            }
             Self::Remote(error) => formatter.write_str(&error.message),
             Self::Disconnected => formatter.write_str("The engine connection ended."),
             Self::TimedOut => formatter.write_str("The engine did not answer in time."),
@@ -190,7 +192,11 @@ where
             frame["startWithinMs"] = json!(start_within_ms);
         }
         let (sender, receiver) = oneshot::channel();
-        self.inner.pending.lock().unwrap().insert(id.clone(), sender);
+        self.inner
+            .pending
+            .lock()
+            .unwrap()
+            .insert(id.clone(), sender);
         let written = {
             let mut writer = self.inner.writer.lock().await;
             write_frame(&mut *writer, &frame).await
@@ -259,12 +265,13 @@ where
     Ok((Client { inner }, EventFeed { receiver }))
 }
 
-
 fn parse_handshake(frame: Value, offered: ProtocolRange) -> Result<Handshake, ClientError> {
     let response: ResponseEnvelope<Value> = serde_json::from_value(frame)
         .map_err(|error| ClientError::Protocol(format!("malformed handshake reply: {error}")))?;
     match response {
-        ResponseEnvelope::Error { id, error } if id == HANDSHAKE_ID => Err(ClientError::Remote(error)),
+        ResponseEnvelope::Error { id, error } if id == HANDSHAKE_ID => {
+            Err(ClientError::Remote(error))
+        }
         ResponseEnvelope::Success { id, result } if id == HANDSHAKE_ID => {
             let handshake: Handshake = serde_json::from_value(result).map_err(|error| {
                 ClientError::Protocol(format!("malformed handshake result: {error}"))

@@ -7,4 +7,6 @@ mod codec;
 mod session;
 
 pub use codec::{read_frame, write_frame, MAX_FRAME_BYTES};
-pub use session::{establish, Client, ClientError, ConnectOptions, EventFeed, Handshake, RequestOptions};
+pub use session::{
+    establish, Client, ClientError, ConnectOptions, EventFeed, Handshake, RequestOptions,
+};

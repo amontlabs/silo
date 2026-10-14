@@ -61,7 +61,10 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
         "editor.includeNotice.changed" => vec![("silo://editor-include-changed", Value::Null)],
         "engine.shutdown.changed" => vec![(
             "silo://shutdown-state-changed",
-            payload.get("shuttingDown").cloned().unwrap_or(Value::Bool(false)),
+            payload
+                .get("shuttingDown")
+                .cloned()
+                .unwrap_or(Value::Bool(false)),
         )],
         "settings.changed" => {
             let mut snapshot = payload;
@@ -107,21 +110,36 @@ mod tests {
     #[test]
     fn catalogue_events_map_to_the_established_listeners() {
         let names = |events: Vec<(&str, Value)>| -> Vec<String> {
-            events.into_iter().map(|(name, _)| name.to_owned()).collect()
+            events
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect()
         };
         assert_eq!(
-            names(legacy_events(&frame("computers.changed", json!({"linux": {}})))),
+            names(legacy_events(&frame(
+                "computers.changed",
+                json!({"linux": {}})
+            ))),
             vec!["silo://application-state-changed"]
         );
-        let with_macos = legacy_events(&frame("computers.changed", json!({"macos": {"computers": []}})));
+        let with_macos = legacy_events(&frame(
+            "computers.changed",
+            json!({"macos": {"computers": []}}),
+        ));
         assert_eq!(with_macos[1].0, "silo://macos-computers-changed");
         assert_eq!(with_macos[1].1, json!({"computers": []}));
         assert_eq!(
-            names(legacy_events(&frame("operations.queue.changed", Value::Null))),
+            names(legacy_events(&frame(
+                "operations.queue.changed",
+                Value::Null
+            ))),
             vec!["silo://operation-queue-changed"]
         );
         assert_eq!(
-            legacy_events(&frame("engine.shutdown.changed", json!({"shuttingDown": true}))),
+            legacy_events(&frame(
+                "engine.shutdown.changed",
+                json!({"shuttingDown": true})
+            )),
             vec![("silo://shutdown-state-changed", json!(true))]
         );
         assert_eq!(
@@ -129,7 +147,10 @@ mod tests {
             vec![("silo://update-state", json!({"state": "idle"}))]
         );
         assert_eq!(
-            names(legacy_events(&frame("notifications.notice", json!({"key": "k"})))),
+            names(legacy_events(&frame(
+                "notifications.notice",
+                json!({"key": "k"})
+            ))),
             vec!["silo://notice"]
         );
     }
@@ -144,7 +165,10 @@ mod tests {
         };
         assert_eq!(
             progress("setup"),
-            vec![("silo://computer-configuration-progress", json!({"step": "x"}))]
+            vec![(
+                "silo://computer-configuration-progress",
+                json!({"step": "x"})
+            )]
         );
         assert_eq!(progress("lifecycle")[0].0, "silo://lifecycle-progress");
         assert_eq!(progress("transfer")[0].0, "silo://transfer-progress");
@@ -154,7 +178,10 @@ mod tests {
 
     #[test]
     fn settings_events_carry_the_snapshot_shape_the_store_parses() {
-        let events = legacy_events(&frame("settings.changed", json!({"revision": 3, "settings": {}})));
+        let events = legacy_events(&frame(
+            "settings.changed",
+            json!({"revision": 3, "settings": {}}),
+        ));
         assert_eq!(events[0].0, "settings:changed");
         assert_eq!(events[0].1["onboardingDraft"], Value::Null);
         assert_eq!(events[0].1["revision"], 3);

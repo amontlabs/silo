@@ -115,14 +115,20 @@ async fn serve(stream: tokio::net::UnixStream, shared: Arc<Shared>) {
     let reply = json!({"id": first["id"], "result": {
         "deviceId": "fake-device", "name": "Fake Mac", "protocol": silo_api::transport::PROTOCOL_VERSION,
         "capabilities": [], "clientId": "fake-client"}});
-    if write_frame(&mut *writer.lock().await, &reply).await.is_err() {
+    if write_frame(&mut *writer.lock().await, &reply)
+        .await
+        .is_err()
+    {
         return;
     }
     let mut events = shared.events.subscribe();
     let pusher = writer.clone();
     let push = tokio::spawn(async move {
         while let Ok(frame) = events.recv().await {
-            if write_frame(&mut *pusher.lock().await, &frame).await.is_err() {
+            if write_frame(&mut *pusher.lock().await, &frame)
+                .await
+                .is_err()
+            {
                 return;
             }
         }
@@ -192,9 +198,7 @@ pub(crate) fn metadata() -> ClientMetadata {
 }
 
 /// A client wired to `fake`, connected and subscribed.
-pub(crate) async fn connected_client(
-    fake: &FakeEngine,
-) -> (Arc<EngineClient>, Arc<RecordingSink>) {
+pub(crate) async fn connected_client(fake: &FakeEngine) -> (Arc<EngineClient>, Arc<RecordingSink>) {
     let sink = Arc::new(RecordingSink::default());
     let client = EngineClient::new(
         fake.socket.clone(),

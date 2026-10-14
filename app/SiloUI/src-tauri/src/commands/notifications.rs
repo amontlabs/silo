@@ -60,7 +60,10 @@ pub(crate) fn engine_notice(app: &AppHandle, payload: &serde_json::Value) {
 
 /// `notifications.cleared`: the computer's notices are gone.
 pub(crate) fn engine_cleared(app: &AppHandle, payload: &serde_json::Value) {
-    if let Some(computer_id) = payload.get("computerId").and_then(serde_json::Value::as_str) {
+    if let Some(computer_id) = payload
+        .get("computerId")
+        .and_then(serde_json::Value::as_str)
+    {
         clear_computer(app, computer_id);
     }
 }

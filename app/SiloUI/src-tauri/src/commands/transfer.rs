@@ -323,7 +323,10 @@ pub(crate) fn native_drop(app: &AppHandle, shell: &str, event: &DragDropEvent) {
                 .collect();
             if !paths.is_empty() {
                 let selection = issue_selection(shell, paths);
-                emit(DROP_EVENT, serde_json::to_value(selection).unwrap_or(Value::Null));
+                emit(
+                    DROP_EVENT,
+                    serde_json::to_value(selection).unwrap_or(Value::Null),
+                );
             }
         }
         _ => {}

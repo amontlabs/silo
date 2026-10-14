@@ -26,7 +26,10 @@ impl Approval {
 }
 
 fn approval_from_settings(settings: Result<Map<String, Value>, EngineError>) -> Approval {
-    match settings.ok().and_then(|settings| settings.get("computerUseAutoApproval").cloned()) {
+    match settings
+        .ok()
+        .and_then(|settings| settings.get("computerUseAutoApproval").cloned())
+    {
         Some(Value::Bool(true)) => Approval::Auto,
         _ => Approval::Ask,
     }
@@ -590,10 +593,7 @@ mod tests {
         assert_eq!(failure, Approval::Ask);
         let mut settings = Map::new();
         settings.insert("computerUseAutoApproval".into(), Value::Bool(true));
-        assert_eq!(
-            approval_from_settings(Ok(settings)),
-            Approval::Auto
-        );
+        assert_eq!(approval_from_settings(Ok(settings)), Approval::Auto);
     }
 
     #[test]

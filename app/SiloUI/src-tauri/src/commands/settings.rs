@@ -78,7 +78,9 @@ pub(crate) async fn update_snapshot(
     drafts: &DraftStore,
     patch: Map<String, Value>,
 ) -> Result<Value, EngineError> {
-    let snapshot = engine.call("settings.update", json!({"patch": patch})).await?;
+    let snapshot = engine
+        .call("settings.update", json!({"patch": patch}))
+        .await?;
     engine.remember_settings(&snapshot);
     Ok(with_draft(snapshot, Some(drafts.read())))
 }
@@ -105,7 +107,9 @@ pub(crate) async fn initialize_settings(
     window: WebviewWindow,
 ) -> Result<Value, String> {
     require_main(window.label())?;
-    let snapshot = read_snapshot(&engine, &drafts, true).await.map_err(String::from)?;
+    let snapshot = read_snapshot(&engine, &drafts, true)
+        .await
+        .map_err(String::from)?;
     apply_theme(&app, &snapshot);
     Ok(snapshot)
 }
@@ -130,7 +134,9 @@ pub(crate) async fn update_settings(
     patch: Map<String, Value>,
 ) -> Result<Value, String> {
     require_main(window.label())?;
-    let snapshot = update_snapshot(&engine, &drafts, patch).await.map_err(String::from)?;
+    let snapshot = update_snapshot(&engine, &drafts, patch)
+        .await
+        .map_err(String::from)?;
     apply_theme(&app, &snapshot);
     Ok(snapshot)
 }
@@ -144,11 +150,16 @@ pub(crate) async fn update_onboarding_draft(
 ) -> Result<Value, String> {
     require_main(window.label())?;
     drafts.write(&draft)?;
-    read_snapshot(&engine, &drafts, true).await.map_err(String::from)
+    read_snapshot(&engine, &drafts, true)
+        .await
+        .map_err(String::from)
 }
 
 #[tauri::command]
-pub(crate) async fn flush_settings(engine: Engine<'_>, window: WebviewWindow) -> Result<(), String> {
+pub(crate) async fn flush_settings(
+    engine: Engine<'_>,
+    window: WebviewWindow,
+) -> Result<(), String> {
     require_main(window.label())?;
     engine
         .call("settings.flush", json!({}))
@@ -184,7 +195,12 @@ pub(crate) fn running_names(listed: &Value) -> Vec<String> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .map(|computer| (computer.get("configuration").unwrap_or(&Value::Null), computer));
+        .map(|computer| {
+            (
+                computer.get("configuration").unwrap_or(&Value::Null),
+                computer,
+            )
+        });
     let macos = listed
         .pointer("/macos/computers")
         .and_then(Value::as_array)
@@ -221,7 +237,9 @@ impl QuitHost for TauriQuitHost {
             return false;
         }
         self.show_main();
-        self.app.emit_to("main", "silo://quit-requested", request).is_ok()
+        self.app
+            .emit_to("main", "silo://quit-requested", request)
+            .is_ok()
     }
 
     fn request_flush(&self) {
@@ -231,7 +249,9 @@ impl QuitHost for TauriQuitHost {
     }
 
     fn announce(&self, shutting_down: bool) {
-        let _ = self.app.emit("silo://shutdown-state-changed", shutting_down);
+        let _ = self
+            .app
+            .emit("silo://shutdown-state-changed", shutting_down);
     }
 
     fn stop_computers(&self) -> Result<(), String> {
@@ -333,11 +353,15 @@ pub(crate) fn prevent_exit_until_saved(
 
 #[tauri::command]
 pub(crate) fn read_shutdown_state(app: AppHandle) -> bool {
-    app.try_state::<Arc<Quit>>().is_some_and(|quit| quit.active())
+    app.try_state::<Arc<Quit>>()
+        .is_some_and(|quit| quit.active())
 }
 
 #[tauri::command]
-pub(crate) fn enable_quit_confirmation(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+pub(crate) fn enable_quit_confirmation(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<(), String> {
     require_main(window.label())?;
     quit_of(&app).enable_confirmation();
     Ok(())
@@ -436,7 +460,10 @@ mod tests {
         patch.insert("reduceMotion".into(), json!(true));
         let snapshot = update_snapshot(&engine, &store, patch).await.unwrap();
         assert_eq!(snapshot["revision"], 5);
-        assert_eq!(fake.calls("settings.update"), vec![json!({"patch": {"reduceMotion": true}})]);
+        assert_eq!(
+            fake.calls("settings.update"),
+            vec![json!({"patch": {"reduceMotion": true}})]
+        );
     }
 
     #[tokio::test]
@@ -447,8 +474,13 @@ mod tests {
         });
         let (engine, _) = connected_client(&fake).await;
         let (_directory, store) = temporary();
-        let error = update_snapshot(&engine, &store, Map::new()).await.unwrap_err();
-        assert_eq!((error.code.as_str(), error.message.as_str()), ("busy", "The settings file is locked."));
+        let error = update_snapshot(&engine, &store, Map::new())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.message.as_str()),
+            ("busy", "The settings file is locked.")
+        );
     }
 
     #[test]

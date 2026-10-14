@@ -196,9 +196,7 @@ pub(crate) struct SmAppService {
 
 #[cfg(target_os = "macos")]
 impl SmAppService {
-    fn service(
-        &self,
-    ) -> objc2::rc::Retained<objc2_service_management::SMAppService> {
+    fn service(&self) -> objc2::rc::Retained<objc2_service_management::SMAppService> {
         let name = objc2_foundation::NSString::from_str(&self.plist_name);
         // SAFETY: Service Management resolves the plist from this app bundle's
         // Contents/Library/LaunchAgents directory.
@@ -343,7 +341,11 @@ mod tests {
             br#"{"engineVersion":"0.0.9","engineBuild":"x","pid":1}"#,
         )
         .unwrap();
-        let launcher = launcher(directory.path(), service.clone(), Some(record("0.1.0", "b")));
+        let launcher = launcher(
+            directory.path(),
+            service.clone(),
+            Some(record("0.1.0", "b")),
+        );
         launcher.ensure_running().unwrap();
         assert_eq!(*service.registered.lock().unwrap(), 0);
     }
@@ -414,7 +416,10 @@ mod tests {
         assert_eq!(compare(&record("0.3.0", "z"), &bundled), Comparison::Newer);
         assert_eq!(compare(&record("0.1.9", "z"), &bundled), Comparison::Older);
         assert_eq!(compare(&record("0.2.0", "a"), &bundled), Comparison::Same);
-        assert_eq!(compare(&record("0.2.0", "b"), &bundled), Comparison::Unknown);
+        assert_eq!(
+            compare(&record("0.2.0", "b"), &bundled),
+            Comparison::Unknown
+        );
         assert_eq!(compare(&record("nope", "a"), &bundled), Comparison::Unknown);
     }
 }

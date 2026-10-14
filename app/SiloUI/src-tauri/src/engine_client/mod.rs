@@ -145,9 +145,10 @@ impl EventSink for TauriSink {
             Some("notifications.cleared") => {
                 crate::commands::notifications::engine_cleared(&self.0, &payload)
             }
-            Some("settings.changed") => {
-                crate::commands::settings::apply_theme(&self.0, &json!({"settings": payload.get("settings")}))
-            }
+            Some("settings.changed") => crate::commands::settings::apply_theme(
+                &self.0,
+                &json!({"settings": payload.get("settings")}),
+            ),
             _ => {}
         }
         for (name, payload) in relay::legacy_events(frame) {
@@ -156,9 +157,10 @@ impl EventSink for TauriSink {
     }
 
     fn connection(&self, connected: bool, message: Option<&str>) {
-        let _ = self
-            .0
-            .emit(relay::ENGINE_CONNECTION, relay::connection_payload(connected, message));
+        let _ = self.0.emit(
+            relay::ENGINE_CONNECTION,
+            relay::connection_payload(connected, message),
+        );
         // A fresh connection means state may have changed while it was down.
         if connected {
             let _ = self.0.emit(relay::APPLICATION_STATE, Value::Null);
@@ -251,7 +253,8 @@ impl EngineClient {
                     self.current.send_replace(Some(connected.clone()));
                     self.sink.connection(true, None);
                     // The first read warms the settings cache before anything asks for it.
-                    if let Ok(snapshot) = connected.client.request("settings.read", json!({})).await {
+                    if let Ok(snapshot) = connected.client.request("settings.read", json!({})).await
+                    {
                         self.remember_settings(&snapshot);
                     }
                     while let Some(frame) = feed.next().await {
@@ -289,15 +292,13 @@ impl EngineClient {
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| error.message)?;
-        let (client, feed) = Client::connect(
-            &self.socket,
-            ConnectOptions::new(self.metadata.clone()),
-        )
-        .await
-        .map_err(|error| match error {
-            ClientError::Remote(remote) => remote.message,
-            other => other.to_string(),
-        })?;
+        let (client, feed) =
+            Client::connect(&self.socket, ConnectOptions::new(self.metadata.clone()))
+                .await
+                .map_err(|error| match error {
+                    ClientError::Remote(remote) => remote.message,
+                    other => other.to_string(),
+                })?;
         client
             .request("events.subscribe", json!({"events": relay::SUBSCRIBED}))
             .await
@@ -333,7 +334,8 @@ impl EngineClient {
     }
 
     pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, EngineError> {
-        self.call_with(method, params, RequestOptions::default()).await
+        self.call_with(method, params, RequestOptions::default())
+            .await
     }
 
     pub(crate) async fn call_with(
@@ -342,7 +344,8 @@ impl EngineClient {
         params: Value,
         options: RequestOptions,
     ) -> Result<Value, EngineError> {
-        self.call_patiently(method, params, options, CONNECT_PATIENCE).await
+        self.call_patiently(method, params, options, CONNECT_PATIENCE)
+            .await
     }
 
     async fn call_patiently(
@@ -356,9 +359,14 @@ impl EngineClient {
         if connected.client.requests_sent() >= REQUEST_ID_BUDGET {
             // Start a new session before the engine refuses more ids on this one.
             connected.client.close().await;
-            return Err(EngineError::internal("Silo is renewing its engine connection; retry."));
+            return Err(EngineError::internal(
+                "Silo is renewing its engine connection; retry.",
+            ));
         }
-        Ok(connected.client.request_with(method, params, options).await?)
+        Ok(connected
+            .client
+            .request_with(method, params, options)
+            .await?)
     }
 
     /// The stable id of the computer called `name` (or already named by id), local to this
@@ -441,7 +449,11 @@ impl EngineClient {
             let wake = self.finished.notified();
             tokio::pin!(wake);
             wake.as_mut().enable();
-            let patience = if exit_is_done { EXIT_GRACE } else { CONNECT_PATIENCE };
+            let patience = if exit_is_done {
+                EXIT_GRACE
+            } else {
+                CONNECT_PATIENCE
+            };
             match self.job_outcome(job_id, patience).await {
                 Ok(Some(outcome)) => {
                     // The outcome is presented to the caller; the engine may now drop it.
@@ -479,13 +491,23 @@ impl EngineClient {
                 params["offsetBytes"] = json!(offset);
             }
             let reply = self
-                .call_patiently("operations.job.get", params, RequestOptions::default(), patience)
+                .call_patiently(
+                    "operations.job.get",
+                    params,
+                    RequestOptions::default(),
+                    patience,
+                )
                 .await?;
             if reply.get("state").and_then(Value::as_str) != Some("finished") {
                 return Ok(None);
             }
             if let Some(chunk) = reply.get("outcomeChunk") {
-                text.push_str(chunk.get("data").and_then(Value::as_str).unwrap_or_default());
+                text.push_str(
+                    chunk
+                        .get("data")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                );
                 match chunk.get("nextOffsetBytes").and_then(Value::as_u64) {
                     Some(next) => {
                         offset = Some(next);
@@ -493,7 +515,9 @@ impl EngineClient {
                     }
                     None => {
                         let outcome: Value = serde_json::from_str(&text).map_err(|error| {
-                            EngineError::internal(format!("The job outcome was unreadable: {error}"))
+                            EngineError::internal(format!(
+                                "The job outcome was unreadable: {error}"
+                            ))
                         })?;
                         return Ok(Some(outcome_result(&outcome)));
                     }
@@ -535,7 +559,8 @@ pub(crate) fn of(app: &AppHandle) -> Arc<EngineClient> {
 
 /// The shared client when setup has already installed it (window events can come first).
 pub(crate) fn try_of(app: &AppHandle) -> Option<Arc<EngineClient>> {
-    app.try_state::<Arc<EngineClient>>().map(|state| state.inner().clone())
+    app.try_state::<Arc<EngineClient>>()
+        .map(|state| state.inner().clone())
 }
 
 /// Builds the client for this app, registers it as managed state and starts keeping the

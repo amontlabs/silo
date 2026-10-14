@@ -4809,27 +4809,14 @@ dependencies = [
 name = "silo-ui"
 version = "0.11.1"
 dependencies = [
- "arboard",
- "base64 0.22.1",
  "block2",
- "flate2",
- "gio",
  "gtk",
- "hmac",
- "image",
- "keyring",
  "ksni",
- "libc",
- "microsandbox-image",
- "microsandbox-utils",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-service-management",
  "objc2-user-notifications",
- "objc2-virtualization",
- "plist",
- "reqwest 0.12.28",
  "semver",
  "serde",
  "serde_json",
@@ -4837,7 +4824,6 @@ dependencies = [
  "silo-api",
  "silo-client",
  "silo-engine",
- "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4845,12 +4831,9 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tempfile",
- "time",
  "tokio",
- "tungstenite",
  "uuid",
  "zbus 5.19.0",
- "zstd",
 ]
 
 [[package]]
