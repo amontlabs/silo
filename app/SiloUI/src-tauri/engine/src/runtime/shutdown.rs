@@ -98,9 +98,10 @@ pub fn stop_local_computers(
     host: &dyn RuntimeHost,
     deadline: Option<Instant>,
 ) -> Result<(), String> {
-    let result = drain_then(
-        || drain_transfers(deadline),
+    let result = prepare_before_quit(
+        crate::macos_computers::prepare_stop_all,
         || {
+            drain_transfers(deadline);
             while_quitting(&OPERATIONS, |guard| {
                 // Quit has stopped admission and holds the operation gate: the SSH monitor
                 // cannot restore listeners while local computer shutdown is in progress.
@@ -132,6 +133,11 @@ pub fn stop_local_computers(
         Audience::All,
     );
     result
+}
+
+fn prepare_before_quit<T>(prepare: impl FnOnce(), quit: impl FnOnce() -> T) -> T {
+    prepare();
+    quit()
 }
 
 /// Run Quit's shutdown `work` holding the device-wide gate.
@@ -539,6 +545,31 @@ mod tests {
             Err(operation_gate::GateError::Cancelled)
         );
         assert!(gate.is_idle());
+    }
+
+    #[test]
+    fn quit_aborts_a_blocked_workflow_before_waiting_for_the_shutdown_gate() {
+        let _test_state = crate::test_support::global_state();
+        let gate: &'static operation_gate::OperationGate =
+            Box::leak(Box::new(operation_gate::OperationGate::new()));
+        let blocker = gate.device("Active provisioning").unwrap();
+        let cancelled = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let worker_cancelled = cancelled.clone();
+        let worker = thread::spawn(move || {
+            prepare_before_quit(
+                || crate::macos_computers::abort_for_quit(true, false, &worker_cancelled),
+                || gate.device("Stopping local computers").map(drop),
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while gate.snapshot().waiting.is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!gate.snapshot().waiting.is_empty(), "Quit did not queue");
+        let cancelled_before_release = cancelled.load(Ordering::SeqCst) != 0;
+        drop(blocker);
+        worker.join().unwrap().unwrap();
+        assert!(cancelled_before_release, "Quit waited before aborting provisioning");
     }
 
     #[test]

@@ -2755,6 +2755,25 @@ pub fn stop_all(app: &MacosContext, deadline: Option<Instant>) -> Result<(), Str
     stopped.and(detached)
 }
 
+/// Refuses new macOS work and asks provisioning and checkpoint operations already in flight to
+/// release their ownership before Quit waits for the device-wide operation guard.
+pub(crate) fn prepare_stop_all() {
+    closed().quit = true;
+    for entry in &registry().entries {
+        abort_workflow_for_quit(entry.state, entry.operation.is_some(), &entry.cancel);
+    }
+}
+
+fn abort_workflow_for_quit(state: State, has_operation: bool, cancel: &AtomicU8) {
+    abort_for_quit(is_creating(state), has_operation, cancel);
+}
+
+pub(crate) fn abort_for_quit(is_workflow: bool, has_operation: bool, cancel: &AtomicU8) {
+    if is_workflow || has_operation {
+        request_abort(cancel);
+    }
+}
+
 /// Detaches the disk image of every macOS computer on disk from this Mac, except
 /// those a creation or setup still owns: their worker detaches its own image, and a
 /// forced detach under it would corrupt the patch. Those report through `stop_busy`.
@@ -2785,8 +2804,8 @@ fn disks_to_release(ids: Vec<String>, owned: &[String]) -> Vec<String> {
 }
 
 fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String> {
-    // From here on nothing new is admitted; anything admitted before is in the snapshot.
-    closed().quit = true;
+    // Also makes the admission close visible when Quit acquired the global guard first.
+    prepare_stop_all();
     let busy: Vec<(String, State, Arc<AtomicU8>, bool)> = registry()
         .entries
         .iter()
@@ -2810,11 +2829,6 @@ fn stop_busy(app: &MacosContext, deadline: Option<Instant>) -> Result<(), String
         })
         .map(|(id, _, _, _)| id)
         .collect();
-    for (_, state, cancel, operating) in &busy {
-        if is_creating(*state) || *operating {
-            request_abort(cancel);
-        }
-    }
     // A start in flight cannot be asked to stop, and a checkpoint operation ends at its next
     // step (a paused machine can't answer a shutdown); let both settle first.
     let settle = Instant::now() + Duration::from_secs(30);
