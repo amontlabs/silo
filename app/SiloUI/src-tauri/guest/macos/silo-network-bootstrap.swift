@@ -266,6 +266,7 @@ private struct SiloNetworkBootstrap {
             var active = false
             for _ in 0..<30 {
                 activeChecks = activeNetworkChecks(config, service: service)
+                activeChecks["ipv6DisabledInPreferences"] = service.ipv6Disabled
                 activeChecks["proxyCATrusted"] = proxyCATrusted(
                     expectedFingerprint: config.caFingerprint,
                     leafPath: proxyCAProbePath,
@@ -349,6 +350,12 @@ private struct SiloNetworkBootstrap {
                 failure: failure.code
             )
             try? writeReceipt(receipt)
+            if case .interfaceNotFound = failure { releaseStaleService(config) }
+            // The receipt can be lost with a guest that is stopped hard; the log keeps the check
+            // names and results (no values) for diagnosis.
+            let summary = receipt.checks.sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+            fputs("Silo network bootstrap checks: \(summary)\n", stderr)
             throw failure
         } catch {
             let failed = Receipt(
@@ -467,6 +474,37 @@ private struct SiloNetworkBootstrap {
         )
     }
 
+    /// A computer restored from an archive, or copied from one, keeps the static address this
+    /// helper gave its source's network card. The card here has another address, the service is
+    /// bound to the card's device name, and the computer would stay unreachable on the network it
+    /// really has (Apple's NAT during personalization). Hand that service back to DHCP.
+    private static func releaseStaleService(_ config: BootstrapConfig) {
+        guard let preferences = SCPreferencesCreate(nil, "Silo Network Bootstrap" as CFString, nil),
+              SCPreferencesLock(preferences, true) else { return }
+        defer { SCPreferencesUnlock(preferences) }
+        guard let set = SCNetworkSetCopyCurrent(preferences),
+              let services = SCNetworkSetCopyServices(set) as? [SCNetworkService] else { return }
+        var changed = false
+        for service in services {
+            guard let ipv4 = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeIPv4),
+                  let current = SCNetworkProtocolGetConfiguration(ipv4) as? [String: Any],
+                  let addresses = current[kSCPropNetIPv4Addresses as String] as? [String],
+                  addresses.contains(config.address) else { continue }
+            let dhcp: [String: Any] = [kSCPropNetIPv4ConfigMethod as String: kSCValNetIPv4ConfigMethodDHCP as String]
+            guard SCNetworkProtocolSetConfiguration(ipv4, dhcp as CFDictionary) else { continue }
+            if let dns = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeDNS) {
+                _ = SCNetworkProtocolSetConfiguration(dns, [:] as CFDictionary)
+            }
+            if let ipv6 = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeIPv6) {
+                let automatic: [String: Any] = [kSCPropNetIPv6ConfigMethod as String: kSCValNetIPv6ConfigMethodAutomatic as String]
+                _ = SCNetworkProtocolSetConfiguration(ipv6, automatic as CFDictionary)
+                _ = SCNetworkProtocolSetEnabled(ipv6, true)
+            }
+            changed = true
+        }
+        if changed, SCPreferencesCommitChanges(preferences) { _ = SCPreferencesApplyChanges(preferences) }
+    }
+
     private static func protocolFor(_ service: SCNetworkService, type: CFString) throws -> SCNetworkProtocol {
         if let existing = SCNetworkServiceCopyProtocol(service, type) { return existing }
         _ = SCNetworkServiceAddProtocolType(service, type)
@@ -495,7 +533,10 @@ private struct SiloNetworkBootstrap {
         let activeAddresses = interfaceIPv4?[kSCPropNetIPv4Addresses as String] as? [String] ?? []
         let activeIPv4 = activeAddresses.contains(config.address)
 
+        // A manual service has its DNS in the setup configuration; the state key exists only for
+        // services that learn their DNS (DHCP, PPP).
         let serviceDNS = dynamicDictionary(store, key: "State:/Network/Service/\(service.serviceId)/DNS")
+            ?? dynamicDictionary(store, key: "Setup:/Network/Service/\(service.serviceId)/DNS")
         let serviceServers = serviceDNS?[kSCPropNetDNSServerAddresses as String] as? [String] ?? []
         let activeServiceDNS = serviceServers.contains(config.dnsServer)
 
@@ -549,7 +590,11 @@ private struct SiloNetworkBootstrap {
     }
 
     private static func hasIPv6DefaultRoute() -> Bool {
-        runCommand("/sbin/route", ["-n", "get", "-inet6", "default"], timeout: 4).exitCode == 0
+        // `route get` exits 0 even when the route is not in the table ("not in table" goes to
+        // its output), so the exit status says nothing. A route has an interface.
+        let result = runCommand("/sbin/route", ["-n", "get", "-inet6", "default"], timeout: 4)
+        guard result.exitCode == 0 else { return false }
+        return valueForRouteKey("interface", in: result.output) != nil
     }
 
     private static func valueForRouteKey(_ key: String, in output: String) -> String? {

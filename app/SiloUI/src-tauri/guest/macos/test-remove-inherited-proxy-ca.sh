@@ -23,8 +23,15 @@ case "$operation" in
 		cat "$TEST_STATE"
 		;;
 	delete-certificate)
-		[ "$#" -eq 4 ] && [ "$1" = -t ] && [ "$2" = -Z ]
-		[ "$3" = "$TEST_FINGERPRINT" ] && [ "$4" = "$TEST_KEYCHAIN" ]
+		if [ "$1" = -t ]; then
+			# Trust settings cannot be removed without a user session.
+			[ -z "${TEST_NO_TRUST_REMOVAL:-}" ] || exit 153
+			shift
+			printf 'with-trust ' >>"$TEST_LOG"
+		fi
+		[ "$#" -eq 3 ] && [ "$1" = -Z ]
+		[ "$2" = "$TEST_FINGERPRINT" ] && [ "$3" = "$TEST_KEYCHAIN" ]
+		set -- "$@"
 		printf 'delete %s\n' "$*" >>"$TEST_LOG"
 		: >"$TEST_STATE"
 		;;
@@ -45,7 +52,22 @@ if grep -Fqi "$fingerprint" "$state"; then
 	printf '%s\n' 'the inherited CA fingerprint remains after cleanup' >&2
 	exit 1
 fi
-grep -Fqx "delete -t -Z $fingerprint $keychain" "$log"
+grep -Fqx "with-trust delete -Z $fingerprint $keychain" "$log"
+
+# Without a user session the trust settings stay, and the certificate still goes.
+printf 'SHA-256 hash: 0x%s\n' "$fingerprint" >"$state"
+: >"$log"
+TEST_NO_TRUST_REMOVAL=1 TEST_KEYCHAIN=$keychain TEST_STATE=$state TEST_LOG=$log TEST_FINGERPRINT=$fingerprint \
+	sh "$tmp_dir/remove-inherited-proxy-ca.sh" "$fingerprint" "$keychain"
+if grep -Fqi "$fingerprint" "$state"; then
+	printf '%s\n' 'the inherited CA remains when trust settings cannot be removed' >&2
+	exit 1
+fi
+grep -Fqx "delete -Z $fingerprint $keychain" "$log"
+printf 'SHA-256 hash: 0x%s\n' "$fingerprint" >"$state"
+: >"$log"
+TEST_KEYCHAIN=$keychain TEST_STATE=$state TEST_LOG=$log TEST_FINGERPRINT=$fingerprint \
+	sh "$tmp_dir/remove-inherited-proxy-ca.sh" "$fingerprint" "$keychain"
 
 # A retry after successful deletion is idempotent and does not delete another cert.
 TEST_KEYCHAIN=$keychain TEST_STATE=$state TEST_LOG=$log TEST_FINGERPRINT=$fingerprint \

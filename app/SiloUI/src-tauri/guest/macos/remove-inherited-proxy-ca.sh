@@ -10,7 +10,11 @@ esac
 
 certificates=$(/usr/bin/security find-certificate -a -Z "$keychain")
 if printf '%s\n' "$certificates" | /usr/bin/grep -Fqi "$fingerprint"; then
-	/usr/bin/security delete-certificate -t -Z "$fingerprint" "$keychain"
+	# Removing the trust settings needs an authorization that an SSH session cannot give
+	# ("no user interaction was possible"). The certificate itself can still go; a trust
+	# setting left for a certificate that is no longer in the keychain trusts nothing.
+	/usr/bin/security delete-certificate -t -Z "$fingerprint" "$keychain" ||
+		/usr/bin/security delete-certificate -Z "$fingerprint" "$keychain"
 fi
 
 remaining=$(/usr/bin/security find-certificate -a -Z "$keychain")
