@@ -25,6 +25,7 @@ pub struct SilodContext {
     local_device: LocalDeviceIdentity,
     events: EventSubscriptions,
     wire_events: EventBus,
+    relays: Arc<crate::relay::Relays>,
     main_thread: Arc<dyn MainThread>,
     process: Arc<dyn ProcessControl>,
     migration: Arc<silo_engine::runtime_migration::Controller>,
@@ -43,6 +44,11 @@ impl SilodContext {
         process: Arc<dyn ProcessControl>,
     ) -> Self {
         let wire_events = EventBus::with_device_id(local_device.device_id.clone());
+        let relays = crate::relay::Relays::new(
+            wire_events.clone(),
+            Arc::new(crate::relay::SshLink),
+            crate::relay::RelayTiming::ENGINE,
+        );
         let migration = Arc::new(silo_engine::runtime_migration::Controller::new(
             paths.app_data.clone(),
         ));
@@ -53,6 +59,7 @@ impl SilodContext {
             local_device,
             events: EventSubscriptions::default(),
             wire_events,
+            relays,
             main_thread,
             process,
             migration,
@@ -149,9 +156,35 @@ impl SilodContext {
         client_id: &ClientId,
         selectors: Vec<String>,
     ) -> Result<String, String> {
+        self.subscribe_events_from(client_id, selectors, None)
+    }
+
+    /// Subscribes to the events of `devices` (this engine alone when `None`). Other engines'
+    /// events arrive through [`Self::relays`].
+    pub fn subscribe_events_from(
+        &self,
+        client_id: &ClientId,
+        selectors: Vec<String>,
+        devices: Option<Vec<String>>,
+    ) -> Result<String, String> {
         self.wire_events
-            .subscribe(client_id, selectors)
+            .subscribe_devices(client_id, selectors, devices)
             .map_err(|error| error.to_string())
+    }
+
+    /// The relays that carry other engines' events to this engine's subscribers.
+    pub fn relays(&self) -> &Arc<crate::relay::Relays> {
+        &self.relays
+    }
+
+    /// Replaces how owners are reached (tests).
+    pub fn with_relay_link(
+        mut self,
+        link: Arc<dyn crate::relay::OwnerLink>,
+        timing: crate::relay::RelayTiming,
+    ) -> Self {
+        self.relays = crate::relay::Relays::new(self.wire_events.clone(), link, timing);
+        self
     }
 
     pub fn activate_events(&self, client_id: &ClientId, subscription: &str) -> Result<(), String> {
@@ -207,6 +240,16 @@ impl SilodContext {
             queue,
             event_barrier,
         })
+    }
+
+    /// The operations queue as this engine's own clients see it, for an owner answering a
+    /// controller's `operations.list`.
+    pub fn operation_queue(&self) -> Result<silo_api::methods::operations::OperationQueue, String> {
+        let _projection = self
+            .queue_projection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.operation_queue_unlocked()
     }
 
     pub fn notifications_snapshot(
@@ -286,7 +329,10 @@ impl SilodContext {
 
     fn publish_unlocked(&self, event: Event, audience: Audience) {
         self.wire_events.publish(event.clone(), audience.clone());
-        self.events.publish(event, audience);
+        // In-process listeners hear this engine's own events only.
+        if event.device_id.is_none() {
+            self.events.publish(event, audience);
+        }
     }
 
     fn retain_notice_with_hook(

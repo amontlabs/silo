@@ -43,6 +43,14 @@ pub trait LocalAccess: Send + Sync {
         Err(BridgeError::unsupported())
     }
 
+    /// Subscribes to this engine's own events for a controller's `events.subscribe` stream.
+    fn open_event_stream(
+        &self,
+        _selectors: Vec<String>,
+    ) -> Result<Box<dyn crate::remote_events::EventSource>, String> {
+        Err("This Silo version does not support that remote operation.".into())
+    }
+
     /// Opens the TCP connection a `github.connect.callback` stream carries: the active
     /// connect job's loopback callback listener, and nothing else.
     fn github_callback_stream(&self, _params: &Value) -> Result<std::net::TcpStream, String> {
@@ -54,9 +62,15 @@ pub trait LocalAccess: Send + Sync {
 /// before request dispatch, like the other stream methods.
 pub(crate) const GITHUB_CALLBACK_STREAM: &str = "github.connect.callback";
 
+/// The stream that carries an owner's events to a controller (`remote_events`).
+pub const EVENTS_STREAM: &str = "events.subscribe";
+
 /// The methods the access domain serves on the owner. Their errors keep their canonical
 /// codes all the way to the controller; everything else reports plain messages.
 const ACCESS_METHODS: &[&str] = &[
+    "desktop.job",
+    "guest.exec.start",
+    "guest.exec.get",
     "github.state",
     "github.connect",
     "github.connect.reopen",
@@ -72,6 +86,7 @@ const ACCESS_METHODS: &[&str] = &[
     "secrets.save",
     "secrets.remove",
     "secrets.retry",
+    "operations.list",
     "operations.job.get",
     "operations.cancel",
     "operations.job.acknowledge",

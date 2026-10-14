@@ -1010,10 +1010,12 @@ fn event_precedes_barrier(event: &OutboundEvent, barrier: Option<&HashMap<String
 }
 
 fn event_frame(event: SequencedEvent, device_id: &str) -> Result<Value, String> {
+    // An event relayed from another engine carries that engine's device id.
+    let origin = event.event.device_id.as_deref().unwrap_or(device_id);
     let candidate = silo_engine::events::wire_event_envelope(
         &event.event,
         &event.subscription,
-        device_id,
+        origin,
         event.seq,
     );
     let typed = serde_json::from_value::<EventEnvelope>(candidate)
@@ -2078,5 +2080,42 @@ mod tests {
             Arc::new(Main),
             Arc::new(Process),
         ))
+    }
+
+    #[tokio::test]
+    async fn a_relayed_event_is_framed_with_the_owners_device_id() {
+        use silo_engine::{
+            context::{Audience, ClientId, Event},
+            events::EventBus,
+        };
+        let bus = EventBus::with_device_id("local-device");
+        let client = ClientId::new("framing");
+        let mut stream = bus.connect(client.clone());
+        let subscription = bus
+            .subscribe_devices(
+                &client,
+                vec!["notifications.cleared".to_owned()],
+                Some(vec!["local-device".to_owned(), "owner-device".to_owned()]),
+            )
+            .unwrap();
+        bus.activate(&client, &subscription).unwrap();
+        let payload = serde_json::json!({"computerId": "c1"});
+        bus.publish(
+            Event::new("notifications.cleared", payload.clone()),
+            Audience::All,
+        );
+        bus.publish(
+            Event::from_device("owner-device", "notifications.cleared", payload),
+            Audience::All,
+        );
+        let mut origins = Vec::new();
+        for _ in 0..2 {
+            let EventDelivery::Event(event) = stream.recv().await.unwrap() else {
+                panic!("expected an event");
+            };
+            let frame = event_frame(event, "local-device").unwrap();
+            origins.push(frame["deviceId"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(origins, ["local-device", "owner-device"]);
     }
 }

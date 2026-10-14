@@ -54,6 +54,7 @@ pub mod pre_upgrade_backup;
 pub mod preparation;
 pub mod remote;
 pub mod remote_access;
+pub mod remote_events;
 pub mod remote_network;
 pub mod remote_ssh_access;
 pub mod runtime;

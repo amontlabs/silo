@@ -300,11 +300,13 @@ const METHODS: &[(&str, Access)] = &[
     ("desktop.connect", Access::Read),
     ("desktop.status", Access::Read),
     ("desktop.action", Access::Change),
+    ("desktop.job", Access::Change),
     ("chatgpt.status", Access::Read),
     ("chatgpt.retry", Access::Change),
     ("github.state", Access::Read),
     ("github.connect", Access::Change),
     ("github.connect.callback", Access::Stream),
+    ("events.subscribe", Access::Stream),
     ("github.connect.reopen", Access::Read),
     ("github.repositories.manage", Access::Read),
     ("github.repositories.refresh", Access::Change),
@@ -324,11 +326,14 @@ const METHODS: &[(&str, Access)] = &[
     ("ssh.access.save", Access::Change),
     ("files.list", Access::Read),
     ("guest.prepare", Access::Change),
+    ("guest.exec.start", Access::Change),
+    ("guest.exec.get", Access::Read),
     ("guest.ssh", Access::Stream),
     ("network.state", Access::Read),
     ("network.publish", Access::Change),
     ("network.unpublish", Access::Change),
     ("connections.keys.revoke", Access::Change),
+    ("operations.list", Access::Read),
     ("operations.job.get", Access::Read),
     ("operations.cancel", Access::Change),
     ("operations.job.acknowledge", Access::Change),
@@ -960,6 +965,15 @@ fn read_socket_frame(socket: &mut UnixStream, timeout: Duration) -> Result<Value
     })
 }
 
+/// Reads one frame of a stream method after its reply (the relayed event stream).
+pub(crate) fn read_stream_frame(reader: impl Read) -> Result<Value, String> {
+    read_frame(reader)
+}
+/// Writes one frame of a stream method after its reply, flushed at once.
+pub(crate) fn write_stream_frame(mut writer: impl Write, value: &Value) -> Result<(), String> {
+    write_frame(&mut writer, value)?;
+    writer.flush().map_err(|error| error.to_string())
+}
 fn read_frame(mut reader: impl Read) -> Result<Value, String> {
     let mut len = [0; 4];
     reader.read_exact(&mut len).map_err(|_|"The remote Silo connection ended. Check that Silo is running and Connections are turned on.".to_string())?;
@@ -1911,6 +1925,7 @@ pub(crate) fn poll_failed(device: &str, error: &BridgeError) -> PollFailure {
         busy: false,
         last_success_at: None,
     });
+    let changed = entry.connected || entry.busy || entry.last_error != error.message;
     entry.failures += 1;
     entry.last_error = error.message.clone();
     entry.at = Instant::now();
@@ -1924,8 +1939,122 @@ pub(crate) fn poll_failed(device: &str, error: &BridgeError) -> PollFailure {
         PollFailure::Transient
     };
     drop(health);
-    publish_device_health_changed();
+    if changed {
+        publish_device_health_changed();
+    }
     failure
+}
+
+/// How long one probe of a device may take, ssh included.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+/// A pass starts no new probe after this long, whatever is still due.
+const PROBE_PASS_BUDGET: Duration = Duration::from_secs(90);
+/// The longest wait between probes of a device that keeps failing.
+const PROBE_BACKOFF_MAX: Duration = Duration::from_secs(300);
+
+/// What one pass of the device health timer may do (05 §6 maintenance, 60 `connections`).
+#[derive(Clone, Copy, Debug)]
+pub struct ProbeSchedule {
+    /// How long a device that answers is left alone. A failing device waits twice as long
+    /// after each failure, up to five minutes.
+    pub interval: Duration,
+    /// Devices probed in one pass at most, the longest-unobserved first.
+    pub max_devices: usize,
+}
+
+/// Whether a probe of `device` is due at `now`. Every reply and every failure counts as an
+/// observation, so a device in active use is not probed on top.
+fn probe_due(device: &str, now: Instant, interval: Duration) -> Option<Instant> {
+    let health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+    let Some(entry) = health.get(device) else {
+        return Some(now.checked_sub(Duration::from_secs(86_400)).unwrap_or(now));
+    };
+    let wait = interval
+        .saturating_mul(1u32 << entry.failures.min(4))
+        .min(PROBE_BACKOFF_MAX.max(interval));
+    (now.saturating_duration_since(entry.at) >= wait).then_some(entry.at)
+}
+
+/// One timer pass: asks each saved device that is due whether it still answers, one at a
+/// time and each within [`PROBE_TIMEOUT`]. The results update the recorded health and publish
+/// `connections.devices.changed` when something visible changed. Returns how many devices
+/// were probed. Devices being removed are left alone.
+pub fn probe_devices(schedule: ProbeSchedule) -> usize {
+    if crate::runtime::shutdown::ensure_accepting_operations().is_err() {
+        return 0;
+    }
+    // Reads only: a pass never creates Connections settings.
+    let (devices, removing) = {
+        let _guard = config_lock();
+        match existing_directory().and_then(|dir| read_stored_config_in(&dir)) {
+            Ok(Some(config)) => (
+                config.devices,
+                config
+                    .removals
+                    .into_iter()
+                    .map(|removal| removal.device_id)
+                    .collect::<Vec<_>>(),
+            ),
+            _ => return 0,
+        }
+    };
+    let ids = devices
+        .into_iter()
+        .map(|device| device.id)
+        .filter(|id| !removing.contains(id))
+        .collect();
+    probe_devices_with(ids, schedule, Instant::now(), &mut |device| {
+        probe_device(device)
+    })
+}
+
+fn probe_device(device_id: &str) -> Result<(), BridgeError> {
+    let device = {
+        let _guard = config_lock();
+        read_config()?
+            .devices
+            .into_iter()
+            .find(|saved| saved.id == device_id)
+            .ok_or("This device is no longer connected.")?
+    };
+    let request = json!({"version":VERSION,"deviceId":device.id,"method":"handshake","params":{}});
+    exchange(&device.address, &request, Instant::now() + PROBE_TIMEOUT)
+        .map(|_| ())
+        .map_err(|failure| name_version_mismatch(failure.error(), &device.name))
+}
+
+/// The pass itself, with the probe injected. `now` is when the pass starts.
+fn probe_devices_with(
+    devices: Vec<String>,
+    schedule: ProbeSchedule,
+    now: Instant,
+    probe: &mut dyn FnMut(&str) -> Result<(), BridgeError>,
+) -> usize {
+    let mut due: Vec<(Instant, String)> = devices
+        .into_iter()
+        .filter_map(|device| probe_due(&device, now, schedule.interval).map(|at| (at, device)))
+        .collect();
+    due.sort();
+    due.truncate(schedule.max_devices);
+    let mut probed = 0;
+    for (_, device) in due {
+        if probed > 0 && now.elapsed() >= PROBE_PASS_BUDGET {
+            break;
+        }
+        if crate::runtime::shutdown::ensure_accepting_operations().is_err() {
+            break;
+        }
+        match probe(&device) {
+            Ok(()) => {
+                poll_succeeded(&device);
+                note_controller_key(&device);
+            }
+            Err(error) if error.code == ErrorCode::UpdateInProgress => poll_busy(&device),
+            Err(error) => close_after_failed_poll(&device, &error),
+        }
+        probed += 1;
+    }
+    probed
 }
 
 /// Records owner admission pressure without treating it as a failed connection.
@@ -2492,6 +2621,9 @@ pub fn open_bridge_stream(
     if let Err(failure) = decode_reply(&reply) {
         return Err(name_version_mismatch(failure.error(), &device.name));
     }
+    // The owner accepted a stream: that is an observation of it, as any reply is.
+    poll_succeeded(device_id);
+    note_controller_key(device_id);
     Ok(BridgeStream {
         child,
         input,
@@ -2650,6 +2782,22 @@ fn listen() -> Result<(), String> {
                                 &request["params"],
                                 |params| local_access.github_callback_stream(params),
                                 || {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
+                        if request["method"] == crate::remote_events::EVENTS_STREAM {
+                            authorize(&request)?;
+                            serve_event_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                |selectors| local_access.open_event_stream(selectors),
+                                &|| {
                                     REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
                                         && crate::runtime::shutdown::ensure_accepting_operations()
                                             .is_ok()
@@ -2879,7 +3027,7 @@ fn changes_allowed() -> bool {
         && crate::runtime::shutdown::ensure_accepting_operations().is_ok()
 }
 /// True until the peer closes its end of `stream` (the bridge closes it when its controller leaves).
-fn connection_open(stream: &UnixStream) -> bool {
+pub fn connection_open(stream: &UnixStream) -> bool {
     use std::os::fd::AsRawFd;
     let mut byte = 0u8;
     // SAFETY: peeks at most one byte into a local buffer without blocking.
@@ -3420,6 +3568,64 @@ fn serve_guest_stream(
     })?;
     Ok(())
 }
+/// Event relays being served, against their own limit inside the stream budget.
+static EVENT_RELAYS: Budget = Budget::new(crate::remote_events::EVENT_RELAY_LIMIT);
+const _: () = assert!(crate::remote_events::EVENT_RELAY_LIMIT < STREAM_LIMIT);
+/// Serves one controller's `events.subscribe`: the owner's own events, until the controller
+/// leaves. It takes a stream permit and one of the event-relay slots, and says so plainly
+/// when either is full.
+fn serve_event_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(Vec<String>) -> Result<Box<dyn crate::remote_events::EventSource>, String>,
+    allowed: &dyn Fn() -> bool,
+) -> Result<(), BridgeError> {
+    serve_event_stream_with(
+        stream,
+        permit,
+        streams,
+        &EVENT_RELAYS,
+        params,
+        open,
+        allowed,
+        crate::remote_events::HEARTBEAT,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn serve_event_stream_with(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    relays: &'static Budget,
+    params: &Value,
+    open: impl FnOnce(Vec<String>) -> Result<Box<dyn crate::remote_events::EventSource>, String>,
+    allowed: &dyn Fn() -> bool,
+    heartbeat: Duration,
+) -> Result<(), BridgeError> {
+    let selectors = crate::remote_events::parse_selectors(params)?;
+    let _relay = relays.acquire().ok_or(
+        "This device is already relaying events to as many controllers as it can. Try again later.",
+    )?;
+    let _stream_permit = admit_stream(permit, streams)?;
+    let source = open(selectors)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    let peer = stream.try_clone().map_err(|e| e.to_string())?;
+    crate::remote_events::serve(
+        &mut *stream,
+        source,
+        &|| connection_open(&peer),
+        allowed,
+        heartbeat,
+    );
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    Ok(())
+}
 /// Opens and relays one `macos.display.stream`: the guest's Screen Sharing connection,
 /// opened by `open`, spliced to the controller's bridge until either side ends.
 fn serve_display_stream(
@@ -3614,6 +3820,104 @@ mod stream_tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap()
+    }
+    struct ScriptedEvents(std::collections::VecDeque<crate::remote_events::EventPoll>);
+    impl crate::remote_events::EventSource for ScriptedEvents {
+        fn next(&mut self, _wait: Duration) -> crate::remote_events::EventPoll {
+            self.0
+                .pop_front()
+                .unwrap_or(crate::remote_events::EventPoll::Ended)
+        }
+    }
+    #[test]
+    fn an_event_stream_replies_then_carries_events_within_both_budgets() {
+        static MANAGEMENT: Budget = Budget::new(4);
+        static STREAMS: Budget = Budget::new(2);
+        static RELAYS: Budget = Budget::new(1);
+        let envelope = json!({"event": "settings.changed", "seq": 1, "payload": {}});
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = MANAGEMENT.acquire();
+        let sent = envelope.clone();
+        let worker = thread::spawn(move || {
+            serve_event_stream_with(
+                &mut server,
+                &mut permit,
+                &STREAMS,
+                &RELAYS,
+                &json!({"events": ["settings.changed"]}),
+                |selectors| {
+                    assert_eq!(selectors, ["settings.changed"]);
+                    Ok(Box::new(ScriptedEvents(
+                        [crate::remote_events::EventPoll::Event(sent)].into(),
+                    )))
+                },
+                &|| true,
+                Duration::from_secs(60),
+            )
+        });
+        let mut reader = std::io::BufReader::new(&mut client);
+        assert_eq!(read_frame(&mut reader).unwrap()["result"], json!({}));
+        assert_eq!(
+            crate::remote_events::read_relay_frame(&mut reader).unwrap(),
+            crate::remote_events::RelayFrame::Event(envelope)
+        );
+        worker.join().unwrap().unwrap();
+        // Both permits are back once the stream ended.
+        assert!(RELAYS.acquire().is_some());
+        assert!(STREAMS.acquire().is_some());
+    }
+    #[test]
+    fn an_event_stream_is_refused_when_the_relay_limit_or_the_stream_budget_is_full() {
+        static MANAGEMENT: Budget = Budget::new(4);
+        static STREAMS: Budget = Budget::new(3);
+        static RELAYS: Budget = Budget::new(1);
+        let _held = RELAYS.acquire().unwrap();
+        let (_client, mut server) = UnixStream::pair().unwrap();
+        let mut permit = MANAGEMENT.acquire();
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &STREAMS,
+            &RELAYS,
+            &json!({"events": ["settings.changed"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("relaying events"), "{refused:?}");
+        // The management permit stays with the refused connection so it can say why.
+        assert!(permit.is_some());
+
+        static FULL_STREAMS: Budget = Budget::new(0);
+        static OTHER_RELAYS: Budget = Budget::new(1);
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &FULL_STREAMS,
+            &OTHER_RELAYS,
+            &json!({"events": ["settings.changed"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("too many active Silo streams"));
+        // The relay slot was given back, not leaked.
+        assert!(OTHER_RELAYS.acquire().is_some());
+        // Unknown or client-scoped events are refused before anything is taken.
+        let refused = serve_event_stream_with(
+            &mut server,
+            &mut permit,
+            &STREAMS,
+            &OTHER_RELAYS,
+            &json!({"events": ["guest.exec.output"]}),
+            |_| panic!("a refused stream subscribes to nothing"),
+            &|| true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(refused.message.contains("not relayed"));
     }
     #[test]
     fn streams_at_capacity_leave_management_connections_admissible() {
@@ -5660,6 +5964,7 @@ mod dispatch_tests {
                 "runtime.upsert",
                 "runtime.delete",
                 "desktop.action",
+                "desktop.job",
                 "chatgpt.retry",
                 "github.connect",
                 "github.repositories.refresh",
@@ -5676,6 +5981,7 @@ mod dispatch_tests {
                 "ssh.access.connection",
                 "ssh.access.save",
                 "guest.prepare",
+                "guest.exec.start",
                 "network.publish",
                 "network.unpublish",
                 "connections.keys.revoke",
@@ -5706,6 +6012,7 @@ mod dispatch_tests {
             methods(Access::Stream),
             [
                 "github.connect.callback",
+                "events.subscribe",
                 "guest.ssh",
                 "macos.display.stream"
             ]
@@ -6618,6 +6925,184 @@ mod key_revocation_tests {
         let (connected, busy, failures, _, kept) = snapshot();
         assert!(!connected && !busy && failures == 1);
         assert_eq!(kept, Some(seen));
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+
+    const INTERVAL: Duration = Duration::from_secs(30);
+
+    fn schedule(max_devices: usize) -> ProbeSchedule {
+        ProbeSchedule {
+            interval: INTERVAL,
+            max_devices,
+        }
+    }
+
+    /// Records a device as last observed `ago` before now, with `failures` failures in a row.
+    fn observed(device: &str, ago: Duration, failures: u32) {
+        let mut health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+        health.insert(
+            device.to_owned(),
+            Health {
+                failures,
+                last_error: String::new(),
+                at: Instant::now() - ago,
+                connected: failures == 0,
+                busy: false,
+                last_success_at: None,
+            },
+        );
+    }
+
+    fn forget(device: &str) {
+        crate::sync::lock_or_recover(&HEALTH, "remote device health").remove(device);
+    }
+
+    fn recorded(device: &str) -> (bool, bool, u32, String) {
+        let health = crate::sync::lock_or_recover(&HEALTH, "remote device health");
+        let entry = health.get(device).expect("an observation was recorded");
+        (
+            entry.connected,
+            entry.busy,
+            entry.failures,
+            entry.last_error.clone(),
+        )
+    }
+
+    #[test]
+    fn a_device_is_due_when_never_observed_or_quiet_for_its_interval() {
+        let _state = crate::test_support::global_state();
+        let device = "00000000-0000-4000-8000-0000000000d1";
+        let now = Instant::now();
+        forget(device);
+        assert!(probe_due(device, now, INTERVAL).is_some());
+        observed(device, Duration::from_secs(5), 0);
+        assert!(probe_due(device, now, INTERVAL).is_none());
+        observed(device, Duration::from_secs(31), 0);
+        assert!(probe_due(device, now, INTERVAL).is_some());
+        forget(device);
+    }
+
+    #[test]
+    fn a_failing_device_waits_longer_after_each_failure_up_to_five_minutes() {
+        let _state = crate::test_support::global_state();
+        let device = "00000000-0000-4000-8000-0000000000d2";
+        let now = Instant::now();
+        // 30 s, 60 s, 120 s, 240 s, then capped at 300 s.
+        for (failures, wait) in [(0, 30), (1, 60), (2, 120), (3, 240), (4, 300), (9, 300)] {
+            observed(device, Duration::from_secs(wait - 1), failures);
+            assert!(
+                probe_due(device, now, INTERVAL).is_none(),
+                "{failures} failures"
+            );
+            observed(device, Duration::from_secs(wait + 1), failures);
+            assert!(
+                probe_due(device, now, INTERVAL).is_some(),
+                "{failures} failures"
+            );
+        }
+        forget(device);
+    }
+
+    #[test]
+    fn a_pass_probes_the_longest_unobserved_first_one_at_a_time_and_at_most_the_limit() {
+        let _state = crate::test_support::global_state();
+        let ids: Vec<String> = (1..=5)
+            .map(|n| format!("00000000-0000-4000-8000-0000000000e{n}"))
+            .collect();
+        // e1 is fresh, e2 was seen a minute ago, e3 two minutes ago, e4 never, e5 an hour ago.
+        observed(&ids[0], Duration::from_secs(1), 0);
+        observed(&ids[1], Duration::from_secs(60), 0);
+        observed(&ids[2], Duration::from_secs(120), 0);
+        forget(&ids[3]);
+        observed(&ids[4], Duration::from_secs(3600), 0);
+
+        let mut asked = Vec::new();
+        let probed = probe_devices_with(ids.clone(), schedule(3), Instant::now(), &mut |device| {
+            asked.push(device.to_owned());
+            Ok(())
+        });
+        assert_eq!(probed, 3);
+        assert_eq!(asked, [ids[3].clone(), ids[4].clone(), ids[2].clone()]);
+        // Each answer is an observation: the device now counts as connected and fresh.
+        for device in &asked {
+            assert_eq!(recorded(device), (true, false, 0, String::new()));
+        }
+        // The next pass takes the one the limit left over, and nothing is probed twice.
+        asked.clear();
+        let probed = probe_devices_with(ids.clone(), schedule(3), Instant::now(), &mut |device| {
+            asked.push(device.to_owned());
+            Ok(())
+        });
+        assert_eq!((probed, &asked), (1, &vec![ids[1].clone()]));
+        for id in &ids {
+            forget(id);
+        }
+    }
+
+    #[test]
+    fn probe_results_become_recorded_health() {
+        let _state = crate::test_support::global_state();
+        let (down, busy, up) = (
+            "00000000-0000-4000-8000-0000000000f1",
+            "00000000-0000-4000-8000-0000000000f2",
+            "00000000-0000-4000-8000-0000000000f3",
+        );
+        for device in [down, busy, up] {
+            forget(device);
+        }
+        let probed = probe_devices_with(
+            vec![down.into(), busy.into(), up.into()],
+            schedule(8),
+            Instant::now(),
+            &mut |device| match device {
+                d if d == down => Err(BridgeError::from("The other device did not answer.")),
+                d if d == busy => Err(BridgeError::new(
+                    ErrorCode::UpdateInProgress,
+                    "Silo is installing an update.",
+                )),
+                _ => Ok(()),
+            },
+        );
+        assert_eq!(probed, 3);
+        assert_eq!(
+            recorded(down),
+            (
+                false,
+                false,
+                1,
+                "The other device did not answer.".to_owned()
+            )
+        );
+        assert!(recorded(busy).1, "an updating owner is busy, not failed");
+        assert_eq!(recorded(busy).2, 0);
+        assert_eq!(recorded(up), (true, false, 0, String::new()));
+        for device in [down, busy, up] {
+            forget(device);
+        }
+    }
+
+    #[test]
+    fn a_pass_runs_while_the_engine_accepts_work() {
+        let _state = crate::test_support::global_state();
+        let device = "00000000-0000-4000-8000-0000000000f4";
+        forget(device);
+        let mut asked = 0;
+        // The shutdown state is process-wide and idle here, so the pass runs.
+        let probed = probe_devices_with(
+            vec![device.into()],
+            schedule(8),
+            Instant::now(),
+            &mut |_| {
+                asked += 1;
+                Ok(())
+            },
+        );
+        assert_eq!((probed, asked), (1, 1));
+        forget(device);
     }
 }
 

@@ -14,6 +14,7 @@ pub mod manifest;
 pub mod methods;
 pub mod ownership;
 pub mod paths;
+pub mod relay;
 pub mod service;
 pub mod socket;
 pub mod startup;
