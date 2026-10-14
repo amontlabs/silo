@@ -721,8 +721,7 @@ fn maintenance_tick(
     periodic(runner, paths, &recovery.unresolved)
 }
 
-pub(crate) fn start_monitor(app: &AppHandle) {
-    let app = app.clone();
+pub(crate) fn start_monitor(host: Arc<dyn RuntimeHost>) {
     thread::spawn(move || {
         loop {
             // Periodic background work skips whenever any operation is active or waiting.
@@ -730,7 +729,7 @@ pub(crate) fn start_monitor(app: &AppHandle) {
                 if shutdown::ensure_accepting_operations().is_ok() {
                     // No paths exist while the storage migration is unfinished, so
                     // neither step below can reach the previous generation.
-                    if let Ok(paths) = runtime_paths(&app) {
+                    if let Ok(paths) = runtime_paths(host.as_ref()) {
                         if let Err(failure) = maintenance_tick(&ProcessRunner, &paths) {
                             eprintln!("Storage maintenance could not finish: {failure}");
                         }
@@ -742,44 +741,26 @@ pub(crate) fn start_monitor(app: &AppHandle) {
     });
 }
 
-#[tauri::command]
-pub async fn read_workspace_storage(
-    app: AppHandle,
-    computer_id: String,
+pub(crate) fn workspace_storage(
+    host: &dyn RuntimeHost,
+    id: &str,
+    reclaim: bool,
 ) -> Result<StorageState, String> {
-    command(app, computer_id, false).await
-}
-#[tauri::command]
-pub async fn reclaim_workspace_storage(
-    app: AppHandle,
-    computer_id: String,
-) -> Result<StorageState, String> {
-    command(app, computer_id, true).await
-}
-async fn command(app: AppHandle, id: String, reclaim: bool) -> Result<StorageState, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        // Reclaim rewrites shared disk state and waits its turn; a plain read does
-        // not take the gate so status stays available during other operations.
-        let _guard = if reclaim {
-            Some(
-                OPERATIONS
-                    .kind(super::operation_gate::OperationKind::StorageReclaim)
-                    .device("Reclaiming computer storage")
-                    .map_err(|e| e.to_string())?,
-            )
-        } else {
-            None
-        };
-        shutdown::ensure_accepting_operations()?;
-        let paths = runtime_paths(&app)?;
-        let result = storage_with(&ProcessRunner, &paths, &id, reclaim);
-        result.map_err(|e| safe_activity_error(&e))
-    })
-    .await
-    .map_err(|_| {
-        "Silo could not finish the workspace storage action. Refresh the Storage tab and retry."
-            .to_string()
-    })?
+    // Reclaim rewrites shared disk state and waits its turn; a plain read does
+    // not take the gate so status stays available during other operations.
+    let _guard = if reclaim {
+        Some(
+            OPERATIONS
+                .kind(super::operation_gate::OperationKind::StorageReclaim)
+                .device("Reclaiming computer storage")
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    shutdown::ensure_accepting_operations()?;
+    let paths = runtime_paths(host)?;
+    storage_with(&ProcessRunner, &paths, id, reclaim).map_err(|error| safe_activity_error(&error))
 }
 
 fn storage_with(

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use silo_engine::context::{Audience, EngineContext, Event};
 pub(crate) use silo_engine::runtime::OPERATIONS;
 #[cfg(test)]
 use std::collections::VecDeque;
@@ -40,7 +41,79 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, Manager};
+
+/// Host services that the runtime needs while its existing Tauri callers are adapted.
+/// The Tauri implementation lives in `commands::runtime`; engine code only sees this
+/// capability interface and the installed `EngineContext`.
+pub(crate) trait RuntimeHost: Send + Sync {
+    fn engine_context(&self) -> Arc<dyn EngineContext>;
+    fn runtime_storage(&self) -> Result<PathBuf, String>;
+    fn blocks_operations(&self) -> bool;
+    fn bundled_tools_directory(&self) -> Result<PathBuf, String>;
+    fn ensure_runtime_ready(&self) -> Result<(), String>;
+    fn runtime_package_kind(&self) -> RuntimePackageKind;
+
+    fn schedule_secret_revocations(&self) {}
+    fn repository_push_operations(&self, local: Vec<Value>) -> Vec<Value> {
+        local
+    }
+    fn github_snapshot(&self) -> Result<Value, String> {
+        Err("GitHub state is unavailable.".into())
+    }
+    fn open_terminal(&self, _name: &str) -> Result<(), String> {
+        Err("The terminal is unavailable.".into())
+    }
+    fn open_editor(&self, _name: &str, _path: Option<&str>) -> Result<(), String> {
+        Err("The editor is unavailable.".into())
+    }
+    fn macos_computer_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn macos_log_target(&self, _computer_id: &str) -> Option<(String, PathBuf)> {
+        None
+    }
+    fn notify(&self, _notice: crate::notifications::Notice) {}
+    fn clear_computer_notices(&self, _computer_ids: &[String]) {}
+    fn stop_macos_computers(&self, _deadline: Option<Instant>) -> Result<(), String> {
+        Ok(())
+    }
+    fn lifecycle_notice(
+        &self,
+        _action: &str,
+        _name: &str,
+        _computer_id: Option<String>,
+        _elapsed: Duration,
+        _outcome: RuntimeLifecycleOutcome,
+    ) {
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum RuntimeLifecycleOutcome {
+    Cancelled,
+    AlreadyQueued,
+    Succeeded,
+    Failed(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RuntimePackageKind {
+    MacApp,
+    AppImage,
+    Deb,
+    Rpm,
+    Other,
+}
+
+pub(crate) trait RuntimeBundleKind {
+    fn runtime_package_kind(&self) -> RuntimePackageKind;
+}
+
+impl RuntimeBundleKind for Option<RuntimePackageKind> {
+    fn runtime_package_kind(&self) -> RuntimePackageKind {
+        self.unwrap_or(RuntimePackageKind::Other)
+    }
+}
 
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(180);
@@ -50,16 +123,9 @@ pub(crate) const WORKSPACE_MOUNT: &str = "/workspace";
 const MAX_COMPUTER_COUNT: usize = 64;
 const MANAGED_LABEL: &str = "silo.managed=true";
 
-#[tauri::command]
-pub fn read_operation_queue() -> operation_gate::OperationQueue {
-    OPERATIONS.snapshot()
-}
-
-/// Ask to cancel a queued or running operation by its queue id. A waiting operation
-/// leaves the queue; a running operation is stopped only when it opted in as cancellable.
-#[tauri::command]
-pub fn cancel_operation(id: u64) -> Result<(), BridgeError> {
-    OPERATIONS.cancel(id).map_err(BridgeError::from)
+fn publish_event(host: &dyn RuntimeHost, name: &str, payload: Value) {
+    host.engine_context()
+        .publish(Event::new(name, payload), Audience::All);
 }
 const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
@@ -489,7 +555,7 @@ impl ComputerConfigurationChange {
     }
 
     /// Notification title naming the computer this change is about, when there is one.
-    fn failure_title(&self) -> String {
+    pub(crate) fn failure_title(&self) -> String {
         match self {
             Self::Upsert { configuration, .. } => {
                 format!("Couldn\u{2019}t save changes to {}", configuration.name())
@@ -721,19 +787,21 @@ struct DeviceResources {
 /// generation is a pre-upgrade backup, so nothing may run `msb` against it while the
 /// migration is pending, running or failed, or after the user continued into a fresh
 /// runtime.
-pub(crate) fn runtime_paths(app: &AppHandle) -> Result<RuntimePaths, String> {
-    paths_for_storage(app, &crate::runtime_migration::runtime_storage(app)?)
+pub(crate) fn runtime_paths(host: &dyn RuntimeHost) -> Result<RuntimePaths, String> {
+    paths_for_storage(host, &host.runtime_storage()?)
 }
 
 /// `None` while the storage migration holds the runtime back. For callers that only
 /// look for running computers to report or stop (Quit, updates, health checks): no
 /// runtime is in use then, so nothing runs, and the migration must not make Quit or an
 /// update fail. Anything that acts on a computer uses `runtime_paths` and is refused.
-pub(crate) fn runtime_paths_if_in_use(app: &AppHandle) -> Result<Option<RuntimePaths>, String> {
-    if crate::runtime_migration::blocks_operations(app) {
+pub(crate) fn runtime_paths_if_in_use(
+    host: &dyn RuntimeHost,
+) -> Result<Option<RuntimePaths>, String> {
+    if host.blocks_operations() {
         return Ok(None);
     }
-    runtime_paths(app).map(Some)
+    runtime_paths(host).map(Some)
 }
 
 /// `paths` with no way to start `msb`: every runtime command fails as unavailable
@@ -747,44 +815,38 @@ pub(crate) fn without_runtime(mut paths: RuntimePaths) -> RuntimePaths {
 /// The files of the selected storage with no runtime to start, for settling saved
 /// state that must finish before the storage migration can start (an interrupted
 /// export or import, E-50). Nothing started through these paths can reach `msb`.
-pub(crate) fn inert_runtime_paths(app: &AppHandle) -> Result<RuntimePaths, String> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Silo could not locate its application storage: {error}"))?;
+pub(crate) fn inert_runtime_paths(host: &dyn RuntimeHost) -> Result<RuntimePaths, String> {
+    let app_data = host.engine_context().paths().app_data.clone();
     let storage = crate::runtime_migration::selected_runtime_storage(&app_data)?;
-    paths_for_storage(app, &storage).map(without_runtime)
+    paths_for_storage(host, &storage).map(without_runtime)
 }
 
 /// The runtime stored in `storage`, whatever the migration state. Only the
 /// migration's staged conversion may call this, to reach the staged runtime while
 /// every other caller is refused. Everything else uses `runtime_paths`.
 pub(crate) fn migration_runtime_paths(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     storage: &Path,
 ) -> Result<RuntimePaths, String> {
-    paths_for_storage(app, storage)
+    paths_for_storage(host, storage)
 }
 
-fn paths_for_storage(app: &AppHandle, storage: &Path) -> Result<RuntimePaths, String> {
+fn paths_for_storage(host: &dyn RuntimeHost, storage: &Path) -> Result<RuntimePaths, String> {
+    let context = host.engine_context();
+    let paths = context.paths();
     let executable =
-        crate::bundled_tools::directory(app)?.join(if cfg!(windows) { "msb.exe" } else { "msb" });
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| format!("Silo could not locate its bundled resources: {error}"))?;
-    let user_home = app.path().home_dir().map_err(|error| error.to_string())?;
-    let guest_image = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("Silo could not locate its application storage: {error}"))?
-        .join("guest-image");
+        host.bundled_tools_directory()?
+            .join(if cfg!(windows) { "msb.exe" } else { "msb" });
+    let resource_dir = &paths.resources;
+    let user_home = &paths.home;
+    let guest_image = paths.app_data.join("guest-image");
     Ok(paths_in_storage(
         executable,
         &resource_dir,
         &user_home,
         storage,
         guest_image,
+        host.runtime_package_kind(),
     ))
 }
 
@@ -794,12 +856,9 @@ fn paths_in_storage(
     user_home: &Path,
     storage: &Path,
     guest_image: PathBuf,
+    package_kind: RuntimePackageKind,
 ) -> RuntimePaths {
-    let library = bundled_runtime_library(
-        &executable,
-        resource_dir,
-        tauri::utils::platform::bundle_type(),
-    );
+    let library = bundled_runtime_library(&executable, resource_dir, Some(package_kind));
     let storage_home = storage.join("microsandbox");
     let home = runtime_home_alias(user_home, &storage_home);
     RuntimePaths {
@@ -813,11 +872,12 @@ fn paths_in_storage(
     }
 }
 
-pub(crate) fn bundled_runtime_library(
+pub(crate) fn bundled_runtime_library<B: RuntimeBundleKind>(
     executable: &Path,
     resource_dir: &Path,
-    _bundle: Option<tauri::utils::config::BundleType>,
+    bundle: B,
 ) -> PathBuf {
+    let _package_kind = bundle.runtime_package_kind();
     #[cfg(target_os = "macos")]
     {
         let _ = resource_dir;
@@ -829,7 +889,10 @@ pub(crate) fn bundled_runtime_library(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        if crate::bundled_tools::is_packaged_linux(_bundle) {
+        if matches!(
+            _package_kind,
+            RuntimePackageKind::AppImage | RuntimePackageKind::Deb | RuntimePackageKind::Rpm
+        ) {
             return executable
                 .parent()
                 .unwrap_or_else(|| Path::new(""))
@@ -2032,20 +2095,21 @@ pub struct ComputerIdentity {
     apply: bool,
 }
 
-#[tauri::command]
-pub async fn verify_computer_identities(
-    app: AppHandle,
+impl ComputerIdentity {
+    pub(crate) fn computer_name(&self) -> &str {
+        &self.computer
+    }
+}
+
+pub(crate) fn verify_computer_identities_with_host(
+    host: &dyn RuntimeHost,
     identities: Vec<ComputerIdentity>,
 ) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        shutdown::ensure_accepting_operations()?;
-        // Each computer is checked in its own lane, one at a time, so other computers keep working.
-        verify_computer_identities_in(&ProcessRunner, &paths, &identities, &identity_lane)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| internal_failure("checking Git identities"))?
+    let paths = runtime_paths(host)?;
+    shutdown::ensure_accepting_operations()?;
+    // Each computer is checked in its own lane, one at a time, so other computers keep working.
+    verify_computer_identities_in(&ProcessRunner, &paths, &identities, &identity_lane)
+        .map_err(|error| error.to_string())
 }
 
 /// Holds one computer's lane while its Git identity is checked or written. Returns `None` when
@@ -2142,32 +2206,30 @@ fn verify_computer_identities_in(
     Ok(true)
 }
 
-#[tauri::command]
-pub async fn configure_computer_identities(
-    app: AppHandle,
+pub(crate) fn configure_computer_identities_with_host(
+    host: &dyn RuntimeHost,
     identities: Vec<ComputerIdentity>,
 ) -> Result<(), String> {
-    let notify_app = app.clone();
     let names: Vec<String> = identities
         .iter()
         .map(|identity| identity.computer.clone())
         .collect();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
+    let result = (|| {
+        let paths = runtime_paths(host)?;
         shutdown::ensure_accepting_operations()?;
         // Every request is validated first; then each computer is written in its own lane, one
         // at a time, cancellable, and named in the queue.
-        let result =
-            configure_computer_identities_in(&ProcessRunner, &paths, &identities, &identity_lane);
-        result.map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|_| internal_failure("saving Git identities"))
-    .and_then(|result| result);
+        configure_computer_identities_in(&ProcessRunner, &paths, &identities, &identity_lane)
+            .map_err(|error| error.to_string())
+    })();
     if let Err(message) = &result {
-        crate::notifications::notify_native(&notify_app, git_identity_notice(&names, message));
+        notify_git_identity_failure(host, &names, message);
     }
     result
+}
+
+pub(crate) fn notify_git_identity_failure(host: &dyn RuntimeHost, names: &[String], message: &str) {
+    host.notify(git_identity_notice(names, message));
 }
 
 fn git_identity_notice(names: &[String], message: &str) -> crate::notifications::Notice {
@@ -2392,10 +2454,10 @@ fn scoped_tokens_of(raw: &str) -> Result<ScopedTokens, String> {
 
 /// Host-only retirement material; see `ScopedTokens`.
 pub(crate) fn scoped_cached_tokens(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     computer: &str,
 ) -> Result<ScopedTokens, String> {
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     let cache = GITHUB_PROFILES.get_or_init(|| Mutex::new(HashMap::new()));
     let profiles = cache
         .lock()
@@ -2408,11 +2470,11 @@ pub(crate) fn scoped_cached_tokens(
 
 /// Check the attachment cache as well as the grant cache. Failed updates clear this cache.
 pub(crate) fn github_policy_is_cached(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     computer: &str,
     profile: &Value,
 ) -> Result<bool, String> {
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     let serialized = serde_json::to_string(profile).map_err(|_| "Invalid GitHub profile.")?;
     Ok(GITHUB_PROFILES
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -2426,12 +2488,12 @@ pub(crate) fn github_policy_is_cached(
 /// The JSON profile reaches the runtime on standard input only: never as a command
 /// argument, an environment variable, a config value or captured log.
 pub(crate) fn apply_github_policy(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     computer: &str,
     revision: u64,
     profiles: &Value,
 ) -> Result<(), String> {
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     apply_github_policy_with(&paths, computer, revision, profiles, MUTATION_TIMEOUT)
 }
 
@@ -2612,12 +2674,12 @@ fn github_update_error(error: RuntimeError, token_protocol: bool) -> String {
 }
 
 pub(crate) fn apply_github_identity(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     computer: &str,
     identity: &Value,
 ) -> Result<(), String> {
     // Applies GitHub identity inside one computer's guest only.
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     let computer_id = resolve_computer_id(&paths, computer).map_err(|error| error.to_string())?;
     let parsed: ComputerIdentity = serde_json::from_value(serde_json::json!({
         "computer": computer, "name": identity["name"], "email": identity["email"], "apply": identity["apply"]
@@ -2644,55 +2706,45 @@ pub(crate) fn apply_github_identity(
     gated_auto_retry(&base_label, acquire, prepare, work).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn read_computer_configuration(
-    app: AppHandle,
+pub(crate) fn read_computer_configuration_with_host(
+    host: &dyn RuntimeHost,
 ) -> Result<ComputerConfigurationRequest, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        // Saved names and resources can render before live computer inspection finishes.
-        // This command does not infer or return a running/stopped state.
-        read_metadata(&paths.metadata).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let paths = runtime_paths(host)?;
+    // Saved names and resources can render before live computer inspection finishes.
+    // This command does not infer or return a running/stopped state.
+    read_metadata(&paths.metadata).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn read_application_state(
-    app: AppHandle,
+pub(crate) fn read_application_state_sync(
+    host: &dyn RuntimeHost,
     refresh_repositories: Option<bool>,
 ) -> Result<ApplicationSource, BridgeError> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        crate::secrets::schedule_revocations(&app);
-        // Only visible device-wide work (computer configuration) can add or remove
-        // computers; work on one computer settles only that computer's row, and hidden housekeeping
-        // never affects the read.
-        let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)?;
-        // Expired-log cleanup runs in the background, at most hourly per stopped computer, so a
-        // state read never waits for it or re-inspects every stopped computer.
-        let due = plan_log_cleanup(&paths, &mut source.computers, Instant::now());
-        if !due.is_empty() {
-            let cleanup_paths = paths.clone();
-            thread::spawn(move || {
-                clean_expired_logs(&ProcessRunner, &cleanup_paths, &OPERATIONS, &due)
-            });
-        }
-        enrich_application_state(
-            &app,
-            &paths,
-            &mut source,
-            Repositories::Discover {
-                refresh: refresh_repositories.unwrap_or(false),
-            },
-        );
-        remember_settled(&paths, &source.computers);
-        Ok(source)
-    })
-    .await
-    .map_err(|_| BridgeError::from(internal_failure("reading computer state")))?
+    host.ensure_runtime_ready().map_err(BridgeError::from)?;
+    let paths = runtime_paths(host)?;
+    host.schedule_secret_revocations();
+    // Only visible device-wide work (computer configuration) can add or remove
+    // computers; work on one computer settles only that computer's row, and hidden housekeeping
+    // never affects the read.
+    let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)?;
+    // Expired-log cleanup runs in the background, at most hourly per stopped computer, so a
+    // state read never waits for it or re-inspects every stopped computer.
+    let due = plan_log_cleanup(&paths, &mut source.computers, Instant::now());
+    if !due.is_empty() {
+        let cleanup_paths = paths.clone();
+        thread::spawn(move || {
+            clean_expired_logs(&ProcessRunner, &cleanup_paths, &OPERATIONS, &due)
+        });
+    }
+    enrich_application_state(
+        host,
+        &paths,
+        &mut source,
+        Repositories::Discover {
+            refresh: refresh_repositories.unwrap_or(false),
+        },
+    );
+    remember_settled(&paths, &source.computers);
+    Ok(source)
 }
 
 /// Expired logs of a stopped computer are cleaned at most this often, off the state-read path.
@@ -2822,14 +2874,13 @@ enum Repositories {
 /// repositories, and GitHub state. A settling or stale row keeps the repositories of its
 /// last known reading instead of scanning a guest that is changing or unreadable.
 fn enrich_application_state(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     paths: &RuntimePaths,
     source: &mut ApplicationSource,
     repositories: Repositories,
 ) {
     source.repository_push_operations =
-        crate::host_push_operations::merge(app, crate::host_push::operations())
-            .unwrap_or_else(|_| crate::host_push::operations());
+        host.repository_push_operations(crate::host_push::operations());
     match repositories {
         Repositories::LastKnown => keep_last_known_repositories(paths, &mut source.computers),
         Repositories::Discover { refresh } => {
@@ -2862,7 +2913,7 @@ fn enrich_application_state(
             }
         }
     }
-    source.github = crate::github::snapshot(app).unwrap_or_else(|message| serde_json::json!({
+    source.github = host.github_snapshot().unwrap_or_else(|message| serde_json::json!({
         "state": "disconnected", "accessEnabled": false, "repositoryCatalog": [],
         "repositoryCatalogStatus": {"status": "unavailable", "message": message, "canRetry": true},
         "computerOperations": [], "deviceIdentity": crate::device_identity::cached(|| {}),
@@ -2871,21 +2922,18 @@ fn enrich_application_state(
 
 /// The controller UI can remain usable when local computer inspection fails. This is
 /// never used for a remote owner's snapshot and never invents local computer states.
-#[tauri::command]
-pub async fn read_application_shell(
-    app: AppHandle,
+pub(crate) fn read_application_shell_with_host(
+    host: &dyn RuntimeHost,
     error: String,
 ) -> Result<ApplicationSource, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        let mut source = application_shell(&paths, &error)?;
-        source.github = crate::github::snapshot(&app).unwrap_or_else(|message| serde_json::json!({
-            "state": "disconnected", "accessEnabled": false, "repositoryCatalog": [],
-            "repositoryCatalogStatus": {"status": "unavailable", "message": message, "canRetry": true},
-            "computerOperations": [], "deviceIdentity": crate::device_identity::cached(|| {}),
-        }));
-        Ok(source)
-    }).await.map_err(|error| error.to_string())?
+    let paths = runtime_paths(host)?;
+    let mut source = application_shell(&paths, &error)?;
+    source.github = host.github_snapshot().unwrap_or_else(|message| serde_json::json!({
+        "state": "disconnected", "accessEnabled": false, "repositoryCatalog": [],
+        "repositoryCatalogStatus": {"status": "unavailable", "message": message, "canRetry": true},
+        "computerOperations": [], "deviceIdentity": crate::device_identity::cached(|| {}),
+    }));
+    Ok(source)
 }
 
 fn application_shell(paths: &RuntimePaths, error: &str) -> Result<ApplicationSource, String> {
@@ -3002,14 +3050,14 @@ impl RuntimeRunner for HealthRunner<'_> {
 /// operation during the read, so the caller skips busy computers without discarding the
 /// rest; a metadata change during the read discards the whole reading. No computer is
 /// created, started, or changed here.
-pub(crate) fn health_observations(app: &AppHandle) -> crate::health_watch::Reading {
+pub(crate) fn health_observations(host: &dyn RuntimeHost) -> crate::health_watch::Reading {
     use crate::health_watch::{ComputerReading, Reading};
     // An unfinished storage migration holds the runtime back: there is nothing to
     // observe, and that is not a health problem to report.
-    if crate::runtime_migration::blocks_operations(app) {
+    if host.blocks_operations() {
         return Reading::Discarded;
     }
-    let paths = runtime_paths(app);
+    let paths = runtime_paths(host);
     let before = paths
         .as_ref()
         .ok()
@@ -3076,8 +3124,8 @@ const EXIT_WAIT: Duration = Duration::from_secs(10 * 60);
 /// Block until the named computer stops or crashes. False when the wait ended any other way
 /// (time limit, runtime unavailable, computer gone). Read-only: it takes no runtime lock and
 /// never creates the runtime home.
-pub(crate) fn wait_for_computer_exit(app: &AppHandle, name: &str) -> bool {
-    let Ok(Some(paths)) = runtime_paths_if_in_use(app) else {
+pub(crate) fn wait_for_computer_exit(host: &dyn RuntimeHost, name: &str) -> bool {
+    let Ok(Some(paths)) = runtime_paths_if_in_use(host) else {
         return false;
     };
     let limit = format!("{}s", EXIT_WAIT.as_secs());
@@ -3250,38 +3298,31 @@ fn gated_auto_retry_classified<T, E>(
     }
 }
 
-#[tauri::command]
-pub async fn computer_action(
-    app: AppHandle,
+pub(crate) fn computer_action_with_host(
+    host: &dyn RuntimeHost,
     action: String,
     name: String,
     path: Option<String>,
 ) -> Result<ApplicationSource, BridgeError> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    host.ensure_runtime_ready()?;
     if matches!(action.as_str(), "open-editor" | "open-terminal") {
         shutdown::ensure_accepting_operations()?;
-        return tauri::async_runtime::spawn_blocking(move || {
-            if action == "open-terminal" {
-                crate::terminal::open(&app, &name)?;
-            } else {
-                crate::editor::open(&app, &name, path.as_deref())?;
-            }
-            let paths = runtime_paths(&app)?;
-            application_state_response(&app, &paths).map_err(BridgeError::from)
-        })
-        .await
-        .map_err(|_| BridgeError::from("The application launcher failed."))?;
+        if action == "open-terminal" {
+            host.open_terminal(&name)?;
+        } else {
+            host.open_editor(&name, path.as_deref())?;
+        }
+        let paths = runtime_paths(host)?;
+        return application_state_response(host, &paths).map_err(BridgeError::from);
     }
-    let worker_app = app.clone();
     // Elapsed time counts from the command, including any wait for the operation gate: it
     // is what the user experienced, and decides whether a success is worth a notice.
     let started = std::time::Instant::now();
     let notice_action = action.clone();
     let notice_name = name.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(String, ApplicationSource, bool), (Option<String>, LifecycleFailure, BridgeError)> {
-        let app = worker_app;
+    let result = (|| -> Result<(String, ApplicationSource, bool), (Option<String>, LifecycleFailure, BridgeError)> {
         // Setup failures before the operation runs are genuine faults worth notifying about.
-        let paths = runtime_paths(&app).map_err(|error| (None, LifecycleFailure::Failed, error.into()))?;
+        let paths = runtime_paths(host).map_err(|error| (None, LifecycleFailure::Failed, error.into()))?;
         // Start/stop/restart change only this computer's runtime; resource admission is
         // against device totals, not other computers, so per-computer ordering is sufficient. The
         // key collapses double-clicked lifecycle requests into one queued action.
@@ -3336,14 +3377,21 @@ pub async fn computer_action(
             // out as its own event, and the first step after the boot refreshes the state so
             // the row leaves "stopped" as soon as the computer is up.
             let sink: LifecycleSink = {
-                let (app, computer_id, action) = (app.clone(), computer_id.clone(), action.clone());
+                let (computer_id, action) = (computer_id.clone(), action.clone());
+                let context = host.engine_context();
                 std::rc::Rc::new(move |step| {
-                    let _ = app.emit(
+                    context.publish(
+                        Event::new(
                         "silo://lifecycle-progress",
                         json!({"computerId": computer_id, "action": action, "step": step.id()}),
+                        ),
+                        Audience::All,
                     );
                     if step == LifecycleStep::Network {
-                        let _ = app.emit("silo://application-state-changed", ());
+                        context.publish(
+                            Event::new("silo://application-state-changed", Value::Null),
+                            Audience::All,
+                        );
                     }
                 })
             };
@@ -3366,9 +3414,9 @@ pub async fn computer_action(
                 Err(error) => Err(error),
             }
         };
-        let _ = app.emit("silo://application-state-changed", ());
+        publish_event(host, "silo://application-state-changed", Value::Null);
         let (result, handed_off) = hand_off_duplicate(result);
-        let result = result.and_then(|_| application_state_response(&app, &paths));
+        let result = result.and_then(|_| application_state_response(host, &paths));
         // Classify before the typed error is flattened to a message: a cancellation or a
         // deduplicated request is an expected outcome, not a failure to notify about.
         match result {
@@ -3379,31 +3427,19 @@ pub async fn computer_action(
                 BridgeError::from(error),
             )),
         }
-    }).await.map_err(|_| BridgeError::from(internal_failure("running the computer action")))?;
+    })();
     let elapsed = started.elapsed();
-    let notify = |computer_id: Option<String>, outcome: crate::notifications::Outcome<'_>| {
-        let computer = computer_id.map(|id| crate::notifications::NoticeComputer {
-            id,
-            name: notice_name.clone(),
-        });
-        if let Some(notice) = crate::notifications::lifecycle_notice(
-            &notice_action,
-            &notice_name,
-            computer,
-            elapsed,
-            outcome,
-        ) {
-            crate::notifications::notify_native(&app, notice);
-        }
+    let notify = |computer_id: Option<String>, outcome: RuntimeLifecycleOutcome| {
+        host.lifecycle_notice(&notice_action, &notice_name, computer_id, elapsed, outcome);
     };
     match result {
         Ok((computer_id, state, handed_off)) => {
             notify(
                 Some(computer_id),
                 if handed_off {
-                    crate::notifications::Outcome::AlreadyQueued
+                    RuntimeLifecycleOutcome::AlreadyQueued
                 } else {
-                    crate::notifications::Outcome::Succeeded
+                    RuntimeLifecycleOutcome::Succeeded
                 },
             );
             Ok(state)
@@ -3424,11 +3460,11 @@ enum LifecycleFailure {
 }
 
 impl LifecycleFailure {
-    fn outcome(self, message: &str) -> crate::notifications::Outcome<'_> {
+    fn outcome(self, message: &str) -> RuntimeLifecycleOutcome {
         match self {
-            Self::Cancelled => crate::notifications::Outcome::Cancelled,
-            Self::AlreadyQueued => crate::notifications::Outcome::AlreadyQueued,
-            Self::Failed => crate::notifications::Outcome::Failed(message),
+            Self::Cancelled => RuntimeLifecycleOutcome::Cancelled,
+            Self::AlreadyQueued => RuntimeLifecycleOutcome::AlreadyQueued,
+            Self::Failed => RuntimeLifecycleOutcome::Failed(message.to_owned()),
         }
     }
 }
@@ -3559,11 +3595,7 @@ fn computer_progress(
 
 /// Shows what a creation is waiting for before it takes the operation gate. These events
 /// are for the creation toast only; they are not part of the setup journal.
-pub(crate) fn publish_creation_wait(
-    app: &AppHandle,
-    request_id: &str,
-    step: &crate::creation_inputs::Step,
-) {
+pub(crate) fn publish_creation_wait(request_id: &str, step: &crate::creation_inputs::Step) {
     use crate::creation_inputs::{ChatGpt, Step};
     let event = match step {
         Step::Image => computer_progress(request_id, "computer-image-wait", "", 0),
@@ -3581,7 +3613,16 @@ pub(crate) fn publish_creation_wait(
         }
         Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
-    let _ = app.emit_to("main", "silo://computer-configuration-progress", &event);
+    if let Some(context) = silo_engine::context::current() {
+        context.publish(
+            silo_engine::context::Event::new(
+                "silo://computer-configuration-progress",
+                serde_json::to_value(event).unwrap_or(Value::Null),
+            ),
+            // window:main
+            silo_engine::context::Audience::All,
+        );
+    }
 }
 
 /// The computers a change would create, for what creation has to wait for before the gate.
@@ -3611,8 +3652,7 @@ fn creation_needs(
 }
 
 /// "Finish without computer use" from the creation toast while it waits for ChatGPT for Linux.
-#[tauri::command]
-pub fn skip_computer_use_wait(request_id: String) {
+pub(crate) fn skip_computer_use_wait_request(request_id: String) {
     crate::creation_inputs::skip(&request_id);
 }
 
@@ -3898,7 +3938,7 @@ pub(crate) fn safe_activity_error(error: &RuntimeError) -> String {
 
 /// A background task of a command ended unexpectedly (a panic). The message says what
 /// Silo was doing and what to try, without naming internals.
-fn internal_failure(activity: &str) -> String {
+pub(crate) fn internal_failure(activity: &str) -> String {
     format!("Silo ran into an internal error while {activity}. Retry; if it keeps happening, quit and reopen Silo.")
 }
 
@@ -4098,16 +4138,11 @@ fn pending_verification_computer(events: &[ComputerConfigurationProgress]) -> Op
 }
 
 /// Reading may rewrite (and fsync) the journal, so it runs off the main thread.
-#[tauri::command]
-pub async fn read_setup_activity(
-    app: AppHandle,
+pub(crate) fn read_setup_activity_with_host(
+    host: &dyn RuntimeHost,
 ) -> Result<Vec<ComputerConfigurationProgress>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
-        read_setup_activity_at(&paths)
-    })
-    .await
-    .map_err(|_| internal_failure("reading setup activity"))?
+    let paths = runtime_paths(host)?;
+    read_setup_activity_at(&paths)
 }
 
 /// An unfinished last attempt was interrupted only when no setup journal is being
@@ -4134,7 +4169,7 @@ fn normalize_request_id(request_id: Option<String>) -> Result<String, String> {
 /// already applied to fresh metadata). Preserves `request_id`, progress events,
 /// `retry_computer` semantics and pending-verification resumption.
 fn apply_configuration_with_progress(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     paths: &RuntimePaths,
     request: ComputerConfigurationRequest,
     request_id: &str,
@@ -4176,9 +4211,19 @@ fn apply_configuration_with_progress(
             .back()
             .filter(|entry| entry.step == "activity-storage-warning")
         {
-            let _ = app.emit_to("main", "silo://computer-configuration-progress", warning);
+            // window:main
+            publish_event(
+                host,
+                "silo://computer-configuration-progress",
+                serde_json::to_value(warning).unwrap_or(Value::Null),
+            );
         }
-        let _ = app.emit_to("main", "silo://computer-configuration-progress", &event);
+        // window:main
+        publish_event(
+            host,
+            "silo://computer-configuration-progress",
+            serde_json::to_value(&event).unwrap_or(Value::Null),
+        );
     };
     publish(computer_progress(request_id, "setup-started", "", 0));
     let progress = |step: &str, computer: &str, fraction: u8| {
@@ -4237,7 +4282,7 @@ fn apply_configuration_with_progress(
     publish(outcome);
     result.map_err(|error| safe_activity_error(&error))?;
     // The setup's outcome is decided above; refreshing the list is separate (D-11).
-    application_state_response(app, paths).map_err(|error| safe_activity_error(&error))
+    application_state_response(host, paths).map_err(|error| safe_activity_error(&error))
 }
 
 /// Resume a failed computer setup or verification without the UI resending a whole list.
@@ -4247,21 +4292,19 @@ fn apply_configuration_with_progress(
 /// it re-verifies the committed inventory. Concurrent changes made since the attempt are
 /// rejected by the recovery reconciliation ("Computer settings changed since the
 /// interruption."), so a resume never overwrites work done meanwhile.
-#[tauri::command]
-pub async fn retry_computer_configuration(
-    app: AppHandle,
+pub(crate) fn retry_computer_configuration_with_host(
+    host: &dyn RuntimeHost,
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
-    let notify_app = app.clone();
     let failure_title = retry_computer.as_deref().map_or_else(
         || "Couldn\u{2019}t finish computer setup".to_string(),
         |name| format!("Couldn\u{2019}t finish setting up {name}"),
     );
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
+    let result = (|| {
+        let paths = runtime_paths(host)?;
         // Waited for before the gate, as in `change_computer_configuration`.
         let needs = configuration_recovery::pending_request(&paths)
             .ok()
@@ -4269,7 +4312,7 @@ pub async fn retry_computer_configuration(
             .or_else(|| read_metadata(&paths.metadata).ok())
             .map(|request| creation_needs(&paths, request))
             .unwrap_or_default();
-        crate::creation_inputs::wait_before_gate(&app, &paths, &request_id, &needs)?;
+        crate::creation_inputs::wait_before_gate(&paths, &request_id, &needs)?;
         // Changes the shared computer inventory/metadata; device-wide.
         let _guard = OPERATIONS
             .kind(operation_gate::OperationKind::ComputerConfiguration)
@@ -4287,49 +4330,46 @@ pub async fn retry_computer_configuration(
         let committed = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
         let _reservation = crate::computer_names::reserve(
             &new_names(&committed.computers, &request.computers),
-            &|| crate::macos_computers::names(&app),
+            &|| host.macos_computer_names(),
         )?;
-        apply_configuration_with_progress(&app, &paths, request, &request_id, retry_computer)
-    })
-    .await
-    .map_err(|_| internal_failure("changing computer settings"))
-    .and_then(|result| result);
+        apply_configuration_with_progress(host, &paths, request, &request_id, retry_computer)
+    })();
     if let Err(message) = &result {
-        notify_configuration_failure(&notify_app, &failure_title, message);
+        notify_configuration_failure(host, &failure_title, message);
     }
     result
 }
 
 /// The setup UI shows the failure in place; the system notice matters when Silo is in the
 /// background. A rejected stale edit is shown inline by the editor and is not a failure.
-fn notify_configuration_failure(app: &AppHandle, title: &str, message: &str) {
+pub(crate) fn notify_configuration_failure(host: &dyn RuntimeHost, title: &str, message: &str) {
     if message.contains("changed while your edit was waiting") {
         return;
     }
-    crate::notifications::notify_native(
-        app,
-        crate::notifications::failure("computer-setup", title, message, None),
-    );
+    host.notify(crate::notifications::failure(
+        "computer-setup",
+        title,
+        message,
+        None,
+    ));
 }
 
 /// Apply one targeted change (create, edit, delete or reorder) against the current
 /// inventory. Because the request may wait its turn on the operation gate, the change
 /// is applied to fresh metadata read under the gate and rejected if the targeted computer
 /// changed while the edit was waiting, rather than overwriting with a stale list.
-#[tauri::command]
-pub async fn change_computer_configuration(
-    app: AppHandle,
+pub(crate) fn change_computer_configuration_with_host(
+    host: &dyn RuntimeHost,
     change: ComputerConfigurationChange,
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<ApplicationSource, String> {
-    crate::runtime_migration::ensure_ready_async(&app).await?;
+    host.ensure_runtime_ready()?;
     let request_id = normalize_request_id(request_id)?;
-    let notify_app = app.clone();
     let failure_title = change.failure_title();
     let deleted = change.deleted_ids();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let paths = runtime_paths(&app)?;
+    let result = (|| {
+        let paths = runtime_paths(host)?;
         // The image import and the ChatGPT download are waited for before the gate: holding
         // the device-wide gate for minutes would stall every lifecycle operation and Quit.
         let needs = read_metadata(&paths.metadata)
@@ -4339,7 +4379,7 @@ pub async fn change_computer_configuration(
                 Some(creation_needs(&paths, request))
             })
             .unwrap_or_default();
-        crate::creation_inputs::wait_before_gate(&app, &paths, &request_id, &needs)?;
+        crate::creation_inputs::wait_before_gate(&paths, &request_id, &needs)?;
         // Changes the shared computer inventory/metadata; device-wide.
         let _guard = OPERATIONS
             .removing(&change.deleted_ids(), &change.label())
@@ -4353,19 +4393,14 @@ pub async fn change_computer_configuration(
         // Held until the change is committed, so a macOS creation sees the name.
         let _reservation =
             crate::computer_names::reserve(&new_names(&before, &request.computers), &|| {
-                crate::macos_computers::names(&app)
+                host.macos_computer_names()
             })?;
-        apply_configuration_with_progress(&app, &paths, request, &request_id, retry_computer)
-    })
-    .await
-    .map_err(|_| internal_failure("changing computer settings"))
-    .and_then(|result| result);
+        apply_configuration_with_progress(host, &paths, request, &request_id, retry_computer)
+    })();
     match &result {
-        Err(message) => notify_configuration_failure(&notify_app, &failure_title, message),
+        Err(message) => notify_configuration_failure(host, &failure_title, message),
         // A deleted computer has nothing left to open: withdraw its delivered notices.
-        Ok(_) => deleted
-            .iter()
-            .for_each(|id| crate::notifications::clear_computer(&notify_app, id)),
+        Ok(_) => host.clear_computer_notices(&deleted),
     }
     result
 }
@@ -4585,11 +4620,11 @@ fn remember_settled(paths: &RuntimePaths, computers: &[ApplicationComputer]) {
 /// panels (D-08), and a failed refresh never turns the finished change into an error
 /// (D-11): see `state_after_change`.
 pub(crate) fn application_state_response(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     paths: &RuntimePaths,
 ) -> Result<ApplicationSource, RuntimeError> {
     let mut source = state_after_change(&ProcessRunner, paths, &OPERATIONS)?;
-    enrich_application_state(app, paths, &mut source, Repositories::LastKnown);
+    enrich_application_state(host, paths, &mut source, Repositories::LastKnown);
     remember_settled(paths, &source.computers);
     Ok(source)
 }
@@ -5111,8 +5146,8 @@ fn configuration_attention(
     }
 }
 
-pub(crate) fn start_at_launch(app: &AppHandle, id: &str) -> Result<(), String> {
-    let paths = runtime_paths(app)?;
+pub(crate) fn start_at_launch(host: &dyn RuntimeHost, id: &str) -> Result<(), String> {
+    let paths = runtime_paths(host)?;
     // A launch start changes only its computer, so it takes that computer's lane like a user Start:
     // other computers' actions and state are not held behind each boot.
     let guard = match launch_start_guard(&OPERATIONS, &paths, id)
@@ -5123,7 +5158,7 @@ pub(crate) fn start_at_launch(app: &AppHandle, id: &str) -> Result<(), String> {
         LaunchAdmission::Skipped => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
-    if crate::startup::is_cancelled(app) {
+    if crate::startup::is_cancelled(host) {
         return Ok(());
     }
     let outcome = device_resources()
@@ -6160,8 +6195,8 @@ fn validate_request(request: &ComputerConfigurationRequest) -> Result<(), Runtim
 /// The lowercased names of the Linux computers on this device, including those an
 /// interrupted creation will add when it resumes. An unreadable inventory yields none;
 /// the Linux path validates it itself.
-pub(crate) fn computer_names(app: &AppHandle) -> Vec<String> {
-    let Ok(paths) = runtime_paths(app) else {
+pub(crate) fn computer_names(host: &dyn RuntimeHost) -> Vec<String> {
+    let Ok(paths) = runtime_paths(host) else {
         return Vec::new();
     };
     let committed = read_metadata(&paths.metadata)
@@ -12162,11 +12197,8 @@ exit 9
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("Silo.app/Contents/MacOS/msb");
         let resource_dir = directory.path().join("Silo.app/Contents/Resources");
-        let library = bundled_runtime_library(
-            &executable,
-            &resource_dir,
-            Some(tauri::utils::config::BundleType::App),
-        );
+        let library =
+            bundled_runtime_library(&executable, &resource_dir, Some(RuntimePackageKind::MacApp));
         assert!(!library.exists());
         #[cfg(target_os = "macos")]
         assert_eq!(
@@ -12178,16 +12210,9 @@ exit 9
         #[cfg(target_os = "linux")]
         assert_eq!(
             bundled_runtime_library(
-                &crate::bundled_tools::resolve(
-                    Path::new("/usr/bin/silo-ui"),
-                    &resource_dir,
-                    Some(tauri::utils::config::BundleType::Deb),
-                    None,
-                )
-                .unwrap()
-                .join("msb"),
+                &Path::new("/usr/libexec/silo/tools").join("msb"),
                 &resource_dir,
-                Some(tauri::utils::config::BundleType::Deb),
+                Some(RuntimePackageKind::Deb),
             ),
             Path::new("/usr/libexec/silo/tools/libkrunfw.so.5.6.1")
         );
@@ -12943,9 +12968,9 @@ exit 9
 mod github_integration_tests;
 
 /// Apply secret policy under the same per-computer lock as GitHub updates and boot.
-pub(crate) fn apply_secrets(app: &AppHandle, computer: &str) -> Result<Vec<String>, String> {
+pub(crate) fn apply_secrets(host: &dyn RuntimeHost, computer: &str) -> Result<Vec<String>, String> {
     validate_name(computer).map_err(|error| error.to_string())?;
-    apply_secrets_at_paths(runtime_paths(app)?, computer)
+    apply_secrets_at_paths(runtime_paths(host)?, computer)
 }
 
 fn apply_secrets_at_paths(paths: RuntimePaths, computer: &str) -> Result<Vec<String>, String> {
@@ -13027,10 +13052,10 @@ fn apply_secrets_at_paths(paths: RuntimePaths, computer: &str) -> Result<Vec<Str
 /// Background name-only revocation. Use the owner device's existing computer gate;
 /// skip busy/transitional/unreadable guests and retry on a later state refresh.
 pub(crate) fn revoke_secret(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     record: &crate::secrets::PendingRevocation,
 ) -> Result<bool, String> {
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     revoke_secret_with(&ProcessRunner, &paths, record, &mut |name| {
         secrets_runtime::remove_name(&paths, &record.computer, name)
     })
@@ -13106,10 +13131,10 @@ pub(crate) fn validate_secret_material_for_tests(
 }
 
 pub(crate) fn validate_secret_computers(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     computers: &[String],
 ) -> Result<(), String> {
-    let paths = runtime_paths(app)?;
+    let paths = runtime_paths(host)?;
     let metadata = read_metadata(&paths.metadata)
         .map_err(|_| "Computer settings could not be read.".to_string())?;
     for computer in computers {

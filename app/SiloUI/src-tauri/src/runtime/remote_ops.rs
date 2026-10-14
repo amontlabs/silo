@@ -1,22 +1,32 @@
 //! Targeted changes against the owner's current inventory, ordered by the operation gate.
 use super::*;
+use silo_engine::context::{Audience, Event};
 
-pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<Value, BridgeError> {
-    let paths = runtime_paths(app)?;
+pub(crate) fn dispatch(
+    host: &dyn RuntimeHost,
+    method: &str,
+    params: Value,
+) -> Result<Value, BridgeError> {
+    let paths = runtime_paths(host)?;
     if method == "runtime.snapshot" {
-        return serde_json::to_value(tauri::async_runtime::block_on(read_application_state(
-            app.clone(),
+        return serde_json::to_value(read_application_state_sync(
+            host,
             params.get("refreshRepositories").and_then(Value::as_bool),
-        ))?)
+        )?)
         .map_err(|e| BridgeError::from(e.to_string()));
     }
     if method == "runtime.logs" {
-        let request = serde_json::from_value(params).map_err(|_| "Invalid log query.")?;
+        let request: runtime_logs::Query =
+            serde_json::from_value(params).map_err(|_| "Invalid log query.")?;
         let (id, name) = crate::remote::log_identity()?;
-        return serde_json::to_value(runtime_logs::query_for_remote(
-            app, &paths, request, &id, &name,
-        )?)
-        .map_err(|e| BridgeError::from(e.to_string()));
+        // macOS setup logs live beside application logs, outside the Linux runtime.
+        let page =
+            if let Some((computer_name, directory)) = host.macos_log_target(&request.computer_id) {
+                runtime_logs::query_directory(&directory, request, &computer_name, &id, &name)?
+            } else {
+                runtime_logs::query_for_remote(&paths, request, &id, &name)?
+            };
+        return serde_json::to_value(page).map_err(|e| BridgeError::from(e.to_string()));
     }
     if method == "runtime.configuration" {
         return serde_json::to_value(read_metadata(&paths.metadata).map_err(BridgeError::from)?)
@@ -27,7 +37,7 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<V
     // and, for the idempotent start/stop/restart, auto-retries transient failures exactly
     // like the local `computer_action` command.
     if method == "runtime.action" {
-        return remote_action(app, &paths, &params);
+        return remote_action(host, &paths, &params);
     }
     // Anything else is unknown: refuse it before taking the gate or announcing a change.
     if !matches!(method, "runtime.upsert" | "runtime.delete") {
@@ -46,7 +56,7 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<V
     shutdown::ensure_accepting_operations()?;
     let mut request = read_metadata(&paths.metadata).map_err(BridgeError::from)?;
     let resources = device_resources().map_err(BridgeError::from)?;
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_changed(host);
     let result = (|| {
         match method {
             "runtime.upsert" | "runtime.delete" => {
@@ -98,7 +108,7 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<V
                     request,
                     None,
                     &|_, _, _| {
-                        let _ = app.emit("silo://application-state-changed", ());
+                        publish_changed(host);
                     },
                 )
                 .map_err(BridgeError::from)?;
@@ -106,11 +116,18 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<V
             }
             _ => return Err(BridgeError::unsupported()),
         }
-        serde_json::to_value(application_state_response(app, &paths).map_err(BridgeError::from)?)
+        serde_json::to_value(application_state_response(host, &paths).map_err(BridgeError::from)?)
             .map_err(|e| BridgeError::from(e.to_string()))
     })();
-    let _ = app.emit("silo://application-state-changed", ());
+    publish_changed(host);
     result
+}
+
+fn publish_changed(host: &dyn RuntimeHost) {
+    host.engine_context().publish(
+        Event::new("silo://application-state-changed", Value::Null),
+        Audience::All,
+    );
 }
 
 /// A remote start/stop/restart/dismiss-error against one local computer. Start/stop/restart are
@@ -119,12 +136,12 @@ pub(crate) fn dispatch(app: &AppHandle, method: &str, params: Value) -> Result<V
 /// dedupe key, labels, cancellability, and expected durations as the local command;
 /// dismiss-error runs once. `silo://application-state-changed` is emitted after the work.
 fn remote_action(
-    app: &AppHandle,
+    host: &dyn RuntimeHost,
     paths: &RuntimePaths,
     params: &Value,
 ) -> Result<Value, BridgeError> {
     let changed = || {
-        let _ = app.emit("silo://application-state-changed", ());
+        publish_changed(host);
     };
     run_remote_action(
         &ProcessRunner,
@@ -134,7 +151,7 @@ fn remote_action(
         &device_resources,
         &changed,
     )?;
-    serde_json::to_value(application_state_response(app, paths).map_err(BridgeError::from)?)
+    serde_json::to_value(application_state_response(host, paths).map_err(BridgeError::from)?)
         .map_err(|e| BridgeError::from(e.to_string()))
 }
 
@@ -551,8 +568,8 @@ mod tests {
     }
 }
 
-pub(crate) fn local_computer_name(app: &AppHandle, id: &str) -> Result<String, String> {
-    local_computer_name_in(&runtime_paths(app)?, id)
+pub(crate) fn local_computer_name(host: &dyn RuntimeHost, id: &str) -> Result<String, String> {
+    local_computer_name_in(&runtime_paths(host)?, id)
 }
 
 pub(crate) fn local_computer_name_in(paths: &RuntimePaths, id: &str) -> Result<String, String> {

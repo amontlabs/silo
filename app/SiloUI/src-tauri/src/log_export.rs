@@ -1,35 +1,43 @@
 //! Stream retained log pages to an atomic, user-selected JSON Lines export.
-use crate::runtime::runtime_logs::{self, Page, Query};
+use crate::runtime::runtime_logs::{Page, Query};
 use serde::Serialize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex,
+        Mutex, MutexGuard,
     },
 };
-use tauri::{AppHandle, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
 
 static EXPORT_LOCK: Mutex<()> = Mutex::new(());
 static CANCELLATION: AtomicU64 = AtomicU64::new(0);
 
-fn cancellation_check() -> impl Fn() -> bool {
+pub(crate) fn cancellation_check() -> impl Fn() -> bool {
     let generation = CANCELLATION.load(Ordering::Acquire);
     move || CANCELLATION.load(Ordering::Acquire) != generation
 }
 
-fn cancel() {
+pub(crate) fn cancel() {
     CANCELLATION.fetch_add(1, Ordering::Release);
 }
 
-fn require_main(window: &WebviewWindow) -> Result<(), String> {
-    if window.label() == "main" {
-        Ok(())
-    } else {
-        Err("Open the main Silo window to export logs.".into())
+pub(crate) struct ExportPermit {
+    _guard: MutexGuard<'static, ()>,
+}
+
+/// Serializes the complete export flow, including the destination picker.
+pub(crate) fn begin_export() -> Result<ExportPermit, String> {
+    let guard = crate::sync::try_lock_or_recover(&EXPORT_LOCK, "log export")
+        .ok_or("A log export is already in progress.")?;
+    Ok(ExportPermit { _guard: guard })
+}
+
+pub(crate) fn validate_requests(requests: &[Query]) -> Result<(), String> {
+    if requests.is_empty() || requests.len() > 100 {
+        return Err("Select between one and 100 computers to export logs.".into());
     }
+    Ok(())
 }
 
 fn write_json_line(output: &mut impl Write, value: &impl Serialize) -> Result<(), String> {
@@ -70,58 +78,33 @@ fn save_atomically(
     Ok(true)
 }
 
-#[tauri::command]
-pub(crate) fn cancel_log_export(window: WebviewWindow) -> Result<(), String> {
-    require_main(&window)?;
-    cancel();
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) async fn export_computer_logs(
-    app: AppHandle,
-    window: WebviewWindow,
+pub(crate) fn export_to(
+    _permit: ExportPermit,
     requests: Vec<Query>,
+    destination: PathBuf,
+    query: impl FnMut(Query) -> Result<Page, String>,
+    cancelled: impl Fn() -> bool,
 ) -> Result<bool, String> {
-    require_main(&window)?;
-    if requests.is_empty() || requests.len() > 100 {
-        return Err("Select between one and 100 computers to export logs.".into());
+    validate_requests(&requests)?;
+    if cancelled() {
+        return Ok(false);
     }
-    let cancelled = cancellation_check();
-    tauri::async_runtime::spawn_blocking(move || {
-        export_with(
-            requests,
-            || {
-                app.dialog()
-                    .file()
-                    .set_parent(&window)
-                    .set_title("Export logs")
-                    .set_file_name("silo-logs.jsonl")
-                    .add_filter("JSON Lines", &["jsonl"])
-                    .blocking_save_file()
-                    .map(|selected| {
-                        selected
-                            .into_path()
-                            .map_err(|_| "The export destination is unavailable.".into())
-                    })
-                    .transpose()
-            },
-            |request| runtime_logs::query(&app, request).map_err(|error| error.message),
-            cancelled,
-        )
-    })
-    .await
-    .map_err(|_| "The log export task failed.".to_owned())?
+    save_atomically(
+        &destination,
+        |output| write_requests(output, requests, query, &cancelled),
+        &cancelled,
+    )
 }
 
+#[cfg(test)]
 fn export_with(
     requests: Vec<Query>,
     select: impl FnOnce() -> Result<Option<PathBuf>, String>,
     query: impl FnMut(Query) -> Result<Page, String>,
     cancelled: impl Fn() -> bool,
 ) -> Result<bool, String> {
-    let _guard = crate::sync::try_lock_or_recover(&EXPORT_LOCK, "log export")
-        .ok_or("A log export is already in progress.")?;
+    validate_requests(&requests)?;
+    let permit = begin_export()?;
     if cancelled() {
         return Ok(false);
     }
@@ -131,11 +114,7 @@ fn export_with(
     if cancelled() {
         return Ok(false);
     }
-    save_atomically(
-        &destination,
-        |output| write_requests(output, requests, query, &cancelled),
-        &cancelled,
-    )
+    export_to(permit, requests, destination, query, cancelled)
 }
 
 pub(crate) fn write_requests(
@@ -204,6 +183,7 @@ pub(crate) fn write_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::runtime_logs;
 
     #[cfg(unix)]
     #[test]

@@ -270,34 +270,35 @@ fn main() {
             backup_controller::cancel_backup_operation,
             backup_controller::dismiss_backup_operation,
             backup_controller::acknowledge_backup_result,
-            runtime::read_application_state,
-            runtime::storage::read_workspace_storage,
-            runtime::storage::reclaim_workspace_storage,
-            runtime::runtime_logs::query_computer_logs,
-            log_export::export_computer_logs,
-            log_export::cancel_log_export,
-            runtime::read_application_shell,
-            runtime::read_computer_configuration,
-            runtime::configure_computer_identities,
-            runtime::verify_computer_identities,
-            runtime::computer_action,
+            commands::runtime::read_application_state,
+            commands::runtime_storage::read_workspace_storage,
+            commands::runtime_storage::reclaim_workspace_storage,
+            commands::runtime_logs::query_computer_logs,
+            commands::log_export::export_computer_logs,
+            commands::log_export::cancel_log_export,
+            commands::runtime::read_application_shell,
+            commands::runtime::read_computer_configuration,
+            commands::runtime::configure_computer_identities,
+            commands::runtime::verify_computer_identities,
+            commands::runtime::computer_action,
             runtime::checkpoints::create_checkpoint,
             runtime::checkpoints::fork_checkpoint,
             runtime::checkpoints::restore_checkpoint,
             runtime::checkpoints::delete_checkpoint,
             runtime::checkpoints::abandon_restore,
             runtime::checkpoints::read_checkpoint_usage,
-            runtime::read_setup_activity,
-            runtime::read_operation_queue,
-            runtime::cancel_operation,
-            runtime::retry_computer_configuration,
-            runtime::skip_computer_use_wait,
-            runtime::change_computer_configuration
+            commands::runtime::read_setup_activity,
+            commands::runtime::read_operation_queue,
+            commands::runtime::cancel_operation,
+            commands::runtime::retry_computer_configuration,
+            commands::runtime::skip_computer_use_wait,
+            commands::runtime::change_computer_configuration
         ])
         .setup(|app| {
             // Tauri panics on a setup error. Explain the failure and exit instead.
             let result = (|| -> Result<(), Box<dyn std::error::Error>> {
                 engine_context::install(app)?;
+                commands::creation_inputs::install(app.handle())?;
                 runtime_migration::vocabulary::run()?;
                 settings::install(app.handle());
                 commands::system_shutdown::install(app.handle());
@@ -348,8 +349,8 @@ fn main() {
                 updates::install(app.handle())?;
                 ssh_access::start_monitor(app.handle());
                 editor::refresh_transports(app.handle());
-                runtime::storage::start_monitor(app.handle());
-                startup::install(app.handle());
+                commands::runtime_storage::start_monitor(app.handle());
+                commands::startup::install(app.handle());
                 Ok(())
             })();
             if let Err(error) = result {

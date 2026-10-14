@@ -8,9 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use tauri::AppHandle;
-
 use crate::notifications::{Category, Notice, NoticeComputer};
+use silo_engine::runtime::OPERATIONS;
 
 /// Poll this often while a local computer is running or starting.
 const ACTIVE_INTERVAL: Duration = Duration::from_secs(10);
@@ -239,32 +238,47 @@ impl ExitWaiters {
     }
 }
 
-pub(crate) fn install(app: &AppHandle) {
-    let app = app.clone();
+/// Runtime and client adapters provide inspection, exit waits and notice delivery.
+pub(crate) trait HealthWatchServices: Send + Sync + 'static {
+    fn observe(&self) -> Reading;
+    fn wait_for_computer_exit(&self, name: &str) -> bool;
+    fn notify(&self, notice: Notice);
+}
+
+/// Produces the host adapter used by the health watch. Implementations live in
+/// `commands/health_watch.rs` so existing setup owners do not carry UI types here.
+pub(crate) trait HealthWatchHost: Send + Sync {
+    fn services(&self) -> Arc<dyn HealthWatchServices>;
+}
+
+pub(crate) fn install<H: HealthWatchHost>(host: &H) {
+    install_services(host.services());
+}
+
+pub(crate) fn install_services(services: Arc<dyn HealthWatchServices>) {
     std::thread::spawn(move || {
         let mut health = HealthState::default();
         let waiters = ExitWaiters::default();
         loop {
             // Anything finishing during the read wakes the next wait immediately.
-            let seen = crate::runtime::OPERATIONS.activity();
+            let seen = OPERATIONS.activity();
             // One bounded read at a time, including while the main window is hidden.
-            let reading = crate::runtime::health_observations(&app);
+            let reading = services.observe();
             if let Reading::Computers(computers) = &reading {
-                let wait_app = app.clone();
+                let wait_services = Arc::clone(&services);
                 waiters.arm(
                     computers
                         .iter()
                         .filter(|computer| computer.state == "Running")
                         .map(|computer| computer.name.clone()),
-                    move |name| crate::runtime::wait_for_computer_exit(&wait_app, name),
-                    || crate::runtime::OPERATIONS.signal_activity(),
+                    move |name| wait_services.wait_for_computer_exit(name),
+                    || OPERATIONS.signal_activity(),
                 );
             }
             for notice in health.observe(reading) {
-                crate::notifications::notify(&app, notice);
+                services.notify(notice);
             }
-            let woken =
-                crate::runtime::OPERATIONS.wait_for_activity(seen, health.poll_interval()) != seen;
+            let woken = OPERATIONS.wait_for_activity(seen, health.poll_interval()) != seen;
             if woken {
                 std::thread::sleep(SETTLE);
             }

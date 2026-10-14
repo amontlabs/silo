@@ -592,32 +592,9 @@ fn keep(entries: &mut Vec<Entry>, entry: Entry, limit: usize, ascending: bool) {
 pub(super) fn is_stopped(status: &str) -> bool {
     status.eq_ignore_ascii_case("stopped") || status.eq_ignore_ascii_case("created")
 }
-pub(crate) fn query(app: &AppHandle, request: Query) -> Result<Page, BridgeError> {
-    let (device_id, device_name) = crate::remote::log_identity()?;
-    if let Some(owner) = request
-        .device_id
-        .as_deref()
-        .filter(|id| *id != device_id && *id != "local")
-    {
-        let outcome = crate::remote::call_remote_typed(
-            app,
-            owner,
-            "runtime.logs",
-            serde_json::to_value(&request).map_err(|e| e.to_string())?,
-        );
-        return remote_page(outcome);
-    }
-    // A macOS computer keeps its setup log beside Silo's own logs, not in the runtime.
-    if let Some((name, directory)) = crate::macos_computers::log_target(app, &request.computer_id) {
-        return read(&directory, request, &name, &device_id, &device_name)
-            .map_err(BridgeError::from);
-    }
-    let paths = runtime_paths(app)?;
-    query_local(&paths, request, &device_id, &device_name).map_err(BridgeError::from)
-}
 /// A device running an older Silo rejects `runtime.logs` as an unknown request. That is
 /// an expected, structured outcome (an empty page marked unsupported), not a failure.
-fn remote_page(outcome: Result<Value, BridgeError>) -> Result<Page, BridgeError> {
+pub(crate) fn remote_page(outcome: Result<Value, BridgeError>) -> Result<Page, BridgeError> {
     match outcome {
         Ok(value) => serde_json::from_value(value).map_err(|_| {
             "The remote device returned invalid logs. Update Silo on both devices.".into()
@@ -655,21 +632,17 @@ fn clean_up_if_stopped(
     }
     Ok(())
 }
-/// Like `query_local`, for a request from another device: the computer may be a macOS one,
-/// whose setup log is kept beside Silo's own logs.
+/// Runtime log query for a computer on this device. The host resolves macOS setup-log
+/// locations separately before choosing this path.
 pub(super) fn query_for_remote(
-    app: &AppHandle,
     paths: &RuntimePaths,
     request: Query,
     device_id: &str,
     device_name: &str,
 ) -> Result<Page, String> {
-    if let Some((name, directory)) = crate::macos_computers::log_target(app, &request.computer_id) {
-        return read(&directory, request, &name, device_id, device_name);
-    }
     query_local(paths, request, device_id, device_name)
 }
-pub(super) fn query_local(
+pub(crate) fn query_local(
     paths: &RuntimePaths,
     request: Query,
     device_id: &str,
@@ -708,14 +681,16 @@ pub(super) fn query_local(
         device_name,
     )
 }
-#[tauri::command]
-pub(crate) async fn query_computer_logs(
-    app: AppHandle,
+/// Queries retained logs in an already-resolved directory. The host supplies
+/// macOS setup-log locations; all scanning, filtering and pagination stay here.
+pub(crate) fn query_directory(
+    directory: &Path,
     request: Query,
-) -> Result<Page, BridgeError> {
-    tauri::async_runtime::spawn_blocking(move || query(&app, request))
-        .await
-        .map_err(|e| e.to_string())?
+    computer_name: &str,
+    device_id: &str,
+    device_name: &str,
+) -> Result<Page, String> {
+    read(directory, request, computer_name, device_id, device_name)
 }
 fn read(
     directory: &Path,
