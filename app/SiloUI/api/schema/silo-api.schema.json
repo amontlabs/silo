@@ -2094,6 +2094,175 @@
       ],
       "type": "object"
     },
+    "CredentialItem": {
+      "properties": {
+        "computerId": {
+          "description": "Set for `proxyCa`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CredentialKind"
+        },
+        "label": {
+          "description": "Short name to show.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/CredentialState"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "state"
+      ],
+      "type": "object"
+    },
+    "CredentialKind": {
+      "description": "Which of the engine's Keychain items this is.",
+      "oneOf": [
+        {
+          "const": "githubSignIn",
+          "description": "The GitHub sign-in.",
+          "type": "string"
+        },
+        {
+          "const": "githubGrants",
+          "description": "The ledger of GitHub tokens handed to running computers.",
+          "type": "string"
+        },
+        {
+          "const": "githubPersonalToken",
+          "description": "A GitHub personal access token.",
+          "type": "string"
+        },
+        {
+          "const": "secretsVault",
+          "description": "The secrets vault.",
+          "type": "string"
+        },
+        {
+          "const": "proxyCa",
+          "description": "A macOS computer's proxy certificate authority (`computerId` names the computer).",
+          "type": "string"
+        }
+      ]
+    },
+    "CredentialRepairItem": {
+      "properties": {
+        "computerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CredentialKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/CredentialRepairOutcome"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "CredentialRepairOutcome": {
+      "description": "What a repair did for one item.",
+      "oneOf": [
+        {
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "alreadyAccessible",
+          "description": "It was usable already; nothing was asked.",
+          "type": "string"
+        },
+        {
+          "const": "repaired",
+          "description": "macOS asked and the user allowed it.",
+          "type": "string"
+        },
+        {
+          "const": "stillDenied",
+          "description": "macOS asked and the user declined, or could not ask.",
+          "type": "string"
+        }
+      ]
+    },
+    "CredentialState": {
+      "description": "Whether the engine can use an item without asking.",
+      "oneOf": [
+        {
+          "enum": [
+            "accessible"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "denied",
+          "description": "The item exists, but this engine build is not allowed to use it.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "The Keychain failed in some other way.",
+          "type": "string"
+        }
+      ]
+    },
+    "CredentialsRepairResult": {
+      "description": "`status` is read again after the repair, with Keychain prompts off again.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CredentialRepairItem"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/CredentialsStatus"
+        }
+      },
+      "required": [
+        "items",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CredentialsStatus": {
+      "description": "Only items that exist are listed; an item the engine never made is not a problem.",
+      "properties": {
+        "deniedCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CredentialItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "deniedCount"
+      ],
+      "type": "object"
+    },
     "DependencyCheck": {
       "properties": {
         "detail": {
@@ -6635,6 +6804,8 @@
         "display.viewer.sound.check",
         "editor.command",
         "editor.includeNotice",
+        "engine.credentials.repair",
+        "engine.credentials.status",
         "engine.disconnect",
         "engine.handshake",
         "engine.shutdown",
@@ -7584,6 +7755,38 @@
           "properties": {
             "method": {
               "const": "editor.includeNotice",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "engine.credentials.repair",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "engine.credentials.status",
               "type": "string"
             },
             "params": {
@@ -9937,6 +10140,38 @@
                 "string",
                 "null"
               ]
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "engine.credentials.repair",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/CredentialsRepairResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "engine.credentials.status",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/CredentialsStatus"
             }
           },
           "required": [
@@ -14345,6 +14580,18 @@
       "name": "editor.includeNotice",
       "paramsType": "common::EmptyParams",
       "resultType": "Option<String>"
+    },
+    {
+      "kind": "command",
+      "name": "engine.credentials.repair",
+      "paramsType": "credentials::EngineCredentialsRepairParams",
+      "resultType": "credentials::CredentialsRepairResult"
+    },
+    {
+      "kind": "query",
+      "name": "engine.credentials.status",
+      "paramsType": "credentials::EngineCredentialsStatusParams",
+      "resultType": "credentials::CredentialsStatus"
     },
     {
       "kind": "command",

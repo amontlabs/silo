@@ -65,6 +65,8 @@ pub async fn handle(
         MethodName::SettingsRead => settings_read(params, context),
         MethodName::SettingsUpdate => settings_update(params, context),
         MethodName::SettingsFlush => settings_flush(params, context),
+        MethodName::EngineCredentialsStatus => engine_credentials_status(params, context).await,
+        MethodName::EngineCredentialsRepair => engine_credentials_repair(params, context).await,
         MethodName::EngineDisconnect => engine_disconnect(params, context),
         MethodName::EngineShutdown => engine_shutdown(params, context),
         MethodName::EngineUpdatePrepare => engine_update_prepare(params, context),
@@ -437,6 +439,49 @@ async fn engine_update_abort(
             message,
         })?;
     Ok(output(Value::Null))
+}
+
+// MARK: Keychain access
+
+fn local_computer_ids(context: &HandlerContext) -> Vec<String> {
+    silo_engine::macos_computers::computer_ids(&context.silod_context().macos_context())
+}
+
+/// Which of the engine's Keychain items it can use. Reads only; never prompts.
+async fn engine_credentials_status(
+    params: &Value,
+    context: &HandlerContext,
+) -> Result<HandlerOutput, DispatchError> {
+    let _: silo_api::methods::credentials::EngineCredentialsStatusParams =
+        context.decode_params(params)?;
+    let ids = local_computer_ids(context);
+    let status = tokio::task::spawn_blocking(move || silo_engine::credential_access::status(&ids))
+        .await
+        .map_err(|_| DispatchError::internal("The Keychain status could not be read."))?;
+    Ok(output(encode(&status)?))
+}
+
+/// The user-started Keychain access repair: macOS may show its access dialogs while it runs.
+/// Clients call this only from an explicit user action.
+async fn engine_credentials_repair(
+    params: &Value,
+    context: &HandlerContext,
+) -> Result<HandlerOutput, DispatchError> {
+    let _: silo_api::methods::credentials::EngineCredentialsRepairParams =
+        context.decode_params(params)?;
+    let ids = local_computer_ids(context);
+    let result = tokio::task::spawn_blocking(move || silo_engine::credential_access::repair(&ids))
+        .await
+        .map_err(|_| DispatchError::internal("The Keychain access repair was interrupted."))?
+        .map_err(|message| DispatchError {
+            code: if message.contains("already running") {
+                ErrorCode::Busy
+            } else {
+                ErrorCode::Internal
+            },
+            message,
+        })?;
+    Ok(output(encode(&result)?))
 }
 
 // MARK: Updates

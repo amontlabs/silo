@@ -99,6 +99,8 @@ define_registry! {
     DisplayViewerSoundCheck => ("display.viewer.sound.check", Query, display::ViewerConnectionParams, display::ViewerSoundCheckResult);
     EditorCommand => ("editor.command", Command, terminal::EditorCommandParams, terminal::CommandResult);
     EditorIncludeNotice => ("editor.includeNotice", Query, common::EmptyParams, Option<String>);
+    EngineCredentialsRepair => ("engine.credentials.repair", Command, credentials::EngineCredentialsRepairParams, credentials::CredentialsRepairResult);
+    EngineCredentialsStatus => ("engine.credentials.status", Query, credentials::EngineCredentialsStatusParams, credentials::CredentialsStatus);
     EngineDisconnect => ("engine.disconnect", Command, engine::EngineDisconnectParams, ());
     EngineHandshake => ("engine.handshake", Query, transport::HandshakeParams, transport::HandshakeResult);
     EngineShutdown => ("engine.shutdown", Job, engine::EngineShutdownParams, common::JobStartResult);
@@ -203,20 +205,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 146);
+        assert_eq!(METHOD_REGISTRY.len(), 148);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            46
+            47
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            65
+            66
         );
         assert_eq!(
             METHOD_REGISTRY

@@ -83,6 +83,23 @@ pub fn forbid_interaction() -> Result<(), String> {
     Ok(())
 }
 
+/// Lets Keychain calls of this process prompt again. Only the user-started access repair
+/// (`credential_access`) calls this, and it forbids prompts again when it ends.
+pub fn allow_interaction() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: a plain Security framework call with a Boolean argument.
+        let status =
+            unsafe { keychain_status_sys::keychain::SecKeychainSetUserInteractionAllowed(1) };
+        if status != 0 {
+            return Err(format!(
+                "Could not allow Keychain access to ask (OSStatus {status})."
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Whether Keychain calls of this process are forbidden from prompting.
 #[cfg(target_os = "macos")]
 pub fn interaction_forbidden() -> bool {

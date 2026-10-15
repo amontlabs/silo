@@ -17,6 +17,7 @@ pub mod common;
 pub mod computer_use;
 pub mod computers;
 pub mod connections;
+pub mod credentials;
 pub mod desktop;
 pub mod device;
 pub mod display;

@@ -97,6 +97,19 @@ To make approvals survive rebuilds, sign the dev engine with a stable identity.
 4. The first time the engine hits an existing item, approve it once in Silo (or in Keychain
    Access, Get Info, Access Control, add `Silo Engine`), and choose Always Allow. The next
    build with the same identity matches the same designated requirement and is not asked again.
+   (Correction from the live run: without a Team ID each item's partition list names the
+   creating build's cdhash, so every rebuild is refused again. See the user-started repair
+   below.)
+
+**Keychain access repair.** `silod` never lets the Keychain prompt, so after an engine update
+the items an earlier build made fail with `credential_access_denied`. `engine.credentials.status`
+lists the engine's items (GitHub sign-in, token ledger, personal token, secrets vault, one proxy
+CA per macOS computer) as accessible, denied or failed. `engine.credentials.repair` is the only
+place prompts are allowed: a client calls it only from a user click; it allows Keychain UI for
+that one call on its own thread, touches each denied item so macOS shows its dialog (choose
+Always Allow), and forbids prompts again before it returns, even on an error or a panic. The
+switch is process-wide, so unattended Keychain calls that overlap the call could also prompt;
+one repair runs at a time.
 
 The cargo-built `silod` used by tests and the hand-assembled bundles of live runs must be
 sealed the same way: `codesign --force --sign "$SILO_ENGINE_SIGNING_IDENTITY" --options runtime

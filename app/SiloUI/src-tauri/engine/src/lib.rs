@@ -16,6 +16,7 @@ pub mod computer_names;
 pub mod computer_use;
 pub mod context;
 pub mod creation_inputs;
+pub mod credential_access;
 pub mod credential_store;
 pub mod dependencies;
 pub mod desktop;
