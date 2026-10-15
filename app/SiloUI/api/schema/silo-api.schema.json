@@ -6202,6 +6202,14 @@
         "needsPersonalizing": {
           "type": "boolean"
         },
+        "note": {
+          "default": null,
+          "description": "Informational only: something to know that is not a problem and needs no action (for\nexample, an imported computer has no SecureToken). Never a failure detail.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "osVersion": {
           "default": null,
           "type": [

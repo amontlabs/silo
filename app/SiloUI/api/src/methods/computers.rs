@@ -370,6 +370,10 @@ pub struct MacosComputer {
     pub progress: Option<f64>,
     #[serde(default)]
     pub detail: Option<String>,
+    /// Informational only: something to know that is not a problem and needs no action (for
+    /// example, an imported computer has no SecureToken). Never a failure detail.
+    #[serde(default)]
+    pub note: Option<String>,
     pub display_open: bool,
     pub installed: bool,
     pub setup_complete: bool,

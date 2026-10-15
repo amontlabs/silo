@@ -185,6 +185,8 @@ pub struct MacosComputer {
     state: State,
     progress: Option<f64>,
     detail: Option<String>,
+    /// Something to know about the computer that is not a problem and needs no action.
+    note: Option<String>,
     display_open: bool,
     installed: bool,
     setup_complete: bool,
@@ -196,6 +198,9 @@ pub struct MacosComputer {
     /// A Restore that the next Start continues.
     pending_restore: Option<checkpoints::PendingRestore>,
 }
+
+/// The informational note of an imported computer without a SecureToken (95 §3).
+const SECURE_TOKEN_NOTE: &str = "This imported computer has no SecureToken. It works normally, but it cannot turn on FileVault or change its password the SecureToken way.";
 
 /// The template new computers are copied from.
 #[derive(Clone, Debug, Serialize)]
@@ -272,6 +277,10 @@ impl Entry {
             state: self.state,
             progress: self.progress,
             detail: self.detail.clone(),
+            note: self
+                .record
+                .secure_token_missing
+                .then(|| SECURE_TOKEN_NOTE.to_owned()),
             display_open: self.display_open,
             installed: self.record.installed,
             setup_complete: self.record.setup_complete(),
@@ -8571,6 +8580,7 @@ mod tests {
                 state: State::Stopped,
                 progress: None,
                 detail: None,
+                note: None,
                 display_open: false,
                 installed: false,
                 setup_complete: false,
@@ -9479,6 +9489,14 @@ mod tests {
         assert_eq!(json["state"], "setting-up");
         assert_eq!(json["detail"], "Creating the account");
         assert_eq!(json["setupComplete"], true);
+        assert_eq!(json["note"], serde_json::Value::Null);
+        done.record.secure_token_missing = true;
+        let json = serde_json::to_value(done.row()).unwrap();
+        assert_eq!(json["note"], SECURE_TOKEN_NOTE);
+        assert_eq!(
+            json["detail"], "Creating the account",
+            "a note is not a failure detail"
+        );
         let state = serde_json::to_value(MacosComputersState {
             supported: false,
             unsupported_reason: Some("no".into()),

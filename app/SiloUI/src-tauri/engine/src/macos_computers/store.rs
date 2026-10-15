@@ -163,6 +163,10 @@ pub(super) struct Record {
     /// first password-authenticated personalization boot.
     #[serde(default)]
     pub imported: bool,
+    /// An imported computer whose account has no SecureToken: the offline password rewrite
+    /// cannot keep it and the engine cannot restore it. Informational only.
+    #[serde(default)]
+    pub secure_token_missing: bool,
 }
 
 impl Record {
@@ -327,6 +331,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         pending_restore: None,
         inherited_access: false,
         imported: false,
+        secure_token_missing: false,
     }
 }
 

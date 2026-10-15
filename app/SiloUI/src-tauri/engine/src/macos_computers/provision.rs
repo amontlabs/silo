@@ -138,12 +138,9 @@ impl Provision<'_> {
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
         let developer_tools_version = developer_tools::version();
-        // A SecureToken that could not be restored must not stop the remaining steps: the
-        // computer is finished first and the setup then reports the failure.
-        let mut token_failure: Option<Stop> = None;
         if record.setup.needs_personalizing {
             if record.imported {
-                token_failure = self.personalize_import(record)?;
+                self.personalize_import(record)?;
             } else {
                 self.personalize(record)?;
             }
@@ -183,7 +180,7 @@ impl Provision<'_> {
                 record.imported = false;
                 self.mark(record, |_| {})?;
             }
-            return token_failure.map_or(Ok(()), Err);
+            return Ok(());
         }
         self.say("Starting macOS")?;
         self.boot(Login::Key)?;
@@ -271,7 +268,7 @@ impl Provision<'_> {
             record.imported = false;
             self.mark(record, |_| {})?;
         }
-        token_failure.map_or(Ok(()), Err)
+        Ok(())
     }
 
     /// The account, its automatic login and SSH: a first boot so macOS writes its
@@ -447,9 +444,9 @@ impl Provision<'_> {
     /// An imported disk has already had its managed password hash changed offline.
     /// Its first setup boot accepts that password, installs this computer's new
     /// host key and authorization, then proves key login before any other setup runs.
-    /// Returns the SecureToken failure, if any, for the caller to report once every other
-    /// step has finished.
-    fn personalize_import(&self, record: &mut Record) -> Result<Option<Stop>, Stop> {
+    /// A SecureToken that cannot be restored is not a failure: the computer is complete
+    /// without one, and the record keeps an informational note (95 §3, SecureToken).
+    fn personalize_import(&self, record: &mut Record) -> Result<(), Stop> {
         let account = guest_access::account(self.layout)?;
         if let Some(log) = &self.log {
             log.hide(&account.password);
@@ -475,8 +472,9 @@ impl Provision<'_> {
         // the computer is up and the password is known.
         let token = self.enable_secure_token(record, &account)?;
         self.shut_down()?;
+        record.secure_token_missing = secure_token_missing(token);
         self.mark(record, |setup| setup.needs_personalizing = false)?;
-        Ok(secure_token_failure(token))
+        Ok(())
     }
 
     /// Enables SecureToken for the working account and reads it back. Repeating it is safe.
@@ -917,13 +915,10 @@ fn sip_disabled(csrutil_status: &str) -> bool {
     csrutil_status.to_ascii_lowercase().contains("disabled")
 }
 
-/// The failure the setup reports once an imported computer is otherwise finished.
-fn secure_token_failure(token: personalize::SecureToken) -> Option<Stop> {
-    (token != personalize::SecureToken::Enabled).then(|| {
-        Stop::Failed(
-            "Silo could not turn on SecureToken for the imported computer's account. It is otherwise ready to start.".into(),
-        )
-    })
+/// Whether the working account has no SecureToken after an import. Anything but a
+/// confirmed token counts as missing: the note is informational, never a setup failure.
+fn secure_token_missing(token: personalize::SecureToken) -> bool {
+    token != personalize::SecureToken::Enabled
 }
 
 fn base64_encode(bytes: &[u8]) -> String {
@@ -936,16 +931,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_missing_secure_token_is_reported_after_an_import_is_finished() {
-        assert!(secure_token_failure(personalize::SecureToken::Enabled).is_none());
+    fn only_an_unconfirmed_secure_token_is_noted_after_an_import() {
+        assert!(!secure_token_missing(personalize::SecureToken::Enabled));
         for token in [
             personalize::SecureToken::Disabled,
             personalize::SecureToken::Unknown,
         ] {
-            assert!(matches!(
-                secure_token_failure(token),
-                Some(Stop::Failed(message)) if message.contains("otherwise ready to start")
-            ));
+            assert!(secure_token_missing(token));
         }
     }
 
