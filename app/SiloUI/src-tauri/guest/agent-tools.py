@@ -170,6 +170,8 @@ def install_claude(lock, work):
     script = Path(work) / 'claude-install.sh'
     download(installer['url'], installer['sha256'], script)
     script.chmod(0o755)
+    # The working account runs the script, and the work directory is a private temporary one.
+    Path(work).chmod(0o755)
     home = account_home()
     # The documented installer, as the working account. It checks the binary against
     # Anthropic's release manifest. Auto-update stays off so the pinned version holds.
