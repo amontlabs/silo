@@ -1095,6 +1095,17 @@ esac
 exit 2
 "#;
 
+    /// Command sessions live in a process-wide table keyed by job id, and every fixture's job
+    /// registry hands out `job:1`, `job:2`, ... again. Tests that start local command jobs
+    /// hold this lock so two fixtures never own the same job id at the same time.
+    static EXEC_JOB_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn exclusive_exec_jobs() -> std::sync::MutexGuard<'static, ()> {
+        EXEC_JOB_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     struct NoopMainThread;
     impl MainThread for NoopMainThread {
         fn run(&self, _work: Box<dyn FnOnce() + Send>) -> Result<(), String> {
@@ -1406,6 +1417,7 @@ exit 2
 
     #[tokio::test]
     async fn an_owner_serves_a_controllers_command_as_its_own_job_with_replayable_output() {
+        let _jobs = exclusive_exec_jobs();
         let fixture = Fixture::new();
         let typed: GuestExecStartParams = serde_json::from_value(json!({
             "computerId": COMPUTER, "argv": ["sh", "-c", "printf owner-output"],
@@ -1499,6 +1511,7 @@ exit 2
 
     #[tokio::test]
     async fn exec_jobs_take_input_stream_output_replay_it_and_cancel() {
+        let _jobs = exclusive_exec_jobs();
         let fixture = Fixture::new();
         let started = fixture
             .ok(

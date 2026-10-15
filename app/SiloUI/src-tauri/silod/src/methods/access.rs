@@ -2737,6 +2737,20 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn network_calls_for_a_macos_computer_go_to_the_macos_store() {
         const MACOS: &str = "66666666-6666-4666-8666-666666666666";
+        // The macOS inventory is process-wide and loads from disk once. Hold its test lock
+        // and forget what other tests loaded, so this test's computer is read from this
+        // fixture's folder; forget it again afterwards for whoever runs next.
+        let _gate = crate::methods::process_gate_lock();
+        let _registry = crate::methods::MACOS_REGISTRY_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        struct ForgetInventory;
+        impl Drop for ForgetInventory {
+            fn drop(&mut self) {
+                silo_engine::macos_computers::reset_registry_for_test();
+            }
+        }
+        let _forget = ForgetInventory;
         let fixture = fixture();
         let folder = fixture
             .context
@@ -2755,6 +2769,7 @@ pub(crate) mod tests {
             .to_string(),
         )
         .unwrap();
+        silo_engine::macos_computers::reset_registry_for_test();
         assert!(macos_proxy::owning_context(MACOS).is_some());
 
         // Before the fix these answered "This computer no longer exists." (the Linux lookup).
