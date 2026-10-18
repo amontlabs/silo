@@ -9,22 +9,33 @@ import tempfile
 import unittest
 
 from embed_engine import (
-    DISTRIBUTION, REQUIREMENT_KEY, SILOD, codesign_engine, embed_engine, engine_requirement, signing_identity,
+    DISTRIBUTION, REQUIREMENT_KEY, SILOD, codesign_engine, embed_engine, engine_requirement, resolve_signing_identity,
+    signing_identity,
 )
 from macos_release_signing import verify_engine_requirement
 
-CERTIFICATE_DER = b'not a real certificate, only bytes to hash'
-CERTIFICATE_PEM = ('-----BEGIN CERTIFICATE-----\n' + base64.b64encode(CERTIFICATE_DER).decode()
-                   + '\n-----END CERTIFICATE-----\n')
+HASH = 'AB' * 20
+OTHER = 'CD' * 20
+PEM = '-----BEGIN CERTIFICATE-----\nQUJD\n-----END CERTIFICATE-----\n'
+OLD_PEM = '-----BEGIN CERTIFICATE-----\nREVG\n-----END CERTIFICATE-----\n'
 
 
-def fake_tools(subject):
-    """Stands in for `security find-certificate` and `openssl x509`."""
+def fake_tools(subject, identities=None, name='Silo Dev Signing'):
+    """Stands in for `security find-identity`, `security find-certificate` and `openssl x509`."""
     calls = []
+    identities = [(HASH, name)] if identities is None else identities
+    listing = ''.join(f'  {n}) {digest} "{label}"\n' for n, (digest, label) in enumerate(identities, 1))
+    certificates = f'SHA-1 hash: {OTHER}\nkeychain: x\n{OLD_PEM}SHA-1 hash: {HASH}\nkeychain: x\n{PEM}'
 
     def run(command, **kwargs):
         calls.append(command)
-        output = CERTIFICATE_PEM if command[0] == 'security' else f'subject={subject}\n'
+        if command[:2] == ['security', 'find-identity']:
+            output = listing + f'     {len(identities)} valid identities found\n'
+        elif command[:2] == ['security', 'find-certificate']:
+            output = certificates
+        else:
+            assert kwargs['input'] == PEM.strip(), 'the subject must come from the certificate the hash names'
+            output = f'subject={subject}\n'
         return subprocess.CompletedProcess(command, 0, output)
     run.calls = calls
     return run
@@ -107,27 +118,37 @@ class EmbedEngineTests(unittest.TestCase):
             self.assertNotIn(REQUIREMENT_KEY, source)
 
     def test_the_requirement_follows_the_signing_identity(self):
-        name = {'SILO_ENGINE_SIGNING_IDENTITY': 'Developer ID Application: Amont (ABCDE12345)'}
+        name = 'Developer ID Application: Amont (ABCDE12345)'
         engine = 'org.silo.preview.engine'
-        self.assertEqual(engine_requirement(engine, {}), 'identifier "org.silo.preview.engine"')
-        developer_id = fake_tools('UID=ABCDE12345,CN=Developer ID Application: Amont (ABCDE12345),OU=ABCDE12345,O=Amont,C=US')
-        self.assertEqual(engine_requirement(engine, name, developer_id),
-                         'anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345"')
-        self.assertEqual(developer_id.calls[0], ['security', 'find-certificate', '-c', name['SILO_ENGINE_SIGNING_IDENTITY'], '-p'])
-        local = {'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}
-        pinned = f'certificate leaf = H"{hashlib.sha1(CERTIFICATE_DER).hexdigest()}"'
-        self.assertEqual(engine_requirement(engine, local, fake_tools('CN=Silo Dev Signing')), pinned)
-        # A team on a non-Developer-ID certificate is not an Apple-anchored identity.
-        self.assertEqual(engine_requirement(engine, local, fake_tools('CN=Silo Dev Signing,OU=ABCDE12345')), pinned)
-        digest = 'AB' * 20
-        self.assertEqual(engine_requirement(engine, {'SILO_ENGINE_SIGNING_IDENTITY': digest}),
-                         f'certificate leaf = H"{digest.lower()}"')
+        self.assertEqual(engine_requirement(engine, '-'), 'identifier "org.silo.preview.engine"')
+        developer_id = fake_tools('UID=ABCDE12345,CN=' + name + ',OU=ABCDE12345,O=Amont,C=US', name=name)
+        self.assertEqual(engine_requirement(engine, HASH, developer_id),
+                         'anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists'
+                         ' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+                         ' and certificate leaf[subject.OU] = "ABCDE12345"')
+        pinned = f'certificate leaf = H"{HASH.lower()}"'
+        self.assertEqual(engine_requirement(engine, HASH, fake_tools('CN=Silo Dev Signing')), pinned)
+        # A team on a non-Developer-ID certificate (Apple Development) is pinned by hash.
+        self.assertEqual(engine_requirement(engine, HASH, fake_tools('CN=Apple Development: A,OU=ABCDE12345')), pinned)
 
-    def test_the_embedded_requirement_comes_from_the_identity_that_signs(self):
+    def test_the_identity_is_one_exact_valid_certificate_and_codesign_gets_its_hash(self):
         environ = {'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}
-        engine, _ = self.embed(environ=environ, run=fake_tools('CN=Silo Dev Signing'))
-        info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
-        self.assertRegex(info[REQUIREMENT_KEY], r'^certificate leaf = H"[0-9a-f]{40}"$')
+        self.assertEqual(resolve_signing_identity({}), '-')
+        self.assertEqual(resolve_signing_identity(environ, fake_tools('')), HASH)
+        self.assertEqual(resolve_signing_identity({'SILO_ENGINE_SIGNING_IDENTITY': HASH.lower()}), HASH)
+        # A substring is not a match, and two certificates with the name are ambiguous.
+        similar = fake_tools('', identities=[(OTHER, 'Silo Dev Signing Old'), (HASH, 'Silo Dev Signing')])
+        self.assertEqual(resolve_signing_identity(environ, similar), HASH)
+        for identities in ([], [(OTHER, 'Silo Dev Signing Old')], [(HASH, 'Silo Dev Signing'), (OTHER, 'Silo Dev Signing')]):
+            with self.subTest(identities=identities), self.assertRaisesRegex(RuntimeError, 'exactly one'):
+                resolve_signing_identity(environ, fake_tools('', identities=identities))
+        run = fake_tools('CN=Silo Dev Signing')
+        engine, _ = self.embed(environ=environ, run=run)
+        self.assertEqual(plistlib.loads((engine / 'Contents/Info.plist').read_bytes())[REQUIREMENT_KEY],
+                         f'certificate leaf = H"{HASH.lower()}"')
+        signed = []
+        codesign_engine(self.root / 'e.app', self.root / 'ent.plist', run=lambda c, **_: signed.append(c), identity=HASH)
+        self.assertEqual(signed[0][signed[0].index('--sign') + 1], HASH)
 
     def test_verification_rejects_an_engine_without_a_requirement(self):
         engine, _ = self.embed()
