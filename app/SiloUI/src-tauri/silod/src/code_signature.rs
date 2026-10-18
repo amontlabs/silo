@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use core_foundation::url::CFURL;
+use objc2_foundation::{NSBundle, NSString};
 use security_framework::os::macos::code_signing::{Flags, SecRequirement, SecStaticCode};
 use silo_engine::channel::Channel;
 
@@ -34,12 +35,20 @@ pub fn bundle_path_for_executable(executable: &Path) -> Result<PathBuf, String> 
     Ok(bundle.to_path_buf())
 }
 
+/// The Info.plist key the packager sets, before signing, to the requirement that the
+/// bundle's signer must satisfy. The bundle signature seals the Info.plist.
+pub const CODE_REQUIREMENT_KEY: &str = "SiloEngineCodeRequirement";
+
+fn bundle_code_requirement() -> Option<String> {
+    NSBundle::mainBundle()
+        .objectForInfoDictionaryKey(&NSString::from_str(CODE_REQUIREMENT_KEY))
+        .and_then(|value| value.downcast::<NSString>().ok())
+        .map(|value| value.to_string())
+}
+
 pub fn validate_bundle(bundle_path: &Path, bundle_identifier: &str) -> Result<(), String> {
-    let requirement = requirement_for_bundle(
-        bundle_identifier,
-        option_env!("SILOD_PRODUCTION_CODE_REQUIREMENT"),
-        option_env!("SILOD_DEVELOPMENT_CODE_REQUIREMENT"),
-    )?;
+    let requirement =
+        requirement_for_bundle(bundle_identifier, bundle_code_requirement().as_deref())?;
     let url = CFURL::from_path(bundle_path, true).ok_or_else(|| {
         format!(
             "Cannot create a Security.framework URL for {}",
@@ -69,15 +78,14 @@ pub fn validate_bundle(bundle_path: &Path, bundle_identifier: &str) -> Result<()
 
 fn requirement_for_bundle(
     bundle_identifier: &str,
-    production_requirement: Option<&str>,
-    development_requirement: Option<&str>,
+    requirement: Option<&str>,
 ) -> Result<String, String> {
+    let requirement = requirement.filter(|requirement| !requirement.trim().is_empty());
     if bundle_identifier == engine_bundle_identifier(Channel::Production) {
-        return pinned_requirement(production_requirement, bundle_identifier);
+        return pinned_requirement(requirement, bundle_identifier);
     }
     if bundle_identifier == engine_bundle_identifier(Channel::Development) {
-        let base = development_requirement
-            .filter(|requirement| !requirement.trim().is_empty())
+        let base = requirement
             .map(str::to_owned)
             .unwrap_or_else(|| format!("identifier \"{bundle_identifier}\""));
         return Ok(requirement_with_identifier(&base, bundle_identifier));
@@ -98,7 +106,7 @@ fn pinned_requirement(
     let requirement = requirement
         .filter(|requirement| !requirement.trim().is_empty())
         .ok_or_else(|| {
-            "production silod requires SILOD_PRODUCTION_CODE_REQUIREMENT at build time".to_owned()
+            format!("production silod requires {CODE_REQUIREMENT_KEY} in its Info.plist")
         })?;
     Ok(requirement_with_identifier(requirement, bundle_identifier))
 }
@@ -112,14 +120,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn production_bundle_requires_a_build_time_pinned_requirement() {
+    fn production_bundle_requires_a_requirement_from_its_info_plist() {
         let production = engine_bundle_identifier(Channel::Production);
-        assert!(requirement_for_bundle(&production, None, None).is_err());
+        assert_eq!(
+            requirement_for_bundle(&production, None).unwrap_err(),
+            "production silod requires SiloEngineCodeRequirement in its Info.plist"
+        );
+        assert!(requirement_for_bundle(&production, Some("  ")).is_err());
         assert_eq!(
             requirement_for_bundle(
                 &production,
-                Some("anchor apple generic and certificate leaf[subject.OU] = \"ABCDE12345\""),
-                None
+                Some("anchor apple generic and certificate leaf[subject.OU] = \"ABCDE12345\"")
             )
             .unwrap(),
             "(anchor apple generic and certificate leaf[subject.OU] = \"ABCDE12345\") and identifier \"org.silo.preview.engine\""
@@ -130,9 +141,17 @@ mod tests {
     fn development_bundle_uses_its_identity_or_a_pinned_requirement() {
         let development = engine_bundle_identifier(Channel::Development);
         assert_eq!(
-            requirement_for_bundle(&development, None, None).unwrap(),
+            requirement_for_bundle(&development, None).unwrap(),
             format!("(identifier \"{development}\") and identifier \"{development}\"")
         );
-        assert!(requirement_for_bundle("org.silo.other.engine", None, None).is_err());
+        assert_eq!(
+            requirement_for_bundle(&development, Some("")).unwrap(),
+            format!("(identifier \"{development}\") and identifier \"{development}\"")
+        );
+        assert_eq!(
+            requirement_for_bundle(&development, Some("certificate leaf = H\"abc\"")).unwrap(),
+            format!("(certificate leaf = H\"abc\") and identifier \"{development}\"")
+        );
+        assert!(requirement_for_bundle("org.silo.other.engine", None).is_err());
     }
 }
