@@ -6,9 +6,7 @@ the calling bundle (`Contents/Library/LaunchAgents`), while the executable stays
 bundle so it sees its own identifier, manifest and resources. Fjord embeds the identical
 distribution; whichever app registers first supplies the one engine per Mac.
 """
-import base64
 from pathlib import Path
-import hashlib
 import json
 import os
 import plistlib
@@ -38,38 +36,56 @@ REQUIREMENT_KEY = 'SiloEngineCodeRequirement'
 DEVELOPER_ID_CERTIFICATE = 'Developer ID Application:'
 
 
-def signing_certificate(identity, run=subprocess.run):
-    """The PEM of the first keychain certificate named `identity`."""
-    result = run(['security', 'find-certificate', '-c', identity, '-p'],
-                 check=True, capture_output=True, text=True)
-    match = re.search(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', result.stdout, re.S)
-    if not match:
-        raise RuntimeError(f'No keychain certificate is named {identity!r}.')
-    return match.group(0)
+def resolve_signing_identity(environ=os.environ, run=subprocess.run):
+    """What `codesign --sign` receives: `-` (ad hoc) or the SHA-1 of one valid signing identity.
+
+    A name is matched exactly against `security find-identity -v -p codesigning`, which lists only
+    certificates with a private key, and must match exactly one. Signing with the hash keeps the
+    signer and the requirement pinned to the same certificate."""
+    identity = signing_identity(environ)
+    if identity == '-' or re.fullmatch(r'[0-9A-Fa-f]{40}', identity):
+        return identity.upper() if identity != '-' else identity
+    listing = run(['security', 'find-identity', '-v', '-p', 'codesigning'],
+                  check=True, capture_output=True, text=True).stdout
+    found = {digest for digest, name in re.findall(r'^\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.*)"', listing, re.M)
+             if name == identity}
+    if len(found) != 1:
+        raise RuntimeError(f'Expected exactly one valid code-signing identity named {identity!r}, found {len(found)}.')
+    return found.pop().upper()
 
 
-def engine_requirement(identifier, environ=os.environ, run=subprocess.run):
+def certificate_with_hash(digest, run=subprocess.run):
+    """The PEM of the keychain certificate whose SHA-1 is `digest`."""
+    listing = run(['security', 'find-certificate', '-a', '-Z', '-p'],
+                  check=True, capture_output=True, text=True).stdout
+    for found, pem in re.findall(r'SHA-1 hash: ([0-9A-Fa-f]{40})\n.*?(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)',
+                                 listing, re.S):
+        if found.upper() == digest.upper():
+            return pem
+    raise RuntimeError(f'No keychain certificate has SHA-1 {digest}.')
+
+
+def engine_requirement(identifier, identity, run=subprocess.run):
     """The code requirement that the signer of the engine named `identifier` must satisfy.
 
-    It follows how `codesign_engine` signs: a Developer ID identity with a team is trusted by its
-    team, any other identity by its exact leaf certificate, and ad hoc by the bundle identifier."""
-    identity = signing_identity(environ)
+    `identity` is from `resolve_signing_identity`. A Developer ID certificate with a team is trusted
+    by its team (and Apple's Developer ID chain), any other certificate by its exact hash, and ad hoc
+    by the bundle identifier."""
     if identity == '-':
         return f'identifier "{identifier}"'
-    if re.fullmatch(r'[0-9A-Fa-f]{40}', identity):
-        return f'certificate leaf = H"{identity.lower()}"'
-    pem = signing_certificate(identity, run)
-    subject = run(['openssl', 'x509', '-noout', '-subject', '-nameopt', 'RFC2253'], input=pem,
-                  check=True, capture_output=True, text=True).stdout.strip()
+    pinned = f'certificate leaf = H"{identity.lower()}"'
+    subject = run(['openssl', 'x509', '-noout', '-subject', '-nameopt', 'RFC2253'],
+                  input=certificate_with_hash(identity, run), check=True, capture_output=True, text=True).stdout.strip()
     team = re.search(r'(?:^|,)OU=([A-Z0-9]{10})(?:,|$)', subject.removeprefix('subject=').strip())
     if DEVELOPER_ID_CERTIFICATE in subject and team:
-        return f'anchor apple generic and certificate leaf[subject.OU] = "{team.group(1)}"'
-    der = base64.b64decode(''.join(pem.splitlines()[1:-1]))
-    return f'certificate leaf = H"{hashlib.sha1(der).hexdigest()}"'
+        return ('anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists'
+                ' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+                f' and certificate leaf[subject.OU] = "{team.group(1)}"')
+    return pinned
 
 
-def codesign_engine(engine, entitlements, run=subprocess.run, environ=os.environ):
-    run(['codesign', '--force', '--sign', signing_identity(environ), '--options', 'runtime',
+def codesign_engine(engine, entitlements, run=subprocess.run, environ=os.environ, identity=None):
+    run(['codesign', '--force', '--sign', identity or signing_identity(environ), '--options', 'runtime',
          '--entitlements', str(entitlements), str(engine)], check=True, capture_output=True)
     run(['codesign', '--verify', '--strict', str(engine)], check=True, capture_output=True)
 
@@ -80,9 +96,10 @@ def embed_engine(bundle, silod_binary, *, identifier='org.silo.preview', build,
 
     `requirement` is written to the engine's Info.plist before signing; by default it is derived
     from the signing identity (`engine_requirement`)."""
+    identity = resolve_signing_identity(environ, run)
     if sign is None:
         def sign(engine, entitlements):
-            codesign_engine(engine, entitlements, run=run, environ=environ)
+            codesign_engine(engine, entitlements, run=run, environ=environ, identity=identity)
     bundle, silod_binary, source = Path(bundle), Path(silod_binary), Path(source)
     channel = 'production' if identifier == 'org.silo.preview' else 'development'
     agent = f'{identifier}.engine.plist'
@@ -106,7 +123,7 @@ def embed_engine(bundle, silod_binary, *, identifier='org.silo.preview', build,
     shutil.copy2(inputs['binary'], executable)
     executable.chmod(0o755)
     info = plistlib.loads(inputs['info'].read_bytes())
-    info[REQUIREMENT_KEY] = requirement or engine_requirement(f'{identifier}.engine', environ, run)
+    info[REQUIREMENT_KEY] = requirement or engine_requirement(f'{identifier}.engine', identity, run)
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
     shutil.copy2(inputs['plist'], contents / 'Library/LaunchAgents' / agent)
     manifest = json.loads(inputs['manifest'].read_text(encoding='utf-8'))

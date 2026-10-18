@@ -556,11 +556,14 @@ plutil -replace SiloEngineCodeRequirement -string '<requirement>' "Silo Engine.a
 ```
 
 The requirement must match the signature the packager then applies. Silo's own
-packaging (`scripts/embed_engine.py`) writes it from the engine signing
-identity: `anchor apple generic and certificate leaf[subject.OU] = "<TEAM>"` for
-a Developer ID identity, `certificate leaf = H"<sha1>"` for any other
-certificate, and `identifier "<engine bundle id>"` for an ad hoc signature, and
-`verify_engine` rejects a production engine without it. There are no build-time
+packaging (`scripts/embed_engine.py`) resolves `SILO_ENGINE_SIGNING_IDENTITY` to
+exactly one valid identity (`security find-identity`), signs with its SHA-1, and
+writes the requirement from that same certificate: for a Developer ID
+certificate, `anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists
+and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "<TEAM>"`;
+for any other certificate, `certificate leaf = H"<sha1>"`; and for an ad hoc
+signature, `identifier "<engine bundle id>"`. `verify_engine` rejects a
+production engine without it. There are no build-time
 requirement variables.
 
 ### Build an archive locally
