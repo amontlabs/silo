@@ -1,0 +1,114 @@
+name: Publish Silo engine
+
+# A tag engine-v<version> publishes the prebuilt silod that other apps embed.
+# <version> is the silod crate version, also engineVersion in the production
+# engine manifest. See docs/SiloUI-RELEASES.md#engine-releases.
+on:
+  push:
+    tags: ['engine-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: silo-engine-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.package.outputs.archive }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Require the tag to name the engine version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('app/SiloUI/src-tauri/silod/Cargo.toml', 'rb'))['package']['version'])")
+          if [[ "$TAG" != "engine-v$version" ]]; then
+            echo "::error::Tag $TAG must be engine-v$version, the silod version in Cargo.toml."
+            exit 1
+          fi
+      - name: Install pinned Rust toolchain with both macOS targets
+        run: |
+          set -euo pipefail
+          toolchain=$(python3 -c "import json; print(json.load(open('app/SiloUI/runtime-inputs.json'))['toolchain'])")
+          rustup toolchain install "$toolchain" --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default "$toolchain"
+      # silo-engine compiles the GitHub App configuration in, as the Silo app does.
+      - name: Build and package the universal engine
+        id: package
+        working-directory: app/SiloUI
+        env:
+          SILO_GITHUB_APP_SLUG: ${{ secrets.SILO_GITHUB_APP_SLUG }}
+          SILO_GITHUB_CLIENT_ID: ${{ secrets.SILO_GITHUB_CLIENT_ID }}
+          SILO_GITHUB_CLIENT_SECRET: ${{ secrets.SILO_GITHUB_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 scripts/package-engine.py --universal --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
+          echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
+      - name: Verify the archive
+        env:
+          TAG: ${{ github.ref_name }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          version="${TAG#engine-v}"
+          test "$ARCHIVE" = "silo-engine-$version-macos-universal.tar.gz"
+          cd "$RUNNER_TEMP/engine-release"
+          test "$(ls | wc -l)" -eq 2
+          shasum -a 256 -c "$ARCHIVE.sha256"
+          mkdir extracted
+          tar -xzf "$ARCHIVE" -C extracted
+          engine="extracted/silo-engine-$version"
+          archs=$(lipo -archs "$engine/bin/silod")
+          [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]] || { echo "::error::silod has architectures: $archs"; exit 1; }
+          python3 - "$engine" "$version" "$GITHUB_SHA" <<'PY'
+          import json, sys
+          engine, version, commit = sys.argv[1:]
+          info = json.load(open(f'{engine}/release.json'))
+          assert info['engineVersion'] == version and info['sourceCommit'] == commit, info
+          assert info['targets'] == ['aarch64-apple-darwin', 'x86_64-apple-darwin'], info
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: silo-engine
+          path: |
+            ${{ runner.temp }}/engine-release/*.tar.gz
+            ${{ runner.temp }}/engine-release/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: silo-engine
+          path: engine-release
+      - name: Create the engine release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          ARCHIVE: ${{ needs.build.outputs.archive }}
+        run: |
+          set -euo pipefail
+          cd engine-release
+          sha256sum -c "$ARCHIVE.sha256"
+          # Not "latest": the Silo app's update feed reads releases/latest.
+          gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+            --verify-tag --latest=false --title "Silo engine ${TAG#engine-v}" \
+            --notes "Prebuilt silod for macOS (arm64 and x86_64), built from $GITHUB_SHA. The binary is not code signed: the app that embeds it sets SiloEngineCodeRequirement in the engine Info.plist and signs it. See docs/SiloUI-RELEASES.md#engine-releases."
