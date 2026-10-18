@@ -38,13 +38,13 @@ response/time limits, and redacted errors.
 Source references: [GitHub implementation plan](../SiloUI-GITHUB-IMPLEMENTATION.md),
 [personal token contract](../SiloUI-GITHUB-PERSONAL-TOKENS.md),
 [generic secret contract](../SiloUI-SECRETS.md),
-[github.rs](../../app/SiloUI/src-tauri/src/github.rs),
-[github_tokens.rs](../../app/SiloUI/src-tauri/src/github_tokens.rs),
-[github_personal_token.rs](../../app/SiloUI/src-tauri/src/github_personal_token.rs),
-[github_http.rs](../../app/SiloUI/src-tauri/src/github_http.rs),
-[secrets.rs](../../app/SiloUI/src-tauri/src/secrets.rs),
-[secrets_runtime.rs](../../app/SiloUI/src-tauri/src/secrets_runtime.rs), and
-[runtime.rs](../../app/SiloUI/src-tauri/src/runtime.rs). The native runtime
+[github.rs](../../app/SiloUI/src-tauri/engine/src/github.rs),
+[github_tokens.rs](../../app/SiloUI/src-tauri/engine/src/github_tokens.rs),
+[github_personal_token.rs](../../app/SiloUI/src-tauri/engine/src/github_personal_token.rs),
+[github_http.rs](../../app/SiloUI/src-tauri/engine/src/github_http.rs),
+[secrets.rs](../../app/SiloUI/src-tauri/engine/src/secrets.rs),
+[secrets_runtime.rs](../../app/SiloUI/src-tauri/engine/src/secrets_runtime.rs), and
+[runtime.rs](../../app/SiloUI/src-tauri/engine/src/runtime/mod.rs). The native runtime
 adapter sends only the workspace's current grant profile through a host-only
 environment reference while applying it and checks the runtime update before
 caching it.

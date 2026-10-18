@@ -418,7 +418,7 @@ The native implementation supports two push routes:
 - When computer pushes are enabled, tools in the computer may push through Silo-controlled GitHub access. GitHub credentials remain on the host.
 - When computer pushes are disabled, guest pushes stay blocked. The user may select commits and click Push in Silo, which pushes from the host.
 
-App Push never grants standing push permission to the computer. It uses the bundled Git and Git LFS, standard Git transfers, only required committed Git/LFS data, and incremental transfer where the protocol supports it. The [GitHub implementation](SiloUI-GITHUB-IMPLEMENTATION.md#native-implementation) describes credential forwarding and host Push. The current [host adapter](../app/SiloUI/src-tauri/src/host_push.rs) checks authority before pushing the confirmed branch and commit through isolated bundled Git.
+App Push never grants standing push permission to the computer. It uses the bundled Git and Git LFS, standard Git transfers, only required committed Git/LFS data, and incremental transfer where the protocol supports it. The [GitHub implementation](SiloUI-GITHUB-IMPLEMENTATION.md#native-implementation) describes credential forwarding and host Push. The current [host adapter](../app/SiloUI/src-tauri/engine/src/host_push.rs) checks authority before pushing the confirmed branch and commit through isolated bundled Git.
 
 ## Resource and VM backup UX recommendation (2026-09-08)
 
@@ -434,7 +434,7 @@ Historical recommendation against MicroSandbox 0.6.17, not current export behavi
 
 ## Dependency assessment
 
-This assessment and the proposed checks below describe the 2026-09-08 snapshot, when native Git/Git LFS invocation and real backup operations were absent. The assessment is preserved as decision evidence. Current [dependency probes](../app/SiloUI/src-tauri/src/dependencies.rs) invoke bundled `git --version` and `git-lfs version` in an isolated environment; [host Push](../app/SiloUI/src-tauri/src/host_push.rs) invokes bundled Git for committed-object transfers. Follow [dependencies, export and import testing](SiloUI-DEPENDENCIES-BACKUP-TESTING.md) for current behavior.
+This assessment and the proposed checks below describe the 2026-09-08 snapshot, when native Git/Git LFS invocation and real backup operations were absent. The assessment is preserved as decision evidence. Current [dependency probes](../app/SiloUI/src-tauri/engine/src/dependencies.rs) invoke bundled `git --version` and `git-lfs version` in an isolated environment; [host Push](../app/SiloUI/src-tauri/engine/src/host_push.rs) invokes bundled Git for committed-object transfers. Follow [dependencies, export and import testing](SiloUI-DEPENDENCIES-BACKUP-TESTING.md) for current behavior.
 
 | Current row | Finding | Recommendation requiring approval |
 | --- | --- | --- |
@@ -460,7 +460,7 @@ That preparation left every row, label, layout, and interaction unchanged. The l
 ## Proposed real checks
 
 These are the original 2026-09-08 implementation requirements. The native
-[dependency module](../app/SiloUI/src-tauri/src/dependencies.rs) now implements
+[dependency module](../app/SiloUI/src-tauri/engine/src/dependencies.rs) now implements
 the probes; its unit tests and the dated packaging records below state their
 verification boundaries.
 

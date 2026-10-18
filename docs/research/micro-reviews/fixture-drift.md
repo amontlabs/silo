@@ -5,7 +5,7 @@
 The preview directory loader returned empty success for missing paths, listed
 stopped sandboxes, resolved remote requests by a bare name, and paged mutable
 arrays under a constant snapshot ID. The native
-[directory command](../../../app/SiloUI/src-tauri/src/files.rs) validates paths
+[directory command](../../../app/SiloUI/src-tauri/engine/src/files.rs) validates paths
 and 200-entry offsets, checks running VM state, sorts folders before files,
 and binds pagination to an owner/path snapshot for two minutes. The
 [guest helper](../../../app/SiloUI/src-tauri/guest/list-directory.py) reports
@@ -24,7 +24,7 @@ The static log-page helper accepted more than 200 records, had no response-byte
 budget, omitted owner names/session, and used a remote UI target as the native
 sandbox ID. It also treated source `all` as no matches, paginated context windows,
 and accepted query failures that native rejects with structured bridge errors.
-The native [log query](../../../app/SiloUI/src-tauri/src/runtime_logs.rs),
+The native [log query](../../../app/SiloUI/src-tauri/engine/src/runtime_logs.rs),
 `cached_page`, `read`, and `context` establish the 200-record/1 MiB response bounds,
 the unfiltered 101-record context, and the query failure wording.
 
@@ -41,7 +41,7 @@ caching or file retention.
 The preview fork action ignored its source and checkpoint, copied the first VM's
 live runtime fields, and returned success for missing selections. Restore never
 published a pending checkpoint reference and always fabricated a full recovery
-point. Native [checkpoint commands](../../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs),
+point. Native [checkpoint commands](../../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs),
 `fork_source`, `fork_commit`, `pending_workspace`, and `restore_steps`, resolve the
 selected owner, publish a stopped VM with empty runtime fields, and retain
 snapshot lineage and scope until Start. Recovery captures are full for running

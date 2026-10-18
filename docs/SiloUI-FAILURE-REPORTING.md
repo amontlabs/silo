@@ -28,8 +28,8 @@ to query these files.
 ## Sources
 
 - [MicroSandbox boot-error format](https://github.com/superradcompany/microsandbox/blob/5eca4de8bf233e57f114140f8c076ea8c96f21ab/crates/runtime/lib/boot_error.rs), verified in the pinned local runtime source.
-- [Activity journal](../app/SiloUI/src-tauri/src/runtime_activity.rs).
-- [Retained log reader](../app/SiloUI/src-tauri/src/runtime_logs.rs).
+- [Activity journal](../app/SiloUI/src-tauri/engine/src/runtime_activity.rs).
+- [Retained log reader](../app/SiloUI/src-tauri/engine/src/runtime_logs.rs).
 - [Desktop bridge](../app/SiloUI/src/desktop/production-source.ts).
 
 ## Verification

@@ -46,8 +46,8 @@ SSH-forwarded viewing; and Tauri webviews on macOS and Linux. CPU-only operation
 is the required baseline because a usable guest GPU/encoder path has not been
 established. This does not mean that the host has no GPU. See the
 [recipe](../app/SiloUI/src-tauri/guest/setup-desktop.sh),
-[viewer](../app/SiloUI/src-tauri/src/desktop_viewer.rs), and
-[proxy](../app/SiloUI/src-tauri/src/desktop_proxy.rs).
+[viewer](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), and
+[proxy](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs).
 
 These constraints do **not** require X11, Xfce, VNC, a particular agent library,
 or one vendor. A Wayland candidate is valid if its complete capture, input,

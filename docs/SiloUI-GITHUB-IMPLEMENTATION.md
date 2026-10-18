@@ -358,7 +358,7 @@ The tests keep permission refusal distinct from network/rate-limit failures.
 
 ### Object transfer failure diagnostics (2026-09-15)
 
-The guest-to-host copy in [`host_push.rs`](../app/SiloUI/src-tauri/src/host_push.rs)
+The guest-to-host copy in [`host_push.rs`](../app/SiloUI/src-tauri/engine/src/host_push.rs)
 previously discarded stderr and mapped every nonzero exit to “Object transfer
 failed or exceeded the available temporary space budget.” That message did not
 establish disk exhaustion. Remote `repository.push` executes this copy on the

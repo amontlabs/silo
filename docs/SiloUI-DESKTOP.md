@@ -395,8 +395,8 @@ rather than overwritten. See [working accounts](SiloUI-WORKING-ACCOUNT.md).
 On computers created before v4, adding a desktop does not install agent tools;
 [LCU](SiloUI-COMPUTER-USE-PLAN.md) setup remains an explicit action on a running
 computer. Built-in desktops use the [automatic computer-use setup](#built-in-computer-use)
-after boot; the [boot handler](../app/SiloUI/src-tauri/src/runtime.rs) schedules
-it, and [desktop actions](../app/SiloUI/src-tauri/src/desktop.rs) keep legacy
+after boot; the [boot handler](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs) schedules
+it, and [desktop actions](../app/SiloUI/src-tauri/engine/src/desktop.rs) keep legacy
 `setup-lcu` separate from built-in `setup-computer-use`.
 Silo previously installed [Luda](SiloUI-LUDA.md) (now historical). Existing
 desktops that have Luda keep it untouched, and Silo ignores its status.

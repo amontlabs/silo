@@ -50,8 +50,8 @@ current default cannot be used by accident.
   ([linux-desktop-viewer.tsx](../app/SiloUI/src/desktop/linux-desktop-viewer.tsx)) and an
   unprivileged `guest-desktop-shell-<uuid>` child webview loading
   `http://127.0.0.1:<port>/` through the cookie-authenticated proxy
-  ([desktop_viewer.rs](../app/SiloUI/src-tauri/src/desktop_viewer.rs),
-  [desktop_proxy.rs](../app/SiloUI/src-tauri/src/desktop_proxy.rs)). The proxy
+  ([desktop_viewer.rs](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs),
+  [desktop_proxy.rs](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs)). The proxy
   forwards HTTP and splices upgraded WebSockets transparently.
 - No host-to-page channel exists: no `Webview::eval`, no `postMessage` bridge,
   no reserved proxy route.
@@ -224,7 +224,7 @@ virtual sound device, so full-memory checkpoints are unaffected (confirm in P6).
 
 **Transport:** the system OpenSSH `sftp` client in batch mode, using the
 managed SSH config and ProxyCommand that
-[editor.rs](../app/SiloUI/src-tauri/src/editor.rs) already builds (`msb ssh serve
+[editor.rs](../app/SiloUI/src-tauri/engine/src/editor.rs) already builds (`msb ssh serve
 --stdio --no-start` locally, `silo --remote-guest` for remote computers). The
 sftp-user patch makes the session run as the working account, so files are
 owned by `silo`. Rejected: `msb copy` (starts stopped computers, writes

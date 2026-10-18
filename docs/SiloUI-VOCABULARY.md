@@ -46,7 +46,7 @@ installations and other programs read. They do not change.
 The first launch after this change runs a one-time migration that rewrites
 saved data to these names before anything else reads it. Normal code reads only
 the new names. The renamed keys and files are listed in the documentation of the
-[migration module](../app/SiloUI/src-tauri/src/runtime_migration/vocabulary.rs).
+[migration module](../app/SiloUI/src-tauri/engine/src/runtime_migration/vocabulary.rs).
 
 Two Silo devices must run the same remote protocol version. The protocol version
 changed with this vocabulary, so an updated device refuses an older one and

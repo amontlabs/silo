@@ -43,7 +43,7 @@ Evidence distinguishes source confirmation from executed deterministic fixtures.
 
 ### CU-03. Manual setup can leave a newer approval choice without an executor
 
-**P2; fixed and folded in `e5f00188`; native regression passed.** [Manual setup](../app/SiloUI/src-tauri/src/computer_use.rs) reads one mode and runs one attempt. The background apply has a convergence loop; manual setup did not.
+**P2; fixed and folded in `e5f00188`; native regression passed.** [Manual setup](../app/SiloUI/src-tauri/engine/src/computer_use.rs) reads one mode and runs one attempt. The background apply has a convergence loop; manual setup did not.
 
 **Trigger.** Change approval while manual Set up computer use runs. The follow-up background thread has a ten-minute admission deadline (`GATE_WAIT`), while the manual guest run may last fifteen minutes plus host allowance (`APPLY_TIMEOUT`/`APPLY_GRACE`). If that thread expires before the manual turn finishes, the manual helper completes the earlier mode and leaves the new choice pending until another boot or app start. A narrower scheduling window also exists between reading the mode and saving the unfinished marker: returning to a previously completed mode there schedules no worker.
 
@@ -57,7 +57,7 @@ Evidence distinguishes source confirmation from executed deterministic fixtures.
 
 ### CU-04. Policy and unfinished-marker publication omit directory synchronization
 
-**P2, open; source-confirmed durability gap, no power-loss reproduction.** [Policy persistence](../app/SiloUI/src-tauri/src/computer_use.rs) in `write_atomic` synchronizes the temporary file, renames it through `NamedTempFile::persist`, and returns success without synchronizing the containing directory. `begin_attempt` then allows the guest helper to mutate agent configuration. The plan explicitly promises recovery after power loss, not only an ordinary process crash.
+**P2, open; source-confirmed durability gap, no power-loss reproduction.** [Policy persistence](../app/SiloUI/src-tauri/engine/src/computer_use.rs) in `write_atomic` synchronizes the temporary file, renames it through `NamedTempFile::persist`, and returns success without synchronizing the containing directory. `begin_attempt` then allows the guest helper to mutate agent configuration. The plan explicitly promises recovery after power loss, not only an ordinary process crash.
 
 **Trigger and evidence.** Auto was recorded durably. The user selects Ask; `set_approval` returns after replacing that policy file, and an apply publishes its unfinished marker through the same writer. Power loss occurs before those directory updates reach durable storage. The prior Auto policy can remain authoritative after reboot. Linux's [fsync contract](https://man7.org/linux/man-pages/man2/fsync.2.html) requires separate directory synchronization to guarantee the directory entry; syncing file contents alone does not establish it. The checked Silo function has no directory sync at all. Pinned [tempfile 3.27.0](https://docs.rs/tempfile/3.27.0/tempfile/struct.NamedTempFile.html#method.persist) also documents that `persist` does not synchronize the directory. Checkpoint record persistence elsewhere already treats directory synchronization as a fallible step. The crash/reboot outcome is inferred from that documented contract; it was not executed against a disposable filesystem.
 

@@ -184,7 +184,7 @@ The current [import-stage patch](../app/SiloUI/patches/microsandbox-import-stage
 adds `snapshot load --stage-id`. Silo journals `silo-import-<id>` before load
 starts, then passes its suffix as the stage ID. The loader uses
 `snapshots/.msb-snapshot-load-<id>` and `cache/tmp/snapshot-load-<id>` under the
-selected runtime home. [Launch recovery](../app/SiloUI/src-tauri/src/backup_controller/recovery.rs)
+selected runtime home. [Launch recovery](../app/SiloUI/src-tauri/engine/src/backup_controller/recovery.rs)
 removes only that journaled group's indexed members and its two stage roots,
 including after a crash before computer identity allocation. Cleanup respects the
 existing worker lock, rejects symlinked stage paths, and retains the journal on failure.

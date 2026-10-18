@@ -9,7 +9,7 @@ were inspected, and no runtime behavior was changed.
 
 ## Implemented behavior
 
-- [Runtime log adapter](../app/SiloUI/src-tauri/src/runtime_activity.rs): requests
+- [Runtime log adapter](../app/SiloUI/src-tauri/engine/src/runtime_activity.rs): requests
   `logs NAME --tail 200 --source all --json` for each VM, including stopped VMs.
   Reads share a three-second budget. Each returned record retains text and time;
   source and session identity are discarded. Each text line is capped at 4,096
@@ -26,10 +26,10 @@ were inspected, and no runtime behavior was changed.
   full date/time, sandbox and progress. Setup output uses the shared
   [collapsible output component](../app/SiloUI/src/components/log-disclosure.tsx).
 - Lifecycle history persists the latest 200 start/stop/restart events in
-  `sandbox-activity.json`. [Setup history](../app/SiloUI/src-tauri/src/runtime.rs)
+  `sandbox-activity.json`. [Setup history](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs)
   persists at most 512 records for the current/latest setup attempt in
   `setup-activity.json`; starting a new journal begins with an empty event list.
-  [Secret activity](../app/SiloUI/src-tauri/src/secrets.rs) retains 100 events.
+  [Secret activity](../app/SiloUI/src-tauri/engine/src/secrets.rs) retains 100 events.
   The local application snapshot merges these sources and returns at most 200.
   These are count limits, not expiration periods.
 

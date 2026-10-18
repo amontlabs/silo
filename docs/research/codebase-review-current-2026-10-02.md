@@ -82,7 +82,7 @@ All entries remain open. Matching an older finding means its current code path w
 
 ### R-01. Activity history is a prerequisite for Stop
 
-**Location:** [runtime_activity.rs](../../app/SiloUI/src-tauri/src/runtime_activity.rs), lines 32–43, 58–65, 130; [lifecycle_recovery.rs](../../app/SiloUI/src-tauri/src/runtime/lifecycle_recovery.rs), lines 238–245, 298; [shutdown.rs](../../app/SiloUI/src-tauri/src/runtime/shutdown.rs), lines 177–184.
+**Location:** [runtime_activity.rs](../../app/SiloUI/src-tauri/engine/src/runtime_activity.rs), lines 32–43, 58–65, 130; [lifecycle_recovery.rs](../../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_recovery.rs), lines 238–245, 298; [shutdown.rs](../../app/SiloUI/src-tauri/engine/src/runtime/shutdown.rs), lines 177–184.
 
 **Trigger:** `sandbox-activity.json` is malformed or unreadable. `begin` reads it before the actual lifecycle intent is persisted or executed. The current extracted function, with a temporary `{broken-json` file, returned `Malformed("Sandbox activity could not be decoded.")` for Stop.
 
@@ -94,7 +94,7 @@ All entries remain open. Matching an older finding means its current code path w
 
 ### R-02. Failed full capture does not settle Paused source state
 
-**Location:** [checkpoints.rs](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 660–692, 2022–2044, 2202–2205; [lifecycle_recovery.rs](../../app/SiloUI/src-tauri/src/runtime/lifecycle_recovery.rs), lines 166–174.
+**Location:** [checkpoints.rs](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 660–692, 2022–2044, 2202–2205; [lifecycle_recovery.rs](../../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_recovery.rs), lines 166–174.
 
 **Trigger:** a full snapshot fails and leaves its source Paused. Silo only attempts resume for cancellation, discards that attempt's error, and otherwise records failure/cleans snapshot references. Quit's special Paused cleanup requires a restore journal, which an ordinary capture does not create.
 
@@ -158,7 +158,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-07. Retirement-ledger updates are not atomic transactions
 
-**Location:** [github.rs](../../app/SiloUI/src-tauri/src/github.rs), `SessionSecret` at lines 312–348, `remember_token` at 1128–1135, `retire_unused` at 1177–1199, and `HostPushCredential::drop` at 1999–2023.
+**Location:** [github.rs](../../app/SiloUI/src-tauri/engine/src/github.rs), `SessionSecret` at lines 312–348, `remember_token` at 1128–1135, `retire_unused` at 1177–1199, and `HostPushCredential::drop` at 1999–2023.
 
 **Trigger:** two push-token revocations fail concurrently, or a destructor adds a token while the worker retires an earlier ledger snapshot. Cache reads and writes are individually locked, but the read/modify/write transaction is not. The worker's operation lock does not cover every destructor caller.
 
@@ -170,7 +170,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-08. Host-push revocation retries depend on unrelated grant renewal
 
-**Location:** [github.rs](../../app/SiloUI/src-tauri/src/github.rs), lines 1136–1139, 1225–1246, 1408–1413, 1999–2023, 2100–2117, 2637–2647.
+**Location:** [github.rs](../../app/SiloUI/src-tauri/engine/src/github.rs), lines 1136–1139, 1225–1246, 1408–1413, 1999–2023, 2100–2117, 2637–2647.
 
 **Trigger:** a push finishes while token revocation fails, then connectivity recovers while the workspace's normal grants remain current. Remembering a token sets `grants_issued`; it does not independently make retirement due. The worker's extra ledger sweep covers removed workspaces, not every configured owner with pending retirement.
 
@@ -182,7 +182,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-09. A listening TCP port does not prove the SSH forward is ready
 
-**Location:** [remote_network.rs](../../app/SiloUI/src-tauri/src/remote_network.rs), lines 267–297, 484–513.
+**Location:** [remote_network.rs](../../app/SiloUI/src-tauri/engine/src/remote_network.rs), lines 267–297, 484–513.
 
 **Trigger:** Silo reserves a loopback port, releases it, starts SSH, then accepts any successful connection to that port while the child remains alive. Another local process can bind in the release/start gap while SSH is still authenticating. The synthetic seam pairs an unrelated listener with a live child; the acceptance test does not identify the listener's owner.
 
@@ -194,7 +194,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-10. Published-port SSH tunnels can survive a controller crash
 
-**Location:** [remote_network.rs](../../app/SiloUI/src-tauri/src/remote_network.rs), lines 29–32, 272–276, 525–528; [remote.rs](../../app/SiloUI/src-tauri/src/remote.rs), lines 617–642; compare [desktop_viewer.rs](../../app/SiloUI/src-tauri/src/desktop_viewer.rs), lines 21–92.
+**Location:** [remote_network.rs](../../app/SiloUI/src-tauri/engine/src/remote_network.rs), lines 29–32, 272–276, 525–528; [remote.rs](../../app/SiloUI/src-tauri/engine/src/remote.rs), lines 617–642; compare [desktop_viewer.rs](../../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), lines 21–92.
 
 **Trigger:** Silo exits abnormally with a healthy `ssh -N` forward. This path gives the child null streams and relies on explicit close or a Rust destructor. Neither runs after a controller crash. [Rust's Child documentation](https://doc.rust-lang.org/std/process/struct.Child.html) also makes process cleanup an explicit owner responsibility.
 
@@ -206,7 +206,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-11. Computer-use Ready survives a failed new boot without a probe
 
-**Location:** [silo-computer-use.py](../../app/SiloUI/src-tauri/guest/silo-computer-use.py), lines 202–234, 520–543; [computer_use.rs](../../app/SiloUI/src-tauri/src/computer_use.rs), lines 1094–1096.
+**Location:** [silo-computer-use.py](../../app/SiloUI/src-tauri/guest/silo-computer-use.py), lines 202–234, 520–543; [computer_use.rs](../../app/SiloUI/src-tauri/engine/src/computer_use.rs), lines 1094–1096.
 
 **Trigger:** setup once writes a matching Ready receipt and the LCU executable still exists, but the next desktop session fails. `update` returns early even for `boot=True`, before current LCU/session checks, repair, or doctor.
 
@@ -220,7 +220,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-12. One checkpoint recovery failure disables all scheduled trim
 
-**Location:** [storage.rs](../../app/SiloUI/src-tauri/src/runtime/storage.rs), lines 684–700; [checkpoints.rs](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 2788–2808.
+**Location:** [storage.rs](../../app/SiloUI/src-tauri/engine/src/runtime/storage.rs), lines 684–700; [checkpoints.rs](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 2788–2808.
 
 **Trigger:** during initial monitor recovery, one checkpoint record is unreadable or interrupted capture cleanup cannot finish. `recover_interrupted` returns early; the monitor never sets its single `recovered` flag, so it never calls periodic reclamation.
 
@@ -280,7 +280,7 @@ The index says the current bundled engine is `0.7.2`, while the manifest pins `0
 
 ### R-17. A late migration Retry response hides terminal state
 
-**Location:** [runtime-migration-boundary.tsx](../../app/SiloUI/src/desktop/runtime-migration-boundary.tsx), lines 75–90; [runtime_migration.rs](../../app/SiloUI/src-tauri/src/runtime_migration.rs), lines 968–992.
+**Location:** [runtime-migration-boundary.tsx](../../app/SiloUI/src/desktop/runtime-migration-boundary.tsx), lines 75–90; [runtime_migration.rs](../../app/SiloUI/src-tauri/engine/src/runtime_migration.rs), lines 968–992.
 
 **Trigger:** Retry captures a Running snapshot, spawns conversion, and returns that earlier snapshot. Conversion can emit completion/failure before its command response settles in the UI. Event reads and command responses both call `setState` without a common ordering guard.
 
@@ -306,7 +306,7 @@ The index says the current bundled engine is `0.7.2`, while the manifest pins `0
 
 ### R-19. Failed personal-token storage still changes the active credential
 
-**Location:** [github.rs](../../app/SiloUI/src-tauri/src/github.rs), `SessionSecret::write`, lines 326–348; [github_personal_token.rs](../../app/SiloUI/src-tauri/src/github_personal_token.rs), `value`, `check`, and `save_github_personal_token`, especially lines 269–284 and 323–334.
+**Location:** [github.rs](../../app/SiloUI/src-tauri/engine/src/github.rs), `SessionSecret::write`, lines 326–348; [github_personal_token.rs](../../app/SiloUI/src-tauri/engine/src/github_personal_token.rs), `value`, `check`, and `save_github_personal_token`, especially lines 269–284 and 323–334.
 
 **Trigger:** account A's token is connected; the user saves a validated replacement B; the system credential store rejects the write. `SessionSecret::write` publishes B in memory before returning the error. The caller's `?` exits before publishing B's account/status or applying the normal change/revision path.
 
@@ -334,7 +334,7 @@ The index says the current bundled engine is `0.7.2`, while the manifest pins `0
 
 ### R-21. Changing approval back can leave an opposite-mode apply uncorrected
 
-**Location:** [computer_use.rs](../../app/SiloUI/src-tauri/src/computer_use.rs), `needs_apply` at lines 143–146, `set_approval` at 247–257, completion recording at 263–272 and 815–816, and scheduling at 1196–1198. Introduced by the reviewed computer-use merge.
+**Location:** [computer_use.rs](../../app/SiloUI/src-tauri/engine/src/computer_use.rs), `needs_apply` at lines 143–146, `set_approval` at 247–257, completion recording at 263–272 and 815–816, and scheduling at 1196–1198. Introduced by the reviewed computer-use merge.
 
 **Trigger:** Ask was applied successfully. Change to Auto and let its helper begin, then change back to Ask before Auto completes. Saving Ask preserves the previous completed Ask attempt; `needs_apply()` returns false, so the second change schedules no worker. It does not account for the in-flight Auto attempt. Auto then completes and records itself as the last applied mode.
 
@@ -376,7 +376,7 @@ The verified browser build emits 1,072.98 kB minified JavaScript, 311.36 kB gzip
 
 ### O-04. Checkpoint usage performs a computer-wide survey
 
-[checkpoints.rs](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), `survey` near line 2216 and usage at 2487–2560, inventories native snapshots, saved references, and runtime lineage for one sandbox's usage/deletion state. Count calls and measure latency with 1, 10, and 100 synthetic sandboxes. If material, separate prompt selected-owner byte totals from dependency surveying or share a correctly invalidated survey. Captures, restore, forks, import, and deletion must all invalidate it.
+[checkpoints.rs](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), `survey` near line 2216 and usage at 2487–2560, inventories native snapshots, saved references, and runtime lineage for one sandbox's usage/deletion state. Count calls and measure latency with 1, 10, and 100 synthetic sandboxes. If material, separate prompt selected-owner byte totals from dependency surveying or share a correctly invalidated survey. Captures, restore, forks, import, and deletion must all invalidate it.
 
 ### O-05. Log virtualization does not bound computation or active history
 
@@ -384,7 +384,7 @@ The verified browser build emits 1,072.98 kB minified JavaScript, 311.36 kB gzip
 
 ### O-06. Export preflight can mutate lineage before acquiring its gate
 
-[backup_controller.rs](../../app/SiloUI/src-tauri/src/backup_controller.rs), near line 819, calls `export_source` before export work owns its gate. [checkpoints.rs](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), near line 872, can reach `ensure_snapshot_group`, which saves migrated lineage. Move mutation into the gated worker and keep preflight read-only. First reproduce concurrent legacy-lineage preflight/checkpoint work; no lost-update or data-loss outcome was established here.
+[backup_controller.rs](../../app/SiloUI/src-tauri/engine/src/backup_controller.rs), near line 819, calls `export_source` before export work owns its gate. [checkpoints.rs](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), near line 872, can reach `ensure_snapshot_group`, which saves migrated lineage. Move mutation into the gated worker and keep preflight read-only. First reproduce concurrent legacy-lineage preflight/checkpoint work; no lost-update or data-loss outcome was established here.
 
 ### O-07. Notification text should receive domain identity explicitly
 
@@ -406,7 +406,7 @@ Use maintained advisory/update tooling for npm lockfiles and Cargo, with an expl
 
 ### O-10. Host Git's deadline does not cover final pipe draining
 
-[host_push.rs](../../app/SiloUI/src-tauri/src/host_push.rs), lines 517–553, stops the group on failure, then joins output-reader threads without a deadline. If a successfully exited child leaves a descendant holding a pipe, the join outlives the main process deadline. This is an execution-seam concern; a realistic trigger using the packaged Git/LFS helpers was not established, so it is not promoted to a production defect.
+[host_push.rs](../../app/SiloUI/src-tauri/engine/src/host_push.rs), lines 517–553, stops the group on failure, then joins output-reader threads without a deadline. If a successfully exited child leaves a descendant holding a pipe, the join outlives the main process deadline. This is an execution-seam concern; a realistic trigger using the packaged Git/LFS helpers was not established, so it is not promoted to a production defect.
 
 Keep the deadline/cancellation policy through output draining and process ownership cleanup. Qualify a bounded fixture with a successful parent and inherited-pipe descendant, then test the real helpers before choosing a shared process abstraction. Preserve the runtime's intentionally detached VM processes; their lifetime policy is different.
 

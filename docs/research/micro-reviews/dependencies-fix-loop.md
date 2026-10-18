@@ -52,7 +52,7 @@ The dependency-store Vitest file passed 11 tests. Node 24.11.1 typecheck, touche
 - **File:line:** `app/SiloUI/src-tauri/src/dependencies.rs`, `run_bounded_with_timeout`: temporary-file capture and the post-exit `MAX_OUTPUT` check.
 - **Trigger:** A probe writes more than 8 KiB to stdout or stderr before exiting. The existing `take(MAX_OUTPUT + 1)` limits only the parent's later read, not the child's writes.
 - **Consequence:** A noisy probe can use arbitrary temporary-file space throughout its timeout window and affect other applications before its output is rejected.
-- **Fix:** Set the child's `RLIMIT_FSIZE` to the existing output bound plus one overflow byte before exec, retain stricter inherited limits, and disable core dumps. The overflow byte preserves the specific malformed-output result. This reuses the existing resource-limit policy in [host_push.rs](../../../app/SiloUI/src-tauri/src/host_push.rs), rather than adding a custom output transport.
+- **Fix:** Set the child's `RLIMIT_FSIZE` to the existing output bound plus one overflow byte before exec, retain stricter inherited limits, and disable core dumps. The overflow byte preserves the specific malformed-output result. This reuses the existing resource-limit policy in [host_push.rs](../../../app/SiloUI/src-tauri/engine/src/host_push.rs), rather than adding a custom output transport.
 - **Regression:** A shell fixture writes 64 KiB, then writes a separate completion marker. Before the fix it completed the oversized write and marker despite the eventual malformed-output result; afterward both stdout and stderr cases stop before the marker and still report malformed output.
 
 
