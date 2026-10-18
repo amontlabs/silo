@@ -498,6 +498,88 @@ guest computers on Mac hosts remain supported.
 - No public-release claim until these checks have real evidence. Unit/build
   success does not substitute for clean installation or computer execution.
 
+## Engine releases
+
+The engine (`silod`) has its own releases, independent of the Silo app's `v*`
+tags. An app that embeds the engine, such as Fjord, downloads a pinned release
+instead of compiling Silo.
+
+### Cut an engine release
+
+1. Raise `version` in `app/SiloUI/src-tauri/silod/Cargo.toml` and
+   `engineVersion` in
+   `app/SiloUI/src-tauri/silod/macos/resources/engine-manifest.production.json`
+   to the same value, and update `Cargo.lock`. Merge it.
+2. Tag the merged commit `engine-v<version>` and push the tag. Nothing is
+   tagged or published for you.
+3. `.github/workflows/engine-release.yml` fails unless the tag equals
+   `engine-v<version>` of the Cargo version. It builds `silod` with Rust 1.94.0
+   for `aarch64-apple-darwin` and `x86_64-apple-darwin`, joins them with `lipo`,
+   packages them with `app/SiloUI/scripts/package-engine.py`, checks both
+   architectures and the checksum, and creates the GitHub release
+   `engine-v<version>`. The release is not marked latest, so
+   `releases/latest/download/latest.json` keeps pointing at the app. The build
+   compiles in the GitHub App configuration, like the app, from the same three
+   repository secrets as the release workflow.
+
+Assets, at `https://github.com/amontlabs/silo/releases/download/engine-v<version>/`:
+
+- `silo-engine-<version>-macos-universal.tar.gz`
+- `silo-engine-<version>-macos-universal.tar.gz.sha256`, one line:
+  `<sha256>  silo-engine-<version>-macos-universal.tar.gz`
+
+The tarball has one top-level directory, `silo-engine-<version>/`:
+
+```text
+release.json                  engineVersion, sourceCommit, targets, rustToolchain,
+                              schemaSha256, protocolMin, protocolMax
+bin/silod                     universal, not code signed
+macos/Info.production.plist   without SiloEngineCodeRequirement
+macos/Entitlements.plist
+macos/LaunchAgents/org.silo.preview.engine.plist
+macos/resources/engine-manifest.production.json   engineBuild = silo-<source commit>
+api/silo-api.schema.json
+```
+
+### Embedding the engine: the signer requirement
+
+`silod` reads the string `SiloEngineCodeRequirement` from the Info.plist of its
+own bundle at run time and accepts the bundle only if its signature satisfies
+`(<requirement>) and identifier "<bundle id>"`. A production engine
+(`org.silo.preview.engine`) refuses to start without a non-empty value. A
+development engine (`org.silo.dev.engine`) falls back to
+`identifier "org.silo.dev.engine"`. The bundle signature seals the Info.plist,
+so a packager sets the key before signing:
+
+```sh
+plutil -replace SiloEngineCodeRequirement -string '<requirement>' "Silo Engine.app/Contents/Info.plist"
+```
+
+The requirement must match the signature the packager then applies. Silo's own
+packaging (`scripts/embed_engine.py`) writes it from the engine signing
+identity: `anchor apple generic and certificate leaf[subject.OU] = "<TEAM>"` for
+a Developer ID identity, `certificate leaf = H"<sha1>"` for any other
+certificate, and `identifier "<engine bundle id>"` for an ad hoc signature, and
+`verify_engine` rejects a production engine without it. There are no build-time
+requirement variables.
+
+### Build an archive locally
+
+To develop an embedding app against unreleased Silo, build the same layout for
+one architecture on a Mac and hand the archive to the app (Fjord:
+`SILOD_ARCHIVE=/path/to/archive`):
+
+```sh
+python3 app/SiloUI/scripts/package-engine.py --target aarch64-apple-darwin --out-dir /tmp/silo-engine
+```
+
+This writes `silo-engine-<version>-macos-arm64.tar.gz` and its `.sha256`.
+`--universal` builds both architectures as the release does, and
+`--source-commit` overrides `git rev-parse HEAD`. Use the Rust 1.94.0 toolchain
+with both targets installed, and the local GitHub build configuration from
+[Local setup](#local-setup). The script refuses a Cargo version that differs from
+the production manifest's `engineVersion`.
+
 ## Primary references
 
 - [Tauri updater and signed static feeds](https://v2.tauri.app/plugin/updater/)

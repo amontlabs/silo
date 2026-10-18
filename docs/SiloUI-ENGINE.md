@@ -69,6 +69,8 @@ used to call the engine in-process forwards to the canonical `silod` method over
 - **Packaging.** `scripts/embed_engine.py` embeds `Silo Engine.app` (the signed `silod`, its
   manifest and plist) under `Contents/Resources/SiloEngineDistribution/` and copies the agent plist
   into `Contents/Library/LaunchAgents/`; `scripts/build_desktop.py` runs it before signing the app.
+  It also writes `SiloEngineCodeRequirement`, the signer requirement `silod` checks at run time, into the
+  engine's `Info.plist` before signing ([engine releases](SiloUI-RELEASES.md#engine-releases)).
 
 ## Signing the dev silod with a stable identity
 
