@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import tempfile
 
+from embed_engine import REQUIREMENT_KEY
+
 TOOLS = (
     'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
     'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
@@ -74,12 +76,21 @@ def sign_runtime(app):
 ENGINE_DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
 
 
+def verify_engine_requirement(engine):
+    """The engine names its signer in its sealed Info.plist; a production silod refuses to start without it."""
+    info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
+    requirement = info.get(REQUIREMENT_KEY)
+    if not isinstance(requirement, str) or not requirement.strip():
+        raise RuntimeError(f'The engine Info.plist must set {REQUIREMENT_KEY}; silod refuses to start without it.')
+
+
 def verify_engine(app, identifier):
     """The embedded engine is sealed with the virtualization entitlement, and the app's LaunchAgent
     plist points at it."""
     engine = app / ENGINE_DISTRIBUTION
     executable = engine / 'Contents/MacOS/silod'
     command('codesign', '--verify', '--strict', engine)
+    verify_engine_requirement(engine)
     display = command('codesign', '--display', '--verbose=4', executable).stderr
     if not re.search(rb'flags=0x[0-9a-f]+\([^\n)]*\bruntime\b', display):
         raise RuntimeError('silod must retain hardened runtime.')

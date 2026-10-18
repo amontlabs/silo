@@ -1,11 +1,33 @@
 """The engine embedded in the app is what Service Management and silod expect."""
 from pathlib import Path
 import json
+import base64
+import hashlib
 import plistlib
+import subprocess
 import tempfile
 import unittest
 
-from embed_engine import DISTRIBUTION, SILOD, codesign_engine, embed_engine, signing_identity
+from embed_engine import (
+    DISTRIBUTION, REQUIREMENT_KEY, SILOD, codesign_engine, embed_engine, engine_requirement, signing_identity,
+)
+from macos_release_signing import verify_engine_requirement
+
+CERTIFICATE_DER = b'not a real certificate, only bytes to hash'
+CERTIFICATE_PEM = ('-----BEGIN CERTIFICATE-----\n' + base64.b64encode(CERTIFICATE_DER).decode()
+                   + '\n-----END CERTIFICATE-----\n')
+
+
+def fake_tools(subject):
+    """Stands in for `security find-certificate` and `openssl x509`."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        output = CERTIFICATE_PEM if command[0] == 'security' else f'subject={subject}\n'
+        return subprocess.CompletedProcess(command, 0, output)
+    run.calls = calls
+    return run
 
 
 class EmbedEngineTests(unittest.TestCase):
@@ -19,9 +41,10 @@ class EmbedEngineTests(unittest.TestCase):
         self.binary.write_bytes(b'#!/bin/sh\n')
         self.signed = []
 
-    def embed(self, identifier='org.silo.preview'):
+    def embed(self, identifier='org.silo.preview', **kwargs):
         return embed_engine(self.bundle, self.binary, identifier=identifier, build='silo-test',
-                            sign=lambda engine, entitlements: self.signed.append((engine, entitlements)))
+                            sign=lambda engine, entitlements: self.signed.append((engine, entitlements)),
+                            environ=kwargs.pop('environ', {}), **kwargs)
 
     def test_the_engine_bundle_and_the_calling_bundles_agent_plist_are_wired_together(self):
         engine, outer = self.embed()
@@ -69,6 +92,55 @@ class EmbedEngineTests(unittest.TestCase):
             sign = calls[0]
             self.assertEqual(sign[sign.index('--sign') + 1], expected)
             self.assertIn('runtime', sign)
+
+    def test_the_engine_names_its_signer_in_its_info_plist_before_it_is_signed(self):
+        engine, _ = self.embed()
+        info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
+        self.assertEqual(info[REQUIREMENT_KEY], 'identifier "org.silo.preview.engine"')
+        self.assertEqual(info['CFBundleIdentifier'], 'org.silo.preview.engine')
+        engine, _ = self.embed(requirement='anchor apple generic')
+        info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
+        self.assertEqual(info[REQUIREMENT_KEY], 'anchor apple generic')
+        # The checked-in plists carry no requirement: packagers derive it from their signer.
+        for channel in ('development', 'production'):
+            source = plistlib.loads((SILOD / f'macos/Info.{channel}.plist').read_bytes())
+            self.assertNotIn(REQUIREMENT_KEY, source)
+
+    def test_the_requirement_follows_the_signing_identity(self):
+        name = {'SILO_ENGINE_SIGNING_IDENTITY': 'Developer ID Application: Amont (ABCDE12345)'}
+        engine = 'org.silo.preview.engine'
+        self.assertEqual(engine_requirement(engine, {}), 'identifier "org.silo.preview.engine"')
+        developer_id = fake_tools('UID=ABCDE12345,CN=Developer ID Application: Amont (ABCDE12345),OU=ABCDE12345,O=Amont,C=US')
+        self.assertEqual(engine_requirement(engine, name, developer_id),
+                         'anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345"')
+        self.assertEqual(developer_id.calls[0], ['security', 'find-certificate', '-c', name['SILO_ENGINE_SIGNING_IDENTITY'], '-p'])
+        local = {'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}
+        pinned = f'certificate leaf = H"{hashlib.sha1(CERTIFICATE_DER).hexdigest()}"'
+        self.assertEqual(engine_requirement(engine, local, fake_tools('CN=Silo Dev Signing')), pinned)
+        # A team on a non-Developer-ID certificate is not an Apple-anchored identity.
+        self.assertEqual(engine_requirement(engine, local, fake_tools('CN=Silo Dev Signing,OU=ABCDE12345')), pinned)
+        digest = 'AB' * 20
+        self.assertEqual(engine_requirement(engine, {'SILO_ENGINE_SIGNING_IDENTITY': digest}),
+                         f'certificate leaf = H"{digest.lower()}"')
+
+    def test_the_embedded_requirement_comes_from_the_identity_that_signs(self):
+        environ = {'SILO_ENGINE_SIGNING_IDENTITY': 'Silo Dev Signing'}
+        engine, _ = self.embed(environ=environ, run=fake_tools('CN=Silo Dev Signing'))
+        info = plistlib.loads((engine / 'Contents/Info.plist').read_bytes())
+        self.assertRegex(info[REQUIREMENT_KEY], r'^certificate leaf = H"[0-9a-f]{40}"$')
+
+    def test_verification_rejects_an_engine_without_a_requirement(self):
+        engine, _ = self.embed()
+        verify_engine_requirement(engine)
+        info = engine / 'Contents/Info.plist'
+        for value in (None, '', '  ', 1):
+            plist = plistlib.loads(info.read_bytes())
+            plist.pop(REQUIREMENT_KEY, None)
+            if value is not None:
+                plist[REQUIREMENT_KEY] = value
+            info.write_bytes(plistlib.dumps(plist))
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError, REQUIREMENT_KEY):
+                verify_engine_requirement(engine)
 
     def test_embedding_again_replaces_the_previous_engine(self):
         engine, _ = self.embed()
