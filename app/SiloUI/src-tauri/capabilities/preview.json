@@ -24,7 +24,6 @@
     "allow-initialize-settings",
     "allow-update-settings",
     "allow-update-onboarding-draft",
-    "allow-import-legacy-theme",
     "allow-flush-settings",
     "allow-begin-settings-flush",
     "allow-complete-settings-flush",
