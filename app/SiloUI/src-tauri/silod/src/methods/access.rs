@@ -2861,6 +2861,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn github_state_is_canonical_and_never_exposes_a_link_without_a_flow() {
+        let _flow = CONNECT_LOCK.lock().await;
         let state = call(MethodName::GitHubState, json!({})).await.unwrap();
         let typed: github::GitHubState = serde_json::from_value(state.clone()).unwrap();
         assert_eq!(typed.pending_authorization_url, None);
@@ -3111,6 +3112,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn github_links_come_from_the_owner() {
+        let _flow = CONNECT_LOCK.lock().await;
         let error = expect_error(MethodName::GitHubConnectReopen, json!({})).await;
         assert!(error
             .message
