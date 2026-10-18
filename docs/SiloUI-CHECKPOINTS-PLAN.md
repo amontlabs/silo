@@ -117,10 +117,10 @@ Required lifecycle rules:
   Resource edits that invalidate a saved memory state require an explicit
   disk-only start decision; never discard memory implicitly.
 
-Current seams: [computer lifecycle](../app/SiloUI/src-tauri/src/runtime.rs),
+Current seams: [computer lifecycle](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs),
 [frontend source contract](../app/SiloUI/src/features/application/model/application-source.ts),
 [computer presentation](../app/SiloUI/src/features/computers/model/computer-presentation.ts),
-and [lifecycle recovery](../app/SiloUI/src-tauri/src/runtime/lifecycle_recovery.rs).
+and [lifecycle recovery](../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_recovery.rs).
 Current code includes automatic startup and temporary boot through helpers;
 these require explicit pending-restore guards.
 
@@ -157,11 +157,11 @@ requests for the same computer, including remote targets.
 Checkpoint commands use the existing five-second lifecycle lock wait. This
 avoids failing immediately when brief background work owns the mutation lock;
 sustained contention still returns Busy. The causal sources are
-[`read_application_state`](../app/SiloUI/src-tauri/src/runtime.rs), which may
+[`read_application_state`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), which may
 inspect stopped-computer log retention under that lock, and
-[`ssh_access::start_monitor`](../app/SiloUI/src-tauri/src/ssh_access.rs), which
+[`ssh_access::start_monitor`](../app/SiloUI/src-tauri/engine/src/ssh_access.rs), which
 holds it during reconciliation. The
-[`checkpoint commands`](../app/SiloUI/src-tauri/src/runtime/checkpoints.rs)
+[`checkpoint commands`](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs)
 previously used an immediate `try_lock`.
 
 Runtime snapshots intentionally reject observations during a mutation, and the
@@ -179,7 +179,7 @@ are changing. The controller preserves the previous snapshot and marks that
 device's rows stale until a successful refresh; its ten-second polling interval
 can turn a brief collision into a much longer visible busy state. See
 [`refreshDevices`](../app/SiloUI/src/desktop/production-source.ts) and
-[`read_application_snapshot`](../app/SiloUI/src-tauri/src/runtime.rs).
+[`read_application_snapshot`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs).
 
 The owner now retries one complete read after 100 ms for transient lock or
 metadata collisions. It discards the first observation, preserves the immediate
@@ -423,12 +423,12 @@ including the separately tested disk-only recovery path. Full-state cross-CPU
 migration is not promised. Remote forks initially stay on their source execution
 device; portable transfer remains an export/import operation subject to compatibility.
 
-Use the existing [backup controller](../app/SiloUI/src-tauri/src/backup_controller.rs),
-[backup recovery](../app/SiloUI/src-tauri/src/backup_controller/recovery.rs),
-[storage](../app/SiloUI/src-tauri/src/runtime/storage.rs),
-[update recovery](../app/SiloUI/src-tauri/src/runtime/update_recovery.rs),
-[shutdown](../app/SiloUI/src-tauri/src/runtime/shutdown.rs) and
-[remote operations](../app/SiloUI/src-tauri/src/runtime/remote_ops.rs) as integration
+Use the existing [backup controller](../app/SiloUI/src-tauri/engine/src/backup_controller.rs),
+[backup recovery](../app/SiloUI/src-tauri/engine/src/backup_controller/recovery.rs),
+[storage](../app/SiloUI/src-tauri/engine/src/runtime/storage.rs),
+[update recovery](../app/SiloUI/src-tauri/engine/src/runtime/update_recovery.rs),
+[shutdown](../app/SiloUI/src-tauri/engine/src/runtime/shutdown.rs) and
+[remote operations](../app/SiloUI/src-tauri/engine/src/runtime/remote_ops.rs) as integration
 seams. Refactor only where the new behaviours require it.
 
 ### 6. Verify the supported product and document the release

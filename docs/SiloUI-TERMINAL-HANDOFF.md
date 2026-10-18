@@ -15,7 +15,7 @@ are shell-quoted as single arguments. No GitHub tokens or secret values are writ
 to launcher files.
 
 For a computer on another device, the
-[terminal adapter](../app/SiloUI/src-tauri/src/terminal.rs) prepares a private
+[terminal adapter](../app/SiloUI/src-tauri/engine/src/terminal.rs) prepares a private
 SSH alias through the owning Silo instance and launches `/usr/bin/ssh -F CONFIG
 -t ALIAS`. The explicit configuration avoids requiring an Include in the user's
 SSH config. See [Connections](SiloUI-CONNECTIONS.md) for ownership and

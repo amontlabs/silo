@@ -177,9 +177,9 @@ suite passed 170 tests; status/settings/onboarding follow-up checks passed 33
 tests, including native menu and open folder-picker updates. Typecheck and lint
 passed. These are mocked discovery and UI checks, not native app launch evidence.
 That run verified preference propagation. The current native
-[`computer_action` handler](../app/SiloUI/src-tauri/src/runtime.rs) dispatches
+[`computer_action` handler](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs) dispatches
 `open-editor` and `open-terminal` to their launchers; website actions use
-[`open_network_port`](../app/SiloUI/src-tauri/src/network.rs), which checks the
+[`open_network_port`](../app/SiloUI/src-tauri/engine/src/network.rs), which checks the
 endpoint before invoking the chosen browser. See
 [editor and browser handoff](SiloUI-EDITOR-HANDOFF.md) and
 [terminal handoff](SiloUI-TERMINAL-HANDOFF.md) for implementation and verification.
@@ -281,7 +281,7 @@ settings on startup.
 
 The 2026-09-22 investigation confirmed the missing-field state in local saved
 preferences. The regression tests in
-[`startup.rs`](../app/SiloUI/src-tauri/src/startup.rs),
+[`startup.rs`](../app/SiloUI/src-tauri/engine/src/startup.rs),
 [`general-page.test.tsx`](../app/SiloUI/src/features/application/pages/general-page.test.tsx),
 and [`setup-complete.test.tsx`](../app/SiloUI/src/features/onboarding/components/setup-complete.test.tsx)
 cover native default resolution and persistence when enabling the setting.
@@ -337,7 +337,7 @@ completed. Credentials and operation results are not accepted draft fields.
 ## Shared state and failures
 
 The main window initializes native storage before rendering the application.
-The [native settings owner](../app/SiloUI/src-tauri/src/settings.rs) always
+The [native settings owner](../app/SiloUI/src-tauri/engine/src/settings.rs) always
 resolves `settings.json` through Tauri's app configuration directory. Status
 reads wait for initialization on a worker thread.
 

@@ -47,7 +47,7 @@ immediate revocation, selective TLS interception and snapshot-safe authority.
 
 The baseline is the [credential contract audit](e2b-credential-contract-2026-09-23.md),
 [secrets contract](../SiloUI-SECRETS.md) and current
-[`github_tokens.rs`](../../app/SiloUI/src-tauri/src/github_tokens.rs).
+[`github_tokens.rs`](../../app/SiloUI/src-tauri/engine/src/github_tokens.rs).
 
 - Run outside guest VMs on Silo's owned execution infrastructure, including
   Linux ARM64 and x86-64. A managed cloud dependency is not an assumed substitute.

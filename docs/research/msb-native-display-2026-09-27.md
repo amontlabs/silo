@@ -31,8 +31,8 @@ experiments, not measurements reproduced in Silo.
 | Remote computer | Existing SSH-backed viewer connection | Still requires a network display transport |
 
 Local evidence: [guest recipe](../../app/SiloUI/src-tauri/guest/setup-desktop.sh),
-[viewer and SSH transport](../../app/SiloUI/src-tauri/src/desktop_viewer.rs),
-[proxy](../../app/SiloUI/src-tauri/src/desktop_proxy.rs), and
+[viewer and SSH transport](../../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs),
+[proxy](../../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs), and
 [desktop contract](../SiloUI-DESKTOP.md).
 
 The architectural opportunity is to remove video encoding, network transport and browser

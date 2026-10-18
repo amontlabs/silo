@@ -1,6 +1,6 @@
 # Native test support
 
-Native unit tests use [shared fixtures](../app/SiloUI/src-tauri/src/test_support.rs)
+Native unit tests use [shared fixtures](../app/SiloUI/src-tauri/engine/src/test_support.rs)
 instead of acquiring the production operation gate to serialize unrelated tests.
 
 ## Persisted configuration compatibility
@@ -140,7 +140,7 @@ These fixture checks do not establish live computer or packaged-app behavior.
 `test_support::paths(directory)` creates the standard disposable runtime layout.
 The compatibility wrappers taking `TempDir` delegate to this one implementation.
 
-[ScriptedRunner](../app/SiloUI/src-tauri/src/test_support/runner.rs) takes ordered
+[ScriptedRunner](../app/SiloUI/src-tauri/engine/src/test_support/runner.rs) takes ordered
 `ExpectedCommand` values. Each expectation specifies exact argv and a typed
 output or error, with an optional exact timeout. Unexpected reads and mutations
 panic immediately. `assert_finished()` and normal drop reject unused expectations.

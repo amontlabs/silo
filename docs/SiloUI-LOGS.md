@@ -91,7 +91,7 @@ record also rebuild the index so PEM state follows the retained record order.
 Carried records keep the estimated time they were indexed with. Refresh and export
 begin new searches. Pagination reads the cached snapshot selected by its cursor;
 it does not start a new search or perform Follow. The
-[query adapter](../app/SiloUI/src-tauri/src/runtime_logs.rs) returns cached pages
+[query adapter](../app/SiloUI/src-tauri/engine/src/runtime_logs.rs) returns cached pages
 before indexing new records, and its pagination regression preserves the original
 record set across append and rotation. Devices running an older Silo ignore the
 follow token and run a full query.
@@ -159,9 +159,9 @@ that arbitrary secrets are removed. Review exports before sharing them.
 
 ## Implementation
 
-- [Query adapter](../app/SiloUI/src-tauri/src/runtime_logs.rs): local retained
+- [Query adapter](../app/SiloUI/src-tauri/engine/src/runtime_logs.rs): local retained
   files, search, pagination, surrounding records and remote owner routing.
-- [Retention policy](../app/SiloUI/src-tauri/src/log_retention.rs): segment age,
+- [Retention policy](../app/SiloUI/src-tauri/engine/src/log_retention.rs): segment age,
   independent execution/console byte budgets and stopped-computer cleanup.
 - [Runtime patch](../app/SiloUI/patches/microsandbox-log-retention-desktop-start-0.7.6.patch):
   execution, runtime and kernel writers.
@@ -171,7 +171,7 @@ that arbitrary secrets are removed. Review exports before sharing them.
   session snapshots, owner errors, cursor deduplication and chronological merging.
 - [Logs table](../app/SiloUI/src/features/application/components/logs-table.tsx):
   skeletons, metadata columns, viewport-sized rendering and automatic pagination.
-- [Native export](../app/SiloUI/src-tauri/src/log_export.rs): paginated,
+- [Native export](../app/SiloUI/src-tauri/engine/src/log_export.rs): paginated,
   cancellable, atomic file export.
 - [Original audit](SiloUI-LOGGING-AUDIT.md): the preceding behavior and findings.
 

@@ -18,11 +18,11 @@ reproduced network trace.
 
 ### All repositories can succeed with zero credentials
 
-[`scopes`](../app/SiloUI/src-tauri/src/github.rs#L923) groups only repositories
+[`scopes`](../app/SiloUI/src-tauri/engine/src/github.rs#L923) groups only repositories
 in the cached GitHub installation catalog. With access enabled, all mode and
 an empty catalog, it returns Ok with zero groups. There is no all-mode empty
-catalog validation. [`runtime_grants_for`](../app/SiloUI/src-tauri/src/github.rs#L994)
-therefore succeeds with zero grants; [`profile`](../app/SiloUI/src-tauri/src/github.rs#L586)
+catalog validation. [`runtime_grants_for`](../app/SiloUI/src-tauri/engine/src/github.rs#L994)
+therefore succeeds with zero grants; [`profile`](../app/SiloUI/src-tauri/engine/src/github.rs#L586)
 produces `{"version":1,"owners":[]}`. The apply loop can attach this disabled
 profile and report "GitHub access verified."
 
@@ -33,12 +33,12 @@ Catalog refresh also accepts an empty list.
 
 ### Success indicators do not establish usable computer access
 
-[`public_snapshot`](../app/SiloUI/src-tauri/src/github.rs#L529) derives Connected
+[`public_snapshot`](../app/SiloUI/src-tauri/engine/src/github.rs#L529) derives Connected
 from the observed account credential expiration, independently of computer grants.
 That distinction is valid, but Connected plus the All repositories checkbox
 cannot diagnose whether the computer has credentials.
 
-The stronger false-success defect is in [`apply`](../app/SiloUI/src-tauri/src/github.rs#L676):
+The stronger false-success defect is in [`apply`](../app/SiloUI/src-tauri/engine/src/github.rs#L676):
 "GitHub access verified" means reconciliation finished without error. It does
 not perform an authenticated computer request. It can report success with no grants.
 
@@ -63,9 +63,9 @@ profiles can; malformed profile/token data can also block at this boundary.
 
 ### Additional recovery risk found by code inspection
 
-[`apply_github_policy`](../app/SiloUI/src-tauri/src/runtime.rs#L1267) removes the
+[`apply_github_policy`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1267) removes the
 boot-profile cache before capability checks and runtime update, but failure
-leaves the higher-level ACTIVE grant cache untouched. [`apply`](../app/SiloUI/src-tauri/src/github.rs#L734)
+leaves the higher-level ACTIVE grant cache untouched. [`apply`](../app/SiloUI/src-tauri/engine/src/github.rs#L734)
 skips attachment when desired grants equal that higher-level cache.
 
 A concrete sequence to cover in a regression is: A applied successfully; update

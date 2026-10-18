@@ -41,7 +41,7 @@ public relay service or general remote-desktop framework is required.
 
 | Finding | Evidence | Implementation consequence |
 | --- | --- | --- |
-| The existing UI already embeds an isolated Tauri child webview and uses an authenticated loopback gateway | [desktop_viewer.rs](../app/SiloUI/src-tauri/src/desktop_viewer.rs), [desktop_proxy.rs](../app/SiloUI/src-tauri/src/desktop_proxy.rs), [capabilities](../app/SiloUI/src-tauri/capabilities/desktop-viewer.json) | Reuse these boundaries; qualify a different client inside them |
+| The existing UI already embeds an isolated Tauri child webview and uses an authenticated loopback gateway | [desktop_viewer.rs](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), [desktop_proxy.rs](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs), [capabilities](../app/SiloUI/src-tauri/capabilities/desktop-viewer.json) | Reuse these boundaries; qualify a different client inside them |
 | Current session supervision launches `vncserver :1 -fg -autokill`; readiness uses its streaming port | [desktop-service.py](../app/SiloUI/src-tauri/guest/desktop-service.py) | Separate display/session health from stream health before claiming streamer independence |
 | Current guest recipe pins KasmVNC 1.5.0, sets 1440×900, disables remote resize and installs Luda | [setup-desktop.sh](../app/SiloUI/src-tauri/guest/setup-desktop.sh) | Preserve geometry and working-account behavior; treat streamer and agent-tool migrations separately |
 | Selkies 2.0.0 supplies native Ubuntu packages for both guest architectures and serves its web client/media through one TCP port | [release](https://github.com/selkies-project/selkies/releases/tag/2.0.0) | Pin one artifact per architecture and start with its WebSocket mode |
@@ -131,7 +131,7 @@ Do not make adding Electron the automatic fallback.
 
 Change [desktop-service.py](../app/SiloUI/src-tauri/guest/desktop-service.py),
 [setup-desktop.sh](../app/SiloUI/src-tauri/guest/setup-desktop.sh) and
-[desktop.rs](../app/SiloUI/src-tauri/src/desktop.rs). Add a small guest artifact
+[desktop.rs](../app/SiloUI/src-tauri/engine/src/desktop.rs). Add a small guest artifact
 lock manifest following the existing pinned-runtime pattern.
 
 - Keep the `silo` UID/home and existing `silo-desktop` entry point. Establish
@@ -168,10 +168,10 @@ process tests need the live process-survival checks from Delivery 1.
 
 ## Delivery 3: transport and native viewer
 
-Change [desktop_viewer.rs](../app/SiloUI/src-tauri/src/desktop_viewer.rs),
-[desktop_proxy.rs](../app/SiloUI/src-tauri/src/desktop_proxy.rs),
-[remote_access.rs](../app/SiloUI/src-tauri/src/remote_access.rs) and the public
-status projection in [desktop.rs](../app/SiloUI/src-tauri/src/desktop.rs).
+Change [desktop_viewer.rs](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs),
+[desktop_proxy.rs](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs),
+[remote_access.rs](../app/SiloUI/src-tauri/engine/src/remote_access.rs) and the public
+status projection in [desktop.rs](../app/SiloUI/src-tauri/engine/src/desktop.rs).
 
 Keep the existing stable computer identity checks, remote-owner SSH bridge, loopback
 cookie, origin restrictions and lack of privileged Tauri capabilities in guest

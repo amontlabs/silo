@@ -80,7 +80,7 @@ The npm advisory request could not complete in the sandbox. Automatic approval r
 
 ### R-01. Advisory history becomes a prerequisite for Stop and Quit
 
-**High confidence.** [Activity persistence](../../app/SiloUI/src-tauri/src/runtime_activity.rs), lines 32–43, 58–65 and 130, rejects unreadable or malformed `sandbox-activity.json`. [Lifecycle recovery](../../app/SiloUI/src-tauri/src/runtime/lifecycle_recovery.rs), lines 298 and 238–245, requires these history operations before control work and before retiring its intent. [Shutdown](../../app/SiloUI/src-tauri/src/runtime/shutdown.rs), line 178, uses that lifecycle path.
+**High confidence.** [Activity persistence](../../app/SiloUI/src-tauri/engine/src/runtime_activity.rs), lines 32–43, 58–65 and 130, rejects unreadable or malformed `sandbox-activity.json`. [Lifecycle recovery](../../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_recovery.rs), lines 298 and 238–245, requires these history operations before control work and before retiring its intent. [Shutdown](../../app/SiloUI/src-tauri/engine/src/runtime/shutdown.rs), line 178, uses that lifecycle path.
 
 **Trigger and consequence:** a truncated, incompatible, malformed, or unreadable history file causes Start, Stop, and Restart to fail before the runtime action. Graceful Quit cannot stop running sandboxes through this path. Ordinary history reads already degrade to a warning, so the app can display a sandbox it then cannot stop. An activity write failure after the runtime action can also replace its actual result. After cancellation, failure in `finish` skips intent removal and leaves the abandoned operation recoverable.
 
@@ -97,7 +97,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-02. Full capture failure has an incomplete Paused recovery path
 
-**High confidence in the integration defect; no live failure injection.** [Capture cleanup](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 660–692, attempts resume only for `RuntimeError::Cancelled`, discards its result, and otherwise records failure/cleans snapshot references without settling the source guest. Lines 2198–2201 release Paused guests during Quit only when a `restore_journal` exists. Ordinary capture has no such journal. [Lifecycle recovery](../../app/SiloUI/src-tauri/src/runtime/lifecycle_recovery.rs), lines 166–174, accepts Paused as neither ordinary Start nor Stop.
+**High confidence in the integration defect; no live failure injection.** [Capture cleanup](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 660–692, attempts resume only for `RuntimeError::Cancelled`, discards its result, and otherwise records failure/cleans snapshot references without settling the source guest. Lines 2198–2201 release Paused guests during Quit only when a `restore_journal` exists. Ordinary capture has no such journal. [Lifecycle recovery](../../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_recovery.rs), lines 166–174, accepts Paused as neither ordinary Start nor Stop.
 
 **Trigger:** pinned MicroSandbox can deliberately retain suspension after a full snapshot error whose recovery could not resume/rebind or thaw the source. Its [executor](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/runtime/lib/runner/control/executor.rs#L485-L500) retains Quiesced for `keep_paused`; its [coordinator](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/runtime/lib/checkpoint/coordinator.rs#L950-L969) sets that condition for source recovery failures. Ordinary resume is insufficient for recovery-owned suspension.
 
@@ -109,7 +109,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-03. A lifecycle response can undo another sandbox's displayed completion
 
-**High confidence.** [Production source](../../app/SiloUI/src/desktop/production-source.ts), lines 680–689 and 1094–1108, merges mutation enrichment but replaces runtime rows wholesale. It bypasses the per-row settlement protection used for reads at lines 924–940. [Runtime state construction](../../app/SiloUI/src-tauri/src/runtime.rs), lines 4314–4325, explicitly emits settling rows for other active sandboxes.
+**High confidence.** [Production source](../../app/SiloUI/src/desktop/production-source.ts), lines 680–689 and 1094–1108, merges mutation enrichment but replaces runtime rows wholesale. It bypasses the per-row settlement protection used for reads at lines 924–940. [Runtime state construction](../../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), lines 4314–4325, explicitly emits settling rows for other active sandboxes.
 
 **Trigger:** Start A and B concurrently. B's response publishes Running. A's older response then includes B's cached Stopped row with `settling: true`. The reproduction deferred the next refresh and observed B revert to Stopped.
 
@@ -121,7 +121,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-04. One remote delays fresh Network and SSH results for other computers
 
-**High confidence.** [Production source](../../app/SiloUI/src/desktop/production-source.ts), lines 439–472 and 478–502, waits for all owners before publishing SSH results, and for the remote Network aggregate before publishing the successful local result. [Remote requests](../../app/SiloUI/src-tauri/src/remote.rs), lines 800–821, can wait 600 seconds.
+**High confidence.** [Production source](../../app/SiloUI/src/desktop/production-source.ts), lines 439–472 and 478–502, waits for all owners before publishing SSH results, and for the remote Network aggregate before publishing the successful local result. [Remote requests](../../app/SiloUI/src-tauri/engine/src/remote.rs), lines 800–821, can wait 600 seconds.
 
 **Trigger:** a connected but unresponsive remote remains pending while local SSH changes from enabled to disabled and a local port moves from 3000 to 4100. The fixture observed both old local values until that remote resolved. Other refresh attempts share the pending request.
 
@@ -155,7 +155,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-07. Token retirement lacks an atomic ledger transaction
 
-**High confidence; locking seam reproduced.** [GitHub token ledger](../../app/SiloUI/src-tauri/src/github.rs), lines 1128–1135 and 1177–1199, reads a cloned ledger and later replaces it. `SessionSecret`, lines 312–348, locks individual reads and writes, not the entire read-modify-write. The worker holds `OPERATION`, but failed-revocation handling in `HostPushCredential::drop`, lines 1999–2023, does not.
+**High confidence; locking seam reproduced.** [GitHub token ledger](../../app/SiloUI/src-tauri/engine/src/github.rs), lines 1128–1135 and 1177–1199, reads a cloned ledger and later replaces it. `SessionSecret`, lines 312–348, locks individual reads and writes, not the entire read-modify-write. The worker holds `OPERATION`, but failed-revocation handling in `HostPushCredential::drop`, lines 1999–2023, does not.
 
 **Trigger:** two failed push-token revocations append concurrently, or a destructor appends while the worker performs network revocations from an older snapshot.
 
@@ -167,7 +167,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-08. Push-token retirement is coupled to unrelated grant renewal
 
-**High confidence from source; no live GitHub reproduction.** [GitHub](../../app/SiloUI/src-tauri/src/github.rs), lines 1136–1139, remembers a failed retirement by setting `grants_issued`. Lines 1408–1413 call retirement only within access application, while lines 1225–1246 decide whether access is due without considering pending retirement. The independent worker sweep, lines 2637–2647, only handles workspaces absent from policy.
+**High confidence from source; no live GitHub reproduction.** [GitHub](../../app/SiloUI/src-tauri/engine/src/github.rs), lines 1136–1139, remembers a failed retirement by setting `grants_issued`. Lines 1408–1413 call retirement only within access application, while lines 1225–1246 decide whether access is due without considering pending retirement. The independent worker sweep, lines 2637–2647, only handles workspaces absent from policy.
 
 **Trigger:** host push completes but token revocation fails while the sandbox's ordinary GitHub grants remain verified and unexpired. Connectivity later recovers.
 
@@ -179,7 +179,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-09. Remote tunnel readiness does not establish listener ownership
 
-**High confidence for false readiness; hostile timing not exercised against OpenSSH.** [Remote tunnels](../../app/SiloUI/src-tauri/src/remote_network.rs), lines 267–297, reserve a TCP port, release it, spawn SSH, and accept any successful TCP connection while the child lives. Browser opening later uses that address at lines 484–513.
+**High confidence for false readiness; hostile timing not exercised against OpenSSH.** [Remote tunnels](../../app/SiloUI/src-tauri/engine/src/remote_network.rs), lines 267–297, reserve a TCP port, release it, spawn SSH, and accept any successful TCP connection while the child lives. Browser opening later uses that address at lines 484–513.
 
 **Trigger:** a competing local process binds during the reservation gap while SSH is connecting/authenticating. The exact extracted `open_tunnel` fixture returned success with a separately bound loopback listener and unrelated `/bin/sleep` child.
 
@@ -191,7 +191,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-10. Crash cleanup depends on destructors that cannot run after a crash
 
-**High confidence from process ownership; no live Silo crash test.** [Remote published-port tunnels](../../app/SiloUI/src-tauri/src/remote_network.rs), lines 272–276, use null stdin/stdout/stderr. Cleanup is `Tunnel::drop`, lines 29–32, or explicit `close_all`, lines 525–528. [SSH construction](../../app/SiloUI/src-tauri/src/remote.rs), lines 617–642, creates long-lived `ssh -N` sessions. [Desktop viewer transport](../../app/SiloUI/src-tauri/src/desktop_viewer.rs), lines 21–92, already has a parent-lifetime mechanism that this path lacks.
+**High confidence from process ownership; no live Silo crash test.** [Remote published-port tunnels](../../app/SiloUI/src-tauri/engine/src/remote_network.rs), lines 272–276, use null stdin/stdout/stderr. Cleanup is `Tunnel::drop`, lines 29–32, or explicit `close_all`, lines 525–528. [SSH construction](../../app/SiloUI/src-tauri/engine/src/remote.rs), lines 617–642, creates long-lived `ssh -N` sessions. [Desktop viewer transport](../../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), lines 21–92, already has a parent-lifetime mechanism that this path lacks.
 
 **Trigger and consequence:** a controller crashes while a healthy forward is connected. SSH retains the local port and remote connection. Relaunch has no registry entry for that process and cannot close it or reliably reuse a selected port. ProxyCommand descendants also need explicit group ownership.
 
@@ -201,7 +201,7 @@ Malformed("Sandbox activity could not be decoded.")
 
 ### R-11. A persistent computer-use receipt is presented as current readiness
 
-**High confidence; warm-boot fixture reproduced.** [Guest computer use](../../app/SiloUI/src-tauri/guest/silo-computer-use.py), lines 549–555, returns early for a matching ready receipt when the LCU path merely exists. Even `boot=True` skips current LCU status, session checks, repair, and doctor. Lines 260–292 project that receipt. [Host projection](../../app/SiloUI/src-tauri/src/computer_use.rs), lines 1129–1135, promotes the result to Ready after approval reconciliation.
+**High confidence; warm-boot fixture reproduced.** [Guest computer use](../../app/SiloUI/src-tauri/guest/silo-computer-use.py), lines 549–555, returns early for a matching ready receipt when the LCU path merely exists. Even `boot=True` skips current LCU status, session checks, repair, and doctor. Lines 260–292 project that receipt. [Host projection](../../app/SiloUI/src-tauri/engine/src/computer_use.rs), lines 1129–1135, promotes the result to Ready after approval reconciliation.
 
 **Trigger:** first boot/setup succeeds; a later desktop boot fails, or runtime readiness is lost while the pinned pair/mode stays unchanged. The existing `test_an_up_to_date_vm_runs_nothing` explicitly requires no work on warm boot.
 
@@ -219,7 +219,7 @@ The current helper with the existing temporary guest fixture produced:
 
 ### R-12. Checkpoint recovery gates storage maintenance for the whole computer
 
-**High confidence from source.** [Storage monitor](../../app/SiloUI/src-tauri/src/runtime/storage.rs), lines 684–700, runs scheduled reclamation only after global checkpoint recovery returns success. [Recovery](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 2784–2804, exits on one invalid record, journal error, or interrupted capture whose data cannot be removed.
+**High confidence from source.** [Storage monitor](../../app/SiloUI/src-tauri/engine/src/runtime/storage.rs), lines 684–700, runs scheduled reclamation only after global checkpoint recovery returns success. [Recovery](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 2784–2804, exits on one invalid record, journal error, or interrupted capture whose data cannot be removed.
 
 **Trigger and consequence:** an unresolved checkpoint during the monitor's initial recovery keeps scheduled reclamation disabled until recovery succeeds. Healthy sandboxes receive no scheduled reclamation during that period. The monitor retries each minute and emits stderr without explaining this dependency in the affected storage UI. Once `recovered` becomes true, a later damaged record does not disable periodic reclamation through this branch.
 
@@ -261,7 +261,7 @@ Unable to find an accessible element with the role "button" and name "SSH contro
 
 **High confidence; fixture reproduced.** [Computer-use section](../../app/SiloUI/src/desktop/computer-use-panel.tsx), lines 185–200, has an unconditional interval. [Detail-page call site](../../app/SiloUI/src/features/application/pages/computer-detail-page.tsx), line 481, supplies no activity flag; [application sections](../../app/SiloUI/src/features/application/application-app.tsx), lines 351–365, remain mounted while hidden.
 
-**Trigger:** inspect a desktop sandbox, navigate to Settings/GitHub, or hide the main document. A hidden-section/hidden-document fixture observed the initial request plus three more reads over 15 seconds. [Native desktop state](../../app/SiloUI/src-tauri/src/desktop.rs), lines 325–326 and 365–393, inspects runtime state and executes guest commands. Related app-status/viewer timers need the same ownership check.
+**Trigger:** inspect a desktop sandbox, navigate to Settings/GitHub, or hide the main document. A hidden-section/hidden-document fixture observed the initial request plus three more reads over 15 seconds. [Native desktop state](../../app/SiloUI/src-tauri/engine/src/desktop.rs), lines 325–326 and 365–393, inspects runtime state and executes guest commands. Related app-status/viewer timers need the same ownership check.
 
 **Consequence:** background subprocess work and SSH traffic continue after the main source correctly pauses. At a five-second interval this is up to 720 periodic reads per hour for a mounted panel, before accounting for other timers; an in-flight read suppresses overlapping ticks. CPU and battery cost were not measured.
 
@@ -303,7 +303,7 @@ Measure main-window, status-panel, and detached-viewer startup on supported mini
 
 ### O-04. Checkpoint usage reads survey every sandbox
 
-[Checkpoint usage](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 2483–2556 and the survey near line 2212, inventories snapshots, loads configured records, and inspects all runtime sandboxes to answer one sandbox's usage/dependency query.
+[Checkpoint usage](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 2483–2556 and the survey near line 2212, inventories snapshots, loads configured records, and inspects all runtime sandboxes to answer one sandbox's usage/dependency query.
 
 Benchmark a fake runner with many sandboxes and count inspections per selected Storage/Checkpoints read. Return the selected sandbox's byte totals promptly, and cache/share the lineage survey or compute dependency blockers separately if measured latency warrants it. Invalidation must cover captures, forks, restores, deletion, and imports; a generic cache without those ownership rules would add risk.
 
@@ -315,7 +315,7 @@ Measure an actively paged 50,000-record view while ordinary state refreshes occu
 
 ### O-06. Keep export preflight reads inside their stated boundary
 
-[Export controller](../../app/SiloUI/src-tauri/src/backup_controller.rs), near line 819, calls `export_source` before acquiring its export gate. [Checkpoint export resolution](../../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), near line 872, can call `ensure_snapshot_group`, which migrates/saves lineage at lines 218–255.
+[Export controller](../../app/SiloUI/src-tauri/engine/src/backup_controller.rs), near line 819, calls `export_source` before acquiring its export gate. [Checkpoint export resolution](../../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), near line 872, can call `ensure_snapshot_group`, which migrates/saves lineage at lines 218–255.
 
 Move lineage migration into the gated worker and make source preflight read-only. A nominal query should not change a legacy record outside serialization. This is a source-identified race boundary; no lost-update/data-loss scenario was reproduced. Add a legacy-lineage fixture with concurrent preflight and checkpoint work before elevating its priority.
 

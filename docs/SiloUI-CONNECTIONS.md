@@ -45,12 +45,12 @@ Remote checkpoint creation, fork, and restore share a 122-minute complete-reques
 window. The controller sends `startWithinMs` as half its remaining request time:
 initial admission must occur within 61 minutes, leaving 60 minutes for all owner
 stages and one minute for framing and transport. The work allowance follows
-[`RESTORE_EXPECTED_DURATION`](../app/SiloUI/src-tauri/src/runtime/checkpoints.rs),
+[`RESTORE_EXPECTED_DURATION`](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs),
 which also sets Restore's slow-operation threshold. The 900-second capture limit
 fits within that allowance; it does not define a complete restore's deadline.
 
 Both the controller exchange and owner bridge use
-[`request_timeout`](../app/SiloUI/src-tauri/src/remote.rs). Both devices need the
+[`request_timeout`](../app/SiloUI/src-tauri/engine/src/remote.rs). Both devices need the
 updated budget. Lost-connection retries retain the operation ID and attach to the
 existing owner registry result. Admission expiration still prevents queued work
 from starting; it does not cancel work that has already started.

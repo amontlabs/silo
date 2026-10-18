@@ -51,7 +51,7 @@ No production app, installed bundle, real sandbox, remote computer, production H
 
 ### R-27 Private-key body lines survive redaction across records
 
-**P2.** Locations: [runtime_activity.rs](../app/SiloUI/src-tauri/src/runtime_activity.rs), lines 384–421; [runtime_logs.rs](../app/SiloUI/src-tauri/src/runtime_logs.rs), lines 124–136, 280–306, 384, 803–807, and 995; [log_export.rs](../app/SiloUI/src-tauri/src/log_export.rs), lines 147–148.
+**P2.** Locations: [runtime_activity.rs](../app/SiloUI/src-tauri/engine/src/runtime_activity.rs), lines 384–421; [runtime_logs.rs](../app/SiloUI/src-tauri/engine/src/runtime_logs.rs), lines 124–136, 280–306, 384, 803–807, and 995; [log_export.rs](../app/SiloUI/src-tauri/engine/src/log_export.rs), lines 147–148.
 
 **Trigger and cause.** A command or console emits a PEM private key over multiple physical lines or execution-log records. `log_text` initializes `in_pem = false` for each call. The retained-log reader calls it separately for each decoded record. The BEGIN and END markers are hidden, but the body records have no marker and are returned unchanged. Search and cached-page reads use the same stateless filter. Export writes those entries without another redaction pass.
 
@@ -65,7 +65,7 @@ No production app, installed bundle, real sandbox, remote computer, production H
 
 ### R-28 Full-checkpoint imports omit the disk-only restore selection
 
-**P2.** Locations: [checkpoints.rs](../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 321–329, 920–924, and 1166–1210; [backup.rs](../app/SiloUI/src-tauri/src/backup.rs), lines 712–748 and the full-descriptor acceptance test at 6085–6087; [bundled help](../app/SiloUI/docs/silo-help.html), line 20.
+**P2.** Locations: [checkpoints.rs](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 321–329, 920–924, and 1166–1210; [backup.rs](../app/SiloUI/src-tauri/engine/src/backup.rs), lines 712–748 and the full-descriptor acceptance test at 6085–6087; [bundled help](../app/SiloUI/docs/silo-help.html), line 20.
 
 **Trigger and cause.** Export a full checkpoint, import that export, then Start the imported sandbox. Import records `state: "disk"`, and availability deliberately accepts a native full snapshot for that desired state. Export/load preserves the full artifact. Start adds CPU/memory arguments for the disk branch but never sends `--disk-only`.
 
@@ -77,15 +77,15 @@ The pinned upstream [configuration defaults to Full restoration](https://github.
 
 **Correction.** Retain the artifact's native scope separately from the desired restoration mode. Pass `--disk-only` when recovering disks from a native full checkpoint. Do not blindly add it to every restore: the pinned runtime rejects it for actual disk/file captures.
 
-**Acceptance.** Import a disposable full checkpoint with a running process and a RAM-only sentinel. Start must change the boot ID, preserve checkpoint-time disk files, and leave the captured process/session absent. Test actual disk snapshots separately. The ignored `real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk` test in [backup_controller.rs](../app/SiloUI/src-tauri/src/backup_controller.rs), lines 4262–4445, checks disk markers only; those survive both cold boot and RAM resume, so its current assertions cannot distinguish the defect.
+**Acceptance.** Import a disposable full checkpoint with a running process and a RAM-only sentinel. Start must change the boot ID, preserve checkpoint-time disk files, and leave the captured process/session absent. Test actual disk snapshots separately. The ignored `real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk` test in [backup_controller.rs](../app/SiloUI/src-tauri/engine/src/backup_controller.rs), lines 4262–4445, checks disk markers only; those survive both cold boot and RAM resume, so its current assertions cannot distinguish the defect.
 
 ### R-29 Checkpoint Start loses the GitHub CLI environment default
 
-**P2.** Locations: [runtime.rs](../app/SiloUI/src-tauri/src/runtime.rs), ordinary creation at 5307–5308 and policy modification at 2408–2416; [checkpoints.rs](../app/SiloUI/src-tauri/src/runtime/checkpoints.rs), lines 1166–1210; [restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.6.patch), lines 34–36, 91–98, and 167–170.
+**P2.** Locations: [runtime.rs](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), ordinary creation at 5307–5308 and policy modification at 2408–2416; [checkpoints.rs](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs), lines 1166–1210; [restore-policy patch](../app/SiloUI/patches/microsandbox-restore-policy-0.7.6.patch), lines 34–36, 91–98, and 167–170.
 
 **Trigger and cause.** Start a sandbox from a checkpoint or imported disk. Ordinary creation supplies `--env GH_TOKEN=$MSB_SILO_GITHUB`. The restore argument path recreates labels, secret bindings, network policy, resources, and mounts, but supplies no environment defaults. A secret binding alone does not put the placeholder into `GH_TOKEN`. The bundled restore patch already supports `--env` for future exec commands.
 
-Post-restore GitHub reconciliation updates secret bindings and identity; it does not restore the environment default. `setup-github.sh` installs a Git credential helper, which does not supply the missing GitHub CLI variable. Backup validation also permits environment entries, while the import pending record does not retain the accepted `runtime_config.env` fields. See [backup.rs](../app/SiloUI/src-tauri/src/backup.rs), lines 2415–2429, and [backup_controller.rs](../app/SiloUI/src-tauri/src/backup_controller.rs), lines 1883–1915.
+Post-restore GitHub reconciliation updates secret bindings and identity; it does not restore the environment default. `setup-github.sh` installs a Git credential helper, which does not supply the missing GitHub CLI variable. Backup validation also permits environment entries, while the import pending record does not retain the accepted `runtime_config.env` fields. See [backup.rs](../app/SiloUI/src-tauri/engine/src/backup.rs), lines 2415–2429, and [backup_controller.rs](../app/SiloUI/src-tauri/engine/src/backup_controller.rs), lines 1883–1915.
 
 **Observed.** Executing the unchanged restore argument builder produced `GH_TOKEN_argument=false` and `env_flags=0` for both disk and full cases. No GitHub request or guest command was run.
 
@@ -93,11 +93,11 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 **Correction.** Reapply the built-in placeholder at the existing restore boundary. Explicitly define which additional environment fields are portable; preserve and validate those fields or reject an unsupported export contract. Use the already bundled upstream feature rather than introducing another credential mechanism.
 
-**Acceptance.** A newly executed guest command after disk import and full-checkpoint fork must receive the placeholder. Verify denied and currently authorized synthetic GitHub policies without copying old credentials. The ignored live GitHub test in [runtime_github_tests.rs](../app/SiloUI/src-tauri/src/runtime_github_tests.rs), lines 361–385, expects a post-restore HTTP response; ordinary unit tests do not exercise that path.
+**Acceptance.** A newly executed guest command after disk import and full-checkpoint fork must receive the placeholder. Verify denied and currently authorized synthetic GitHub policies without copying old credentials. The ignored live GitHub test in [runtime_github_tests.rs](../app/SiloUI/src-tauri/engine/src/runtime_github_tests.rs), lines 361–385, expects a post-restore HTTP response; ordinary unit tests do not exercise that path.
 
 ### R-30 GitHub Retry resends saved state instead of the rejected choice
 
-**P2.** Locations: [github-page.tsx](../app/SiloUI/src/features/application/pages/github-page.tsx), lines 156–170, 237–260, and 301–304; [github.rs](../app/SiloUI/src-tauri/src/github.rs), lines 2955–2959.
+**P2.** Locations: [github-page.tsx](../app/SiloUI/src/features/application/pages/github-page.tsx), lines 156–170, 237–260, and 301–304; [github.rs](../app/SiloUI/src-tauri/engine/src/github.rs), lines 2955–2959.
 
 **Trigger and cause.** Enable All repositories, disable it before the first save settles, let the second save receive a stale-revision rejection, then refresh and click Retry. Rejected saves retain workspace names, not their values. A refreshed authoritative snapshot replaces the repository/access draft. Retry submits that replaced draft.
 
@@ -117,7 +117,7 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 **Observed.** The real component mounted with placeholder machines and no policies, then received the same authoritative machine configuration and an existing nonempty `dev` policy. Clicking GitHub Continue submitted `dev.repositories=[]` without a user policy edit.
 
-**Native consequence.** Finish invokes the GitHub setup step in [production-source.ts](../app/SiloUI/src/desktop/production-source.ts), lines 1341–1346. Connected submission sends each draft policy at lines 1314–1317. Native [apply_patches](../app/SiloUI/src-tauri/src/github.rs), lines 2974–2985, replaces existing policy objects. The empty draft therefore clears configured repository access when saved. This is more than a transient display discrepancy.
+**Native consequence.** Finish invokes the GitHub setup step in [production-source.ts](../app/SiloUI/src/desktop/production-source.ts), lines 1341–1346. Connected submission sends each draft policy at lines 1314–1317. Native [apply_patches](../app/SiloUI/src-tauri/engine/src/github.rs), lines 2974–2985, replaces existing policy objects. The empty draft therefore clears configured repository access when saved. This is more than a transient display discrepancy.
 
 **Correction.** Reconcile untouched policy fields when the first authoritative policies arrive, independently of whether machines changed. Track authoritative initialization and user/restored edits separately so loading cannot overwrite deliberate choices.
 
@@ -125,7 +125,7 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 ### R-32 Onboarding changes an existing token policy to OAuth
 
-**P2.** Locations: [onboarding-app.tsx](../app/SiloUI/src/features/onboarding/onboarding-app.tsx), lines 160, 351–364, and 440–457; [onboarding-draft.ts](../app/SiloUI/src/features/onboarding/model/onboarding-draft.ts), line 45; [onboarding-source.ts](../app/SiloUI/src/features/onboarding/model/onboarding-source.ts), lines 81–94; [github.rs](../app/SiloUI/src-tauri/src/github.rs), lines 2887–2896 and 2974–2985.
+**P2.** Locations: [onboarding-app.tsx](../app/SiloUI/src/features/onboarding/onboarding-app.tsx), lines 160, 351–364, and 440–457; [onboarding-draft.ts](../app/SiloUI/src/features/onboarding/model/onboarding-draft.ts), line 45; [onboarding-source.ts](../app/SiloUI/src/features/onboarding/model/onboarding-source.ts), lines 81–94; [github.rs](../app/SiloUI/src-tauri/engine/src/github.rs), lines 2887–2896 and 2974–2985.
 
 **Trigger and cause.** Resume onboarding with an existing `authenticationMethod: "token"` policy while OAuth is also connected, and initialize from the persisted policies rather than a recovered draft. Initialization copies repository mode and write permission but drops authentication method. The recovery schema and completion policy contract omit it, and the editor receives no connected-token state.
 
@@ -139,7 +139,7 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 ### R-33 Remote notifications route to the wrong same-named sandbox
 
-**P2.** Locations: [remote.rs](../app/SiloUI/src-tauri/src/remote.rs), lines 1307 and 1328–1349; [notifications.rs](../app/SiloUI/src-tauri/src/notifications.rs), lines 75–88; [macOS integration](../app/SiloUI/src-tauri/src/system_integrations/macos.rs), line 281; [application-app.tsx](../app/SiloUI/src/features/application/application-app.tsx), lines 236–238 and 251–254.
+**P2.** Locations: [remote.rs](../app/SiloUI/src-tauri/engine/src/remote.rs), lines 1307 and 1328–1349; [notifications.rs](../app/SiloUI/src-tauri/engine/src/notifications.rs), lines 75–88; [macOS integration](../app/SiloUI/src-tauri/engine/src/system_integrations/macos.rs), line 281; [application-app.tsx](../app/SiloUI/src/features/application/application-app.tsx), lines 236–238 and 251–254.
 
 **Trigger and cause.** A local sandbox and a remote sandbox share a display name, such as `dev`. The remote action completion/failure notification retains the raw VM ID and name but drops its computer identity. `Notice::route` sends the name. The frontend resolves the first matching ID, name, or target.
 
@@ -153,7 +153,7 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 ### R-34 Unrelated runtime data can block a small export
 
-**P2.** Location: [backup.rs](../app/SiloUI/src-tauri/src/backup.rs), lines 817–870.
+**P2.** Location: [backup.rs](../app/SiloUI/src-tauri/engine/src/backup.rs), lines 817–870.
 
 **Trigger and cause.** Export an existing checkpoint when disk space is limited and the native store contains unrelated snapshots or cache data. Admission measures the entire `snapshots` and `cache` trees, multiplies those bytes by the selected sandbox count, and charges the resulting estimate to staging and destination volumes. The comment deliberately calls this conservative, but the estimate is a hard rejection without a narrower fallback.
 
@@ -169,13 +169,13 @@ The exact upstream [archive selection](https://github.com/superradcompany/micros
 
 ### R-35 Failed Debian restart leaves a running app without its instance claim
 
-**P2.** Locations: [updates.rs](../app/SiloUI/src-tauri/src/updates.rs), lines 608–622 and 681–699; [updates/debian.rs](../app/SiloUI/src-tauri/src/updates/debian.rs), lines 180–189; [single_instance.rs](../app/SiloUI/src-tauri/src/single_instance.rs), lines 30–35.
+**P2.** Locations: [updates.rs](../app/SiloUI/src-tauri/engine/src/updates.rs), lines 608–622 and 681–699; [updates/debian.rs](../app/SiloUI/src-tauri/engine/src/updates/debian.rs), lines 180–189; [single_instance.rs](../app/SiloUI/src-tauri/src/single_instance.rs), lines 30–35.
 
 **Trigger and cause.** A Debian installation succeeds but replacing the process with `/usr/bin/silo-ui` fails. Before `exec`, Silo explicitly destroys the single-instance plugin claim. The failure callback then cancels shutdown and restores sandboxes without reacquiring that claim. The UI reports that relaunch is needed, but the surviving process resumes normal operation.
 
 The exact cached `tauri-plugin-single-instance 2.4.5` Linux source was inspected: `destroy` releases the session D-Bus name and does not reacquire it. The [upstream implementation](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/single-instance/src/platform_impl/linux.rs) exposes the same release mechanism. Rust's [exec contract](https://doc.rust-lang.org/std/os/unix/process/trait.CommandExt.html#tymethod.exec) confirms that return means replacement failed; the old process still exists. The pinned cached implementation, rather than the moving upstream branch, is the version evidence here.
 
-**Consequence and limit.** Another runnable same-channel copy can acquire the claim while the old app is still active. The remote-control lease does not prevent full startup: [remote.rs](../app/SiloUI/src-tauri/src/remote.rs), lines 1551–1567, records its failure and continues. Scoped runtime-worker locks protect individual commands, but they do not restore application-lifetime ownership or serialize every settings/credential state writer. Competing state writers are therefore permitted; data corruption was not demonstrated. No package installation, failed reexec, or second live Linux instance was executed in this review.
+**Consequence and limit.** Another runnable same-channel copy can acquire the claim while the old app is still active. The remote-control lease does not prevent full startup: [remote.rs](../app/SiloUI/src-tauri/engine/src/remote.rs), lines 1551–1567, records its failure and continues. Scoped runtime-worker locks protect individual commands, but they do not restore application-lifetime ownership or serialize every settings/credential state writer. Competing state writers are therefore permitted; data corruption was not demonstrated. No package installation, failed reexec, or second live Linux instance was executed in this review.
 
 **Correction.** Restore verified instance ownership before reopening mutation admission after failed reexec. If reacquisition cannot be guaranteed, keep mutations blocked and provide a safe exit/relaunch path. Prefer a supported plugin lifecycle facility or upstream extension over an additional custom ownership subsystem.
 
@@ -183,7 +183,7 @@ The exact cached `tauri-plugin-single-instance 2.4.5` Linux source was inspected
 
 ### R-36 Editor repair discards file failures and reports success
 
-**P3.** Locations: [editor.rs](../app/SiloUI/src-tauri/src/editor.rs), lines 816–845, 890–903, and 919–929.
+**P3.** Locations: [editor.rs](../app/SiloUI/src-tauri/engine/src/editor.rs), lines 816–845, 890–903, and 919–929.
 
 **Trigger and cause.** An editor transport configuration cannot be read or replaced during migration or launch-time repair. `rewrite_configs` returns no result, skips directory/file errors, and discards `write_private` failures. The migration path can install a new Include and return `Repair::Done` even though its included files retain the previous runtime paths.
 
@@ -197,7 +197,7 @@ The exact cached `tauri-plugin-single-instance 2.4.5` Linux source was inspected
 
 ### R-37 Linux browser selection accepts a path its launcher cannot use
 
-**P3.** Locations: [applications.rs](../app/SiloUI/src-tauri/src/applications.rs), lines 224–243; [applications/linux.rs](../app/SiloUI/src-tauri/src/applications/linux.rs), lines 87–99, 203–223, and 299–322.
+**P3.** Locations: [applications.rs](../app/SiloUI/src-tauri/engine/src/applications.rs), lines 224–243; [applications/linux.rs](../app/SiloUI/src-tauri/engine/src/applications/linux.rs), lines 87–99, 203–223, and 299–322.
 
 **Trigger and cause.** Select an installed browser executable through Choose application, for example an executable under `/usr/bin`, instead of its desktop-entry file. Generic `application_at` accepts executable files and returns a valid application. Explicit browser launch always calls `desktop_at`, which requires a parsable GIO desktop entry. An executable is therefore accepted by selection and rejected by use.
 
@@ -229,7 +229,7 @@ The first report classified the approval-change-back race as source-confirmed an
 
 The test **failed as predicted**: actual `Some("auto")`, expected `Some("ask")`. The result was 0 passed, 1 failed, and 1,322 filtered out. This establishes the old defect deterministically without a real guest.
 
-The final cutoff includes a subsequent convergence loop in [computer_use.rs](../app/SiloUI/src-tauri/src/computer_use.rs), lines 880–918, plus an unfinished-attempt marker. The loop reads the latest desired mode after an attempt and applies again within the turn. Running the same unchanged regression against an isolated copy of the final source **passed: 1 passed, 0 failed, 1,328 filtered out**. Production Rust was unchanged and no test call-site repairs were needed at this revision. **R-21's demonstrated sequence is fixed at the final cutoff.** This establishes the deterministic policy behavior, not live guest qualification.
+The final cutoff includes a subsequent convergence loop in [computer_use.rs](../app/SiloUI/src-tauri/engine/src/computer_use.rs), lines 880–918, plus an unfinished-attempt marker. The loop reads the latest desired mode after an attempt and applies again within the turn. Running the same unchanged regression against an isolated copy of the final source **passed: 1 passed, 0 failed, 1,328 filtered out**. Production Rust was unchanged and no test call-site repairs were needed at this revision. **R-21's demonstrated sequence is fixed at the final cutoff.** This establishes the deterministic policy behavior, not live guest qualification.
 
 The intermediate attempt at `ac83d94` could not execute because of R-38; those compiler errors were also reproduced directly in the checkout. The subsequent checkout movement removed the unrelated broken test calls and allowed the final regression to run. R-22 also has a targeted warning correction in [computer-use-panel.tsx](../app/SiloUI/src/desktop/computer-use-panel.tsx), lines 117–134; this pass source-checked it but did not rerun the earlier compatibility fixtures.
 

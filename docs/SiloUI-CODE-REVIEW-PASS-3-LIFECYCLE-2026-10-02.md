@@ -18,9 +18,9 @@ These tests do not establish live VM health or release readiness.
 
 Priority: P1. Status: fixed and verified.
 
-Location: [local lifecycle adapter](../app/SiloUI/src-tauri/src/runtime.rs),
-[remote lifecycle adapter](../app/SiloUI/src-tauri/src/runtime/remote_ops.rs), and
-[operation gate](../app/SiloUI/src-tauri/src/runtime/operation_gate.rs).
+Location: [local lifecycle adapter](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs),
+[remote lifecycle adapter](../app/SiloUI/src-tauri/engine/src/runtime/remote_ops.rs), and
+[operation gate](../app/SiloUI/src-tauri/engine/src/runtime/operation_gate.rs).
 
 Trigger: Start encounters a transient launch failure and releases its VM lane for
 retry backoff. A newer Stop runs and retires the saved Start. The older Start then

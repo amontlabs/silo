@@ -96,7 +96,7 @@ these are separate display systems.
 [Tauri documents](https://v2.tauri.app/reference/webview-versions/) WKWebView on
 macOS and WebKitGTK on Linux. Silo already embeds its current desktop client
 with a Tauri child webview in
-[`desktop_viewer.rs`](../app/SiloUI/src-tauri/src/desktop_viewer.rs).
+[`desktop_viewer.rs`](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs).
 This proves an existing embedding boundary, not Selkies compatibility.
 Qualify Selkies' exact codec/decoder path, audio, input and reconnect behavior
 on minimum and current supported device environments. A browser API appearing
