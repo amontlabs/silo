@@ -315,7 +315,7 @@ export function GitHubAccessEditor({
       {tokenConnection}
       {notice && <div className="shrink-0">{notice}</div>}
 
-      <ScrollArea className="min-h-0 flex-1 rounded-md border border-border" role="region" aria-label="Computer Git identity and repository access" aria-busy={busy || undefined}>
+      <ScrollArea className="min-h-0 flex-initial rounded-md border border-border" role="region" aria-label="Computer Git identity and repository access" aria-busy={busy || undefined}>
         <div className="divide-y divide-border">
           {computers.map((computer) => {
             const { name } = computer
