@@ -1517,6 +1517,11 @@ fn run_msb_process(
         }
     }
     ensure_runtime_files(paths)?;
+    if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+        if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
+            crate::computer_use::repair_lcu_mount_before_start(paths, computer);
+        }
+    }
     let mut secret_revision = None;
     let general_secrets = if let Some(computer) = github_command_computer(args) {
         secret_revision =

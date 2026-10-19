@@ -738,6 +738,36 @@ fn read_only(mount: &Value) -> bool {
         || mount.get("readonly").and_then(Value::as_bool) == Some(true)
 }
 
+/// The host folder a computer's inspected configuration records as its LCU mount source.
+pub(crate) fn lcu_mount_source(config: &Value) -> Option<PathBuf> {
+    config
+        .get("mounts")?
+        .as_array()?
+        .iter()
+        .find(|mount| {
+            mount.get("type").and_then(Value::as_str) == Some("Bind")
+                && mount.get("guest").and_then(Value::as_str) == Some(LCU_GUEST_MOUNT)
+        })?
+        .get("host")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+}
+
+/// Gives a computer an empty LCU folder again when the one it recorded is gone. The runtime
+/// cannot change a computer's mounts after creation and refuses to boot one whose mount
+/// source is missing, yet older versions of Silo recorded a folder named after the LCU
+/// version and removed it on update. The guest downloads LCU itself when the folder holds
+/// no archive. Best effort: a computer whose configuration cannot be read is left to the
+/// runtime to report.
+pub(crate) fn repair_lcu_mount_before_start(paths: &RuntimePaths, computer: &str) {
+    let Ok(inspected) = runtime::inspect_computer(&runtime::ProcessRunner, paths, computer) else {
+        return;
+    };
+    if let Some(source) = lcu_mount_source(&inspected.config) {
+        crate::preparation::restore_missing_lcu_folder(&source);
+    }
+}
+
 /// Removes the computer-use mount from a configuration about to be exported. Its host
 /// path means nothing on another device; the importing Silo mounts its own folder
 /// because the computer settings say `builtIn`. A writable mount at that path is refused.

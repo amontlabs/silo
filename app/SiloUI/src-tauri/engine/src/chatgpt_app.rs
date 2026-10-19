@@ -2065,17 +2065,17 @@ fn collect_unused_once(root: &Path, idle_check: &dyn Fn() -> bool) -> bool {
     collect_unused_gated(&crate::runtime::OPERATIONS, root, &lock, arch, idle_check)
 }
 
-const COLLECTION_RETRY: Duration = Duration::from_secs(120);
+pub(crate) const COLLECTION_RETRY: Duration = Duration::from_secs(120);
 static COLLECTION: Maintenance = Maintenance::new();
 
 /// Work that was skipped because the device was busy and must run later.
-struct Maintenance {
+pub(crate) struct Maintenance {
     pending: AtomicBool,
     retrying: AtomicBool,
 }
 
 impl Maintenance {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             pending: AtomicBool::new(false),
             retrying: AtomicBool::new(false),
@@ -2084,13 +2084,13 @@ impl Maintenance {
 
     /// Records the outcome of a pass; true when the caller must start the retry loop
     /// (work is pending and no loop runs yet).
-    fn note(&self, done: bool) -> bool {
+    pub(crate) fn note(&self, done: bool) -> bool {
         self.pending.store(!done, Ordering::SeqCst);
         !done && !self.retrying.swap(true, Ordering::SeqCst)
     }
 
     /// The retry loop: waits, tries, repeats until the work ran.
-    fn run_retries(&self, mut attempt: impl FnMut() -> bool, mut wait: impl FnMut()) {
+    pub(crate) fn run_retries(&self, mut attempt: impl FnMut() -> bool, mut wait: impl FnMut()) {
         loop {
             while self.pending.load(Ordering::SeqCst) {
                 wait();

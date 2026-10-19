@@ -29,6 +29,8 @@ const LCU_LOCK: &str = include_str!("../../guest/lcu-lock.json");
 const DOWNLOAD_DIR: &str = ".download";
 const PUBLISH_PREFIX: &str = ".publish-";
 
+mod lcu_mount;
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparationTask {
@@ -273,6 +275,7 @@ fn kick() {
         .name("preparation-lcu".into())
         .spawn(|| {
             let _ = ensure_lcu(&|_| {});
+            lcu_mount::request_collection();
         });
 }
 
@@ -342,11 +345,26 @@ fn percent(received: u64, total: u64) -> u8 {
 }
 
 /// The read-only host folder holding the verified pinned LCU archive for this device's guest
-/// architecture (file name as in guest/lcu-lock.json's URL), once ready.
+/// architecture (file name as in guest/lcu-lock.json's URL), once ready. Its path never
+/// changes; an update replaces the archive inside it.
 pub fn lcu_folder() -> Option<PathBuf> {
     let root = LCU_ROOT.get()?;
     let spec = ArchiveSpec::lcu().ok()?;
     published(root, &spec)
+}
+
+/// The folder LCU archives are published under. A computer's recorded mount source may
+/// still name a folder of an older version there.
+pub fn lcu_root() -> Option<PathBuf> {
+    LCU_ROOT.get().cloned()
+}
+
+/// Recreates `source`, a mount source a computer recorded, as an empty folder when it is
+/// missing and is a direct child of the LCU root.
+pub(crate) fn restore_missing_lcu_folder(source: &Path) -> bool {
+    LCU_ROOT
+        .get()
+        .is_some_and(|root| lcu_mount::restore_missing(source, root))
 }
 
 /// Returns the folder once the archive is downloaded and verified (joins or starts the download).
@@ -372,9 +390,13 @@ pub fn retry() -> PreparationStatus {
 
 // -------------------------------------------------------------- archives
 
-/// A pinned download published below a root as `<root>/<version>/<archive>`.
+/// A pinned download published below a root as `<root>/<folder>/<archive>`, where the folder
+/// is the version unless the spec names a stable one.
 struct ArchiveSpec {
     version: String,
+    /// A folder whose name never changes, so the host path a computer records as its mount
+    /// source stays valid across updates.
+    stable_folder: Option<&'static str>,
     archive: String,
     url: String,
     sha256: String,
@@ -399,6 +421,7 @@ impl ArchiveSpec {
     fn image(pinned: &PinnedImage) -> Self {
         Self {
             version: pinned.manifest.version.clone(),
+            stable_folder: None,
             archive: guest_image::ARCHIVE_FILE.into(),
             url: pinned.url.clone(),
             sha256: pinned.manifest.archive_sha256.clone(),
@@ -433,6 +456,7 @@ impl ArchiveSpec {
         }
         Ok(Self {
             version: version.into(),
+            stable_folder: Some(lcu_mount::FOLDER),
             archive: archive.into(),
             url: url.into(),
             sha256: sha256.into(),
@@ -440,6 +464,10 @@ impl ArchiveSpec {
             what: "LCU",
             file: "LCU file",
         })
+    }
+
+    fn folder(&self) -> &str {
+        self.stable_folder.unwrap_or(&self.version)
     }
 
     fn part_name(&self) -> String {
@@ -455,7 +483,7 @@ static VERIFIED: Mutex<Vec<Stamp>> = Mutex::new(Vec::new());
 /// The folder of the verified archive, `None` when it is missing or does not match the spec.
 /// The checksum is read once per process and again when the file changes.
 fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
-    let folder = root.join(&spec.version);
+    let folder = root.join(spec.folder());
     let file = folder.join(&spec.archive);
     let meta = fs::symlink_metadata(&file).ok()?;
     if !meta.is_file() || (spec.bytes > 0 && meta.len() != spec.bytes) {
@@ -515,7 +543,9 @@ fn storage_failure(spec: &ArchiveSpec) -> impl Fn(std::io::Error) -> Failure + '
 }
 
 /// Downloads the pinned archive (resuming a partial file), verifies its size and checksum and
-/// publishes it read-only as `<root>/<version>/<archive>`, then removes every other version.
+/// publishes it read-only as `<root>/<folder>/<archive>`. A versioned folder replaces the
+/// previous one and every other version is removed; a stable folder keeps its place and the
+/// archive is renamed into it (`lcu_mount`).
 /// `progress` receives the bytes downloaded so far.
 fn download_and_publish(
     root: &Path,
@@ -547,6 +577,9 @@ fn download_and_publish(
             "The downloaded {} did not match its checksum and was removed. Retry.",
             spec.file
         )));
+    }
+    if spec.stable_folder.is_some() {
+        return lcu_mount::publish(root, spec, &part).map_err(saving);
     }
     let staging = root.join(format!(
         "{PUBLISH_PREFIX}{}-{}",

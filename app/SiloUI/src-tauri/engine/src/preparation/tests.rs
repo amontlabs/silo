@@ -175,6 +175,7 @@ const BODY: &[u8] = b"pinned archive body";
 fn spec_of(version: &str, archive: &str, bytes: u64) -> ArchiveSpec {
     ArchiveSpec {
         version: version.into(),
+        stable_folder: None,
         archive: archive.into(),
         url: format!("https://example.test/{archive}"),
         sha256: format!("{:x}", Sha256::digest(BODY)),
@@ -680,4 +681,23 @@ fn preparation_status_publication_targets_only_the_main_client() {
     );
     assert_eq!(published[1].0.name, STATUS_EVENT);
     assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
+}
+
+#[test]
+fn the_lcu_archive_is_published_in_a_folder_that_does_not_change_with_the_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    let mut first = ArchiveSpec::parse_lcu(LCU_LOCK, DebArch::Amd64).unwrap();
+    first.sha256 = format!("{:x}", Sha256::digest(BODY));
+    let mut second = ArchiveSpec::parse_lcu(LCU_LOCK, DebArch::Amd64).unwrap();
+    second.version = "0.12.0".into();
+    second.archive = "lcu-0.12.0-linux-x64.tar.gz".into();
+    second.sha256 = first.sha256.clone();
+    for spec in [&first, &second] {
+        download_and_publish(&root, spec, &Fake::serving(BODY), &no_progress)
+            .map_err(|f| f.message)
+            .unwrap();
+        assert_eq!(published(&root, spec).unwrap(), root.join("current"));
+    }
+    assert!(published(&root, &first).is_none());
 }
