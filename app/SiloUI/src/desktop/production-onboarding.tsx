@@ -11,6 +11,7 @@ import type { ApplicationSource } from "@/features/application/model/application
 import { OnboardingApp } from "@/features/onboarding/onboarding-app"
 import type { OnboardingCompletionRequest, OnboardingSource, OnboardingSubmissionOptions } from "@/features/onboarding/model/onboarding-source"
 import { useSettings } from "@/features/preferences/settings-store"
+import { errorMessage } from "@/lib/error-message"
 
 function bootstrapConfiguration(configurations: readonly SetupComputerConfiguration[]): SiloBootstrapConfiguration {
   return {
@@ -185,7 +186,7 @@ export function ProductionOnboarding({ application, dependencies, source, onOpen
     void operation.then(() => {
       if (sequence === submissionSequence.current) setOperationError(null)
     }).catch((error: unknown) => {
-      if (sequence === submissionSequence.current) setOperationError(error instanceof Error ? error.message : String(error))
+      if (sequence === submissionSequence.current) setOperationError(errorMessage(error))
     }).finally(() => {
       if (sequence === submissionSequence.current) setFinishing(false)
     })

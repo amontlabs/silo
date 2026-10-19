@@ -1,4 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
+import { errorMessage } from "@/lib/error-message"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { parseRemoteComputerTarget } from "@/features/application/model/connections"
@@ -62,7 +63,6 @@ export interface ComputerUseBridge {
   chatGptFor(device?: string): ChatGptAppStore
 }
 
-const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
 const LOCAL = "local"
 // A remote device's status has no events: it is read again on this schedule.
 const REMOTE_BUSY_POLL_MS = 3000
@@ -115,13 +115,13 @@ function createChatGptAppStore(backend: ComputerUseBackend, device: string | und
     } catch (cause) {
       if (read === reads && seenEvents === events) {
         failureDelay = Math.min(Math.max(failureDelay, working(snapshot.status) ? pollMs.busy : pollMs.idle) * 2, REMOTE_FAILURE_POLL_MAX_MS)
-        set({ loadError: message(cause) })
+        set({ loadError: errorMessage(cause) })
       }
     }
   }
   const retry = async () => {
     set({ busy: true, error: null })
-    try { await backend.retry(device) } catch (cause) { set({ error: message(cause) }) } finally { set({ busy: false }) }
+    try { await backend.retry(device) } catch (cause) { set({ error: errorMessage(cause) }) } finally { set({ busy: false }) }
     await refresh()
   }
   const schedule = (mine: number) => {
@@ -156,7 +156,7 @@ function createChatGptAppStore(backend: ComputerUseBackend, device: string | und
           if (mine !== generation) return
           registering = false
           if (device === undefined) {
-            set({ subscriptionError: `Silo could not subscribe to ChatGPT for Linux updates: ${message(cause)}` })
+            set({ subscriptionError: `Silo could not subscribe to ChatGPT for Linux updates: ${errorMessage(cause)}` })
             if (document.visibilityState !== "hidden") {
               timer = window.setTimeout(register, retryDelay)
               retryDelay = Math.min(retryDelay * 2, 30_000)

@@ -1,4 +1,5 @@
 /* oxlint-disable react/only-export-components */
+import { errorMessage } from "@/lib/error-message"
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 
 /**
@@ -19,10 +20,6 @@ export function EditorIncludeProvider({ backend, children }: { backend: EditorIn
   return <Backend value={backend}>{children}</Backend>
 }
 
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
-
 /**
  * The line the user has to add, or null: none is needed, it is not known yet, or there is no
  * provider (windows and previews without a previous storage). Read when mounted, when Silo reports
@@ -41,12 +38,12 @@ export function useEditorIncludeLine(): string | null {
       const mine = ++sequence
       backend.read().then(
         next => { if (live && mine === sequence) setLine(next) },
-        (cause: unknown) => console.error("Silo editor connections:", message(cause)),
+        (cause: unknown) => console.error("Silo editor connections:", errorMessage(cause)),
       )
     }
     backend.subscribe(refresh).then(
       stop => { if (live) unsubscribe = stop; else stop() },
-      (cause: unknown) => console.error("Silo editor connections:", message(cause)),
+      (cause: unknown) => console.error("Silo editor connections:", errorMessage(cause)),
     ).then(() => { if (live) refresh() })
     window.addEventListener("focus", refresh)
     return () => {

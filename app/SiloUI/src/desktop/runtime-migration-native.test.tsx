@@ -72,7 +72,7 @@ describe("native migration boundary", () => {
     renderNativeGate()
     expect(await screen.findByRole("heading", { name: "Your computers were updated" })).toBeVisible()
     expect(screen.queryByText("Normal application")).not.toBeInTheDocument()
-    expect(await screen.findByText("12.40 GiB")).toBeVisible()
+    expect(await screen.findByText("12.4 GiB")).toBeVisible()
     expect(screen.getByText("Silo deletes it automatically on October 15, 2026.")).toBeVisible()
     expect(native.listen).toHaveBeenCalledWith("silo://pre-upgrade-backup-changed", expect.any(Function))
     fireEvent.click(screen.getByRole("button", { name: "Open Silo" }))

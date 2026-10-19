@@ -4,6 +4,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import "./index.css"
+import { isMac } from "@/lib/platform"
+import { errorMessage } from "@/lib/error-message"
 import { SiloWindow } from "@/components/silo-window"
 import { createComputerUseBridge, nativeComputerUseBackend } from "@/desktop/computer-use-bridge"
 import { createPreparationStore, nativePreparationBackend, PreparationProvider } from "@/desktop/preparation"
@@ -32,7 +34,7 @@ const desktop = isTauri()
 const windowLabel = desktop ? getCurrentWindow().label : ""
 const statusPanel = windowLabel === "status"
 document.documentElement.classList.toggle("native-status", statusPanel)
-document.documentElement.classList.toggle("native-material", windowLabel === "main" && /Mac/.test(navigator.platform))
+document.documentElement.classList.toggle("native-material", windowLabel === "main" && isMac())
 const settings = createDesktopSettingsStore({}, !statusPanel)
 const production = createProductionSource()
 // One root for the session: the loading shell, a startup failure, Retry and the app
@@ -166,7 +168,7 @@ async function start() {
   function run() {
     void boot().catch(async (error: unknown) => {
       if (disposed) return
-      const message = `Silo startup failed: ${error instanceof Error ? error.message : String(error)}. No computer state changed.`
+      const message = `Silo startup failed: ${errorMessage(error)}. No computer state changed.`
       const retry = () => { surface = loadSurface(); surface.catch(() => {}); showLoading(); run() }
       const loaded = await surface.catch(() => null)
       if (disposed) return

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Switch } from "@/components/ui/switch"
 import { useComputerUseBridge } from "./computer-use-bridge"
 import type { ComputerUseApproval, ComputerUseState, LinuxDesktopState } from "./linux-desktop-state"
+import { errorMessage } from "@/lib/error-message"
 
 export interface ComputerUseApprovalController {
   /** The computer's state as last read; null until the first read. */
@@ -48,7 +49,7 @@ export function useComputerUseApproval(computer: string, pollMs = 5000, active =
     } catch (cause) {
       if (current === revision.current) {
         failureDelay.current = Math.min(Math.max(failureDelay.current, pollMs) * 2, 30000)
-        setLoadError(cause instanceof Error ? cause.message : String(cause))
+        setLoadError(errorMessage(cause))
       }
     }
     finally { reading.current = false }
@@ -81,12 +82,12 @@ export function useComputerUseApproval(computer: string, pollMs = 5000, active =
     try {
       setState(await work()); setLoadError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorMessage(cause))
       // The change may have been stored or even applied before it failed to answer: show what the
       // computer's own state says now, not the snapshot from before the change. Only when that read
       // fails too does the old snapshot stand, with its read error.
       try { setState(await bridge?.readState(computer) ?? previous); setLoadError(null) }
-      catch (readCause) { setLoadError(readCause instanceof Error ? readCause.message : String(readCause)); setState(previous) }
+      catch (readCause) { setLoadError(errorMessage(readCause)); setState(previous) }
     }
     finally { working.current = false; setBusy(false) }
   }, [bridge, state, computer])

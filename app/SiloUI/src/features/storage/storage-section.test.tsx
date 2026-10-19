@@ -21,7 +21,7 @@ describe("Settings, General: Storage", () => {
     const section = await screen.findByRole("region", { name: "Storage" })
     expect(within(section).getByRole("heading", { name: "Storage" })).toBeVisible()
     expect(within(section).getByRole("heading", { name: "Pre-upgrade backup" })).toBeVisible()
-    expect(await within(section).findByText("12.40 GiB · deleted on October 15, 2026")).toBeVisible()
+    expect(await within(section).findByText("12.4 GiB · deleted on October 15, 2026")).toBeVisible()
     // Linux disk images: copyable, not browsable. No countdown either.
     expect(within(section).getByText("It holds Linux disk images, so you can copy it but not browse its files.")).toBeVisible()
     expect(section).not.toHaveTextContent(/\bdays?\b/i)
@@ -34,7 +34,7 @@ describe("Settings, General: Storage", () => {
     const first = setup({}, backend => { backend.measure = () => new Promise(resolve => { finish = resolve }) })
     expect(await screen.findByText("Calculating size… · deleted on October 15, 2026")).toBeVisible()
     await act(async () => finish(1536 * 1024 ** 2))
-    expect(await screen.findByText("1.50 GiB · deleted on October 15, 2026")).toBeVisible()
+    expect(await screen.findByText("1.5 GiB · deleted on October 15, 2026")).toBeVisible()
     expect(first.backend.calls).toEqual(["read"])
   })
 
@@ -45,7 +45,7 @@ describe("Settings, General: Storage", () => {
 
   it("says the backup is not deleted automatically when Silo cannot read its date", async () => {
     setup({ deleteAt: null })
-    expect(await screen.findByText("12.40 GiB · not deleted automatically")).toBeVisible()
+    expect(await screen.findByText("12.4 GiB · not deleted automatically")).toBeVisible()
   })
 
   it("shows nothing, and measures nothing, when there is no backup", async () => {
@@ -74,7 +74,7 @@ describe("Settings, General: Storage", () => {
     const { backend, user } = setup()
     await user.click(await screen.findByRole("button", { name: "Delete now" }))
     expect(await screen.findByText("Delete the pre-upgrade backup permanently?")).toBeVisible()
-    await screen.findByText(/frees up to 12\.40 GiB/)
+    await screen.findByText(/frees up to 12.4 GiB/)
     expect(screen.getByText(/can't be undone/)).toBeVisible()
     expect(screen.getByText(/current computers aren't affected/)).toBeVisible()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
@@ -161,7 +161,7 @@ describe("Settings, General: Storage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Silo could not check for it. Silo application storage is unavailable.")
     expect(screen.queryByRole("button", { name: "Delete now" })).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Retry" }))
-    expect(await screen.findByText("12.40 GiB · deleted on October 15, 2026")).toBeVisible()
+    expect(await screen.findByText("12.4 GiB · deleted on October 15, 2026")).toBeVisible()
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
     expect(read).toHaveBeenCalledTimes(2)
   })

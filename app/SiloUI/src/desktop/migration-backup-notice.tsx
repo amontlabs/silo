@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message"
 import { useState, type ReactNode } from "react"
 import { CircleCheck, HardDrive, TriangleAlert } from "lucide-react"
 
@@ -15,10 +16,6 @@ import {
   type PreUpgradeBackupBackend,
   type PreUpgradeBackupState,
 } from "@/features/storage/pre-upgrade-backup"
-
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
 
 /**
  * Shown once after a migration that converted every computer, before the application: Silo kept the
@@ -43,10 +40,10 @@ export function MigrationBackupGate({ backend, transferResult, children }: { bac
   if (decision === null) return <SiloWindow title="Silo" label="Silo"><span role="status" className="sr-only">Opening Silo…</span></SiloWindow>
   return <BackupNotice state={backup} result={transfer.notice} onContinue={async () => {
     // The notice is shown once; failing to record that only shows it again at the next launch.
-    void backup.acknowledge().catch((cause: unknown) => console.error("Silo pre-upgrade backup:", message(cause)))
+    void backup.acknowledge().catch((cause: unknown) => console.error("Silo pre-upgrade backup:", errorMessage(cause)))
     // The result is acknowledged before the application opens, so it does not show the same result
     // again. If that fails the result stays unseen and the application shows it: never lost.
-    await transfer.acknowledge().catch((cause: unknown) => console.error("Silo export and import result:", message(cause)))
+    await transfer.acknowledge().catch((cause: unknown) => console.error("Silo export and import result:", errorMessage(cause)))
     setDecision("open")
   }} />
 }
@@ -57,7 +54,7 @@ function BackupNotice({ state, result, onContinue }: { state: PreUpgradeBackupSt
   const [opening, setOpening] = useState(false)
   async function remove() {
     setError(null)
-    try { await state.remove() } catch (cause) { setError(message(cause)) }
+    try { await state.remove() } catch (cause) { setError(errorMessage(cause)) }
   }
   return <SiloWindow title="Silo" label="Silo migration complete">
     <main className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-6 py-8">

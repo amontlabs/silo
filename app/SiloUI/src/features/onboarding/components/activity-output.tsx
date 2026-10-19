@@ -1,3 +1,4 @@
+import { formatLocalTimestamp } from "@/lib/format-date"
 import { useMemo } from "react"
 
 import { LogDisclosure } from "@/components/log-disclosure"
@@ -8,7 +9,7 @@ function eventLine(event: SiloProgressEvent): string {
     : event.totalBytes === undefined ? `${formatBytes(event.downloadedBytes)} downloaded`
       : `${formatBytes(event.downloadedBytes)} / ${formatBytes(event.totalBytes)} downloaded`
   return [
-    event.timestamp === undefined ? undefined : new Date(event.timestamp).toLocaleString(),
+    event.timestamp === undefined ? undefined : formatLocalTimestamp(event.timestamp),
     event.level === "error" ? "Error" : event.level === "warning" ? "Warning" : undefined,
     event.computer,
     event.message,

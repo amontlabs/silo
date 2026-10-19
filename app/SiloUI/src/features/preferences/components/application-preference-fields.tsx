@@ -5,7 +5,7 @@ import { ListRow, ListRowIcon } from "@/components/list-row"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { matchesApplication, useApplications, type ApplicationKind } from "@/features/preferences/application-catalog"
-import { errorMessage } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
 
 const chooseApplication = "__silo-choose-application__"
 const unavailableApplication = "__silo-unavailable-application__"

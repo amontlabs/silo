@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useState } from "react"
 import { invoke, isTauri } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { isMac } from "@/lib/platform"
 import { desktopShortcutCommand } from "@/lib/shortcuts"
 
 export interface AppMenuState {
@@ -21,7 +22,7 @@ export function useAppMenu(state: AppMenuState, onCommand: (command: string) => 
     onCommand(command)
   })
   useEffect(() => {
-    if (!isTauri() || navigator.platform.startsWith("Mac") || connected) return
+    if (!isTauri() || isMac() || connected) return
     const onKeyDown = (event: KeyboardEvent) => {
       const command = desktopShortcutCommand(event)
       if (command) { event.preventDefault(); receive(command) }

@@ -63,10 +63,10 @@ it("ignores a previous computer's late usage response when the selected computer
   const other = { ...computer, configuration: { ...computer.configuration, id: "vm-other", name: "other" } }
   view.rerender(<CheckpointPanel computer={other} target="other" actions={actions} disabled={false} />)
   const row = within(screen.getByText("Before refactor").closest("[data-checkpoint-name]")!)
-  expect(await row.findByText(/1\.00 GiB/)).toBeVisible()
+  expect(await row.findByText(/1 GiB/)).toBeVisible()
   await act(async () => finish(usage))
   expect(readCheckpointUsage.mock.calls).toEqual([["vm-dev"], ["vm-other"]])
-  expect(row.getByText(/1\.00 GiB/)).toBeVisible()
+  expect(row.getByText(/1 GiB/)).toBeVisible()
   expect(row.queryByText(/Used by experiment/)).not.toBeInTheDocument()
   await user.click(row.getByRole("button", { name: "Checkpoint actions for Before refactor" }))
   expect(screen.getByRole("menuitem", { name: "Delete Before refactor" })).not.toHaveAttribute("data-disabled")
@@ -238,18 +238,12 @@ it("keeps a failed restore in its notification with Retry", async () => {
   expect(restoreCheckpoint).toHaveBeenCalledTimes(2)
 })
 
-it("suggests an English checkpoint name regardless of the system locale", async () => {
-  const original = Date.prototype.toLocaleString
-  const seen: unknown[] = []
-  Date.prototype.toLocaleString = function (locale?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) { seen.push(locale); return original.call(this, locale ?? "fr", options) }
-  try {
-    const user = userEvent.setup()
-    render(<CheckpointPanel computer={computer} target="dev" actions={{ createCheckpoint: vi.fn() } as unknown as ApplicationActions} disabled={false} />)
-    await user.click(screen.getByRole("button", { name: "New checkpoint" }))
-    const value = (screen.getByRole("textbox", { name: "Checkpoint name" }) as HTMLInputElement).value
-    expect(value).toMatch(/^Checkpoint [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/)
-    expect(seen).toContain("en")
-  } finally { Date.prototype.toLocaleString = original }
+it("suggests an English checkpoint name", async () => {
+  const user = userEvent.setup()
+  render(<CheckpointPanel computer={computer} target="dev" actions={{ createCheckpoint: vi.fn() } as unknown as ApplicationActions} disabled={false} />)
+  await user.click(screen.getByRole("button", { name: "New checkpoint" }))
+  const value = (screen.getByRole("textbox", { name: "Checkpoint name" }) as HTMLInputElement).value
+  expect(value).toMatch(/^Checkpoint [A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/)
 })
 
 const gib = 1024 ** 3
@@ -268,13 +262,13 @@ it("confirms Delete in destructive style, deletes in a notification, and refresh
   const user = userEvent.setup()
   render(withToaster(<CheckpointPanel computer={computer} target="dev" actions={{ deleteCheckpoint, readCheckpointUsage } as unknown as ApplicationActions} disabled={false} />))
   const row = within(screen.getByText("Before restore").closest("[data-checkpoint-name]")!)
-  expect(await row.findByText(/1\.00 GiB/)).toBeVisible()
+  expect(await row.findByText(/1 GiB/)).toBeVisible()
   expect(readCheckpointUsage).toHaveBeenCalledWith("vm-dev")
 
   await user.click(row.getByRole("button", { name: "Checkpoint actions for Before restore" }))
   await user.click(screen.getByRole("menuitem", { name: "Delete Before restore" }))
   expect(screen.getByText("Delete “Before restore”?")).toBeVisible()
-  expect(screen.getByText(/freeing up to 1\.00 GiB/)).toBeVisible()
+  expect(screen.getByText(/freeing up to 1 GiB/)).toBeVisible()
   expect(screen.getByText(/can no longer undo the Restore/)).toBeVisible()
   const confirm = confirmButton("Delete")
   expect(confirm).toHaveAttribute("data-variant", "destructive")

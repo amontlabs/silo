@@ -1,5 +1,7 @@
 import { useId, useRef, useState } from "react"
 import { CalendarDays } from "lucide-react"
+import { formatDateTime } from "@/lib/format-date"
+import { errorMessage } from "@/lib/error-message"
 import { FilterCombobox, type FilterOption } from "@/components/filter-combobox"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,7 +57,7 @@ export function LogFilters({ source, since, until, onChange }: LogFilterValues &
       if (from && to && from > to) throw new Error("The start date is after the end date. Change the date filter to see logs.")
       onChange({ source, since: from, until: to })
       setError(""); setOpen(false)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    } catch (cause) { setError(errorMessage(cause)) }
   }
   const fields = [
     { label: "From", date: fromDate, time: fromTime, setDate: setFromDate, setTime: setFromTime },
@@ -128,6 +130,6 @@ function boundary(date: string, time: string, end: boolean): string {
   return value.toISOString()
 }
 function rangeLabel(since: string, until: string): string {
-  const format = (value: string) => new Date(value).toLocaleString("en", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+  const format = (value: string) => formatDateTime(value)
   return since && until ? `${format(since)} → ${format(until)}` : since ? `Since ${format(since)}` : `Until ${format(until)}`
 }

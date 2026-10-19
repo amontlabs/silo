@@ -1,3 +1,5 @@
+import { formatLocalTimestamp } from "@/lib/format-date"
+
 const divisions: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
   { amount: 60, unit: "second" },
   { amount: 60, unit: "minute" },
@@ -29,5 +31,5 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
 /** The full local timestamp, kept in a tooltip beside the relative phrase. */
 export function formatAbsoluteTime(iso: string): string {
   const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? iso : formatLocalTimestamp(date)
 }

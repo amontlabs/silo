@@ -1,5 +1,6 @@
 import type { NoticeComputer } from "@/desktop/notices"
-import { errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess, type OperationStep } from "@/lib/operation-toast"
+import { errorMessage } from "@/lib/error-message"
+import { showOperationFailure, showOperationProgress, showOperationSuccess, type OperationStep } from "@/lib/operation-toast"
 import { computerTarget } from "./connections"
 import type { OperationQueue } from "./operation-queue"
 import type { ApplicationComputer } from "./application-source"

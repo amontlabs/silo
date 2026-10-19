@@ -3,7 +3,8 @@ import { z } from "zod"
 
 import type { MacosEditorState } from "@/features/computers/model/editor-drafts-context"
 import type { ClipboardReport } from "@/desktop/viewer-clipboard-feedback"
-import { bridgeErrorMessage, hasBridgeErrorCode } from "@/contracts/bridge-error"
+import { errorMessage } from "@/lib/error-message"
+import { hasBridgeErrorCode } from "@/contracts/bridge-error"
 import { parseRemoteComputerTarget, remoteComputerTarget } from "@/features/application/model/connections"
 
 export const macosComputerStates = ["preparing", "copying", "downloading", "installing", "setting-up", "stopped", "starting", "running", "stopping", "failed"] as const
@@ -185,11 +186,11 @@ const remoteUnavailableMessage = "This build cannot manage macOS computers on ot
 const remoteUnreadableMessage = "The macOS computers of this device were unreadable."
 
 function remoteFailureMessage(error: unknown) {
-  return bridgeErrorMessage(error) ?? (error instanceof Error && error.message.trim() ? error.message : typeof error === "string" && error.trim() ? error : "The macOS computers of this device could not be read.")
+  return errorMessage(error, { fallback: "The macOS computers of this device could not be read." })
 }
 
 function failureMessage(error: unknown) {
-  return error instanceof Error ? error.message : typeof error === "string" ? error : "The state of macOS computers could not be read."
+  return errorMessage(error, { fallback: "The state of macOS computers could not be read." })
 }
 
 const unreadableMessage = "The state of the macOS computers was unreadable."

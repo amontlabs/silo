@@ -1,14 +1,17 @@
+import { formatDateTime } from '@/lib/format-date'
 import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { formatStorageBytes as formatBytes, type WorkspaceStorageState } from '../model/workspace-storage'
+import { formatBinaryBytes as formatBytes } from '@/lib/format-bytes'
+import type { WorkspaceStorageState } from '../model/workspace-storage'
 import { HardDrive, Database, Folder, Gauge, RefreshCw, History, ChevronDown, Check, CircleAlert, Layers, type LucideIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { dismissOperationToast, errorMessage, showOperationFailure, showOperationProgress, showOperationSuccess } from '@/lib/operation-toast'
+import { errorMessage } from '@/lib/error-message'
+import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from '@/lib/operation-toast'
 import { DisabledReason } from '../components/disabled-reason'
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip'
 
 type ReclaimEntry = WorkspaceStorageState['history'][number]
 
-function date(at: number) { return new Date(at * 1000).toLocaleString('en', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) }
+function date(at: number) { return formatDateTime(at * 1000) }
 function ago(at: number) {
   const seconds = Math.max(0, Date.now() / 1000 - at)
   const units: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86400], ['hour', 3600], ['minute', 60]]

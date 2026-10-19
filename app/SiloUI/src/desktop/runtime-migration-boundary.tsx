@@ -10,6 +10,7 @@ import { desktopPreUpgradeBackupBackend } from "@/desktop/pre-upgrade-backup"
 import { desktopTransferResultNoticeBackend } from "@/desktop/transfer-result-notice"
 import type { TransferResultNoticeBackend } from "@/features/application/model/transfer-result-notice"
 import type { PreUpgradeBackupBackend } from "@/features/storage/pre-upgrade-backup"
+import { errorMessage } from "@/lib/error-message"
 
 const migrationStateSchema = z.object({
   status: z.enum(["not-required", "scanning", "running", "failed", "complete"]),
@@ -44,9 +45,6 @@ const nativeBackend: RuntimeMigrationBackend = {
   transferResult: desktopTransferResultNoticeBackend,
 }
 
-function message(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
 
 function issueUrl(state: RuntimeMigrationState) {
   const title = "Silo computer migration failed"
@@ -100,7 +98,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
           }
         }
       } catch (cause) {
-        if (active && sequence === publication.sequence) setError(message(cause))
+        if (active && sequence === publication.sequence) setError(errorMessage(cause))
         return
       }
       if (!active || settled || sequence !== publication.sequence || !beforeSubscription) return
@@ -120,7 +118,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
       unsubscribe = stop
       listening = true
       if (recheck && !eventSeen) { recheck = false; void read() }
-    }).catch(cause => { if (active) setSubscriptionError(message(cause)) })
+    }).catch(cause => { if (active) setSubscriptionError(errorMessage(cause)) })
     return () => { active = false; ++publication.sequence; unsubscribe?.() }
   }, [backend, attempt])
 
@@ -135,7 +133,7 @@ export function RuntimeMigrationBoundary({ children, backend = nativeBackend }: 
       if (readAfter) next = await backend.read()
       if (sequence === publicationSequence.current.sequence) { setState(next); setError(null) }
     } catch (cause) {
-      if (sequence === publicationSequence.current.sequence) setError(message(cause))
+      if (sequence === publicationSequence.current.sequence) setError(errorMessage(cause))
     } finally { setBusy(false) }
   }
 
