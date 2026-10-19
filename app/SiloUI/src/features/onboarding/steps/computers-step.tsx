@@ -20,9 +20,11 @@ function formatElapsed(seconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
 }
 
-export function ComputersStep({ onConnectDevice, configurations, progress, onConfigurationsChange, onRetry, initialEditorDraft, onEditorDraftChange }: {
+export function ComputersStep({ onConnectDevice, configurations, existingConfigurations, progress, onConfigurationsChange, onRetry, initialEditorDraft, onEditorDraftChange }: {
   onConnectDevice?: () => void
   configurations: readonly SetupComputerConfiguration[]
+  /** The computers that already exist on this device; when unknown, none is treated as safe to remove silently. */
+  existingConfigurations?: readonly SetupComputerConfiguration[]
   progress: ComputerProgressView
   onConfigurationsChange: (configurations: SetupComputerConfiguration[]) => void
   onRetry: () => void
@@ -68,7 +70,7 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
         <ComputerConfigurationList
           onConnectDevice={onConnectDevice}
           isComputerCreated={(configuration) => progress.computers.some((computer) => computer.name === configuration.name && computer.status === "ready")}
-          isComputerDraft={(configuration) => progress.status === "waiting" && progress.computers.every((computer) => computer.name !== configuration.name || computer.status === "waiting")}
+          isComputerDraft={(configuration) => existingConfigurations !== undefined && !existingConfigurations.some(({ id }) => id === configuration.id)}
           configurations={configurations}
           onConfigurationsChange={onConfigurationsChange}
           initialEditorDraft={initialEditorDraft}

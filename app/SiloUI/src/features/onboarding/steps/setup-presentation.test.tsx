@@ -73,17 +73,36 @@ describe("setup progress and review presentation", () => {
   it("keeps the permanent deletion warning for a computer whose setup failed", async () => {
     const user = userEvent.setup()
     const failed = { ...progress, status: "failed" as const, retryable: true, computers: [{ name: "dev", status: "failed" as const, detail: "Verification failed" }, { name: "playgrounds", status: "waiting" as const, detail: "Waiting" }] }
-    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 2)} progress={failed} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 2)} existingConfigurations={fixtureComputerDefaults.slice(0, 2)} progress={failed} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
     await user.click(screen.getByRole("button", { name: "More actions for dev" }))
     await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
     expect(screen.queryByText("It has not been created yet, so no files are affected.")).not.toBeInTheDocument()
     expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
   })
 
-  it("treats a computer setup has not started on as not created", async () => {
+  it("keeps the permanent deletion warning for an existing computer when setup restarts idle", async () => {
+    const user = userEvent.setup()
+    const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} existingConfigurations={fixtureComputerDefaults.slice(0, 1)} progress={idle} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(screen.queryByText("It has not been created yet, so no files are affected.")).not.toBeInTheDocument()
+    expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
+  })
+
+  it("keeps the warning when the existing computers are not known", async () => {
     const user = userEvent.setup()
     const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
     render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} progress={idle} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
+  })
+
+  it("treats a computer setup has not started on as not created", async () => {
+    const user = userEvent.setup()
+    const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} existingConfigurations={[]} progress={idle} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
     await user.click(screen.getByRole("button", { name: "More actions for dev" }))
     await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
     expect(await screen.findByText("It has not been created yet, so no files are affected.")).toBeVisible()
