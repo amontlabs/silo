@@ -7,7 +7,7 @@ const LOCALE = "en"
 
 type DateInput = Date | number | string
 
-function dateFormat(options: Intl.DateTimeFormatOptions, locale: string | undefined = LOCALE) {
+function dateFormat(options: Intl.DateTimeFormatOptions, locale: string | undefined) {
   let formatter: Intl.DateTimeFormat | undefined
   return (value: DateInput): string => {
     const date = value instanceof Date ? value : new Date(value)
@@ -19,16 +19,16 @@ function dateFormat(options: Intl.DateTimeFormatOptions, locale: string | undefi
 }
 
 /** "October 7, 2026" */
-export const formatLongDate = dateFormat({ year: "numeric", month: "long", day: "numeric" })
+export const formatLongDate = dateFormat({ year: "numeric", month: "long", day: "numeric" }, LOCALE)
 
 /** "Oct 7" */
-export const formatMonthDay = dateFormat({ month: "short", day: "numeric" })
+export const formatMonthDay = dateFormat({ month: "short", day: "numeric" }, LOCALE)
 
 /** "Oct 7, 13:58" */
-export const formatMonthDayTime = dateFormat({ month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+export const formatMonthDayTime = dateFormat({ month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }, LOCALE)
 
 /** "Oct 7, 2026, 13:58" */
-export const formatDateTime = dateFormat({ year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+export const formatDateTime = dateFormat({ year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }, LOCALE)
 
 /** The system locale's full date and time, e.g. "10/7/2026, 1:58:05 PM". */
 export const formatLocalTimestamp = dateFormat({ year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }, undefined)

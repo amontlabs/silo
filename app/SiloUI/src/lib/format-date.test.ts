@@ -40,3 +40,18 @@ it("formats local timestamps with the system locale", () => {
   expect(formatLocalActivityTime(at)).toBe(at.toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" }))
   expect(formatLocalTimeOfDay(at)).toBe(at.toLocaleTimeString())
 })
+
+it("formats local timestamps with a non-English system locale", async () => {
+  vi.resetModules()
+  const RealFormat = Intl.DateTimeFormat
+  vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (locale?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+    return new RealFormat(locale ?? "fr", options)
+  } as unknown as typeof Intl.DateTimeFormat)
+  try {
+    const fresh = await import("@/lib/format-date")
+    expect(fresh.formatLocalActivityTime(at)).toBe("07/10/2026 13:58:05")
+    expect(fresh.formatLocalTimeOfDay(at)).toBe("13:58:05")
+    expect(fresh.formatLocalTimestamp(at)).toBe("07/10/2026 13:58:05")
+    expect(fresh.formatMonthDay(at)).toBe("Oct 7")
+  } finally { vi.restoreAllMocks() }
+})
