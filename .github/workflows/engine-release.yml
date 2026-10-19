@@ -1,11 +1,14 @@
 name: Publish Silo engine
 
-# A tag engine-v<version> publishes the prebuilt silod that other apps embed.
-# <version> is the silod crate version, also engineVersion in the production
-# engine manifest. See docs/SiloUI-RELEASES.md#engine-releases.
+# Publishes the prebuilt silod (Apple Silicon) that other apps embed, as the
+# release engine-v<version>. <version> is the silod crate version, also
+# engineVersion in the production engine manifest. Push a tag engine-v<version>,
+# or run this workflow from main to create the tag and release at that commit.
+# See docs/SiloUI-RELEASES.md#engine-releases.
 on:
   push:
     tags: ['engine-v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,6 +23,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       archive: ${{ steps.package.outputs.archive }}
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,24 +31,40 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - name: Require the tag to name the engine version
+      - name: Determine the engine tag
+        id: tag
         env:
-          TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           version=$(python3 -c "import tomllib; print(tomllib.load(open('app/SiloUI/src-tauri/silod/Cargo.toml', 'rb'))['package']['version'])")
-          if [[ "$TAG" != "engine-v$version" ]]; then
-            echo "::error::Tag $TAG must be engine-v$version, the silod version in Cargo.toml."
+          tag="engine-v$version"
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            if [[ "$REF" != refs/heads/main ]]; then
+              echo "::error::Run this workflow from main, not $REF."
+              exit 1
+            fi
+            if gh release view "$tag" >/dev/null 2>&1 || gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+              echo "::error::$tag already exists; raise the silod version before releasing again."
+              exit 1
+            fi
+          elif [[ "$REF_NAME" != "$tag" ]]; then
+            echo "::error::Tag $REF_NAME must be $tag, the silod version in Cargo.toml."
             exit 1
           fi
-      - name: Install pinned Rust toolchain with both macOS targets
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Rust toolchain for Apple Silicon
         run: |
           set -euo pipefail
           toolchain=$(python3 -c "import json; print(json.load(open('app/SiloUI/runtime-inputs.json'))['toolchain'])")
-          rustup toolchain install "$toolchain" --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup toolchain install "$toolchain" --profile minimal --target aarch64-apple-darwin
           rustup default "$toolchain"
       # silo-engine compiles the GitHub App configuration in, as the Silo app does.
-      - name: Build and package the universal engine
+      - name: Build and package the engine
         id: package
         working-directory: app/SiloUI
         env:
@@ -53,16 +73,16 @@ jobs:
           SILO_GITHUB_CLIENT_SECRET: ${{ secrets.SILO_GITHUB_CLIENT_SECRET }}
         run: |
           set -euo pipefail
-          python3 scripts/package-engine.py --universal --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
+          python3 scripts/package-engine.py --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
           echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
       - name: Verify the archive
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.tag.outputs.tag }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           set -euo pipefail
           version="${TAG#engine-v}"
-          test "$ARCHIVE" = "silo-engine-$version-macos-universal.tar.gz"
+          test "$ARCHIVE" = "silo-engine-$version-macos-arm64.tar.gz"
           cd "$RUNNER_TEMP/engine-release"
           test "$(ls | wc -l)" -eq 2
           shasum -a 256 -c "$ARCHIVE.sha256"
@@ -70,13 +90,13 @@ jobs:
           tar -xzf "$ARCHIVE" -C extracted
           engine="extracted/silo-engine-$version"
           archs=$(lipo -archs "$engine/bin/silod")
-          [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]] || { echo "::error::silod has architectures: $archs"; exit 1; }
+          [[ "$archs" == arm64 ]] || { echo "::error::silod has architectures: $archs"; exit 1; }
           python3 - "$engine" "$version" "$GITHUB_SHA" <<'PY'
           import json, sys
           engine, version, commit = sys.argv[1:]
           info = json.load(open(f'{engine}/release.json'))
           assert info['engineVersion'] == version and info['sourceCommit'] == commit, info
-          assert info['targets'] == ['aarch64-apple-darwin', 'x86_64-apple-darwin'], info
+          assert info['targets'] == ['aarch64-apple-darwin'], info
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -102,13 +122,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ needs.build.outputs.tag }}
           ARCHIVE: ${{ needs.build.outputs.archive }}
         run: |
           set -euo pipefail
           cd engine-release
           sha256sum -c "$ARCHIVE.sha256"
+          # A tag push already has its tag; a dispatch creates it at the built commit.
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            tag_flag=(--target "$GITHUB_SHA")
+          else
+            tag_flag=(--verify-tag)
+          fi
           # Not "latest": the Silo app's update feed reads releases/latest.
           gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
-            --verify-tag --latest=false --title "Silo engine ${TAG#engine-v}" \
-            --notes "Prebuilt silod for macOS (arm64 and x86_64), built from $GITHUB_SHA. The binary is not code signed: the app that embeds it sets SiloEngineCodeRequirement in the engine Info.plist and signs it. See docs/SiloUI-RELEASES.md#engine-releases."
+            "${tag_flag[@]}" --latest=false --title "Silo engine ${TAG#engine-v}" \
+            --notes "Prebuilt silod for macOS (arm64), built from $GITHUB_SHA. The binary is not code signed: the app that embeds it sets SiloEngineCodeRequirement in the engine Info.plist and signs it. See docs/SiloUI-RELEASES.md#engine-releases."
