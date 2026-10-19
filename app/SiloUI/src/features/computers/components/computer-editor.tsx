@@ -107,7 +107,9 @@ function TextField({ label, value, error, hint, firstField = false, inputRef, ..
   )
 }
 
-export function ComputerEditor({ saving, blockedReason, editorHeader, editor, focusRequest, configurations, baselineComputer, conflict = false, review, onCancel, onSave, onDraftChange, onReview, onDiscard, created, running, capacity, deviceName, deviceId, reservedNames }: {
+export function ComputerEditor({ saving, blockedReason, editorHeader, editor, focusRequest, configurations, baselineComputer, conflict = false, review, onCancel, onSave, onDraftChange, onReview, onDiscard, created, running, capacity, deviceName, deviceId, reservedNames, pristine }: {
+  /** What the editor opened with; a restored editor compares against it rather than its restored draft. */
+  pristine?: { draft: SetupComputerConfiguration; deviceId: string }
   /** Names of this device's computers of another kind (macOS), which a new computer cannot reuse. */
   reservedNames?: readonly string[]
   saving?: boolean
@@ -254,7 +256,8 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   // Escape cancels only an untouched editor, so a keystroke never discards typed changes.
   function cancelOnEscape(event: React.KeyboardEvent) {
     if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || saving || stopPending) return
-    if (!sameComputerConfiguration(initialDraft.current, draft)) return
+    const untouched = pristine ?? { draft: initialDraft.current, deviceId: deviceId ?? "" }
+    if (!sameComputerConfiguration(untouched.draft, draft) || untouched.deviceId !== (deviceId ?? "")) return
     event.preventDefault()
     onCancel()
   }

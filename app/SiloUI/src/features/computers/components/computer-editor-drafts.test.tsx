@@ -133,6 +133,31 @@ describe("unsaved computer edits across navigation", () => {
     expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   })
 
+  it("keeps a restored edit when Escape is pressed after returning", async () => {
+    const onConfigurationsChange = vi.fn()
+    const user = userEvent.setup()
+    const { rerender } = render(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
+    await editCpuLimit(user)
+    rerender(<Surface shown={false} onConfigurationsChange={onConfigurationsChange} />)
+    rerender(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
+    await user.click(screen.getByRole("textbox", { name: "Computer name" }))
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
+  })
+
+  it("keeps a new computer's device choice when Escape is pressed", async () => {
+    const user = userEvent.setup()
+    const devices = [{ id: "office", name: "Office", connected: true }]
+    const { rerender } = render(<TooltipProvider><ComputerEditorDraftsProvider><ComputerConfigurationList configurations={[]} onConfigurationsChange={vi.fn()} devices={devices} editorDraftKey="computer-list" /></ComputerEditorDraftsProvider></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "Add" }))
+    await user.click(screen.getByRole("menuitem", { name: "New computer" }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "Run on" }), "office")
+    await user.click(screen.getByRole("textbox", { name: "Computer name" }))
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("combobox", { name: "Run on" })).toHaveValue("office")
+    rerender(<TooltipProvider><ComputerEditorDraftsProvider><p>Files</p></ComputerEditorDraftsProvider></TooltipProvider>)
+  })
+
   it("forgets a cancelled edit", async () => {
     const onConfigurationsChange = vi.fn()
     const user = userEvent.setup()

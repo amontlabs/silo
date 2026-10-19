@@ -12,7 +12,7 @@ import { isStaleConfigurationError } from "@/features/application/model/computer
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
 import { fitComputerToCapacity, type DeviceCapacity } from "@/features/computers/model/computer-limits"
 import { rebaseComputerDraft, type ComputerReview } from "@/features/computers/model/computer-review"
-import { useComputerEditorDrafts } from "@/features/computers/model/editor-drafts-context"
+import { useComputerEditorDrafts, type EditorPristine } from "@/features/computers/model/editor-drafts-context"
 
 export const defaultSaveBlockedReason = "Saving is paused while another computer change is in progress or needs review."
 
@@ -89,6 +89,7 @@ export function useComputerEditing({
   const baselineRef = useRef<SetupComputerConfiguration[] | null>(stored?.baseline ?? null)
   // The edited computer's baseline, plus editor conflict state, drive the in-editor notices.
   const [editorBaseline, setEditorBaseline] = useState<SetupComputerConfiguration | null>(stored?.editorBaseline ?? null)
+  const [pristine, setPristine] = useState<EditorPristine | null>(stored?.pristine ?? null)
   const [editorConflict, setEditorConflict] = useState(stored?.editorConflict ?? false)
   const [editorReview, setEditorReview] = useState<ComputerReview | null>(stored?.editorReview ?? null)
   useEffect(() => {
@@ -97,10 +98,10 @@ export function useComputerEditing({
       const previous = drafts.get(draftKey)
       // The macOS state belongs to the editor it was made in; a different editor starts without it.
       const macos = previous?.editor.draft.id === editor.draft.id ? previous : undefined
-      drafts.set(draftKey, { editor, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: previous?.pendingSave, macosForm: macos?.macosForm, pendingMacosCreate: macos?.pendingMacosCreate })
+      drafts.set(draftKey, { editor, pristine, editorBaseline, editorConflict, editorReview, baseline: baselineRef.current, deviceId, pendingSave: previous?.pendingSave, macosForm: macos?.macosForm, pendingMacosCreate: macos?.pendingMacosCreate })
     }
     else drafts.delete(draftKey)
-  }, [drafts, draftKey, editor, editorBaseline, editorConflict, editorReview, deviceId])
+  }, [drafts, draftKey, editor, pristine, editorBaseline, editorConflict, editorReview, deviceId])
   const [editorResetToken, setEditorResetToken] = useState(0)
 
   const completeRestoredSave = useEffectEvent(() => { setEditor(null); setCommitting(false) })
@@ -129,7 +130,7 @@ export function useComputerEditing({
     editorRef.current = next
     setEditorState(next)
     onEditorDraftChange?.(next)
-    if (!next) { setEditorConflict(false); setEditorBaseline(null); setEditorReview(null) }
+    if (!next) { setPristine(null); setEditorConflict(false); setEditorBaseline(null); setEditorReview(null) }
   }
 
   /**
@@ -158,6 +159,7 @@ export function useComputerEditing({
     captureBaseline()
     setEditorBaseline(structuredClone(configuration))
     setDeviceId(getDeviceId?.(configuration) ?? "")
+    setPristine({ draft: structuredClone(configuration), deviceId: getDeviceId?.(configuration) ?? "" })
     setEditor({
       draft: structuredClone(configuration),
       originalID: configuration.id,
@@ -170,9 +172,11 @@ export function useComputerEditing({
     beginOperation()
     captureBaseline()
     setDeviceId("")
+    const draft = fitComputerToCapacity(newVirtualComputer(configurations), getDeviceCapacity?.(""))
+    setPristine({ draft: structuredClone(draft), deviceId: "" })
     setEditor({
       // New computers start on this device, so fit the defaults to it.
-      draft: fitComputerToCapacity(newVirtualComputer(configurations), getDeviceCapacity?.("")),
+      draft,
       insertAt: configurations.length,
     })
   }
@@ -183,7 +187,9 @@ export function useComputerEditing({
     captureBaseline()
     const sourceIndex = configurations.findIndex(({ id }) => id === configuration.id)
     setDeviceId(getDeviceId?.(configuration) ?? "")
-    setEditor({ draft: duplicateComputer(configuration, configurations), insertAt: sourceIndex + 1, displayAfterID: configuration.id })
+    const draft = duplicateComputer(configuration, configurations)
+    setPristine({ draft: structuredClone(draft), deviceId: getDeviceId?.(configuration) ?? "" })
+    setEditor({ draft, insertAt: sourceIndex + 1, displayAfterID: configuration.id })
   }
 
   // Restrict a captured baseline to the configurations this list actually commits (local vs a
@@ -312,7 +318,7 @@ export function useComputerEditing({
     interactionDisabled: disabled,
     saveBlockedReason,
     editor, setEditor,
-    editorBaseline, editorConflict, editorReview, editorResetToken,
+    editorBaseline, pristine, editorConflict, editorReview, editorResetToken,
     editorFocusRequest, setEditorFocusRequest,
     baselineRef,
     captureBaseline, beginOperation, scopedBaseline, dispatchChange,

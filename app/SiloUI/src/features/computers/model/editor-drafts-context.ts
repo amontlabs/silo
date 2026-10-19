@@ -11,6 +11,11 @@ import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding
  * Save, Cancel and Discard clear the entry. Onboarding persists its editor itself
  * (`onEditorDraftChange`); without a `ComputerEditorDraftsProvider` nothing is kept.
  */
+export interface EditorPristine {
+  draft: SetupComputerConfiguration
+  deviceId: string
+}
+
 export interface StoredComputerEditor {
   editor: ComputerEditorDraft
   /** The edited computer's saved configuration when the editor opened. */
@@ -18,6 +23,8 @@ export interface StoredComputerEditor {
   /** Every computer's saved configuration when the edit began (the change's `expected`). */
   baseline: SetupComputerConfiguration[] | null
   deviceId: string
+  /** The configuration and device the editor opened with, so a restored editor still knows what counts as changed. */
+  pristine?: EditorPristine | null
   editorConflict?: boolean
   editorReview?: ComputerReview | null
   /** A save that must stay locked and settle even if its editor surface unmounts. */
