@@ -220,7 +220,8 @@ impl Probes {
                         .map(|slots| slots.get(label).is_none_or(|slot| slot.epoch != epoch))
                         .unwrap_or(true)
             };
-            let outcome = run(&obsolete);
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&obsolete)))
+                .unwrap_or_else(|_| Err(NOT_READY.to_string()));
             let Ok(mut slots) = self.slots.lock() else {
                 return;
             };
@@ -433,6 +434,16 @@ mod tests {
         let second = second.into_inner().unwrap();
         assert_eq!(second.blocking_recv().unwrap(), Ok(true));
         assert!(probes.enlist("v").unwrap().1, "the worker has finished");
+    }
+
+    #[test]
+    fn a_panicking_probe_answers_its_waiter_and_frees_the_slot() {
+        let probes = Probes::default();
+        let (answer, start) = probes.enlist("v").unwrap();
+        assert!(start);
+        probes.work("v", PROBE_DEADLINE, |_| panic!("probe bug"));
+        assert_eq!(answer.blocking_recv().unwrap(), Err(NOT_READY.into()));
+        assert!(probes.enlist("v").unwrap().1, "a new worker may start");
     }
 
     #[test]

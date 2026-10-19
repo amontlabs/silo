@@ -11,6 +11,7 @@ pub mod bundled_tools;
 pub mod channel;
 pub mod chatgpt_app;
 pub mod checkpoints;
+pub(crate) mod child_process;
 pub mod clipboard;
 pub mod computer_names;
 pub mod computer_use;
