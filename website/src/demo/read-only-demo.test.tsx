@@ -92,7 +92,7 @@ it('shows computer menus and sample storage without allowing native operations',
   await user.click(screen.getByRole('button', { name: 'More actions for dev' }));
   expect(screen.getByRole('menuitem', { name: 'Restart dev' })).toHaveAttribute('aria-disabled', 'true');
   await user.click(screen.getByRole('menuitem', { name: 'Storage for dev' }));
-  expect(await screen.findByText('18.00 GiB')).toBeVisible();
+  expect(await screen.findByText('18 GiB')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Free up space' })).toBeDisabled();
   await user.click(screen.getByRole('button', { name: 'History, 1 attempt' }));
   expect(screen.getByLabelText('History entries')).toBeVisible();
