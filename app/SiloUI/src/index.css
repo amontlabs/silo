@@ -163,27 +163,27 @@ html.dark {
 }
 
 .collapsible-content-motion[data-state="open"] {
-  animation: collapsible-content-reveal 180ms ease-out;
+  animation: collapsible-content-reveal 120ms ease-out;
 }
 
 .collapsible-content-motion[data-state="closed"] {
-  animation: collapsible-content-collapse 180ms ease-in;
+  animation: collapsible-content-collapse 100ms ease-in;
 }
 
 .file-pane-content-motion[data-state="open"] {
-  animation: file-pane-content-reveal 180ms ease-out;
+  animation: file-pane-content-reveal 120ms ease-out;
 }
 
 .file-pane-content-motion[data-state="closed"] {
-  animation: file-pane-content-collapse 140ms ease-in;
+  animation: file-pane-content-collapse 100ms ease-in;
 }
 
 [data-files-layout][data-file-tree-state="open"] [data-files-pane-scroll="repositories"] {
-  animation: suppress-repository-overflow-after-tree-expand 200ms;
+  animation: suppress-repository-overflow-after-tree-expand 120ms;
 }
 
 [data-files-layout][data-file-tree-state="closed"] [data-files-pane-scroll="repositories"] {
-  animation: suppress-repository-overflow-after-tree-collapse 200ms;
+  animation: suppress-repository-overflow-after-tree-collapse 120ms;
 }
 
 @keyframes collapsible-content-reveal {

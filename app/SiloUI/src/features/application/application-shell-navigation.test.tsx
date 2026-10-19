@@ -120,7 +120,7 @@ it("formats activity dates in the user's locale and timezone", () => {
 it("keeps secret edits across navigation and shows pending changes on affected computers", async () => {
   const { user, actions } = renderApplication()
   await user.click(within(appNavigation()).getByRole("button", { name: "Secrets" }))
-  await user.click(screen.getByRole("button", { name: "Edit PACKAGE_TOKEN" }))
+  await user.click(await screen.findByRole("button", { name: "Edit PACKAGE_TOKEN" }))
   const form = within(screen.getByRole("form", { name: "Edit PACKAGE_TOKEN" }))
   await user.click(form.getByRole("combobox", { name: "Add computer" }))
   await user.click(screen.getByRole("option", { name: "personal" }))
@@ -190,7 +190,7 @@ it("collapses the sidebar to labelled icons and keeps every destination usable",
   }
   await user.click(navigation.getByRole("button", { name: "Settings" }))
   await user.click(navigation.getByRole("button", { name: "Notifications" }))
-  expect(within(appPanel("Settings")).getByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
+  expect(await within(appPanel("Settings")).findByRole("heading", { name: "Notifications", level: 2 })).toBeVisible()
   await user.click(screen.getByRole("button", { name: "Expand sidebar" }))
   expect(appNavigation()).toHaveAttribute("data-collapsed", "false")
   expect(navigation.getByRole("button", { name: "Notifications" })).toHaveAttribute("aria-current", "page")

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef } from "react"
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef } from "react"
 
 import { ErrorDetails } from "@/components/error-details"
 import { dismissOperationToast, showOperationFailure, showOperationNotice, showOperationProgress } from "@/lib/operation-toast"
@@ -9,8 +9,26 @@ import { cancelledActionLabel, emptyOperationQueue, waitingOperationForVm, waiti
 
 const LIFECYCLE_TOAST_DELAY_MS = 800
 
+/** The computers whose lifecycle state drives notifications. */
+function lifecycleComputers(computers: ApplicationComputer[]) {
+  return computers.filter(computer => computer.lifecycleAction || computer.lifecycleFailure)
+}
+
+/** Everything the lifecycle notifications read from a computer, so unrelated publishes compare equal. */
+function lifecycleKey(computers: ApplicationComputer[]) {
+  return JSON.stringify(computers.map(computer => [
+    computer.device?.id ?? "", computer.configuration.id, computer.configuration.name, computer.lifecycleAction,
+    computer.lifecycleStep, computer.lifecycleFailure, computer.lifecycleFailureAction,
+    computer.lifecycleFailureCancelled, computer.lifecycleFailureDiagnostic,
+  ]))
+}
+
 /** Track lifecycle notifications independently of the visible page. */
 export function useLifecycleToasts(source: ApplicationSource, actions: ApplicationActions, { enabled = true, readOnly = false } = {}) {
+  const relevantComputers = lifecycleComputers(source.computers)
+  const relevantKey = lifecycleKey(relevantComputers)
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  const lifecycleSubset = useMemo(() => relevantComputers, [relevantKey])
   const latest = useRef({ source, actions, readOnly })
   useLayoutEffect(() => { latest.current = { source, actions, readOnly } }, [source, actions, readOnly])
 
@@ -62,7 +80,7 @@ export function useLifecycleToasts(source: ApplicationSource, actions: Applicati
       tracked.delete(key)
     }
   })
-  useEffect(() => { if (enabled) trackLifecycle(source.computers) }, [enabled, source.computers, source.operationQueue])
+  useEffect(() => { if (enabled) trackLifecycle(lifecycleSubset) }, [enabled, lifecycleSubset, source.operationQueue])
   useEffect(() => {
     const tracked = lifecycleProgress.current
     return () => {
@@ -103,5 +121,5 @@ export function useLifecycleToasts(source: ApplicationSource, actions: Applicati
       showOperationFailure(id, `Could not ${verb} ${name}`, { description: computer.lifecycleFailure ? <ErrorDetails message={computer.lifecycleFailure} diagnostic={computer.lifecycleFailureDiagnostic} /> : undefined, retry: retry(computer), computer: name, native: false })
     }
   })
-  useEffect(() => { if (enabled) lifecycleToasts(source.computers) }, [enabled, source.computers])
+  useEffect(() => { if (enabled) lifecycleToasts(lifecycleSubset) }, [enabled, lifecycleSubset])
 }

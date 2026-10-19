@@ -25,6 +25,7 @@ it("keeps every General and Notifications choice after source replacement and re
   const store = createMemorySettingsStore({ ...source.preferences, startupComputerIds: [dev] })
   const view = render(application(store, source))
   const settings = settingsPanel()
+  await settings.findByRole("combobox", { name: "Theme" })
 
   for (const [label, option] of [["Theme", "Dark"], ["Terminal", "iTerm"], ["Code editor", "Cursor"], ["Browser", "Firefox"]]) {
     await user.click(settings.getByRole("combobox", { name: label }))
@@ -39,7 +40,7 @@ it("keeps every General and Notifications choice after source replacement and re
 
   const navigation = within(screen.getByRole("navigation", { name: "Silo navigation" }))
   await user.click(navigation.getByRole("button", { name: "Notifications" }))
-  await user.click(settings.getByRole("switch", { name: "Unexpected computer changes" }))
+  await user.click(await settings.findByRole("switch", { name: "Unexpected computer changes" }))
   await user.click(settings.getByRole("switch", { name: "Failures" }))
   await user.click(settings.getByRole("switch", { name: "Failures" }))
   await user.click(settings.getByRole("switch", { name: "Long tasks finished" }))
@@ -96,6 +97,7 @@ it("retains saved startup IDs absent from telemetry and preserves an explicitly 
   const store = createMemorySettingsStore({ ...source.preferences, startComputersAtLaunch: true, startupComputerIds: ["temporarily-unavailable"] })
   const view = render(application(store, source))
   const settings = settingsPanel()
+  await settings.findByRole("switch", { name: "Start computers at launch" })
   expect(settings.queryByRole("button", { name: "Remove dev" })).not.toBeInTheDocument()
   await user.click(settings.getByRole("switch", { name: "Start computers at launch" }))
   await user.click(settings.getByRole("switch", { name: "Start computers at launch" }))
@@ -119,14 +121,14 @@ it("retains saved startup IDs absent from telemetry and preserves an explicitly 
   expect(restored.queryByRole("button", { name: "Remove archive" })).not.toBeInTheDocument()
 })
 
-it("honors an explicitly empty startup selection supplied by the initial source", () => {
+it("honors an explicitly empty startup selection supplied by the initial source", async () => {
   const source = applicationSourceForScenario("running")
   render(<ApplicationPreview source={{ ...source, preferences: { ...source.preferences, startComputersAtLaunch: true, startupComputerIds: [] } }} initialRoute={{ tab: "settings" }} />)
-  expect(settingsPanel().getByRole("combobox", { name: "Add computer at startup" })).toBeVisible()
+  expect(await settingsPanel().findByRole("combobox", { name: "Add computer at startup" })).toBeVisible()
   expect(settingsPanel().queryByRole("button", { name: "Remove dev" })).not.toBeInTheDocument()
 })
 
-it.each(["native", "fixture"] as const)("updates unsaved startup defaults after the %s onboarding handoff without saving them", (mode) => {
+it.each(["native", "fixture"] as const)("updates unsaved startup defaults after the %s onboarding handoff without saving them", async (mode) => {
   const source = applicationSourceForScenario("running")
   const oldDev = source.computers.find(({ configuration }) => configuration.name === "dev")!.configuration.id
   const snapshot: SettingsSnapshot = { revision: 0, settings: {}, onboardingDraft: null, saveError: null }
@@ -142,7 +144,7 @@ it.each(["native", "fixture"] as const)("updates unsaved startup defaults after 
     }, { ...source.preferences, startComputersAtLaunch: true, startupComputerIds: [oldDev] }, snapshot)
   const update = vi.spyOn(store, "updateSettings")
   const view = render(application(store, source))
-  expect(settingsPanel().getByRole("button", { name: "Remove dev" })).toBeVisible()
+  expect(await settingsPanel().findByRole("button", { name: "Remove dev" })).toBeVisible()
 
   const alpha = { ...source.computers[0], configuration: { ...source.computers[0].configuration, id: "onboarded-alpha", name: "alpha" } }
   view.rerender(application(store, { ...source, computers: [alpha] }))

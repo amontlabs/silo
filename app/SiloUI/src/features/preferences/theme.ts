@@ -1,11 +1,12 @@
-import { useSettings, type SettingsStore } from "./settings-store"
+import { useSettingsSelector, useSettingsStore, type SettingsStore } from "./settings-store"
 import type { Settings } from "./model/settings"
 
 export type Theme = Settings["theme"]
 
 export function useTheme() {
-  const { settings, updateSettings } = useSettings()
-  return { theme: settings.theme, setTheme: (theme: string) => { void updateSettings({ theme: theme as Theme }) } }
+  const { updateSettings } = useSettingsStore()
+  const theme = useSettingsSelector((view) => view.settings.theme)
+  return { theme, setTheme: (next: string) => { void updateSettings({ theme: next as Theme }) } }
 }
 
 // Initialize before React renders, in both the main window and the status panel.

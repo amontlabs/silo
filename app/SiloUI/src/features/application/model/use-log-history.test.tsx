@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
-import { fixtureLogPage, type LogPage, type LogQuery } from "./logs"
+import { fixtureLogPage, logEntryKey, type LogPage, type LogQuery } from "./logs"
 import { useLogHistory } from "./use-log-history"
 
 function fixture() {
@@ -89,7 +89,7 @@ describe("cached log history", () => {
       if (page === 24) {
         act(() => {
           view.result.current.setScrollTop(5000 * 52 - 520)
-          view.result.current.setExpandedRows(() => new Map([[JSON.stringify(["local", computer.configuration.id, "0"]), 172]]))
+          view.result.current.setExpandedRows(() => new Map([[logEntryKey({ deviceId: "local", computerId: computer.configuration.id, id: "0" }), 172]]))
         })
       }
       if (page === 25) {

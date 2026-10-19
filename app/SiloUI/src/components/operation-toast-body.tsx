@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { formatElapsed } from "@/lib/format-elapsed"
 import { restoreFocus } from "@/lib/focus"
+import { useClock } from "@/lib/use-clock"
 
 export type OperationStepState = "done" | "current" | "pending" | "failed"
 export interface OperationStep { label: string; state: OperationStepState }
@@ -36,12 +37,8 @@ export interface OperationProgressOptions {
 function useElapsed(startedAt: number | undefined) {
   const [fallback] = useState(() => Date.now())
   const start = startedAt ?? fallback
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-  return formatElapsed(now - start)
+  const now = useClock()
+  return formatElapsed(Math.max(0, now - start))
 }
 
 const stepIcon: Record<OperationStepState, React.ReactNode> = {

@@ -34,7 +34,7 @@ describe("onboarding to application", () => {
     expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     await user.click(navigation.getByRole("button", { name: "Settings" }))
-    expect(screen.getByRole("combobox", { name: "Browser" })).toHaveTextContent("Firefox")
+    expect(await screen.findByRole("combobox", { name: "Browser" })).toHaveTextContent("Firefox")
     await user.click(navigation.getByRole("button", { name: "Computers" }))
     await user.click(screen.getByRole("button", { name: "Add" }))
     expect(screen.getByRole("menuitem", { name: "Import computer…" })).toBeVisible()
