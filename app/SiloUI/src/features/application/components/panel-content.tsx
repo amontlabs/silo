@@ -1,5 +1,7 @@
 import { Component, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from "react"
 
+import { InlineAlert } from "@/components/inline-alert"
+import { PageContainer } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { renewFailedPages } from "./lazy-page"
 
@@ -9,10 +11,12 @@ class LoadBoundary extends Component<{ children: ReactNode }, { failed: boolean;
   componentDidCatch(error: Error, info: ErrorInfo) { console.error("Silo page failed to load:", error, info.componentStack) }
   render() {
     if (!this.state.failed) return <div key={this.state.attempt} className="contents">{this.props.children}</div>
-    return <div role="alert" className="mx-auto flex w-full max-w-4xl items-center gap-2 px-4 py-5 text-xs text-destructive sm:px-6 sm:py-6">
-      <span>This page could not be loaded.</span>
-      <Button type="button" size="xs" variant="outline" onClick={() => { renewFailedPages(); this.setState(({ attempt }) => ({ failed: false, attempt: attempt + 1 })) }}>Retry</Button>
-    </div>
+    return <PageContainer>
+      <InlineAlert className="flex items-center justify-between gap-2">
+        <span>This page could not be loaded.</span>
+        <Button type="button" size="xs" variant="outline" onClick={() => { renewFailedPages(); this.setState(({ attempt }) => ({ failed: false, attempt: attempt + 1 })) }}>Retry</Button>
+      </InlineAlert>
+    </PageContainer>
   }
 }
 

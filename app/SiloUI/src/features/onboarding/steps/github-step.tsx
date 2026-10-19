@@ -47,7 +47,7 @@ export function GitHubStep({ queueItems = [], activityEvents = [], ...props }: G
         connectionProgress={started && <>
           <ListRowDetails label="GitHub setup details">
             <Progress value={connecting ? undefined : items.length ? completed / items.length * 100 : undefined} aria-label="GitHub setup progress" />
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground" role={failure ? "alert" : "status"} aria-live="polite">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground" role={failure ? "alert" : "status"} aria-live="polite">
               <span>{connecting ? "Waiting for browser authorization." : `${completed} of ${items.length} operations complete`}</span>
               {!connecting && <span aria-label="Elapsed time" className="shrink-0 font-mono tabular-nums">{elapsed}</span>}
             </div>

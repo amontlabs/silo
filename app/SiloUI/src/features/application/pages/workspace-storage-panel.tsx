@@ -136,7 +136,7 @@ function WorkspaceStorageContent({ computerId, computerName, running, deviceName
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-xs" aria-label="Refresh storage" disabled={busy || disabled} onClick={() => void load(false)}>
-              <RefreshCw className={busy && !reclaiming ? 'animate-spin' : undefined} />
+              <RefreshCw className={busy && !reclaiming ? 'animate-spin motion-reduce:animate-none' : undefined} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Refresh storage measurements</TooltipContent>
@@ -177,7 +177,7 @@ function StorageMetric({ icon: Icon, label, value, help, loading, className }: S
     <div className="mt-1 text-lg font-medium tabular-nums tracking-tight">
       {loading ? <span aria-hidden="true" className="inline-block h-6 w-16 animate-pulse rounded bg-muted" /> : value}
     </div>
-    <p className="text-[11px] leading-4 text-muted-foreground">{help}</p>
+    <p className="text-caption leading-4 text-muted-foreground">{help}</p>
   </div>
 }
 
@@ -189,7 +189,7 @@ function ReclaimControls({ where, latest, running, disabled, onReclaim }: { wher
   return <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/40 p-3">
     <div className="grid gap-0.5">
       <span className="font-medium">Unused space</span>
-      <span className="max-w-md text-[11px] leading-4 text-muted-foreground">Releases unused blocks {where}; files and capacity stay the same. Silo does this automatically after 7 days of running, or when the computer stops once 24 hours have passed, and waits 24 hours after a failed attempt.</span>
+      <span className="max-w-md text-caption leading-4 text-muted-foreground">Releases unused blocks {where}; files and capacity stay the same. Silo does this automatically after 7 days of running, or when the computer stops once 24 hours have passed, and waits 24 hours after a failed attempt.</span>
     </div>
     <span className={`ml-auto text-right tabular-nums ${latest?.error ? 'text-destructive/80' : 'text-muted-foreground'}`}>{result}</span>
     <DisabledReason reason={disabled && !running ? 'Start the computer first.' : undefined}>
@@ -206,8 +206,8 @@ function ReclaimHistory({ history, open, onOpenChange }: { history: ReclaimEntry
     <button type="button" aria-label={`History, ${history.length} ${history.length === 1 ? 'attempt' : 'attempts'}`} aria-expanded={open} aria-controls={listId} onClick={() => onOpenChange(!open)} className="flex w-full items-center gap-2 py-1 text-muted-foreground hover:text-foreground">
       <History aria-hidden="true" className="size-3.5" />
       <span>History</span>
-      <span className="rounded bg-muted px-1.5 text-[10px]">{history.length}</span>
-      <span className="ml-auto text-[11px]">{summary}</span>
+      <span className="rounded bg-muted px-1.5 text-caption">{history.length}</span>
+      <span className="ml-auto text-caption">{summary}</span>
       <ChevronDown aria-hidden="true" className={`size-3 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {open && <div id={listId} className="mt-2 max-h-56 overflow-y-auto" aria-label="History entries">
@@ -228,10 +228,10 @@ function ReclaimHistoryEntry({ entry, index }: { entry: ReclaimEntry; index: num
       {entry.error ? <CircleAlert aria-hidden="true" className="size-3.5 text-destructive" /> : <Check aria-hidden="true" className="size-3.5 text-muted-foreground" />}
       <div className="min-w-0 flex-1">
         <div>{title}</div>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">{trigger(entry.trigger)} · {date(entry.at)}</div>
+        <div className="mt-0.5 text-caption text-muted-foreground">{trigger(entry.trigger)} · {date(entry.at)}</div>
       </div>
-      <button type="button" aria-label={`Details for free-up ${index + 1}`} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)} className="text-[11px] text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground">Details</button>
+      <button type="button" aria-label={`Details for free-up ${index + 1}`} aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)} className="text-caption text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground">Details</button>
     </div>
-    {open && <p id={detailsId} className={`mt-1.5 pl-6 text-[11px] leading-4 ${entry.error ? 'text-destructive' : 'text-muted-foreground'}`}>{details}</p>}
+    {open && <p id={detailsId} className={`mt-1.5 pl-6 text-caption leading-4 ${entry.error ? 'text-destructive' : 'text-muted-foreground'}`}>{details}</p>}
   </div>
 }

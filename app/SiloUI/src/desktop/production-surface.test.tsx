@@ -109,7 +109,7 @@ describe("status panel without application state", () => {
     state.error = "Runtime inspection failed."
     render(<SettingsProvider store={createMemorySettingsStore({ onboardingComplete: true })}><ProductionSurface source={source} dependencyStore={null} statusPanel /></SettingsProvider>)
     const panel = screen.getByRole("dialog", { name: "Silo" })
-    expect(panel).toHaveClass("w-[380px]")
+    expect(panel).toHaveClass("status-panel")
     expect(screen.queryByRole("region", { name: "Silo unavailable" })).not.toBeInTheDocument()
     expect(screen.getByRole("alert")).toHaveTextContent("Runtime inspection failed.")
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))

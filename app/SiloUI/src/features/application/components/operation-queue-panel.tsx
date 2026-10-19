@@ -27,7 +27,7 @@ function CancelOperationButton({ entry, onCancel }: { entry: OperationEntry; onC
       aria-label={`Cancel ${entry.label}`}
       title={`Cancel ${entry.label}`}
       onClick={() => onCancel(entry.id)}
-      className="flex shrink-0 items-center gap-1 rounded px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex shrink-0 items-center gap-1 rounded px-1 text-muted-foreground hover:text-foreground focus-ring"
     >
       <X aria-hidden="true" className="size-3" />
       Cancel

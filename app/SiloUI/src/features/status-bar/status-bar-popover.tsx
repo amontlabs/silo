@@ -1,10 +1,11 @@
 import { useRef, useState } from "react"
-import { CircleAlert, LoaderCircle, TriangleAlert } from "lucide-react"
+import { CircleAlert, TriangleAlert } from "lucide-react"
 
 import { SiloMark } from "@/components/silo-mark"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import type { ApplicationSource } from "@/features/application/model/application-source"
 import { cn } from "@/lib/utils"
 import { StatusBarContent } from "./status-bar"
@@ -13,14 +14,14 @@ import type { StatusBarActions } from "./status-bar-types"
 
 function StatusBarIcon({ tone, reduceMotion }: { tone: ReturnType<typeof statusBarHealth>["tone"]; reduceMotion: boolean }) {
   const color = tone === "error" ? "text-destructive"
-    : tone === "warning" || tone === "busy" ? "text-amber-700 dark:text-amber-400"
+    : tone === "warning" || tone === "busy" ? "text-warning"
       : tone === "neutral" ? "text-muted-foreground" : "text-foreground"
-  const Indicator = tone === "busy" ? LoaderCircle : tone === "error" ? CircleAlert : tone === "warning" ? TriangleAlert : null
+  const Indicator = tone === "error" ? CircleAlert : tone === "warning" ? TriangleAlert : null
   return (
     <span className={cn("relative size-4", color)} aria-hidden="true">
       <SiloMark className={cn("size-4", color, tone !== "success" && "[&_path]:stroke-current")} />
-      {Indicator && <span className="absolute -top-1 -right-1 grid size-3 place-items-center rounded-full bg-background ring-1 ring-background">
-        <Indicator strokeWidth={2.5} className={cn("size-2.5", tone === "busy" && !reduceMotion && "animate-spin motion-reduce:animate-none")} />
+      {(Indicator || tone === "busy") && <span className="absolute -top-1 -right-1 grid size-3 place-items-center rounded-full bg-background ring-1 ring-background">
+        {Indicator ? <Indicator strokeWidth={2.5} className="size-2.5" /> : <Spinner size="sm" strokeWidth={2.5} reduceMotion={reduceMotion} />}
       </span>}
     </span>
   )
@@ -59,7 +60,7 @@ export function StatusBar({ source, actions, defaultOpen = false }: { source: Ap
           align="end"
           sideOffset={8}
           collisionPadding={10}
-          className="silo-window flex max-h-[min(520px,var(--radix-popover-content-available-height))] w-[380px] max-w-[calc(100vw-20px)] flex-col overflow-hidden rounded-xl p-0 shadow-lg"
+          className="silo-window status-panel flex max-h-[min(var(--status-panel-height),var(--radix-popover-content-available-height))] max-w-[calc(100vw-20px)] flex-col overflow-hidden rounded-xl p-0 shadow-lg"
           data-reduce-motion={source.preferences.reduceMotion}
           onOpenAutoFocus={(event) => { event.preventDefault(); content.current?.focus() }}
         >

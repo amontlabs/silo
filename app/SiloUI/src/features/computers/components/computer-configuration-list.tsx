@@ -1,3 +1,4 @@
+import { InlineAlert } from "@/components/inline-alert"
 import { ActionsMenu, type MenuAction, type MenuPopovers } from "@/components/actions-menu"
 import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react"
 import { GripVertical, Plus } from "lucide-react"
@@ -407,15 +408,15 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
           </DropdownMenu.Root>)}
         />
 
-        {macos?.snapshot.error && <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/30 p-2 text-xs text-destructive">
+        {macos?.snapshot.error && <InlineAlert className="mb-2 flex items-center justify-between">
           <span className="min-w-0">Could not read the macOS computers. {macos.snapshot.error}</span>
           <Button type="button" variant="outline" size="xs" onClick={() => void macos.store.refresh()}>Retry</Button>
-        </div>}
-        {remoteMacosErrors.map(({ name, error }) => <div key={name} role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md border border-destructive/30 p-2 text-xs text-destructive">
+        </InlineAlert>}
+        {remoteMacosErrors.map(({ name, error }) => <InlineAlert key={name} className="mb-2 flex items-center justify-between">
           <span className="min-w-0">Could not read the macOS computers on {name}. {error}</span>
           <Button type="button" variant="outline" size="xs" onClick={() => void macos?.store.refresh()}>Retry</Button>
-        </div>)}
-        {macosState && macos?.snapshot.warning && <p role="status" className="mb-2 text-[11px] text-amber-700 dark:text-amber-400">{macos.snapshot.warning}</p>}
+        </InlineAlert>)}
+        {macosState && macos?.snapshot.warning && <p role="status" className="mb-2 text-caption text-warning select-text">{macos.snapshot.warning}</p>}
         <ComputerList label="Configured computers" className="max-h-full min-h-0" data-testid="computer-configuration-list">
             {displayConfigurations.map((configuration) => {
               const isEditing = editor?.draft.id === configuration.id
@@ -435,7 +436,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
               const macosHost = macosHosts.find(host => host.id === (macosFields.deviceId ?? "")) ?? macosHosts.find(host => host.connected) ?? macosHosts[0]
               const macosHostId = macosHost?.id ?? ""
               const macosHostState = macosHostId ? remoteMacosHosts.find(({ device }) => device.id === macosHostId)?.state : macosState
-              const runOnField = macosHosts.some(host => host.id !== "") ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={macosHostId} disabled={macosFields.creating} onChange={event => setMacosForm({ ...macosFields, deviceId: event.target.value })}>{macosHosts.map(host => <option key={host.id} value={host.id} disabled={!host.connected}>{host.name}{!host.connected ? " (offline)" : ""}</option>)}</select></label> : undefined
+              const runOnField = macosHosts.some(host => host.id !== "") ? <label className="grid gap-1 text-caption text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={macosHostId} disabled={macosFields.creating} onChange={event => setMacosForm({ ...macosFields, deviceId: event.target.value })}>{macosHosts.map(host => <option key={host.id} value={host.id} disabled={!host.connected}>{host.name}{!host.connected ? " (offline)" : ""}</option>)}</select></label> : undefined
               const osField = creating ? <OperatingSystemField value={newMacosForm ? "macos" : "linux"} macosSupported={macosHosts.length > 0} disabled={committing || macosFields.creating} onChange={os => { focusOsSelect.current = true; setMacosForm({ ...macosFields, os }) }} /> : undefined
               const deviceName = devices?.find(device => device.id === getDeviceId?.(configuration))?.name
               const deletionName = deviceName ? `${configuration.name} on ${deviceName}` : configuration.name
@@ -467,7 +468,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                       onCreate={request => void createMacos(editor.draft.id, request, macosHostId)}
                     />
                   ) : isEditing && editor ? (
-                    <ComputerEditor reservedNames={deviceId === "" ? macosComputers.map(({ name }) => name) : undefined} key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={<>{osField}{devices ? <label className="grid gap-1 text-[11px] text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}</>} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
+                    <ComputerEditor reservedNames={deviceId === "" ? macosComputers.map(({ name }) => name) : undefined} key={`${editor.draft.id}:${editorResetToken}`} saving={committing} blockedReason={saveBlockedReason} editorHeader={<>{osField}{devices ? <label className="grid gap-1 text-caption text-muted-foreground">Run on<select aria-label="Run on" className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground" value={deviceId} disabled={Boolean(editor.originalID) || committing} onChange={event => setDeviceId(event.target.value)}><option value="">This device</option>{devices.map(device => <option key={device.id} value={device.id} disabled={!device.connected}>{device.name}{!device.connected ? " (offline)" : ""}</option>)}</select></label> : undefined}</>} focusRequest={editorFocusRequest} capacity={getDeviceCapacity?.(deviceId)} deviceName={devices?.find(device => device.id === deviceId)?.name} deviceId={deviceId} created={Boolean(editor.originalID && isComputerCreated?.(configuration))} running={Boolean(editor.originalID && isComputerRunning?.(configuration))} editor={editor} baselineComputer={editorBaseline ?? undefined} conflict={editorConflict} review={editorReview} configurations={getDeviceId ? configurations.filter(configuration => (getDeviceId(configuration) ?? "") === deviceId) : configurations} onCancel={() => setEditor(null)} onSave={save} onDraftChange={(draft) => setEditor({ ...editor, draft })} onReview={reviewConflict} onDiscard={() => setEditor(null)} />
                   ) : (
                     <ComputerListRow
                       name={configuration.name}
@@ -488,7 +489,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         aria-label={`Reorder ${configuration.name}`}
                         aria-describedby={reorderHelpId}
                         aria-disabled={reorderDisabled || undefined}
-                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-40"
+                        className="grid size-7 shrink-0 cursor-grab place-items-center rounded-md text-muted-foreground focus-ring hover:bg-muted active:cursor-grabbing aria-disabled:cursor-default aria-disabled:opacity-50"
                         onKeyDown={(event) => { if (!reorderDisabled) handleReorderKey(event, configuration) }}
                         onDragStart={(event) => {
                           if (reorderDisabled) { event.preventDefault(); return }

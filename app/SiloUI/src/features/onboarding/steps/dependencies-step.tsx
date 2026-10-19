@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import { SectionHeading } from "@/components/page"
 import { ListCard } from "@/components/list-row"
 import { DependencyDisclosure } from "@/features/onboarding/components/dependency-disclosure"
 import type { DependencyGroupView } from "@/features/onboarding/model/onboarding-state"
@@ -30,7 +31,7 @@ export function DependenciesStep({
         {groups.map((group) => <DependencyDisclosure key={group.id} group={group} onRetry={group.id === retryGroup ? onRetry : undefined} />)}
       </div>
       <section aria-labelledby="onboarding-applications-title" className="mt-5 grid gap-2">
-        <h3 id="onboarding-applications-title" className="text-xs font-medium">Applications</h3>
+        <SectionHeading id="onboarding-applications-title">Applications</SectionHeading>
         <ListCard divided>
           <ApplicationPreferenceFields compact value={applicationPreferences} onChange={onApplicationPreferencesChange} />
         </ListCard>

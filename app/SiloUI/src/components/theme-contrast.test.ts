@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
-import { createRequire } from "node:module"
 import { createElement } from "react"
 import { render, screen } from "@testing-library/react"
 
@@ -9,8 +7,6 @@ import { OperationToastBody } from "@/components/operation-toast-body"
 import { buttonVariants } from "@/components/ui/button"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { SecretsPage } from "@/features/application/pages/secrets-page"
-
-const palette = readFileSync(createRequire(import.meta.url).resolve("tailwindcss/theme.css"), "utf8")
 
 // Muted text sits on every neutral surface, including muted chips (kind badges) and
 // 11 px captions, so it must meet WCAG AA for normal text (4.5:1) on each of them.
@@ -107,20 +103,37 @@ describe("destructive text contrast", () => {
   })
 })
 
+describe.each(["--success", "--warning"] as const)("%s text contrast", (token) => {
+  it.each([":root", ".dark"] as const)("meets WCAG AA on every neutral surface in %s", (selector) => {
+    const theme = tokens(selector)
+    const text = rgbLuminance(linearRgb(theme.get(token)!))
+    for (const surface of surfaces) {
+      const ratio = contrast(text, luminance(theme.get(surface)!))
+      expect(ratio, `${selector} ${token} on ${surface}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it.each([":root", ".dark"] as const)("keeps its foreground readable on a solid fill in %s", (selector) => {
+    const theme = tokens(selector)
+    const fill = rgbLuminance(linearRgb(theme.get(token)!))
+    const foreground = rgbLuminance(linearRgb(theme.get(`${token}-foreground`)!))
+    expect(contrast(fill, foreground)).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe("focus ring contrast", () => {
+  it.each([":root", ".dark"] as const)("meets the 3:1 non-text contrast on the page background in %s", (selector) => {
+    const theme = tokens(selector)
+    const ratio = contrast(luminance(theme.get("--ring")!), luminance(theme.get("--background")!))
+    expect(ratio).toBeGreaterThanOrEqual(3)
+  })
+})
+
 describe("secret restart notice contrast", () => {
-  it.each([":root", ".dark"] as const)("meets WCAG AA on neutral surfaces in %s", (selector) => {
+  it("styles the notice with the warning token", () => {
     const source = structuredClone(applicationSourceForScenario("running"))
     source.secrets[0] = { ...source.secrets[0], state: "restart-required", pendingComputers: ["dev"] }
     render(createElement(SecretsPage, { source, onSaveSecret: () => {}, onRemoveSecret: () => {} }))
-    const notice = screen.getByText("Restart to apply: dev")
-    const name = notice.className.match(selector === ".dark" ? /dark:text-(amber-\d+)/ : /\btext-(amber-\d+)/)?.[1]
-    expect(name).toBeDefined()
-    const color = palette.match(new RegExp(`--color-${name}: oklch\\(([\\d.]+)% ([\\d.]+) ([\\d.]+)\\)`))!
-    const text = rgbLuminance(linearRgb({ lightness: Number(color[1]) / 100, chroma: Number(color[2]), hue: Number(color[3]) }))
-    const theme = tokens(selector)
-    for (const surface of surfaces) {
-      const ratio = contrast(text, luminance(theme.get(surface)!))
-      expect(ratio, `${selector} restart notice on ${surface}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5)
-    }
+    expect(screen.getByText("Restart to apply: dev").className).toMatch(/\btext-warning\b/)
   })
 })

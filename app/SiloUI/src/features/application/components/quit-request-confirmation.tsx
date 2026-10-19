@@ -66,7 +66,7 @@ export function QuitRequestConfirmation({ connect }: { connect?: ConnectQuitConf
         event.preventDefault()
         restoreFocus(previousFocus.current)
       }} className="fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 gap-2 rounded-xl border border-border bg-popover p-4 text-xs text-popover-foreground shadow-2xl outline-none">
-        <AlertDialog.Title className="text-[13px] font-medium">Quit Silo?</AlertDialog.Title>
+        <AlertDialog.Title className="text-ui font-medium">Quit Silo?</AlertDialog.Title>
         <AlertDialog.Description className="text-muted-foreground">{detail}</AlertDialog.Description>
         <div className="mt-1 flex justify-end gap-2">
           <AlertDialog.Cancel asChild><Button type="button" variant="ghost" size="sm">Cancel</Button></AlertDialog.Cancel>

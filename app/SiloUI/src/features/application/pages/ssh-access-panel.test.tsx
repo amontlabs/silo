@@ -323,7 +323,7 @@ describe("SSH badge", () => {
     render(<SshAccessBadges access={base} stale />)
     expect(badge()).toHaveAccessibleName("SSH from Ada’s Mac mini only: Status unavailable")
     expect(badge().querySelector(".lucide-triangle-alert")).toBeInTheDocument()
-    expect(badge().className).toContain("text-amber")
+    expect(badge().className).toContain("text-warning")
   })
   it("names a waiting listener without alarming", () => {
     render(<SshAccessBadges access={{ ...base, state: "waiting" }} />)

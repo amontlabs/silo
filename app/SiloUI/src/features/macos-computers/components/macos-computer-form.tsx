@@ -46,7 +46,7 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
     // An untouched name is incomplete, not wrong.
     const error = key === "name" && fields.name === "" ? undefined : errors[key]
     const errorId = `${noticeId}-${key}`
-    return <label className="grid min-w-0 gap-1 text-[11px] font-medium text-muted-foreground">
+    return <label className="grid min-w-0 gap-1 text-caption font-medium text-muted-foreground">
       {label}
       <Input technical aria-label={label} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} type={numeric ? "number" : "text"} inputMode={numeric ? "numeric" : undefined} maxLength={key === "name" ? 32 : undefined} autoComplete="off" value={fields[key]} onChange={event => onChange({ [key]: event.target.value })} />
       {error && <span id={errorId} className="text-destructive">{error}</span>}
@@ -67,8 +67,8 @@ export function MacosComputerForm({ fields, onChange, creating, existingNames, o
         {field("Memory (GiB)", "memoryGiB", true)}
         {field("Disk (GiB)", "diskGiB", true)}
       </div>
-      <p className="text-[11px] text-muted-foreground">{macosLicenseNotice}</p>
-      {template && <div className="grid justify-items-start gap-1 text-[11px] text-muted-foreground" data-testid="macos-template-notice">
+      <p className="text-caption text-muted-foreground">{macosLicenseNotice}</p>
+      {template && <div className="grid justify-items-start gap-1 text-caption text-muted-foreground" data-testid="macos-template-notice">
         <p>{template.current
           ? `New macOS computers are copied from a set-up template (macOS ${template.macosVersion}); the first takes about 15 minutes, later ones about a minute.`
           : `A template from an earlier setup or macOS version (macOS ${template.macosVersion}) is kept but not used.`}</p>

@@ -1,7 +1,8 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
 
 import { useTheme } from "@/features/preferences/theme"
+import { Spinner } from "@/components/ui/spinner"
 
 // The shadcn template pulls the theme from next-themes. Silo is not a Next app, so the
 // theme comes from the app's own settings store (see features/preferences/theme.ts), which
@@ -29,7 +30,7 @@ const Toaster = ({ reduceMotion = false, ...props }: ToasterProps & { reduceMoti
           <OctagonXIcon className="size-4" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <Spinner className="size-4" />
         ),
       }}
       style={

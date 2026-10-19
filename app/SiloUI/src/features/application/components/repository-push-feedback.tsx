@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CircleAlert, CircleCheck, Loader2, RotateCw } from "lucide-react"
+import { CircleAlert, CircleCheck, RotateCw } from "lucide-react"
 
 import { ConfirmBody, ConfirmPopover } from "@/components/confirm-popover"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Spinner } from "@/components/ui/spinner"
 import { commitLabel, pushTarget, shortCommit } from "@/features/application/model/repository-push"
 import type { ApplicationRepository, RepositoryPushOperation, RepositoryPushTarget } from "@/features/application/model/application-source"
 
@@ -70,7 +71,7 @@ export function RepositoryPushFeedback({
   if (operation.status === "pushing") {
     return (
       <div className="flex h-6 items-center gap-1.5 text-xs text-muted-foreground" role="status" aria-live="polite" aria-atomic="true">
-        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        <Spinner />
         {operation.message ?? `Pushing ${commitLabel(operation.commitCount)}…`}
       </div>
     )
@@ -85,7 +86,7 @@ export function RepositoryPushFeedback({
   if (operation.status === "succeeded") {
     if (!showSuccess) return null
     return (
-      <div className="flex h-6 items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400" role="status" aria-live="polite" aria-atomic="true">
+      <div className="flex h-6 items-center gap-1.5 text-xs text-success" role="status" aria-live="polite" aria-atomic="true">
         <CircleCheck className="size-3.5" aria-hidden="true" />
         Pushed {commitLabel(operation.commitCount)}.
       </div>
@@ -122,7 +123,7 @@ function FailedPush({ operation, repositoryPath, repository, onPush, disabled }:
             ? <ConfirmBody {...pushConfirmation(target, repository.ahead)} onConfirm={() => onPush(target)} onClose={() => change(false)} />
             : <>
               <p className="text-destructive">{operation.message}</p>
-              {operation.diagnosticDetails && <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[10px] leading-4 whitespace-pre-wrap text-muted-foreground">{operation.diagnosticDetails}</pre>}
+              {operation.diagnosticDetails && <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-caption leading-4 whitespace-pre-wrap text-muted-foreground">{operation.diagnosticDetails}</pre>}
               <Button className="justify-self-start" variant="outline" size="xs" disabled={disabled || !target} title={target ? undefined : UNCONFIRMABLE} onClick={() => setConfirming(true)} aria-label={`Retry push for ${repositoryPath}`}>
                 <RotateCw aria-hidden="true" />
                 Retry

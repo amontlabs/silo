@@ -1,13 +1,17 @@
-import { Clock3, GitBranch, LoaderCircle, Pencil, Play, RotateCw, UserRound } from "lucide-react"
+import { Clock3, GitBranch, Pencil, Play, RotateCw, UserRound } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { SectionHeading } from "@/components/page"
+import { statusTones } from "@/components/status-tone"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { StatusLabel } from "@/features/onboarding/components/status-label"
+import { reviewQueueStatuses } from "@/features/onboarding/components/status-presentation"
 import { SetupNotice } from "@/features/onboarding/components/setup-notice"
 import { ComputerList, ComputerListItem, ComputerListRow } from "@/features/computers/components/computer-list"
 import { computerSummary } from "@/features/computers/model/computer-summary"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
 import type { OnboardingViewModel, ReviewQueueItemView, ComputerView } from "@/features/onboarding/model/onboarding-state"
-import { cn } from "@/lib/utils"
 
 interface ReviewStepProps {
   computerRetryable: boolean
@@ -37,7 +41,7 @@ function FinishBlockerNotice({ blocker, onStartComputer, onRefresh }: { blocker:
   return <ListCard role="status" aria-live="polite">
     <ListRow
       className="grid grid-cols-[auto_minmax(0,1fr)] gap-y-2 sm:flex"
-      icon={<ListRowIcon aria-hidden="true">{blocker.action === null ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Clock3 className="size-3.5" />}</ListRowIcon>}
+      icon={<ListRowIcon aria-hidden="true">{blocker.action === null ? <Spinner /> : <Clock3 className="size-3.5" />}</ListRowIcon>}
       title={<h3>Finish is unavailable</h3>}
       detail={blocker.message}
       detailClassName="whitespace-normal break-words"
@@ -46,19 +50,8 @@ function FinishBlockerNotice({ blocker, onStartComputer, onRefresh }: { blocker:
   </ListCard>
 }
 
-const statusLabel: Record<ReviewQueueItemView["status"], string> = {
-  idle: "Not started",
-  queued: "Waiting",
-  running: "In progress",
-  succeeded: "Complete",
-  failed: "Failed",
-}
-
 function ValidationBadge({ status }: { status: ReviewQueueItemView["status"] }) {
-  return <span className={cn(
-    "inline-flex shrink-0 items-center gap-1 text-[10px] font-normal",
-    status === "failed" ? "text-destructive" : status === "running" ? "text-amber-700 dark:text-amber-400" : status === "succeeded" ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground",
-  )}>{status === "running" && <LoaderCircle className="size-2.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}{statusLabel[status]}</span>
+  return <StatusLabel {...reviewQueueStatuses[status]} busy={status === "running"} />
 }
 
 export function ReviewStep({ computerRetryable, queueItems, configurations, computers, identitySummary, githubSummary, githubConnected = true, errorMessage, errorRecovery, onRetryComputerSetup, onEditStep, finishBlocker, onStartComputer, onRefresh }: ReviewStepProps) {
@@ -86,7 +79,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
 
       <section aria-labelledby="review-configurations-heading" className="min-w-0">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 id="review-configurations-heading" className="text-xs font-medium">Computers</h3>
+          <SectionHeading id="review-configurations-heading">Computers</SectionHeading>
           {onEditStep && <Button type="button" variant="ghost" size="xs" onClick={() => onEditStep("computers")} aria-label="Edit computers"><Pencil aria-hidden="true" />Edit</Button>}
         </div>
         <ComputerList label="Computers">
@@ -99,7 +92,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             return <ComputerListItem key={configuration.id} aria-busy={state === "working"}>
               <ComputerListRow
                 name={configuration.name}
-                leading={<span className="w-5 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-foreground">{index + 1}</span>}
+                leading={<span className="w-5 shrink-0 text-center font-mono text-caption tabular-nums text-muted-foreground">{index + 1}</span>}
                 tone={state === "failed" ? "error" : state === "working" ? "starting" : state === "ready" ? "running" : "stopped"}
                 iconState={state === "failed" ? "error" : "normal"}
                 badge={<ValidationBadge status={status} />}
@@ -113,7 +106,7 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
 
       <section aria-labelledby="review-preferences-heading">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 id="review-preferences-heading" className="text-xs font-medium">GitHub and Git identity</h3>
+          <SectionHeading id="review-preferences-heading">GitHub and Git identity</SectionHeading>
           {onEditStep && <Button type="button" variant="ghost" size="xs" onClick={() => onEditStep("github")} aria-label="Edit GitHub and Git identity"><Pencil aria-hidden="true" />Edit</Button>}
         </div>
         <ListCard divided>
@@ -125,8 +118,8 @@ export function ReviewStep({ computerRetryable, queueItems, configurations, comp
             icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
             role="group"
             aria-label={title}
-            className={complete ? "bg-emerald-500/[0.035] hover:bg-emerald-500/[0.07] focus-within:bg-emerald-500/[0.07]" : undefined}
-            title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-[10px] font-normal text-muted-foreground">Skipped</span>}</>}
+            className={complete ? statusTones.success.row : undefined}
+            title={<>{title}{title === "Git identity" ? <ValidationBadge status={identityStatus} /> : githubConnected ? <ValidationBadge status={githubStatus} /> : <span className="text-caption font-normal text-muted-foreground">Skipped</span>}</>}
             detail={title === "Git identity" && identityFailure?.failure ? `${detail} · ${identityFailure.failure}` : detail}
             detailClassName={title === "Git identity" && identityFailure ? "whitespace-normal break-words text-destructive" : undefined}
           />)}

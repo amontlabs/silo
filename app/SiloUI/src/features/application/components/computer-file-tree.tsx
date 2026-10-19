@@ -13,7 +13,7 @@ import type { ApplicationComputer } from "@/features/application/model/applicati
 type DirectoryStore = ReturnType<typeof createDirectoryStore>
 /** Adds a shown folder to its tree's refresh set; returns the removal. */
 type RegisterDirectory = (path: string) => () => void
-const rowClass = "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-state=open]_.tree-caret]:rotate-90"
+const rowClass = "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left font-mono text-xs [&[data-state=open]_.tree-caret]:rotate-90 focus-ring"
 const refreshInterval = 10_000
 
 function Directory({ computer, computerLabel, path, label, store, expanded, toggle, register, editor, onOpenEditor, transfers }: {
@@ -132,7 +132,7 @@ export function ComputerFileTree({ computer, store, active, editor, onOpenEditor
     }
   }, [polling, store, target])
   return <li><Collapsible open={open} onOpenChange={setOpen}>
-    <div className="group/folder flex items-center rounded-md pr-1 hover:bg-muted focus-within:bg-muted"><CollapsibleTrigger className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&[data-state=open]_.tree-caret]:rotate-90">
+    <div className="group/folder flex items-center rounded-md pr-1 hover:bg-muted focus-within:bg-muted"><CollapsibleTrigger className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm font-medium [&[data-state=open]_.tree-caret]:rotate-90 focus-ring">
       <ChevronRight className="tree-caret size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none" aria-hidden="true" />
       <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="truncate" title={computer.configuration.name}>{computer.configuration.name}</span>
     </CollapsibleTrigger>

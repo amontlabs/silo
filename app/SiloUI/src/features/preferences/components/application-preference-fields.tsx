@@ -16,7 +16,7 @@ function ApplicationOptionLabel({ kind, name, icon }: { kind: ApplicationKind; n
   const Fallback = kind === "terminal" ? SquareTerminal : kind === "editor" ? Code2 : Compass
   return <span className="flex min-w-0 items-center gap-2">
     {icon ? <img src={icon} alt="" aria-hidden="true" draggable={false} className="size-4 shrink-0 object-contain" /> : <Fallback className="size-4 shrink-0" aria-hidden="true" />}
-    <span className="truncate">{name}</span>
+    <span className="truncate" title={name}>{name}</span>
   </span>
 }
 
@@ -39,7 +39,7 @@ function ApplicationPreferenceRow({
 }) {
   return (
     <ListRow
-      className={compact ? "hover:bg-muted/35 focus-within:bg-muted/35" : "gap-3 px-0 py-3 first:pt-0 last:pb-0"}
+      className={compact ? "row-hover" : "gap-3 px-0 py-3 first:pt-0 last:pb-0"}
       icon={compact ? <ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon> : <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       title={<div className={compact ? undefined : "text-sm"}>{title}</div>}
       detail={<>{description}{error && <span id={errorId} role="alert" className="mt-0.5 block text-destructive">{error}</span>}</>}
@@ -109,7 +109,7 @@ export function ApplicationPreferenceFields({
         onValueChange={(selection) => { void update(kind, selection) }}
         onOpenChange={(open) => { if (open) void refresh().catch((error: unknown) => console.error("Silo application discovery:", error)) }}
       >
-        <SelectTrigger className={compact ? "h-7 text-[11px]" : undefined} aria-label={label} aria-invalid={failures[kind] ? true : undefined} aria-describedby={failures[kind] ? errorId(kind) : undefined}>
+        <SelectTrigger size={compact ? "sm" : undefined} aria-label={label} aria-invalid={failures[kind] ? true : undefined} aria-describedby={failures[kind] ? errorId(kind) : undefined}>
           <SelectValue>{useSystemDefault ? <ApplicationOptionLabel kind={kind} name={systemDefault ? `${systemDefault.name} (default)` : "System default (not set)"} icon={systemDefault?.icon} /> : undefined}</SelectValue>
         </SelectTrigger>
         <SelectContent className="w-max min-w-[var(--radix-select-trigger-width)] max-w-[min(24rem,var(--radix-select-content-available-width))]">

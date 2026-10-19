@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 
 import { TabsContent } from "@/components/ui/tabs"
+import { PageContainer } from "@/components/page"
 import { DeletionConfirmation } from "@/features/onboarding/components/deletion-confirmation"
 import { SetupComplete } from "@/features/onboarding/components/setup-complete"
 import type { ApplicationGitHubComputerPolicy } from "@/features/application/model/application-source"
@@ -53,7 +54,7 @@ function OnboardingPanel({ step, activeStep, notice, children }: { step: Onboard
     style={{ visibility: active ? "visible" : "hidden" }}
     className="absolute inset-0 mt-0 flex h-full min-h-0 flex-col overflow-y-auto outline-none"
   >
-    <div className="mx-auto w-full max-w-4xl flex-1 px-4 py-5 sm:px-6 sm:py-6">{active && <SettingsSaveNotice />}{active && notice}{children}</div>
+    <PageContainer className="flex-1">{active && <SettingsSaveNotice />}{active && notice}{children}</PageContainer>
   </TabsContent>
 }
 

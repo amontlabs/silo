@@ -30,7 +30,7 @@ export function ComputerStatus({ computer, source, readOnly, onCancel }: { compu
     // Until its queue entry runs, a pending action reads "Waiting for <blocker>…".
     return waitingForVm && queueVmId !== null
       ? <ComputerWaitingStatus queue={source.operationQueue} computerId={queueVmId} onCancel={cancel} />
-      : <span role="status" className="text-amber-700 dark:text-amber-400">{lifecycleLabels[lifecycle]}</span>
+      : <span role="status" className="text-warning">{lifecycleLabels[lifecycle]}</span>
   }
   if (computer.device?.busy) return <span role="status">Updating…</span>
   if (computer.device && !computer.device.connected) return <span>Offline · last known status</span>

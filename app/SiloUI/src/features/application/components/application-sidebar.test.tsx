@@ -75,7 +75,7 @@ describe("sidebar attention", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse Computers menu" }))
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }))
     expect(computers()).toHaveAccessibleDescription("1 computer needs attention")
-    expect(mark()).toHaveClass("bg-amber-500")
+    expect(mark()).toHaveClass("bg-warning")
     expect(mark()).toBeEmptyDOMElement()
   })
 

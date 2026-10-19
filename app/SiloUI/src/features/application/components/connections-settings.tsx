@@ -1,6 +1,7 @@
 import { errorMessage } from "@/lib/error-message"
 import { useEffect, useRef, useState } from "react"
 import { CopyButton } from "@/components/copy-button"
+import { PageHeader } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -100,7 +101,7 @@ function DevicesSection({ source, actions }: { source: ApplicationSource; action
   const removeDevice = actions.removeDevice
   if (!actions.connectDevice) return null
   return <section aria-label="Connections" className="grid gap-3">
-    <h2 className="text-xs font-medium">Connections</h2>
+    <PageHeader title="Connections" />
     <div className="grid gap-3 rounded-lg border p-3">
       <div className="flex items-center justify-between gap-4"><div><label htmlFor="connections-enabled" className="text-xs font-medium">Allow connections from other devices</label><p className="text-xs text-muted-foreground">Let devices with SSH access to your account manage these computers while Silo is running.</p><p className="text-xs text-muted-foreground">Quit stops local computers and disconnects other devices.</p></div><Switch id="connections-enabled" checked={source.connections?.enabled ?? false} disabled={busy || !source.connections || !actions.setConnectionsEnabled} onCheckedChange={enabled => { void perform("connections-enabled", () => actions.setConnectionsEnabled!(enabled)) }} /></div>
       {source.connections?.error && <p role="alert" className="text-xs text-destructive">{source.connections.error}</p>}

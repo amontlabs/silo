@@ -23,7 +23,7 @@ export function SetupNotice({ title, detail, recovery, technicalDetails, action 
       />
       {(recovery || technicalDetails) && (
         <ListRowDetails label={`${title} details`}>
-          {recovery && <p className="text-[11px] leading-4 text-muted-foreground select-text">{recovery}</p>}
+          {recovery && <p className="text-caption leading-4 text-muted-foreground select-text">{recovery}</p>}
           {technicalDetails && <LogDisclosure title="Technical details" output={technicalDetails} />}
         </ListRowDetails>
       )}

@@ -2,6 +2,7 @@ import { useLayoutEffect } from "react"
 import { Bell, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power } from "lucide-react"
 
 import { FilterCombobox } from "@/components/filter-combobox"
+import { SectionHeading } from "@/components/page"
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
@@ -33,7 +34,7 @@ export function SetupComplete({ configurations, githubSummary }: {
       <ListCard divided>
         <ListRow
           role="status"
-          icon={<ListRowIcon className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" aria-hidden="true"><Check className="size-3.5" /></ListRowIcon>}
+          icon={<ListRowIcon className="bg-success/10 text-success" aria-hidden="true"><Check className="size-3.5" /></ListRowIcon>}
           title={<h2 id="setup-complete-title">Setup complete</h2>}
           detail={`${configurations.length} ${configurations.length === 1 ? "computer is" : "computers are"} ready. Open Silo to get started.`}
           detailClassName="whitespace-normal"
@@ -46,11 +47,11 @@ export function SetupComplete({ configurations, githubSummary }: {
         />
       </ListCard>
       <section aria-labelledby="setup-preferences-title" className="grid gap-2">
-        <h3 id="setup-preferences-title" className="text-xs font-medium">Stay informed</h3>
+        <SectionHeading id="setup-preferences-title">Stay informed</SectionHeading>
         <ListCard divided>
           <div>
             <ListRow
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Power className="size-3.5" /></ListRowIcon>}
               title="Launch Silo at login"
               detail={null}
@@ -66,7 +67,7 @@ export function SetupComplete({ configurations, githubSummary }: {
             {integrations.loginEnabled && (
               <ListRowDetails label="Startup preferences" className="mx-0 gap-0 px-0 py-1">
                 <ListRow
-                  className="py-1.5 hover:bg-muted/35 focus-within:bg-muted/35"
+                  className="py-1.5 row-hover"
                   icon={<ListRowIcon aria-hidden="true"><Boxes className="size-3.5" /></ListRowIcon>}
                   title={<span className="text-xs">Start computers at launch</span>}
                   detail={null}
@@ -92,7 +93,7 @@ export function SetupComplete({ configurations, githubSummary }: {
           </div>
           <div>
             <ListRow
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Bell className="size-3.5" /></ListRowIcon>}
               title="Enable notifications"
               detail={null}
@@ -110,7 +111,7 @@ export function SetupComplete({ configurations, githubSummary }: {
                 {notificationCategories.map(({ id, label, icon: Icon }) => (
                   <ListRow
                     key={id}
-                    className="py-1.5 hover:bg-muted/35 focus-within:bg-muted/35"
+                    className="py-1.5 row-hover"
                     icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
                     title={<span className="text-xs">{label}</span>}
                     detail={null}

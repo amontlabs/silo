@@ -185,7 +185,7 @@ export function MacosComputerRow({ computer, store, takenNames = [], device, onE
               <Input id={`macos-memory-${computer.id}`} type="number" min={4} step={1} required value={memoryGiB} onChange={event => setMemoryGiB(event.target.value)} />
             </div>
             <p className="text-muted-foreground">Changes apply the next time this computer starts.</p>
-            {resourceError && <p role="alert" className="text-destructive">{resourceError}</p>}
+            {resourceError && <p role="alert" className="text-destructive select-text">{resourceError}</p>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={close}>Cancel</Button>
               <Button type="submit" size="sm" disabled={pending}>Save</Button>

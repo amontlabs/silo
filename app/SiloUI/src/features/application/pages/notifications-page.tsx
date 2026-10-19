@@ -1,6 +1,7 @@
 import { Bell, CircleAlert, CircleCheck, HeartPulse } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
+import { PageContainer, PageHeader, SectionHeading } from "@/components/page"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { useSettings } from "@/features/preferences/settings-store"
@@ -18,11 +19,11 @@ export function NotificationsPage() {
   const enabled = settings.notificationsEnabled && integrations.notificationsAuthorized
 
   return (
-    <div className="mx-auto grid w-full max-w-4xl gap-4 px-4 py-5 sm:px-6 sm:py-6">
-      <h2 className="text-xs font-medium">Notifications</h2>
+    <PageContainer className="grid gap-4">
+      <PageHeader title="Notifications" />
       <ListCard>
         <ListRow
-          className="hover:bg-muted/35 focus-within:bg-muted/35"
+          className="row-hover"
           icon={<ListRowIcon aria-hidden="true"><Bell className="size-3.5" /></ListRowIcon>}
           title={<h3>Enable notifications</h3>}
           detail="Silo sends system notifications while its window is in the background. While you're using Silo, results appear in the app."
@@ -38,12 +39,12 @@ export function NotificationsPage() {
         actions={<Button type="button" variant="outline" size="xs" onClick={() => { void integrations.openIntegrationSettings("notifications") }}>Open System Settings</Button>}
       /></ListCard>}
       <section className="grid gap-2">
-        <h3 className="text-xs font-medium">Alert categories</h3>
+        <SectionHeading>Alert categories</SectionHeading>
         <ListCard divided>
           {categories.map(({ id, label, detail, icon: Icon }) => (
             <ListRow
               key={id}
-              className="hover:bg-muted/35 focus-within:bg-muted/35"
+              className="row-hover"
               icon={<ListRowIcon aria-hidden="true"><Icon className="size-3.5" /></ListRowIcon>}
               title={<h4>{label}</h4>}
               detail={detail}
@@ -53,6 +54,6 @@ export function NotificationsPage() {
           ))}
         </ListCard>
       </section>
-    </div>
+    </PageContainer>
   )
 }

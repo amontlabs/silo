@@ -1,6 +1,7 @@
-import { CircleAlert, Loader2 } from "lucide-react"
+import { CircleAlert } from "lucide-react"
 
 import { ErrorDetails } from "@/components/error-details"
+import { Spinner } from "@/components/ui/spinner"
 import { ListRowIcon } from "@/components/list-row"
 import { Progress } from "@/components/ui/progress"
 import type { ConfigurationRowView } from "./overview-configuration"
@@ -13,7 +14,7 @@ export function ConfigurationIcon({ failed }: { failed: boolean }) {
     >
       {failed
         ? <CircleAlert className="size-3.5" aria-hidden="true" />
-        : <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+        : <Spinner />}
     </ListRowIcon>
   )
 }
@@ -26,7 +27,7 @@ export function ConfigurationDetail({ view }: { view: ConfigurationRowView }) {
       <div role="status" aria-live="polite" aria-atomic="true" className="relative h-4 min-w-0">
         <div className="flex min-w-0 items-center gap-3">
           <span className="min-w-0 flex-1 truncate" title={view.message}>{view.message}</span>
-          {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
+          {progressLabel && <span className="shrink-0 text-caption text-muted-foreground">{progressLabel}</span>}
         </div>
         {view.completedSteps !== undefined && (
           <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="absolute inset-x-0 -bottom-1 h-0.5" />
@@ -43,12 +44,12 @@ export function ConfigurationDetail({ view }: { view: ConfigurationRowView }) {
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <ErrorDetails className="flex-1 text-destructive" message={view.message} diagnostic={view.diagnostic} fallbackSummary="Computer changes failed." />
-        {progressLabel && <span className="shrink-0 text-[10px] text-muted-foreground">{progressLabel}</span>}
+        {progressLabel && <span className="shrink-0 text-caption text-muted-foreground">{progressLabel}</span>}
       </div>
       {view.completedSteps !== undefined && (
         <Progress aria-label={progressLabel} value={(view.completedSteps / 3) * 100} className="mt-0.5" />
       )}
-      {view.recovery && <p className="text-[10px] text-muted-foreground">{view.recovery}</p>}
+      {view.recovery && <p className="text-caption text-muted-foreground">{view.recovery}</p>}
     </div>
   )
 }

@@ -201,7 +201,7 @@ export function MacosRemoteViewer({ name, device, getSession, resize, onFullscre
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
       <Monitor aria-hidden="true" className="size-4" />
       <h1 className="min-w-0 flex-1 truncate text-xs font-medium">{device ? `${name} · ${device}` : name}</h1>
-      {notice && <div role="alert" className="flex min-w-0 items-center gap-1 text-xs text-destructive">
+      {notice && <div role="alert" className="flex min-w-0 items-center gap-1 text-xs text-destructive select-text">
         <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span className="truncate" title={notice}>{notice}</span>
       </div>}
       <span role="status" className="shrink-0 text-xs text-muted-foreground">{statusLabel(status)}</span>
@@ -213,7 +213,7 @@ export function MacosRemoteViewer({ name, device, getSession, resize, onFullscre
       {overlay && <div className="absolute inset-0 grid place-items-center bg-background/80 p-6 text-center">
         <div className="grid max-w-sm justify-items-center gap-2">
           {failed
-            ? <p role="alert" className="text-sm">{status.message}</p>
+            ? <p role="alert" className="text-sm select-text">{status.message}</p>
             : <p className="text-sm text-muted-foreground">{status.phase === "reconnecting" && status.message ? status.message : "Connecting to the computer's screen…"}</p>}
         </div>
       </div>}
