@@ -29,19 +29,19 @@ describe("configuration editor validation", () => {
     const { user, onConfigurationsChange } = await openNewComputer()
     const name = screen.getByRole("textbox", { name: "Computer name" })
     await user.clear(name)
-    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "16")
+    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "16")
     await user.click(screen.getByRole("button", { name: "Create" }))
 
     expect(onConfigurationsChange).not.toHaveBeenCalled()
     expect(name).toHaveFocus()
     expect(name).toHaveAttribute("aria-invalid", "true")
     expect(name).toHaveAccessibleDescription("Use 1–32 lowercase letters, numbers, or hyphens, starting with a letter.")
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveAccessibleDescription("CPU limit cannot exceed its ceiling.")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveAccessibleDescription("CPUs at start cannot exceed the maximum.")
     // Valid fields carry no stale description.
-    expect(screen.getByRole("combobox", { name: "Memory" })).not.toHaveAttribute("aria-describedby")
+    expect(screen.getByRole("combobox", { name: "Memory at start" })).not.toHaveAttribute("aria-describedby")
 
     await user.type(name, "dev")
     await user.click(screen.getByRole("button", { name: "Create" }))
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveFocus()
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveFocus()
   })
 })

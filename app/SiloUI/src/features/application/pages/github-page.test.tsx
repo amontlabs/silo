@@ -26,7 +26,7 @@ afterEach(() => { toast.dismiss() })
 const advanceTime = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 
 async function startUserChange(user: ReturnType<typeof userEvent.setup>, actions: Partial<ApplicationActions> = {}) {
-  await user.click(screen.getByRole("button", { name: "Disable access" }))
+  await user.click(screen.getByRole("button", { name: "Disable for all computers" }))
   expect(actions.setGitHubAccessEnabled).toHaveBeenCalled()
 }
 

@@ -21,7 +21,7 @@ function Surface({ shown, withProvider = true, onConfigurationsChange, onCommitC
 async function editCpuLimit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
   await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
 }
 
 describe("unsaved computer edits across navigation", () => {
@@ -42,7 +42,7 @@ describe("unsaved computer edits across navigation", () => {
     rerender(surface(true))
     expect(screen.getByRole("alert")).toHaveTextContent("This computer changed since you opened it.")
     expect(screen.getByRole("button", { name: "Review changes" })).toBeVisible()
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
     expect(props.onCommitComputer).toHaveBeenCalledTimes(1)
   })
@@ -59,12 +59,12 @@ describe("unsaved computer edits across navigation", () => {
     rerender(<Surface shown {...props} />)
     await act(async () => reject(new Error("This computer changed while your edit was waiting. Review it and try again.")))
     expect(screen.getByRole("alert")).toHaveTextContent("This computer changed since you opened it.")
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toBeEnabled()
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toBeEnabled()
     await user.click(screen.getByRole("button", { name: "Review changes" }))
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(props.onCommitComputer).toHaveBeenCalledTimes(2)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   })
 
   it("forgets a saved edit when the save completes after leaving", async () => {
@@ -78,7 +78,7 @@ describe("unsaved computer edits across navigation", () => {
     rerender(<Surface shown={false} {...props} />)
     await act(async () => resolve())
     rerender(<Surface shown configurations={[{ ...configuration, cpus: 4 }]} {...props} />)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
     expect(props.onCommitComputer).toHaveBeenCalledTimes(1)
   })
 
@@ -93,12 +93,12 @@ describe("unsaved computer edits across navigation", () => {
     rerender(<Surface shown={false} {...props} />)
     rerender(<Surface shown {...props} />)
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled()
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toBeDisabled()
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toBeDisabled()
     await act(async () => resolve())
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
     rerender(<Surface shown={false} {...props} />)
     rerender(<Surface shown {...props} />)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
     expect(props.onCommitComputer).toHaveBeenCalledTimes(1)
   })
 
@@ -109,10 +109,10 @@ describe("unsaved computer edits across navigation", () => {
     await editCpuLimit(user)
     await user.click(screen.getByRole("button", { name: "Add" }))
     await user.keyboard("{Escape}")
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
     rerender(<Surface shown={false} onConfigurationsChange={onConfigurationsChange} />)
     rerender(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(onConfigurationsChange).toHaveBeenCalledExactlyOnceWith([{ ...configuration, cpus: 4 }], [configuration])
   })
@@ -124,13 +124,13 @@ describe("unsaved computer edits across navigation", () => {
     await editCpuLimit(user)
     rerender(<Surface shown={false} onConfigurationsChange={onConfigurationsChange} />)
     rerender(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
-    expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+    expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
     // The restored edit still saves against the configuration it started from.
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(onConfigurationsChange).toHaveBeenCalledExactlyOnceWith([{ ...configuration, cpus: 4 }], [configuration])
     rerender(<Surface shown={false} onConfigurationsChange={onConfigurationsChange} />)
     rerender(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   })
 
   it("forgets a cancelled edit", async () => {
@@ -141,7 +141,7 @@ describe("unsaved computer edits across navigation", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     rerender(<Surface shown={false} onConfigurationsChange={onConfigurationsChange} />)
     rerender(<Surface shown onConfigurationsChange={onConfigurationsChange} />)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   })
 
   it("keeps nothing outside a provider", async () => {
@@ -151,7 +151,7 @@ describe("unsaved computer edits across navigation", () => {
     await editCpuLimit(user)
     rerender(<Surface shown={false} withProvider={false} onConfigurationsChange={onConfigurationsChange} />)
     rerender(<Surface shown withProvider={false} onConfigurationsChange={onConfigurationsChange} />)
-    expect(screen.queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   })
 })
 
@@ -168,12 +168,12 @@ it.each(["conflict", "review"])("restores the %s notice with the unsaved draft a
   if (notice === "review") await user.click(screen.getByRole("button", { name: "Review changes" }))
   rerender(<Surface shown={false} configurations={[latest]} {...props} />)
   rerender(<Surface shown configurations={[latest]} {...props} />)
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   if (notice === "conflict") {
     expect(screen.getByRole("alert")).toHaveTextContent("This computer changed since you opened it.")
     expect(screen.getByRole("button", { name: "Review changes" })).toBeVisible()
   } else {
-    expect(screen.getByRole("status", { name: "Review changes" })).toHaveTextContent("CPUs: yours 4 CPUs, elsewhere 6 CPUs")
-    expect(screen.getByRole("status", { name: "Review changes" })).toHaveTextContent("Updated from elsewhere: Memory ceiling.")
+    expect(screen.getByRole("status", { name: "Review changes" })).toHaveTextContent("CPUs at start: yours 4 CPUs, elsewhere 6 CPUs")
+    expect(screen.getByRole("status", { name: "Review changes" })).toHaveTextContent("Updated from elsewhere: Maximum memory.")
   }
 })

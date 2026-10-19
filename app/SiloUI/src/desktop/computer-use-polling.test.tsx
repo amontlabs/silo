@@ -3,8 +3,7 @@ import { Profiler } from "react"
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-import { ConnectionsSettings } from "@/features/application/components/connections-settings"
-import type { ApplicationActions } from "@/features/application/model/application-source"
+import { ComputerUseSettings } from "@/features/application/components/computer-use-settings"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { createFixtureComputerUseBackend, fixtureDesktopState } from "@/fixtures/computer-use"
 import { createComputerUseBridge, useChatGptApp, type ComputerUseBackend } from "./computer-use-bridge"
@@ -275,11 +274,11 @@ it("pauses remote download status polling when hidden and still settles an expli
   } finally { stop() }
 })
 
-it("releases remote download polling while Devices settings are inactive", async () => {
+it("releases remote download polling while computer use settings are inactive", async () => {
   const read = vi.fn(async (_device?: string) => ({ state: "downloading", receivedBytes: 1, totalBytes: 10 }))
   const bridge = createComputerUseBridge(backend({ chatGptStatus: read }), { busy: 1000, idle: 1000 })
   const source = { ...applicationSourceForScenario("running"), devices: [{ id: "office", name: "Office", address: "owner@office", connected: true }] }
-  const page = (active: boolean) => <ComputerUseProvider bridge={bridge}><ConnectionsSettings source={source} actions={{} as ApplicationActions} active={active} /></ComputerUseProvider>
+  const page = (active: boolean) => <ComputerUseProvider bridge={bridge}><ComputerUseSettings source={source} active={active} /></ComputerUseProvider>
   const view = render(page(true))
   await advance(0)
   const reads = () => read.mock.calls.filter(([device]) => device === "office")

@@ -29,7 +29,7 @@ describe("configuration editor resource fields", () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Add" }))
     await user.click(screen.getByRole("menuitem", { name: "New computer" }))
-    const ceiling = screen.getByRole("combobox", { name: "CPUs ceiling" })
+    const ceiling = screen.getByRole("combobox", { name: "Maximum CPUs" })
     const values = [...ceiling.querySelectorAll("option")].map(option => option.value)
     expect(values).not.toContain("512")
     expect(values).toContain("255")
@@ -47,9 +47,9 @@ describe("configuration editor resource fields", () => {
     await user.click(screen.getByRole("button", { name: "Add" }))
     await user.click(screen.getByRole("menuitem", { name: "New computer" }))
     await user.selectOptions(screen.getByRole("combobox", { name: "Run on" }), "office")
-    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs ceiling" }), "12")
+    await user.selectOptions(screen.getByRole("combobox", { name: "Maximum CPUs" }), "12")
     await user.selectOptions(screen.getByRole("combobox", { name: "Run on" }), "")
-    const ceiling = screen.getByRole("spinbutton", { name: "CPUs ceiling custom (CPUs)" })
+    const ceiling = screen.getByRole("spinbutton", { name: "Maximum CPUs custom (CPUs)" })
     expect(ceiling).toHaveDisplayValue("12")
     await user.clear(ceiling)
     await user.type(ceiling, "4")
@@ -59,7 +59,7 @@ describe("configuration editor resource fields", () => {
 
   it("caps custom CPU counts at what the runtime accepts", async () => {
     const { user } = await openNewComputer()
-    const input = await enterCustom(user, "CPUs ceiling", "CPUs", "12")
+    const input = await enterCustom(user, "Maximum CPUs", "CPUs", "12")
     expect(input).toHaveAttribute("max", "255")
     expect(input).toHaveAttribute("step", "1")
   })
@@ -71,7 +71,7 @@ describe("configuration editor resource fields", () => {
     ["more than the runtime accepts", "300"],
   ])("rejects %s with a readable message instead of saving", async (_case, value) => {
     const { user, onConfigurationsChange } = await openNewComputer()
-    const input = await enterCustom(user, "CPUs ceiling", "CPUs", value)
+    const input = await enterCustom(user, "Maximum CPUs", "CPUs", value)
     await user.click(screen.getByRole("button", { name: "Create" }))
     expect(onConfigurationsChange).not.toHaveBeenCalled()
     expect(input).toHaveAccessibleDescription("Enter a whole number of CPUs from 1 to 255.")
@@ -83,7 +83,7 @@ describe("configuration editor resource fields", () => {
 
   it("explains memory and storage ranges in the same words", async () => {
     const { user, onConfigurationsChange } = await openNewComputer()
-    const memory = await enterCustom(user, "Memory", "GiB", "0")
+    const memory = await enterCustom(user, "Memory at start", "GiB", "0")
     const storage = await enterCustom(user, "Workspace disk", "GiB", "2.5")
     await user.click(screen.getByRole("button", { name: "Create" }))
     expect(onConfigurationsChange).not.toHaveBeenCalled()
@@ -97,11 +97,11 @@ describe("configuration editor resource fields", () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Add" }))
     await user.click(screen.getByRole("menuitem", { name: "New computer" }))
-    expect(screen.getByRole("combobox", { name: "CPUs ceiling" })).toHaveValue("8")
-    expect(screen.getByRole("combobox", { name: "Memory ceiling" })).toHaveValue("16")
+    expect(screen.getByRole("combobox", { name: "Maximum CPUs" })).toHaveValue("8")
+    expect(screen.getByRole("combobox", { name: "Maximum memory" })).toHaveValue("16")
     const options = (label: string) => [...screen.getByRole("combobox", { name: label }).querySelectorAll("option")].map(option => option.value)
-    expect(options("CPUs ceiling")).toEqual(["1", "2", "4", "6", "8", "custom"])
-    expect(options("Memory ceiling")).toEqual(["1", "2", "4", "8", "12", "16", "custom"])
+    expect(options("Maximum CPUs")).toEqual(["1", "2", "4", "6", "8", "custom"])
+    expect(options("Maximum memory")).toEqual(["1", "2", "4", "8", "12", "16", "custom"])
     await user.click(screen.getByRole("button", { name: "Create" }))
     expect(onConfigurationsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ cpus: 4, maxCPUs: 8, memoryGiB: 8, maxMemoryGiB: 16 })])
   })
@@ -112,7 +112,7 @@ describe("configuration editor resource fields", () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Add" }))
     await user.click(screen.getByRole("menuitem", { name: "New computer" }))
-    const input = await enterCustom(user, "CPUs ceiling", "CPUs", "12")
+    const input = await enterCustom(user, "Maximum CPUs", "CPUs", "12")
     expect(input).toHaveAttribute("max", "8")
     await user.click(screen.getByRole("button", { name: "Create" }))
     expect(onConfigurationsChange).not.toHaveBeenCalled()
@@ -121,7 +121,7 @@ describe("configuration editor resource fields", () => {
 
   it("saves a valid whole custom value", async () => {
     const { user, onConfigurationsChange } = await openNewComputer()
-    await enterCustom(user, "CPUs ceiling", "CPUs", "10")
+    await enterCustom(user, "Maximum CPUs", "CPUs", "10")
     await user.click(screen.getByRole("button", { name: "Create" }))
     expect(onConfigurationsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ maxCPUs: 10 })])
   })

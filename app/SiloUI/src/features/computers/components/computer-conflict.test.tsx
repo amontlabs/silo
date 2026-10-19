@@ -22,18 +22,18 @@ async function openEditor(configurations: readonly SetupComputerConfiguration[],
 it("keeps the editor open with the user's edits when a save is rejected as stale", async () => {
   const onCommitComputer = vi.fn().mockRejectedValue(staleError)
   const { user } = await openEditor([configuration], { onCommitComputer, getDeviceId: () => "" })
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(screen.getByRole("button", { name: "Save" }))
 
   expect(await screen.findByRole("alert")).toHaveTextContent("This computer changed since you opened it.")
   // The edited value is preserved rather than discarded.
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   expect(screen.getByRole("button", { name: "Review changes" })).toBeInTheDocument()
 
   // Review changes clears the conflict but keeps the user's edit on the latest settings.
   await user.click(screen.getByRole("button", { name: "Review changes" }))
   expect(screen.queryByText("This computer changed since you opened it.")).not.toBeInTheDocument()
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   expect(screen.getByRole("status", { name: "Review changes" })).toHaveTextContent("Your edits are kept on top of the latest settings.")
 })
 
@@ -41,7 +41,7 @@ it("shows fields changed on both sides and saves the user's edits on top of the 
   const onCommitComputer = vi.fn().mockRejectedValueOnce(staleError).mockResolvedValue(undefined)
   const props = { onCommitComputer, getDeviceId: () => "" }
   const { user, view } = await openEditor([configuration], props)
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   const latest = { ...configuration, cpus: 6, maxMemoryGiB: 64 }
   view.rerender(<TooltipProvider><ComputerConfigurationList configurations={[latest]} onConfigurationsChange={vi.fn()}
     isComputerCreated={() => true} getRowPresentation={() => ({ menuActions: [] })} {...props} /></TooltipProvider>)
@@ -49,10 +49,10 @@ it("shows fields changed on both sides and saves the user's edits on top of the 
   await user.click(await screen.findByRole("button", { name: "Review changes" }))
 
   const review = screen.getByRole("status", { name: "Review changes" })
-  expect(review).toHaveTextContent("CPUs: yours 4 CPUs, elsewhere 6 CPUs")
-  expect(review).toHaveTextContent("Updated from elsewhere: Memory ceiling.")
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
-  expect(screen.getByRole("combobox", { name: "Memory ceiling" })).toHaveValue("64")
+  expect(review).toHaveTextContent("CPUs at start: yours 4 CPUs, elsewhere 6 CPUs")
+  expect(review).toHaveTextContent("Updated from elsewhere: Maximum memory.")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "Maximum memory" })).toHaveValue("64")
 
   await user.click(screen.getByRole("button", { name: "Save" }))
   expect(onCommitComputer).toHaveBeenLastCalledWith({ ...latest, cpus: 4 }, latest, "", [latest])
@@ -79,7 +79,7 @@ it("keeps the edit's original baseline when another row receives a reorder key",
   const second = { ...configuration, id: "00000000-0000-4000-8000-000000000002", name: "second" }
   const props = { onCommitComputer: vi.fn().mockResolvedValue(undefined), onReorder: vi.fn(), getDeviceId: () => "" }
   const { user, view } = await openEditor([configuration, second], props)
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   const latest = { ...configuration, maxMemoryGiB: 64 }
   view.rerender(<TooltipProvider><ComputerConfigurationList configurations={[latest, second]} onConfigurationsChange={vi.fn()}
     isComputerCreated={() => true} getRowPresentation={() => ({ menuActions: [] })} {...props} /></TooltipProvider>)
@@ -98,7 +98,7 @@ it("keeps the edit's original baseline when another computer is deleted", async 
   const second = { ...configuration, id: "00000000-0000-4000-8000-000000000002", name: "second" }
   const props = { onCommitComputer: vi.fn().mockResolvedValue(undefined), onDeleteComputer: vi.fn().mockResolvedValue(undefined), getDeviceId: () => "" }
   const { user, view } = await openEditor([configuration, second], props)
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   const latest = { ...configuration, maxMemoryGiB: 64 }
   const renderConfigurations = (configurations: SetupComputerConfiguration[]) => <TooltipProvider><ComputerConfigurationList configurations={configurations} onConfigurationsChange={vi.fn()}
     isComputerCreated={() => true} getRowPresentation={() => ({ menuActions: [] })} {...props} /></TooltipProvider>
@@ -132,7 +132,7 @@ it("reports a stale rejection after the editor closed on a local save", async ()
   const user = userEvent.setup()
   await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
   await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(screen.getByRole("button", { name: "Save" }))
   expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument()
   await act(async () => reject(staleError))

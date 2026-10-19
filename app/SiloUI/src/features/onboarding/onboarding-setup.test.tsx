@@ -33,7 +33,7 @@ it("expands the consolidated runtime failure and exposes non-repair remediation"
   const user = userEvent.setup()
   renderScenario("dependency-failure")
 
-  expect(screen.getByText("MicroSandbox runtime")).toBeVisible()
+  expect(screen.getByText("Computer runtime")).toBeVisible()
   expect(screen.getByText("Reinstall this Silo build from a trusted package.")).toBeVisible()
   expect(screen.queryByText("msb")).not.toBeInTheDocument()
   expect(screen.queryByRole("button", { name: /Repair/ })).not.toBeInTheDocument()
@@ -41,9 +41,9 @@ it("expands the consolidated runtime failure and exposes non-repair remediation"
   const disclosure = screen.getByRole("button", { name: /Bundled tools/ })
   expectDisclosureIndicator(disclosure)
   await user.click(disclosure)
-  expect(screen.queryByText("MicroSandbox runtime")).not.toBeInTheDocument()
+  expect(screen.queryByText("Computer runtime")).not.toBeInTheDocument()
   await user.click(disclosure)
-  expect(screen.getByText("MicroSandbox runtime")).toBeVisible()
+  expect(screen.getByText("Computer runtime")).toBeVisible()
 })
 
 

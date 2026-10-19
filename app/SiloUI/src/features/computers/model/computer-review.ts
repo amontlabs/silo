@@ -18,8 +18,8 @@ export interface ComputerReview {
 }
 
 const fieldLabels = new Map([
-  ["name", "Name"], ["cpus", "CPUs"], ["maxCPUs", "CPUs ceiling"],
-  ["memoryGiB", "Memory"], ["maxMemoryGiB", "Memory ceiling"],
+  ["name", "Name"], ["cpus", "CPUs at start"], ["maxCPUs", "Maximum CPUs"],
+  ["memoryGiB", "Memory at start"], ["maxMemoryGiB", "Maximum memory"],
   ["workspaceStorageGiB", "Workspace disk"], ["runtimeStorageGiB", "Runtime disk"],
   ["desktop", "Linux desktop"],
 ])

@@ -68,7 +68,7 @@ it("adds, cancels, and saves a virtual configuration through the typed configura
   const draftName = computerEditor().getByRole("textbox", { name: "Computer name" })
   expect(draftName).toHaveValue("computer-4")
   expect(draftName).toHaveFocus()
-  expect(computerEditor().getByRole("combobox", { name: "CPUs" })).toHaveValue("8")
+  expect(computerEditor().getByRole("combobox", { name: "CPUs at start" })).toHaveValue("8")
   await user.click(computerEditor().getByRole("button", { name: "Cancel" }))
   expect(screen.queryByDisplayValue("computer-4")).not.toBeInTheDocument()
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
@@ -77,7 +77,7 @@ it("adds, cancels, and saves a virtual configuration through the typed configura
   await user.click(within(screen.getByRole("menu", { name: "Add computer" })).getByRole("menuitem", { name: "New computer" }))
   await user.clear(computerEditor().getByRole("textbox", { name: "Computer name" }))
   await user.type(computerEditor().getByRole("textbox", { name: "Computer name" }), "build")
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
 
   expect(saveComputerConfiguration).toHaveBeenCalledOnce()
@@ -96,26 +96,28 @@ it("adds, cancels, and saves a virtual configuration through the typed configura
 it("restores an existing computer exactly on Cancel and persists a valid edit on Save", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
   const name = computerEditor().getByRole("textbox", { name: "Computer name" })
   expect(name).toHaveFocus()
   expect(name).toHaveAttribute("readonly")
   expect(computerEditor().getByRole("combobox", { name: "Workspace disk" })).toBeDisabled()
   expect(computerEditor().getByRole("combobox", { name: "Runtime disk" })).toBeDisabled()
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory" }), "16")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory at start" }), "16")
   await user.click(computerEditor().getByRole("button", { name: "Cancel" }))
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
-  expect(configuredComputers().getByRole("button", { name: "Edit dev" })).toBeVisible()
+  expect(configuredComputers().getByRole("button", { name: "More actions for dev" })).toBeVisible()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev" }))
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory" }), "16")
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory at start" }), "16")
   await user.click(computerEditor().getByRole("button", { name: "Save" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers[0]).toMatchObject({ name: "dev", memoryGiB: 16 })
-  expect(configuredComputers().getByRole("button", { name: "Edit dev" })).toBeVisible()
+  expect(configuredComputers().getByRole("button", { name: "More actions for dev" })).toBeVisible()
 })
 
 
-it("keeps configuration actions on one custom tooltip and the drag handle tooltip-free", async () => {
+it("offers Edit, Duplicate settings and Delete in the actions menu and keeps the drag handle tooltip-free", async () => {
   const { user } = await renderComputerScenario()
   const dragHandle = configuredComputers().getByRole("button", { name: "Reorder dev" })
   expect(dragHandle).toHaveAccessibleName("Reorder dev")
@@ -125,32 +127,14 @@ it("keeps configuration actions on one custom tooltip and the drag handle toolti
   fireEvent.blur(dragHandle)
   await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument())
 
-  const tooltipCases = [
-    ["Edit dev", "Edit dev"],
-    ["Duplicate settings for dev", "Create a new empty computer with the same settings."],
-    ["Delete dev", "Delete dev"],
-  ] as const
-
-  for (const [name, explanation] of tooltipCases) {
-    const trigger = configuredComputers().getByRole("button", { name })
-    expect(trigger).toHaveAccessibleName(name)
-    expect(trigger).not.toHaveAttribute("title")
-    fireEvent.focus(trigger)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(explanation)
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1)
-    fireEvent.blur(trigger)
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument())
-
-    await user.hover(trigger)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(explanation)
-    expect(screen.getAllByRole("tooltip")).toHaveLength(1)
-    await user.unhover(trigger)
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument())
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  for (const name of ["Edit dev", "Duplicate settings for dev", "Delete dev"]) {
+    expect(screen.getByRole("menuitem", { name })).toBeVisible()
   }
+  await user.keyboard("{Escape}")
 
-  await user.click(configuredComputers().getByRole("button", { name: "Delete dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
   expect(screen.getByText("Delete dev permanently?")).toBeVisible()
 })
 
@@ -164,8 +148,9 @@ it("preserves GitHub policy and identity settings when computer resources change
   expect(within(screen.getByRole("table", { name: "Selected repositories for dev" })).getByText("acme/silo")).toBeVisible()
 
   await user.click(screen.getByRole("tab", { name: /Computers/ }))
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev" }))
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs" }), "4")
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(computerEditor().getByRole("button", { name: "Save" }))
 
   await user.click(screen.getByRole("tab", { name: /GitHub/ }))
@@ -177,16 +162,19 @@ it("preserves GitHub policy and identity settings when computer resources change
 it("duplicates after the source, cancels drafts, and generates collision-free copy names", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
   expect(computerEditor().getByRole("textbox", { name: "Computer name" })).toHaveValue("dev-copy")
   await user.click(computerEditor().getByRole("button", { name: "Cancel" }))
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers.map(({ name }: { name: string }) => name)).toEqual(["dev", "dev-copy", "playgrounds", "personal"])
 
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
   expect(computerEditor().getByRole("textbox", { name: "Computer name" })).toHaveValue("dev-copy-2")
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers.map(({ name }: { name: string }) => name)).toEqual(["dev", "dev-copy-2", "dev-copy", "playgrounds", "personal"])
@@ -196,8 +184,10 @@ it("duplicates after the source, cancels drafts, and generates collision-free co
 it("places a replacement duplicate after its source when another draft is open", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for playgrounds" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for playgrounds" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for playgrounds" }))
   expect(computerEditor().getByRole("textbox", { name: "Computer name" })).toHaveValue("playgrounds-copy")
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
 
@@ -210,23 +200,26 @@ it("places a replacement duplicate after its source when another draft is open",
 it("confirms deletion in a popover; Cancel or Escape keeps the computer", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Delete dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
   expect(screen.getByText("Delete dev permanently?")).toBeVisible()
   expect(screen.getByText("Its files and checkpoints will be deleted. This can't be undone.")).toBeVisible()
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
   await user.click(screen.getByRole("button", { name: "Cancel" }))
   expect(screen.queryByText("Delete dev permanently?")).not.toBeInTheDocument()
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
-  await user.click(configuredComputers().getByRole("button", { name: "Delete dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
   await user.keyboard("{Escape}")
   expect(screen.queryByText("Delete dev permanently?")).not.toBeInTheDocument()
-  expect(configuredComputers().getByRole("button", { name: "Delete dev" })).toBeVisible()
+  expect(configuredComputers().getByRole("button", { name: "More actions for dev" })).toBeVisible()
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
 
-  await user.click(configuredComputers().getByRole("button", { name: "Delete dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
   await user.click(screen.getByRole("button", { name: /^Delete permanently$/ }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers.map(({ name }: { name: string }) => name)).toEqual(["playgrounds", "personal"])
-  expect(screen.queryByRole("button", { name: "Edit dev" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "More actions for dev" })).not.toBeInTheDocument()
 })
 
 
@@ -238,7 +231,7 @@ it("persists pointer drag reorder and the quiet keyboard reorder path", async ()
     setData: (type: string, value: string) => data.set(type, value),
     getData: (type: string) => data.get(type) ?? "",
   }
-  const target = configuredComputers().getByRole("button", { name: "Edit personal" }).closest("li")
+  const target = configuredComputers().getByRole("button", { name: "More actions for personal" }).closest("li")
   expect(target).not.toBeNull()
 
   fireEvent.dragStart(configuredComputers().getByRole("button", { name: "Reorder dev" }), { dataTransfer })
@@ -256,33 +249,36 @@ it("persists pointer drag reorder and the quiet keyboard reorder path", async ()
 
 it("saves smaller memory presets and custom whole GiB values", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory" }), "12")
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory ceiling" }), "12")
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory at start" }), "12")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Maximum memory" }), "12")
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: "dev-copy", memoryGiB: 12, maxMemoryGiB: 12 }),
   ]))
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev-copy" }))
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory" }), "custom")
-  const input = computerEditor().getByRole("spinbutton", { name: "Memory custom (GiB)" })
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev-copy" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev-copy" }))
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory at start" }), "custom")
+  const input = computerEditor().getByRole("spinbutton", { name: "Memory at start custom (GiB)" })
   await user.clear(input)
   await user.type(input, "10")
   await user.click(computerEditor().getByRole("button", { name: "Save" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: "dev-copy", memoryGiB: 10, maxMemoryGiB: 12 }),
   ]))
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev-copy" }))
-  expect(computerEditor().getByRole("spinbutton", { name: "Memory custom (GiB)" })).toHaveValue(10)
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev-copy" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev-copy" }))
+  expect(computerEditor().getByRole("spinbutton", { name: "Memory at start custom (GiB)" })).toHaveValue(10)
   saveComputerConfiguration.mockClear()
-  const customInput = computerEditor().getByRole("spinbutton", { name: "Memory custom (GiB)" })
+  const customInput = computerEditor().getByRole("spinbutton", { name: "Memory at start custom (GiB)" })
   for (const invalid of ["0", "1.5", "13"]) {
     await user.clear(customInput)
     await user.type(customInput, invalid)
     await user.click(computerEditor().getByRole("button", { name: "Save" }))
     expect(saveComputerConfiguration).not.toHaveBeenCalled()
   }
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory" }), "8")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Memory at start" }), "8")
   await user.click(computerEditor().getByRole("button", { name: "Save" }))
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: "dev-copy", memoryGiB: 8, maxMemoryGiB: 12 }),
@@ -292,8 +288,9 @@ it("saves smaller memory presets and custom whole GiB values", async () => {
 
 it("saves custom CPU and disk values and reopens them", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
-  for (const [label, unit, value] of [["CPUs", "CPUs", "3"], ["CPUs ceiling", "CPUs", "5"], ["Workspace disk", "GiB", "35"], ["Runtime disk", "GiB", "25"]]) {
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
+  for (const [label, unit, value] of [["CPUs at start", "CPUs", "3"], ["Maximum CPUs", "CPUs", "5"], ["Workspace disk", "GiB", "35"], ["Runtime disk", "GiB", "25"]]) {
     await user.selectOptions(computerEditor().getByRole("combobox", { name: label }), "custom")
     const input = computerEditor().getByRole("spinbutton", { name: `${label} custom (${unit})` })
     await user.clear(input)
@@ -303,23 +300,25 @@ it("saves custom CPU and disk values and reopens them", async () => {
   expect(saveComputerConfiguration.mock.lastCall?.[0].computers).toEqual(expect.arrayContaining([
     expect.objectContaining({ name: "dev-copy", cpus: 3, maxCPUs: 5, workspaceStorageGiB: 35, runtimeStorageGiB: 25 }),
   ]))
-  await user.click(configuredComputers().getByRole("button", { name: "Edit dev-copy" }))
-  expect(computerEditor().getByRole("spinbutton", { name: "CPUs custom (CPUs)" })).toHaveValue(3)
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev-copy" }))
+  await user.click(screen.getByRole("menuitem", { name: "Edit dev-copy" }))
+  expect(computerEditor().getByRole("spinbutton", { name: "CPUs at start custom (CPUs)" })).toHaveValue(3)
   expect(computerEditor().getByRole("spinbutton", { name: "Workspace disk custom (GiB)" })).toHaveValue(35)
 })
 
 
 it("blocks duplicate names and invalid computer resource ranges", async () => {
   const { user, saveComputerConfiguration } = await renderComputerScenario()
-  await user.click(configuredComputers().getByRole("button", { name: "Duplicate settings for dev" }))
+  await user.click(configuredComputers().getByRole("button", { name: "More actions for dev" }))
+  await user.click(screen.getByRole("menuitem", { name: "Duplicate settings for dev" }))
   await user.clear(computerEditor().getByRole("textbox", { name: "Computer name" }))
   await user.type(computerEditor().getByRole("textbox", { name: "Computer name" }), "personal")
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs" }), "12")
-  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs ceiling" }), "4")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "CPUs at start" }), "12")
+  await user.selectOptions(computerEditor().getByRole("combobox", { name: "Maximum CPUs" }), "4")
   await user.click(computerEditor().getByRole("button", { name: "Create" }))
 
   expect(screen.getByText("Computer names must be unique.")).toBeVisible()
-  expect(screen.getByText("CPU limit cannot exceed its ceiling.")).toBeVisible()
+  expect(screen.getByText("CPUs at start cannot exceed the maximum.")).toBeVisible()
   expect(saveComputerConfiguration).not.toHaveBeenCalled()
 })
 

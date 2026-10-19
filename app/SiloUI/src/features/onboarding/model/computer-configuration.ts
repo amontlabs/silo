@@ -98,8 +98,8 @@ export function validateComputer(
   }
   const nameError = validateComputerName(configuration.name)
   if (nameError) errors.name = nameError
-  if (configuration.cpus > configuration.maxCPUs) errors.cpus = "CPU limit cannot exceed its ceiling."
-  if (configuration.memoryGiB > configuration.maxMemoryGiB) errors.memoryGiB = "Memory limit cannot exceed its ceiling."
+  if (configuration.cpus > configuration.maxCPUs) errors.cpus = "CPUs at start cannot exceed the maximum."
+  if (configuration.memoryGiB > configuration.maxMemoryGiB) errors.memoryGiB = "Memory at start cannot exceed the maximum."
   return errors
 }
 

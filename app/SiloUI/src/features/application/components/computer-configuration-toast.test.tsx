@@ -60,7 +60,7 @@ describe("describeConfiguration", () => {
 
   it("names what creation waits for and finishes with computer use setup, with progress where known", () => {
     const step = (...events: SiloProgressEvent[]) => describeConfiguration(operation(events), committed)
-    expect(step(event("computer-image-wait"))).toMatchObject({ step: "Waiting for the VM image", progress: null })
+    expect(step(event("computer-image-wait"))).toMatchObject({ step: "Waiting for the computer image", progress: null })
     expect(step(event("chatgpt-app-wait"))).toMatchObject({ step: "Waiting for ChatGPT for Linux", progress: null })
     const download = { ...event("chatgpt-app-download"), downloadedBytes: 620, totalBytes: 1000 }
     expect(step(download)).toMatchObject({ step: "Downloading ChatGPT for Linux · 62%", progress: 0.62 })

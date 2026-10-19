@@ -530,9 +530,9 @@ it("fits a new computer to the capacity this device reports (I-24)", async () =>
   const panel = within(appPanel("Computers"))
   await user.click(panel.getByRole("button", { name: "Add" }))
   await user.click(screen.getByRole("menuitem", { name: "New computer" }))
-  expect(panel.getByRole("combobox", { name: "CPUs ceiling" })).toHaveValue("8")
-  expect(panel.getByRole("combobox", { name: "Memory ceiling" })).toHaveValue("16")
-  expect(panel.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(panel.getByRole("combobox", { name: "Maximum CPUs" })).toHaveValue("8")
+  expect(panel.getByRole("combobox", { name: "Maximum memory" })).toHaveValue("16")
+  expect(panel.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
 })
 
 
@@ -541,11 +541,11 @@ it("keeps an unsaved computer edit while visiting another section (I-37)", async
   const computerSections = within(within(appNavigation()).getByRole("group", { name: "Computer sections" }))
   await user.click(screen.getByRole("button", { name: "More actions for dev" }))
   await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
-  await user.selectOptions(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(computerSections.getByRole("button", { name: "Files" }))
-  expect(within(appPanel("Computers")).queryByRole("combobox", { name: "CPUs" })).not.toBeInTheDocument()
+  expect(within(appPanel("Computers")).queryByRole("combobox", { name: "CPUs at start" })).not.toBeInTheDocument()
   await user.click(computerSections.getByRole("button", { name: "All computers" }))
-  expect(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(within(appPanel("Computers")).getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
 })
 
 

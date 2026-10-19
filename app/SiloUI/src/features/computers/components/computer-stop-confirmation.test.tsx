@@ -19,7 +19,7 @@ function renderRunningEditor(running = true) {
 describe("saving changes that stop a running computer", () => {
   it("confirms the stop inline before saving", async () => {
     const { onConfigurationsChange, user } = renderRunningEditor()
-    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+    await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
     await user.click(screen.getByRole("button", { name: "Stop and save…" }))
     expect(onConfigurationsChange).not.toHaveBeenCalled()
     const confirmation = screen.getByRole("group", { name: `Stop ${configuration.name} and save?` })
@@ -67,7 +67,7 @@ it("revalidates newly reported host capacity before confirming Stop and save", a
   result.rerender(view({ logicalCPUs: 8, memoryGiB: 16 }))
   await user.click(screen.getByRole("button", { name: "Stop and save" }))
   expect(onConfigurationsChange).not.toHaveBeenCalled()
-  expect(screen.getByRole("spinbutton", { name: "Memory ceiling custom (GiB)" }))
+  expect(screen.getByRole("spinbutton", { name: "Maximum memory custom (GiB)" }))
     .toHaveAccessibleDescription("This device has 16 GiB of memory. Choose 16 GiB or fewer.")
   expect(screen.queryByRole("group", { name: `Stop ${configuration.name} and save?` })).not.toBeInTheDocument()
 })
@@ -75,13 +75,13 @@ it("revalidates newly reported host capacity before confirming Stop and save", a
 
 it.each(["stopped", "locked"])("does not revive an old stop confirmation after the computer was %s", async interruption => {
   const { user, rerender, onConfigurationsChange } = renderRunningEditor()
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   await user.click(screen.getByRole("button", { name: "Stop and save…" }))
   rerender(interruption !== "stopped", interruption === "locked")
   expect(screen.queryByRole("group", { name: `Stop ${configuration.name} and save?` })).not.toBeInTheDocument()
   rerender(true)
   expect(screen.queryByRole("group", { name: `Stop ${configuration.name} and save?` })).not.toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Stop and save…" })).toBeEnabled()
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   expect(onConfigurationsChange).not.toHaveBeenCalled()
 })

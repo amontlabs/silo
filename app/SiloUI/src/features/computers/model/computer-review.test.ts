@@ -45,8 +45,8 @@ describe("rebasing a draft after a stale save", () => {
     const draft = { ...opened, cpus: 4, memoryGiB: 16 }
     const { draft: rebased, review } = rebaseComputerDraft(opened, latest, draft)
     expect(rebased).toEqual({ ...opened, cpus: 4, memoryGiB: 16, maxMemoryGiB: 64, desktop: { startWithComputer: true } })
-    expect(review.conflicts).toEqual([{ field: "cpus", label: "CPUs", theirs: "6 CPUs", mine: "4 CPUs" }])
-    expect(review.adopted).toEqual(["Memory ceiling", "Linux desktop"])
+    expect(review.conflicts).toEqual([{ field: "cpus", label: "CPUs at start", theirs: "6 CPUs", mine: "4 CPUs" }])
+    expect(review.adopted).toEqual(["Maximum memory", "Linux desktop"])
   })
 
   it("does not list a field both sides changed to the same value", () => {

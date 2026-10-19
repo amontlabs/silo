@@ -67,7 +67,7 @@ it.each(["list", "detail"])("pauses an open %s editor while a checkpoint runs an
   if (surface === "detail") await user.click(screen.getByRole("button", { name: "Open dev" }))
   await user.click(screen.getByRole("button", { name: "More actions for dev" }))
   await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   const busy = structuredClone(source)
   busy.computers.find(({ configuration }) => configuration.name === "dev")!.checkpointOperation = {
     kind: "capture", status: "running", stage: "Saving disk copies",
@@ -77,7 +77,7 @@ it.each(["list", "detail"])("pauses an open %s editor while a checkpoint runs an
   expect(screen.getByRole("button", { name: "Save" })).toHaveAccessibleDescription("Wait for the checkpoint to finish.")
   expect(onConfigurationsChange).not.toHaveBeenCalled()
   result.rerender(view(source))
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
 })
 
@@ -91,7 +91,7 @@ it.each(["list", "detail"])("pauses an open %s editor when the computer status b
   if (surface === "detail") await user.click(screen.getByRole("button", { name: "Open dev" }))
   await user.click(screen.getByRole("button", { name: "More actions for dev" }))
   await user.click(screen.getByRole("menuitem", { name: "Edit dev" }))
-  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs" }), "4")
+  await user.selectOptions(screen.getByRole("combobox", { name: "CPUs at start" }), "4")
   const stale = structuredClone(source)
   stale.computers.find(({ configuration }) => configuration.name === "dev")!.freshness = "stale"
   result.rerender(view(stale))
@@ -100,6 +100,6 @@ it.each(["list", "detail"])("pauses an open %s editor when the computer status b
   await user.click(screen.getByRole("button", { name: "Save" }))
   expect(onConfigurationsChange).not.toHaveBeenCalled()
   result.rerender(view(source))
-  expect(screen.getByRole("combobox", { name: "CPUs" })).toHaveValue("4")
+  expect(screen.getByRole("combobox", { name: "CPUs at start" })).toHaveValue("4")
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
 })

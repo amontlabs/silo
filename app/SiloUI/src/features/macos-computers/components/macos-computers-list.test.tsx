@@ -314,12 +314,12 @@ it("switches a new computer between Linux and macOS fields", async () => {
   const os = await screen.findByRole("combobox", { name: "Operating system" })
   expect(within(os).getAllByRole("option").map(option => option.textContent)).toEqual(["Linux", "macOS"])
   expect(os).toHaveValue("linux")
-  expect(screen.getByRole("combobox", { name: "CPUs ceiling" })).toBeVisible()
+  expect(screen.getByRole("combobox", { name: "Maximum CPUs" })).toBeVisible()
   await user.selectOptions(os, "macOS")
-  expect(screen.queryByRole("combobox", { name: "CPUs ceiling" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("combobox", { name: "Maximum CPUs" })).not.toBeInTheDocument()
   expect(screen.getByLabelText("Disk (GiB)")).toBeVisible()
   await user.selectOptions(screen.getByRole("combobox", { name: "Operating system" }), "Linux")
-  expect(screen.getByRole("combobox", { name: "CPUs ceiling" })).toBeVisible()
+  expect(screen.getByRole("combobox", { name: "Maximum CPUs" })).toBeVisible()
 })
 
 it("creates a macOS computer from the editor with the defaults and notice", async () => {

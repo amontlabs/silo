@@ -43,9 +43,10 @@ it("names the focusable read-only disk groups and keeps their values available",
   const configuration = productionComputerDefaults[0]
   const user = userEvent.setup()
   render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={vi.fn()} isComputerCreated={() => true} /></TooltipProvider>)
-  await user.click(screen.getByRole("button", { name: `Edit ${configuration.name}` }))
+  await user.click(screen.getByRole("button", { name: `More actions for ${configuration.name}` }))
+  await user.click(screen.getByRole("menuitem", { name: `Edit ${configuration.name}` }))
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Computer name" })).toHaveFocus())
-  for (const label of ["CPUs", "CPUs ceiling", "Memory", "Memory ceiling"]) {
+  for (const label of ["CPUs at start", "Maximum CPUs", "Memory at start", "Maximum memory"]) {
     await user.tab()
     expect(screen.getByRole("combobox", { name: label })).toHaveFocus()
   }

@@ -79,7 +79,7 @@ const inventory = [
     id: "bundled-tools",
     title: "Bundled tools",
     items: [
-      ["MicroSandbox runtime", "runtime-microsandbox"],
+      ["Computer runtime", "runtime-microsandbox"],
       ["Git", "tool-git"],
       ["Git LFS", "tool-git-lfs"],
     ],
@@ -112,8 +112,8 @@ function computerDetail(event: SiloProgressEvent): string {
 const queueLabels: Record<SetupQueueItemID, string> = {
   computerRun: "Create computers",
   computerVerify: "Verify computers",
-  githubRun: "Save GitHub",
-  githubVerify: "Verify GitHub",
+  githubRun: "Save GitHub access",
+  githubVerify: "Check GitHub access",
   identityRun: "Save Git identities",
   identityVerify: "Verify Git identities",
   completion: "Finish setup",

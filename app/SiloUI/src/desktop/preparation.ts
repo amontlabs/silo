@@ -122,8 +122,8 @@ export function describePreparation(status: PreparationStatus | null, chatgpt: C
     if (value?.state === "failed") items.push({ id, state: "failed", text: value.message || failed, progress: null, retryable: value.retryable })
   }
   // The image reports a fraction while it downloads, then none while it is verified and imported.
-  task("image", fraction => fraction === null ? "Preparing the VM image (first time only)" : `Downloading the VM image · ${Math.floor(fraction)}%`, "Silo could not prepare its VM image.", status?.image)
-  task("lcu", () => "Downloading LCU", "Silo could not download LCU.", status?.lcu)
+  task("image", fraction => fraction === null ? "Preparing the computer image (first time only)" : `Downloading the computer image · ${Math.floor(fraction)}%`, "Silo could not download the computer image. Check your connection, then retry.", status?.image)
+  task("lcu", () => "Downloading the computer use tools", "Silo could not download the computer use tools. Check your connection, then retry.", status?.lcu)
   switch (chatgpt?.state) {
     case "downloading": {
       const fraction = percent(chatgpt.receivedBytes, chatgpt.totalBytes)
@@ -144,7 +144,7 @@ export interface PreparationState {
   items: PreparationItem[]
   /** False until the backend has answered and while anything is still running or waiting. */
   ready: boolean
-  /** Starts again whatever failed (the VM image, LCU and the ChatGPT for Linux download). */
+  /** Starts again whatever failed (the computer image, the computer use tools and the ChatGPT for Linux download). */
   retry(): void
 }
 
