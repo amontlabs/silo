@@ -31,7 +31,7 @@ it("does not poll a computer's ports while the Computers panel is hidden", async
 
     show()
     await waitFor(() => expect(refreshNetwork).toHaveBeenCalledTimes(1))
-    vi.advanceTimersByTime(5_000)
+    vi.advanceTimersByTime(12_000)
     expect(refreshNetwork).toHaveBeenCalledTimes(2)
   } finally { vi.useRealTimers() }
 })

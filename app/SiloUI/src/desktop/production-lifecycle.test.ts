@@ -197,6 +197,7 @@ describe("production source start-up", () => {
       const reads = mock.count("read_application_state")
       await vi.advanceTimersByTimeAsync(10_000)
       expect(mock.count("read_application_state")).toBe(reads + 1)
+      await vi.advanceTimersByTimeAsync(2_000)
       window.dispatchEvent(new Event("focus"))
       await vi.advanceTimersByTimeAsync(0)
       expect(mock.count("read_application_state")).toBe(reads + 2)

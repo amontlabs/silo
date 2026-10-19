@@ -7,6 +7,7 @@ const native = vi.hoisted(() => ({
   production: {
     loadConfiguration: vi.fn(() => new Promise<void>(() => undefined)),
     initialize: vi.fn(async () => {}),
+    watchNetwork: vi.fn(() => () => {}),
     drainSetup: vi.fn(async () => {}),
     dispose: vi.fn(),
   },
@@ -58,9 +59,10 @@ it("paints at once, does not wait for the saved computer list, and retries a fai
   // Independent steps start together rather than one after another.
   expect(native.production.loadConfiguration).toHaveBeenCalledOnce()
   expect(native.integrations.initialize).toHaveBeenCalledOnce()
+  // Live state loads while the settings do.
+  expect(native.production.initialize).toHaveBeenCalledOnce()
   await act(async () => { releaseSettings() })
   expect(await screen.findByRole("alert")).toHaveTextContent("Silo startup failed: settings lock unavailable. No computer state changed.")
-  expect(native.production.initialize).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: "Retry" }))
   // The saved list never answered: it only feeds the loading skeleton, so it cannot block startup.
   expect(await screen.findByText("Silo application")).toBeInTheDocument()

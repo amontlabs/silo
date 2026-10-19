@@ -35,10 +35,17 @@ function catalog() {
 }
 
 beforeEach(() => {
-  applications.useApplications.mockReturnValue({ catalog: catalog(), refresh: vi.fn().mockResolvedValue(undefined), choose: vi.fn().mockResolvedValue(null), available: true })
+  applications.useApplications.mockReturnValue({ catalog: catalog(), refresh: vi.fn().mockResolvedValue(undefined), choose: vi.fn().mockResolvedValue(null), available: true, loaded: true })
 })
 
 describe("application preference choices", () => {
+  it("keeps the selects disabled and neutral until the applications have been read", () => {
+    applications.useApplications.mockReturnValue({ catalog: { terminal: [], editor: [], browser: [], defaults: {} }, refresh: vi.fn().mockResolvedValue(undefined), choose: vi.fn(), available: true, loaded: false })
+    setup()
+    for (const name of ["Terminal", "Code editor"]) expect(screen.getByRole("combobox", { name })).toBeDisabled()
+    expect(screen.queryByText(/unavailable/)).not.toBeInTheDocument()
+  })
+
   it("shows the current system default and its icon as the first option and selected value", async () => {
     const source = applications.useApplications()
     source.catalog.editor[0].icon = testIcon

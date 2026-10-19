@@ -70,8 +70,8 @@ it("does not announce a migration before the first status arrives", async () => 
   let resolve!: (state: RuntimeMigrationState) => void
   const read = vi.fn(() => new Promise<RuntimeMigrationState>(done => { resolve = done }))
   const backend: RuntimeMigrationBackend = { read, retry: vi.fn(), continueAfterFailure: vi.fn(), subscribe: async () => () => {} }
-  render(<RuntimeMigrationBoundary backend={backend}><p>Normal application</p></RuntimeMigrationBoundary>)
-  await vi.waitFor(() => expect(read).toHaveBeenCalled())
+  await act(async () => { render(<RuntimeMigrationBoundary backend={backend}><p>Normal application</p></RuntimeMigrationBoundary>) })
+  expect(read).toHaveBeenCalled()
   expect(screen.queryByText("Updating your computers")).not.toBeInTheDocument()
   expect(screen.queryByText("Normal application")).not.toBeInTheDocument()
   await act(async () => resolve({ ...failed, status: "not-required", error: undefined }))
@@ -120,7 +120,7 @@ it("keeps the latest event read when two status reads resolve in reverse order",
   let refresh!: () => void
   const older = deferred<RuntimeMigrationState>()
   const newer = deferred<RuntimeMigrationState>()
-  const read = vi.fn().mockResolvedValueOnce(failed).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
+  const read = vi.fn().mockResolvedValueOnce(failed).mockResolvedValueOnce(failed).mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise)
   const backend: RuntimeMigrationBackend = {
     read, retry: vi.fn(), continueAfterFailure: vi.fn(),
     subscribe: async handler => { refresh = handler; return () => {} },
@@ -135,7 +135,7 @@ it("keeps the latest event read when two status reads resolve in reverse order",
 })
 
 it("reads authoritative status after Retry even without a completion event", async () => {
-  const read = vi.fn().mockResolvedValueOnce(failed).mockResolvedValue({ ...failed, status: "complete", error: undefined })
+  const read = vi.fn().mockResolvedValueOnce(failed).mockResolvedValueOnce(failed).mockResolvedValue({ ...failed, status: "complete", error: undefined })
   const backend: RuntimeMigrationBackend = {
     read, retry: vi.fn().mockResolvedValue({ ...failed, status: "running", error: undefined }),
     continueAfterFailure: vi.fn(), subscribe: async () => () => {},
@@ -144,5 +144,37 @@ it("reads authoritative status after Retry even without a completion event", asy
   await screen.findByText("Some computers could not be migrated")
   fireEvent.click(screen.getByRole("button", { name: "Retry migration" }))
   expect(await screen.findByText("Normal application")).toBeVisible()
-  expect(read).toHaveBeenCalledTimes(2)
+  // The first status, the read that closes the gap before the subscription, and the read after Retry.
+  expect(read).toHaveBeenCalledTimes(3)
+})
+
+it("reads once without waiting for the subscription and stops listening when no migration is needed", async () => {
+  const stop = vi.fn()
+  let register!: (stop: () => void) => void
+  const subscribe = vi.fn(() => new Promise<() => void>(resolve => { register = resolve }))
+  const read = vi.fn().mockResolvedValue({ ...failed, status: "not-required", error: undefined })
+  const backend: RuntimeMigrationBackend = { read, retry: vi.fn(), continueAfterFailure: vi.fn(), subscribe }
+  await act(async () => { render(<RuntimeMigrationBoundary backend={backend}><p>Normal application</p></RuntimeMigrationBoundary>) })
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText("Normal application")).not.toBeInTheDocument()
+  await act(async () => register(stop))
+  expect(await screen.findByText("Normal application")).toBeVisible()
+  expect(stop).toHaveBeenCalledOnce()
+  expect(read).toHaveBeenCalledTimes(1)
+})
+
+it("stops listening once a running migration completes, and reads again after the subscription for a status that may predate it", async () => {
+  const stop = vi.fn()
+  let refresh!: () => void
+  let current: RuntimeMigrationState = { ...failed, status: "running", error: undefined }
+  const read = vi.fn(async () => current)
+  const backend: RuntimeMigrationBackend = { read, retry: vi.fn(), continueAfterFailure: vi.fn(), subscribe: async handler => { refresh = handler; return stop } }
+  render(<RuntimeMigrationBoundary backend={backend}><p>Normal application</p></RuntimeMigrationBoundary>)
+  expect(await screen.findByText("Updating your computers")).toBeVisible()
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+  expect(stop).not.toHaveBeenCalled()
+  current = { ...failed, status: "not-required", error: undefined }
+  await act(async () => refresh())
+  expect(await screen.findByText("Normal application")).toBeVisible()
+  expect(stop).toHaveBeenCalledOnce()
 })

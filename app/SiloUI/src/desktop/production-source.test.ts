@@ -1076,11 +1076,11 @@ describe("production application bridge", () => {
 
   it("does not hide a failed live-update subscription behind an initial snapshot", async () => {
     const unsubscribe = vi.fn()
-    const listen = vi.fn().mockResolvedValueOnce(unsubscribe).mockRejectedValueOnce(new Error("event channel closed"))
+    const listen = vi.fn().mockResolvedValueOnce(unsubscribe).mockRejectedValueOnce(new Error("event channel closed")).mockResolvedValue(unsubscribe)
     const mock = native({ listen })
     const store = createProductionSource(mock.bridge)
     await expect(store.initialize()).rejects.toThrow("Silo could not subscribe to application updates: event channel closed")
-    expect(unsubscribe).toHaveBeenCalledOnce()
+    expect(unsubscribe).toHaveBeenCalledTimes(listen.mock.calls.length - 1)
     expect(store.getSnapshot().source).toBeNull()
     store.dispose()
   })
