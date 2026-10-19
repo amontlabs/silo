@@ -14,7 +14,6 @@ import re
 import subprocess
 import sys
 import tarfile
-import tempfile
 import tomllib
 
 APP = Path(__file__).resolve().parent.parent
@@ -27,12 +26,8 @@ ENGINE_FILES = (
     'macos/Entitlements.plist',
     'macos/LaunchAgents/org.silo.preview.engine.plist',
 )
-UNIVERSAL_TARGETS = ('aarch64-apple-darwin', 'x86_64-apple-darwin')
-SUFFIXES = {
-    UNIVERSAL_TARGETS: 'universal',
-    ('aarch64-apple-darwin',): 'arm64',
-    ('x86_64-apple-darwin',): 'x86_64',
-}
+# Silo hosts are Apple Silicon only, and silo-engine's macOS VM code builds for nothing else.
+TARGET = 'aarch64-apple-darwin'
 REQUIREMENT_KEY = 'SiloEngineCodeRequirement'
 
 
@@ -48,11 +43,8 @@ def engine_version(silod=SILOD):
     return crate
 
 
-def archive_name(version, targets):
-    suffix = SUFFIXES.get(tuple(targets))
-    if suffix is None:
-        raise ValueError(f'Unsupported engine targets: {", ".join(targets)}')
-    return f'silo-engine-{version}-macos-{suffix}.tar.gz'
+def archive_name(version):
+    return f'silo-engine-{version}-macos-arm64.tar.gz'
 
 
 def sha256_of(path):
@@ -63,11 +55,11 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
-def release_info(version, commit, targets, toolchain, manifest):
+def release_info(version, commit, toolchain, manifest):
     return {
         'engineVersion': version,
         'sourceCommit': commit,
-        'targets': list(targets),
+        'targets': [TARGET],
         'rustToolchain': toolchain,
         'schemaSha256': sha256_of(SCHEMA),
         'protocolMin': manifest['protocolMin'],
@@ -98,14 +90,12 @@ def write_archive(destination, root, files):
             tar.addfile(info, io.BytesIO(data))
 
 
-def package(out_dir, targets, *, commit, binary_for, toolchain, silod=SILOD):
-    """Writes the tarball and its `.sha256`; returns their paths.
-
-    `binary_for(targets)` returns the (universal when several targets) silod binary to ship."""
+def package(out_dir, *, commit, binary, toolchain, silod=SILOD):
+    """Writes the tarball and its `.sha256`; returns their paths. `binary` is the arm64 silod to ship."""
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('The source commit must be a full 40-character lowercase hex SHA.')
     version = engine_version(silod)
-    name = archive_name(version, targets)
+    name = archive_name(version)
     out_dir = Path(out_dir)
     archive, checksum = out_dir / name, out_dir / f'{name}.sha256'
     if archive.exists() or checksum.exists():
@@ -113,10 +103,10 @@ def package(out_dir, targets, *, commit, binary_for, toolchain, silod=SILOD):
     manifest = json.loads((silod / MANIFEST).read_text(encoding='utf-8'))
     if REQUIREMENT_KEY in plistlib.loads((silod / 'macos/Info.production.plist').read_bytes()):
         raise RuntimeError(f'Info.production.plist must not set {REQUIREMENT_KEY}; the app that embeds the engine does.')
-    binary = Path(binary_for(tuple(targets)))
+    binary = Path(binary)
     manifest['engineBuild'] = f'silo-{commit}'
     files = {
-        'release.json': (json.dumps(release_info(version, commit, targets, toolchain, manifest), indent=2).encode() + b'\n', 0o644),
+        'release.json': (json.dumps(release_info(version, commit, toolchain, manifest), indent=2).encode() + b'\n', 0o644),
         'bin/silod': (binary, 0o755),
         MANIFEST: ((json.dumps(manifest, indent=2) + '\n').encode(), 0o644),
         'api/silo-api.schema.json': (SCHEMA, 0o644),
@@ -138,14 +128,6 @@ def cargo_build(target, toolchain, run=subprocess.run):
     return Path(json.loads(metadata.stdout)['target_directory']) / target / 'release/silod'
 
 
-def lipo_create(inputs, output, run=subprocess.run):
-    run(['lipo', '-create', *map(str, inputs), '-output', str(output)], check=True)
-    archs = run(['lipo', '-archs', str(output)], check=True, capture_output=True, text=True).stdout.split()
-    if sorted(archs) != ['arm64', 'x86_64']:
-        raise RuntimeError(f'The universal silod must hold arm64 and x86_64, not {archs}.')
-    return output
-
-
 def toolchain_version(runtime_inputs=RUNTIME_INPUTS):
     return json.loads(runtime_inputs.read_text(encoding='utf-8'))['toolchain']
 
@@ -155,26 +137,14 @@ def source_commit():
     return result.stdout.strip()
 
 
-def main(argv=None, *, build=cargo_build, lipo=lipo_create, commit_of=source_commit):
+def main(argv=None, *, build=cargo_build, commit_of=source_commit):
     parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--universal', action='store_true',
-                      help='build arm64 and x86_64 and join them with lipo (the release archive)')
-    mode.add_argument('--target', choices=sorted({t for targets in SUFFIXES for t in targets}),
-                      help='build one architecture, for local development against an unreleased Silo')
     parser.add_argument('--out-dir', type=Path, default=Path('engine-release'))
     parser.add_argument('--source-commit', default=None, help='default: git rev-parse HEAD')
     args = parser.parse_args(argv)
     toolchain = toolchain_version()
-    targets = UNIVERSAL_TARGETS if args.universal else (args.target,)
-
-    with tempfile.TemporaryDirectory(prefix='silo-engine-') as temporary:
-        def binary_for(requested):
-            binaries = [build(target, toolchain) for target in requested]
-            return binaries[0] if len(binaries) == 1 else lipo(binaries, Path(temporary) / 'silod')
-
-        archive, checksum = package(args.out_dir, targets, commit=args.source_commit or commit_of(),
-                                    binary_for=binary_for, toolchain=toolchain)
+    archive, checksum = package(args.out_dir, commit=args.source_commit or commit_of(),
+                                binary=build(TARGET, toolchain), toolchain=toolchain)
     print(archive)
     print(checksum)
 
