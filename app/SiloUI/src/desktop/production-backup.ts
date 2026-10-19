@@ -149,9 +149,11 @@ export function createBackupControls({ native, snapshot, publish, disposed, view
       if (operation?.kind !== "result") return
       // A rejected start is reported only here; the runtime has nothing to dismiss.
       // The view reuses an equal earlier object, so compare by content.
-      if (localBackupOperation && shareStructure(operation, localBackupOperation) === operation) {
+      const local = localBackupOperation
+      if (local && shareStructure(operation, local) === operation) {
         localBackupOperation = null
-        publish({ ...snapshot(), backup: { ...snapshot().backup, operation: snapshot().backup.operation === operation ? null : snapshot().backup.operation } })
+        const shown = snapshot().backup.operation
+        publish({ ...snapshot(), backup: { ...snapshot().backup, operation: shown === operation || shown === local ? null : shown } })
         return
       }
       const key = backupResultKey(view().backup, operation)

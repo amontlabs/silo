@@ -1439,6 +1439,24 @@ describe("production application bridge", () => {
     store.dispose()
   })
 
+  it("clears a submission failure on dismissal before any refresh", async () => {
+    const completed = { operation: "backup" as const, archive: backup.archives[0], runningNames: [], kind: "result" as const, outcome: "success" as const, title: "Export complete", message: "Export completed successfully." }
+    const mock = native({ invoke: nativeBridgeMock({
+      ...initializationHandlers(),
+      read_application_state: () => structuredClone(source),
+      read_backup_state: () => ({ ...backup, operation: completed }),
+      start_restore: async () => { throw new Error("Computer name already exists") },
+      dismiss_backup_operation: () => false,
+    }) as ProductionBridge["invoke"] })
+    const store = createProductionSource(mock.bridge)
+    await store.initialize()
+    store.backupActions.startRestore(backup.archives[0], "dev", "dev")
+    await vi.waitFor(() => expect(store.getSnapshot().backup.operation).toMatchObject({ kind: "result", outcome: "failed" }))
+    store.backupActions.dismissOperation()
+    expect(store.getSnapshot().backup.operation).toBeNull()
+    store.dispose()
+  })
+
   it("announces archive selection before waiting for validation", async () => {
     let release: (() => void) | undefined
     const mock = native({ invoke: nativeBridgeMock({
