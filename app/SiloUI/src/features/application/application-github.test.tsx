@@ -151,3 +151,10 @@ it("shows per-computer GitHub apply progress, success, and actionable failure th
   await application.user.click(screen.getByRole("button", { name: "Retry" }))
   expect(application.actions.retryGitHubConfiguration).toHaveBeenCalledWith("dev")
 })
+
+it("clears the GitHub busy indicator when background connecting ends without visiting the page", () => {
+  const { actions, rerender } = renderApplication("running", applicationSourceForScenario("running", "connecting"))
+  expect(within(appNavigation()).getByRole("button", { name: "GitHub" })).toHaveAttribute("aria-busy", "true")
+  rerender(<ApplicationPreview source={applicationSourceForScenario("running")} actions={actions} />)
+  expect(within(appNavigation()).getByRole("button", { name: "GitHub" })).not.toHaveAttribute("aria-busy", "true")
+})

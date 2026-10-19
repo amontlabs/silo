@@ -185,10 +185,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const [computerConfigurationOperation, setComputerConfigurationOperation] = useState<ComputerConfigurationOperation | null>(source.computerConfigurationOperation)
   const [repositoryPushOperations, setRepositoryPushOperations] = useState<RepositoryPushOperation[]>(source.repositoryPushOperations)
   const backupBusy = backup.state.operation?.kind === "running"
-  const [githubBusy, setGitHubBusy] = useState(
-    source.github.state === "connecting"
-      || (source.github.computerOperations ?? []).some(({ status }) => status === "applying"),
-  )
+  // Reported by the page once it is mounted; backend activity is derived from the source.
+  const [githubBusy, setGitHubBusy] = useState(false)
   const visibleTab = activeTab
   const visibleComputerSection = computerSection
   const preferences = useMemo(() => ({ ...source.preferences, ...settings }), [source.preferences, settings])
