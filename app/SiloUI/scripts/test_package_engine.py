@@ -18,7 +18,7 @@ spec.loader.exec_module(engine)
 COMMIT = 'ab' * 20
 VERSION = engine.engine_version()
 ROOT = f'silo-engine-{VERSION}'
-UNIVERSAL = f'silo-engine-{VERSION}-macos-universal.tar.gz'
+ARCHIVE = f'silo-engine-{VERSION}-macos-arm64.tar.gz'
 
 
 class PackageEngineTests(unittest.TestCase):
@@ -27,12 +27,11 @@ class PackageEngineTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.binary = self.root / 'binary'
-        self.binary.write_bytes(b'\xcf\xfa\xed\xfe fake universal silod')
+        self.binary.write_bytes(b'\xcf\xfa\xed\xfe fake arm64 silod')
         self.out = self.root / 'out'
 
-    def package(self, targets=engine.UNIVERSAL_TARGETS, silod=engine.SILOD, commit=COMMIT):
-        return engine.package(self.out, targets, commit=commit, binary_for=lambda requested: self.binary,
-                              toolchain='1.94.0', silod=silod)
+    def package(self, silod=engine.SILOD, commit=COMMIT):
+        return engine.package(self.out, commit=commit, binary=self.binary, toolchain='1.94.0', silod=silod)
 
     def members(self, archive):
         with tarfile.open(archive) as tar:
@@ -45,7 +44,7 @@ class PackageEngineTests(unittest.TestCase):
     def test_the_archive_has_one_top_level_directory_with_exactly_the_contracted_files(self):
         archive, _ = self.package()
         members = self.members(archive)
-        self.assertEqual(archive.name, UNIVERSAL)
+        self.assertEqual(archive.name, ARCHIVE)
         files = sorted(name for name, member in members.items() if member.isfile())
         self.assertEqual(files, sorted(f'{ROOT}/{name}' for name in (
             'release.json', 'bin/silod', 'macos/Info.production.plist', 'macos/Entitlements.plist',
@@ -65,7 +64,7 @@ class PackageEngineTests(unittest.TestCase):
                                       'schemaSha256', 'protocolMin', 'protocolMax'])
         self.assertEqual(info['engineVersion'], VERSION)
         self.assertEqual(info['sourceCommit'], COMMIT)
-        self.assertEqual(info['targets'], ['aarch64-apple-darwin', 'x86_64-apple-darwin'])
+        self.assertEqual(info['targets'], ['aarch64-apple-darwin'])
         self.assertEqual(info['rustToolchain'], '1.94.0')
         self.assertEqual(info['schemaSha256'], hashlib.sha256(schema).hexdigest())
         self.assertEqual(self.read(archive, 'api/silo-api.schema.json'), schema)
@@ -82,9 +81,9 @@ class PackageEngineTests(unittest.TestCase):
 
     def test_the_checksum_file_is_one_line_that_matches_the_archive(self):
         archive, checksum = self.package()
-        self.assertEqual(checksum.name, f'{UNIVERSAL}.sha256')
+        self.assertEqual(checksum.name, f'{ARCHIVE}.sha256')
         text = checksum.read_text()
-        self.assertRegex(text, rf'^[0-9a-f]{{64}}  {re.escape(UNIVERSAL)}\n$')
+        self.assertRegex(text, rf'^[0-9a-f]{{64}}  {re.escape(ARCHIVE)}\n$')
         self.assertEqual(text.split()[0], hashlib.sha256(archive.read_bytes()).hexdigest())
 
     def test_the_archive_is_reproducible(self):
@@ -93,13 +92,6 @@ class PackageEngineTests(unittest.TestCase):
         shutil.rmtree(self.out)
         second, _ = self.package()
         self.assertEqual(second.read_bytes(), digest)
-
-    def test_a_single_architecture_build_is_named_and_listed_by_its_target(self):
-        archive, _ = self.package(('aarch64-apple-darwin',))
-        self.assertEqual(archive.name, f'silo-engine-{VERSION}-macos-arm64.tar.gz')
-        self.assertEqual(json.loads(self.read(archive, 'release.json'))['targets'], ['aarch64-apple-darwin'])
-        with self.assertRaises(ValueError):
-            engine.archive_name(VERSION, ('aarch64-unknown-linux-gnu',))
 
     def test_an_existing_archive_is_never_overwritten(self):
         self.package()
@@ -145,27 +137,26 @@ class PackageEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'must not set'):
             self.package(silod=silod)
 
-    def test_main_builds_each_architecture_joins_them_and_names_the_commit(self):
-        built, joined = [], []
+    def test_main_builds_arm64_and_names_the_commit(self):
+        built = []
 
         def build(target, toolchain):
             built.append((target, toolchain))
             return self.binary
 
-        def lipo(binaries, output):
-            joined.append(list(binaries))
-            shutil.copy2(self.binary, output)
-            return output
+        engine.main(['--out-dir', str(self.out)], build=build, commit_of=lambda: COMMIT)
+        self.assertEqual(built, [('aarch64-apple-darwin', '1.94.0')])
+        self.assertEqual(json.loads(self.read(self.out / ARCHIVE, 'release.json'))['sourceCommit'], COMMIT)
+        shutil.rmtree(self.out)
+        engine.main(['--out-dir', str(self.out), '--source-commit', 'cd' * 20], build=build,
+                    commit_of=lambda: self.fail('--source-commit wins'))
+        self.assertEqual(json.loads(self.read(self.out / ARCHIVE, 'release.json'))['sourceCommit'], 'cd' * 20)
 
-        engine.main(['--universal', '--out-dir', str(self.out)], build=build, lipo=lipo, commit_of=lambda: COMMIT)
-        self.assertEqual(built, [('aarch64-apple-darwin', '1.94.0'), ('x86_64-apple-darwin', '1.94.0')])
-        self.assertEqual(len(joined), 1)
-        self.assertEqual(json.loads(self.read(self.out / UNIVERSAL, 'release.json'))['sourceCommit'], COMMIT)
-        engine.main(['--target', 'aarch64-apple-darwin', '--out-dir', str(self.out), '--source-commit', 'cd' * 20],
-                    build=build, lipo=lipo, commit_of=lambda: self.fail('--source-commit wins'))
-        self.assertEqual(len(joined), 1)
-        arm = self.out / f'silo-engine-{VERSION}-macos-arm64.tar.gz'
-        self.assertEqual(json.loads(self.read(arm, 'release.json'))['sourceCommit'], 'cd' * 20)
+    def test_only_apple_silicon_is_accepted(self):
+        with self.assertRaises(SystemExit):
+            engine.main(['--universal'], build=None)
+        with self.assertRaises(SystemExit):
+            engine.main(['--target', 'x86_64-apple-darwin'], build=None)
 
     def test_cargo_is_run_with_the_pinned_toolchain_and_the_lockfile(self):
         calls = []
@@ -174,19 +165,10 @@ class PackageEngineTests(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, json.dumps({'target_directory': '/t'}))
 
-        binary = engine.cargo_build('x86_64-apple-darwin', '1.94.0', run)
-        self.assertEqual(binary, Path('/t/x86_64-apple-darwin/release/silod'))
+        binary = engine.cargo_build('aarch64-apple-darwin', '1.94.0', run)
+        self.assertEqual(binary, Path('/t/aarch64-apple-darwin/release/silod'))
         self.assertEqual(calls[0], ['cargo', '+1.94.0', 'build', '--locked', '--release', '-p', 'silod',
-                                    '--target', 'x86_64-apple-darwin'])
-
-    def test_lipo_must_produce_both_architectures(self):
-        def run(archs):
-            return lambda command, **kwargs: subprocess.CompletedProcess(command, 0, archs)
-
-        output = self.root / 'joined'
-        self.assertEqual(engine.lipo_create([Path('a'), Path('b')], output, run('x86_64 arm64\n')), output)
-        with self.assertRaisesRegex(RuntimeError, 'arm64 and x86_64'):
-            engine.lipo_create([Path('a')], output, run('arm64\n'))
+                                    '--target', 'aarch64-apple-darwin'])
 
 
 if __name__ == '__main__':

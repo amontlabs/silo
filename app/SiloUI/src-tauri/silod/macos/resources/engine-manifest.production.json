@@ -1,6 +1,6 @@
 {
   "channelIdentifier": "org.silo.preview",
-  "engineVersion": "0.1.0",
+  "engineVersion": "0.1.1",
   "engineBuild": "p2-silod-scaffold-production",
   "protocolMin": 6,
   "protocolMax": 6

@@ -506,34 +506,40 @@ instead of compiling Silo.
 
 ### Cut an engine release
 
+The engine is Apple Silicon only, like every Silo host: its macOS VM code does
+not build for Intel, so there is no `x86_64` or universal archive.
+
 1. Raise `version` in `app/SiloUI/src-tauri/silod/Cargo.toml` and
    `engineVersion` in
    `app/SiloUI/src-tauri/silod/macos/resources/engine-manifest.production.json`
-   to the same value, and update `Cargo.lock`. Merge it.
-2. Tag the merged commit `engine-v<version>` and push the tag. Nothing is
-   tagged or published for you.
-3. `.github/workflows/engine-release.yml` fails unless the tag equals
-   `engine-v<version>` of the Cargo version. It builds `silod` with Rust 1.94.0
-   for `aarch64-apple-darwin` and `x86_64-apple-darwin`, joins them with `lipo`,
-   packages them with `app/SiloUI/scripts/package-engine.py`, checks both
-   architectures and the checksum, and creates the GitHub release
-   `engine-v<version>`. The release is not marked latest, so
+   (and the development manifest) to the same value, and update `Cargo.lock`.
+   Merge it.
+2. Run the "Publish Silo engine" workflow from `main` (Actions, Run workflow).
+   It takes the version from Cargo.toml, fails unless it runs on `main`, fails
+   if the release or tag `engine-v<version>` already exists, and creates the tag
+   and release at the commit it built. Alternatively, tag the merged commit
+   `engine-v<version>` and push the tag; the workflow then fails unless the tag
+   equals `engine-v<version>` of the Cargo version.
+3. `.github/workflows/engine-release.yml` builds `silod` with Rust 1.94.0 for
+   `aarch64-apple-darwin`, packages it with `app/SiloUI/scripts/package-engine.py`,
+   checks that the binary is `arm64` and the checksum, and creates the GitHub
+   release `engine-v<version>`. The release is not marked latest, so
    `releases/latest/download/latest.json` keeps pointing at the app. The build
    compiles in the GitHub App configuration, like the app, from the same three
    repository secrets as the release workflow.
 
 Assets, at `https://github.com/amontlabs/silo/releases/download/engine-v<version>/`:
 
-- `silo-engine-<version>-macos-universal.tar.gz`
-- `silo-engine-<version>-macos-universal.tar.gz.sha256`, one line:
-  `<sha256>  silo-engine-<version>-macos-universal.tar.gz`
+- `silo-engine-<version>-macos-arm64.tar.gz`
+- `silo-engine-<version>-macos-arm64.tar.gz.sha256`, one line:
+  `<sha256>  silo-engine-<version>-macos-arm64.tar.gz`
 
 The tarball has one top-level directory, `silo-engine-<version>/`:
 
 ```text
-release.json                  engineVersion, sourceCommit, targets, rustToolchain,
-                              schemaSha256, protocolMin, protocolMax
-bin/silod                     universal, not code signed
+release.json                  engineVersion, sourceCommit, targets (aarch64-apple-darwin),
+                              rustToolchain, schemaSha256, protocolMin, protocolMax
+bin/silod                     arm64, not code signed
 macos/Info.production.plist   without SiloEngineCodeRequirement
 macos/Entitlements.plist
 macos/LaunchAgents/org.silo.preview.engine.plist
@@ -568,20 +574,19 @@ requirement variables.
 
 ### Build an archive locally
 
-To develop an embedding app against unreleased Silo, build the same layout for
-one architecture on a Mac and hand the archive to the app (Fjord:
+To develop an embedding app against unreleased Silo, build the same archive on
+an Apple Silicon Mac and hand it to the app (Fjord:
 `SILOD_ARCHIVE=/path/to/archive`):
 
 ```sh
-python3 app/SiloUI/scripts/package-engine.py --target aarch64-apple-darwin --out-dir /tmp/silo-engine
+python3 app/SiloUI/scripts/package-engine.py --out-dir /tmp/silo-engine
 ```
 
 This writes `silo-engine-<version>-macos-arm64.tar.gz` and its `.sha256`.
-`--universal` builds both architectures as the release does, and
 `--source-commit` overrides `git rev-parse HEAD`. Use the Rust 1.94.0 toolchain
-with both targets installed, and the local GitHub build configuration from
-[Local setup](#local-setup). The script refuses a Cargo version that differs from
-the production manifest's `engineVersion`.
+with the `aarch64-apple-darwin` target installed, and the local GitHub build
+configuration from [Local setup](#local-setup). The script refuses a Cargo
+version that differs from the production manifest's `engineVersion`.
 
 ## Primary references
 
