@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { Button } from "@/components/ui/button"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { SetupNotice } from "@/features/onboarding/components/setup-notice"
 import { fixtureComputerDefaults } from "@/fixtures/computer-configurations"
 import type { ReviewQueueItemView, ComputerProgressView } from "@/features/onboarding/model/onboarding-state"
@@ -67,6 +68,25 @@ describe("setup progress and review presentation", () => {
     expect(rows[1].querySelector("svg.lucide-loader-circle")).not.toBeNull()
     expect(within(rows[2]).getByText("Waiting")).toBeVisible()
     expect(screen.getByLabelText("Elapsed time")).toHaveTextContent("01:23")
+  })
+
+  it("keeps the permanent deletion warning for a computer whose setup failed", async () => {
+    const user = userEvent.setup()
+    const failed = { ...progress, status: "failed" as const, retryable: true, computers: [{ name: "dev", status: "failed" as const, detail: "Verification failed" }, { name: "playgrounds", status: "waiting" as const, detail: "Waiting" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 2)} progress={failed} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(screen.queryByText("It has not been created yet, so no files are affected.")).not.toBeInTheDocument()
+    expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
+  })
+
+  it("treats a computer setup has not started on as not created", async () => {
+    const user = userEvent.setup()
+    const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} progress={idle} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(await screen.findByText("It has not been created yet, so no files are affected.")).toBeVisible()
   })
 
   it("keeps recovery and retry beside the failed operation", async () => {

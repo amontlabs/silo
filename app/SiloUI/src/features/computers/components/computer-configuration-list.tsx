@@ -83,6 +83,8 @@ interface ComputerConfigurationListProps {
   initialEditorDraft?: ComputerEditorDraft | null
   onEditorDraftChange?: (editor: ComputerEditorDraft | null) => void
   isComputerCreated?: (configuration: SetupComputerConfiguration) => boolean
+  /** True only when the computer is known not to exist yet; without it, a computer that is not created counts as not existing. */
+  isComputerDraft?: (configuration: SetupComputerConfiguration) => boolean
   isComputerRunning?: (configuration: SetupComputerConfiguration) => boolean
   validateOperation?: (configuration: SetupComputerConfiguration, isNew: boolean, deviceId?: string) => string | undefined
   /** The CPUs and memory of a device ("" is this one), when known: fits new-computer defaults and presets, and rejects ceilings above it. */
@@ -95,7 +97,7 @@ interface ComputerConfigurationListProps {
   includeMacosComputers?: boolean
 }
 
-export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, onExportMacosComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
+export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, onExportMacosComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerDraft, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
   const {
     deviceId, setDeviceId,
     committing,
@@ -508,7 +510,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                         delete: close => <DeleteComputerBody
                           displayName={deletionName}
                           details={presentation?.deleteDetails}
-                          draft={Boolean(isComputerCreated) && !isComputerCreated?.(configuration)}
+                          draft={isComputerDraft ? isComputerDraft(configuration) : isComputerCreated !== undefined && !isComputerCreated(configuration)}
                           onClose={close}
                           onDelete={() => deleteWithNotice(configuration)}
                         />,

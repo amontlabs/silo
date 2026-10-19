@@ -68,6 +68,7 @@ export function ComputersStep({ onConnectDevice, configurations, progress, onCon
         <ComputerConfigurationList
           onConnectDevice={onConnectDevice}
           isComputerCreated={(configuration) => progress.computers.some((computer) => computer.name === configuration.name && computer.status === "ready")}
+          isComputerDraft={(configuration) => progress.status === "waiting" && progress.computers.every((computer) => computer.name !== configuration.name || computer.status === "waiting")}
           configurations={configurations}
           onConfigurationsChange={onConfigurationsChange}
           initialEditorDraft={initialEditorDraft}
