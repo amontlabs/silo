@@ -90,7 +90,8 @@ export function productionOnboardingSource(application: ApplicationSource | null
     readyToFinish: configured && !computerSetupPending,
     finishBlocker,
     configurationsAuthoritative: configurationsAuthoritative || Boolean(setup?.setupCandidate ?? operation),
-    existingConfigurations,
+    existingConfigurations: configurationsAuthoritative ? existingConfigurations : undefined,
+    existingConfigurationIds: configurationsAuthoritative ? (application?.computers ?? []).map(({ configuration }) => configuration.id) : undefined,
     computerConfigurations: [...configurations],
     bootstrapConfiguration: bootstrapConfiguration(configurations),
     bootstrapState: {

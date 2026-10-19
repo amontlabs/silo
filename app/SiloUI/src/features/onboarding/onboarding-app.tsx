@@ -516,7 +516,7 @@ export function OnboardingApp({
         />
       </OnboardingPanel>
       <OnboardingPanel step="computers" activeStep={activeStep} notice={deletionNotice}>
-        <ComputersStep onConnectDevice={onConnectDevice} configurations={computers} existingConfigurations={source.existingConfigurations} progress={viewModel.computerProgress} onConfigurationsChange={saveConfigurations} onRetry={retrySetup} initialEditorDraft={draft.unfinishedComputerEditor} onEditorDraftChange={(unfinishedComputerEditor) => updateDraft({ unfinishedComputerEditor })} />
+        <ComputersStep onConnectDevice={onConnectDevice} configurations={computers} existingConfigurations={source.existingConfigurations} existingConfigurationIds={source.existingConfigurationIds} progress={viewModel.computerProgress} onConfigurationsChange={saveConfigurations} onRetry={retrySetup} initialEditorDraft={draft.unfinishedComputerEditor} onEditorDraftChange={(unfinishedComputerEditor) => updateDraft({ unfinishedComputerEditor })} />
       </OnboardingPanel>
       <OnboardingPanel step="github" activeStep={activeStep} notice={deletionNotice}>
         <GitHubStep

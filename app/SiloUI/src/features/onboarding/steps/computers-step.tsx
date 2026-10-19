@@ -20,11 +20,13 @@ function formatElapsed(seconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
 }
 
-export function ComputersStep({ onConnectDevice, configurations, existingConfigurations, progress, onConfigurationsChange, onRetry, initialEditorDraft, onEditorDraftChange }: {
+export function ComputersStep({ onConnectDevice, configurations, existingConfigurations, existingConfigurationIds, progress, onConfigurationsChange, onRetry, initialEditorDraft, onEditorDraftChange }: {
   onConnectDevice?: () => void
   configurations: readonly SetupComputerConfiguration[]
   /** The computers that already exist on this device; when unknown, none is treated as safe to remove silently. */
   existingConfigurations?: readonly SetupComputerConfiguration[]
+  /** Every existing computer's id, including those whose saved configuration could not be read. */
+  existingConfigurationIds?: readonly string[]
   progress: ComputerProgressView
   onConfigurationsChange: (configurations: SetupComputerConfiguration[]) => void
   onRetry: () => void
@@ -70,7 +72,10 @@ export function ComputersStep({ onConnectDevice, configurations, existingConfigu
         <ComputerConfigurationList
           onConnectDevice={onConnectDevice}
           isComputerCreated={(configuration) => progress.computers.some((computer) => computer.name === configuration.name && computer.status === "ready")}
-          isComputerDraft={(configuration) => existingConfigurations !== undefined && !existingConfigurations.some(({ id }) => id === configuration.id)}
+          isComputerDraft={(configuration) => existingConfigurations !== undefined
+            && !existingConfigurations.some(({ id }) => id === configuration.id)
+            && !existingConfigurationIds?.includes(configuration.id)
+            && progress.computers.every((computer) => computer.name !== configuration.name || computer.status === "waiting")}
           configurations={configurations}
           onConfigurationsChange={onConfigurationsChange}
           initialEditorDraft={initialEditorDraft}

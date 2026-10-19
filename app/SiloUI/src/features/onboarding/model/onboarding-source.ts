@@ -35,8 +35,10 @@ export const onboardingSourceSchema = z.object({
    * this device's computers have not loaded; the draft is seeded again once they do.
    */
   configurationsAuthoritative: z.boolean().optional(),
-  /** Computers that already exist on this device. Dropping one from the draft deletes it. */
+  /** Computers that already exist on this device; absent while the device's computers have not loaded. Dropping one from the draft deletes it. */
   existingConfigurations: setupComputerConfigurationRequestSchema.shape.computers.optional(),
+  /** Every computer id on this device, including any whose saved configuration could not be read. Absent while the list is not known. */
+  existingConfigurationIds: z.array(z.string()).optional(),
   setupQueue: z.array(z.object({ id: setupQueueItemIdSchema, status: z.enum(["idle", "queued", "running", "succeeded", "failed"]), failure: z.string().optional() }).strict()).optional(),
   computerConfigurations: setupComputerConfigurationRequestSchema.shape.computers,
   bootstrapConfiguration: siloBootstrapConfigurationSchema,

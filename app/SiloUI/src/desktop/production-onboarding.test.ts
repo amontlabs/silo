@@ -96,12 +96,16 @@ describe("production onboarding", () => {
     expect(loaded).toMatchObject({ configurationsAuthoritative: true, existingConfigurations: configurations, computerConfigurations: configurations })
 
     const beforeLoad = productionOnboardingSource(null, dependencies, application.preferences, snapshot({ savedConfigurations: [configurations[1]] }))
-    expect(beforeLoad).toMatchObject({ configurationsAuthoritative: false, existingConfigurations: [], computerConfigurations: [configurations[1]] })
+    expect(beforeLoad).toMatchObject({ configurationsAuthoritative: false, existingConfigurations: undefined, computerConfigurations: [configurations[1]] })
 
     // While this device's computers update, the shell has no local rows: not an empty device.
     const shell = { ...application, computers: [] }
     const updating = productionOnboardingSource(shell, dependencies, application.preferences, snapshot({ localUpdating: true }))
     expect(updating.configurationsAuthoritative).toBe(false)
+    // A real local computer is not reported as absent while the device's state is unknown.
+    const updatingWithDev = productionOnboardingSource(application, dependencies, application.preferences, snapshot({ localUpdating: true }))
+    expect(updatingWithDev.existingConfigurations).toBeUndefined()
+    expect(updatingWithDev.existingConfigurationIds).toBeUndefined()
     const unreadable = productionOnboardingSource(shell, dependencies, application.preferences, snapshot({ error: "Silo could not read application state" }))
     expect(unreadable.configurationsAuthoritative).toBe(false)
     expect(unreadable.computerConfigurations.map(({ name }) => name)).toEqual(["dev"])
@@ -110,4 +114,11 @@ describe("production onboarding", () => {
     expect(productionOnboardingSource(shell, dependencies, application.preferences, snapshot({})).configurationsAuthoritative).toBe(true)
   })
 
+  it("reports the ids of existing computers whose saved configuration cannot be read", () => {
+    const broken = structuredClone(application)
+    broken.computers[0] = { ...broken.computers[0], configuration: { ...broken.computers[0].configuration, cpus: "many" as unknown as number } }
+    const source = productionOnboardingSource(broken, { checks: [], retry: vi.fn() }, application.preferences)
+    expect(source.existingConfigurations?.map(({ id }) => id)).not.toContain(broken.computers[0].configuration.id)
+    expect(source.existingConfigurationIds).toContain(broken.computers[0].configuration.id)
+  })
 })

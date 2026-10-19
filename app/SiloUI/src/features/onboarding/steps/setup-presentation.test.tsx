@@ -90,6 +90,24 @@ describe("setup progress and review presentation", () => {
     expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
   })
 
+  it("keeps the warning for an existing computer whose saved settings could not be read", async () => {
+    const user = userEvent.setup()
+    const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} existingConfigurations={[]} existingConfigurationIds={[fixtureComputerDefaults[0].id]} progress={idle} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
+  })
+
+  it("keeps the warning for a computer setup has already created but the device list does not show yet", async () => {
+    const user = userEvent.setup()
+    const created = { ...progress, status: "running" as const, computers: [{ name: "dev", status: "ready" as const, detail: "Ready" }] }
+    render(<TooltipProvider><ComputersStep configurations={fixtureComputerDefaults.slice(0, 1)} existingConfigurations={[]} progress={created} onConfigurationsChange={vi.fn()} onRetry={vi.fn()} /></TooltipProvider>)
+    await user.click(screen.getByRole("button", { name: "More actions for dev" }))
+    await user.click(screen.getByRole("menuitem", { name: "Delete dev" }))
+    expect(await screen.findByText("Delete dev permanently?")).toBeVisible()
+  })
+
   it("keeps the warning when the existing computers are not known", async () => {
     const user = userEvent.setup()
     const idle = { ...progress, status: "waiting" as const, computers: [{ name: "dev", status: "waiting" as const, detail: "Waiting" }] }
