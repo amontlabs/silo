@@ -68,9 +68,9 @@
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.48 0.18 27.325);
     /* Status text and dots: success and warning meet WCAG AA as small text on every neutral surface. */
-    --success: oklch(0.508 0.118 165.612);
+    --success: oklch(0.495 0.115 165.612);
     --success-foreground: oklch(0.985 0 0);
-    --warning: oklch(0.555 0.163 48.998);
+    --warning: oklch(0.515 0.15 48.998);
     --warning-foreground: oklch(0.985 0 0);
     --terminal: oklch(0.141 0.005 285.823);
     --terminal-foreground: oklch(0.92 0.004 286.32);

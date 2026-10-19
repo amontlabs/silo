@@ -113,6 +113,20 @@ describe.each(["--success", "--warning"] as const)("%s text contrast", (token) =
     }
   })
 
+  it.each([":root", ".dark"] as const)("meets WCAG AA on the tinted surfaces it is used on in %s", (selector) => {
+    const theme = tokens(selector)
+    const text = linearRgb(theme.get(token)!)
+    // Callouts and badges tint a neutral surface with the token at these opacities.
+    for (const surface of surfaces) {
+      const background = linearRgb(theme.get(surface)!)
+      for (const alpha of [0.05, 0.07, 0.1]) {
+        const tinted = background.map((channel, index) => linear(srgb(text[index]) * alpha + srgb(channel) * (1 - alpha)))
+        const ratio = contrast(rgbLuminance(text), rgbLuminance(tinted))
+        expect(ratio, `${selector} ${token} on ${surface} tinted ${alpha}: ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
+
   it.each([":root", ".dark"] as const)("keeps its foreground readable on a solid fill in %s", (selector) => {
     const theme = tokens(selector)
     const fill = rgbLuminance(linearRgb(theme.get(token)!))
