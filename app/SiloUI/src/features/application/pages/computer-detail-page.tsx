@@ -446,6 +446,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
                 created={Boolean(editing.editor.originalID && editingContext?.isComputerCreated?.(configuration))}
                 running={Boolean(editing.editor.originalID && editingContext?.isComputerRunning?.(configuration))}
                 editor={editing.editor}
+                pristine={editing.pristine ?? undefined}
                 baselineComputer={editing.editorBaseline ?? undefined}
                 conflict={editing.editorConflict}
                 review={editing.editorReview}

@@ -252,12 +252,13 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     else onSave(builtInNewVm && startsWithComputer ? { ...draft, desktop: { startWithComputer: true } } : draft)
   }
 
-  const initialDraft = useRef(editor.draft)
   // Escape cancels only an untouched editor, so a keystroke never discards typed changes.
   function cancelOnEscape(event: React.KeyboardEvent) {
     if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || saving || stopPending) return
-    const untouched = pristine ?? { draft: initialDraft.current, deviceId: deviceId ?? "" }
-    if (!sameComputerConfiguration(untouched.draft, draft) || untouched.deviceId !== (deviceId ?? "")) return
+    // Without a recorded opening state, an edit of a saved computer is judged against the saved
+    // configuration; a new draft with no known origin might have been restored, so it is never untouched.
+    const untouched = pristine ?? (original ? { draft: original, deviceId: deviceId ?? "" } : undefined)
+    if (!untouched || !sameComputerConfiguration(untouched.draft, draft) || untouched.deviceId !== (deviceId ?? "")) return
     event.preventDefault()
     onCancel()
   }

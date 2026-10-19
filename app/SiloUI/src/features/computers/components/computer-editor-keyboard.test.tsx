@@ -48,6 +48,24 @@ describe("computer editor keyboard", () => {
     expect(onConfigurationsChange).not.toHaveBeenCalled()
   })
 
+  it("keeps a recovered edit of a saved computer when Escape is pressed", async () => {
+    const user = userEvent.setup()
+    render(<TooltipProvider><ComputerConfigurationList configurations={[configuration]} onConfigurationsChange={vi.fn()}
+      initialEditorDraft={{ draft: { ...configuration, cpus: configuration.cpus + 1 }, originalID: configuration.id, insertAt: 0 }} /></TooltipProvider>)
+    await user.click(screen.getByRole("textbox", { name: "Computer name" }))
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("textbox", { name: "Computer name" })).toBeInTheDocument()
+  })
+
+  it("keeps a recovered new computer when Escape is pressed", async () => {
+    const user = userEvent.setup()
+    render(<TooltipProvider><ComputerConfigurationList configurations={[]} onConfigurationsChange={vi.fn()}
+      initialEditorDraft={{ draft: { ...configuration, id: "recovered", name: "typed" }, insertAt: 0 }} /></TooltipProvider>)
+    await user.click(screen.getByRole("textbox", { name: "Computer name" }))
+    await user.keyboard("{Escape}")
+    expect(screen.getByRole("textbox", { name: "Computer name" })).toBeInTheDocument()
+  })
+
   it("lets Escape dismiss the stop confirmation without closing the editor", async () => {
     const { user } = renderEditor({ running: true })
     await user.click(screen.getByRole("button", { name: "Stop and save…" }))
