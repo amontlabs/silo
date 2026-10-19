@@ -881,6 +881,16 @@ class DesktopLifecycle(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(result))
         self.assertNotIn('password', result)
 
+    def test_sealed_connection_hides_the_password_behind_the_pad(self):
+        service.write(service.STATE / 'connection.json', {'username': 'silo', 'password': 'ab12', 'port': 6901})
+        pad = bytes(range(1, 9)).hex()
+        sealed = service.sealed_connection(pad)
+        self.assertNotIn('password', sealed)
+        self.assertEqual(bytes(a ^ b for a, b in zip(bytes.fromhex(sealed['sealed']), bytes.fromhex(pad))), b'ab12')
+        for bad in ('', 'xyz', '01'):
+            with self.assertRaises(RuntimeError):
+                service.sealed_connection(bad)
+
     def test_selkies_supervision_bounds_logs_with_open_append_descriptors(self):
         log = self.root / 'service.log'
         log.write_bytes(b'old' * (1024 * 1024))
