@@ -109,17 +109,19 @@ fn references(
         if !inspected.config.is_object() {
             return None;
         }
-        let active = inspected
-            .active_config
-            .as_ref()
-            .filter(|config| !config.is_null());
-        if active.is_some_and(|config| !config.is_object()) {
-            return None;
-        }
         let running = !matches!(
             inspected.status.to_ascii_lowercase().as_str(),
             "created" | "stopped" | "crashed"
         );
+        // A running guest mounted its active configuration; when that one is missing, null or
+        // unreadable its references are unknown.
+        let active = inspected
+            .active_config
+            .as_ref()
+            .filter(|config| config.is_object());
+        if running && active.is_none() {
+            return None;
+        }
         // The saved configuration, and the one a running guest mounted.
         for (config, running) in [(Some(&inspected.config), running), (active, true)] {
             let Some(source) = config.and_then(crate::computer_use::lcu_mount_source) else {

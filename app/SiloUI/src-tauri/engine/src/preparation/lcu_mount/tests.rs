@@ -40,6 +40,8 @@ struct Computers {
     unreadable: Option<&'static str>,
     /// A mount only the running guest's active configuration records, for the first entry.
     active: Option<PathBuf>,
+    /// Running computers whose active configuration is null.
+    active_unreadable: bool,
     fail_inspect: Option<&'static str>,
     fail_list: bool,
 }
@@ -50,6 +52,7 @@ impl Computers {
             entries,
             unreadable: None,
             active: None,
+            active_unreadable: false,
             fail_inspect: None,
             fail_list: false,
         }
@@ -89,10 +92,16 @@ impl RuntimeRunner for Computers {
                 } else {
                     json!({"mounts": mounts})
                 };
-                let active = self.active.as_ref().filter(|_| *name == self.entries[0].0).map_or(
-                    Value::Null,
-                    |source| json!({"mounts": [{"type": "Bind", "guest": "/opt/silo/lcu", "host": source}]}),
-                );
+                let running = *status == "Running";
+                let active = if self.active_unreadable || !running {
+                    Value::Null
+                } else if let Some(source) =
+                    self.active.as_ref().filter(|_| *name == self.entries[0].0)
+                {
+                    json!({"mounts": [{"type": "Bind", "guest": "/opt/silo/lcu", "host": source}]})
+                } else {
+                    json!({"mounts": mounts})
+                };
                 json!({"name": name, "status": status, "config": config, "active_config": active})
             }
             _ => return Err(unavailable()),
@@ -330,7 +339,12 @@ fn collection_defers_when_a_configuration_is_unreadable_and_keeps_active_mounts(
     runner.active = Some(recorded.clone());
     assert!(collect_with(&runner, &root, &OperationGate::new()));
     assert!(recorded.join("lcu-0.8.1-linux-x64.tar.gz").is_file());
+    // A running guest whose active configuration cannot be read leaves references unknown.
     runner.active = None;
+    runner.active_unreadable = true;
+    assert!(!collect_with(&runner, &root, &OperationGate::new()));
+    assert!(recorded.join("lcu-0.8.1-linux-x64.tar.gz").is_file());
+    runner.entries[0].1 = "Stopped";
     assert!(collect_with(&runner, &root, &OperationGate::new()));
     assert!(!recorded.exists());
 }
