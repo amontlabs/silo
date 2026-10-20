@@ -104,21 +104,35 @@ fn references(
     for entry in listed {
         let name = entry.get("name")?.as_str()?;
         let inspected = crate::runtime::inspect_computer(runner, paths, name).ok()?;
-        let Some(source) = crate::computer_use::lcu_mount_source(&inspected.config) else {
-            continue;
-        };
-        let (Some(parent), Some(folder)) = (source.parent(), source.file_name()) else {
-            continue;
-        };
-        if parent != root && parent.canonicalize().ok().as_deref() != Some(root.as_path()) {
-            continue;
+        // An unreadable configuration (the runtime reports null when it cannot parse the
+        // stored one) is an unknown reference, not the absence of a mount.
+        if !inspected.config.is_object() {
+            return None;
+        }
+        let active = inspected
+            .active_config
+            .as_ref()
+            .filter(|config| !config.is_null());
+        if active.is_some_and(|config| !config.is_object()) {
+            return None;
         }
         let running = !matches!(
             inspected.status.to_ascii_lowercase().as_str(),
             "created" | "stopped" | "crashed"
         );
-        let slot = referenced.entry(folder.to_owned()).or_insert(false);
-        *slot |= running;
+        // The saved configuration, and the one a running guest mounted.
+        for (config, running) in [(Some(&inspected.config), running), (active, true)] {
+            let Some(source) = config.and_then(crate::computer_use::lcu_mount_source) else {
+                continue;
+            };
+            let (Some(parent), Some(folder)) = (source.parent(), source.file_name()) else {
+                continue;
+            };
+            if parent != root && parent.canonicalize().ok().as_deref() != Some(root.as_path()) {
+                continue;
+            }
+            *referenced.entry(folder.to_owned()).or_insert(false) |= running;
+        }
     }
     Some(referenced)
 }

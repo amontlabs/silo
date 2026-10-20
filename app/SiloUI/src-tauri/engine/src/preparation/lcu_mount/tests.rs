@@ -36,6 +36,10 @@ fn part(root: &Path, body: &[u8]) -> PathBuf {
 /// Computers as the runtime reports them: name, status and recorded LCU mount source.
 struct Computers {
     entries: Vec<(&'static str, &'static str, Option<PathBuf>)>,
+    /// Inspections that succeed with a null configuration.
+    unreadable: Option<&'static str>,
+    /// A mount only the running guest's active configuration records, for the first entry.
+    active: Option<PathBuf>,
     fail_inspect: Option<&'static str>,
     fail_list: bool,
 }
@@ -44,6 +48,8 @@ impl Computers {
     fn new(entries: Vec<(&'static str, &'static str, Option<PathBuf>)>) -> Self {
         Self {
             entries,
+            unreadable: None,
+            active: None,
             fail_inspect: None,
             fail_list: false,
         }
@@ -78,7 +84,16 @@ impl RuntimeRunner for Computers {
                     .iter()
                     .map(|source| json!({"type": "Bind", "guest": "/opt/silo/lcu", "host": source}))
                     .collect();
-                json!({"name": name, "status": status, "config": {"mounts": mounts}})
+                let config = if self.unreadable == Some(*name) {
+                    Value::Null
+                } else {
+                    json!({"mounts": mounts})
+                };
+                let active = self.active.as_ref().filter(|_| *name == self.entries[0].0).map_or(
+                    Value::Null,
+                    |source| json!({"mounts": [{"type": "Bind", "guest": "/opt/silo/lcu", "host": source}]}),
+                );
+                json!({"name": name, "status": status, "config": config, "active_config": active})
             }
             _ => return Err(unavailable()),
         };
@@ -299,4 +314,23 @@ fn collection_and_repair_racing_leave_the_recorded_folder_in_place() {
         assert!(recorded.is_dir(), "the recorded folder was lost");
         fs::remove_dir(&recorded).unwrap();
     }
+}
+
+#[test]
+fn collection_defers_when_a_configuration_is_unreadable_and_keeps_active_mounts() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lcu");
+    let recorded = legacy(&root, "0.8.1");
+    let mut runner = Computers::new(vec![("a", "Running", None), ("b", "Stopped", None)]);
+    runner.unreadable = Some("a");
+    assert!(!collect_with(&runner, &root, &OperationGate::new()));
+    assert!(recorded.join("lcu-0.8.1-linux-x64.tar.gz").is_file());
+    // Readable, but only the running guest's active configuration records the folder.
+    runner.unreadable = None;
+    runner.active = Some(recorded.clone());
+    assert!(collect_with(&runner, &root, &OperationGate::new()));
+    assert!(recorded.join("lcu-0.8.1-linux-x64.tar.gz").is_file());
+    runner.active = None;
+    assert!(collect_with(&runner, &root, &OperationGate::new()));
+    assert!(!recorded.exists());
 }
