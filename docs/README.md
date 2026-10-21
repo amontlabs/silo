@@ -1,8 +1,10 @@
 # Silo documentation
 
-The application lives in [`app/SiloUI`](../app/SiloUI): React in `src/`, Rust and
-native integration in `src-tauri/`, and build tooling in `scripts/`. Start with
-the [repository README](../README.md) to install and use Silo, or the
+The engine and the app live in [`app/SiloUI`](../app/SiloUI): the API contract in
+`api/`, the Rust client in `client/`, the engine and `silod` in `src-tauri/engine/`
+and `src-tauri/silod/`, the app's React in `src/` and Tauri shell in `src-tauri/`,
+and build tooling in `scripts/`. Start with the [repository README](../README.md)
+to embed the engine or install the app, [Using the Silo app](SiloUI-APP.md), or the
 [source-build guide](SiloUI-BUILD-FROM-SOURCE.md) to develop it with your own
 GitHub App.
 
@@ -14,14 +16,15 @@ untracked evidence kept on the machine that ran the check; they are not in Git.
 
 ## Current implementation and operations
 
-These documents describe the Tauri app. Dated verification results establish
-coverage for that run, not a guarantee that every platform or live VM workflow
-has been exercised.
+These documents describe the engine (`silod`) and the Silo app built on it.
+Dated verification results establish coverage for that run, not a guarantee
+that every platform or live VM workflow has been exercised.
 
 | Area | Documents |
 | --- | --- |
 | Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, sandboxed) and the identifiers that keep older names |
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [historical Linux system updates](SiloUI-LINUX-UPDATES.md), [historical distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
+| Using the app | [Using the Silo app](SiloUI-APP.md): create a computer, open a project and development server, open the desktop, and connect another device |
 | Engine | [Engine crate extraction](SiloUI-ENGINE.md): workspace location, host context boundary, and macOS VM-window seam for `silod` |
 | Runtime | [Packaging](SiloUI-RUNTIME-PACKAGING.md), [guest images](SiloUI-GUEST-IMAGES.md) (downloaded on first use), [SSH agent TLS regression](SiloUI-ZCODE-TLS-INVESTIGATION.md), and the [current runtime pins](../app/SiloUI/runtime-inputs.json). The dated [runtime and backup decision log](SiloUI-RUNTIME-BACKUP-FINDINGS.md) was validated against MicroSandbox 0.6.17 unless a section says otherwise; its Backup page became per-sandbox Export and Import. |
 | Checkpoints | [Checkpoint implementation plan and qualification](SiloUI-CHECKPOINTS-PLAN.md), [snapshot lineage groups](research/silo-snapshot-lineage-groups-2026-09-26.md) |
