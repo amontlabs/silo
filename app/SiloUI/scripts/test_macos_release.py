@@ -139,6 +139,7 @@ int main(int argc, char **argv) {
         (self.case / 'host/src').mkdir(parents=True)
         shutil.copy2(SCRIPT.parent.parent / 'host/src/channel.rs',
                      self.case / 'host/src/channel.rs')
+        (self.case / 'src-tauri').mkdir(exist_ok=True)
         shutil.copy2(SCRIPT.parent.parent / 'src-tauri/Entitlements.plist',
                      self.case / 'src-tauri/Entitlements.plist')
         cli = self.case / 'node_modules/@tauri-apps/cli/tauri.js'
