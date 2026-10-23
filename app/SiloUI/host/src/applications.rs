@@ -55,7 +55,7 @@ fn browser_url(value: &str) -> Result<String, String> {
     if value.len() > 8192 || value.chars().any(char::is_control) {
         return Err("The website address is invalid.".into());
     }
-    let url = reqwest::Url::parse(value).map_err(|_| "The website address is invalid.")?;
+    let url = url::Url::parse(value).map_err(|_| "The website address is invalid.")?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -207,7 +207,7 @@ pub fn discover_with_selections(
     Ok(catalog)
 }
 
-pub(crate) fn application_at(path: &Path) -> Option<Application> {
+pub fn application_at(path: &Path) -> Option<Application> {
     platform::application_at(path)
 }
 
@@ -227,12 +227,12 @@ pub fn chosen_application(path: &Path, kind: ApplicationKind) -> Result<Applicat
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn load_icons(catalog: &mut ApplicationCatalog) {
+pub fn load_icons(catalog: &mut ApplicationCatalog) {
     platform::load_icons(catalog);
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn load_icon(application: &mut Application) {
+pub fn load_icon(application: &mut Application) {
     platform::load_icon(application);
 }
 

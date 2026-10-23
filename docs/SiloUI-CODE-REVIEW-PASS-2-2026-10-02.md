@@ -139,7 +139,7 @@ Post-restore GitHub reconciliation updates secret bindings and identity; it does
 
 ### R-33 Remote notifications route to the wrong same-named sandbox
 
-**P2.** Locations: [remote.rs](../app/SiloUI/src-tauri/engine/src/remote.rs), lines 1307 and 1328–1349; [notifications.rs](../app/SiloUI/src-tauri/engine/src/notifications.rs), lines 75–88; [macOS integration](../app/SiloUI/src-tauri/engine/src/system_integrations/macos.rs), line 281; [application-app.tsx](../app/SiloUI/src/features/application/application-app.tsx), lines 236–238 and 251–254.
+**P2.** Locations: [remote.rs](../app/SiloUI/src-tauri/engine/src/remote.rs), lines 1307 and 1328–1349; [notifications.rs](../app/SiloUI/host/src/notifications.rs), lines 75–88; [macOS integration](../app/SiloUI/host/src/system_integrations/macos.rs), line 281; [application-app.tsx](../app/SiloUI/src/features/application/application-app.tsx), lines 236–238 and 251–254.
 
 **Trigger and cause.** A local sandbox and a remote sandbox share a display name, such as `dev`. The remote action completion/failure notification retains the raw VM ID and name but drops its computer identity. `Notice::route` sends the name. The frontend resolves the first matching ID, name, or target.
 
@@ -197,7 +197,7 @@ The exact cached `tauri-plugin-single-instance 2.4.5` Linux source was inspected
 
 ### R-37 Linux browser selection accepts a path its launcher cannot use
 
-**P3.** Locations: [applications.rs](../app/SiloUI/src-tauri/engine/src/applications.rs), lines 224–243; [applications/linux.rs](../app/SiloUI/src-tauri/engine/src/applications/linux.rs), lines 87–99, 203–223, and 299–322.
+**P3.** Locations: [applications.rs](../app/SiloUI/host/src/applications.rs), lines 224–243; [applications/linux.rs](../app/SiloUI/host/src/applications/linux.rs), lines 87–99, 203–223, and 299–322.
 
 **Trigger and cause.** Select an installed browser executable through Choose application, for example an executable under `/usr/bin`, instead of its desktop-entry file. Generic `application_at` accepts executable files and returns a valid application. Explicit browser launch always calls `desktop_at`, which requires a parsable GIO desktop entry. An executable is therefore accepted by selection and rejected by use.
 

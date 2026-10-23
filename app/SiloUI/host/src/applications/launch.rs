@@ -23,7 +23,7 @@ const UNSUPPORTED_EDITOR: &str =
 
 /// A desktop entry's `Exec` tokens without field codes (`%U`) or Flatpak's
 /// file-forwarding markers (`@@`, `@@u`).
-pub(crate) fn exec_argv(tokens: impl IntoIterator<Item = String>) -> Vec<String> {
+pub fn exec_argv(tokens: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut argv: Vec<_> = tokens
         .into_iter()
         .filter(|token| {
@@ -43,7 +43,7 @@ pub(crate) fn exec_argv(tokens: impl IntoIterator<Item = String>) -> Vec<String>
 }
 
 /// The program an `Exec` line runs after env options and assignments.
-pub(crate) fn exec_program(argv: &[String]) -> Option<&str> {
+pub fn exec_program(argv: &[String]) -> Option<&str> {
     exec_program_index(argv).map(|index| argv[index].as_str())
 }
 
@@ -67,7 +67,7 @@ fn file_name(path: &Path) -> &str {
     path.file_name().and_then(OsStr::to_str).unwrap_or("")
 }
 
-pub(crate) fn executable_file(path: &Path) -> bool {
+pub fn executable_file(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     path.metadata()
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
@@ -106,7 +106,7 @@ fn with_exec_prefix(
 /// which never exits; its CLI is `bin/code` beside it. Zed's tarball entry runs
 /// `libexec/zed-editor`, whose CLI is `bin/zed`. Flatpak entries run
 /// `flatpak run <app id>`, and snap entries prefix `env NAME=value`.
-pub(crate) fn linux_editor_command(
+pub fn linux_editor_command(
     argv: &[String],
     flatpak_app: Option<&str>,
     find_program: &dyn Fn(&str) -> Option<PathBuf>,
@@ -187,7 +187,7 @@ pub(crate) fn linux_editor_command(
 }
 
 /// Resolves the actual terminal executable behind an entry's env wrapper.
-pub(crate) fn linux_terminal_program(
+pub fn linux_terminal_program(
     argv: &[String],
     fallback: PathBuf,
     find_program: &dyn Fn(&str) -> Option<PathBuf>,
@@ -202,11 +202,11 @@ pub(crate) fn linux_terminal_program(
 
 /// Commands that run the user's preferred terminal (G-07). The freedesktop
 /// `xdg-terminal-exec` comes first, then Debian's `x-terminal-emulator`.
-pub(crate) const TERMINAL_LAUNCHERS: [&str; 2] = ["xdg-terminal-exec", "x-terminal-emulator"];
+pub const TERMINAL_LAUNCHERS: [&str; 2] = ["xdg-terminal-exec", "x-terminal-emulator"];
 
 /// The terminal default: a system launcher when one exists, otherwise the
 /// first listed terminal Silo can drive.
-pub(crate) fn linux_terminal_default(
+pub fn linux_terminal_default(
     find_program: &dyn Fn(&str) -> Option<PathBuf>,
     supported_in_order: &[String],
 ) -> Option<String> {
@@ -229,7 +229,7 @@ fn appimage_root() -> Option<PathBuf> {
 /// (G-24): every variable naming the mount point loses those entries (and is
 /// removed when nothing remains), so children such as gnome-terminal use the
 /// system's GSettings schemas, GTK modules, GStreamer plugins and libraries.
-pub(crate) fn appimage_child_environment(
+pub fn appimage_child_environment(
     variables: impl IntoIterator<Item = (OsString, OsString)>,
     root: &Path,
 ) -> Vec<(OsString, Option<OsString>)> {
@@ -265,7 +265,7 @@ pub(crate) fn appimage_child_environment(
 }
 
 /// The changes for this process's children; empty outside an AppImage.
-pub(crate) fn child_environment() -> Vec<(OsString, Option<OsString>)> {
+pub fn child_environment() -> Vec<(OsString, Option<OsString>)> {
     appimage_root()
         .map(|root| appimage_child_environment(std::env::vars_os(), &root))
         .unwrap_or_default()
@@ -284,7 +284,7 @@ pub fn sanitize_child(command: &mut Command) -> &mut Command {
 
 /// A path to Silo that outlives this process: the AppImage file rather than
 /// its temporary mount (G-12). Elsewhere, the running executable.
-pub(crate) fn stable_executable() -> Result<PathBuf, String> {
+pub fn stable_executable() -> Result<PathBuf, String> {
     if appimage_root().is_some() {
         if let Some(image) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
             if image.is_absolute() && executable_file(&image) {
@@ -297,7 +297,7 @@ pub(crate) fn stable_executable() -> Result<PathBuf, String> {
 
 /// Whether persisted commands must go through `stable_executable` because
 /// bundled tool paths are temporary (AppImage mounts).
-pub(crate) fn tools_are_temporary() -> bool {
+pub fn tools_are_temporary() -> bool {
     appimage_root().is_some()
 }
 

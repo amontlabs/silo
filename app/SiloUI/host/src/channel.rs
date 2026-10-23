@@ -261,7 +261,10 @@ mod tests {
     #[test]
     fn tauri_configurations_match_the_channel_identifiers() {
         let read = |name: &str| -> serde_json::Value {
-            let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(name);
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("src-tauri")
+                .join(name);
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
         };
         let production = read("tauri.conf.json");

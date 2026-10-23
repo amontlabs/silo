@@ -7,7 +7,7 @@
 pub mod adapter;
 pub mod guards;
 pub mod hold;
-pub mod installer;
+pub use silo_host::installer;
 pub mod journal;
 pub mod reservation;
 pub mod transaction;

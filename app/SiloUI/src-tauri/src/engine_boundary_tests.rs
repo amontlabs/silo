@@ -66,44 +66,19 @@ fn no_source_constructs_or_calls_the_engine_in_process() {
 }
 
 #[test]
-fn only_the_stateless_host_helpers_are_borrowed_from_the_engine_crate() {
-    let allowed = [
-        "applications",
-        "notifications",
-        "system_integrations",
-        "system_shutdown",
-        "terminal",
-    ];
+fn no_source_names_the_engine_crate() {
     for (path, text) in without_this_file(sources()) {
-        for line in text.lines().filter(|line| line.contains("silo_engine")) {
-            // Comments may name the crate; code may only name the helper modules.
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
+        // Comments may name the crate; code may not.
+        for line in text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+        {
             assert!(
-                path.ends_with("main.rs"),
-                "{} names silo_engine; only main.rs re-exports the host helpers",
+                !line.contains("silo_engine"),
+                "{} names silo_engine; the stateless host helpers live in silo_host",
                 path.display()
             );
-            let _ = line;
         }
-    }
-    let main =
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs")).unwrap();
-    let reexport = main
-        .split("pub(crate) use silo_engine::{")
-        .nth(1)
-        .and_then(|rest| rest.split("};").next())
-        .expect("main.rs re-exports the host helpers");
-    for module in reexport
-        .split(',')
-        .map(str::trim)
-        .filter(|module| !module.is_empty())
-    {
-        assert!(
-            allowed.contains(&module),
-            "{module} is not a stateless host helper"
-        );
     }
 }
 
@@ -141,6 +116,86 @@ fn the_ui_crate_does_not_depend_on_the_engine_runtime_crates() {
         );
     }
     assert!(manifest.contains("silo-client"));
+}
+
+fn dependency_tables(table: &toml::Table, found: &mut Vec<(String, toml::Table)>, scope: &str) {
+    for (key, value) in table {
+        let Some(inner) = value.as_table() else {
+            continue;
+        };
+        match key.as_str() {
+            "dependencies" | "dev-dependencies" | "build-dependencies" => {
+                found.push((format!("{scope}{key}"), inner.clone()));
+            }
+            "target" => {
+                for (cfg, platform) in inner {
+                    if let Some(platform) = platform.as_table() {
+                        dependency_tables(platform, found, &format!("target.{cfg}."));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn the_ui_manifest_has_no_engine_dependency_in_any_table() {
+    let text =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let manifest: toml::Table = text.parse().unwrap();
+    let mut tables = Vec::new();
+    dependency_tables(&manifest, &mut tables, "");
+    assert!(tables.iter().any(|(name, _)| name == "dependencies"));
+    for (name, dependencies) in tables {
+        for (key, value) in &dependencies {
+            let package = value
+                .get("package")
+                .and_then(toml::Value::as_str)
+                .unwrap_or(key);
+            assert_ne!(package, "silo-engine", "[{name}] depends on the engine");
+        }
+    }
+}
+
+#[test]
+fn the_ui_crate_never_reaches_the_engine_through_any_locked_dependency_path() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../Cargo.lock"))
+        .unwrap();
+    let lock: toml::Table = text.parse().unwrap();
+    let mut graph = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for package in lock["package"].as_array().unwrap() {
+        let name = package["name"].as_str().unwrap().to_string();
+        let dependencies = package
+            .get("dependencies")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|dependency| {
+                dependency
+                    .as_str()
+                    .unwrap()
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .to_string()
+            });
+        graph.entry(name).or_default().extend(dependencies);
+    }
+    assert!(graph.contains_key("silo-ui") && graph.contains_key("silo-host"));
+    let mut seen = std::collections::BTreeSet::new();
+    let mut pending = vec!["silo-ui".to_string()];
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        pending.extend(graph.get(&name).into_iter().flatten().cloned());
+    }
+    assert!(
+        !seen.contains("silo-engine"),
+        "silo-ui reaches silo-engine through its locked dependencies"
+    );
+    assert!(seen.contains("silo-host"));
 }
 
 /// Every method name the app sends is a canonical one: there are no aliases or old names.

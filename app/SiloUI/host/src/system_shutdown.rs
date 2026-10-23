@@ -44,7 +44,7 @@ pub fn quit_reason(code: Option<u32>) -> ShutdownReason {
 
 /// Stop within logind's delay, leaving a margin to save settings and exit.
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
-pub(crate) fn logind_budget(max_delay: Option<Duration>) -> Duration {
+pub fn logind_budget(max_delay: Option<Duration>) -> Duration {
     let max_delay = max_delay.unwrap_or(LOGIND_DEFAULT_DELAY);
     let margin = LOGIND_MARGIN.min(max_delay / 2);
     max_delay.saturating_sub(margin).min(SESSION_END_BUDGET)

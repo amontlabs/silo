@@ -129,7 +129,7 @@ Implementation references: [remote ownership](SiloUI-CONNECTIONS.md),
 [GitHub page](../app/SiloUI/src/features/application/pages/github-page.tsx),
 [secrets](SiloUI-SECRETS.md),
 [computer export and import](../app/SiloUI/src/features/application/components/computer-transfer.tsx),
-[notification events](../app/SiloUI/src-tauri/engine/src/notifications.rs), and
+[notification events](../app/SiloUI/host/src/notifications.rs), and
 [menu-bar controls](../app/SiloUI/src/features/status-bar/status-bar.tsx).
 
 ## UI fidelity correction in v5

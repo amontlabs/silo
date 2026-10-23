@@ -3,11 +3,11 @@ mod commands;
 // Stateless host helpers shared with the engine library: application discovery and launch,
 // notification routing, the login item, and the Quit reasons. None starts or owns engine work.
 pub(crate) use silo_client::channel;
-pub(crate) use silo_engine::{
+pub(crate) use silo_host::{
     applications, notifications, system_integrations, system_shutdown, terminal,
 };
 // The installer's lock, held across an engine update (design/p2 §3.3).
-pub(crate) use silo_engine::engine_update::installer;
+pub(crate) use silo_host::installer;
 #[cfg(test)]
 mod command_permissions_tests;
 #[cfg(test)]
@@ -34,8 +34,8 @@ fn main() {
     // The bundle identifier embedded at build time decides the channel.
     let context = tauri::generate_context!();
     silo_client::channel::init(&context.config().identifier);
-    // Helpers that still read the engine's copy of the channel need the same answer.
-    silo_engine::channel::init(&context.config().identifier);
+    // The host helpers read their own copy of the channel and need the same answer.
+    silo_host::channel::init(&context.config().identifier);
     // Plugins initialize while the app is built, in registration order, and the
     // setup hook runs only after that. A second launch therefore exits inside
     // the single-instance plugin before any migration, Connections or computer work.

@@ -200,7 +200,7 @@ No release was published or signed, and no repository or remote release tag was 
 
 ### RL-11 Lifecycle guest probes use the production alias for Dev
 
-**P2.** Confirmed at `0aef0323`. Locations: [test-linux-desktop.py](../app/SiloUI/scripts/test-linux-desktop.py), `run_lifecycle` identifier and nested `guest_for`; [runtime.rs](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), `runtime_home_alias`; [channel.rs](../app/SiloUI/src-tauri/engine/src/channel.rs), `from_identifier` and `state_dir_name`.
+**P2.** Confirmed at `0aef0323`. Locations: [test-linux-desktop.py](../app/SiloUI/scripts/test-linux-desktop.py), `run_lifecycle` identifier and nested `guest_for`; [runtime.rs](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), `runtime_home_alias`; [channel.rs](../app/SiloUI/host/src/channel.rs), `from_identifier` and `state_dir_name`.
 
 **Trigger.** Run lifecycle verification against an isolated Dev fixture, or the helper's default historical `org.silo.preview.linux-checkpoints` identifier. Native code classifies every identifier except exact `org.silo.preview` as Dev.
 

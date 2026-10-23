@@ -43,7 +43,7 @@ pub enum Category {
 
 /// A successful operation this long or longer is worth a completion notice. Matches the
 /// frontend `LONG_OPERATION_MS`.
-pub(crate) const LONG_OPERATION: std::time::Duration = std::time::Duration::from_secs(3);
+pub const LONG_OPERATION: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +68,7 @@ pub struct Notice {
 
 impl Category {
     /// Stable name, used to group system notifications that have no computer.
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Failures => "failures",
             Self::Changes => "changes",
@@ -275,7 +275,7 @@ impl PendingWithdrawal {
 const BODY_LIMIT: usize = 200;
 
 /// One-line, bounded text for a system notification body.
-pub(crate) fn bounded_body(text: &str) -> String {
+pub fn bounded_body(text: &str) -> String {
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.chars().count() <= BODY_LIMIT {
         return collapsed;
@@ -341,7 +341,7 @@ pub fn lifecycle_notice(
 }
 
 /// Notice for an export (`backup`) or import (`restore`).
-pub(crate) fn transfer_notice(
+pub fn transfer_notice(
     operation: &str,
     label: &str,
     computer: Option<NoticeComputer>,

@@ -19,6 +19,7 @@ the requirement.
 
 - `app/SiloUI/src/`: UI, production data sources, deterministic fixtures, and frontend tests.
 - `app/SiloUI/src-tauri/src/`: runtime management, connections to other devices, native integrations, and backend tests.
+- `app/SiloUI/host/`: `silo-host`, the stateless host helpers (channel names, applications, notifications, system integrations, terminal launch, shutdown, installer lock) shared by the app and the engine.
 - `app/SiloUI/src-tauri/`: guest scripts, runtime inputs, capabilities, and Tauri packaging configuration.
 - `app/SiloUI/scripts/`: runtime preparation and release tooling.
 - `app/SiloUI/docs/`: bundled application help.

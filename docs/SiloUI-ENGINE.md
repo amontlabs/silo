@@ -64,8 +64,10 @@ used to call the engine in-process forwards to the canonical `silod` method over
   crashing the app never stops computers.
 - **Boundary.** `src-tauri/src/engine_boundary_tests.rs` fails if the crate starts constructing
   the engine, calls engine operations in-process, or depends on the engine's runtime crates.
-  `silo-ui` still links `silo-engine` for five stateless host helpers (`applications`,
-  `notifications`, `system_integrations`, `system_shutdown`, `terminal`); extracting them is open.
+  `silo-ui` does not link `silo-engine`, directly or transitively. The stateless host helpers
+  (`applications`, `notifications`, `system_integrations`, `system_shutdown`, `terminal`, the
+  channel and the installer lock) live in the `silo-host` crate (`app/SiloUI/host`), which both
+  `silo-ui` and `silo-engine` depend on.
 - **Packaging.** `scripts/embed_engine.py` embeds `Silo Engine.app` (the signed `silod`, its
   manifest and plist) under `Contents/Resources/SiloEngineDistribution/` and copies the agent plist
   into `Contents/Library/LaunchAgents/`; `scripts/build_desktop.py` runs it before signing the app.

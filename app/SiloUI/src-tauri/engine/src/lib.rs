@@ -3,12 +3,10 @@
 extern crate self as silo_engine;
 
 pub mod agent_tools;
-pub mod applications;
 pub mod backup;
 pub mod backup_controller;
 pub mod bridge_error;
 pub mod bundled_tools;
-pub mod channel;
 pub mod chatgpt_app;
 pub mod checkpoints;
 pub(crate) mod child_process;
@@ -52,7 +50,6 @@ pub mod macos_display_gateway;
 pub mod macos_remote_engine;
 pub mod network;
 pub mod notices;
-pub mod notifications;
 pub mod owned_tunnel;
 pub mod pre_upgrade_backup;
 pub mod preparation;
@@ -70,8 +67,6 @@ pub mod ssh_access;
 pub mod ssh_connection;
 pub mod startup;
 pub mod sync;
-pub mod system_integrations;
-pub mod system_shutdown;
 pub mod terminal;
 pub mod transfer;
 pub mod updates;
@@ -89,3 +84,4 @@ pub use context::{
     Audience, ClientId, EngineContext, EngineIdentity, EnginePaths, EngineRuntimeState, Event,
     MainThread, PackageKind, ProcessControl,
 };
+pub use silo_host::{applications, channel, notifications, system_integrations, system_shutdown};

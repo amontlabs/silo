@@ -94,7 +94,7 @@ pub fn notification_desktop_entry() -> &'static str {
     crate::channel::current().notification_desktop_entry()
 }
 #[cfg_attr(not(any(test, target_os = "linux")), allow(dead_code))]
-pub(crate) const NOTIFICATION_ICON: &str = "silo-ui";
+pub const NOTIFICATION_ICON: &str = "silo-ui";
 
 /// Created by the Debian preinst and removed by postinst.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn notifications_name_the_installed_desktop_entry_and_icon() {
         let config: serde_json::Value =
-            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+            serde_json::from_str(include_str!("../../src-tauri/tauri.conf.json")).unwrap();
         assert_eq!(config["productName"], notification_desktop_entry());
         assert!(
             config["mainBinaryName"].is_null(),
