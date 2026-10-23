@@ -49,4 +49,4 @@ pub use common::EmptyParams;
 pub use registry::{
     method_registry, MethodDescriptor, MethodKind, MethodName, MethodParams, MethodResults,
 };
-pub use request::{kind, Request};
+pub use request::{kind, Kind, Request};
