@@ -198,50 +198,106 @@ fn the_ui_crate_never_reaches_the_engine_through_any_locked_dependency_path() {
     assert!(seen.contains("silo-host"));
 }
 
-/// Every method name the app sends is a canonical one: there are no aliases or old names.
-#[test]
-fn every_forwarded_method_is_in_the_canonical_registry() {
-    let registry: std::collections::HashSet<&str> = silo_api::methods::method_registry()
-        .iter()
-        .map(|descriptor| descriptor.name)
-        .collect();
-    let mut seen = std::collections::BTreeSet::new();
-    for (path, text) in without_this_file(sources()) {
-        // Tests use fake method names for the engine's own replies; only code is checked.
-        let code = text.split("#[cfg(test)]").next().unwrap_or(&text);
-        let mut rest = code;
-        while let Some(index) = rest.find(['.', '(']) {
-            rest = &rest[index + 1..];
-            for call in ["call(", "call_with(", "run_job(", "run_job_until_exit("] {
-                if let Some(arguments) = rest.strip_prefix(call) {
-                    let arguments = arguments.trim_start();
-                    if let Some(quoted) = arguments.strip_prefix('"') {
-                        let name = quoted.split('"').next().unwrap_or_default();
-                        // Engine methods are `domain.name`; other `call(` users (D-Bus) are not.
-                        if !name.contains('.') {
-                            continue;
+/// The string literals of Rust source, without comments. Raw strings and byte strings are
+/// read like ordinary ones; a quote character literal is skipped.
+fn string_literals(source: &str) -> Vec<String> {
+    let characters: Vec<char> = source.chars().collect();
+    let mut literals = Vec::new();
+    let mut index = 0;
+    while index < characters.len() {
+        match characters[index] {
+            '/' if characters.get(index + 1) == Some(&'/') => {
+                while index < characters.len() && characters[index] != '\n' {
+                    index += 1;
+                }
+            }
+            '/' if characters.get(index + 1) == Some(&'*') => {
+                let mut depth = 0;
+                while index < characters.len() {
+                    if characters[index] == '/' && characters.get(index + 1) == Some(&'*') {
+                        depth += 1;
+                        index += 2;
+                    } else if characters[index] == '*' && characters.get(index + 1) == Some(&'/') {
+                        depth -= 1;
+                        index += 2;
+                        if depth == 0 {
+                            break;
                         }
-                        assert!(
-                            registry.contains(name),
-                            "{} sends {name}, which is not a canonical method",
-                            path.display()
-                        );
-                        seen.insert(name.to_owned());
+                    } else {
+                        index += 1;
                     }
                 }
             }
+            '\'' if characters.get(index + 1) == Some(&'"')
+                && characters.get(index + 2) == Some(&'\'') =>
+            {
+                index += 3;
+            }
+            '"' => {
+                let mut literal = String::new();
+                index += 1;
+                while index < characters.len() && characters[index] != '"' {
+                    if characters[index] == '\\' {
+                        literal.push(characters[index]);
+                        index += 1;
+                    }
+                    if let Some(character) = characters.get(index) {
+                        literal.push(*character);
+                    }
+                    index += 1;
+                }
+                index += 1;
+                literals.push(literal);
+            }
+            _ => index += 1,
         }
     }
-    // The scan is not vacuous: the core forwarding paths are among what it saw.
-    for expected in [
-        "computers.list",
-        "operations.job.get",
-        "settings.read",
-        "engine.shutdown",
-    ] {
-        assert!(
-            seen.contains(expected),
-            "{expected} was not found in the sources"
-        );
+    literals
+}
+
+/// The app never names an engine method: every call goes through the typed constructors of
+/// `silo_api::methods::requests`, so a wrong name or parameter cannot compile. No string
+/// literal in the app equals a method name, and none is a template that builds one.
+#[test]
+fn no_source_names_an_engine_method() {
+    let methods: Vec<&str> = silo_api::methods::method_registry()
+        .iter()
+        .map(|descriptor| descriptor.name)
+        .collect();
+    let domains: std::collections::BTreeSet<String> = methods
+        .iter()
+        .filter_map(|name| name.split('.').next())
+        .map(|domain| format!("{domain}."))
+        .collect();
+    let files = sources();
+    assert!(files.len() > 40, "the scan saw only {} files", files.len());
+    let mut typed_requests = 0;
+    for (path, text) in &files {
+        typed_requests += text.matches("requests::").count();
+        for literal in string_literals(text) {
+            assert!(
+                !methods.contains(&literal.as_str()),
+                "{} names the engine method {literal}; build a request with `requests::`",
+                path.display()
+            );
+            // A `format!` template that builds a method name, such as `<domain>.{action}`.
+            assert!(
+                !(literal.contains('{')
+                    && domains.iter().any(|domain| literal.starts_with(domain))),
+                "{} builds an engine method name from {literal}",
+                path.display()
+            );
+        }
     }
+    // The scan is not vacuous: the app's calls are typed requests.
+    assert!(
+        typed_requests > 100,
+        "only {typed_requests} typed requests were found"
+    );
+}
+
+#[test]
+fn the_literal_scan_reads_strings_but_not_comments_or_quote_characters() {
+    let source = "let a = \"x.y\"; // \"no\"\n/* \"no\" */ let b = '\"'; let c = \"p\\\"q\";";
+    assert_eq!(string_literals(source), ["x.y", "p\\\"q"]);
 }

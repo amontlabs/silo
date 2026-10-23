@@ -2,9 +2,18 @@
 //! device: it picks the paths, the engine reads and writes them.
 use crate::engine_client::{
     forwarding::{not_found, roster},
+    params::{decode, job_id},
     Engine, EngineClient, EngineError,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    exports::{
+        ExportAcknowledgeParams, ExportCreateParams, ExportDestinationSetParams,
+        ExportDismissParams, ExportImportParams, ExportInspectParams, ExportStateParams,
+    },
+    operations::CancelJobParams,
+    requests,
+};
 use std::path::PathBuf;
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
@@ -18,7 +27,11 @@ fn require_main(window: &WebviewWindow) -> Result<(), EngineError> {
 // MARK: Operations
 
 pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("exports.state", json!({})).await
+    engine
+        .call(requests::exports_state(ExportStateParams {
+            device_id: None,
+        }))
+        .await
 }
 
 fn path_text(path: &std::path::Path) -> Result<String, EngineError> {
@@ -33,7 +46,12 @@ pub(crate) async fn set_destination(
     path: &std::path::Path,
 ) -> Result<String, EngineError> {
     let remembered = engine
-        .call("exports.destination.set", json!({"path": path_text(path)?}))
+        .call(requests::exports_destination_set(
+            ExportDestinationSetParams {
+                path: path_text(path)?,
+                device_id: None,
+            },
+        ))
         .await?;
     remembered
         .get("destination")
@@ -49,10 +67,11 @@ pub(crate) async fn inspect(
 ) -> Result<Value, EngineError> {
     let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     engine
-        .run_job(
-            "exports.inspect",
-            json!({"archivePath": archive_path, "requestId": request_id}),
-        )
+        .run_job(requests::exports_inspect(ExportInspectParams {
+            archive_path,
+            request_id: Some(request_id),
+            device_id: None,
+        }))
         .await
 }
 
@@ -62,10 +81,10 @@ pub(crate) async fn cancel_inspection(
     request_id: &str,
 ) -> Result<bool, EngineError> {
     match engine
-        .call(
-            "operations.cancel",
-            json!({"jobId": format!("inspect:{request_id}")}),
-        )
+        .call(requests::operations_cancel(CancelJobParams {
+            job_id: job_id(&format!("inspect:{request_id}"))?,
+            device_id: None,
+        }))
         .await
     {
         Ok(_) => Ok(true),
@@ -106,11 +125,14 @@ pub(crate) async fn start_export(
         .iter()
         .map(|name| roster.id_of(name))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut params = json!({"destination": destination, "computerIds": computer_ids});
-    if let Some(checkpoint_id) = checkpoint_id {
-        params["checkpointId"] = Value::String(checkpoint_id);
-    }
-    let started = engine.call("exports.create", params).await?;
+    let started = engine
+        .call(requests::exports_create(ExportCreateParams {
+            destination,
+            computer_ids,
+            checkpoint_id,
+            device_id: None,
+        }))
+        .await?;
     let job_id = started
         .get("jobId")
         .and_then(Value::as_str)
@@ -124,11 +146,14 @@ pub(crate) async fn start_import(
     new_name: String,
     source_name: Option<String>,
 ) -> Result<(), EngineError> {
-    let mut params = json!({"archivePath": archive_path, "newName": new_name});
-    if let Some(source_name) = source_name {
-        params["sourceName"] = Value::String(source_name);
-    }
-    engine.call("exports.import", params).await?;
+    engine
+        .call(requests::exports_import(ExportImportParams {
+            archive_path,
+            new_name,
+            source_name,
+            device_id: None,
+        }))
+        .await?;
     Ok(())
 }
 
@@ -141,10 +166,10 @@ pub(crate) async fn cancel_operation(engine: &EngineClient) -> Result<(), Engine
         .map(str::to_owned)
         .ok_or_else(|| not_found("No export or import is running."))?;
     engine
-        .call(
-            "operations.cancel",
-            json!({"jobId": format!("exports:{operation_id}")}),
-        )
+        .call(requests::operations_cancel(CancelJobParams {
+            job_id: job_id(&format!("exports:{operation_id}"))?,
+            device_id: None,
+        }))
         .await?;
     Ok(())
 }
@@ -154,11 +179,13 @@ pub(crate) async fn dismiss(
     expected_operation: Value,
     expected_operation_id: Option<String>,
 ) -> Result<bool, EngineError> {
-    let mut params = json!({"expectedOperation": expected_operation});
-    if let Some(id) = expected_operation_id {
-        params["expectedOperationId"] = Value::String(id);
-    }
-    let dismissed = engine.call("exports.dismiss", params).await?;
+    let dismissed = engine
+        .call(requests::exports_dismiss(ExportDismissParams {
+            expected_operation: decode(expected_operation, "export operation")?,
+            expected_operation_id,
+            device_id: None,
+        }))
+        .await?;
     Ok(dismissed.as_bool().unwrap_or(false))
 }
 
@@ -167,10 +194,10 @@ pub(crate) async fn acknowledge(
     expected_operation_id: String,
 ) -> Result<bool, EngineError> {
     let changed = engine
-        .call(
-            "exports.acknowledge",
-            json!({"expectedOperationId": expected_operation_id}),
-        )
+        .call(requests::exports_acknowledge(ExportAcknowledgeParams {
+            expected_operation_id,
+            device_id: None,
+        }))
         .await?;
     Ok(changed.as_bool().unwrap_or(false))
 }
@@ -341,6 +368,8 @@ pub(crate) async fn acknowledge_backup_result(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
@@ -352,20 +381,20 @@ mod forwarding_tests {
         })
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "exports.state" => Ok(backup_state()),
-            "exports.destination.set" => Ok(json!({"destination": "/exports"})),
-            "exports.create" => Ok(json!({"jobId": "exports:op9"})),
-            "exports.import" => Ok(json!({"jobId": "exports:op10"})),
-            "exports.inspect" => Ok(json!({"jobId": "inspect:r1"})),
-            "exports.dismiss" | "exports.acknowledge" => Ok(json!(true)),
-            "operations.job.get" => Ok(json!({
+            MethodName::ExportsState => Ok(backup_state()),
+            MethodName::ExportsDestinationSet => Ok(json!({"destination": "/exports"})),
+            MethodName::ExportsCreate => Ok(json!({"jobId": "exports:op9"})),
+            MethodName::ExportsImport => Ok(json!({"jobId": "exports:op10"})),
+            MethodName::ExportsInspect => Ok(json!({"jobId": "inspect:r1"})),
+            MethodName::ExportsDismiss | MethodName::ExportsAcknowledge => Ok(json!(true)),
+            MethodName::OperationsJobGet => Ok(json!({
                 "jobId": "inspect:r1", "state": "finished",
                 "outcome": {"result": {"archive": {"name": "a"}, "valid": true}}
             })),
@@ -383,7 +412,7 @@ mod forwarding_tests {
             .unwrap();
         assert_eq!(kept, "/exports");
         assert_eq!(
-            fake.calls("exports.destination.set"),
+            fake.calls(MethodName::ExportsDestinationSet),
             vec![json!({"path": "/exports"})]
         );
     }
@@ -402,14 +431,14 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(id, "op9");
         assert_eq!(
-            fake.calls("exports.create"),
+            fake.calls(MethodName::ExportsCreate),
             vec![json!({"destination": "/exports", "computerIds": [DEV], "checkpointId": "c1"})]
         );
         let missing = start_export(&engine, "/exports".into(), vec!["ghost".into()], None)
             .await
             .unwrap_err();
         assert_eq!(missing.code, "not_found");
-        assert_eq!(fake.calls("exports.create").len(), 1);
+        assert_eq!(fake.calls(MethodName::ExportsCreate).len(), 1);
     }
 
     #[tokio::test]
@@ -425,18 +454,18 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(
-            fake.calls("exports.import"),
+            fake.calls(MethodName::ExportsImport),
             vec![
                 json!({"archivePath": "/exports/a.silo-backup", "newName": "copy", "sourceName": "dev"})
             ]
         );
-        assert!(fake.calls("operations.job.get").is_empty());
+        assert!(fake.calls(MethodName::OperationsJobGet).is_empty());
         let inspected = inspect(&engine, "/exports/a.silo-backup".into(), Some("r1".into()))
             .await
             .unwrap();
         assert_eq!(inspected["valid"], true);
         assert_eq!(
-            fake.calls("exports.inspect"),
+            fake.calls(MethodName::ExportsInspect),
             vec![json!({"archivePath": "/exports/a.silo-backup", "requestId": "r1"})]
         );
     }
@@ -444,7 +473,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn cancelling_addresses_the_inspect_and_export_jobs() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.cancel" if params["jobId"] == "inspect:gone" => {
+            MethodName::OperationsCancel if params["jobId"] == "inspect:gone" => {
                 Err(("not_found", "No such job.".into()))
             }
             _ => replies(method, params),
@@ -454,13 +483,24 @@ mod forwarding_tests {
         assert!(!cancel_inspection(&engine, "gone").await.unwrap());
         cancel_operation(&engine).await.unwrap();
         assert_eq!(
-            fake.calls("operations.cancel"),
+            fake.calls(MethodName::OperationsCancel),
             vec![
                 json!({"jobId": "inspect:r1"}),
                 json!({"jobId": "inspect:gone"}),
                 json!({"jobId": "exports:op9"}),
             ]
         );
+    }
+
+    fn finished_operation() -> Value {
+        json!({
+            "kind": "result", "operation": "backup", "runningNames": [],
+            "archive": {
+                "name": "a", "archivePath": "/exports/a.silo-backup", "completedLabel": "Today",
+                "size": "1 MB", "destination": "/exports", "computers": []
+            },
+            "outcome": "success", "title": "Done", "message": "Exported."
+        })
     }
 
     #[tokio::test]
@@ -480,18 +520,16 @@ mod forwarding_tests {
                 .code,
             "not_found"
         );
-        assert!(
-            dismiss(&engine, json!({"kind": "result"}), Some("op9".into()))
-                .await
-                .unwrap()
-        );
+        assert!(dismiss(&engine, finished_operation(), Some("op9".into()))
+            .await
+            .unwrap());
         assert!(acknowledge(&engine, "op9".into()).await.unwrap());
         assert_eq!(
-            fake.calls("exports.dismiss"),
-            vec![json!({"expectedOperation": {"kind": "result"}, "expectedOperationId": "op9"})]
+            fake.calls(MethodName::ExportsDismiss),
+            vec![json!({"expectedOperation": finished_operation(), "expectedOperationId": "op9"})]
         );
         assert_eq!(
-            fake.calls("exports.acknowledge"),
+            fake.calls(MethodName::ExportsAcknowledge),
             vec![json!({"expectedOperationId": "op9"})]
         );
     }
@@ -499,7 +537,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn an_unsupported_export_is_the_typed_unavailable_state() {
         let fake = FakeEngine::start(|method, params| match method {
-            "exports.state" => Err(("unsupported_remote_operation", "Not available yet.".into())),
+            MethodName::ExportsState => {
+                Err(("unsupported_remote_operation", "Not available yet.".into()))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;

@@ -3,10 +3,28 @@
 //! owns the computer; when it cannot, it answers `unsupported_remote_operation` and that
 //! reaches the UI as the unavailable state. Opening terminals and browsers stays here.
 use crate::engine_client::{
-    forwarding::{browser, open_in_terminal, open_url, terminal, with_device},
+    forwarding::{browser, open_in_terminal, open_url, terminal},
+    params::{decode, device, target},
     Engine, EngineClient, EngineError,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+use silo_api::methods::{
+    checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams},
+    common::EmptyParams,
+    computer_use::{ApprovalMode, ComputerUseApprovalParams},
+    computers::{
+        ComputerConfigurationChange, ComputerConfigurationChangeParams, ComputerDeleteParams,
+        ComputerListParams,
+    },
+    connections::{
+        ConnectDeviceParams, ConnectionsSetEnabledParams, DeviceIdParams, SshAddressParams,
+    },
+    kind,
+    network::{NetworkOpenParams, NetworkPublishParams, NetworkUnpublishParams},
+    requests,
+    ssh_access::SshAccessSaveParams,
+    Kind, Request,
+};
 use tauri::AppHandle;
 
 /// How a new computer starts: it asks before an agent acts unless the setting says auto.
@@ -17,10 +35,10 @@ enum Approval {
 }
 
 impl Approval {
-    fn as_str(self) -> &'static str {
+    fn mode(self) -> ApprovalMode {
         match self {
-            Self::Ask => "ask",
-            Self::Auto => "auto",
+            Self::Ask => ApprovalMode::Ask,
+            Self::Auto => ApprovalMode::Auto,
         }
     }
 }
@@ -38,7 +56,9 @@ fn approval_from_settings(settings: Result<Map<String, Value>, EngineError>) -> 
 // MARK: Connections
 
 pub(crate) async fn status(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("connections.status", json!({})).await
+    engine
+        .call(requests::connections_status(EmptyParams {}))
+        .await
 }
 
 pub(crate) async fn set_enabled(
@@ -46,17 +66,23 @@ pub(crate) async fn set_enabled(
     enabled: bool,
 ) -> Result<Value, EngineError> {
     engine
-        .call("connections.setEnabled", json!({"enabled": enabled}))
+        .call(requests::connections_set_enabled(
+            ConnectionsSetEnabledParams { enabled },
+        ))
         .await
 }
 
 pub(crate) async fn devices(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("connections.devices.list", json!({})).await
+    engine
+        .call(requests::connections_devices_list(EmptyParams {}))
+        .await
 }
 
 pub(crate) async fn remove(engine: &EngineClient, device_id: String) -> Result<(), EngineError> {
     engine
-        .call("connections.devices.remove", json!({"deviceId": device_id}))
+        .call(requests::connections_devices_remove(DeviceIdParams {
+            device_id,
+        }))
         .await?;
     Ok(())
 }
@@ -66,21 +92,21 @@ pub(crate) async fn connect(
     address: String,
     replace: Option<bool>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({"address": address});
-    if let Some(replace) = replace {
-        params["replace"] = Value::Bool(replace);
-    }
-    engine.call("connections.devices.connect", params).await
+    engine
+        .call(requests::connections_devices_connect(ConnectDeviceParams {
+            address,
+            replace,
+        }))
+        .await
 }
 
 /// Runs the command the engine built to authorize this device on `address` in a terminal.
-pub(crate) async fn run_ssh_command(
+pub(crate) async fn run_ssh_command<K: Kind>(
     engine: &EngineClient,
-    method: &str,
-    address: String,
+    request: Request<K>,
     open: impl FnOnce(&Map<String, Value>, &str) -> Result<(), String>,
 ) -> Result<(), EngineError> {
-    let built = engine.call(method, json!({"address": address})).await?;
+    let built = engine.call(request).await?;
     let command = built
         .get("command")
         .and_then(Value::as_str)
@@ -121,8 +147,7 @@ pub(crate) async fn authorize_device(
 ) -> Result<(), EngineError> {
     run_ssh_command(
         &engine,
-        "connections.ssh.authorizationCommand",
-        address,
+        requests::connections_ssh_authorization_command(SshAddressParams { address }),
         terminal,
     )
     .await
@@ -135,8 +160,7 @@ pub(crate) async fn setup_device_key(
 ) -> Result<(), EngineError> {
     run_ssh_command(
         &engine,
-        "connections.ssh.keySetupCommand",
-        address,
+        requests::connections_ssh_key_setup_command(SshAddressParams { address }),
         terminal,
     )
     .await
@@ -159,12 +183,11 @@ pub(crate) async fn snapshot(
     device_id: &str,
     refresh_repositories: bool,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({});
-    if refresh_repositories {
-        params["refreshRepositories"] = Value::Bool(true);
-    }
     let listed = engine
-        .call("computers.list", with_device(params, Some(device_id)))
+        .call(requests::computers_list(ComputerListParams {
+            device_id: Some(device_id.to_owned()),
+            refresh_repositories: refresh_repositories.then_some(true),
+        }))
         .await?;
     listed
         .get("linux")
@@ -180,13 +203,16 @@ pub(crate) async fn computer_action(
     computer_id: &str,
     action: &str,
 ) -> Result<Value, EngineError> {
-    let params = json!({"computerId": computer_id, "deviceId": device_id});
+    let params = target(computer_id, Some(device_id));
     match action {
-        "dismiss-error" => return engine.call("computers.dismissError", params).await,
+        "dismiss-error" => return engine.call(requests::computers_dismiss_error(params)).await,
         "start" | "stop" | "restart" => {
-            engine
-                .run_job(&format!("computers.{action}"), params)
-                .await?;
+            let request: Request<kind::Job> = match action {
+                "start" => requests::computers_start(params),
+                "stop" => requests::computers_stop(params),
+                _ => requests::computers_restart(params),
+            };
+            engine.run_job(request).await?;
         }
         other => {
             return Err(EngineError::internal(format!(
@@ -207,32 +233,30 @@ pub(crate) async fn checkpoint_action(
     checkpoint_id: Option<String>,
     new_name: Option<String>,
 ) -> Result<(), EngineError> {
-    let mut params = json!({"computerId": computer_id, "deviceId": device_id});
-    let method = match action {
-        "create" => {
-            params["name"] = Value::String(
-                name.ok_or_else(|| EngineError::internal("Missing checkpoint name."))?,
-            );
-            "checkpoints.create"
-        }
-        "fork" => {
-            params["newName"] =
-                Value::String(new_name.ok_or_else(|| EngineError::internal("Missing fork name."))?);
-            if let Some(checkpoint_id) = checkpoint_id {
-                params["checkpointId"] = Value::String(checkpoint_id);
-            }
-            "checkpoints.fork"
-        }
-        "restore" => {
-            params["checkpointId"] = Value::String(
-                checkpoint_id
-                    .ok_or_else(|| EngineError::internal("Missing checkpoint identity."))?,
-            );
-            "checkpoints.restore"
-        }
+    let computer_id = computer_id.to_owned();
+    let device_id = Some(device_id.to_owned());
+    let request = match action {
+        "create" => requests::checkpoints_create(CheckpointCreateParams {
+            computer_id,
+            device_id,
+            name: name.ok_or_else(|| EngineError::internal("Missing checkpoint name."))?,
+            kind: None,
+        }),
+        "fork" => requests::checkpoints_fork(CheckpointForkParams {
+            computer_id,
+            device_id,
+            checkpoint_id,
+            new_name: new_name.ok_or_else(|| EngineError::internal("Missing fork name."))?,
+        }),
+        "restore" => requests::checkpoints_restore(CheckpointTargetParams {
+            computer_id,
+            device_id,
+            checkpoint_id: checkpoint_id
+                .ok_or_else(|| EngineError::internal("Missing checkpoint identity."))?,
+        }),
         _ => return Err(EngineError::internal("Unsupported checkpoint operation.")),
     };
-    engine.run_job(method, params).await?;
+    engine.run_job(request).await?;
     Ok(())
 }
 
@@ -250,30 +274,40 @@ pub(crate) async fn upsert_computer(
         .and_then(Value::as_str)
         .ok_or_else(|| EngineError::internal("The computer has no identity."))?
         .to_owned();
-    let mut change = json!({"kind": "upsert", "configuration": configuration});
-    if let Some(expected) = expected {
-        change["expected"] = expected;
-    }
+    let change = ComputerConfigurationChange::Upsert {
+        configuration: decode(configuration, "computer configuration")?,
+        expected: expected
+            .map(|expected| decode(expected, "expected computer configuration"))
+            .transpose()?,
+    };
     engine
-        .run_job(
-            "computers.configuration.change",
-            json!({"change": change, "deviceId": device_id}),
-        )
+        .run_job(requests::computers_configuration_change(
+            ComputerConfigurationChangeParams {
+                change,
+                request_id: None,
+                retry_computer_id: None,
+                device_id: Some(device_id.to_owned()),
+            },
+        ))
         .await?;
     if created {
         // The preference is read after the computer was saved; failing to read it means ask.
-        let settings = engine.call("settings.read", json!({})).await.map(|read| {
-            read.get("settings")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default()
-        });
-        let mode = approval_from_settings(settings).as_str().to_owned();
+        let settings = engine
+            .call(requests::settings_read(EmptyParams {}))
+            .await
+            .map(|read| {
+                read.get("settings")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default()
+            });
+        let mode = approval_from_settings(settings).mode();
         if let Err(error) = engine
-            .call(
-                "computerUse.approval",
-                json!({"computerId": computer_id, "deviceId": device_id, "mode": mode}),
-            )
+            .call(requests::computer_use_approval(ComputerUseApprovalParams {
+                computer_id,
+                device_id: Some(device_id.to_owned()),
+                mode,
+            }))
             .await
         {
             eprintln!("Computer use approval was not set on the new remote computer: {error}");
@@ -289,10 +323,12 @@ pub(crate) async fn delete_computer(
     expected: Value,
 ) -> Result<Value, EngineError> {
     engine
-        .run_job(
-            "computers.delete",
-            json!({"computerId": computer_id, "deviceId": device_id, "expected": expected}),
-        )
+        .run_job(requests::computers_delete(ComputerDeleteParams {
+            computer_id: computer_id.to_owned(),
+            device_id: Some(device_id.to_owned()),
+            expected: Some(decode(expected, "expected computer configuration")?),
+            request_id: None,
+        }))
         .await?;
     snapshot(engine, device_id, false).await
 }
@@ -420,7 +456,7 @@ pub(crate) async fn network_state(
     device_id: &str,
 ) -> Result<Value, EngineError> {
     engine
-        .call("network.state", with_device(json!({}), Some(device_id)))
+        .call(requests::network_state(device(Some(device_id))))
         .await
 }
 
@@ -432,15 +468,17 @@ pub(crate) async fn publish_port(
     host_port: Option<u16>,
     scheme: Option<String>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({"computerId": computer_id, "port": port});
-    if let Some(host_port) = host_port {
-        params["hostPort"] = json!(host_port);
-    }
-    if let Some(scheme) = scheme {
-        params["scheme"] = Value::String(scheme);
-    }
+    let scheme = scheme
+        .map(|scheme| decode(Value::String(scheme), "network scheme"))
+        .transpose()?;
     engine
-        .call("network.publish", with_device(params, Some(device_id)))
+        .call(requests::network_publish(NetworkPublishParams {
+            computer_id,
+            device_id: Some(device_id.to_owned()),
+            port,
+            host_port,
+            scheme,
+        }))
         .await
 }
 
@@ -451,13 +489,11 @@ pub(crate) async fn unpublish_port(
     port: u16,
 ) -> Result<Value, EngineError> {
     engine
-        .call(
-            "network.unpublish",
-            with_device(
-                json!({"computerId": computer_id, "port": port}),
-                Some(device_id),
-            ),
-        )
+        .call(requests::network_unpublish(NetworkUnpublishParams {
+            computer_id,
+            device_id: Some(device_id.to_owned()),
+            port,
+        }))
         .await
 }
 
@@ -469,13 +505,11 @@ pub(crate) async fn open_port(
     open: impl FnOnce(&Map<String, Value>, &str) -> Result<(), String>,
 ) -> Result<(), EngineError> {
     let opened = engine
-        .call(
-            "network.open",
-            with_device(
-                json!({"computerId": computer_id, "port": port}),
-                Some(device_id),
-            ),
-        )
+        .call(requests::network_open(NetworkOpenParams {
+            computer_id,
+            device_id: Some(device_id.to_owned()),
+            port,
+        }))
         .await?;
     let url = opened
         .get("url")
@@ -489,7 +523,7 @@ pub(crate) async fn ssh_access_state(
     device_id: &str,
 ) -> Result<Value, EngineError> {
     engine
-        .call("sshAccess.state", with_device(json!({}), Some(device_id)))
+        .call(requests::ssh_access_state(device(Some(device_id))))
         .await
 }
 
@@ -502,14 +536,15 @@ pub(crate) async fn save_ssh_access(
     bind_address: String,
     keys: Option<Vec<String>>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({
-        "computerId": computer_id, "enabled": enabled, "port": port, "bindAddress": bind_address,
-    });
-    if let Some(keys) = keys {
-        params["keys"] = json!(keys);
-    }
     engine
-        .call("sshAccess.save", with_device(params, Some(device_id)))
+        .call(requests::ssh_access_save(SshAccessSaveParams {
+            computer_id,
+            device_id: Some(device_id.to_owned()),
+            enabled,
+            port,
+            bind_address,
+            keys,
+        }))
         .await
 }
 
@@ -586,6 +621,7 @@ pub(crate) async fn remote_save_ssh_access(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_failed_settings_read_means_ask_for_new_remote_computers() {
@@ -609,6 +645,8 @@ mod tests {
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
     use std::sync::{Arc, Mutex};
 
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
@@ -618,35 +656,36 @@ mod forwarding_tests {
         json!({"computers": [{"configuration": {"id": COMPUTER, "name": "dev"}}]})
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({"linux": state(), "macos": {"computers": []}})),
-            "computers.start"
-            | "computers.stop"
-            | "computers.restart"
-            | "computers.delete"
-            | "computers.configuration.change"
-            | "checkpoints.create"
-            | "checkpoints.fork"
-            | "checkpoints.restore" => Ok(json!({"jobId": "job:1"})),
-            "operations.job.get" => {
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({"linux": state(), "macos": {"computers": []}})),
+            MethodName::ComputersStart
+            | MethodName::ComputersStop
+            | MethodName::ComputersRestart
+            | MethodName::ComputersDelete
+            | MethodName::ComputersConfigurationChange
+            | MethodName::CheckpointsCreate
+            | MethodName::CheckpointsFork
+            | MethodName::CheckpointsRestore => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
-            "computers.dismissError" => Ok(state()),
-            "connections.status" => Ok(json!({"enabled": true, "deviceId": DEVICE})),
-            "connections.devices.list" => {
+            MethodName::ComputersDismissError => Ok(state()),
+            MethodName::ConnectionsStatus => Ok(json!({"enabled": true, "deviceId": DEVICE})),
+            MethodName::ConnectionsDevicesList => {
                 Ok(json!([{"id": DEVICE, "name": "Office", "address": "office.local"}]))
             }
-            "connections.devices.connect" => {
+            MethodName::ConnectionsDevicesConnect => {
                 Ok(json!({"id": DEVICE, "name": "Office", "address": "office.local"}))
             }
-            "connections.setEnabled" => Ok(json!({"enabled": false, "deviceId": DEVICE})),
-            "connections.ssh.authorizationCommand" | "connections.ssh.keySetupCommand" => {
+            MethodName::ConnectionsSetEnabled => Ok(json!({"enabled": false, "deviceId": DEVICE})),
+            MethodName::ConnectionsSshAuthorizationCommand
+            | MethodName::ConnectionsSshKeySetupCommand => {
                 Ok(json!({"command": "ssh-copy-id office.local"}))
             }
-            "network.open" => Ok(json!({"url": "http://127.0.0.1:3000"})),
-            "settings.read" => Ok(json!({"settings": {"computerUseAutoApproval": true}})),
+            MethodName::NetworkOpen => Ok(json!({"url": "http://127.0.0.1:3000"})),
+            MethodName::SettingsRead => Ok(json!({"settings": {"computerUseAutoApproval": true}})),
             _ => Ok(Value::Null),
         }
     }
@@ -663,15 +702,15 @@ mod forwarding_tests {
             .unwrap();
         remove(&engine, DEVICE.into()).await.unwrap();
         assert_eq!(
-            fake.calls("connections.setEnabled"),
+            fake.calls(MethodName::ConnectionsSetEnabled),
             vec![json!({"enabled": false})]
         );
         assert_eq!(
-            fake.calls("connections.devices.connect"),
+            fake.calls(MethodName::ConnectionsDevicesConnect),
             vec![json!({"address": "office.local", "replace": true})]
         );
         assert_eq!(
-            fake.calls("connections.devices.remove"),
+            fake.calls(MethodName::ConnectionsDevicesRemove),
             vec![json!({"deviceId": DEVICE})]
         );
     }
@@ -681,26 +720,37 @@ mod forwarding_tests {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
         let ran = Arc::new(Mutex::new(Vec::new()));
-        for method in [
-            "connections.ssh.authorizationCommand",
-            "connections.ssh.keySetupCommand",
-        ] {
-            let record = ran.clone();
-            run_ssh_command(
-                &engine,
-                method,
-                "office.local".into(),
-                move |settings, command| {
-                    record.lock().unwrap().push((
-                        settings.contains_key("computerUseAutoApproval"),
-                        command.to_owned(),
-                    ));
-                    Ok(())
-                },
-            )
-            .await
-            .unwrap();
-        }
+        let address = || SshAddressParams {
+            address: "office.local".into(),
+        };
+        let record = ran.clone();
+        run_ssh_command(
+            &engine,
+            requests::connections_ssh_authorization_command(address()),
+            move |settings, command| {
+                record.lock().unwrap().push((
+                    settings.contains_key("computerUseAutoApproval"),
+                    command.to_owned(),
+                ));
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        let record = ran.clone();
+        run_ssh_command(
+            &engine,
+            requests::connections_ssh_key_setup_command(address()),
+            move |settings, command| {
+                record.lock().unwrap().push((
+                    settings.contains_key("computerUseAutoApproval"),
+                    command.to_owned(),
+                ));
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(ran.lock().unwrap().len(), 2);
         assert_eq!(
             ran.lock().unwrap()[0],
@@ -722,17 +772,17 @@ mod forwarding_tests {
             .await
             .unwrap();
         assert_eq!(
-            fake.calls("computers.list"),
+            fake.calls(MethodName::ComputersList),
             vec![
                 json!({"deviceId": DEVICE, "refreshRepositories": true}),
                 json!({"deviceId": DEVICE}),
             ]
         );
         assert_eq!(
-            fake.calls("computers.start"),
+            fake.calls(MethodName::ComputersStart),
             vec![json!({"computerId": COMPUTER, "deviceId": DEVICE})]
         );
-        assert_eq!(fake.calls("computers.dismissError").len(), 1);
+        assert_eq!(fake.calls(MethodName::ComputersDismissError).len(), 1);
         assert!(computer_action(&engine, DEVICE, COMPUTER, "explode")
             .await
             .is_err());
@@ -776,17 +826,17 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(
-            fake.calls("checkpoints.create"),
+            fake.calls(MethodName::CheckpointsCreate),
             vec![json!({"computerId": COMPUTER, "deviceId": DEVICE, "name": "c"})]
         );
         assert_eq!(
-            fake.calls("checkpoints.fork"),
+            fake.calls(MethodName::CheckpointsFork),
             vec![
                 json!({"computerId": COMPUTER, "deviceId": DEVICE, "newName": "copy", "checkpointId": "k1"})
             ]
         );
         assert_eq!(
-            fake.calls("checkpoints.restore"),
+            fake.calls(MethodName::CheckpointsRestore),
             vec![json!({"computerId": COMPUTER, "deviceId": DEVICE, "checkpointId": "k1"})]
         );
         assert!(
@@ -805,31 +855,39 @@ mod forwarding_tests {
     async fn a_new_remote_computer_gets_this_devices_approval_preference() {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
-        let configuration = json!({"id": COMPUTER, "name": "dev"});
+        let configuration = json!({
+            "id": COMPUTER, "name": "dev", "cpus": 2, "maxCPUs": 8, "memoryGiB": 4,
+            "maxMemoryGiB": 16, "workspaceStorageGiB": 20, "runtimeStorageGiB": 20
+        });
         upsert_computer(&engine, DEVICE, configuration.clone(), None)
             .await
             .unwrap();
         assert_eq!(
-            fake.calls("computers.configuration.change"),
+            fake.calls(MethodName::ComputersConfigurationChange),
             vec![
                 json!({"change": {"kind": "upsert", "configuration": configuration}, "deviceId": DEVICE})
             ]
         );
         assert_eq!(
-            fake.calls("computerUse.approval"),
+            fake.calls(MethodName::ComputerUseApproval),
             vec![json!({"computerId": COMPUTER, "deviceId": DEVICE, "mode": "auto"})]
         );
         // Editing an existing computer leaves its approval alone.
-        upsert_computer(&engine, DEVICE, configuration.clone(), Some(configuration))
-            .await
-            .unwrap();
-        assert_eq!(fake.calls("computerUse.approval").len(), 1);
-        delete_computer(&engine, DEVICE, COMPUTER, json!({"id": COMPUTER}))
+        upsert_computer(
+            &engine,
+            DEVICE,
+            configuration.clone(),
+            Some(configuration.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fake.calls(MethodName::ComputerUseApproval).len(), 1);
+        delete_computer(&engine, DEVICE, COMPUTER, configuration.clone())
             .await
             .unwrap();
         assert_eq!(
-            fake.calls("computers.delete"),
-            vec![json!({"computerId": COMPUTER, "deviceId": DEVICE, "expected": {"id": COMPUTER}})]
+            fake.calls(MethodName::ComputersDelete),
+            vec![json!({"computerId": COMPUTER, "deviceId": DEVICE, "expected": configuration})]
         );
     }
 
@@ -865,15 +923,15 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(
-            fake.calls("network.state"),
+            fake.calls(MethodName::NetworkState),
             vec![json!({"deviceId": DEVICE})]
         );
         assert_eq!(
-            fake.calls("network.publish"),
+            fake.calls(MethodName::NetworkPublish),
             vec![json!({"computerId": COMPUTER, "port": 80, "hostPort": 8080, "deviceId": DEVICE})]
         );
         assert_eq!(
-            fake.calls("sshAccess.save"),
+            fake.calls(MethodName::SshAccessSave),
             vec![
                 json!({"computerId": COMPUTER, "enabled": true, "port": 2222, "bindAddress": "127.0.0.1", "deviceId": DEVICE})
             ]
@@ -887,10 +945,12 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_device_the_engine_cannot_reach_is_the_typed_unavailable_state() {
         let fake = FakeEngine::start(|method, params| match method {
-            "computers.list" | "network.state" | "sshAccess.state" => Err((
-                "unsupported_remote_operation",
-                "Remote devices are not available from this engine yet.".into(),
-            )),
+            MethodName::ComputersList | MethodName::NetworkState | MethodName::SshAccessState => {
+                Err((
+                    "unsupported_remote_operation",
+                    "Remote devices are not available from this engine yet.".into(),
+                ))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;

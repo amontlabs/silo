@@ -1,11 +1,33 @@
 use std::{sync::Arc, time::Duration};
 
 use serde_json::{json, Value};
+use silo_api::methods::{
+    checkpoints::{CheckpointCreateParams, CheckpointTargetParams},
+    common::{ComputerTargetParams, EmptyParams},
+    computers::{ComputerDeleteParams, ComputerListParams},
+    engine::{EngineShutdownParams, ShutdownReason},
+    requests, MethodName,
+};
 
 use super::{
     testing::{connected_client, metadata, FailingLauncher, FakeEngine, RecordingSink},
     EngineClient, Status,
 };
+
+fn list() -> silo_api::methods::Request<silo_api::methods::kind::Query> {
+    requests::computers_list(ComputerListParams {
+        device_id: None,
+        refresh_repositories: None,
+    })
+}
+
+fn checkpoint(id: &str) -> CheckpointTargetParams {
+    CheckpointTargetParams {
+        computer_id: "c".into(),
+        device_id: None,
+        checkpoint_id: id.into(),
+    }
+}
 
 fn ok(value: Value) -> Result<Value, (&'static str, String)> {
     Ok(value)
@@ -14,19 +36,21 @@ fn ok(value: Value) -> Result<Value, (&'static str, String)> {
 #[tokio::test]
 async fn forwards_a_call_subscribes_once_and_maps_typed_errors() {
     let fake = FakeEngine::start(|method, _| match method {
-        "computers.list" => ok(json!({"linux": {}})),
-        "events.subscribe" => ok(json!({"subscription": "sub"})),
-        "computers.delete" => Err(("busy", "Another operation is running.".into())),
-        "settings.read" => Err(("permission_denied", "No.".into())),
+        MethodName::ComputersList => ok(json!({"linux": {}})),
+        MethodName::EventsSubscribe => ok(json!({"subscription": "sub"})),
+        MethodName::ComputersDelete => Err(("busy", "Another operation is running.".into())),
+        MethodName::SettingsRead => Err(("permission_denied", "No.".into())),
         _ => ok(Value::Null),
     });
     let (client, _sink) = connected_client(&fake).await;
-    assert_eq!(
-        client.call("computers.list", json!({})).await.unwrap(),
-        json!({"linux": {}})
-    );
+    assert_eq!(client.call(list()).await.unwrap(), json!({"linux": {}}));
     let busy = client
-        .call("computers.delete", json!({}))
+        .call(requests::computers_delete(ComputerDeleteParams {
+            computer_id: "c".into(),
+            device_id: None,
+            expected: None,
+            request_id: None,
+        }))
         .await
         .unwrap_err();
     assert_eq!(
@@ -36,13 +60,13 @@ async fn forwards_a_call_subscribes_once_and_maps_typed_errors() {
     // Codes the UI does not know are plain failures.
     assert_eq!(
         client
-            .call("settings.read", json!({}))
+            .call(requests::settings_read(EmptyParams {}))
             .await
             .unwrap_err()
             .code,
         "internal"
     );
-    let subscriptions = fake.calls("events.subscribe");
+    let subscriptions = fake.calls(MethodName::EventsSubscribe);
     assert_eq!(subscriptions.len(), 1);
     assert!(subscriptions[0]["events"]
         .as_array()
@@ -71,8 +95,8 @@ async fn a_job_is_awaited_through_its_outcome_and_then_acknowledged() {
     let polls = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let seen = polls.clone();
     let fake = FakeEngine::start(move |method, params| match method {
-        "computers.start" => ok(json!({"jobId": "job:7"})),
-        "operations.job.get" => {
+        MethodName::ComputersStart => ok(json!({"jobId": "job:7"})),
+        MethodName::OperationsJobGet => {
             assert_eq!(params["jobId"], "job:7");
             if seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
                 ok(json!({"jobId": "job:7", "state": "running"}))
@@ -86,12 +110,15 @@ async fn a_job_is_awaited_through_its_outcome_and_then_acknowledged() {
     });
     let (client, _sink) = connected_client(&fake).await;
     let result = client
-        .run_job("computers.start", json!({"computerId": "c"}))
+        .run_job(requests::computers_start(ComputerTargetParams {
+            computer_id: "c".into(),
+            device_id: None,
+        }))
         .await
         .unwrap();
     assert_eq!(result, json!({"started": true}));
     assert_eq!(
-        fake.calls("operations.job.acknowledge"),
+        fake.calls(MethodName::OperationsJobAcknowledge),
         vec![json!({"jobId": "job:7"})]
     );
 }
@@ -99,12 +126,12 @@ async fn a_job_is_awaited_through_its_outcome_and_then_acknowledged() {
 #[tokio::test]
 async fn a_failed_job_surfaces_its_typed_error_and_a_chunked_outcome_is_reassembled() {
     let fake = FakeEngine::start(|method, params| match method {
-        "checkpoints.restore" => ok(json!({"jobId": "job:1"})),
-        "checkpoints.create" => ok(json!({"jobId": "job:2"})),
-        "operations.job.get" if params["jobId"] == "job:1" => ok(json!({
+        MethodName::CheckpointsRestore => ok(json!({"jobId": "job:1"})),
+        MethodName::CheckpointsCreate => ok(json!({"jobId": "job:2"})),
+        MethodName::OperationsJobGet if params["jobId"] == "job:1" => ok(json!({
             "jobId": "job:1", "state": "finished",
             "outcome": {"error": {"code": "cancelled", "message": "Stopped."}}})),
-        "operations.job.get" => {
+        MethodName::OperationsJobGet => {
             let whole = r#"{"result":{"big":"abcdefgh"}}"#;
             match params.get("offsetBytes").and_then(Value::as_u64) {
                 None => ok(
@@ -122,7 +149,7 @@ async fn a_failed_job_surfaces_its_typed_error_and_a_chunked_outcome_is_reassemb
     });
     let (client, _sink) = connected_client(&fake).await;
     let error = client
-        .run_job("checkpoints.restore", json!({}))
+        .run_job(requests::checkpoints_restore(checkpoint("a")))
         .await
         .unwrap_err();
     assert_eq!(
@@ -130,7 +157,12 @@ async fn a_failed_job_surfaces_its_typed_error_and_a_chunked_outcome_is_reassemb
         ("cancelled", "Stopped.")
     );
     let result = client
-        .run_job("checkpoints.create", json!({}))
+        .run_job(requests::checkpoints_create(CheckpointCreateParams {
+            computer_id: "c".into(),
+            device_id: None,
+            name: "n".into(),
+            kind: None,
+        }))
         .await
         .unwrap();
     assert_eq!(result, json!({"big": "abcdefgh"}));
@@ -149,8 +181,11 @@ async fn the_client_reconnects_and_resubscribes_after_the_connection_drops() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(fake.connections(), 2);
-    client.call("engine.state", json!({})).await.unwrap();
-    assert_eq!(fake.calls("events.subscribe").len(), 2);
+    client
+        .call(requests::engine_state(EmptyParams {}))
+        .await
+        .unwrap();
+    assert_eq!(fake.calls(MethodName::EventsSubscribe).len(), 2);
     let connections = sink.connections.lock().unwrap().clone();
     assert_eq!(connections, vec![true, false, true]);
 }
@@ -183,8 +218,8 @@ async fn a_shutdown_job_ends_when_the_engine_exits_after_stopping_the_computers(
     let polls = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let seen = polls.clone();
     let fake = Arc::new(FakeEngine::start(move |method, _| match method {
-        "engine.shutdown" => ok(json!({"jobId": "job:3"})),
-        "operations.job.get" => {
+        MethodName::EngineShutdown => ok(json!({"jobId": "job:3"})),
+        MethodName::OperationsJobGet => {
             seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             ok(json!({"jobId": "job:3", "state": "running"}))
         }
@@ -197,31 +232,35 @@ async fn a_shutdown_job_ends_when_the_engine_exits_after_stopping_the_computers(
         stopper.stop();
     });
     let result = client
-        .run_job_until_exit(
-            "engine.shutdown",
-            json!({"stopComputers": true, "reason": "user"}),
-        )
+        .run_job_until_exit(requests::engine_shutdown(EngineShutdownParams {
+            stop_computers: true,
+            reason: ShutdownReason::User,
+            deadline_ms: None,
+        }))
         .await
         .unwrap();
     assert_eq!(result, Value::Null);
     assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
     // An ordinary job keeps waiting through a lost connection instead of inventing a result.
-    assert!(fake.calls("operations.job.acknowledge").is_empty());
+    assert!(fake.calls(MethodName::OperationsJobAcknowledge).is_empty());
 }
 
 #[tokio::test]
 async fn a_method_the_engine_does_not_advertise_is_unavailable_without_a_request() {
     let fake = FakeEngine::start(|_, _| ok(json!({"subscription": "sub"})));
     fake.advertise(&[
-        "engine.state",
-        "events.subscribe",
-        "settings.read",
-        "computers.list",
+        MethodName::EngineState,
+        MethodName::EventsSubscribe,
+        MethodName::SettingsRead,
+        MethodName::ComputersList,
     ]);
     let (client, _sink) = connected_client(&fake).await;
-    let error = client.call("updates.state", json!({})).await.unwrap_err();
+    let error = client
+        .call(requests::updates_state(EmptyParams {}))
+        .await
+        .unwrap_err();
     assert_eq!(error.code, "unsupported_remote_operation");
-    assert!(error.message.contains("updates.state"));
-    assert!(fake.calls("updates.state").is_empty());
-    assert!(client.call("computers.list", json!({})).await.is_ok());
+    assert!(error.message.contains(MethodName::UpdatesState.name()));
+    assert!(fake.calls(MethodName::UpdatesState).is_empty());
+    assert!(client.call(list()).await.is_ok());
 }

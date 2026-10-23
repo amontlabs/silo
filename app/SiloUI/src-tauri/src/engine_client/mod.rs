@@ -6,6 +6,7 @@
 
 pub(crate) mod forwarding;
 pub(crate) mod launcher;
+pub(crate) mod params;
 pub(crate) mod relay;
 pub(crate) mod targets;
 
@@ -17,7 +18,17 @@ use std::{
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use silo_api::transport::ClientMetadata;
+use silo_api::{
+    methods::{
+        common::EmptyParams,
+        computers::ComputerListParams,
+        engine::EventsSubscribeParams,
+        kind,
+        operations::{AcknowledgeJobParams, GetJobParams},
+        requests, Kind, Request,
+    },
+    transport::ClientMetadata,
+};
 use silo_client::{Client, ClientError, ConnectOptions, RequestOptions};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{watch, Notify};
@@ -253,7 +264,8 @@ impl EngineClient {
                     self.current.send_replace(Some(connected.clone()));
                     self.sink.connection(true, None);
                     // The first read warms the settings cache before anything asks for it.
-                    if let Ok(snapshot) = connected.client.request("settings.read", json!({})).await
+                    if let Ok(snapshot) =
+                        send(&connected.client, &requests::settings_read(EmptyParams {})).await
                     {
                         self.remember_settings(&snapshot);
                     }
@@ -299,10 +311,18 @@ impl EngineClient {
                     ClientError::Remote(remote) => remote.message,
                     other => other.to_string(),
                 })?;
-        client
-            .request("events.subscribe", json!({"events": relay::SUBSCRIBED}))
-            .await
-            .map_err(|error| EngineError::from(error).message)?;
+        send(
+            &client,
+            &requests::events_subscribe(EventsSubscribeParams {
+                events: relay::SUBSCRIBED
+                    .iter()
+                    .map(|event| (*event).to_owned())
+                    .collect(),
+                device_ids: None,
+            }),
+        )
+        .await
+        .map_err(|error| EngineError::from(error).message)?;
         Ok((Connected { client }, feed))
     }
 
@@ -333,28 +353,26 @@ impl EngineClient {
         }
     }
 
-    pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, EngineError> {
-        self.call_with(method, params, RequestOptions::default())
-            .await
+    pub(crate) async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, EngineError> {
+        self.call_with(request, RequestOptions::default()).await
     }
 
-    pub(crate) async fn call_with(
+    pub(crate) async fn call_with<K: Kind>(
         &self,
-        method: &str,
-        params: Value,
+        request: Request<K>,
         options: RequestOptions,
     ) -> Result<Value, EngineError> {
-        self.call_patiently(method, params, options, CONNECT_PATIENCE)
+        self.call_patiently(request, options, CONNECT_PATIENCE)
             .await
     }
 
-    async fn call_patiently(
+    async fn call_patiently<K: Kind>(
         &self,
-        method: &str,
-        params: Value,
+        request: Request<K>,
         options: RequestOptions,
         patience: Duration,
     ) -> Result<Value, EngineError> {
+        let method = request.name();
         let connected = self.connected(patience).await?;
         // The handshake lists what this engine serves. A method it does not list is the
         // deliberate unavailable state, never a fallback to doing the work here.
@@ -372,14 +390,19 @@ impl EngineClient {
         }
         Ok(connected
             .client
-            .request_with(method, params, options)
+            .request_with(method, request.params_value(), options)
             .await?)
     }
 
     /// The stable id of the computer called `name` (or already named by id), local to this
     /// engine. Commands that still address computers by display name resolve through here.
     pub(crate) async fn computer_id(&self, name: &str) -> Result<String, EngineError> {
-        let listed = self.call("computers.list", json!({})).await?;
+        let listed = self
+            .call(requests::computers_list(ComputerListParams {
+                device_id: None,
+                refresh_repositories: None,
+            }))
+            .await?;
         let linux = listed
             .pointer("/linux/computers")
             .and_then(Value::as_array)
@@ -407,11 +430,12 @@ impl EngineClient {
         &self,
         refresh_repositories: bool,
     ) -> Result<Value, EngineError> {
-        let mut params = json!({});
-        if refresh_repositories {
-            params["refreshRepositories"] = Value::Bool(true);
-        }
-        let listed = self.call("computers.list", params).await?;
+        let listed = self
+            .call(requests::computers_list(ComputerListParams {
+                device_id: None,
+                refresh_repositories: refresh_repositories.then_some(true),
+            }))
+            .await?;
         listed
             .get("linux")
             .cloned()
@@ -421,8 +445,8 @@ impl EngineClient {
     /// Starts a job method and waits for its terminal outcome, then acknowledges it.
     /// Losing the connection while waiting never invents a failure: the job continues in
     /// the engine, so the wait resumes on the next connection.
-    pub(crate) async fn run_job(&self, method: &str, params: Value) -> Result<Value, EngineError> {
-        let started = self.call(method, params).await?;
+    pub(crate) async fn run_job(&self, request: Request<kind::Job>) -> Result<Value, EngineError> {
+        let started = self.call(request).await?;
         let job_id = started
             .get("jobId")
             .and_then(Value::as_str)
@@ -439,10 +463,9 @@ impl EngineClient {
     /// engine that is gone for good once the job was accepted has finished the job.
     pub(crate) async fn run_job_until_exit(
         &self,
-        method: &str,
-        params: Value,
+        request: Request<kind::Job>,
     ) -> Result<Value, EngineError> {
-        let started = self.call(method, params).await?;
+        let started = self.call(request).await?;
         let job_id = started
             .get("jobId")
             .and_then(Value::as_str)
@@ -465,7 +488,10 @@ impl EngineClient {
                 Ok(Some(outcome)) => {
                     // The outcome is presented to the caller; the engine may now drop it.
                     let _ = self
-                        .call("operations.job.acknowledge", json!({"jobId": job_id}))
+                        .call(requests::operations_job_acknowledge(AcknowledgeJobParams {
+                            job_id: params::job_id(job_id)?,
+                            device_id: None,
+                        }))
                         .await;
                     return outcome;
                 }
@@ -493,14 +519,13 @@ impl EngineClient {
         let mut text = String::new();
         let mut offset: Option<u64> = None;
         loop {
-            let mut params = json!({"jobId": job_id});
-            if let Some(offset) = offset {
-                params["offsetBytes"] = json!(offset);
-            }
             let reply = self
                 .call_patiently(
-                    "operations.job.get",
-                    params,
+                    requests::operations_job_get(GetJobParams {
+                        job_id: params::job_id(job_id)?,
+                        device_id: None,
+                        offset_bytes: offset,
+                    }),
                     RequestOptions::default(),
                     patience,
                 )
@@ -534,6 +559,11 @@ impl EngineClient {
             return Ok(Some(outcome_result(&outcome)));
         }
     }
+}
+
+/// Sends `request` on a connection that is not yet shared (the supervisor's own).
+async fn send<K: Kind>(client: &Client, request: &Request<K>) -> Result<Value, ClientError> {
+    client.request(request.name(), request.params_value()).await
 }
 
 fn outcome_result(outcome: &Value) -> Result<Value, EngineError> {

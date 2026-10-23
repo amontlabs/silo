@@ -1,14 +1,18 @@
 //! SSH access settings of the computers, through `sshAccess.*`. The save dialog for an
 //! exported key stays on this device: it picks the path, the engine writes the key there.
 
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    requests,
+    ssh_access::{SshAccessConnectionParams, SshAccessSaveParams},
+};
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::engine_client::{Engine, EngineClient, EngineError};
+use crate::engine_client::{params::device, Engine, EngineClient, EngineError};
 
 pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("sshAccess.state", json!({})).await
+    engine.call(requests::ssh_access_state(device(None))).await
 }
 
 pub(crate) async fn save(
@@ -19,16 +23,16 @@ pub(crate) async fn save(
     bind_address: String,
     keys: Option<Vec<String>>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({
-        "computerId": engine.computer_id(computer).await?,
-        "enabled": enabled,
-        "port": port,
-        "bindAddress": bind_address,
-    });
-    if let Some(keys) = keys {
-        params["keys"] = json!(keys);
-    }
-    engine.call("sshAccess.save", params).await
+    engine
+        .call(requests::ssh_access_save(SshAccessSaveParams {
+            computer_id: engine.computer_id(computer).await?,
+            device_id: None,
+            enabled,
+            port,
+            bind_address,
+            keys,
+        }))
+        .await
 }
 
 /// Which computer a connection export is for: a name on this device, or a computer of a
@@ -75,19 +79,20 @@ pub(crate) async fn connection(
         (None, _, Some(name)) => engine.computer_id(name).await?,
         (None, _, None) => return Err(EngineError::internal("Missing computer name.")),
     };
-    let mut params = json!({"computerId": computer_id, "download": download});
-    if let Some(device_id) = &target.device_id {
-        params["deviceId"] = Value::String(device_id.clone());
-    }
-    if let Some(network) = network {
-        params["network"] = Value::Bool(network);
-    }
-    if download {
-        params["destination"] = Value::String(
-            destination.ok_or_else(|| EngineError::internal("Choose where to save the key."))?,
-        );
-    }
-    let reply = engine.call("sshAccess.connection", params).await?;
+    let destination = if download {
+        Some(destination.ok_or_else(|| EngineError::internal("Choose where to save the key."))?)
+    } else {
+        None
+    };
+    let reply = engine
+        .call(requests::ssh_access_connection(SshAccessConnectionParams {
+            computer_id,
+            device_id: target.device_id.clone(),
+            network,
+            download,
+            destination,
+        }))
+        .await?;
     Ok(reply.as_str().filter(|_| !download).map(str::to_owned))
 }
 
@@ -163,20 +168,22 @@ pub(crate) async fn ssh_connection(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
 
-    fn replies(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "sshAccess.state" | "sshAccess.save" => Ok(json!({"computers": []})),
-            "sshAccess.connection" if params["download"] == true => Ok(Value::Null),
-            "sshAccess.connection" => Ok(json!("ssh -p 2222 user@127.0.0.1")),
+            MethodName::SshAccessState | MethodName::SshAccessSave => Ok(json!({"computers": []})),
+            MethodName::SshAccessConnection if params["download"] == true => Ok(Value::Null),
+            MethodName::SshAccessConnection => Ok(json!("ssh -p 2222 user@127.0.0.1")),
             _ => Ok(Value::Null),
         }
     }
@@ -200,7 +207,7 @@ mod forwarding_tests {
             .await
             .unwrap();
         assert_eq!(
-            fake.calls("sshAccess.save"),
+            fake.calls(MethodName::SshAccessSave),
             vec![
                 json!({"computerId": DEV, "enabled": true, "port": 2222, "bindAddress": "127.0.0.1", "keys": ["k"]}),
                 json!({"computerId": DEV, "enabled": false, "port": 2222, "bindAddress": "127.0.0.1"}),
@@ -235,7 +242,7 @@ mod forwarding_tests {
             None
         );
         assert_eq!(
-            fake.calls("sshAccess.connection"),
+            fake.calls(MethodName::SshAccessConnection),
             vec![
                 json!({"computerId": DEV, "download": false, "network": true}),
                 json!({"computerId": DEV, "deviceId": DEVICE, "download": true, "destination": "/tmp/k.key"}),
@@ -251,7 +258,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn unsupported_remote_access_is_the_typed_unavailable_state() {
         let fake = FakeEngine::start(|method, params| match method {
-            "sshAccess.connection" => Err((
+            MethodName::SshAccessConnection => Err((
                 "unsupported_remote_operation",
                 "Not available for that device yet.".into(),
             )),

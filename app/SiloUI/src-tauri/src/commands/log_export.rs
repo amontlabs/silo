@@ -1,6 +1,14 @@
 //! Log export: the user picks the destination here, `silod` writes the file as a job.
-use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use crate::engine_client::{
+    params::{decode, job_id as parse_job_id},
+    Engine, EngineClient, EngineError,
+};
+use serde_json::Value;
+use silo_api::methods::{
+    logs::{LogsExportParams, LogsQueryParams},
+    operations::CancelJobParams,
+    requests,
+};
 use std::sync::Mutex;
 use tauri::{AppHandle, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
@@ -76,15 +84,17 @@ async fn run_export(
     requests: Vec<Value>,
     destination: String,
 ) -> Result<bool, EngineError> {
-    let requests: Vec<Value> = requests
+    let requests = requests
         .into_iter()
-        .map(super::runtime_logs::without_nulls)
-        .collect();
+        .map(|request| {
+            decode::<LogsQueryParams>(super::runtime_logs::without_nulls(request), "log query")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let started = engine
-        .call(
-            "logs.export",
-            json!({"requests": requests, "destination": destination}),
-        )
+        .call(requests::logs_export(LogsExportParams {
+            requests,
+            destination,
+        }))
         .await?;
     let job_id = started
         .get("jobId")
@@ -95,7 +105,10 @@ async fn run_export(
     // A cancel that arrived while the job was starting.
     if cancelled(state) {
         let _ = engine
-            .call("operations.cancel", json!({"jobId": job_id}))
+            .call(requests::operations_cancel(CancelJobParams {
+                job_id: parse_job_id(&job_id)?,
+                device_id: None,
+            }))
             .await;
     }
     match engine.wait_job(&job_id).await {
@@ -138,7 +151,10 @@ pub(crate) async fn cancel_export(
 ) -> Result<(), EngineError> {
     if let Some(job_id) = request_cancel(state) {
         engine
-            .call("operations.cancel", json!({"jobId": job_id}))
+            .call(requests::operations_cancel(CancelJobParams {
+                job_id: parse_job_id(&job_id)?,
+                device_id: None,
+            }))
             .await?;
     }
     Ok(())
@@ -190,17 +206,19 @@ pub(crate) async fn export_computer_logs(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     fn requests() -> Vec<Value> {
         vec![json!({"computerId": "c1", "deviceId": null})]
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "logs.export" => Ok(json!({"jobId": "export:1"})),
-            "operations.job.get" => {
-                Ok(json!({"jobId": "export:1", "state": "finished", "outcome": {"result": true}}))
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::LogsExport => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
+                Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": true}}))
             }
             _ => Ok(Value::Null),
         }
@@ -218,14 +236,14 @@ mod forwarding_tests {
         .unwrap();
         assert!(saved);
         assert_eq!(
-            fake.calls("logs.export"),
+            fake.calls(MethodName::LogsExport),
             vec![
                 json!({"requests": [{"computerId": "c1"}], "destination": "/tmp/silo-logs.jsonl"})
             ]
         );
         assert_eq!(
-            fake.calls("operations.job.acknowledge"),
-            vec![json!({"jobId": "export:1"})]
+            fake.calls(MethodName::OperationsJobAcknowledge),
+            vec![json!({"jobId": "job:1"})]
         );
         // The flow is free again afterwards.
         assert!(begin(&state).is_ok());
@@ -239,7 +257,7 @@ mod forwarding_tests {
         assert!(!export_logs(&engine, &state, requests(), || Ok(None))
             .await
             .unwrap());
-        assert!(fake.calls("logs.export").is_empty());
+        assert!(fake.calls(MethodName::LogsExport).is_empty());
     }
 
     #[tokio::test]
@@ -260,23 +278,23 @@ mod forwarding_tests {
     #[tokio::test]
     async fn cancelling_cancels_the_running_job_and_reports_no_file() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => Ok(json!({"jobId": "export:1", "state": "finished",
+            MethodName::OperationsJobGet => Ok(json!({"jobId": "job:1", "state": "finished",
                 "outcome": {"error": {"code": "cancelled", "message": "Cancelled."}}})),
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;
         let state = Mutex::new(ExportState::default());
         begin(&state).unwrap();
-        state.lock().unwrap().job_id = Some("export:1".into());
+        state.lock().unwrap().job_id = Some("job:1".into());
         cancel_export(&engine, &state).await.unwrap();
         assert_eq!(
-            fake.calls("operations.cancel"),
-            vec![json!({"jobId": "export:1"})]
+            fake.calls(MethodName::OperationsCancel),
+            vec![json!({"jobId": "job:1"})]
         );
         // Nothing to cancel when no export runs.
         finish(&state);
         cancel_export(&engine, &state).await.unwrap();
-        assert_eq!(fake.calls("operations.cancel").len(), 1);
+        assert_eq!(fake.calls(MethodName::OperationsCancel).len(), 1);
 
         // A job the engine ends as cancelled is not an error.
         assert!(!export_logs(&engine, &state, requests(), || Ok(Some(
@@ -289,7 +307,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn an_engine_failure_is_typed_and_frees_the_flow() {
         let fake = FakeEngine::start(|method, params| match method {
-            "logs.export" => Err(("not_found", "This computer no longer exists.".into())),
+            MethodName::LogsExport => Err(("not_found", "This computer no longer exists.".into())),
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;

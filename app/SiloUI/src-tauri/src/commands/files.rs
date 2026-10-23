@@ -1,11 +1,9 @@
 //! Folder listings of the computers, through `files.list`.
 
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{files::FileListParams, requests};
 
-use crate::engine_client::{
-    forwarding::{resolve, with_device},
-    Engine, EngineClient, EngineError,
-};
+use crate::engine_client::{forwarding::resolve, Engine, EngineClient, EngineError};
 
 pub(crate) async fn list_directory(
     engine: &EngineClient,
@@ -15,12 +13,14 @@ pub(crate) async fn list_directory(
     snapshot_id: Option<String>,
 ) -> Result<Value, EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
-    let mut params = json!({"computerId": computer_id, "path": path, "offset": offset});
-    if let Some(snapshot_id) = snapshot_id {
-        params["snapshotId"] = Value::String(snapshot_id);
-    }
     engine
-        .call("files.list", with_device(params, device_id.as_deref()))
+        .call(requests::files_list(FileListParams {
+            computer_id,
+            device_id,
+            path,
+            offset: offset as u64,
+            snapshot_id,
+        }))
         .await
 }
 
@@ -39,18 +39,22 @@ pub(crate) async fn list_computer_directory(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "files.list" => Ok(json!({"entries": [], "nextOffset": null, "snapshotId": "s1"})),
+            MethodName::FilesList => {
+                Ok(json!({"entries": [], "nextOffset": null, "snapshotId": "s1"}))
+            }
             _ => Ok(Value::Null),
         }
     }
@@ -73,7 +77,7 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(
-            fake.calls("files.list"),
+            fake.calls(MethodName::FilesList),
             vec![
                 json!({"computerId": DEV, "path": "/workspace", "offset": 0}),
                 json!({"computerId": DEV, "deviceId": DEVICE, "path": "/workspace/a", "offset": 200, "snapshotId": "s1"}),
@@ -84,7 +88,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn listing_failures_are_typed_and_unknown_computers_never_reach_the_engine() {
         let fake = FakeEngine::start(|method, params| match method {
-            "files.list" => Err(("not_found", "That folder no longer exists.".into())),
+            MethodName::FilesList => Err(("not_found", "That folder no longer exists.".into())),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -97,6 +101,6 @@ mod forwarding_tests {
                 .await
                 .is_err()
         );
-        assert_eq!(fake.calls("files.list").len(), 1);
+        assert_eq!(fake.calls(MethodName::FilesList).len(), 1);
     }
 }

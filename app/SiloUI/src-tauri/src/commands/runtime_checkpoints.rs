@@ -1,16 +1,21 @@
 //! Tauri adapters for checkpoint commands: each starts a `checkpoints.*` job in `silod`,
 //! waits for its outcome and returns the Linux application state the UI renders.
-use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use crate::engine_client::{params::target, Engine, EngineClient, EngineError};
+use serde_json::Value;
+use silo_api::methods::{
+    checkpoints::{
+        CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams, CheckpointUsageParams,
+    },
+    kind, requests, Request,
+};
 use tauri::{AppHandle, Manager};
 
 /// Runs one checkpoint job and returns the resulting Linux state.
 pub(crate) async fn checkpoint_job(
     engine: &EngineClient,
-    method: &str,
-    params: Value,
+    request: Request<kind::Job>,
 ) -> Result<Value, EngineError> {
-    engine.run_job(method, params).await?;
+    engine.run_job(request).await?;
     engine.application_source(false).await
 }
 
@@ -21,8 +26,12 @@ pub(crate) async fn create(
 ) -> Result<Value, EngineError> {
     checkpoint_job(
         engine,
-        "checkpoints.create",
-        json!({"computerId": computer_id, "name": name}),
+        requests::checkpoints_create(CheckpointCreateParams {
+            computer_id: computer_id.to_owned(),
+            device_id: None,
+            name: name.to_owned(),
+            kind: None,
+        }),
     )
     .await
 }
@@ -35,8 +44,12 @@ pub(crate) async fn fork(
 ) -> Result<Value, EngineError> {
     checkpoint_job(
         engine,
-        "checkpoints.fork",
-        json!({"computerId": computer_id, "checkpointId": checkpoint_id, "newName": new_name}),
+        requests::checkpoints_fork(CheckpointForkParams {
+            computer_id: computer_id.to_owned(),
+            device_id: None,
+            checkpoint_id: checkpoint_id.map(str::to_owned),
+            new_name: new_name.to_owned(),
+        }),
     )
     .await
 }
@@ -48,8 +61,11 @@ pub(crate) async fn restore(
 ) -> Result<Value, EngineError> {
     checkpoint_job(
         engine,
-        "checkpoints.restore",
-        json!({"computerId": computer_id, "checkpointId": checkpoint_id}),
+        requests::checkpoints_restore(CheckpointTargetParams {
+            computer_id: computer_id.to_owned(),
+            device_id: None,
+            checkpoint_id: checkpoint_id.to_owned(),
+        }),
     )
     .await
 }
@@ -60,8 +76,7 @@ pub(crate) async fn abandon(
 ) -> Result<Value, EngineError> {
     checkpoint_job(
         engine,
-        "checkpoints.abandonRestore",
-        json!({"computerId": computer_id}),
+        requests::checkpoints_abandon_restore(target(computer_id, None)),
     )
     .await
 }
@@ -73,15 +88,21 @@ pub(crate) async fn delete(
 ) -> Result<Value, EngineError> {
     checkpoint_job(
         engine,
-        "checkpoints.delete",
-        json!({"computerId": computer_id, "checkpointId": checkpoint_id}),
+        requests::checkpoints_delete(CheckpointTargetParams {
+            computer_id: computer_id.to_owned(),
+            device_id: None,
+            checkpoint_id: checkpoint_id.to_owned(),
+        }),
     )
     .await
 }
 
 pub(crate) async fn usage(engine: &EngineClient, computer_id: &str) -> Result<Value, EngineError> {
     engine
-        .call("checkpoints.usage", json!({"computerId": computer_id}))
+        .call(requests::checkpoints_usage(CheckpointUsageParams {
+            computer_id: computer_id.to_owned(),
+            device_id: None,
+        }))
         .await
 }
 
@@ -156,24 +177,26 @@ pub(crate) async fn read_checkpoint_usage(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "checkpoints.create"
-            | "checkpoints.fork"
-            | "checkpoints.restore"
-            | "checkpoints.delete"
-            | "checkpoints.abandonRestore" => Ok(json!({"jobId": "job:1"})),
-            "operations.job.get" => {
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::CheckpointsCreate
+            | MethodName::CheckpointsFork
+            | MethodName::CheckpointsRestore
+            | MethodName::CheckpointsDelete
+            | MethodName::CheckpointsAbandonRestore => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
-            "computers.list" => {
+            MethodName::ComputersList => {
                 Ok(json!({"linux": {"computers": [{"configuration": {"id": DEV}}]}, "macos": {}}))
             }
-            "checkpoints.usage" => Ok(json!({"totalBytes": 5, "checkpoints": []})),
+            MethodName::CheckpointsUsage => Ok(json!({"totalBytes": 5, "checkpoints": []})),
             _ => Ok(Value::Null),
         }
     }
@@ -192,26 +215,26 @@ mod forwarding_tests {
             assert_eq!(state["computers"][0]["configuration"]["id"], DEV);
         }
         assert_eq!(
-            fake.calls("checkpoints.create"),
+            fake.calls(MethodName::CheckpointsCreate),
             vec![json!({"computerId": DEV, "name": "before"})]
         );
         assert_eq!(
-            fake.calls("checkpoints.fork"),
+            fake.calls(MethodName::CheckpointsFork),
             vec![json!({"computerId": DEV, "checkpointId": null, "newName": "copy"})]
         );
         assert_eq!(
-            fake.calls("checkpoints.restore"),
+            fake.calls(MethodName::CheckpointsRestore),
             vec![json!({"computerId": DEV, "checkpointId": "cp1"})]
         );
         assert_eq!(
-            fake.calls("checkpoints.abandonRestore"),
+            fake.calls(MethodName::CheckpointsAbandonRestore),
             vec![json!({"computerId": DEV})]
         );
         assert_eq!(
-            fake.calls("checkpoints.delete"),
+            fake.calls(MethodName::CheckpointsDelete),
             vec![json!({"computerId": DEV, "checkpointId": "cp1"})]
         );
-        assert_eq!(fake.calls("operations.job.acknowledge").len(), 5);
+        assert_eq!(fake.calls(MethodName::OperationsJobAcknowledge).len(), 5);
     }
 
     #[tokio::test]
@@ -220,7 +243,7 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         assert_eq!(usage(&engine, DEV).await.unwrap()["totalBytes"], 5);
         assert_eq!(
-            fake.calls("checkpoints.usage"),
+            fake.calls(MethodName::CheckpointsUsage),
             vec![json!({"computerId": DEV})]
         );
     }
@@ -228,7 +251,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_failed_job_is_the_commands_error_and_no_state_is_read() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished",
+            MethodName::OperationsJobGet => Ok(json!({"jobId": "job:1", "state": "finished",
                 "outcome": {"error": {"code": "busy", "message": "A checkpoint operation is in progress."}}})),
             other => replies(other, params),
         });
@@ -238,13 +261,15 @@ mod forwarding_tests {
             (error.code.as_str(), error.message.as_str()),
             ("busy", "A checkpoint operation is in progress.")
         );
-        assert!(fake.calls("computers.list").is_empty());
+        assert!(fake.calls(MethodName::ComputersList).is_empty());
     }
 
     #[tokio::test]
     async fn a_refusal_at_start_is_typed() {
         let fake = FakeEngine::start(|method, params| match method {
-            "checkpoints.restore" => Err(("not_found", "This computer no longer exists.".into())),
+            MethodName::CheckpointsRestore => {
+                Err(("not_found", "This computer no longer exists.".into()))
+            }
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;

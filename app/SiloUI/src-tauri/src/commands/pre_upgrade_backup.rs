@@ -3,10 +3,13 @@
 
 use std::path::PathBuf;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 use tauri::WebviewWindow;
 
-use crate::engine_client::{forwarding::not_found, Engine, EngineClient, EngineError};
+use crate::engine_client::{
+    forwarding::not_found, params::device, Engine, EngineClient, EngineError,
+};
+use silo_api::methods::requests;
 
 fn require_main(window: &WebviewWindow) -> Result<(), EngineError> {
     if window.label() == "main" {
@@ -36,34 +39,36 @@ fn status_for_ui(backup: &Value) -> Value {
 
 pub(crate) async fn read(engine: &EngineClient) -> Result<Value, EngineError> {
     let backup = engine
-        .call("migration.preUpgradeBackup.get", json!({}))
+        .call(requests::migration_pre_upgrade_backup_get(device(None)))
         .await?;
     Ok(status_for_ui(&backup))
 }
 
 pub(crate) async fn measure(engine: &EngineClient) -> Result<Value, EngineError> {
     engine
-        .call("migration.preUpgradeBackup.measure", json!({}))
+        .call(requests::migration_pre_upgrade_backup_measure(device(None)))
         .await
 }
 
 pub(crate) async fn delete(engine: &EngineClient) -> Result<(), EngineError> {
     engine
-        .call("migration.preUpgradeBackup.delete", json!({}))
+        .call(requests::migration_pre_upgrade_backup_delete(device(None)))
         .await?;
     Ok(())
 }
 
 pub(crate) async fn acknowledge_notice(engine: &EngineClient) -> Result<(), EngineError> {
     engine
-        .call("migration.preUpgradeBackup.acknowledgeNotice", json!({}))
+        .call(requests::migration_pre_upgrade_backup_acknowledge_notice(
+            device(None),
+        ))
         .await?;
     Ok(())
 }
 
 pub(crate) async fn reveal_path(engine: &EngineClient) -> Result<PathBuf, EngineError> {
     engine
-        .call("migration.preUpgradeBackup.get", json!({}))
+        .call(requests::migration_pre_upgrade_backup_get(device(None)))
         .await?
         .get("path")
         .and_then(Value::as_str)
@@ -128,14 +133,16 @@ pub(crate) async fn acknowledge_pre_upgrade_backup_notice(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "migration.preUpgradeBackup.get" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::MigrationPreUpgradeBackupGet => Ok(json!({
                 "path": "/data/pre-upgrade", "deleteAt": "2030-01-01T00:00:00Z", "noticePending": true
             })),
-            "migration.preUpgradeBackup.measure" => Ok(json!(4096)),
+            MethodName::MigrationPreUpgradeBackupMeasure => Ok(json!(4096)),
             _ => Ok(Value::Null),
         }
     }
@@ -155,9 +162,13 @@ mod forwarding_tests {
         assert_eq!(measure(&engine).await.unwrap(), json!(4096));
         delete(&engine).await.unwrap();
         acknowledge_notice(&engine).await.unwrap();
-        assert_eq!(fake.calls("migration.preUpgradeBackup.delete").len(), 1);
         assert_eq!(
-            fake.calls("migration.preUpgradeBackup.acknowledgeNotice")
+            fake.calls(MethodName::MigrationPreUpgradeBackupDelete)
+                .len(),
+            1
+        );
+        assert_eq!(
+            fake.calls(MethodName::MigrationPreUpgradeBackupAcknowledgeNotice)
                 .len(),
             1
         );
@@ -166,7 +177,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn no_backup_is_null_and_has_nothing_to_reveal() {
         let fake = FakeEngine::start(|method, params| match method {
-            "migration.preUpgradeBackup.get" => Ok(Value::Null),
+            MethodName::MigrationPreUpgradeBackupGet => Ok(Value::Null),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -177,7 +188,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn engine_errors_pass_through() {
         let fake = FakeEngine::start(|method, params| match method {
-            "migration.preUpgradeBackup.delete" => Err(("busy", "A migration is running.".into())),
+            MethodName::MigrationPreUpgradeBackupDelete => {
+                Err(("busy", "A migration is running.".into()))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;

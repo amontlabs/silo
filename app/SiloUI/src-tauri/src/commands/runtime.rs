@@ -7,11 +7,31 @@
 // results so the UI is unchanged; where the engine answers with a job, the command waits for
 // its outcome and returns the state the UI used to receive.
 
-use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use crate::engine_client::{
+    params::{decode, device, job_id as parse_job_id, target},
+    Engine, EngineClient, EngineError,
+};
+use serde_json::Value;
+use silo_api::methods::{
+    common::EmptyParams,
+    computers::{
+        ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
+        ComputerCreationSkipWaitParams, ComputerIdentitiesParams, ComputerIdentity,
+        ComputerShellParams,
+    },
+    kind,
+    operations::{CancelJobParams, OperationsListParams},
+    requests,
+    terminal::{EditorCommandParams, TerminalCommandParams},
+    Request,
+};
 
 pub(crate) async fn operation_queue(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("operations.list", json!({})).await
+    engine
+        .call(requests::operations_list(OperationsListParams {
+            device_id: None,
+        }))
+        .await
 }
 
 /// Cancels by the queue id the UI shows. The engine cancels jobs, so the id is resolved to
@@ -29,7 +49,10 @@ pub(crate) async fn cancel_queue_entry(engine: &EngineClient, id: u64) -> Result
         .ok_or_else(|| EngineError::internal("That operation cannot be cancelled."))?
         .to_owned();
     engine
-        .call("operations.cancel", json!({"jobId": job_id}))
+        .call(requests::operations_cancel(CancelJobParams {
+            job_id: parse_job_id(&job_id)?,
+            device_id: None,
+        }))
         .await?;
     Ok(())
 }
@@ -49,21 +72,34 @@ pub(crate) async fn cancel_operation(engine: Engine<'_>, id: u64) -> Result<(), 
 async fn engine_identities(
     engine: &EngineClient,
     identities: Vec<Value>,
-) -> Result<Vec<Value>, EngineError> {
+) -> Result<ComputerIdentitiesParams, EngineError> {
     let mut converted = Vec::with_capacity(identities.len());
     for identity in identities {
         let name = identity
             .get("computer")
             .and_then(Value::as_str)
             .ok_or_else(|| EngineError::internal("A Git identity names no computer."))?;
-        converted.push(json!({
-            "computerId": engine.computer_id(name).await?,
-            "name": identity.get("name").cloned().unwrap_or(Value::Null),
-            "email": identity.get("email").cloned().unwrap_or(Value::Null),
-            "apply": identity.get("apply").cloned().unwrap_or(Value::Bool(false)),
-        }));
+        let text = |field: &str| {
+            identity
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| EngineError::internal(format!("A Git identity has no {field}.")))
+        };
+        converted.push(ComputerIdentity {
+            computer_id: engine.computer_id(name).await?,
+            name: text("name")?,
+            email: text("email")?,
+            apply: identity
+                .get("apply")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        });
     }
-    Ok(converted)
+    Ok(ComputerIdentitiesParams {
+        identities: converted,
+        device_id: None,
+    })
 }
 
 pub(crate) async fn verify_identities(
@@ -72,10 +108,7 @@ pub(crate) async fn verify_identities(
 ) -> Result<bool, EngineError> {
     let identities = engine_identities(engine, identities).await?;
     let verified = engine
-        .call(
-            "computers.identities.verify",
-            json!({"identities": identities}),
-        )
+        .call(requests::computers_identities_verify(identities))
         .await?;
     Ok(verified.as_bool().unwrap_or(false))
 }
@@ -86,10 +119,7 @@ pub(crate) async fn configure_identities(
 ) -> Result<(), EngineError> {
     let identities = engine_identities(engine, identities).await?;
     engine
-        .run_job(
-            "computers.identities.configure",
-            json!({"identities": identities}),
-        )
+        .run_job(requests::computers_identities_configure(identities))
         .await?;
     Ok(())
 }
@@ -117,7 +147,7 @@ pub(crate) async fn configure_computer_identities(
 #[tauri::command]
 pub(crate) async fn read_computer_configuration(engine: Engine<'_>) -> Result<Value, String> {
     engine
-        .call("computers.configuration.read", json!({}))
+        .call(requests::computers_configuration_read(device(None)))
         .await
         .map_err(String::from)
 }
@@ -138,7 +168,7 @@ pub(crate) async fn read_application_shell(
     error: String,
 ) -> Result<Value, String> {
     engine
-        .call("computers.shell", json!({"error": error}))
+        .call(requests::computers_shell(ComputerShellParams { error }))
         .await
         .map_err(String::from)
 }
@@ -157,9 +187,12 @@ pub(crate) async fn lifecycle_action(
     match action {
         "open-terminal" => {
             let command = engine
-                .call("terminal.command", json!({"computerId": computer_id}))
+                .call(requests::terminal_command(TerminalCommandParams {
+                    computer_id,
+                    device_id: None,
+                }))
                 .await?;
-            let settings = engine.call("settings.read", json!({})).await?;
+            let settings = engine.call(requests::settings_read(EmptyParams {})).await?;
             let settings = settings
                 .get("settings")
                 .and_then(Value::as_object)
@@ -168,25 +201,31 @@ pub(crate) async fn lifecycle_action(
             open_terminal(&settings, &argv(&command)?).map_err(EngineError::internal)?;
         }
         "open-editor" => {
-            let mut params = json!({"computerId": computer_id});
-            if let Some(path) = path {
-                params["path"] = Value::String(path);
-            }
-            let command = engine.call("editor.command", params).await?;
+            let command = engine
+                .call(requests::editor_command(EditorCommandParams {
+                    computer_id,
+                    device_id: None,
+                    path,
+                }))
+                .await?;
             open_editor(&argv(&command)?).map_err(EngineError::internal)?;
         }
         "dismiss-error" => {
             return engine
-                .call("computers.dismissError", json!({"computerId": computer_id}))
+                .call(requests::computers_dismiss_error(target(
+                    &computer_id,
+                    None,
+                )))
                 .await;
         }
         "start" | "stop" | "restart" => {
-            engine
-                .run_job(
-                    &format!("computers.{action}"),
-                    json!({"computerId": computer_id}),
-                )
-                .await?;
+            let params = target(&computer_id, None);
+            let request: Request<kind::Job> = match action {
+                "start" => requests::computers_start(params),
+                "stop" => requests::computers_stop(params),
+                _ => requests::computers_restart(params),
+            };
+            engine.run_job(request).await?;
         }
         other => {
             return Err(EngineError::internal(format!(
@@ -230,7 +269,7 @@ pub(crate) async fn computer_action(
 #[tauri::command]
 pub(crate) async fn read_setup_activity(engine: Engine<'_>) -> Result<Value, String> {
     engine
-        .call("activity.setup.read", json!({}))
+        .call(requests::activity_setup_read(device(None)))
         .await
         .map_err(String::from)
 }
@@ -241,10 +280,12 @@ pub(crate) async fn skip_computer_use_wait(
     request_id: String,
 ) -> Result<(), String> {
     engine
-        .call(
-            "computers.creation.skipComputerUseWait",
-            json!({"requestId": request_id}),
-        )
+        .call(requests::computers_creation_skip_computer_use_wait(
+            ComputerCreationSkipWaitParams {
+                request_id,
+                device_id: None,
+            },
+        ))
         .await
         .map(drop)
         .map_err(String::from)
@@ -255,15 +296,18 @@ pub(crate) async fn retry_configuration(
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({});
-    if let Some(request_id) = request_id {
-        params["requestId"] = Value::String(request_id);
-    }
-    if let Some(name) = retry_computer {
-        params["retryComputerId"] = Value::String(engine.computer_id(&name).await?);
-    }
+    let retry_computer_id = match retry_computer {
+        Some(name) => Some(engine.computer_id(&name).await?),
+        None => None,
+    };
     engine
-        .run_job("computers.configuration.retry", params)
+        .run_job(requests::computers_configuration_retry(
+            ComputerConfigurationRetryParams {
+                request_id,
+                retry_computer_id,
+                device_id: None,
+            },
+        ))
         .await
 }
 
@@ -273,15 +317,20 @@ pub(crate) async fn change_configuration(
     request_id: Option<String>,
     retry_computer: Option<String>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({"change": change});
-    if let Some(request_id) = request_id {
-        params["requestId"] = Value::String(request_id);
-    }
-    if let Some(name) = retry_computer {
-        params["retryComputerId"] = Value::String(engine.computer_id(&name).await?);
-    }
+    let change = decode(change, "computer configuration change")?;
+    let retry_computer_id = match retry_computer {
+        Some(name) => Some(engine.computer_id(&name).await?),
+        None => None,
+    };
     engine
-        .run_job("computers.configuration.change", params)
+        .run_job(requests::computers_configuration_change(
+            ComputerConfigurationChangeParams {
+                change,
+                request_id,
+                retry_computer_id,
+                device_id: None,
+            },
+        ))
         .await
 }
 
@@ -312,6 +361,8 @@ pub(crate) async fn change_computer_configuration(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
     use std::sync::{Arc, Mutex};
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
@@ -323,25 +374,27 @@ mod forwarding_tests {
         })
     }
 
-    fn engine_replies(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+    fn engine_replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(listing()),
-            "computers.start" | "computers.stop" | "computers.restart" => {
-                Ok(json!({"jobId": "job:1"}))
-            }
-            "operations.job.get" => {
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(listing()),
+            MethodName::ComputersStart
+            | MethodName::ComputersStop
+            | MethodName::ComputersRestart => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
-            "operations.list" => Ok(json!({
+            MethodName::OperationsList => Ok(json!({
                 "running": [{"id": 7, "jobId": "job:9"}, {"id": 8}],
                 "waiting": [{"id": 9, "jobId": "job:10"}],
                 "unacknowledgedJobIds": []
             })),
-            "terminal.command" => Ok(json!({"argv": ["/usr/bin/ssh", "-t", "alias"]})),
-            "editor.command" => Ok(json!({"argv": ["code", "--folder-uri", params["path"]]})),
-            "settings.read" => Ok(json!({"settings": {"terminalApplication": "x"}})),
-            "computers.dismissError" => Ok(json!({"computers": []})),
+            MethodName::TerminalCommand => Ok(json!({"argv": ["/usr/bin/ssh", "-t", "alias"]})),
+            MethodName::EditorCommand => {
+                Ok(json!({"argv": ["code", "--folder-uri", params["path"]]}))
+            }
+            MethodName::SettingsRead => Ok(json!({"settings": {"terminalApplication": "x"}})),
+            MethodName::ComputersDismissError => Ok(json!({"computers": []})),
             _ => Ok(Value::Null),
         }
     }
@@ -356,7 +409,7 @@ mod forwarding_tests {
         );
         cancel_queue_entry(&engine, 9).await.unwrap();
         assert_eq!(
-            fake.calls("operations.cancel"),
+            fake.calls(MethodName::OperationsCancel),
             vec![json!({"jobId": "job:10"})]
         );
         // The display id is never the cancellation key, and an entry without a job has none.
@@ -365,7 +418,7 @@ mod forwarding_tests {
             cancel_queue_entry(&engine, 99).await.unwrap_err().code,
             "not_found"
         );
-        assert_eq!(fake.calls("operations.cancel").len(), 1);
+        assert_eq!(fake.calls(MethodName::OperationsCancel).len(), 1);
     }
 
     #[tokio::test]
@@ -384,11 +437,11 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(state["computers"][0]["configuration"]["name"], "dev");
         assert_eq!(
-            fake.calls("computers.start"),
+            fake.calls(MethodName::ComputersStart),
             vec![json!({"computerId": DEV})]
         );
         assert_eq!(
-            fake.calls("operations.job.acknowledge"),
+            fake.calls(MethodName::OperationsJobAcknowledge),
             vec![json!({"jobId": "job:1"})]
         );
         let missing = lifecycle_action(&engine, "stop", "ghost", None, |_, _| Ok(()), |_| Ok(()))
@@ -424,7 +477,7 @@ mod forwarding_tests {
         assert_eq!(settings["terminalApplication"], "x");
         assert_eq!(argv, vec!["/usr/bin/ssh", "-t", "alias"]);
         assert_eq!(
-            fake.calls("terminal.command"),
+            fake.calls(MethodName::TerminalCommand),
             vec![json!({"computerId": DEV})]
         );
 
@@ -448,7 +501,7 @@ mod forwarding_tests {
             vec!["code", "--folder-uri", "/workspace/app"]
         );
         assert_eq!(
-            fake.calls("editor.command"),
+            fake.calls(MethodName::EditorCommand),
             vec![json!({"computerId": DEV, "path": "/workspace/app"})]
         );
         // A launch that fails is reported, not swallowed.
@@ -480,17 +533,17 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(state, json!({"computers": []}));
-        assert!(fake.calls("operations.job.get").is_empty());
+        assert!(fake.calls(MethodName::OperationsJobGet).is_empty());
     }
 
     #[tokio::test]
     async fn identities_and_configuration_changes_address_computers_by_id() {
         let fake = FakeEngine::start(|method, params| match method {
-            "computers.identities.verify" => Ok(json!(true)),
-            "computers.identities.configure"
-            | "computers.configuration.retry"
-            | "computers.configuration.change" => Ok(json!({"jobId": "setup:r1"})),
-            "operations.job.get" => Ok(json!({"jobId": "setup:r1", "state": "finished",
+            MethodName::ComputersIdentitiesVerify => Ok(json!(true)),
+            MethodName::ComputersIdentitiesConfigure
+            | MethodName::ComputersConfigurationRetry
+            | MethodName::ComputersConfigurationChange => Ok(json!({"jobId": "setup:r1"})),
+            MethodName::OperationsJobGet => Ok(json!({"jobId": "setup:r1", "state": "finished",
                 "outcome": {"result": {"computers": []}}})),
             other => engine_replies(other, params),
         });
@@ -504,11 +557,11 @@ mod forwarding_tests {
         let expected =
             json!([{"computerId": DEV, "name": "Ada", "email": "ada@example.com", "apply": true}]);
         assert_eq!(
-            fake.calls("computers.identities.verify")[0]["identities"],
+            fake.calls(MethodName::ComputersIdentitiesVerify)[0]["identities"],
             expected
         );
         assert_eq!(
-            fake.calls("computers.identities.configure")[0]["identities"],
+            fake.calls(MethodName::ComputersIdentitiesConfigure)[0]["identities"],
             expected
         );
 
@@ -522,7 +575,7 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(state, json!({"computers": []}));
         assert_eq!(
-            fake.calls("computers.configuration.change"),
+            fake.calls(MethodName::ComputersConfigurationChange),
             vec![
                 json!({"change": {"kind": "batch", "changes": []}, "requestId": "r1", "retryComputerId": DEV})
             ]
@@ -531,7 +584,7 @@ mod forwarding_tests {
             .await
             .unwrap();
         assert_eq!(
-            fake.calls("computers.configuration.retry"),
+            fake.calls(MethodName::ComputersConfigurationRetry),
             vec![json!({"requestId": "r1"})]
         );
         assert!(

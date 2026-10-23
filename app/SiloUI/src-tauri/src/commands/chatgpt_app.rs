@@ -1,13 +1,11 @@
 //! The ChatGPT app preparation: the engine downloads it; these commands read its status and
 //! ask for a retry through `silod`.
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{common::DeviceParams, requests};
 
-fn device_params(device: Option<String>) -> Value {
-    match device {
-        Some(device) => json!({"deviceId": device}),
-        None => json!({}),
-    }
+fn device_params(device: Option<String>) -> DeviceParams {
+    DeviceParams { device_id: device }
 }
 
 pub(crate) async fn status(
@@ -15,7 +13,7 @@ pub(crate) async fn status(
     device: Option<String>,
 ) -> Result<Value, EngineError> {
     engine
-        .call("preparation.chatgpt.status", device_params(device))
+        .call(requests::preparation_chatgpt_status(device_params(device)))
         .await
 }
 
@@ -24,7 +22,7 @@ pub(crate) async fn retry(
     device: Option<String>,
 ) -> Result<Value, EngineError> {
     engine
-        .call("preparation.chatgpt.retry", device_params(device))
+        .call(requests::preparation_chatgpt_retry(device_params(device)))
         .await
 }
 
@@ -50,13 +48,15 @@ pub(crate) async fn chatgpt_app_retry(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn status_and_retry_address_the_device_only_when_one_is_named() {
         let fake = FakeEngine::start(|method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "preparation.chatgpt.status" => Ok(json!({"state": "idle"})),
-            "preparation.chatgpt.retry" => Err((
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::PreparationChatgptStatus => Ok(json!({"state": "idle"})),
+            MethodName::PreparationChatgptRetry => Err((
                 "unsupported_remote_operation",
                 "That device is not reachable.".into(),
             )),
@@ -66,13 +66,13 @@ mod forwarding_tests {
         assert_eq!(status(&engine, None).await.unwrap()["state"], "idle");
         status(&engine, Some("d1".into())).await.unwrap();
         assert_eq!(
-            fake.calls("preparation.chatgpt.status"),
+            fake.calls(MethodName::PreparationChatgptStatus),
             vec![json!({}), json!({"deviceId": "d1"})]
         );
         let error = retry(&engine, Some("d1".into())).await.unwrap_err();
         assert_eq!(error.code, "unsupported_remote_operation");
         assert_eq!(
-            fake.calls("preparation.chatgpt.retry"),
+            fake.calls(MethodName::PreparationChatgptRetry),
             vec![json!({"deviceId": "d1"})]
         );
     }

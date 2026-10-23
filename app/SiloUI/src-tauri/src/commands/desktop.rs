@@ -1,6 +1,9 @@
 //! Tauri adapters for desktop and computer-use operations: each forwards to `silod`.
-use crate::engine_client::{targets, Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use crate::engine_client::{params::decode, targets, Engine, EngineClient, EngineError};
+use serde_json::Value;
+use silo_api::methods::{
+    computer_use::ComputerUseApprovalParams, desktop::DesktopActionParams, requests,
+};
 use tauri::Window;
 
 /// The computer's desktop status (`desktop.status`).
@@ -10,7 +13,7 @@ pub(crate) async fn desktop_state(
 ) -> Result<Value, EngineError> {
     let target = targets::resolve(engine, computer).await?;
     engine
-        .call("desktop.status", target.params(Value::Null))
+        .call(requests::desktop_status(target.computer()))
         .await
 }
 
@@ -25,12 +28,17 @@ pub(crate) async fn desktop_do(
     let outcome = match action {
         "setup-computer-use" | "setup-lcu" => {
             engine
-                .run_job("computerUse.setup", target.params(Value::Null))
+                .run_job(requests::computer_use_setup(target.computer()))
                 .await?
         }
         other => {
+            let action = decode(Value::String(other.to_owned()), "desktop action")?;
             engine
-                .run_job("desktop.action", target.params(json!({"action": other})))
+                .run_job(requests::desktop_action(DesktopActionParams {
+                    computer_id: target.computer_id.clone(),
+                    device_id: target.device_id.clone(),
+                    action,
+                }))
                 .await?
         }
     };
@@ -39,7 +47,7 @@ pub(crate) async fn desktop_do(
         Ok(outcome)
     } else {
         engine
-            .call("desktop.status", target.params(Value::Null))
+            .call(requests::desktop_status(target.computer()))
             .await
     }
 }
@@ -51,11 +59,16 @@ pub(crate) async fn approve(
     mode: &str,
 ) -> Result<Value, EngineError> {
     let target = targets::resolve(engine, computer).await?;
+    let mode = decode(Value::String(mode.to_owned()), "approval mode")?;
     engine
-        .call("computerUse.approval", target.params(json!({"mode": mode})))
+        .call(requests::computer_use_approval(ComputerUseApprovalParams {
+            computer_id: target.computer_id.clone(),
+            device_id: target.device_id.clone(),
+            mode,
+        }))
         .await?;
     engine
-        .call("desktop.status", target.params(Value::Null))
+        .call(requests::desktop_status(target.computer()))
         .await
 }
 
@@ -101,23 +114,27 @@ pub(crate) async fn desktop_action(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"kind": "linux", "configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "desktop.status" => {
+            MethodName::DesktopStatus => {
                 Ok(json!({"installed": true, "state": "running", "autoStart": true}))
             }
-            "desktop.action" | "computerUse.setup" => Ok(json!({"jobId": "job:1"})),
-            "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished",
+            MethodName::DesktopAction | MethodName::ComputerUseSetup => {
+                Ok(json!({"jobId": "job:1"}))
+            }
+            MethodName::OperationsJobGet => Ok(json!({"jobId": "job:1", "state": "finished",
                 "outcome": {"result": {"installed": true, "state": "stopped", "autoStart": true}}})),
-            "computerUse.approval" => Ok(json!({"approval": "auto"})),
+            MethodName::ComputerUseApproval => Ok(json!({"approval": "auto"})),
             _ => Ok(Value::Null),
         }
     }
@@ -131,13 +148,13 @@ mod forwarding_tests {
             "running"
         );
         assert_eq!(
-            fake.calls("desktop.status"),
+            fake.calls(MethodName::DesktopStatus),
             vec![json!({"computerId": DEV})]
         );
         let remote = format!("silo-remote:device-1:{DEV}");
         desktop_state(&engine, &remote).await.unwrap();
         assert_eq!(
-            fake.calls("desktop.status")[1],
+            fake.calls(MethodName::DesktopStatus)[1],
             json!({"computerId": DEV, "deviceId": "device-1"})
         );
         assert_eq!(
@@ -155,11 +172,11 @@ mod forwarding_tests {
             .unwrap();
         assert_eq!(status["state"], "stopped");
         assert_eq!(
-            fake.calls("desktop.action"),
+            fake.calls(MethodName::DesktopAction),
             vec![json!({"computerId": DEV, "action": "restart-streamer"})]
         );
         assert_eq!(
-            fake.calls("operations.job.acknowledge"),
+            fake.calls(MethodName::OperationsJobAcknowledge),
             vec![json!({"jobId": "job:1"})]
         );
     }
@@ -167,7 +184,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn setting_up_computer_use_is_its_own_job_and_reads_the_status_after() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => {
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
             other => replies(other, params),
@@ -178,10 +195,10 @@ mod forwarding_tests {
             .unwrap();
         assert_eq!(status["state"], "running");
         assert_eq!(
-            fake.calls("computerUse.setup"),
+            fake.calls(MethodName::ComputerUseSetup),
             vec![json!({"computerId": DEV})]
         );
-        assert!(fake.calls("desktop.action").is_empty());
+        assert!(fake.calls(MethodName::DesktopAction).is_empty());
     }
 
     #[tokio::test]
@@ -191,7 +208,7 @@ mod forwarding_tests {
         let status = approve(&engine, "dev", "auto").await.unwrap();
         assert_eq!(status["installed"], true);
         assert_eq!(
-            fake.calls("computerUse.approval"),
+            fake.calls(MethodName::ComputerUseApproval),
             vec![json!({"computerId": DEV, "mode": "auto"})]
         );
     }
@@ -199,7 +216,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_refused_action_is_a_typed_error() {
         let fake = FakeEngine::start(|method, params| match method {
-            "desktop.action" => Err(("unsupported_remote_operation", "Not on that device.".into())),
+            MethodName::DesktopAction => {
+                Err(("unsupported_remote_operation", "Not on that device.".into()))
+            }
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;

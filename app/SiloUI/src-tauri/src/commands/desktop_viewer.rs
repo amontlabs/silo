@@ -10,8 +10,12 @@ use std::{
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
-use serde_json::{json, Value};
-use silo_api::methods::display::ViewerOpenResult;
+use serde_json::Value;
+use silo_api::methods::{
+    common::{ComputerTargetParams, EmptyParams},
+    display::{ViewerConnectionParams, ViewerOpenResult},
+    requests,
+};
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewBuilder, WebviewUrl,
     WebviewWindowBuilder, Window,
@@ -303,12 +307,11 @@ async fn target_of(engine: &EngineClient, computer: &str) -> Result<Target, Engi
     }
 }
 
-fn target_params(target: &Target) -> Value {
-    let mut params = json!({"computerId": target.computer_id});
-    if let Some(device) = &target.device_id {
-        params["deviceId"] = json!(device);
+fn target_params(target: &Target) -> ComputerTargetParams {
+    ComputerTargetParams {
+        computer_id: target.computer_id.clone(),
+        device_id: target.device_id.clone(),
     }
-    params
 }
 
 /// The window's identity and display name, resolved through the engine; nothing is read
@@ -329,13 +332,15 @@ async fn resolve_viewer(engine: &EngineClient, computer: &str) -> Result<Resolve
     };
     // Verify the remote identity before creating a shell.
     let status = engine
-        .call("desktop.status", target_params(&target))
+        .call(requests::desktop_status(target_params(&target)))
         .await?;
     let configuration = status
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or(&target.computer_id);
-    let devices = engine.call("connections.devices.list", json!({})).await?;
+    let devices = engine
+        .call(requests::connections_devices_list(EmptyParams {}))
+        .await?;
     let device_name = devices
         .as_array()
         .into_iter()
@@ -355,7 +360,7 @@ async fn open_connection(
 ) -> Result<ViewerOpenResult, EngineError> {
     let target = target_of(engine, computer).await?;
     let opened = engine
-        .call("display.viewer.open", target_params(&target))
+        .call(requests::display_viewer_open(target_params(&target)))
         .await?;
     serde_json::from_value(opened)
         .map_err(|_| EngineError::internal("The engine returned an unreadable desktop connection."))
@@ -363,7 +368,9 @@ async fn open_connection(
 
 async fn close_connection(engine: &EngineClient, connection: &str) -> Result<(), EngineError> {
     engine
-        .call("display.viewer.close", json!({"connectionId": connection}))
+        .call(requests::display_viewer_close(ViewerConnectionParams {
+            connection_id: connection.to_owned(),
+        }))
         .await
         .map(|_| ())
 }
@@ -722,7 +729,9 @@ pub(crate) async fn desktop_viewer_detach(
 mod tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
     use silo_api::methods::display::ViewerCookie;
+    use silo_api::methods::MethodName;
 
     const DEVICE: &str = "22222222-2222-4222-8222-222222222222";
     const COMPUTER: &str = "11111111-1111-4111-8111-111111111111";
@@ -973,7 +982,7 @@ mod tests {
     #[tokio::test]
     async fn a_local_viewer_is_resolved_through_computers_list() {
         let fake = FakeEngine::start(|method, _| match method {
-            "computers.list" => Ok(computers_list()),
+            MethodName::ComputersList => Ok(computers_list()),
             _ => Ok(Value::Null),
         });
         let (client, _) = connected_client(&fake).await;
@@ -992,11 +1001,11 @@ mod tests {
     #[tokio::test]
     async fn a_remote_viewer_is_named_by_the_engine_and_its_device() {
         let fake = FakeEngine::start(|method, _| match method {
-            "desktop.status" => Ok(json!({"name": "build box"})),
-            "connections.devices.list" => {
+            MethodName::DesktopStatus => Ok(json!({"name": "build box"})),
+            MethodName::ConnectionsDevicesList => {
                 Ok(json!([{"id": DEVICE, "name": "Office", "address": "x"}]))
             }
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("internal", "unexpected".into())),
         });
         let (client, _) = connected_client(&fake).await;
@@ -1005,7 +1014,7 @@ mod tests {
         assert_eq!(resolved.name, "build box · Office");
         assert_eq!(resolved.stable_id, computer);
         assert_eq!(
-            fake.calls("desktop.status"),
+            fake.calls(MethodName::DesktopStatus),
             [json!({"computerId": COMPUTER, "deviceId": DEVICE})]
         );
     }
@@ -1013,7 +1022,7 @@ mod tests {
     #[tokio::test]
     async fn a_remote_refusal_passes_through_typed() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err((
                 "unsupported_remote_operation",
                 "desktop.status on a remote device".into(),
@@ -1023,32 +1032,32 @@ mod tests {
         let computer = format!("silo-remote:{DEVICE}:{COMPUTER}");
         let error = resolve_viewer(&client, &computer).await.unwrap_err();
         assert!(error.is("unsupported_remote_operation"));
-        assert!(fake.calls("display.viewer.open").is_empty());
+        assert!(fake.calls(MethodName::DisplayViewerOpen).is_empty());
     }
 
     #[tokio::test]
     async fn attach_opens_a_connection_and_detach_closes_it() {
         let fake = FakeEngine::start(|method, _| match method {
-            "computers.list" => Ok(computers_list()),
-            "display.viewer.open" => Ok(json!({
+            MethodName::ComputersList => Ok(computers_list()),
+            MethodName::DisplayViewerOpen => Ok(json!({
                 "connectionId": "c1", "url": "http://127.0.0.1:41000/",
                 "cookie": {"name": "silo", "value": "v", "domain": "127.0.0.1",
                            "path": "/", "httpOnly": true},
                 "initScript": "/*b*/", "name": "dev"})),
-            "display.viewer.close" => Ok(Value::Null),
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::DisplayViewerClose => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("internal", "unexpected".into())),
         });
         let (client, _) = connected_client(&fake).await;
         let result = open_connection(&client, "dev").await.unwrap();
         assert_eq!(result.connection_id, "c1");
         assert_eq!(
-            fake.calls("display.viewer.open"),
+            fake.calls(MethodName::DisplayViewerOpen),
             [json!({"computerId": COMPUTER})]
         );
         close_connection(&client, "c1").await.unwrap();
         assert_eq!(
-            fake.calls("display.viewer.close"),
+            fake.calls(MethodName::DisplayViewerClose),
             [json!({"connectionId": "c1"})]
         );
     }
@@ -1056,8 +1065,8 @@ mod tests {
     #[tokio::test]
     async fn a_refused_open_keeps_the_engines_code() {
         let fake = FakeEngine::start(|method, _| match method {
-            "computers.list" => Ok(computers_list()),
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::ComputersList => Ok(computers_list()),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("busy", "Close an unused desktop viewer first.".into())),
         });
         let (client, _) = connected_client(&fake).await;

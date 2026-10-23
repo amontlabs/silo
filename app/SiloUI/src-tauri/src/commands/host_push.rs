@@ -3,24 +3,14 @@
 //! operations it gets back carry that same string.
 
 use serde_json::{json, Value};
-
-use crate::engine_client::{
-    forwarding::{resolve, with_device},
-    Engine, EngineClient, EngineError,
+use silo_api::methods::{
+    push::{PushDismissParams, PushStartParams, PushStatusParams},
+    requests,
 };
 
-fn repository_params(
-    computer_id: &str,
-    device_id: Option<&str>,
-    repository_path: &str,
-    operation_id: Option<&str>,
-) -> Value {
-    let mut params = json!({"computerId": computer_id, "repositoryPath": repository_path});
-    if let Some(operation_id) = operation_id {
-        params["operationId"] = Value::String(operation_id.to_owned());
-    }
-    with_device(params, device_id)
-}
+use crate::engine_client::{
+    forwarding::resolve, params::decode, Engine, EngineClient, EngineError,
+};
 
 /// The operation as the UI keys it: under the computer string it asked about.
 fn for_ui(mut operation: Value, computer: &str) -> Value {
@@ -38,15 +28,12 @@ pub(crate) async fn status(
 ) -> Result<Value, EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
     let operation = engine
-        .call(
-            "push.status",
-            repository_params(
-                &computer_id,
-                device_id.as_deref(),
-                repository_path,
-                Some(operation_id),
-            ),
-        )
+        .call(requests::push_status(PushStatusParams {
+            computer_id,
+            device_id,
+            repository_path: repository_path.to_owned(),
+            operation_id: operation_id.to_owned(),
+        }))
         .await?;
     Ok(if operation.is_null() {
         operation
@@ -65,14 +52,15 @@ pub(crate) async fn start(
     target: Value,
 ) -> Result<Value, EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
-    let mut params = repository_params(
-        &computer_id,
-        device_id.as_deref(),
-        repository_path,
-        Some(operation_id),
-    );
-    params["target"] = target.clone();
-    engine.call("push.start", params).await?;
+    engine
+        .call(requests::push_start(PushStartParams {
+            computer_id,
+            device_id,
+            repository_path: repository_path.to_owned(),
+            operation_id: operation_id.to_owned(),
+            target: decode(target.clone(), "push target")?,
+        }))
+        .await?;
     let began = status(engine, computer, repository_path, operation_id).await?;
     Ok(if began.is_null() {
         json!({
@@ -91,10 +79,11 @@ pub(crate) async fn dismiss(
 ) -> Result<(), EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
     engine
-        .call(
-            "push.dismiss",
-            repository_params(&computer_id, device_id.as_deref(), repository_path, None),
-        )
+        .call(requests::push_dismiss(PushDismissParams {
+            computer_id,
+            device_id,
+            repository_path: repository_path.to_owned(),
+        }))
         .await?;
     Ok(())
 }
@@ -133,6 +122,8 @@ pub(crate) async fn repository_push_status(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
@@ -142,15 +133,15 @@ mod forwarding_tests {
         serde_json::from_str(TARGET).unwrap()
     }
 
-    fn replies(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "push.start" => Ok(json!({"jobId": "push:op1"})),
-            "push.status" => Ok(json!({
+            MethodName::PushStart => Ok(json!({"jobId": "push:op1"})),
+            MethodName::PushStatus => Ok(json!({
                 "operationId": params["operationId"], "computer": DEV, "repositoryPath": "/workspace/r",
                 "status": "pushing", "commitCount": 2, "target": target()
             })),
@@ -168,19 +159,19 @@ mod forwarding_tests {
         assert_eq!(operation["computer"], "dev");
         assert_eq!(operation["status"], "pushing");
         assert_eq!(
-            fake.calls("push.start"),
+            fake.calls(MethodName::PushStart),
             vec![json!({
                 "computerId": DEV, "repositoryPath": "/workspace/r", "operationId": "op1", "target": target()
             })]
         );
         // A push job is never awaited: the status is polled.
-        assert!(fake.calls("operations.job.get").is_empty());
+        assert!(fake.calls(MethodName::OperationsJobGet).is_empty());
     }
 
     #[tokio::test]
     async fn status_and_dismiss_address_a_connected_device_computer() {
         let fake = FakeEngine::start(|method, params| match method {
-            "push.status" if params["operationId"] == "gone" => Ok(Value::Null),
+            MethodName::PushStatus if params["operationId"] == "gone" => Ok(Value::Null),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -195,7 +186,7 @@ mod forwarding_tests {
             .is_null());
         dismiss(&engine, &remote, "/workspace/r").await.unwrap();
         assert_eq!(
-            fake.calls("push.dismiss"),
+            fake.calls(MethodName::PushDismiss),
             vec![json!({"computerId": DEV, "deviceId": DEVICE, "repositoryPath": "/workspace/r"})]
         );
     }
@@ -203,7 +194,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_refused_push_is_the_engines_typed_error() {
         let fake = FakeEngine::start(|method, params| match method {
-            "push.start" => Err((
+            MethodName::PushStart => Err((
                 "unsupported_remote_operation",
                 "Update Silo on the remote device.".into(),
             )),
@@ -214,6 +205,6 @@ mod forwarding_tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, "unsupported_remote_operation");
-        assert!(fake.calls("push.status").is_empty());
+        assert!(fake.calls(MethodName::PushStatus).is_empty());
     }
 }

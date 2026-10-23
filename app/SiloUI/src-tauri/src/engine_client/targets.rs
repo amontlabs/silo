@@ -2,7 +2,7 @@
 //! and a computer on another device as `silo-remote:<deviceId>:<computerId>`; the engine
 //! wants a stable computer id and, for another device, its `deviceId`.
 
-use serde_json::{json, Value};
+use silo_api::methods::common::ComputerTargetParams;
 
 use super::{EngineClient, EngineError};
 
@@ -16,18 +16,11 @@ pub(crate) struct Target {
 }
 
 impl Target {
-    /// `{computerId, deviceId?}` plus the given extra fields.
-    pub(crate) fn params(&self, extra: Value) -> Value {
-        let mut params = json!({"computerId": self.computer_id});
-        if let Some(device) = &self.device_id {
-            params["deviceId"] = Value::String(device.clone());
+    pub(crate) fn computer(&self) -> ComputerTargetParams {
+        ComputerTargetParams {
+            computer_id: self.computer_id.clone(),
+            device_id: self.device_id.clone(),
         }
-        if let Value::Object(fields) = extra {
-            for (key, value) in fields {
-                params[key] = value;
-            }
-        }
-        params
     }
 }
 
@@ -80,16 +73,16 @@ mod tests {
             computer_id: "c".into(),
         };
         assert_eq!(
-            local.params(json!({"mode": "ask"})),
-            json!({"computerId": "c", "mode": "ask"})
+            serde_json::to_value(local.computer()).unwrap(),
+            serde_json::json!({"computerId": "c"})
         );
         let remote = Target {
             device_id: Some("d".into()),
             computer_id: "c".into(),
         };
         assert_eq!(
-            remote.params(Value::Null),
-            json!({"computerId": "c", "deviceId": "d"})
+            serde_json::to_value(remote.computer()).unwrap(),
+            serde_json::json!({"computerId": "c", "deviceId": "d"})
         );
     }
 }

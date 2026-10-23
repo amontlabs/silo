@@ -1,13 +1,17 @@
 //! The dependency report is the engine's: it probes the host `silod` runs on.
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{device::DependencyReportParams, requests};
 
 pub(crate) async fn report(
     engine: &EngineClient,
     request_id: String,
 ) -> Result<Value, EngineError> {
     engine
-        .call("device.dependencies", json!({"requestId": request_id}))
+        .call(requests::device_dependencies(DependencyReportParams {
+            request_id,
+            device_id: None,
+        }))
         .await
 }
 
@@ -23,12 +27,14 @@ pub(crate) async fn read_dependencies(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn the_report_is_requested_by_id() {
         let fake = FakeEngine::start(|method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "device.dependencies" => Ok(json!({"requestId": "r1", "checks": []})),
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::DeviceDependencies => Ok(json!({"requestId": "r1", "checks": []})),
             _ => Ok(Value::Null),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -37,7 +43,7 @@ mod forwarding_tests {
             "r1"
         );
         assert_eq!(
-            fake.calls("device.dependencies"),
+            fake.calls(MethodName::DeviceDependencies),
             vec![json!({"requestId": "r1"})]
         );
     }
@@ -45,7 +51,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_rejected_request_id_is_the_engines_error() {
         let fake = FakeEngine::start(|method, _| match method {
-            "device.dependencies" => Err(("internal", "Invalid request ID.".into())),
+            MethodName::DeviceDependencies => Err(("internal", "Invalid request ID.".into())),
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;

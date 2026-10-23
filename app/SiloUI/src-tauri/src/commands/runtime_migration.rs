@@ -2,12 +2,15 @@
 //! before it serves; it has no retry or continue method, so those two commands report the
 //! typed unavailable state.
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{common::DeviceParams, requests};
 
 // MARK: Operations
 
 pub(crate) async fn read_state(client: &EngineClient) -> Result<Value, EngineError> {
-    client.call("migration.state", json!({})).await
+    client
+        .call(requests::migration_state(DeviceParams { device_id: None }))
+        .await
 }
 
 fn unavailable(what: &str) -> EngineError {
@@ -37,12 +40,14 @@ pub(crate) async fn continue_after_migration_failure() -> Result<Value, EngineEr
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn the_state_is_the_engines_and_errors_stay_typed() {
         let fake = FakeEngine::start(|method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "migration.state" => {
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::MigrationState => {
                 Ok(json!({"status": "done", "stage": "ready", "canContinue": false}))
             }
             _ => Ok(Value::Null),
@@ -51,8 +56,8 @@ mod forwarding_tests {
         assert_eq!(read_state(&client).await.unwrap()["status"], "done");
 
         let broken = FakeEngine::start(|method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "engine.state" => Ok(Value::Null),
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::EngineState => Ok(Value::Null),
             _ => Err(("internal", "The migration journal is unreadable.".into())),
         });
         let (client, _) = connected_client(&broken).await;

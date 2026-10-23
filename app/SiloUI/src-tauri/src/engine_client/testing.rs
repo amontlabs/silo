@@ -8,7 +8,10 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use silo_api::transport::ClientMetadata;
+use silo_api::{
+    methods::{common::EmptyParams, requests, MethodName},
+    transport::ClientMetadata,
+};
 use silo_client::{read_frame, write_frame};
 use tokio::{
     net::UnixListener,
@@ -21,12 +24,12 @@ use super::{
 };
 
 pub(crate) type Handler =
-    Box<dyn FnMut(&str, &Value) -> Result<Value, (&'static str, String)> + Send>;
+    Box<dyn FnMut(MethodName, &Value) -> Result<Value, (&'static str, String)> + Send>;
 
 struct Shared {
-    capabilities: Mutex<Vec<String>>,
+    capabilities: Mutex<Vec<MethodName>>,
     handler: Mutex<Handler>,
-    requests: Mutex<Vec<(String, Value)>>,
+    requests: Mutex<Vec<(MethodName, Value)>>,
     events: broadcast::Sender<Value>,
     kill: Notify,
     connections: Mutex<u32>,
@@ -41,7 +44,9 @@ pub(crate) struct FakeEngine {
 
 impl FakeEngine {
     pub(crate) fn start(
-        handler: impl FnMut(&str, &Value) -> Result<Value, (&'static str, String)> + Send + 'static,
+        handler: impl FnMut(MethodName, &Value) -> Result<Value, (&'static str, String)>
+            + Send
+            + 'static,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let socket = directory.path().join("engine.sock");
@@ -51,7 +56,7 @@ impl FakeEngine {
             capabilities: Mutex::new(
                 silo_api::methods::method_registry()
                     .iter()
-                    .map(|descriptor| descriptor.name.to_owned())
+                    .map(|descriptor| descriptor.method)
                     .collect(),
             ),
             handler: Mutex::new(Box::new(handler)),
@@ -79,14 +84,14 @@ impl FakeEngine {
     }
 
     /// Every request received so far, `engine.handshake` excluded.
-    pub(crate) fn requests(&self) -> Vec<(String, Value)> {
+    pub(crate) fn requests(&self) -> Vec<(MethodName, Value)> {
         self.shared.requests.lock().unwrap().clone()
     }
 
-    pub(crate) fn calls(&self, method: &str) -> Vec<Value> {
+    pub(crate) fn calls(&self, method: MethodName) -> Vec<Value> {
         self.requests()
             .into_iter()
-            .filter(|(name, _)| name == method)
+            .filter(|(name, _)| *name == method)
             .map(|(_, params)| params)
             .collect()
     }
@@ -103,9 +108,8 @@ impl FakeEngine {
     }
 
     /// Restricts what the engine advertises in its handshake (for later connections).
-    pub(crate) fn advertise(&self, methods: &[&str]) {
-        *self.shared.capabilities.lock().unwrap() =
-            methods.iter().map(|method| (*method).to_owned()).collect();
+    pub(crate) fn advertise(&self, methods: &[MethodName]) {
+        *self.shared.capabilities.lock().unwrap() = methods.to_vec();
     }
 
     /// The engine exits: connections end and nothing listens any more.
@@ -126,7 +130,13 @@ async fn serve(stream: tokio::net::UnixStream, shared: Arc<Shared>) {
     let Ok(Some(first)) = read_frame::<_, Value>(&mut reader).await else {
         return;
     };
-    let capabilities = shared.capabilities.lock().unwrap().clone();
+    let capabilities: Vec<&str> = shared
+        .capabilities
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|method| method.name())
+        .collect();
     let reply = json!({"id": first["id"], "result": {
         "deviceId": "fake-device", "name": "Fake Mac", "protocol": silo_api::transport::PROTOCOL_VERSION,
         "capabilities": capabilities, "clientId": "fake-client"}});
@@ -153,10 +163,13 @@ async fn serve(stream: tokio::net::UnixStream, shared: Arc<Shared>) {
             _ = shared.kill.notified() => break,
             frame = read_frame::<_, Value>(&mut reader) => {
                 let Ok(Some(request)) = frame else { break };
-                let method = request["method"].as_str().unwrap_or_default().to_owned();
+                let name = request["method"].as_str().unwrap_or_default();
+                let Some(method) = MethodName::from_name(name) else {
+                    panic!("the fake engine received {name}, which is not in the registry");
+                };
                 let params = request["params"].clone();
-                shared.requests.lock().unwrap().push((method.clone(), params.clone()));
-                let result = (shared.handler.lock().unwrap())(&method, &params);
+                shared.requests.lock().unwrap().push((method, params.clone()));
+                let result = (shared.handler.lock().unwrap())(method, &params);
                 let reply = match result {
                     Ok(result) => json!({"id": request["id"], "result": result}),
                     Err((code, message)) => json!({"id": request["id"], "error": {"code": code, "message": message}}),
@@ -224,6 +237,9 @@ pub(crate) async fn connected_client(fake: &FakeEngine) -> (Arc<EngineClient>, A
     .with_backoff(Duration::from_millis(20));
     tokio::spawn(client.clone().run());
     // The first request waits for the connection; subscription happens before it is shared.
-    client.call("engine.state", json!({})).await.unwrap();
+    client
+        .call(requests::engine_state(EmptyParams {}))
+        .await
+        .unwrap();
     (client, sink)
 }

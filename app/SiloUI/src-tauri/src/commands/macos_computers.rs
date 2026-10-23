@@ -1,8 +1,21 @@
 //! Tauri commands for macOS computers: each forwards to `silod`, which owns the VMs and
 //! hosts their display windows.
-use crate::engine_client::{Engine, EngineClient, EngineError};
+use crate::engine_client::{
+    params::{device, target},
+    Engine, EngineClient, EngineError,
+};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointTargetParams},
+    clipboard::{ClipboardAction, ClipboardTransferParams},
+    computers::{
+        ComputerConfigurationChange, ComputerConfigurationChangeParams, ComputerCreateParams,
+        ComputerDeleteParams, ComputerListParams, MacosComputerCreateRequest,
+        MacosResourceConfiguration,
+    },
+    kind, requests, Request,
+};
 use std::sync::Arc;
 use tauri::Window;
 
@@ -51,17 +64,22 @@ pub(crate) enum ClipboardDirection {
 }
 
 impl ClipboardDirection {
-    fn action(self) -> &'static str {
+    fn action(self) -> ClipboardAction {
         match self {
-            Self::PasteInto => "paste",
-            Self::CopyFrom => "copy",
+            Self::PasteInto => ClipboardAction::Paste,
+            Self::CopyFrom => ClipboardAction::Copy,
         }
     }
 }
 
 /// The macOS part of the inventory, in the shape the section parses.
 pub(crate) async fn read(engine: &EngineClient) -> Result<Value, EngineError> {
-    let listed = engine.call("computers.list", json!({})).await?;
+    let listed = engine
+        .call(requests::computers_list(ComputerListParams {
+            device_id: None,
+            refresh_repositories: None,
+        }))
+        .await?;
     listed
         .get("macos")
         .cloned()
@@ -74,11 +92,13 @@ pub(crate) async fn create(
     engine: &Arc<EngineClient>,
     request: Value,
 ) -> Result<Value, EngineError> {
+    let request: MacosComputerCreateRequest =
+        crate::engine_client::params::decode(request, "macOS computer request")?;
     let started = engine
-        .call(
-            "computers.create",
-            json!({"kind": "macos", "request": request}),
-        )
+        .call(requests::computers_create(ComputerCreateParams::Macos {
+            request,
+            device_id: None,
+        }))
         .await?;
     acknowledge_in_background(engine, &started);
     started
@@ -101,15 +121,28 @@ pub(crate) async fn act(
     id: &str,
     action: Action,
 ) -> Result<(), EngineError> {
-    let target = json!({"computerId": id});
+    let computer = target(id, None);
     match action {
-        Action::Start => drop(engine.run_job("computers.start", target).await?),
-        Action::Stop => drop(engine.run_job("computers.stop", target).await?),
-        Action::Delete => drop(engine.run_job("computers.delete", target).await?),
-        Action::ForceStop => drop(engine.call("computers.forceStop", target).await?),
+        Action::Start => drop(engine.run_job(requests::computers_start(computer)).await?),
+        Action::Stop => drop(engine.run_job(requests::computers_stop(computer)).await?),
+        Action::Delete => drop(
+            engine
+                .run_job(requests::computers_delete(ComputerDeleteParams {
+                    computer_id: computer.computer_id,
+                    device_id: None,
+                    expected: None,
+                    request_id: None,
+                }))
+                .await?,
+        ),
+        Action::ForceStop => drop(
+            engine
+                .call(requests::computers_force_stop(computer))
+                .await?,
+        ),
         // Setup runs for as long as the installation steps need; the row shows it.
         Action::Setup => {
-            let started = engine.call("macos.setup.retry", target).await?;
+            let started = engine.call(requests::macos_setup_retry(computer)).await?;
             acknowledge_in_background(engine, &started);
         }
         Action::ChangeResources {
@@ -117,16 +150,26 @@ pub(crate) async fn act(
             memory_gib,
             expected,
         } => {
-            let change = json!({
-                "kind": "macosResources",
-                "computerId": id,
-                "expected": {"cpus": expected.cpus, "memoryGiB": expected.memory_gib, "diskGiB": expected.disk_gib},
-                "cpus": cpus,
-                "memoryGiB": memory_gib,
-                "requestId": uuid::Uuid::new_v4().to_string(),
-            });
+            let change = ComputerConfigurationChange::MacosResources {
+                computer_id: id.to_owned(),
+                expected: MacosResourceConfiguration {
+                    cpus: expected.cpus,
+                    memory_gib: expected.memory_gib,
+                    disk_gib: expected.disk_gib,
+                },
+                cpus,
+                memory_gib,
+                request_id: uuid::Uuid::new_v4().to_string(),
+            };
             engine
-                .run_job("computers.configuration.change", json!({"change": change}))
+                .run_job(requests::computers_configuration_change(
+                    ComputerConfigurationChangeParams {
+                        change,
+                        request_id: None,
+                        retry_computer_id: None,
+                        device_id: None,
+                    },
+                ))
                 .await?;
         }
     }
@@ -135,7 +178,7 @@ pub(crate) async fn act(
 
 pub(crate) async fn open_display(engine: &EngineClient, id: &str) -> Result<(), EngineError> {
     engine
-        .call("display.show", json!({"computerId": id}))
+        .call(requests::display_show(target(id, None)))
         .await?;
     Ok(())
 }
@@ -146,24 +189,27 @@ pub(crate) async fn clipboard(
     direction: ClipboardDirection,
 ) -> Result<Value, EngineError> {
     engine
-        .call(
-            "clipboard.transfer",
-            json!({"computerId": id, "action": direction.action()}),
-        )
+        .call(requests::clipboard_transfer(ClipboardTransferParams {
+            computer_id: id.to_owned(),
+            device_id: None,
+            connection_id: None,
+            action: direction.action(),
+        }))
         .await
 }
 
 pub(crate) async fn delete_template(engine: &EngineClient) -> Result<(), EngineError> {
-    engine.call("macos.template.delete", json!({})).await?;
+    engine
+        .call(requests::macos_template_delete(device(None)))
+        .await?;
     Ok(())
 }
 
 pub(crate) async fn checkpoint(
     engine: &EngineClient,
-    method: &str,
-    params: Value,
+    request: Request<kind::Job>,
 ) -> Result<(), EngineError> {
-    engine.run_job(method, params).await?;
+    engine.run_job(request).await?;
     Ok(())
 }
 
@@ -226,8 +272,12 @@ pub(crate) async fn create_macos_checkpoint(
     require_main(&window)?;
     checkpoint(
         &engine,
-        "checkpoints.create",
-        json!({"computerId": id, "name": name}),
+        requests::checkpoints_create(CheckpointCreateParams {
+            computer_id: id,
+            device_id: None,
+            name,
+            kind: None,
+        }),
     )
     .await
     .map_err(String::from)
@@ -243,8 +293,11 @@ pub(crate) async fn restore_macos_checkpoint(
     require_main(&window)?;
     checkpoint(
         &engine,
-        "checkpoints.restore",
-        json!({"computerId": id, "checkpointId": checkpoint_id}),
+        requests::checkpoints_restore(CheckpointTargetParams {
+            computer_id: id,
+            device_id: None,
+            checkpoint_id,
+        }),
     )
     .await
     .map_err(String::from)
@@ -261,8 +314,12 @@ pub(crate) async fn fork_macos_checkpoint(
     require_main(&window)?;
     checkpoint(
         &engine,
-        "checkpoints.fork",
-        json!({"computerId": id, "checkpointId": checkpoint_id, "newName": new_name}),
+        requests::checkpoints_fork(CheckpointForkParams {
+            computer_id: id,
+            device_id: None,
+            checkpoint_id: Some(checkpoint_id),
+            new_name,
+        }),
     )
     .await
     .map_err(String::from)
@@ -278,8 +335,11 @@ pub(crate) async fn delete_macos_checkpoint(
     require_main(&window)?;
     checkpoint(
         &engine,
-        "checkpoints.delete",
-        json!({"computerId": id, "checkpointId": checkpoint_id}),
+        requests::checkpoints_delete(CheckpointTargetParams {
+            computer_id: id,
+            device_id: None,
+            checkpoint_id,
+        }),
     )
     .await
     .map_err(String::from)
@@ -302,28 +362,30 @@ pub(crate) async fn macos_computer_clipboard(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({"linux": {"computers": []},
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({"linux": {"computers": []},
                 "macos": {"supported": true, "computers": [{"id": "m1", "name": "sonoma"}], "minDiskGiB": 64}})),
-            "computers.create" => Ok(
+            MethodName::ComputersCreate => Ok(
                 json!({"jobId": "job:1", "computer": {"id": "m2", "name": "new", "state": "preparing"}}),
             ),
-            "computers.start"
-            | "computers.stop"
-            | "computers.delete"
-            | "macos.setup.retry"
-            | "computers.configuration.change"
-            | "checkpoints.create"
-            | "checkpoints.restore"
-            | "checkpoints.fork"
-            | "checkpoints.delete" => Ok(json!({"jobId": "job:1"})),
-            "operations.job.get" => {
+            MethodName::ComputersStart
+            | MethodName::ComputersStop
+            | MethodName::ComputersDelete
+            | MethodName::MacosSetupRetry
+            | MethodName::ComputersConfigurationChange
+            | MethodName::CheckpointsCreate
+            | MethodName::CheckpointsRestore
+            | MethodName::CheckpointsFork
+            | MethodName::CheckpointsDelete => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
-            "clipboard.transfer" => Ok(
+            MethodName::ClipboardTransfer => Ok(
                 json!({"action": "paste", "status": "pasted", "content": "text", "message": null}),
             ),
             _ => Ok(Value::Null),
@@ -347,7 +409,7 @@ mod forwarding_tests {
         let row = create(&engine, request.clone()).await.unwrap();
         assert_eq!(row["state"], "preparing");
         assert_eq!(
-            fake.calls("computers.create"),
+            fake.calls(MethodName::ComputersCreate),
             vec![json!({"kind": "macos", "request": request})]
         );
     }
@@ -362,13 +424,13 @@ mod forwarding_tests {
         act(&engine, "m1", Action::ForceStop).await.unwrap();
         act(&engine, "m1", Action::Setup).await.unwrap();
         let target = vec![json!({"computerId": "m1"})];
-        assert_eq!(fake.calls("computers.start"), target);
-        assert_eq!(fake.calls("computers.stop"), target);
-        assert_eq!(fake.calls("computers.delete"), target);
-        assert_eq!(fake.calls("computers.forceStop"), target);
-        assert_eq!(fake.calls("macos.setup.retry"), target);
+        assert_eq!(fake.calls(MethodName::ComputersStart), target);
+        assert_eq!(fake.calls(MethodName::ComputersStop), target);
+        assert_eq!(fake.calls(MethodName::ComputersDelete), target);
+        assert_eq!(fake.calls(MethodName::ComputersForceStop), target);
+        assert_eq!(fake.calls(MethodName::MacosSetupRetry), target);
         // The three jobs were waited for and acknowledged.
-        assert!(fake.calls("operations.job.acknowledge").len() >= 3);
+        assert!(fake.calls(MethodName::OperationsJobAcknowledge).len() >= 3);
     }
 
     #[tokio::test]
@@ -379,7 +441,7 @@ mod forwarding_tests {
             "cpus": 6, "memoryGiB": 12, "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64}}}))
         .unwrap();
         act(&engine, "m1", action).await.unwrap();
-        let sent = &fake.calls("computers.configuration.change")[0]["change"];
+        let sent = &fake.calls(MethodName::ComputersConfigurationChange)[0]["change"];
         assert_eq!(sent["kind"], "macosResources");
         assert_eq!(sent["computerId"], "m1");
         assert_eq!(
@@ -404,13 +466,13 @@ mod forwarding_tests {
             serde_json::from_value::<ClipboardDirection>(json!("paste-into"))
                 .unwrap()
                 .action(),
-            "paste"
+            ClipboardAction::Paste
         );
         assert_eq!(
             serde_json::from_value::<ClipboardDirection>(json!("copy-from"))
                 .unwrap()
                 .action(),
-            "copy"
+            ClipboardAction::Copy
         );
     }
 
@@ -420,37 +482,41 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         open_display(&engine, "m1").await.unwrap();
         assert_eq!(
-            fake.calls("display.show"),
+            fake.calls(MethodName::DisplayShow),
             vec![json!({"computerId": "m1"})]
         );
         delete_template(&engine).await.unwrap();
-        assert_eq!(fake.calls("macos.template.delete"), vec![json!({})]);
+        assert_eq!(fake.calls(MethodName::MacosTemplateDelete), vec![json!({})]);
         let report = clipboard(&engine, "m1", ClipboardDirection::PasteInto)
             .await
             .unwrap();
         assert_eq!(report["status"], "pasted");
         assert_eq!(
-            fake.calls("clipboard.transfer"),
+            fake.calls(MethodName::ClipboardTransfer),
             vec![json!({"computerId": "m1", "action": "paste"})]
         );
         checkpoint(
             &engine,
-            "checkpoints.fork",
-            json!({"computerId": "m1", "checkpointId": "c", "newName": "n"}),
+            requests::checkpoints_fork(CheckpointForkParams {
+                computer_id: "m1".into(),
+                device_id: None,
+                checkpoint_id: Some("c".into()),
+                new_name: "n".into(),
+            }),
         )
         .await
         .unwrap();
-        assert_eq!(fake.calls("checkpoints.fork").len(), 1);
+        assert_eq!(fake.calls(MethodName::CheckpointsFork).len(), 1);
     }
 
     #[tokio::test]
     async fn refusals_are_typed_errors() {
         let fake = FakeEngine::start(|method, params| match method {
-            "display.show" => Err((
+            MethodName::DisplayShow => Err((
                 "unsupported_remote_operation",
                 "Start the computer to open its display.".into(),
             )),
-            "computers.start" => Err(("busy", "Another operation is running.".into())),
+            MethodName::ComputersStart => Err(("busy", "Another operation is running.".into())),
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;
