@@ -5,11 +5,18 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+use silo_api::methods::{
+    common::EmptyParams,
+    computers::ComputerListParams,
+    engine::{EngineShutdownParams, ShutdownReason},
+    requests,
+    settings::SettingsUpdateParams,
+};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 use crate::{
-    engine_client::{self, Engine, EngineClient, EngineError},
+    engine_client::{self, params::decode, Engine, EngineClient, EngineError},
     quit::{Choice, Quit, QuitHost, QuitRequest},
 };
 
@@ -68,7 +75,7 @@ pub(crate) async fn read_snapshot(
     drafts: &DraftStore,
     main: bool,
 ) -> Result<Value, EngineError> {
-    let snapshot = engine.call("settings.read", json!({})).await?;
+    let snapshot = engine.call(requests::settings_read(EmptyParams {})).await?;
     engine.remember_settings(&snapshot);
     Ok(with_draft(snapshot, main.then(|| drafts.read())))
 }
@@ -79,7 +86,9 @@ pub(crate) async fn update_snapshot(
     patch: Map<String, Value>,
 ) -> Result<Value, EngineError> {
     let snapshot = engine
-        .call("settings.update", json!({"patch": patch}))
+        .call(requests::settings_update(SettingsUpdateParams {
+            patch: decode(Value::Object(patch), "settings change")?,
+        }))
         .await?;
     engine.remember_settings(&snapshot);
     Ok(with_draft(snapshot, Some(drafts.read())))
@@ -162,7 +171,7 @@ pub(crate) async fn flush_settings(
 ) -> Result<(), String> {
     require_main(window.label())?;
     engine
-        .call("settings.flush", json!({}))
+        .call(requests::settings_flush(EmptyParams {}))
         .await
         .map(drop)
         .map_err(String::from)
@@ -225,7 +234,10 @@ impl QuitHost for TauriQuitHost {
         let engine = self.engine();
         tauri::async_runtime::block_on(async move {
             engine
-                .call("computers.list", json!({}))
+                .call(requests::computers_list(ComputerListParams {
+                    device_id: None,
+                    refresh_repositories: None,
+                }))
                 .await
                 .map(|listed| running_names(&listed))
                 .map_err(String::from)
@@ -258,10 +270,11 @@ impl QuitHost for TauriQuitHost {
         let engine = self.engine();
         tauri::async_runtime::block_on(async move {
             engine
-                .run_job_until_exit(
-                    "engine.shutdown",
-                    json!({"stopComputers": true, "reason": "user"}),
-                )
+                .run_job_until_exit(requests::engine_shutdown(EngineShutdownParams {
+                    stop_computers: true,
+                    reason: ShutdownReason::User,
+                    deadline_ms: None,
+                }))
                 .await
                 .map(drop)
                 .map_err(String::from)
@@ -271,7 +284,7 @@ impl QuitHost for TauriQuitHost {
     fn flush_settings(&self) -> Result<(), String> {
         let engine = self.engine();
         tauri::async_runtime::block_on(async move {
-            match engine.call("settings.flush", json!({})).await {
+            match engine.call(requests::settings_flush(EmptyParams {})).await {
                 Ok(_) => Ok(()),
                 // No engine, nothing unsaved: this app holds no settings of its own to lose.
                 Err(error) if error.unreachable => Ok(()),
@@ -408,6 +421,8 @@ pub(crate) async fn complete_settings_flush(
 mod tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     fn temporary() -> (tempfile::TempDir, DraftStore) {
         let directory = tempfile::tempdir().unwrap();
@@ -415,13 +430,15 @@ mod tests {
         (directory, store)
     }
 
-    fn engine_replies(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+    fn engine_replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "settings.read" => Ok(json!({"revision": 4, "settings": {"theme": "dark"},
+            MethodName::SettingsRead => Ok(json!({"revision": 4, "settings": {"theme": "dark"},
                 "onboardingDraft": null, "saveError": null, "writeProtected": false})),
-            "settings.update" => Ok(json!({"revision": 5, "settings": params["patch"].clone(),
-                "onboardingDraft": null, "saveError": null, "writeProtected": false})),
-            "settings.flush" => Ok(Value::Null),
+            MethodName::SettingsUpdate => {
+                Ok(json!({"revision": 5, "settings": params["patch"].clone(),
+                "onboardingDraft": null, "saveError": null, "writeProtected": false}))
+            }
+            MethodName::SettingsFlush => Ok(Value::Null),
             _ => Ok(json!({"subscription": "sub"})),
         }
     }
@@ -461,7 +478,7 @@ mod tests {
         let snapshot = update_snapshot(&engine, &store, patch).await.unwrap();
         assert_eq!(snapshot["revision"], 5);
         assert_eq!(
-            fake.calls("settings.update"),
+            fake.calls(MethodName::SettingsUpdate),
             vec![json!({"patch": {"reduceMotion": true}})]
         );
     }
@@ -469,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn a_disconnected_engine_is_a_save_error_not_a_silent_drop() {
         let fake = FakeEngine::start(|method, params| match method {
-            "settings.update" => Err(("busy", "The settings file is locked.".into())),
+            MethodName::SettingsUpdate => Err(("busy", "The settings file is locked.".into())),
             other => engine_replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;

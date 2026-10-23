@@ -1,9 +1,11 @@
 use crate::engine_client::{Engine, EngineClient, EngineError};
-use serde_json::json;
+use silo_api::methods::{common::EmptyParams, requests};
 use tauri::WebviewWindow;
 
 pub(crate) async fn include_notice(engine: &EngineClient) -> Result<Option<String>, EngineError> {
-    let notice = engine.call("editor.includeNotice", json!({})).await?;
+    let notice = engine
+        .call(requests::editor_include_notice(EmptyParams {}))
+        .await?;
     Ok(notice.as_str().map(str::to_owned))
 }
 
@@ -24,7 +26,9 @@ pub(crate) async fn read_editor_include_notice(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
     use serde_json::Value;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn the_include_notice_is_the_engines_text_or_nothing() {
@@ -32,9 +36,9 @@ mod forwarding_tests {
             std::sync::Arc::new(std::sync::Mutex::new(json!("Add Include to ~/.ssh/config")));
         let current = notice.clone();
         let fake = FakeEngine::start(move |method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "editor.includeNotice" => Ok(current.lock().unwrap().clone()),
-            "engine.state" => Ok(Value::Null),
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::EditorIncludeNotice => Ok(current.lock().unwrap().clone()),
+            MethodName::EngineState => Ok(Value::Null),
             _ => Ok(Value::Null),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -49,7 +53,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn an_unavailable_engine_method_is_typed() {
         let fake = FakeEngine::start(|method, _| match method {
-            "editor.includeNotice" => Err(("unsupported_remote_operation", "Not here.".into())),
+            MethodName::EditorIncludeNotice => {
+                Err(("unsupported_remote_operation", "Not here.".into()))
+            }
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;

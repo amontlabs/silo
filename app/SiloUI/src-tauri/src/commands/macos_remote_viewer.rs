@@ -7,6 +7,12 @@
 //! work on the computer the window was opened for and nothing else.
 use crate::engine_client::{Engine, EngineClient, EngineError};
 use serde_json::{json, Value};
+use silo_api::methods::{
+    common::EmptyParams,
+    computers::ComputerListParams,
+    macos::{MacosDisplayResizeParams, MacosDisplaySessionParams},
+    requests,
+};
 use std::{
     collections::HashMap,
     sync::{Mutex, MutexGuard},
@@ -118,10 +124,15 @@ async fn display_name(
     computer_id: &str,
 ) -> Result<String, EngineError> {
     let listed = engine
-        .call("computers.list", json!({"deviceId": device_id}))
+        .call(requests::computers_list(ComputerListParams {
+            device_id: Some(device_id.to_owned()),
+            refresh_repositories: None,
+        }))
         .await?;
     let name = running_computer_name(&listed["macos"], computer_id).map_err(bad_request)?;
-    let devices = engine.call("connections.devices.list", json!({})).await?;
+    let devices = engine
+        .call(requests::connections_devices_list(EmptyParams {}))
+        .await?;
     let device_name = devices
         .as_array()
         .into_iter()
@@ -204,10 +215,10 @@ async fn display_session(
     computer: &str,
 ) -> Result<Value, EngineError> {
     let session = engine
-        .call(
-            "macos.display.session",
-            json!({"deviceId": device, "computerId": computer}),
-        )
+        .call(requests::macos_display_session(MacosDisplaySessionParams {
+            device_id: device.to_owned(),
+            computer_id: computer.to_owned(),
+        }))
         .await?;
     let text = |name: &str| session.get(name).and_then(Value::as_str);
     let (Some(url), Some(username), Some(password)) =
@@ -248,10 +259,12 @@ async fn display_resize(
     height_px: u64,
 ) -> Result<Value, EngineError> {
     engine
-        .call(
-            "macos.display.resize",
-            json!({"deviceId": device, "computerId": computer, "widthPx": width_px, "heightPx": height_px}),
-        )
+        .call(requests::macos_display_resize(MacosDisplayResizeParams {
+            computer_id: computer.to_owned(),
+            width_px,
+            height_px,
+            device_id: Some(device.to_owned()),
+        }))
         .await
 }
 
@@ -274,6 +287,8 @@ pub(crate) async fn macos_display_resize(
 mod tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEVICE: &str = "22222222-2222-4222-8222-222222222222";
     const COMPUTER: &str = "11111111-1111-4111-8111-111111111111";
@@ -337,13 +352,13 @@ mod tests {
     #[tokio::test]
     async fn the_window_name_comes_from_the_owners_list_and_the_device() {
         let fake = FakeEngine::start(|method, _| match method {
-            "computers.list" => Ok(json!({"linux": {"computers": []}, "macos": {
+            MethodName::ComputersList => Ok(json!({"linux": {"computers": []}, "macos": {
                 "supported": true,
                 "computers": [{"id": COMPUTER, "name": "mac", "state": "running"}]}})),
-            "connections.devices.list" => {
+            MethodName::ConnectionsDevicesList => {
                 Ok(json!([{"id": DEVICE, "name": "Studio", "address": "x"}]))
             }
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("internal", "unexpected".into())),
         });
         let (client, _) = connected_client(&fake).await;
@@ -351,13 +366,16 @@ mod tests {
             display_name(&client, DEVICE, COMPUTER).await.unwrap(),
             "mac · Studio"
         );
-        assert_eq!(fake.calls("computers.list"), [json!({"deviceId": DEVICE})]);
+        assert_eq!(
+            fake.calls(MethodName::ComputersList),
+            [json!({"deviceId": DEVICE})]
+        );
     }
 
     #[tokio::test]
     async fn a_remote_device_the_engine_cannot_serve_passes_its_typed_error_through() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err((
                 "unsupported_remote_operation",
                 "computers.list on a remote device".into(),
@@ -384,7 +402,7 @@ mod tests {
                    "width": 1280, "height": 800})
         );
         assert_eq!(
-            fake.calls("macos.display.session"),
+            fake.calls(MethodName::MacosDisplaySession),
             [json!({"deviceId": DEVICE, "computerId": COMPUTER})]
         );
     }
@@ -395,7 +413,7 @@ mod tests {
         let (client, _) = connected_client(&fake).await;
         assert!(display_session(&client, DEVICE, COMPUTER).await.is_err());
         let refusing = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err((
                 "unsupported_remote_operation",
                 "macos.display.session on a remote device".into(),
@@ -417,7 +435,7 @@ mod tests {
             .unwrap();
         assert_eq!(applied, json!({"widthPx": 1280, "heightPx": 800}));
         assert_eq!(
-            fake.calls("macos.display.resize"),
+            fake.calls(MethodName::MacosDisplayResize),
             [json!({"deviceId": DEVICE, "computerId": COMPUTER, "widthPx": 1300, "heightPx": 900})]
         );
     }

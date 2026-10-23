@@ -2,20 +2,13 @@
 //! Connections domains: device scoping, computer name/id translation and the two client-side
 //! launchers (browser, terminal) that open what the engine returned.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+use silo_api::methods::{common::EmptyParams, computers::ComputerListParams, requests};
 
 use super::{EngineClient, EngineError};
 
 pub(crate) fn not_found(message: &str) -> EngineError {
     EngineError::not_found(message)
-}
-
-/// `params` with `deviceId` set when the command addresses a connected device.
-pub(crate) fn with_device(mut params: Value, device_id: Option<&str>) -> Value {
-    if let (Some(device_id), Some(object)) = (device_id, params.as_object_mut()) {
-        object.insert("deviceId".to_owned(), Value::String(device_id.to_owned()));
-    }
-    params
 }
 
 /// The computers of one engine, as `computers.list` names them: `(id, display name)`.
@@ -70,7 +63,10 @@ pub(crate) async fn roster(
     device_id: Option<&str>,
 ) -> Result<Roster, EngineError> {
     let listing = engine
-        .call("computers.list", with_device(json!({}), device_id))
+        .call(requests::computers_list(ComputerListParams {
+            device_id: device_id.map(str::to_owned),
+            refresh_repositories: None,
+        }))
         .await?;
     Ok(Roster::from_listing(&listing))
 }
@@ -117,7 +113,7 @@ pub(crate) async fn resolve(
 
 /// This device's settings, as the launchers read them.
 async fn settings(engine: &EngineClient) -> Result<Map<String, Value>, EngineError> {
-    let read = engine.call("settings.read", json!({})).await?;
+    let read = engine.call(requests::settings_read(EmptyParams {})).await?;
     Ok(read
         .get("settings")
         .and_then(Value::as_object)
@@ -156,6 +152,7 @@ pub(crate) fn terminal(settings: &Map<String, Value>, command: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
     const COMPUTER: &str = "00000000-0000-4000-8000-0000000000c1";
@@ -176,15 +173,6 @@ mod tests {
         assert_eq!(roster.id_of("ghost").unwrap_err().code, "not_found");
         assert_eq!(roster.name_of("lin-1"), "dev");
         assert_eq!(roster.name_of("gone"), "gone");
-    }
-
-    #[test]
-    fn a_device_is_added_only_when_one_is_named() {
-        assert_eq!(with_device(json!({"a": 1}), None), json!({"a": 1}));
-        assert_eq!(
-            with_device(json!({"a": 1}), Some("d")),
-            json!({"a": 1, "deviceId": "d"})
-        );
     }
 
     #[test]

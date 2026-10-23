@@ -1,15 +1,20 @@
 //! Published ports of this device's computers, through `network.*`. Opening the URL in the
 //! browser chosen in settings stays on this device.
 
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    network::{NetworkOpenParams, NetworkPublishParams, NetworkUnpublishParams},
+    requests,
+};
 
 use crate::engine_client::{
     forwarding::{browser, open_url},
+    params::{decode, device},
     Engine, EngineClient, EngineError,
 };
 
 pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("network.state", json!({})).await
+    engine.call(requests::network_state(device(None))).await
 }
 
 pub(crate) async fn save_port(
@@ -19,14 +24,18 @@ pub(crate) async fn save_port(
     host_port: Option<u16>,
     scheme: Option<String>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({"computerId": engine.computer_id(computer).await?, "port": port});
-    if let Some(host_port) = host_port {
-        params["hostPort"] = json!(host_port);
-    }
-    if let Some(scheme) = scheme {
-        params["scheme"] = Value::String(scheme);
-    }
-    engine.call("network.publish", params).await
+    let scheme = scheme
+        .map(|scheme| decode(Value::String(scheme), "network scheme"))
+        .transpose()?;
+    engine
+        .call(requests::network_publish(NetworkPublishParams {
+            computer_id: engine.computer_id(computer).await?,
+            device_id: None,
+            port,
+            host_port,
+            scheme,
+        }))
+        .await
 }
 
 pub(crate) async fn remove_port(
@@ -34,8 +43,13 @@ pub(crate) async fn remove_port(
     computer: &str,
     port: u16,
 ) -> Result<Value, EngineError> {
-    let params = json!({"computerId": engine.computer_id(computer).await?, "port": port});
-    engine.call("network.unpublish", params).await
+    engine
+        .call(requests::network_unpublish(NetworkUnpublishParams {
+            computer_id: engine.computer_id(computer).await?,
+            device_id: None,
+            port,
+        }))
+        .await
 }
 
 pub(crate) async fn open_port(
@@ -44,8 +58,13 @@ pub(crate) async fn open_port(
     port: u16,
     open: impl FnOnce(&serde_json::Map<String, Value>, &str) -> Result<(), String>,
 ) -> Result<(), EngineError> {
-    let params = json!({"computerId": engine.computer_id(computer).await?, "port": port});
-    let opened = engine.call("network.open", params).await?;
+    let opened = engine
+        .call(requests::network_open(NetworkOpenParams {
+            computer_id: engine.computer_id(computer).await?,
+            device_id: None,
+            port,
+        }))
+        .await?;
     let url = opened
         .get("url")
         .and_then(Value::as_str)
@@ -91,22 +110,26 @@ pub(crate) async fn open_network_port(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
     use std::sync::{Arc, Mutex};
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "network.state" | "network.publish" | "network.unpublish" => {
+            MethodName::NetworkState
+            | MethodName::NetworkPublish
+            | MethodName::NetworkUnpublish => {
                 Ok(json!({"computers": [{"computer": "dev", "ports": []}]}))
             }
-            "network.open" => Ok(json!({"url": "http://127.0.0.1:8080"})),
-            "settings.read" => Ok(json!({"settings": {"browserApplication": "x"}})),
+            MethodName::NetworkOpen => Ok(json!({"url": "http://127.0.0.1:8080"})),
+            MethodName::SettingsRead => Ok(json!({"settings": {"browserApplication": "x"}})),
             _ => Ok(Value::Null),
         }
     }
@@ -125,14 +148,14 @@ mod forwarding_tests {
         save_port(&engine, "dev", 80, None, None).await.unwrap();
         remove_port(&engine, "dev", 8080).await.unwrap();
         assert_eq!(
-            fake.calls("network.publish"),
+            fake.calls(MethodName::NetworkPublish),
             vec![
                 json!({"computerId": DEV, "port": 8080, "hostPort": 9090, "scheme": "https"}),
                 json!({"computerId": DEV, "port": 80}),
             ]
         );
         assert_eq!(
-            fake.calls("network.unpublish"),
+            fake.calls(MethodName::NetworkUnpublish),
             vec![json!({"computerId": DEV, "port": 8080})]
         );
     }
@@ -157,7 +180,7 @@ mod forwarding_tests {
             vec![(Some(json!("x")), "http://127.0.0.1:8080/".to_owned())]
         );
         assert_eq!(
-            fake.calls("network.open"),
+            fake.calls(MethodName::NetworkOpen),
             vec![json!({"computerId": DEV, "port": 8080})]
         );
     }
@@ -165,7 +188,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn errors_and_unknown_computers_pass_through_typed() {
         let fake = FakeEngine::start(|method, params| match method {
-            "network.state" => Err(("unsupported_remote_operation", "Not on this device.".into())),
+            MethodName::NetworkState => {
+                Err(("unsupported_remote_operation", "Not on this device.".into()))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -176,6 +201,6 @@ mod forwarding_tests {
             remove_port(&engine, "ghost", 1).await.unwrap_err().code,
             "not_found"
         );
-        assert!(fake.calls("network.unpublish").is_empty());
+        assert!(fake.calls(MethodName::NetworkUnpublish).is_empty());
     }
 }

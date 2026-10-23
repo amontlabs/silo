@@ -1,10 +1,15 @@
 //! macOS computers on a connected device, through the computer methods with a `deviceId`.
 //! The local engine routes them to the device that hosts the virtual machines.
 use crate::engine_client::{
-    forwarding::{not_found, with_device},
+    forwarding::not_found,
+    params::{decode, target},
     Engine, EngineClient, EngineError,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    computers::{ComputerCreateParams, ComputerDeleteParams, ComputerListParams},
+    requests,
+};
 use tauri::Window;
 
 // Still read by `macos_remote_viewer.rs`, which opens the display stream itself.
@@ -22,7 +27,10 @@ fn require_main(window: &Window) -> Result<(), EngineError> {
 /// The macOS computers of a connected device, and whether that device can host them.
 pub(crate) async fn snapshot(engine: &EngineClient, device_id: &str) -> Result<Value, EngineError> {
     let listed = engine
-        .call("computers.list", with_device(json!({}), Some(device_id)))
+        .call(requests::computers_list(ComputerListParams {
+            device_id: Some(device_id.to_owned()),
+            refresh_repositories: None,
+        }))
         .await?;
     listed
         .get("macos")
@@ -38,10 +46,10 @@ pub(crate) async fn create(
     request: Value,
 ) -> Result<Value, EngineError> {
     let created = engine
-        .call(
-            "computers.create",
-            json!({"kind": "macos", "request": request, "deviceId": device_id}),
-        )
+        .call(requests::computers_create(ComputerCreateParams::Macos {
+            request: decode(request, "macOS computer request")?,
+            device_id: Some(device_id.to_owned()),
+        }))
         .await?;
     created
         .get("computer")
@@ -58,21 +66,29 @@ pub(crate) async fn action(
     computer_id: &str,
     action: &str,
 ) -> Result<Value, EngineError> {
-    let params = json!({"computerId": computer_id, "deviceId": device_id});
+    let params = target(computer_id, Some(device_id));
     match action {
-        "start" | "stop" => {
-            engine
-                .run_job(&format!("computers.{action}"), params)
-                .await?;
+        "start" => {
+            engine.run_job(requests::computers_start(params)).await?;
+        }
+        "stop" => {
+            engine.run_job(requests::computers_stop(params)).await?;
         }
         "delete" => {
-            engine.run_job("computers.delete", params).await?;
+            engine
+                .run_job(requests::computers_delete(ComputerDeleteParams {
+                    computer_id: params.computer_id,
+                    device_id: params.device_id,
+                    expected: None,
+                    request_id: None,
+                }))
+                .await?;
         }
         "setup" => {
-            engine.run_job("macos.setup.retry", params).await?;
+            engine.run_job(requests::macos_setup_retry(params)).await?;
         }
         "force-stop" => {
-            engine.call("computers.forceStop", params).await?;
+            engine.call(requests::computers_force_stop(params)).await?;
         }
         _ => return Err(not_found("Silo does not know that macOS computer action.")),
     }
@@ -119,6 +135,8 @@ pub(crate) async fn remote_macos_action(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
     const MAC: &str = "00000000-0000-4000-8000-0000000000a1";
@@ -127,17 +145,20 @@ mod forwarding_tests {
         json!({"computers": [{"id": MAC, "name": "sonoma"}], "canHost": true})
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({"linux": {"computers": []}, "macos": macos_state()})),
-            "computers.create" => {
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => {
+                Ok(json!({"linux": {"computers": []}, "macos": macos_state()}))
+            }
+            MethodName::ComputersCreate => {
                 Ok(json!({"jobId": "job:2", "computer": {"id": MAC, "name": "sonoma"}}))
             }
-            "computers.start" | "computers.stop" | "computers.delete" | "macos.setup.retry" => {
-                Ok(json!({"jobId": "job:1"}))
-            }
-            "operations.job.get" => {
+            MethodName::ComputersStart
+            | MethodName::ComputersStop
+            | MethodName::ComputersDelete
+            | MethodName::MacosSetupRetry => Ok(json!({"jobId": "job:1"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
             _ => Ok(Value::Null),
@@ -150,7 +171,7 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         assert_eq!(snapshot(&engine, DEVICE).await.unwrap(), macos_state());
         assert_eq!(
-            fake.calls("computers.list"),
+            fake.calls(MethodName::ComputersList),
             vec![json!({"deviceId": DEVICE})]
         );
     }
@@ -163,10 +184,10 @@ mod forwarding_tests {
         let row = create(&engine, DEVICE, request.clone()).await.unwrap();
         assert_eq!(row["id"], MAC);
         assert_eq!(
-            fake.calls("computers.create"),
+            fake.calls(MethodName::ComputersCreate),
             vec![json!({"kind": "macos", "request": request, "deviceId": DEVICE})]
         );
-        assert!(fake.calls("operations.job.get").is_empty());
+        assert!(fake.calls(MethodName::OperationsJobGet).is_empty());
     }
 
     #[tokio::test]
@@ -181,13 +202,18 @@ mod forwarding_tests {
         }
         let target = json!({"computerId": MAC, "deviceId": DEVICE});
         for method in [
-            "computers.start",
-            "computers.stop",
-            "computers.delete",
-            "macos.setup.retry",
-            "computers.forceStop",
+            MethodName::ComputersStart,
+            MethodName::ComputersStop,
+            MethodName::ComputersDelete,
+            MethodName::MacosSetupRetry,
+            MethodName::ComputersForceStop,
         ] {
-            assert_eq!(fake.calls(method), vec![target.clone()], "{method}");
+            assert_eq!(
+                fake.calls(method),
+                vec![target.clone()],
+                "{}",
+                method.name()
+            );
         }
         assert!(action(&engine, DEVICE, MAC, "explode").await.is_err());
     }
@@ -195,14 +221,20 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_device_that_cannot_host_answers_with_the_typed_error() {
         let fake = FakeEngine::start(|method, params| match method {
-            "computers.create" => Err((
+            MethodName::ComputersCreate => Err((
                 "unsupported_remote_operation",
                 "That device cannot host macOS computers.".into(),
             )),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
-        let error = create(&engine, DEVICE, json!({})).await.unwrap_err();
+        let error = create(
+            &engine,
+            DEVICE,
+            json!({"name": "m", "cpus": 4, "memoryGiB": 8, "diskGiB": 64}),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.code, "unsupported_remote_operation");
     }
 }

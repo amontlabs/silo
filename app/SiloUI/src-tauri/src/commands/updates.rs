@@ -7,7 +7,13 @@
 
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    common::EmptyParams,
+    engine::{EngineShutdownParams, ShutdownReason},
+    requests,
+    updates::UpdatesSetAutomaticChecksParams,
+};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -20,17 +26,19 @@ const INSTALLER_BUSY: &str =
     "Another app is installing a Silo update. Wait for it to finish, then try again.";
 
 pub(crate) async fn state(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("updates.state", json!({})).await
+    engine.call(requests::updates_state(EmptyParams {})).await
 }
 
 pub(crate) async fn check(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.call("updates.check", json!({})).await
+    engine.call(requests::updates_check(EmptyParams {})).await
 }
 
 /// The download is a job whose progress arrives as `updates.changed`; the result is the
 /// state once it ends.
 pub(crate) async fn download(engine: &EngineClient) -> Result<Value, EngineError> {
-    engine.run_job("updates.download", json!({})).await?;
+    engine
+        .run_job(requests::updates_download(EmptyParams {}))
+        .await?;
     state(engine).await
 }
 
@@ -39,7 +47,9 @@ pub(crate) async fn set_automatic_checks(
     enabled: bool,
 ) -> Result<Value, EngineError> {
     engine
-        .call("updates.setAutomaticChecks", json!({"enabled": enabled}))
+        .call(requests::updates_set_automatic_checks(
+            UpdatesSetAutomaticChecksParams { enabled },
+        ))
         .await
 }
 
@@ -49,7 +59,7 @@ pub(crate) fn focused(app: &AppHandle) {
         return;
     };
     tauri::async_runtime::spawn(async move {
-        let _ = engine.call("updates.focused", json!({})).await;
+        let _ = engine.call(requests::updates_focused(EmptyParams {})).await;
     });
 }
 
@@ -84,18 +94,26 @@ pub(crate) async fn hand_off<L>(
         _ => format!("Silo could not take the installer lock: {error}"),
     })?;
     // The engine saves and holds the running computers; `resuming` is for the new engine.
-    if let Err(error) = engine.run_job("engine.update.prepare", json!({})).await {
-        let _ = engine.call("engine.update.abort", json!({})).await;
+    if let Err(error) = engine
+        .run_job(requests::engine_update_prepare(EmptyParams {}))
+        .await
+    {
+        let _ = engine
+            .call(requests::engine_update_abort(EmptyParams {}))
+            .await;
         return Err(String::from(error));
     }
     if let Err(error) = engine
-        .run_job_until_exit(
-            "engine.shutdown",
-            json!({"stopComputers": false, "reason": "update"}),
-        )
+        .run_job_until_exit(requests::engine_shutdown(EngineShutdownParams {
+            stop_computers: false,
+            reason: ShutdownReason::Update,
+            deadline_ms: None,
+        }))
         .await
     {
-        let _ = engine.call("engine.update.abort", json!({})).await;
+        let _ = engine
+            .call(requests::engine_update_abort(EmptyParams {}))
+            .await;
         return Err(String::from(error));
     }
     swap()
@@ -171,6 +189,8 @@ pub(crate) async fn open_update_release(app: AppHandle, engine: Engine<'_>) -> R
 mod tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     fn snapshot(phase: &str) -> Value {
         json!({"phase": phase, "currentVersion": "0.11.1", "automaticChecks": true,
@@ -180,9 +200,9 @@ mod tests {
     #[tokio::test]
     async fn state_check_and_automatic_checks_forward_to_the_engine() {
         let fake = FakeEngine::start(|method, params| match method {
-            "updates.state" => Ok(snapshot("idle")),
-            "updates.check" => Ok(snapshot("available")),
-            "updates.setAutomaticChecks" => {
+            MethodName::UpdatesState => Ok(snapshot("idle")),
+            MethodName::UpdatesCheck => Ok(snapshot("available")),
+            MethodName::UpdatesSetAutomaticChecks => {
                 Ok(json!({"phase": "idle", "automaticChecks": params["enabled"]}))
             }
             _ => Ok(json!({"subscription": "sub"})),
@@ -193,7 +213,7 @@ mod tests {
         let toggled = set_automatic_checks(&engine, false).await.unwrap();
         assert_eq!(toggled["automaticChecks"], false);
         assert_eq!(
-            fake.calls("updates.setAutomaticChecks"),
+            fake.calls(MethodName::UpdatesSetAutomaticChecks),
             vec![json!({"enabled": false})]
         );
     }
@@ -201,22 +221,22 @@ mod tests {
     #[tokio::test]
     async fn a_download_waits_for_its_job_then_returns_the_state() {
         let fake = FakeEngine::start(|method, _| match method {
-            "updates.download" => Ok(json!({"jobId": "job:5"})),
-            "operations.job.get" => {
+            MethodName::UpdatesDownload => Ok(json!({"jobId": "job:5"})),
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:5", "state": "finished", "outcome": {"result": null}}))
             }
-            "updates.state" => Ok(snapshot("downloaded")),
+            MethodName::UpdatesState => Ok(snapshot("downloaded")),
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;
         assert_eq!(download(&engine).await.unwrap()["phase"], "downloaded");
-        assert_eq!(fake.calls("operations.job.acknowledge").len(), 1);
+        assert_eq!(fake.calls(MethodName::OperationsJobAcknowledge).len(), 1);
     }
 
     #[tokio::test]
     async fn an_engine_without_updates_reports_a_typed_unavailable_error() {
         let fake = FakeEngine::start(|method, _| match method {
-            "updates.state" => Err((
+            MethodName::UpdatesState => Err((
                 "unsupported_remote_operation",
                 "The engine does not support updates.state.".into(),
             )),
@@ -227,14 +247,16 @@ mod tests {
         assert_eq!(error.code, "unsupported_remote_operation");
     }
 
-    fn handoff_engine(fail: Option<&'static str>) -> FakeEngine {
+    fn handoff_engine(fail: Option<MethodName>) -> FakeEngine {
         FakeEngine::start(move |method, _| {
             if fail == Some(method) {
                 return Err(("busy", "The engine refused.".into()));
             }
             match method {
-                "engine.update.prepare" | "engine.shutdown" => Ok(json!({"jobId": "job:1"})),
-                "operations.job.get" => Ok(
+                MethodName::EngineUpdatePrepare | MethodName::EngineShutdown => {
+                    Ok(json!({"jobId": "job:1"}))
+                }
+                MethodName::OperationsJobGet => Ok(
                     json!({"jobId": "job:1", "state": "finished", "outcome": {"result": {"resuming": []}}}),
                 ),
                 _ => Ok(json!({"subscription": "sub"})),
@@ -257,12 +279,12 @@ mod tests {
         .await
         .unwrap();
         assert!(swapped);
-        assert_eq!(fake.calls("engine.update.prepare").len(), 1);
+        assert_eq!(fake.calls(MethodName::EngineUpdatePrepare).len(), 1);
         assert_eq!(
-            fake.calls("engine.shutdown"),
+            fake.calls(MethodName::EngineShutdown),
             vec![json!({"stopComputers": false, "reason": "update"})]
         );
-        assert!(fake.calls("engine.update.abort").is_empty());
+        assert!(fake.calls(MethodName::EngineUpdateAbort).is_empty());
         // Dropping the guard released the lock.
         assert!(!crate::installer::coordinator_present(directory.path()));
     }
@@ -270,7 +292,7 @@ mod tests {
     #[tokio::test]
     async fn a_refused_prepare_aborts_and_never_shuts_down_or_swaps() {
         let directory = tempfile::tempdir().unwrap();
-        let fake = handoff_engine(Some("engine.update.prepare"));
+        let fake = handoff_engine(Some(MethodName::EngineUpdatePrepare));
         let (engine, _) = connected_client(&fake).await;
         let error = hand_off(&engine, locked(directory.path()), || {
             panic!("the bundle must not be replaced")
@@ -278,22 +300,22 @@ mod tests {
         .await
         .unwrap_err();
         assert!(error.contains("refused"), "{error}");
-        assert_eq!(fake.calls("engine.update.abort").len(), 1);
-        assert!(fake.calls("engine.shutdown").is_empty());
+        assert_eq!(fake.calls(MethodName::EngineUpdateAbort).len(), 1);
+        assert!(fake.calls(MethodName::EngineShutdown).is_empty());
         assert!(!crate::installer::coordinator_present(directory.path()));
     }
 
     #[tokio::test]
     async fn a_refused_shutdown_aborts_and_keeps_the_bundle() {
         let directory = tempfile::tempdir().unwrap();
-        let fake = handoff_engine(Some("engine.shutdown"));
+        let fake = handoff_engine(Some(MethodName::EngineShutdown));
         let (engine, _) = connected_client(&fake).await;
         hand_off(&engine, locked(directory.path()), || {
             panic!("the bundle must not be replaced")
         })
         .await
         .unwrap_err();
-        assert_eq!(fake.calls("engine.update.abort").len(), 1);
+        assert_eq!(fake.calls(MethodName::EngineUpdateAbort).len(), 1);
     }
 
     #[tokio::test]
@@ -306,7 +328,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error, INSTALLER_BUSY);
-        assert!(fake.calls("engine.update.prepare").is_empty());
+        assert!(fake.calls(MethodName::EngineUpdatePrepare).is_empty());
     }
 
     #[tokio::test]
@@ -322,7 +344,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error, "disk full");
-        assert!(fake.calls("engine.update.abort").is_empty());
+        assert!(fake.calls(MethodName::EngineUpdateAbort).is_empty());
         assert!(!crate::installer::coordinator_present(directory.path()));
     }
 }

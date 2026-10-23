@@ -5,10 +5,19 @@
 use std::{sync::Mutex, time::Duration};
 
 use serde_json::{json, Map, Value};
+use silo_api::methods::{
+    github::{
+        GitHubAccessSetParams, GitHubConfigurationRetryParams, GitHubConfigurationSaveParams,
+        GitHubPersonalTokenSaveParams,
+    },
+    operations::{CancelJobParams, GetJobParams},
+    requests, Kind, Request,
+};
 use tauri::{Manager, WebviewWindow};
 
 use crate::engine_client::{
     forwarding::{browser, open_url, roster, Roster},
+    params::{decode, device, job_id as parse_job_id},
     Engine, EngineClient, EngineError,
 };
 
@@ -126,13 +135,13 @@ async fn view(engine: &EngineClient, state: Value) -> Result<Value, EngineError>
 // MARK: Operations
 
 pub(crate) async fn read_state(engine: &EngineClient) -> Result<Value, EngineError> {
-    let state = engine.call("github.state", json!({})).await?;
+    let state = engine.call(requests::github_state(device(None))).await?;
     view(engine, state).await
 }
 
 /// A mutation that answers with the new state.
-async fn mutate(engine: &EngineClient, method: &str, params: Value) -> Result<Value, EngineError> {
-    let state = engine.call(method, params).await?;
+async fn mutate<K: Kind>(engine: &EngineClient, request: Request<K>) -> Result<Value, EngineError> {
+    let state = engine.call(request).await?;
     view(engine, state).await
 }
 
@@ -158,12 +167,16 @@ async fn open_authorization(
     poll: Duration,
 ) -> Result<(), EngineError> {
     for _ in 0..URL_ATTEMPTS {
-        let state = engine.call("github.state", json!({})).await?;
+        let state = engine.call(requests::github_state(device(None))).await?;
         if let Some(url) = state.get("pendingAuthorizationUrl").and_then(Value::as_str) {
             return open_url(engine, url, open).await;
         }
         let job = engine
-            .call("operations.job.get", json!({"jobId": job_id}))
+            .call(requests::operations_job_get(GetJobParams {
+                job_id: parse_job_id(job_id)?,
+                device_id: None,
+                offset_bytes: None,
+            }))
             .await?;
         if job.get("state").and_then(Value::as_str) == Some("finished") {
             return Ok(());
@@ -179,7 +192,7 @@ pub(crate) async fn connect(
     open: impl Fn(&Map<String, Value>, &str) -> Result<(), String>,
     poll: Duration,
 ) -> Result<Value, EngineError> {
-    let started = engine.call("github.connect", json!({})).await?;
+    let started = engine.call(requests::github_connect(device(None))).await?;
     let job_id = started
         .get("jobId")
         .and_then(Value::as_str)
@@ -188,9 +201,14 @@ pub(crate) async fn connect(
     remember_connection(Some(job_id.clone()));
     let finished = async {
         if let Err(error) = open_authorization(engine, &job_id, &open, poll).await {
-            let _ = engine
-                .call("operations.cancel", json!({"jobId": job_id}))
-                .await;
+            if let Ok(job_id) = parse_job_id(&job_id) {
+                let _ = engine
+                    .call(requests::operations_cancel(CancelJobParams {
+                        job_id,
+                        device_id: None,
+                    }))
+                    .await;
+            }
             let _ = engine.wait_job(&job_id).await;
             return Err(error);
         }
@@ -207,19 +225,22 @@ pub(crate) async fn connect(
 pub(crate) async fn cancel_connection(engine: &EngineClient) -> Result<Value, EngineError> {
     if let Some(job_id) = active_connection() {
         engine
-            .call("operations.cancel", json!({"jobId": job_id}))
+            .call(requests::operations_cancel(CancelJobParams {
+                job_id: parse_job_id(&job_id)?,
+                device_id: None,
+            }))
             .await?;
     }
     read_state(engine).await
 }
 
 /// Opens the page a command returned as `{url}`.
-async fn open_returned_url(
+async fn open_returned_url<K: Kind>(
     engine: &EngineClient,
-    method: &str,
+    request: Request<K>,
     open: impl FnOnce(&Map<String, Value>, &str) -> Result<(), String>,
 ) -> Result<(), EngineError> {
-    let page = engine.call(method, json!({})).await?;
+    let page = engine.call(request).await?;
     let url = page
         .get("url")
         .and_then(Value::as_str)
@@ -234,8 +255,10 @@ pub(crate) async fn save_configuration(
     let configuration = configuration_for_engine(configuration, &roster(engine, None).await?)?;
     mutate(
         engine,
-        "github.configuration.save",
-        json!({"configuration": configuration}),
+        requests::github_configuration_save(GitHubConfigurationSaveParams {
+            configuration: decode(configuration, "GitHub configuration")?,
+            device_id: None,
+        }),
     )
     .await
 }
@@ -244,11 +267,18 @@ pub(crate) async fn retry_configuration(
     engine: &EngineClient,
     computer: Option<String>,
 ) -> Result<Value, EngineError> {
-    let mut params = json!({});
-    if let Some(name) = computer {
-        params["computerId"] = Value::String(engine.computer_id(&name).await?);
-    }
-    mutate(engine, "github.configuration.retry", params).await
+    let computer_id = match computer {
+        Some(name) => Some(engine.computer_id(&name).await?),
+        None => None,
+    };
+    mutate(
+        engine,
+        requests::github_configuration_retry(GitHubConfigurationRetryParams {
+            computer_id,
+            device_id: None,
+        }),
+    )
+    .await
 }
 
 // MARK: Commands
@@ -287,7 +317,12 @@ pub async fn reopen_github_authorization(
     window: WebviewWindow,
 ) -> Result<(), EngineError> {
     require_main(&window)?;
-    open_returned_url(&engine, "github.connect.reopen", browser).await
+    open_returned_url(
+        &engine,
+        requests::github_connect_reopen(device(None)),
+        browser,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -296,7 +331,12 @@ pub async fn manage_github_repositories(
     window: WebviewWindow,
 ) -> Result<(), EngineError> {
     require_main(&window)?;
-    open_returned_url(&engine, "github.repositories.manage", browser).await
+    open_returned_url(
+        &engine,
+        requests::github_repositories_manage(device(None)),
+        browser,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -305,7 +345,7 @@ pub async fn refresh_github_repositories(
     window: WebviewWindow,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    mutate(&engine, "github.repositories.refresh", json!({})).await
+    mutate(&engine, requests::github_repositories_refresh(device(None))).await
 }
 
 #[tauri::command]
@@ -314,7 +354,7 @@ pub async fn disconnect_github(
     window: WebviewWindow,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    mutate(&engine, "github.disconnect", json!({})).await
+    mutate(&engine, requests::github_disconnect(device(None))).await
 }
 
 #[tauri::command]
@@ -324,7 +364,14 @@ pub async fn set_github_access_enabled(
     enabled: bool,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    mutate(&engine, "github.access.set", json!({"enabled": enabled})).await
+    mutate(
+        &engine,
+        requests::github_access_set(GitHubAccessSetParams {
+            enabled,
+            device_id: None,
+        }),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -356,8 +403,10 @@ pub async fn save_github_personal_token(
     require_main(&window)?;
     mutate(
         &engine,
-        "github.personalToken.save",
-        json!({"token": token}),
+        requests::github_personal_token_save(GitHubPersonalTokenSaveParams {
+            token,
+            device_id: None,
+        }),
     )
     .await
 }
@@ -368,7 +417,11 @@ pub async fn remove_github_personal_token(
     window: WebviewWindow,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    mutate(&engine, "github.personalToken.remove", json!({})).await
+    mutate(
+        &engine,
+        requests::github_personal_token_remove(device(None)),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -388,6 +441,8 @@ mod tests {
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
     use std::sync::Arc;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
@@ -411,25 +466,25 @@ mod forwarding_tests {
         })
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "github.state"
-            | "github.disconnect"
-            | "github.access.set"
-            | "github.configuration.save"
-            | "github.configuration.retry"
-            | "github.personalToken.save"
-            | "github.personalToken.remove"
-            | "github.repositories.refresh" => Ok(engine_state()),
-            "github.connect.reopen" | "github.repositories.manage" => {
+            MethodName::GitHubState
+            | MethodName::GitHubDisconnect
+            | MethodName::GitHubAccessSet
+            | MethodName::GitHubConfigurationSave
+            | MethodName::GitHubConfigurationRetry
+            | MethodName::GitHubPersonalTokenSave
+            | MethodName::GitHubPersonalTokenRemove
+            | MethodName::GitHubRepositoriesRefresh => Ok(engine_state()),
+            MethodName::GitHubConnectReopen | MethodName::GitHubRepositoriesManage => {
                 Ok(json!({"url": "https://github.com/login/oauth/authorize?x=1"}))
             }
-            "settings.read" => Ok(json!({"settings": {}})),
+            MethodName::SettingsRead => Ok(json!({"settings": {}})),
             _ => Ok(Value::Null),
         }
     }
@@ -466,7 +521,7 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(
-            fake.calls("github.configuration.save"),
+            fake.calls(MethodName::GitHubConfigurationSave),
             vec![json!({"configuration": {
                 "baseRevision": 3,
                 "computers": [{
@@ -481,7 +536,7 @@ mod forwarding_tests {
             .await
             .unwrap_err();
         assert_eq!(unknown.code, "not_found");
-        assert_eq!(fake.calls("github.configuration.save").len(), 1);
+        assert_eq!(fake.calls(MethodName::GitHubConfigurationSave).len(), 1);
     }
 
     #[tokio::test]
@@ -492,15 +547,21 @@ mod forwarding_tests {
             .await
             .unwrap();
         retry_configuration(&engine, None).await.unwrap();
-        mutate(&engine, "github.access.set", json!({"enabled": false}))
-            .await
-            .unwrap();
+        mutate(
+            &engine,
+            requests::github_access_set(GitHubAccessSetParams {
+                enabled: false,
+                device_id: None,
+            }),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            fake.calls("github.configuration.retry"),
+            fake.calls(MethodName::GitHubConfigurationRetry),
             vec![json!({"computerId": DEV}), json!({})]
         );
         assert_eq!(
-            fake.calls("github.access.set"),
+            fake.calls(MethodName::GitHubAccessSet),
             vec![json!({"enabled": false})]
         );
     }
@@ -510,17 +571,17 @@ mod forwarding_tests {
         let pending = Arc::new(Mutex::new(false));
         let handler_pending = pending.clone();
         let fake = FakeEngine::start(move |method, params| match method {
-            "github.connect" => {
+            MethodName::GitHubConnect => {
                 *handler_pending.lock().unwrap() = true;
                 Ok(json!({"jobId": "job:7"}))
             }
-            "github.state" if *handler_pending.lock().unwrap() => {
+            MethodName::GitHubState if *handler_pending.lock().unwrap() => {
                 let mut state = engine_state();
                 state["pendingAuthorizationUrl"] =
                     json!("https://github.com/login/oauth/authorize?x=1");
                 Ok(state)
             }
-            "operations.job.get" => {
+            MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:7", "state": "finished", "outcome": {"result": null}}))
             }
             _ => replies(method, params),
@@ -544,7 +605,7 @@ mod forwarding_tests {
             vec!["https://github.com/login/oauth/authorize?x=1".to_owned()]
         );
         assert_eq!(
-            fake.calls("operations.job.acknowledge"),
+            fake.calls(MethodName::OperationsJobAcknowledge),
             vec![json!({"jobId": "job:7"})]
         );
     }
@@ -552,8 +613,8 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_connection_that_fails_to_start_or_ends_in_error_is_the_engines_error() {
         let fake = FakeEngine::start(|method, params| match method {
-            "github.connect" => Ok(json!({"jobId": "job:8"})),
-            "operations.job.get" => Ok(json!({
+            MethodName::GitHubConnect => Ok(json!({"jobId": "job:8"})),
+            MethodName::OperationsJobGet => Ok(json!({
                 "jobId": "job:8", "state": "finished",
                 "outcome": {"error": {"code": "cancelled", "message": "GitHub connection cancelled."}}
             })),
@@ -567,7 +628,7 @@ mod forwarding_tests {
         assert_eq!(error.message, "GitHub connection cancelled.");
 
         let refused = FakeEngine::start(|method, params| match method {
-            "github.connect" => Err(("unsupported_remote_operation", "No.".into())),
+            MethodName::GitHubConnect => Err(("unsupported_remote_operation", "No.".into())),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&refused).await;
@@ -582,15 +643,28 @@ mod forwarding_tests {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
         let opened = Arc::new(Mutex::new(Vec::new()));
-        for method in ["github.connect.reopen", "github.repositories.manage"] {
-            let record = opened.clone();
-            open_returned_url(&engine, method, move |_, url| {
+        let record = opened.clone();
+        open_returned_url(
+            &engine,
+            requests::github_connect_reopen(device(None)),
+            move |_, url| {
                 record.lock().unwrap().push(url.to_owned());
                 Ok(())
-            })
-            .await
-            .unwrap();
-        }
+            },
+        )
+        .await
+        .unwrap();
+        let record = opened.clone();
+        open_returned_url(
+            &engine,
+            requests::github_repositories_manage(device(None)),
+            move |_, url| {
+                record.lock().unwrap().push(url.to_owned());
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(opened.lock().unwrap().len(), 2);
     }
 }

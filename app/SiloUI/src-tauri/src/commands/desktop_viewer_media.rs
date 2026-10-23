@@ -1,7 +1,11 @@
 //! Sound, audio and screen controls of a desktop viewer: each forwards to the engine, which
 //! owns the page probe, the revision ordering and the guest bridge.
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
+use silo_api::methods::{
+    display::{ViewerAudioSetParams, ViewerConnectionParams},
+    requests,
+};
 use tauri::Window;
 
 use crate::{
@@ -15,8 +19,10 @@ pub(crate) struct SoundSupport {
     pub sound: bool,
 }
 
-fn connection_params(connection: &str) -> Value {
-    json!({"connectionId": connection})
+fn connection_params(connection: &str) -> ViewerConnectionParams {
+    ViewerConnectionParams {
+        connection_id: connection.to_owned(),
+    }
 }
 
 /// Whether this device can play the computer's sound, waiting for the page's connection.
@@ -25,7 +31,9 @@ pub(crate) async fn sound_check(
     connection: &str,
 ) -> Result<SoundSupport, EngineError> {
     let answer = engine
-        .call("display.viewer.sound.check", connection_params(connection))
+        .call(requests::display_viewer_sound_check(connection_params(
+            connection,
+        )))
         .await?;
     answer
         .get("sound")
@@ -39,7 +47,9 @@ pub(crate) async fn sound_cancel(
     connection: &str,
 ) -> Result<(), EngineError> {
     engine
-        .call("display.viewer.sound.cancel", connection_params(connection))
+        .call(requests::display_viewer_sound_cancel(connection_params(
+            connection,
+        )))
         .await
         .map(|_| ())
 }
@@ -52,15 +62,12 @@ pub(crate) async fn set_audio(
     revision: u64,
 ) -> Result<(), EngineError> {
     engine
-        .call(
-            "display.viewer.audio.set",
-            json!({
-                "connectionId": connection,
-                "muted": muted,
-                "active": active,
-                "revision": revision,
-            }),
-        )
+        .call(requests::display_viewer_audio_set(ViewerAudioSetParams {
+            connection_id: connection.to_owned(),
+            muted,
+            active,
+            revision,
+        }))
         .await
         .map(|_| ())
 }
@@ -70,7 +77,9 @@ pub(crate) async fn reset_screen(
     connection: &str,
 ) -> Result<(), EngineError> {
     engine
-        .call("display.viewer.screen.reset", connection_params(connection))
+        .call(requests::display_viewer_screen_reset(connection_params(
+            connection,
+        )))
         .await
         .map(|_| ())
 }
@@ -140,11 +149,13 @@ pub(crate) async fn desktop_viewer_reset_screen(
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn the_sound_check_asks_the_engine_and_translates_its_answer() {
         let fake = FakeEngine::start(|method, _| match method {
-            "display.viewer.sound.check" => Ok(json!({"sound": true})),
+            MethodName::DisplayViewerSoundCheck => Ok(json!({"sound": true})),
             _ => Ok(Value::Null),
         });
         let (client, _) = connected_client(&fake).await;
@@ -154,7 +165,7 @@ mod forwarding_tests {
             json!({"sound": true})
         );
         assert_eq!(
-            fake.calls("display.viewer.sound.check"),
+            fake.calls(MethodName::DisplayViewerSoundCheck),
             [json!({"connectionId": "c1"})]
         );
     }
@@ -169,7 +180,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_superseded_check_reports_the_engines_cancellation() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("cancelled", "The desktop sound check was cancelled.".into())),
         });
         let (client, _) = connected_client(&fake).await;
@@ -186,15 +197,15 @@ mod forwarding_tests {
         set_audio(&client, "c1", true, false, 7).await.unwrap();
         reset_screen(&client, "c1").await.unwrap();
         assert_eq!(
-            fake.calls("display.viewer.sound.cancel"),
+            fake.calls(MethodName::DisplayViewerSoundCancel),
             [json!({"connectionId": "c1"})]
         );
         assert_eq!(
-            fake.calls("display.viewer.audio.set"),
+            fake.calls(MethodName::DisplayViewerAudioSet),
             [json!({"connectionId": "c1", "muted": true, "active": false, "revision": 7})]
         );
         assert_eq!(
-            fake.calls("display.viewer.screen.reset"),
+            fake.calls(MethodName::DisplayViewerScreenReset),
             [json!({"connectionId": "c1"})]
         );
     }
@@ -202,7 +213,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn engine_errors_reach_the_ui_as_their_message() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("not_found", "Unknown desktop viewer.".into())),
         });
         let (client, _) = connected_client(&fake).await;

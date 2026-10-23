@@ -1,6 +1,7 @@
 //! Log queries: `silod` reads (and routes) the logs.
-use crate::engine_client::{Engine, EngineClient, EngineError};
+use crate::engine_client::{params::decode, Engine, EngineClient, EngineError};
 use serde_json::Value;
+use silo_api::methods::{logs::LogsQueryParams, requests};
 
 /// The UI serializes unset options as null; the engine's params leave them out.
 pub(crate) fn without_nulls(request: Value) -> Value {
@@ -16,7 +17,8 @@ pub(crate) fn without_nulls(request: Value) -> Value {
 }
 
 pub(crate) async fn query(engine: &EngineClient, request: Value) -> Result<Value, EngineError> {
-    engine.call("logs.query", without_nulls(request)).await
+    let params: LogsQueryParams = decode(without_nulls(request), "log query")?;
+    engine.call(requests::logs_query(params)).await
 }
 
 #[tauri::command]
@@ -32,12 +34,13 @@ mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
     use serde_json::json;
+    use silo_api::methods::MethodName;
 
     #[tokio::test]
     async fn a_query_is_forwarded_without_its_unset_options() {
         let fake = FakeEngine::start(|method, _| match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "logs.query" => Ok(json!({"entries": [], "totalMatches": 0})),
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::LogsQuery => Ok(json!({"entries": [], "totalMatches": 0})),
             _ => Ok(Value::Null),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -49,7 +52,7 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(page["totalMatches"], 0);
         assert_eq!(
-            fake.calls("logs.query"),
+            fake.calls(MethodName::LogsQuery),
             vec![json!({"computerId": "c1", "query": "boot", "limit": 50})]
         );
     }
@@ -57,7 +60,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn an_unknown_computer_is_a_typed_error() {
         let fake = FakeEngine::start(|method, _| match method {
-            "logs.query" => Err(("not_found", "This computer no longer exists.".into())),
+            MethodName::LogsQuery => Err(("not_found", "This computer no longer exists.".into())),
             _ => Ok(json!({"subscription": "sub"})),
         });
         let (engine, _) = connected_client(&fake).await;

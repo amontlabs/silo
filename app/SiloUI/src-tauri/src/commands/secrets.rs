@@ -2,10 +2,16 @@
 //! engine by id, so both directions are translated here. Values are write-only.
 
 use serde_json::{json, Value};
+use silo_api::methods::{
+    requests,
+    secrets::{SecretIdParams, SecretsSaveParams},
+    Kind, Request,
+};
 use tauri::WebviewWindow;
 
 use crate::engine_client::{
     forwarding::{roster, Roster},
+    params::{decode, device},
     Engine, EngineClient, EngineError,
 };
 
@@ -83,24 +89,26 @@ fn request_for_engine(request: &Value, roster: &Roster) -> Result<Value, EngineE
 }
 
 pub(crate) async fn list(engine: &EngineClient) -> Result<Vec<Value>, EngineError> {
-    let listed = engine.call("secrets.list", json!({})).await?;
+    let listed = engine.call(requests::secrets_list(device(None))).await?;
     secrets_for_ui(engine, listed).await
 }
 
 pub(crate) async fn save(engine: &EngineClient, request: Value) -> Result<Vec<Value>, EngineError> {
     let request = request_for_engine(&request, &roster(engine, None).await?)?;
     let saved = engine
-        .call("secrets.save", json!({"request": request}))
+        .call(requests::secrets_save(SecretsSaveParams {
+            request: decode(request, "secret request")?,
+            device_id: None,
+        }))
         .await?;
     secrets_for_ui(engine, saved).await
 }
 
-async fn change(
+async fn change<K: Kind>(
     engine: &EngineClient,
-    method: &str,
-    id: String,
+    request: Request<K>,
 ) -> Result<Vec<Value>, EngineError> {
-    let changed = engine.call(method, json!({"id": id})).await?;
+    let changed = engine.call(request).await?;
     secrets_for_ui(engine, changed).await
 }
 
@@ -126,7 +134,14 @@ pub async fn remove_secret(
     id: String,
 ) -> Result<Vec<Value>, EngineError> {
     require_main(&window)?;
-    change(&engine, "secrets.remove", id).await
+    change(
+        &engine,
+        requests::secrets_remove(SecretIdParams {
+            id,
+            device_id: None,
+        }),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -136,13 +151,22 @@ pub async fn retry_secret(
     id: String,
 ) -> Result<Vec<Value>, EngineError> {
     require_main(&window)?;
-    change(&engine, "secrets.retry", id).await
+    change(
+        &engine,
+        requests::secrets_retry(SecretIdParams {
+            id,
+            device_id: None,
+        }),
+    )
+    .await
 }
 
 #[cfg(test)]
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
 
@@ -153,16 +177,17 @@ mod forwarding_tests {
         })
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "secrets.list" | "secrets.save" | "secrets.remove" | "secrets.retry" => {
-                Ok(json!([engine_secret()]))
-            }
+            MethodName::SecretsList
+            | MethodName::SecretsSave
+            | MethodName::SecretsRemove
+            | MethodName::SecretsRetry => Ok(json!([engine_secret()])),
             _ => Ok(Value::Null),
         }
     }
@@ -191,7 +216,7 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(saved[0]["computers"], json!(["dev"]));
         assert_eq!(
-            fake.calls("secrets.save"),
+            fake.calls(MethodName::SecretsSave),
             vec![json!({"request": {
                 "operation": "add", "name": "TOKEN", "value": "v",
                 "computerIds": [DEV], "allowedDomains": ["example.com"]
@@ -204,23 +229,38 @@ mod forwarding_tests {
         .await
         .unwrap_err();
         assert_eq!(unknown.code, "not_found");
-        assert_eq!(fake.calls("secrets.save").len(), 1);
+        assert_eq!(fake.calls(MethodName::SecretsSave).len(), 1);
     }
 
     #[tokio::test]
     async fn remove_and_retry_forward_the_id_and_errors_stay_typed() {
         let fake = FakeEngine::start(|method, params| match method {
-            "secrets.retry" => Err(("busy", "Another change is running.".into())),
+            MethodName::SecretsRetry => Err(("busy", "Another change is running.".into())),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
-        change(&engine, "secrets.remove", "s1".into())
-            .await
-            .unwrap();
-        assert_eq!(fake.calls("secrets.remove"), vec![json!({"id": "s1"})]);
-        let error = change(&engine, "secrets.retry", "s1".into())
-            .await
-            .unwrap_err();
+        change(
+            &engine,
+            requests::secrets_remove(SecretIdParams {
+                id: "s1".into(),
+                device_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fake.calls(MethodName::SecretsRemove),
+            vec![json!({"id": "s1"})]
+        );
+        let error = change(
+            &engine,
+            requests::secrets_retry(SecretIdParams {
+                id: "s1".into(),
+                device_id: None,
+            }),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.code, "busy");
     }
 }

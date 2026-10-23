@@ -1,7 +1,10 @@
 //! Paste and Copy between this device and a Linux computer's desktop. The engine does the work
 //! (device clipboard, page bridge); this client starts a transfer and reports its outcome.
-use serde_json::{json, Value};
-use silo_api::methods::clipboard::{ClipboardAction, ClipboardTransferResult};
+use serde_json::Value;
+use silo_api::methods::{
+    clipboard::{ClipboardAction, ClipboardTransferParams, ClipboardTransferResult},
+    requests,
+};
 use tauri::{AppHandle, Emitter, Window};
 
 use crate::{
@@ -47,12 +50,14 @@ pub(crate) async fn transfer(
     let Some(connection) = connection else {
         return not_connected(action);
     };
-    let mut params =
-        json!({"computerId": computer_id, "connectionId": connection, "action": action});
-    if let Some(device) = device_id {
-        params["deviceId"] = json!(device);
-    }
-    let reply = engine.call("clipboard.transfer", params).await;
+    let reply = engine
+        .call(requests::clipboard_transfer(ClipboardTransferParams {
+            computer_id: computer_id.clone(),
+            device_id: device_id.clone(),
+            connection_id: Some(connection.to_owned()),
+            action,
+        }))
+        .await;
     match reply {
         Ok(value) => serde_json::from_value(value)
             .unwrap_or_else(|_| failed(action, "The engine returned an unreadable result.")),
@@ -113,7 +118,9 @@ pub(crate) fn spawn(app: &AppHandle, label: &str, action: ClipboardAction) {
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
     use silo_api::methods::clipboard::{ClipboardTransferContent, ClipboardTransferStatus};
+    use silo_api::methods::MethodName;
 
     fn comp() -> (String, Option<String>) {
         ("comp".to_owned(), None)
@@ -122,7 +129,7 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_remote_computer_is_addressed_with_its_device() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err((
                 "unsupported_remote_operation",
                 "clipboard.transfer on a remote device".into(),
@@ -133,7 +140,7 @@ mod forwarding_tests {
         let report = transfer(&client, &remote, Some("c1"), ClipboardAction::Copy).await;
         assert_eq!(report.status, ClipboardTransferStatus::Failed);
         assert_eq!(
-            fake.calls("clipboard.transfer"),
+            fake.calls(MethodName::ClipboardTransfer),
             [
                 json!({"computerId": "comp", "deviceId": "dev", "connectionId": "c1", "action": "copy"})
             ]
@@ -150,7 +157,7 @@ mod forwarding_tests {
         assert_eq!(report.status, ClipboardTransferStatus::Pasted);
         assert_eq!(report.content, Some(ClipboardTransferContent::Text));
         assert_eq!(
-            fake.calls("clipboard.transfer"),
+            fake.calls(MethodName::ClipboardTransfer),
             [json!({"computerId": "comp", "connectionId": "c1", "action": "paste"})]
         );
         // The shape the UI parses.
@@ -189,13 +196,13 @@ mod forwarding_tests {
         let report = transfer(&client, &comp(), None, ClipboardAction::Copy).await;
         assert_eq!(report.status, ClipboardTransferStatus::NotConnected);
         assert_eq!(report.action, ClipboardAction::Copy);
-        assert!(fake.calls("clipboard.transfer").is_empty());
+        assert!(fake.calls(MethodName::ClipboardTransfer).is_empty());
     }
 
     #[tokio::test]
     async fn an_engine_failure_is_a_failed_report_with_its_message() {
         let fake = FakeEngine::start(|method, _| match method {
-            "engine.state" | "events.subscribe" => Ok(Value::Null),
+            MethodName::EngineState | MethodName::EventsSubscribe => Ok(Value::Null),
             _ => Err(("not_found", "Unknown desktop viewer.".into())),
         });
         let (client, _) = connected_client(&fake).await;

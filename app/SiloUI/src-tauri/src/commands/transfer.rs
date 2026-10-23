@@ -8,14 +8,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
+use silo_api::methods::{
+    files::{FileDownloadParams, FileUploadParams, UploadOrigin},
+    operations::CancelJobParams,
+    requests,
+};
 use tauri::{AppHandle, DragDropEvent, Window};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::engine_client::{
-    forwarding::{resolve, with_device},
-    Engine, EngineClient, EngineError,
+    forwarding::resolve, params::job_id, Engine, EngineClient, EngineError,
 };
 
 fn require_main(window: &Window) -> Result<(), EngineError> {
@@ -105,13 +109,7 @@ fn restore_selection(token: &str, owner: &str, paths: Vec<String>) {
 
 // MARK: Operations
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum ConflictPolicy {
-    Ask,
-    Replace,
-    KeepBoth,
-}
+pub(crate) use silo_api::methods::files::ConflictPolicy;
 
 /// Uploads the files `selection` stands for. A conflict answer sends nothing and keeps the
 /// selection, so the UI can ask and send again.
@@ -127,23 +125,24 @@ pub(crate) async fn upload(
 ) -> Result<Value, EngineError> {
     let (computer_id, device_id) = resolve(engine, computer).await?;
     let paths = take_selection(selection, owner)?;
-    let mut params = with_device(
-        json!({
-            "transferId": transfer_id,
-            "computerId": computer_id,
-            "directory": directory,
-            "conflict": conflict,
-            "paths": paths,
-            "origin": "client",
-        }),
-        device_id.as_deref(),
-    );
     // A file dropped on a viewer window goes to that viewer's computer through its connection.
-    if let Some(connection) = viewer_connection {
-        params["origin"] = json!("viewer");
-        params["connectionId"] = json!(connection);
-    }
-    let outcome = engine.run_job("files.upload", params).await;
+    let (origin, connection_id) = match viewer_connection {
+        Some(connection) => (UploadOrigin::Viewer, Some(connection.to_owned())),
+        None => (UploadOrigin::Client, None),
+    };
+    let outcome = engine
+        .run_job(requests::files_upload(FileUploadParams {
+            transfer_id,
+            computer_id,
+            device_id,
+            directory,
+            conflict,
+            selection: None,
+            paths: Some(paths.clone()),
+            origin: Some(origin),
+            connection_id,
+        }))
+        .await;
     match &outcome {
         Ok(result) if result.get("status").and_then(Value::as_str) == Some("conflict") => {
             restore_selection(selection, owner, paths);
@@ -178,24 +177,23 @@ pub(crate) async fn download(
         return Ok(json!({"status": "cancelled"}));
     };
     let (computer_id, device_id) = resolve(engine, computer).await?;
-    let params = with_device(
-        json!({
-            "transferId": transfer_id,
-            "computerId": computer_id,
-            "path": path,
-            "destination": destination,
-        }),
-        device_id.as_deref(),
-    );
-    engine.run_job("files.download", params).await
+    engine
+        .run_job(requests::files_download(FileDownloadParams {
+            transfer_id,
+            computer_id,
+            device_id,
+            path,
+            destination: Some(destination),
+        }))
+        .await
 }
 
 pub(crate) async fn cancel(engine: &EngineClient, transfer_id: &str) -> Result<(), EngineError> {
     engine
-        .call(
-            "operations.cancel",
-            json!({"jobId": format!("transfer:{transfer_id}")}),
-        )
+        .call(requests::operations_cancel(CancelJobParams {
+            job_id: job_id(&format!("transfer:{transfer_id}"))?,
+            device_id: None,
+        }))
         .await?;
     Ok(())
 }
@@ -337,6 +335,8 @@ pub(crate) fn native_drop(app: &AppHandle, shell: &str, event: &DragDropEvent) {
 mod forwarding_tests {
     use super::*;
     use crate::engine_client::testing::{connected_client, FakeEngine};
+    use serde_json::json;
+    use silo_api::methods::MethodName;
 
     const DEV: &str = "00000000-0000-4000-8000-00000000000d";
     const DEVICE: &str = "00000000-0000-4000-8000-0000000000d1";
@@ -345,14 +345,16 @@ mod forwarding_tests {
         json!({"jobId": "transfer:t1", "state": "finished", "outcome": {"result": result}})
     }
 
-    fn replies(method: &str, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
-            "events.subscribe" => Ok(json!({"subscription": "sub"})),
-            "computers.list" => Ok(json!({
+            MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
+            MethodName::ComputersList => Ok(json!({
                 "linux": {"computers": [{"configuration": {"id": DEV, "name": "dev"}}]},
                 "macos": {"computers": []}
             })),
-            "files.upload" | "files.download" => Ok(json!({"jobId": "transfer:t1"})),
+            MethodName::FilesUpload | MethodName::FilesDownload => {
+                Ok(json!({"jobId": "transfer:t1"}))
+            }
             _ => Ok(Value::Null),
         }
     }
@@ -360,7 +362,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn an_upload_sends_the_selected_paths_and_returns_the_outcome() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => Ok(finished(json!({"status": "done", "names": ["a.txt"]}))),
+            MethodName::OperationsJobGet => {
+                Ok(finished(json!({"status": "done", "names": ["a.txt"]})))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -380,7 +384,7 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(outcome, json!({"status": "done", "names": ["a.txt"]}));
         assert_eq!(
-            fake.calls("files.upload"),
+            fake.calls(MethodName::FilesUpload),
             vec![json!({
                 "transferId": "t1", "computerId": DEV, "directory": "/workspace",
                 "conflict": "keepBoth", "paths": ["/tmp/a.txt"], "origin": "client"
@@ -393,7 +397,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn a_file_dropped_on_a_viewer_goes_through_that_viewers_connection() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => Ok(finished(json!({"status": "done", "names": ["a.txt"]}))),
+            MethodName::OperationsJobGet => {
+                Ok(finished(json!({"status": "done", "names": ["a.txt"]})))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -410,7 +416,7 @@ mod forwarding_tests {
         )
         .await
         .unwrap();
-        let sent = &fake.calls("files.upload")[0];
+        let sent = &fake.calls(MethodName::FilesUpload)[0];
         assert_eq!(sent["origin"], "viewer");
         assert_eq!(sent["connectionId"], "conn-1");
     }
@@ -423,7 +429,7 @@ mod forwarding_tests {
         ]));
         let queue = answers.clone();
         let fake = FakeEngine::start(move |method, params| match method {
-            "operations.job.get" => Ok(queue.lock().unwrap().pop().unwrap()),
+            MethodName::OperationsJobGet => Ok(queue.lock().unwrap().pop().unwrap()),
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -455,7 +461,7 @@ mod forwarding_tests {
         .await
         .unwrap();
         assert_eq!(second["status"], "done");
-        assert_eq!(fake.calls("files.upload")[0]["deviceId"], DEVICE);
+        assert_eq!(fake.calls(MethodName::FilesUpload)[0]["deviceId"], DEVICE);
         let wrong_window = upload(
             &engine,
             "other",
@@ -474,7 +480,9 @@ mod forwarding_tests {
     #[tokio::test]
     async fn downloads_go_to_the_chosen_destination_and_a_cancelled_dialog_sends_nothing() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.job.get" => Ok(finished(json!({"status": "done", "path": "/tmp/f.txt"}))),
+            MethodName::OperationsJobGet => {
+                Ok(finished(json!({"status": "done", "path": "/tmp/f.txt"})))
+            }
             _ => replies(method, params),
         });
         let (engine, _) = connected_client(&fake).await;
@@ -489,7 +497,7 @@ mod forwarding_tests {
         .unwrap();
         assert_eq!(done["path"], "/tmp/f.txt");
         assert_eq!(
-            fake.calls("files.download"),
+            fake.calls(MethodName::FilesDownload),
             vec![
                 json!({"transferId": "t1", "computerId": DEV, "path": "/workspace/f.txt", "destination": "/tmp/f.txt"})
             ]
@@ -498,7 +506,7 @@ mod forwarding_tests {
             .await
             .unwrap();
         assert_eq!(cancelled, json!({"status": "cancelled"}));
-        assert_eq!(fake.calls("files.download").len(), 1);
+        assert_eq!(fake.calls(MethodName::FilesDownload).len(), 1);
         assert_eq!(suggested_name("/workspace/dir/f.txt"), "f.txt");
         assert_eq!(suggested_name("/workspace/dir/"), "dir");
     }
@@ -506,10 +514,10 @@ mod forwarding_tests {
     #[tokio::test]
     async fn cancelling_addresses_the_transfer_job_and_failures_are_typed() {
         let fake = FakeEngine::start(|method, params| match method {
-            "operations.cancel" if params["jobId"] == "transfer:missing" => {
+            MethodName::OperationsCancel if params["jobId"] == "transfer:missing" => {
                 Err(("not_found", "That transfer is no longer running.".into()))
             }
-            "operations.job.get" => Ok(json!({
+            MethodName::OperationsJobGet => Ok(json!({
                 "jobId": "transfer:t1", "state": "finished",
                 "outcome": {"error": {"code": "unsupported_remote_operation", "message": "Not yet."}}
             })),
@@ -518,7 +526,7 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         cancel(&engine, "t1").await.unwrap();
         assert_eq!(
-            fake.calls("operations.cancel"),
+            fake.calls(MethodName::OperationsCancel),
             vec![json!({"jobId": "transfer:t1"})]
         );
         assert_eq!(
