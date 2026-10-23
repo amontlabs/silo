@@ -35,6 +35,9 @@ pub mod operations;
 pub mod preparation;
 pub mod push;
 pub mod registry;
+pub mod request;
+#[rustfmt::skip]
+pub mod requests;
 pub mod secrets;
 pub mod settings;
 pub mod ssh_access;
@@ -46,3 +49,4 @@ pub use common::EmptyParams;
 pub use registry::{
     method_registry, MethodDescriptor, MethodKind, MethodName, MethodParams, MethodResults,
 };
+pub use request::{kind, Request};

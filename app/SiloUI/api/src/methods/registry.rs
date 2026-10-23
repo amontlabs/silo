@@ -28,6 +28,25 @@ macro_rules! define_registry {
         #[serde(tag = "method", content = "result")]
         pub enum MethodResults { $( #[serde(rename = $wire)] $variant($result), )* }
 
+        impl MethodName {
+            /// The wire name of this method.
+            pub const fn name(self) -> &'static str {
+                match self { $( Self::$variant => $wire, )* }
+            }
+
+            /// The method with this wire name, if the registry declares one.
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name { $( $wire => Some(Self::$variant), )* _ => None }
+            }
+        }
+
+        impl MethodParams {
+            /// The method these parameters belong to.
+            pub const fn method(&self) -> MethodName {
+                match self { $( Self::$variant(_) => MethodName::$variant, )* }
+            }
+        }
+
         pub static METHOD_REGISTRY: &[MethodDescriptor] = &[
             $( MethodDescriptor { name: $wire, method: MethodName::$variant, kind: MethodKind::$kind,
                 params_type: stringify!($params), result_type: stringify!($result) }, )*
