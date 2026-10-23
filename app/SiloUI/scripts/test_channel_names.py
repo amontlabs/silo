@@ -29,14 +29,14 @@ class ChannelNamesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / 'scripts').mkdir()
-            (root / 'src-tauri/engine/src').mkdir(parents=True)
+            (root / 'host/src').mkdir(parents=True)
             source = root / 'scripts/channel_names.rs'
             shutil.copyfile(SCRIPTS / source.name, source)
-            rust = (SCRIPTS.parent / 'src-tauri/engine/src/channel.rs').read_text()
+            rust = (SCRIPTS.parent / 'host/src/channel.rs').read_text()
             rust = rust.replace('"org.silo.dev"', '"org.example.fixture"')
             rust = rust.replace('".silo-dev"', '".fixture-state"')
             rust = rust.replace('"org.silo.dev.github"', '"fixture.github"')
-            (root / 'src-tauri/engine/src/channel.rs').write_text(rust)
+            (root / 'host/src/channel.rs').write_text(rust)
             development = channel_names(source)['development']
             self.assertEqual(development['identifier'], 'org.example.fixture')
             self.assertEqual(development['stateDir'], '.fixture-state')
