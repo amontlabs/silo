@@ -21,8 +21,9 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 - **`silod`** is the engine daemon. One runs per Mac and build channel, started by launchd as a LaunchAgent. It owns the computers, credentials, and VM windows, and keeps running when the apps that use it quit.
 - **Socket and protocol.** Clients connect to `~/.silo/engine.sock` and exchange JSON frames, each prefixed with a 4-byte big-endian length. A handshake negotiates the protocol version (currently 6). Requests and responses are matched by id; the engine also pushes job progress and events. Methods are grouped by area, such as `computers`, `checkpoints`, `desktop`, `github`, `secrets`, and `exports` ([`api/src/methods`](app/SiloUI/api/src/methods)).
 - **Crates** in the [`app/SiloUI`](app/SiloUI) Cargo workspace:
-  - `silo-api` ([`api`](app/SiloUI/api)): the wire contract as serde types, and the generated [JSON schema](app/SiloUI/api/schema/silo-api.schema.json).
+  - `silo-api` ([`api`](app/SiloUI/api)): the wire contract as serde types, the generated [JSON schema](app/SiloUI/api/schema/silo-api.schema.json), and a typed request constructor for each method.
   - `silo-client` ([`client`](app/SiloUI/client)): a thin Rust client with framing, the handshake, request correlation, and the event feed.
+  - `silo-host` ([`host`](app/SiloUI/host)): stateless host helpers shared by the app and the engine (channel names, applications, notifications, system integrations, terminal launch).
   - `silo-engine` ([`src-tauri/engine`](app/SiloUI/src-tauri/engine)): the engine library, without Tauri.
   - `silod` ([`src-tauri/silod`](app/SiloUI/src-tauri/silod)): the daemon.
   - `silo-ui` ([`src-tauri`](app/SiloUI/src-tauri)): the Tauri desktop app, a client of `silod`.
