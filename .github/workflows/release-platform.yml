@@ -58,10 +58,10 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source-ref }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Explain one-time cold preparation
@@ -84,7 +84,7 @@ jobs:
         run: |
           python3 app/SiloUI/scripts/release-runtime-cache.py pack --archive "$RUNNER_TEMP/runtime-cache.tar.gz" >> "$GITHUB_OUTPUT"
           echo "artifact-name=runtime-cache-$RUNTIME_TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.archive.outputs.artifact-name }}
           path: ${{ runner.temp }}/runtime-cache.tar.gz
@@ -93,7 +93,7 @@ jobs:
           retention-days: 7
       - name: Upload timing metrics only
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-timings-${{ inputs.target }}
           path: ${{ runner.temp }}/build-phases.jsonl
@@ -123,12 +123,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source-ref }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: app/SiloUI/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Install pinned Rust toolchain
@@ -150,7 +150,7 @@ jobs:
         run: python3 scripts/measure-command.py updater-tests -- cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib -- --test-threads=1
       - name: Upload timing metrics only
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-timings-${{ inputs.target }}
           path: ${{ runner.temp }}/build-phases.jsonl
@@ -184,7 +184,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source-ref }}
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Require GitHub App configuration
@@ -199,7 +199,7 @@ jobs:
               exit 1
             fi
           done
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
@@ -310,7 +310,7 @@ jobs:
         run: python3 scripts/verify-release-signatures.py release-assets
       - name: Verify signed package versions and architectures
         run: python3 scripts/verify-release-metadata.py release-assets "$(node -p "require('./package.json').version")"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ inputs.asset }}
           path: app/SiloUI/release-assets/*
@@ -318,7 +318,7 @@ jobs:
           retention-days: 7
       - name: Upload timing metrics only
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-timings-${{ inputs.target }}
           path: ${{ runner.temp }}/build-phases.jsonl
