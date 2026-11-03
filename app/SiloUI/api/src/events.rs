@@ -15,7 +15,7 @@ use crate::{
         network::NetworkState,
         notifications::{Notice, NotificationsClearedPayload},
         operations::OperationQueue,
-        preparation::{ChatGptPreparationStatus, PreparationStatus},
+        preparation::PreparationStatus,
         push::PushOperation,
         secrets::Secret,
         settings::SettingsSnapshot,
@@ -164,14 +164,6 @@ pub enum EventEnvelope {
         seq: u64,
         payload: PreparationStatus,
     },
-    #[serde(rename = "preparation.chatgpt.changed")]
-    ChatGptPreparationChanged {
-        subscription: String,
-        #[serde(rename = "deviceId")]
-        device_id: String,
-        seq: u64,
-        payload: ChatGptPreparationStatus,
-    },
     #[serde(rename = "notifications.notice")]
     NotificationNotice {
         subscription: String,
@@ -297,7 +289,6 @@ pub const EVENT_NAMES: &[&str] = &[
     "settings.changed",
     "updates.changed",
     "preparation.changed",
-    "preparation.chatgpt.changed",
     "notifications.notice",
     "connections.devices.changed",
     "notifications.cleared",

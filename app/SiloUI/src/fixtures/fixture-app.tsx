@@ -35,7 +35,7 @@ import { createComputerUseBridge } from "@/desktop/computer-use-bridge"
 import { ComputerUseProvider } from "@/desktop/computer-use-provider"
 import { createFixturePreparationBackend, preparationFixtureFromSearch } from "./preparation"
 import { createPreparationStore, PreparationProvider } from "@/desktop/preparation"
-import { chatGptFixtureFromSearch, computerUseFixtureFromSearch, createFixtureComputerUseBackend, withComputerUseFixture, withDevicesFixture } from "./computer-use"
+import { computerUseFixtureFromSearch, createFixtureComputerUseBackend, withComputerUseFixture } from "./computer-use"
 import { createFixtureUnseenResult, unseenResultFixtureModeFromSearch } from "./transfer-result-notice"
 
 export function FixtureApp({ nativeOnboardingComplete = false, nativeDependencies = null, nativeOperations = false, settingsStore }: { nativeOnboardingComplete?: boolean; nativeDependencies?: DependencyRuntime | null; nativeOperations?: boolean; settingsStore?: SettingsStore }) {
@@ -74,15 +74,13 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
   const editorInclude = useMemo(() => editorIncludeMode ? createFixtureEditorInclude() : undefined, [editorIncludeMode])
   const baseSource = withResourceFixture(completedSetup ? applicationPreviewAfterSetup(completedSetup) : applicationSourceForScenario(scenario, githubState, computerMode, computerConfigurationMode, systemIssueMode, repositoryPushMode, activityMode, activityStep, githubManagementMode), resourceMode)
   const computerUseMode = computerUseFixtureFromSearch(window.location.search)
-  const chatGptMode = chatGptFixtureFromSearch(window.location.search)
-  const chatGptRemoteMode = chatGptFixtureFromSearch(window.location.search, "chatgpt-remote")
-  const computerUseBridge = useMemo(() => computerUseMode || chatGptMode || chatGptRemoteMode ? createComputerUseBridge(createFixtureComputerUseBackend(computerUseMode ?? "ready", chatGptMode ?? "ready", chatGptRemoteMode ?? chatGptMode ?? "ready")) : null, [computerUseMode, chatGptMode, chatGptRemoteMode])
+  const computerUseBridge = useMemo(() => computerUseMode ? createComputerUseBridge(createFixtureComputerUseBackend(computerUseMode)) : null, [computerUseMode])
   const macosComputersStore = useMemo(() => createFixtureMacosComputersStore(), [])
   const preparationMode = preparationFixtureFromSearch(window.location.search)
   const preparationStore = useMemo(() => preparationMode ? createPreparationStore(createFixturePreparationBackend(preparationMode)) : null, [preparationMode])
   const queuedSource = operationQueue ? { ...baseSource, operationQueue } : baseSource
   const sourceWithComputerUse = computerUseMode ? withComputerUseFixture(queuedSource, computerUseMode) : queuedSource
-  const fixtureSource = computerUseBridge ? withDevicesFixture(sourceWithComputerUse) : sourceWithComputerUse
+  const fixtureSource = sourceWithComputerUse
 
   useEffect(() => {
     const stepCount = activityFixtureStepCount(activityMode)

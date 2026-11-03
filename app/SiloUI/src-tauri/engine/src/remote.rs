@@ -301,8 +301,6 @@ const METHODS: &[(&str, Access)] = &[
     ("desktop.status", Access::Read),
     ("desktop.action", Access::Change),
     ("desktop.job", Access::Change),
-    ("chatgpt.status", Access::Read),
-    ("chatgpt.retry", Access::Change),
     ("github.state", Access::Read),
     ("github.connect", Access::Change),
     ("github.connect.callback", Access::Stream),
@@ -376,7 +374,6 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("computers.configuration.read", false),
     ("computers.configuration.retry", true),
     ("computers.create", true),
-    ("computers.creation.skipComputerUseWait", true),
     ("computers.delete", true),
     ("computers.dismissError", true),
     ("computers.forceStop", true),
@@ -413,8 +410,6 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("migration.preUpgradeBackup.measure", false),
     ("migration.state", false),
     ("notifications.list", false),
-    ("preparation.chatgpt.retry", true),
-    ("preparation.chatgpt.status", false),
     ("preparation.retry", true),
     ("preparation.status", false),
     ("storage.read", false),
@@ -1411,7 +1406,7 @@ fn request_timeout(request: &Value) -> Duration {
         || (request["method"] == "desktop.action"
             && matches!(
                 request["params"]["action"].as_str(),
-                Some("update-streamer" | "setup-lcu" | "setup-computer-use" | "setup-agent-tools")
+                Some("update-streamer" | "setup-computer-use" | "setup-agent-tools")
             ))
         || request["method"] == "computerUse.approval"
     {
@@ -3088,8 +3083,6 @@ fn execute(
         _ if method.starts_with("macos.") => {
             crate::macos_remote_engine::dispatch(macos, method, params)
         }
-        "chatgpt.status" => local_access.chatgpt_status().map_err(BridgeError::from),
-        "chatgpt.retry" => local_access.chatgpt_retry().map_err(BridgeError::from),
         _ => {
             let paths = paths().map_err(BridgeError::from)?;
             crate::remote_access::dispatch_typed(&paths, method, params, checkpoints, local_access)
@@ -3475,20 +3468,18 @@ mod tests {
     }
 
     #[test]
-    fn desktop_lcu_setup_has_time_to_install_over_remote_connection() {
+    fn desktop_setup_actions_have_time_to_install_over_remote_connection() {
         let _test_state = crate::test_support::global_state();
         assert_eq!(
-            request_timeout(&json!({"method":"desktop.action","params":{"action":"setup-lcu"}})),
+            request_timeout(
+                &json!({"method":"desktop.action","params":{"action":"setup-computer-use"}})
+            ),
             Duration::from_secs(2100)
         );
         assert_eq!(
             request_timeout(
                 &json!({"method":"desktop.action","params":{"action":"update-streamer"}})
             ),
-            Duration::from_secs(2100)
-        );
-        assert_eq!(
-            request_timeout(&json!({"method":"desktop.action","params":{"action":"setup-lcu"}})),
             Duration::from_secs(2100)
         );
         assert_eq!(
@@ -6260,14 +6251,6 @@ mod dispatch_tests {
         fn desktop_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, String> {
             Ok(Value::Null)
         }
-
-        fn chatgpt_status(&self) -> Result<Value, String> {
-            Ok(json!({"operation": "status"}))
-        }
-
-        fn chatgpt_retry(&self) -> Result<Value, String> {
-            Ok(json!({"operation": "retry"}))
-        }
     }
 
     /// A private owner directory (never the real `~/.silo`) with management enabled.
@@ -6379,7 +6362,7 @@ mod dispatch_tests {
     }
 
     #[test]
-    fn linux_path_resolution_does_not_block_macos_or_chatgpt_handlers() {
+    fn linux_path_resolution_does_not_block_macos_handlers() {
         let path_calls = Arc::new(AtomicUsize::new(0));
         let resolver_calls = path_calls.clone();
         let paths: Arc<RuntimePathsResolver> = Arc::new(move || {
@@ -6403,25 +6386,6 @@ mod dispatch_tests {
         let local_access = PathIndependentLocalAccess;
         let checkpoints: Arc<crate::remote_access::CheckpointHandler> =
             Arc::new(|_, _| Ok(Value::Null));
-
-        for (method, expected) in [
-            ("chatgpt.status", json!({"operation": "status"})),
-            ("chatgpt.retry", json!({"operation": "retry"})),
-        ] {
-            assert_eq!(
-                execute(
-                    paths.as_ref(),
-                    checkpoints.as_ref(),
-                    &runtime_host,
-                    &macos,
-                    &local_access,
-                    method,
-                    &Value::Null,
-                )
-                .unwrap(),
-                expected
-            );
-        }
 
         let macos_error = execute(
             paths.as_ref(),
@@ -6467,7 +6431,6 @@ mod dispatch_tests {
                 "runtime.delete",
                 "desktop.action",
                 "desktop.job",
-                "chatgpt.retry",
                 "github.connect",
                 "github.repositories.refresh",
                 "github.disconnect",

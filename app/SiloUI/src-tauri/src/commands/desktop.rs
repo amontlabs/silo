@@ -26,7 +26,7 @@ pub(crate) async fn desktop_do(
 ) -> Result<Value, EngineError> {
     let target = targets::resolve(engine, computer).await?;
     let outcome = match action {
-        "setup-computer-use" | "setup-lcu" => {
+        "setup-computer-use" => {
             engine
                 .run_job(requests::computer_use_setup(target.computer()))
                 .await?

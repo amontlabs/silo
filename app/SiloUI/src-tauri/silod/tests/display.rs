@@ -112,7 +112,7 @@ impl Client {
                 "id": "handshake",
                 "method": "engine.handshake",
                 "params": {
-                    "protocol": {"min": 6, "max": 6},
+                    "protocol": {"min": 7, "max": 7},
                     "client": {"name": name, "version": "1.0"}
                 }
             }),

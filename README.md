@@ -134,7 +134,7 @@ The engine, computer runtime, base Linux image, and Git tools are bundled. For c
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
-| macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
+| macOS | Apple Silicon, macOS 15+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
 
 The latest app release, v0.11.1, predates the engine and the Cua-based Linux computer use described here: it downloads ChatGPT for Linux (453 MB, about 1.5 GB unpacked) from OpenAI in the background, without asking. Build from source for the current code until the next release.
 

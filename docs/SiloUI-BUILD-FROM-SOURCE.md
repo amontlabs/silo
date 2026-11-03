@@ -2,11 +2,11 @@
 
 Use this path if you want to own the GitHub connection as well as run Silo locally. You create a GitHub App under your account, put its configuration in an ignored local file, and build Silo with it. To install a prebuilt app instead, follow the [README](../README.md#install). Silo's publisher has no ownership of that registration or independent installation access through it. You still need to trust the code you build and run.
 
-Silo's host app builds and runs on Apple Silicon macOS 14+ only. Linux host apps and packages are discontinued. Linux computers remain supported as VMs on a Mac host. You do not need to host a server, create a personal access token, or generate an App private key. Silo talks directly to GitHub and stores user credentials in macOS Keychain. Native builds require GitHub App configuration even if you plan to skip GitHub during onboarding.
+Silo's host app builds and runs on Apple Silicon macOS 15+ only. Linux host apps and packages are discontinued. Linux computers remain supported as VMs on a Mac host. You do not need to host a server, create a personal access token, or generate an App private key. Silo talks directly to GitHub and stores user credentials in macOS Keychain. Native builds require GitHub App configuration even if you plan to skip GitHub during onboarding.
 
 ## 1. Install the build tools
 
-Build on the supported host: Apple Silicon macOS 14+. Linux is a guest operating system, not a supported Silo host.
+Build on the supported host: Apple Silicon macOS 15+. Linux is a guest operating system, not a supported Silo host.
 
 Install [Node.js 24](https://nodejs.org/en/download), Python 3.11 or newer, [Go 1.25 or newer](https://go.dev/doc/install), Git, and [Rust through rustup](https://rustup.rs/). Install the pinned Rust toolchain used by the bundled VM runtime:
 

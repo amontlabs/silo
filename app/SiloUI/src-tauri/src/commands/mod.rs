@@ -1,6 +1,5 @@
 pub(crate) mod applications;
 pub(crate) mod backup_controller;
-pub(crate) mod chatgpt_app;
 pub(crate) mod dependencies;
 pub(crate) mod desktop;
 pub(crate) mod desktop_viewer;

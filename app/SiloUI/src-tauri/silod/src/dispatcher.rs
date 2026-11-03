@@ -990,7 +990,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let _ = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 6, 6), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 7, 7), &mut session))
             .await;
         let request = serde_json::json!({ "id": "two", "method": "engine.state", "params": {} });
         let _ = dispatcher

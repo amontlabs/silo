@@ -31,7 +31,7 @@ Preserve bundled MicroSandbox and Git tools, guest scripts, the Rust vendor patc
 
 ## Setup and commands
 
-Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.94.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. Silo host builds target Apple Silicon macOS 14+ only. Linux computers remain supported as guests on a Mac.
+Use Node.js 24, Python 3.11 or newer, Rust, and the device's Tauri prerequisites. Runtime preparation (`npm --prefix app/SiloUI run runtime:prepare`, also run by `desktop`) requires Rust 1.94.0 for the pinned MicroSandbox build, Go 1.25, and network access on a cold cache. Silo host builds target Apple Silicon macOS 15+ only. Linux computers remain supported as guests on a Mac.
 
 Native builds and Rust tests require GitHub App configuration. Follow `docs/SiloUI-RELEASES.md#local-setup`; do not print `github-build.local.json`, signing credentials, or verbose build output containing configuration. For native unit tests only, the release guide permits explicit synthetic GitHub configuration. Never distribute those test executables.
 

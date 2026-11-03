@@ -29,9 +29,9 @@ use silo_api::{
         computers::{
             ApplicationSource, ComputerConfigurationChange as ApiChange,
             ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
-            ComputerCreateParams, ComputerCreateResult, ComputerCreationSkipWaitParams,
-            ComputerDeleteParams, ComputerIdentitiesParams, ComputerIdentity, ComputerListParams,
-            ComputerShellParams, ComputersListResult, LaunchStatus,
+            ComputerCreateParams, ComputerCreateResult, ComputerDeleteParams,
+            ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerShellParams,
+            ComputersListResult, LaunchStatus,
         },
         logs::{LogSource, LogsExportParams, LogsQueryParams},
         macos::{
@@ -1129,15 +1129,6 @@ async fn begin_delete(
     }
 }
 
-fn skip_creation_wait(
-    context: &HandlerContext,
-    params: ComputerCreationSkipWaitParams,
-) -> Result<HandlerOutput, DispatchError> {
-    require_local_device(context, params.device_id.as_deref())?;
-    silo_engine::runtime::skip_computer_use_wait_request(params.request_id);
-    Ok(plain(Value::Null))
-}
-
 // MARK: Identities
 
 fn engine_identities(
@@ -1626,7 +1617,6 @@ async fn route(
         }
         MethodName::ComputersCreate => begin_create(context, decoded!()).await,
         MethodName::ComputersDelete => begin_delete(context, decoded!()).await,
-        MethodName::ComputersCreationSkipComputerUseWait => skip_creation_wait(context, decoded!()),
         MethodName::ComputersIdentitiesConfigure => {
             begin_identity_configuration(context, decoded!()).await
         }
@@ -2195,20 +2185,6 @@ pub(crate) mod tests {
             .await;
         let registry = f.context.job_registry().unwrap();
         assert!(registry.list_unacknowledged().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn skipping_the_computer_use_wait_accepts_any_request_id() {
-        let f = fixture();
-        assert_eq!(
-            f.call(
-                MethodName::ComputersCreationSkipComputerUseWait,
-                json!({"requestId": "never-started"}),
-            )
-            .await
-            .unwrap(),
-            Value::Null
-        );
     }
 
     #[tokio::test]

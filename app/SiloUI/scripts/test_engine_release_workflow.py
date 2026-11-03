@@ -38,9 +38,9 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn('actions/checkout', job('publish'))
         self.assertNotIn('cargo', job('publish'))
 
-    def test_checkout_does_not_persist_credentials_and_builds_on_macos_14(self):
+    def test_checkout_does_not_persist_credentials_and_builds_on_macos_15(self):
         build = job('build')
-        self.assertIn('runs-on: macos-14', build)
+        self.assertIn('runs-on: macos-15', build)
         self.assertRegex(build, r'(?s)uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n        with:\n          persist-credentials: false')
 
     def test_github_app_configuration_reaches_only_the_engine_build_step(self):

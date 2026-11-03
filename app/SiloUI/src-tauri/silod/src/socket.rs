@@ -1766,7 +1766,7 @@ mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 6, "max": 6 } }
+                "params": { "protocol": { "min": 7, "max": 7 } }
             }),
         )
         .await
@@ -1795,7 +1795,7 @@ mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 6, "max": 6 } }
+                "params": { "protocol": { "min": 7, "max": 7 } }
             }),
         )
         .await

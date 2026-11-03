@@ -1,10 +1,16 @@
 # Pinned ChatGPT app on each device
 
-Implements section 4 of the [computer use plan](SiloUI-COMPUTER-USE-PLAN.md).
+> Superseded 2026-11-03. Linux computers now use Cua Driver baked into the guest image,
+> and Silo no longer downloads the ChatGPT Linux app. See the
+> [Cua Driver decision](../SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03). macOS computers
+> still use the ChatGPT app until a follow-up change. This file is kept as history and
+> evidence; it describes the removed design.
+
+Implements section 4 of the [computer use plan](../SiloUI-COMPUTER-USE-PLAN.md).
 Code: `app/SiloUI/src-tauri/src/chatgpt_app.rs` (this folder) and
 `chatgpt_app/auto.rs` (the background worker), `computer_use.rs` (computer integration);
 lock: `app/SiloUI/src-tauri/guest/chatgpt-app-lock.json`. Every device, remote
-ones included, prepares its own copy. [Linux desktop](SiloUI-DESKTOP.md#built-in-computer-use)
+ones included, prepares its own copy. [Linux desktop](../SiloUI-DESKTOP.md#built-in-computer-use)
 describes what a computer does with the folder.
 
 ## Behavior
@@ -136,7 +142,7 @@ path.
 
 Under `app_data_dir()/chatgpt`, which Tauri derives from the bundle identifier,
 so production (`org.silo.preview`) and Dev (`org.silo.dev`) never share it, as
-[build channels](SiloUI-BUILD-CHANNELS.md) require. On macOS that is
+[build channels](../SiloUI-BUILD-CHANNELS.md) require. On macOS that is
 `~/Library/Application Support/<identifier>/chatgpt/`.
 
 ```text
@@ -214,7 +220,7 @@ computer use up at once (see below); stopped ones do it when they start.
 
 ## Extraction and validation
 
-Tool choice, per [reuse established tools](../AGENTS.md): macOS runs
+Tool choice, per [reuse established tools](../../AGENTS.md): macOS runs
 `/usr/bin/tar -xOf x.deb data.tar.xz` into `/usr/bin/tar -cf - @-` (bsdtar
 reads the `ar` container and rewrites the member as plain tar); Linux runs
 `dpkg-deb --fsys-tarfile` (dpkg is essential on Ubuntu). Rust has no xz
@@ -265,7 +271,7 @@ not be checked here (no gpg), only its hash chain to `Packages`.
 The runtime pair is `0.0.27/20260927214556-b77d38801cca`
 (`resources/cua_node/manifest.json`). `lcuVersion` is `0.11.0`, the LCU release
 tested with it (the published v4 image still stages 0.8.1; see
-[the computer use plan](SiloUI-COMPUTER-USE-PLAN.md#lcu-083-pin-2026-10-02)); `guest/lcu-lock.json` pins that release's archives (a test
+[the computer use plan](../SiloUI-COMPUTER-USE-PLAN.md#lcu-083-pin-2026-10-02)); `guest/lcu-lock.json` pins that release's archives (a test
 checks that both locks agree). The owner updates the pair by hand: bump the
 app lock and `lcu-lock.json` together.
 
@@ -326,7 +332,7 @@ The mount, guest flow and commands are in `computer_use.rs`; the guest side in
 - **Guest.** Silo pushes the helper and the pinned pair into the guest and runs
   `apply` after every boot and when the app becomes ready, on a host background
   thread within a bound; see
-  [Linux desktop](SiloUI-DESKTOP.md#built-in-computer-use).
+  [Linux desktop](../SiloUI-DESKTOP.md#built-in-computer-use).
 - **Evidence** (2026-10-02, macOS arm64, MicroSandbox 0.7.6, real v4 image and
   real app): a fresh VM mounted the folder read-only (`ro` in `/proc/mounts`,
   writes fail with EROFS), `lcu status --json` reported `tested`, `lcu doctor`

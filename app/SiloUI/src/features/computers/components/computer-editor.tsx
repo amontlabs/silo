@@ -21,7 +21,7 @@ import {
   type ComputerValidationErrors,
 } from "@/features/onboarding/model/computer-configuration"
 import { divergentComputerFields, sameComputerConfiguration } from "@/features/application/model/computer-change"
-import { useChatGptApp, useComputerUseBridge } from "@/desktop/computer-use-bridge"
+import { useComputerUseBridge } from "@/desktop/computer-use-bridge"
 import type { ComputerEditorDraft } from "@/features/onboarding/model/onboarding-draft"
 import { computerFieldLabel, type ComputerReview } from "@/features/computers/model/computer-review"
 import { parseWholeNumber, presetsWithin, resourceFields, resourceMaximums, runtimeLimits, validateComputerResources, type DeviceCapacity } from "@/features/computers/model/computer-limits"
@@ -157,16 +157,8 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   // A computer whose desktop is built into its image always starts it; only older computers are configured here.
   const builtInDesktop = created && original?.desktop?.builtIn === true
   const computerUse = useComputerUseBridge()
-  // A new computer gets the built-in desktop only if the device it runs on can provide it.
-  // This device follows the build; another device is asked, because it may run an
-  // older Silo (and guest image) without computer use.
-  const remoteOwner = !created && deviceId ? deviceId : undefined
-  const ownerApp = useChatGptApp(remoteOwner && computerUse ? computerUse.chatGptFor(remoteOwner) : undefined)
-  const ownerName = deviceName ?? "that device"
-  const newVmSupport: "yes" | "no" | "checking" = !computerUse ? "no"
-    : !remoteOwner ? "yes"
-    : ownerApp.status ? (ownerApp.status.state === "unknown" ? "no" : "yes")
-    : ownerApp.loadError ? "no" : "checking"
+  // Every Linux computer on a build with computer use gets the built-in desktop.
+  const newVmSupport = computerUse ? "yes" : "no"
   const builtInNewVm = !created && newVmSupport === "yes"
   const startsWithComputer = draft.desktop?.startWithComputer === false
   // Computer use needs the session running: a new built-in computer always starts it, so a
@@ -328,9 +320,6 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
       </div>
 
       {!builtInDesktop && !builtInNewVm && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
-        {!created && computerUse && remoteOwner && (newVmSupport === "no"
-          ? <p className="text-caption text-muted-foreground">Update Silo on {ownerName} for built-in computer use. Until then, the optional Linux desktop is available.</p>
-          : newVmSupport === "checking" ? <p role="status" className="text-caption text-muted-foreground">Checking {ownerName}…</p> : null)}
         {desktopInstalled ? <label className="flex items-center justify-between gap-3 text-xs">
           <span>Start desktop with computer<span className="mt-1 block text-caption text-muted-foreground">When off, start the desktop from its viewer.</span></span>
           <Switch aria-label="Start desktop with computer" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />

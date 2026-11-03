@@ -1,16 +1,14 @@
 //! Opt-in live regressions for the built-in desktop and computer use, run against the
 //! real runtime with disposable homes under `SILO_TEST_TMP` (default /tmp) and `e2e-*` computers. They need the guest
 //! image directory (`SILO_TEST_GUEST_IMAGE`, a directory with manifest.json and
-//! image.tar.gz), a published ChatGPT folder (`SILO_TEST_PUBLISHED`, `<root>/published` of
-//! a prepared app), a signed msb (`SILO_TEST_MSB`, `SILO_TEST_LIBKRUNFW`) and
-//! `SILO_LIVE_TEST_CONFIRM`.
+//! image.tar.gz), a signed msb (`SILO_TEST_MSB`, `SILO_TEST_LIBKRUNFW`), network access for the
+//! driver download and `SILO_LIVE_TEST_CONFIRM`.
 use crate::runtime::{self, ComputerConfiguration, RuntimePaths};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// One disposable runtime home with its own metadata and, for built-in computers, the published
-/// ChatGPT folder registered for this thread.
+/// One disposable runtime home with its own metadata.
 pub(crate) struct Fixture {
     directory: Option<tempfile::TempDir>,
     pub(crate) paths: RuntimePaths,
@@ -20,7 +18,7 @@ pub(crate) struct Fixture {
 impl Fixture {
     /// `image` overrides `SILO_TEST_GUEST_IMAGE` (a directory with manifest.json and
     /// image.tar.gz), for example to create a pre-v4 computer.
-    pub(crate) fn new(prefix: &str, image: Option<PathBuf>, with_published: bool) -> Self {
+    pub(crate) fn new(prefix: &str, image: Option<PathBuf>) -> Self {
         crate::test_support::live::require_confirmation();
         let directory = tempfile::Builder::new()
             .prefix(prefix)
@@ -28,22 +26,6 @@ impl Fixture {
             .unwrap();
         let guest_image =
             image.unwrap_or_else(|| PathBuf::from(std::env::var("SILO_TEST_GUEST_IMAGE").unwrap()));
-        if with_published {
-            let published = crate::chatgpt_app::ensure_published_dir(
-                PathBuf::from(std::env::var("SILO_TEST_PUBLISHED").unwrap())
-                    .parent()
-                    .unwrap(),
-            )
-            .unwrap();
-            let version = crate::chatgpt_app::Lock::bundled()
-                .unwrap()
-                .directory_name(crate::chatgpt_app::DebArch::host().unwrap());
-            crate::chatgpt_app::set_test_cache(Some(crate::chatgpt_app::Status::Ready {
-                path: published.join(&version),
-                version: "26.928.31416".into(),
-            }));
-            crate::computer_use::set_test_published_dir(Some(published));
-        }
         let paths = RuntimePaths {
             guest_image,
             executable: PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap()),
@@ -162,8 +144,6 @@ impl Drop for Fixture {
                 Duration::from_secs(60),
             );
         }
-        crate::computer_use::set_test_published_dir(None);
-        crate::chatgpt_app::set_test_cache(None);
         // `SILO_LIVE_KEEP=1` leaves the (stopped) home behind for inspection after a failure.
         if std::env::var_os("SILO_LIVE_KEEP").is_some() {
             eprintln!("kept {}", self.paths.home.display());
@@ -174,5 +154,5 @@ impl Drop for Fixture {
 
 #[path = "computer_use_live/approval.rs"]
 mod approval;
-#[path = "computer_use_live/lcu.rs"]
-mod lcu;
+#[path = "computer_use_live/driver.rs"]
+mod driver;

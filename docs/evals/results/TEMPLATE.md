@@ -5,7 +5,7 @@ only to record a run by hand; otherwise publish the generated file with its `.js
 
 - Eval commit: `<full commit of the checkout that ran the evals>`
 - Silo app: `<version (build)>` from `/Applications/Silo.app`
-- Engine protocol: 6
+- Engine protocol: 7
 - Host: macOS `<version>` on arm64 (`<Mac model>`)
 - Computer under test: `silo-eval-a`; peer: `silo-eval-b`
 - Totals: `<n> pass, <n> known-gap, ...`

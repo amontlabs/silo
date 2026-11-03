@@ -77,7 +77,7 @@ class FakeEngine:
 
     def handle(self, method: str, params: Dict[str, Any]) -> Any:
         if method == "engine.handshake":
-            return {"deviceId": "fake", "name": "fake", "protocol": 6, "capabilities": [], "clientId": "client:1"}
+            return {"deviceId": "fake", "name": "fake", "protocol": 7, "capabilities": [], "clientId": "client:1"}
         if method == "computers.list":
             return {"linux": {"computers": [self.computer("silo-eval-a", "id-a"), self.computer("silo-eval-b", "id-b")]}, "macos": {}}
         if method == "guest.exec":
@@ -161,7 +161,7 @@ class WireFormatTests(FakeEngineCase):
 
     def test_handshake_and_typed_errors(self) -> None:
         with engine_client.EngineClient(engine_client.socket_path()) as client:
-            self.assertEqual(client.handshake["protocol"], 6)
+            self.assertEqual(client.handshake["protocol"], 7)
             self.assertEqual(client.computer_by_name("silo-eval-b")["configuration"]["id"], "id-b")
             with self.assertRaises(engine_client.EngineError) as raised:
                 client.call("no.such.method")

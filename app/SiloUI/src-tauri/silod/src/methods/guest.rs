@@ -1193,7 +1193,7 @@ exit 2
                 engine.clone(),
                 RequestContext {
                     client_id: "client-a".into(),
-                    protocol: 6,
+                    protocol: 7,
                     client: None,
                 },
             );

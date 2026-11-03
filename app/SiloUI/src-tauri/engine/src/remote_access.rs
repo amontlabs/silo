@@ -33,8 +33,6 @@ pub type CheckpointHandler = dyn Fn(&str, &Value) -> Result<Value, String> + Sen
 pub trait LocalAccess: Send + Sync {
     fn desktop_connection(&self, computer: &str, computer_id: &str) -> Result<Value, String>;
     fn desktop_dispatch(&self, method: &str, params: &Value) -> Result<Value, String>;
-    fn chatgpt_status(&self) -> Result<Value, String>;
-    fn chatgpt_retry(&self) -> Result<Value, String>;
 
     /// Access-domain methods remain owner-side because credentials and secret values
     /// belong to the selected owner. The silod adapter translates canonical IDs at the
@@ -157,8 +155,6 @@ fn dispatch_untyped(
             Ok(state)
         }
         "desktop.action" | "computerUse.approval" => local.desktop_dispatch(method, params),
-        "chatgpt.status" => local.chatgpt_status(),
-        "chatgpt.retry" => local.chatgpt_retry(),
         "ssh.access.state" | "ssh.access.save" | "ssh.access.connection" => {
             crate::ssh_access::remote_dispatch(paths, method, params)
         }
@@ -546,12 +542,6 @@ mod typed_access_tests {
             unreachable!()
         }
         fn desktop_dispatch(&self, _: &str, _: &Value) -> Result<Value, String> {
-            unreachable!()
-        }
-        fn chatgpt_status(&self) -> Result<Value, String> {
-            unreachable!()
-        }
-        fn chatgpt_retry(&self) -> Result<Value, String> {
             unreachable!()
         }
         fn access_dispatch(&self, method: &str, _: &Value) -> Result<Value, BridgeError> {

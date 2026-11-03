@@ -111,7 +111,6 @@
     "allow-read-operation-queue",
     "allow-cancel-operation",
     "allow-retry-computer-configuration",
-    "allow-skip-computer-use-wait",
     "allow-change-computer-configuration",
     "allow-device-list",
     "allow-device-snapshot",
@@ -151,8 +150,6 @@
     "allow-remote-macos-action",
     "allow-open-macos-remote-display",
     "allow-set-computer-use-approval",
-    "allow-chatgpt-app-status",
-    "allow-chatgpt-app-retry",
     "allow-read-preparation-status",
     "allow-retry-preparation"
   ]
