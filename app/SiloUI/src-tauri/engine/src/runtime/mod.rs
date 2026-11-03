@@ -13074,7 +13074,7 @@ exit 9
             bundled_runtime_library(
                 &Path::new("/usr/libexec/silo/tools").join("msb"),
                 &resource_dir,
-                Some(RuntimePackageKind::Deb),
+                RuntimePackageKind::Deb,
             ),
             Path::new("/usr/libexec/silo/tools/libkrunfw.so.5.6.1")
         );

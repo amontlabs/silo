@@ -6,7 +6,7 @@ import subprocess
 import tarfile
 import tempfile
 from embed_engine import embed_engine
-from macos_release_signing import sign_runtime, verify_bundle, verify_engine
+from macos_release_signing import seal_app, sign_helpers, verify_bundle, verify_engine
 from channel_names import channel_names
 
 
@@ -42,10 +42,12 @@ def main():
     if any(path.exists() for path in (archive, Path(str(archive) + '.sig'), dmg)):
         raise RuntimeError('Release assets already exist; use a fresh output directory.')
     identifier = channel_names()["production"]["identifier"]
-    # The nested engine is signed first with the virtualization entitlement; sign_runtime then
-    # re-seals the outer bundle without --deep, which keeps the nested signature.
+    # The tools get their final signatures first, so the engine carries the same signed copies.
+    # The nested engine is then signed with the virtualization entitlement, and seal_app
+    # re-seals the outer bundle without --deep, which keeps the nested signatures.
+    sign_helpers(app)
     embed_engine(app, args.engine.resolve(), identifier=identifier, build=args.engine_build or engine_build())
-    sign_runtime(app)
+    seal_app(app)
     verify_bundle(app)
     verify_engine(app, identifier)
     # Python tarfile does not insert Apple's resource-fork sidecar entries.

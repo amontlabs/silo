@@ -1,6 +1,8 @@
 [package]
 name = "silo-macos-gateway"
 version = "0.1.0"
+license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2024"
 publish = false
 

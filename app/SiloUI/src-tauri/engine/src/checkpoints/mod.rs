@@ -699,6 +699,8 @@ mod tests {
         let _state = crate::test_support::global_state();
         let fixture = fixture(3);
         assert_eq!(fixture.service.platform(LINUX_ID), Ok(Platform::Linux));
+        // macOS computers are loaded only on an Apple silicon host.
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert_eq!(
             fixture.service.platform(&fixture.macos_id),
             Ok(Platform::Macos)
@@ -849,11 +851,15 @@ mod tests {
         assert_eq!(linux.total_bytes, Some(0));
         assert!(linux.checkpoints.is_empty());
 
-        let macos = fixture.service.usage(&fixture.macos_id).unwrap();
-        assert_eq!(macos.total_bytes, None);
-        assert_eq!(macos.checkpoints.len(), 1);
-        assert_eq!(macos.checkpoints[0].id, fixture.macos_checkpoint);
-        assert_eq!(macos.checkpoints[0].size_bytes, None);
+        // macOS computers are loaded only on an Apple silicon host.
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            let macos = fixture.service.usage(&fixture.macos_id).unwrap();
+            assert_eq!(macos.total_bytes, None);
+            assert_eq!(macos.checkpoints.len(), 1);
+            assert_eq!(macos.checkpoints[0].id, fixture.macos_checkpoint);
+            assert_eq!(macos.checkpoints[0].size_bytes, None);
+        }
 
         let missing = fixture
             .service

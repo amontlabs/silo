@@ -208,6 +208,7 @@ pub(super) struct Sample {
     pub id: String,
     pub state: MachineState,
     pub generation: u64,
+    pub lifecycle_managed: bool,
 }
 
 pub(super) fn machine_samples(_app: &MacosContext) -> Result<Vec<Sample>, String> {

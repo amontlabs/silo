@@ -1,6 +1,8 @@
 [package]
 name = "silod"
 version = "0.1.1"
+license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 

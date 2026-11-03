@@ -14,6 +14,7 @@ use silo_api::methods::{
 };
 
 /// A measurement that may fail: `None` when the Mac cannot tell.
+#[cfg(target_os = "macos")]
 fn physical_memory_bytes() -> Option<u64> {
     let mut value = 0_u64;
     let mut length = std::mem::size_of::<u64>();
@@ -29,6 +30,22 @@ fn physical_memory_bytes() -> Option<u64> {
         )
     };
     (status == 0 && length == std::mem::size_of::<u64>() && value > 0).then_some(value)
+}
+
+/// The same measurement on other hosts, so that the engine builds and is tested there:
+/// physical pages times the page size, `None` when either cannot be read.
+#[cfg(not(target_os = "macos"))]
+fn physical_memory_bytes() -> Option<u64> {
+    // SAFETY: sysconf takes no pointers and only reads the system configuration.
+    let (pages, page_size) = unsafe {
+        (
+            libc::sysconf(libc::_SC_PHYS_PAGES),
+            libc::sysconf(libc::_SC_PAGESIZE),
+        )
+    };
+    let pages = u64::try_from(pages).ok().filter(|pages| *pages > 0)?;
+    let page_size = u64::try_from(page_size).ok().filter(|size| *size > 0)?;
+    pages.checked_mul(page_size)
 }
 
 /// The limits for Linux computers: logical CPUs and physical memory, `None` when either

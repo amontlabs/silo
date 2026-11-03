@@ -94,6 +94,10 @@ use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
 const NOT_SUPPORTED: &str = "macOS computers need a Mac with Apple silicon.";
+/// What the macOS engine reports when Virtualization.framework refuses a third running
+/// macOS computer; `classify_refusal` matches on it on every host.
+const LIMIT_EXCEEDED: &str =
+    "macOS allows at most two macOS computers running at once on this Mac.";
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 static MACOS_JOBS: OnceLock<Mutex<HashMap<String, silo_api::jobs::JobId>>> = OnceLock::new();
@@ -698,7 +702,7 @@ pub enum Refusal {
 pub fn classify_refusal(message: &str) -> Option<Refusal> {
     if message.contains(store::NEEDS_PERSONALIZING) {
         Some(Refusal::NeedsPersonalizing)
-    } else if message.contains(engine::LIMIT_EXCEEDED) {
+    } else if message.contains(LIMIT_EXCEEDED) {
         Some(Refusal::RunningLimit)
     } else if message.contains(remote_display::SHARING_UNAVAILABLE)
         || message.contains("Screen Sharing accepted TCP")
@@ -6720,7 +6724,7 @@ mod tests {
                 Refusal::NotRunning,
             ),
             (store::NEEDS_PERSONALIZING, Refusal::NeedsPersonalizing),
-            (engine::LIMIT_EXCEEDED, Refusal::RunningLimit),
+            (LIMIT_EXCEEDED, Refusal::RunningLimit),
             (
                 remote_display::SHARING_UNAVAILABLE,
                 Refusal::ScreenSharingUnavailable,
@@ -7283,6 +7287,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_checkpoint_jobs_wait_on_the_computer_gate_and_cancel_before_admission() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -7420,6 +7428,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_checkpoint_operations_use_typed_computer_scopes_while_running() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -7512,6 +7524,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn an_automatic_capture_refused_after_admission_keeps_its_error_code() {
         use checkpoints::PolicyKind;
         let _test_state = crate::test_support::global_state();
@@ -7995,6 +8011,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn force_stop_is_a_command_that_leaves_no_job_behind() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -8218,6 +8238,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn fork_workflow_job_records_setup_failure_without_overwriting_fork_command() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -8423,6 +8447,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn fork_copy_failure_finishes_the_source_command_without_a_setup_job() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -11095,6 +11123,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_usage_measures_only_memory_files_and_projects_the_delete_blockers() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -11146,6 +11178,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_retention_removes_only_automatic_checkpoints_beyond_the_newest_count() {
         use checkpoints::{PolicyKind::*, Reason};
         let _test_state = crate::test_support::global_state();
@@ -11284,6 +11320,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_retention_rereads_the_setting_after_the_deletion_is_admitted() {
         assert_eq!(macos_prune_while_queued(2, 0), 4, "turned off while queued");
         assert_eq!(macos_prune_while_queued(2, 4), 4, "raised while queued");
@@ -11291,6 +11331,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_retention_keeps_a_checkpoint_a_pending_restore_continues_from() {
         use checkpoints::{PolicyKind::*, Reason};
         let _test_state = crate::test_support::global_state();

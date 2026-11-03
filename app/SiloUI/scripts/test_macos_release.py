@@ -76,6 +76,11 @@ int main(int argc, char **argv) {
         self.digest = bytes.fromhex(re.search(rb'^CDHash=(\w+)$', output, re.M)[1].decode())
         self.sign_helper({'cdhash': self.digest})
         self.sign_gateway_helper({'cdhash': self.digest})
+        resources = self.app / 'Contents/Resources'
+        for directory in ('microsandbox', 'git-support'):
+            (resources / directory).mkdir(parents=True)
+            (resources / directory / 'manifest.json').write_text('{}')
+        (resources / 'THIRD-PARTY-NOTICES.md').write_text('notices')
         self.seal()
 
     def sign(self, target, *, entitlements=None, constraint=None, hardened=True):
@@ -181,6 +186,24 @@ int main(int argc, char **argv) {
         verify_engine(self.app, 'org.silo.preview')
         self.run_command('codesign', '--verify', '--deep', '--strict', self.app)
 
+    def test_engine_tools_must_be_the_apps_signed_copies(self):
+        from macos_release_signing import verify_engine
+        from embed_engine import DISTRIBUTION
+        self.embed_real_engine()
+        engine = self.app / DISTRIBUTION
+        # The VM helper inside the engine without its library constraint is not the app's copy.
+        shutil.copy2(self.root / 'executable', engine / 'Contents/MacOS/msb')
+        self.sign(engine / 'Contents/MacOS/msb')
+        self.sign(engine, entitlements={'com.apple.security.virtualization': True})
+        self.seal()
+        with self.assertRaisesRegex(RuntimeError, 'MacOS/msb'):
+            verify_engine(self.app, 'org.silo.preview')
+        (engine / 'Contents/MacOS/msb').unlink()
+        self.sign(engine, entitlements={'com.apple.security.virtualization': True})
+        self.seal()
+        with self.assertRaisesRegex(RuntimeError, 'missing MacOS/msb'):
+            verify_engine(self.app, 'org.silo.preview')
+
     def test_engine_without_the_virtualization_entitlement_rejected(self):
         from macos_release_signing import verify_engine
         from embed_engine import DISTRIBUTION
@@ -230,7 +253,7 @@ int main(int argc, char **argv) {
 
 
 class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
-    def test_the_packager_embeds_the_engine_before_resealing_and_verifies_it(self):
+    def test_the_packager_signs_the_tools_embeds_the_engine_then_reseals_and_verifies_it(self):
         script = SCRIPT.with_name('package-macos-release.py')
         with patch.object(sys, 'path', [str(script.parent), *sys.path]):
             spec = importlib.util.spec_from_file_location('package_macos_release_order', script)
@@ -247,16 +270,19 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
             with patch.dict(os.environ, {'TAURI_SIGNING_PRIVATE_KEY': 'k'}), \
                     patch.object(sys, 'argv', [str(script), str(app), str(root / 'out'), '--engine', str(root / 'silod'),
                                                '--engine-build', 'silo-abc']), \
+                    patch.object(module, 'sign_helpers', side_effect=record('sign_helpers')), \
                     patch.object(module, 'embed_engine', side_effect=record('embed')), \
-                    patch.object(module, 'sign_runtime', side_effect=record('sign')), \
+                    patch.object(module, 'seal_app', side_effect=record('seal')), \
                     patch.object(module, 'verify_bundle', side_effect=record('verify')), \
                     patch.object(module, 'verify_engine', side_effect=record('verify_engine')), \
                     patch.object(module.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
                     patch.object(module.tarfile, 'open', side_effect=RuntimeError('stop')):
                 with self.assertRaisesRegex(RuntimeError, 'stop'):
                     module.main()
-            self.assertEqual([name for name, *_ in calls], ['embed', 'sign', 'verify', 'verify_engine'])
-            _, args, kwargs = calls[0]
+            # The engine copies the finally signed tools, then the app is sealed around it.
+            self.assertEqual([name for name, *_ in calls],
+                             ['sign_helpers', 'embed', 'seal', 'verify', 'verify_engine'])
+            _, args, kwargs = calls[1]
             self.assertEqual(args[1], (root / 'silod').resolve())
             self.assertEqual((kwargs['identifier'], kwargs['build']), ('org.silo.preview', 'silo-abc'))
 
@@ -299,7 +325,8 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
             with patch.dict(os.environ, environment), \
                     patch.object(sys, 'argv', [str(script), str(app), str(root / 'output'),
                                                '--engine', str(root / 'silod'), '--engine-build', 'silo-test']), \
-                    patch.object(module, 'sign_runtime'), patch.object(module, 'verify_bundle'), \
+                    patch.object(module, 'sign_helpers'), patch.object(module, 'seal_app'), \
+                    patch.object(module, 'verify_bundle'), \
                     patch.object(module, 'verify_engine'), patch.object(module, 'embed_engine'), \
                     patch.object(module, 'channel_names', return_value=names, create=True), \
                     patch.object(module.subprocess, 'run', side_effect=command):

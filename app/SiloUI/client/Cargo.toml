@@ -2,6 +2,8 @@
 name = "silo-client"
 version = "0.1.0"
 description = "Native socket client for the Silo engine (codec, handshake, request correlation, event feed)"
+license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 
