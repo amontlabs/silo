@@ -1,11 +1,11 @@
 import { createElement, useEffect, useRef, useState } from "react"
 
-import { skipComputerUseWait, useComputerUseBridge } from "@/desktop/computer-use-bridge"
+import { useComputerUseBridge } from "@/desktop/computer-use-bridge"
 import { CreatedComputerApprovalSwitch } from "@/desktop/created-computer-toast"
 import { dismissOperationToast, showOperationFailure, showOperationProgress, showOperationSuccess } from "@/lib/operation-toast"
 
 import type { ApplicationComputer, ComputerConfigurationOperation } from "@/features/application/model/application-source"
-import { chatGptFailure, computerUsePending, describeConfiguration, waitingForChatGpt } from "@/features/application/model/computer-configuration-progress"
+import { computerUsePending, describeConfiguration } from "@/features/application/model/computer-configuration-progress"
 import { computerTarget } from "@/features/application/model/connections"
 
 const TOAST_ID = "computer-configuration"
@@ -47,20 +47,15 @@ export function ComputerConfigurationToast({ operation, computers, onOpen }: {
       // The backend adds the built-in desktop to a new computer on a v4 image, so neither the request nor a lagging
       // snapshot may carry it. The request and the setup steps it reports are what is known while it is created.
       tracked.current.desktop ||= description.creating.length === 1 && (operation.candidate.computers.some(configuration => configuration.name === description.creating[0] && Boolean(configuration.desktop))
-        || operation.progressEvents.some(event => event.step === "desktop-installation" || event.step?.startsWith("chatgpt-app-") || event.step === "computer-use-setup" || event.step === "computer-use-pending"))
+        || operation.progressEvents.some(event => event.step === "desktop-installation" || event.step === "computer-use-setup" || event.step === "computer-use-pending"))
       if (!show) return
       tracked.current.shown = true
-      // Creation waits for ChatGPT for Linux before it takes its turn; the user may finish without computer use.
-      const waiting = description.kind === "creating" && waitingForChatGpt(operation)
-      const failed = waiting && chatGptFailure(operation) !== null
       showOperationProgress(TOAST_ID, {
         title: description.title,
         step: description.step,
         progress: description.progress,
         startedAt: tracked.current.startedAt,
         computer: description.creating,
-        action: failed && bridge ? { label: "Retry", onClick: () => { void bridge.chatGptFor().retry() } } : undefined,
-        cancel: waiting ? { label: "Finish without computer use", onCancel: () => { void skipComputerUseWait(operation.id) } } : undefined,
       })
     } else if (operation.status === "failed" && tracked.current?.shown) {
       tracked.current = null

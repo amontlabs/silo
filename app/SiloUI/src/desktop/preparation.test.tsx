@@ -4,33 +4,30 @@ import { describe, expect, it, vi } from "vitest"
 import { createPreparationStore, describePreparation, PreparationProvider, preparationStatusSchema, usePreparationStatus, type PreparationBackend, type PreparationStatus } from "./preparation"
 
 const task = (state: PreparationStatus["image"]["state"], extra: Partial<PreparationStatus["image"]> = {}) => ({ state, fraction: null, message: null, retryable: false, ...extra })
-const status = (image: PreparationStatus["image"], lcu: PreparationStatus["lcu"] = task("ready")): PreparationStatus => ({ image, lcu })
+const status = (image: PreparationStatus["image"]): PreparationStatus => ({ image })
 
 describe("describePreparation", () => {
-  it("lists nothing when everything is ready or only waiting", () => {
-    expect(describePreparation(status(task("ready")), { state: "ready" })).toEqual([])
-    expect(describePreparation(status(task("pending"), task("pending")), { state: "idle" })).toEqual([])
-    expect(describePreparation(null, null)).toEqual([])
+  it("lists nothing when the image is ready or only waiting", () => {
+    expect(describePreparation(status(task("ready")))).toEqual([])
+    expect(describePreparation(status(task("pending")))).toEqual([])
+    expect(describePreparation(null)).toEqual([])
   })
 
-  it("names the running items in the order they are prepared", () => {
-    const items = describePreparation(status(task("running", { fraction: 25 }), task("running")), { state: "downloading", receivedBytes: 62, totalBytes: 100 })
-    expect(items.map(item => item.text)).toEqual(["Downloading the computer image · 25%", "Downloading the computer use tools", "Downloading ChatGPT for Linux · 62%"])
-    expect(items.map(item => item.progress)).toEqual([0.25, null, 0.62])
+  it("names the image download with its progress", () => {
+    const items = describePreparation(status(task("running", { fraction: 25 })))
+    expect(items.map(item => item.text)).toEqual(["Downloading the computer image · 25%"])
+    expect(items.map(item => item.progress)).toEqual([0.25])
   })
 
   it("says the image is being prepared once its download is over", () => {
-    const items = describePreparation(status(task("running")), null)
+    const items = describePreparation(status(task("running")))
     expect(items.map(item => item.text)).toEqual(["Preparing the computer image (first time only)"])
     expect(items[0].progress).toBeNull()
   })
 
   it("reports a failure with its message and whether it can be retried", () => {
-    const items = describePreparation(status(task("ready"), task("failed", { message: "Check your network.", retryable: true })), { state: "failed", reason: "Checksum mismatch.", retryable: false })
-    expect(items).toMatchObject([
-      { id: "lcu", state: "failed", text: "Check your network.", retryable: true },
-      { id: "chatgpt", state: "failed", text: "Checksum mismatch.", retryable: false },
-    ])
+    const items = describePreparation(status(task("failed", { message: "Check your network.", retryable: true })))
+    expect(items).toMatchObject([{ id: "image", state: "failed", text: "Check your network.", retryable: true }])
   })
 })
 
@@ -65,7 +62,7 @@ describe("preparation store", () => {
   })
 
   it("accepts the native payload shape", () => {
-    expect(preparationStatusSchema.parse({ image: { state: "failed", fraction: null, message: "x", retryable: true }, lcu: { state: "ready", fraction: null, message: null, retryable: false } }).image.retryable).toBe(true)
+    expect(preparationStatusSchema.parse({ image: { state: "failed", fraction: null, message: "x", retryable: true } }).image.retryable).toBe(true)
   })
 
   it("exposes readiness to any component", async () => {

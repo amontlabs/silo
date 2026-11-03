@@ -3,8 +3,6 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { z } from "zod"
 
-import { useChatGptApp, useComputerUseBridge } from "./computer-use-bridge"
-import type { ChatGptAppStatus } from "./linux-desktop-state"
 
 const taskSchema = z.object({
   state: z.enum(["pending", "running", "ready", "failed"]),
@@ -12,7 +10,7 @@ const taskSchema = z.object({
   message: z.string().nullish().catch(null),
   retryable: z.boolean().catch(false),
 })
-export const preparationStatusSchema = z.object({ image: taskSchema, lcu: taskSchema })
+export const preparationStatusSchema = z.object({ image: taskSchema })
 export type PreparationTask = z.infer<typeof taskSchema>
 export type PreparationStatus = z.infer<typeof preparationStatusSchema>
 
@@ -94,7 +92,7 @@ export function PreparationProvider({ store, children }: { store: PreparationSto
   return createElement(PreparationContext.Provider, { value: store }, children)
 }
 
-export type PreparationItemId = "image" | "lcu" | "chatgpt"
+export type PreparationItemId = "image"
 
 export interface PreparationItem {
   id: PreparationItemId
@@ -109,42 +107,23 @@ export interface PreparationItem {
 const noop = () => () => {}
 const nothing = () => null
 
-function percent(received: number, total: number | null | undefined) {
-  return total && total > 0 ? Math.min(1, received / total) : null
-}
-
 /** The items that still need the user's attention, in the order they are prepared. A failure
  * is an item until the next attempt starts. Items that are ready or only waiting are absent. */
-export function describePreparation(status: PreparationStatus | null, chatgpt: ChatGptAppStatus | null): PreparationItem[] {
+export function describePreparation(status: PreparationStatus | null): PreparationItem[] {
   const items: PreparationItem[] = []
-  const task = (id: "image" | "lcu", running: (fraction: number | null) => string, failed: string, value: PreparationTask | undefined) => {
-    if (value?.state === "running") items.push({ id, state: "running", text: running(value.fraction ?? null), progress: value.fraction == null ? null : value.fraction / 100, retryable: false })
-    if (value?.state === "failed") items.push({ id, state: "failed", text: value.message || failed, progress: null, retryable: value.retryable })
-  }
+  const image = status?.image
   // The image reports a fraction while it downloads, then none while it is verified and imported.
-  task("image", fraction => fraction === null ? "Preparing the computer image (first time only)" : `Downloading the computer image · ${Math.floor(fraction)}%`, "Silo could not download the computer image. Check your connection, then retry.", status?.image)
-  task("lcu", () => "Downloading the computer use tools", "Silo could not download the computer use tools. Check your connection, then retry.", status?.lcu)
-  switch (chatgpt?.state) {
-    case "downloading": {
-      const fraction = percent(chatgpt.receivedBytes, chatgpt.totalBytes)
-      items.push({ id: "chatgpt", state: "running", text: fraction === null ? "Downloading ChatGPT for Linux" : `Downloading ChatGPT for Linux · ${Math.floor(fraction * 100)}%`, progress: fraction, retryable: false })
-      break
-    }
-    case "verifying": items.push({ id: "chatgpt", state: "running", text: "Verifying ChatGPT for Linux", progress: null, retryable: false }); break
-    case "extracting": items.push({ id: "chatgpt", state: "running", text: "Preparing ChatGPT for Linux", progress: null, retryable: false }); break
-    case "failed": items.push({ id: "chatgpt", state: "failed", text: chatgpt.reason, progress: null, retryable: chatgpt.retryable }); break
-    default: break
-  }
+  if (image?.state === "running") items.push({ id: "image", state: "running", text: image.fraction == null ? "Preparing the computer image (first time only)" : `Downloading the computer image · ${Math.floor(image.fraction)}%`, progress: image.fraction == null ? null : image.fraction / 100, retryable: false })
+  if (image?.state === "failed") items.push({ id: "image", state: "failed", text: image.message || "Silo could not download the computer image. Check your connection, then retry.", progress: null, retryable: image.retryable })
   return items
 }
 
 export interface PreparationState {
   status: PreparationStatus | null
-  chatgpt: ChatGptAppStatus | null
   items: PreparationItem[]
   /** False until the backend has answered and while anything is still running or waiting. */
   ready: boolean
-  /** Starts again whatever failed (the computer image, the computer use tools and the ChatGPT for Linux download). */
+  /** Starts again whatever failed (the computer image). */
   retry(): void
 }
 
@@ -153,19 +132,12 @@ export interface PreparationState {
 export function usePreparationStatus(): PreparationState {
   const store = useContext(PreparationContext)
   const status = useSyncExternalStore(store ? store.subscribe : noop, store ? store.getSnapshot : nothing)
-  const bridge = useComputerUseBridge()
-  const chatGptStore = bridge?.chatGptFor()
-  const chatgpt = useChatGptApp(chatGptStore, store !== null).status
-  const items = describePreparation(status, chatgpt)
-  const waiting = [status?.image, status?.lcu].some(task => task?.state === "pending") || chatgpt?.state === "idle"
+  const items = describePreparation(status)
+  const waiting = status?.image.state === "pending"
   return {
     status,
-    chatgpt,
     items,
     ready: status !== null && items.length === 0 && !waiting,
-    retry() {
-      void store?.retry()
-      if (chatgpt?.state === "failed") void chatGptStore?.retry()
-    },
+    retry() { void store?.retry() },
   }
 }

@@ -15,7 +15,7 @@ import { ViewerTransferStatus, useViewerFileDrop } from "./viewer-file-drop"
 // including dialogs that look like Silo's, comes from the computer (G-20).
 const GUEST_CONTENT_NOTICE = "Everything inside the amber frame comes from the computer. Silo's own controls are only in this bar."
 
-export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, lcuUpdated = false, sound, onResetScreen, MenuComponent = DesktopActionsMenu, transfer, clipboard }: {
+export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry, onFullscreen, screenRef, computerUseUpdated = false, sound, onResetScreen, MenuComponent = DesktopActionsMenu, transfer, clipboard }: {
   name: string
   state: LinuxDesktopState | null
   busy: boolean
@@ -24,7 +24,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   onRetry: () => void
   onFullscreen: () => void
   screenRef?: React.RefObject<HTMLDivElement | null>
-  lcuUpdated?: boolean
+  computerUseUpdated?: boolean
   sound?: DesktopSound
   onResetScreen?: () => void
   MenuComponent?: ComponentType<DesktopMenuProps>
@@ -41,16 +41,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
   const updateRequired = state?.state === "stopped" && state.updateRequired === true
   const updateAvailable = state?.installed && state.state === "stopped"
     && (state.updateRequired === true || state.updateAvailable === true || state.backend === "kasm")
-  // v4 computers report computer use as a unit; older ones report the legacy LCU fields.
   const computerUse = state?.computerUse
-  // A failed ChatGPT download is the device's, and setting up the computer cannot fix it.
-  const downloadFailed = computerUse?.state === "failed" && computerUse.cause === "app-download"
-  const lcuStatus = computerUse ? null : state?.lcuState === "needs-runtime" ? "LCU requires the official ChatGPT app in this computer"
-    : state?.lcuState === "not-installed" ? "LCU is not set up"
-      : state?.lcuState === "installing" ? "Setting up LCU…"
-        : state?.lcuState === "repair-required" || state?.lcuState === "failed" ? "LCU setup needs attention"
-          : state?.lcuState === "ready" ? `LCU ready${state.lcuAgents?.length ? ` · ${state.lcuAgents.join(", ")}` : ""}`
-            : null
   const problem = error ?? menuError
   const actionLabel = updateRequired ? "Update desktop" : state?.state === "computer-stopped" ? state.autoStart ? "Start computer" : "Start computer and desktop" : state?.state === "failed" ? "Restart desktop" : "Start desktop"
   const primaryAction: DesktopAction = updateRequired ? "update-streamer" : state?.state === "failed" ? "restart" : "start"
@@ -67,21 +58,17 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
           <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span className="truncate" title={problem ?? undefined}>{problem}</span>
           {error && <Button size="xs" variant="ghost" disabled={busy} onClick={onRetry}>Reconnect</Button>}
         </div>}
-        {state?.installed && state.state !== "computer-stopped" && lcuStatus && <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-          <span role={state.lcuState === "installing" ? "status" : undefined} title={state.lcuReason ?? undefined} className="truncate">{lcuStatus}</span>
-          {running && state.lcuState !== "ready" && state.lcuState !== "installing" && <Button size="xs" variant="ghost" disabled={busy} aria-label="Set up LCU" onClick={() => onAction("setup-lcu")}>Set up LCU</Button>}
-        </div>}
         {state?.installed && state.state !== "computer-stopped" && computerUse?.state === "failed" && <div role="alert" className="flex min-w-0 items-center gap-1 text-xs text-destructive">
           <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="truncate" title={computerUse.reason ?? undefined}>{downloadFailed ? "ChatGPT download failed. Retry from the computer's page." : "Computer use setup failed"}</span>
-          {running && !downloadFailed && <Button size="xs" variant="ghost" disabled={busy} onClick={() => onAction("setup-computer-use")}>Try again</Button>}
+          <span className="truncate" title={computerUse.reason ?? undefined}>Computer use setup failed</span>
+          {running && <Button size="xs" variant="ghost" disabled={busy} onClick={() => onAction("setup-computer-use")}>Try again</Button>}
         </div>}
         {streamNeedsRecovery && <div role="alert" className="flex min-w-0 items-center gap-1 text-xs text-destructive">
           <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" /><span className="truncate">Display disconnected</span>
           <Button size="xs" variant="ghost" disabled={busy} onClick={() => onAction("restart-streamer")}>Reconnect display</Button>
         </div>}
         {streamStarting && <span role="status" className="text-xs text-muted-foreground">Connecting display…</span>}
-        {lcuUpdated && (computerUse ? computerUse.state === "ready" : state?.lcuState === "ready") && <span role="status" className="text-xs text-muted-foreground">{computerUse ? "Reconnect agent sessions to load computer use." : "Reconnect agent sessions to load LCU."}</span>}
+        {computerUseUpdated && computerUse?.state === "ready" && <span role="status" className="text-xs text-muted-foreground">Reconnect agent sessions to load computer use.</span>}
       </>}
       {running && clipboard}
       {transfer}
@@ -111,7 +98,7 @@ export function NativeLinuxDesktopViewer({ computer, name, id = computer }: { co
   const drop = useViewerFileDrop(computer)
   const [state, setState] = useState<LinuxDesktopState | null>(null)
   const [busy, setBusy] = useState(true)
-  const [lcuUpdated, setLcuUpdated] = useState(false)
+  const [computerUseUpdated, setComputerUseUpdated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [connection, setConnection] = useState(0)
@@ -208,23 +195,21 @@ export function NativeLinuxDesktopViewer({ computer, name, id = computer }: { co
     revision.current += 1
     setBusy(true)
     const previous = state
-    if (action === "setup-lcu") { setLcuUpdated(false); setState(current => current ? { ...current, lcuState: "installing" } : current) }
-    if (action === "setup-computer-use") { setLcuUpdated(false); setState(current => current?.computerUse ? { ...current, computerUse: { ...current.computerUse, state: "installing", reason: null } } : current) }
+    if (action === "setup-computer-use") { setComputerUseUpdated(false); setState(current => current?.computerUse ? { ...current, computerUse: { ...current.computerUse, state: "installing", reason: null } } : current) }
     setError(null)
     try {
       const result = parseLinuxDesktopState(await invoke("desktop_action", { computer, action }))
       setState(result)
-        if (action === "setup-lcu") setLcuUpdated(result.lcuState === "ready")
-      if (action === "setup-computer-use") setLcuUpdated(result.computerUse?.state === "ready")
+      if (action === "setup-computer-use") setComputerUseUpdated(result.computerUse?.state === "ready")
       if (action === "restart-streamer") {
         setConnectionError(null)
         setConnection(value => value + 1)
       }
     }
-    catch (cause) { setError(String(cause)); if (action === "setup-lcu" || action === "setup-computer-use") setState(previous) }
+    catch (cause) { setError(String(cause)); if (action === "setup-computer-use") setState(previous) }
     finally { operation.current = false; setBusy(false) }
   }
-  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} lcuUpdated={lcuUpdated} sound={sound} onResetScreen={desktopOutdated ? undefined : resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
+  return <LinuxDesktopViewer name={name} state={state} busy={busy} error={error ?? (streamReady ? connectionError : null)} screenRef={screenRef} computerUseUpdated={computerUseUpdated} sound={sound} onResetScreen={desktopOutdated ? undefined : resetScreen} MenuComponent={NativeDesktopActionsMenu} transfer={<ViewerTransferStatus drop={drop} />}
     clipboard={<ViewerClipboard computer={computer} name={name} />}
     onAction={action => { void handleAction(action) }}
     onRetry={() => { setConnection(value => value + 1); void refresh(false) }}
