@@ -127,7 +127,9 @@ supplies them through repository Actions secrets. These are native compile-time
 settings. The desktop crate's `build.rs` and the engine's `engine/build.rs` share
 `github_build.rs`; both track the file and environment changes and reject missing or
 invalid values. The engine build alone (`cargo build -p silod`) also works without
-any configuration, warns, and produces an engine that cannot connect GitHub. See [local setup and release configuration](SiloUI-RELEASES.md).
+any configuration, warns, and produces an engine that cannot connect GitHub. Cargo
+notices the file by its modification time: after restoring a file with an older
+timestamp, `touch` it or run `cargo clean -p silo-engine` before rebuilding. See [local setup and release configuration](SiloUI-RELEASES.md).
 The client-secret value is extractable from a distributed native binary and is
 not treated as a confidential security boundary. Do not commit actual values to
 source or confuse them with users' bearer tokens. There is no service URL setting.
