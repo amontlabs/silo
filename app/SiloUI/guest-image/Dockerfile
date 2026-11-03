@@ -40,7 +40,8 @@ RUN sh /tmp/silo-setup-github.sh \
 # symlink; the other files of the archive are never extracted. Cua Driver sends product
 # telemetry by default, so /etc/environment and /etc/profile.d switch it and the update check
 # off for every account (the MCP registrations that Silo writes carry the same variables).
-# The helper src-tauri/guest/silo-computer-use.py registers it with the agents. Its licence
+# The helper src-tauri/guest/silo-computer-use.py registers it with the agents through the launcher
+# src-tauri/guest/silo-cua-driver-mcp (installed here; the helper writes the same text on v4 computers). Its licence
 # MIT licence text is part of the notices below. No OpenAI file is ever part of the image.
 #
 # The third-party notices for the Selkies streamer, its bundled GPL/LGPL codecs, Cua Driver
@@ -50,6 +51,7 @@ ARG TARGETARCH
 RUN --mount=type=bind,source=src-tauri/guest/desktop-streamer-lock.json,target=/mnt/desktop-streamer-lock.json \
     --mount=type=bind,source=src-tauri/guest/desktop-packages.txt,target=/mnt/desktop-packages.txt \
     --mount=type=bind,source=src-tauri/guest/silo-accessibility.py,target=/mnt/silo-accessibility.py \
+    --mount=type=bind,source=src-tauri/guest/silo-cua-driver-mcp,target=/mnt/silo-cua-driver-mcp \
     --mount=type=bind,source=src-tauri/guest/cua-driver-lock.json,target=/mnt/cua-driver-lock.json \
     --mount=type=bind,source=src-tauri/guest/guest-third-party-notices.md,target=/mnt/guest-third-party-notices.md \
     set -eu \
@@ -88,6 +90,7 @@ RUN --mount=type=bind,source=src-tauri/guest/desktop-streamer-lock.json,target=/
     && install -D -m 0644 /mnt/guest-third-party-notices.md /usr/share/doc/silo-guest-third-party/NOTICES.md \
     && install -d -m 0755 /usr/local/libexec /etc/dconf/profile /etc/dconf/db/local.d /etc/xdg/autostart \
     && install -m 0755 /mnt/silo-accessibility.py /usr/local/libexec/silo-accessibility \
+    && install -m 0755 /mnt/silo-cua-driver-mcp /usr/local/libexec/silo-cua-driver-mcp \
     && printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Silo accessibility' \
         'Comment=Lets assistive tools read Chromium and Electron web content' \
         'Exec=/usr/local/libexec/silo-accessibility' 'NoDisplay=true' \

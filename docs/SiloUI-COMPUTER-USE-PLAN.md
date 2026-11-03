@@ -1,11 +1,68 @@
 # Built-in Linux desktop and computer use: plan
 
-Status: approved 2026-10-01; the backend integration (sections 3 to 5) is implemented
-and verified live (2026-10-02, see the evidence in [ChatGPT app](SiloUI-CHATGPT-APP.md#integration-2026-10-02)). This replaces the optional,
-per-computer desktop installation described in [Linux desktop](SiloUI-DESKTOP.md)
-for new computers, and replaces Luda with [LCU](https://github.com/0xpolarzero/lcu).
+Status: Linux computers use Cua Driver since 2026-11-03 (see the
+[decision](#cua-driver-2026-11-03) below). The LCU and ChatGPT app design that this
+plan was written around (approved 2026-10-01, implemented and verified live 2026-10-02) is
+superseded on Linux and kept below as history and evidence; macOS computers still use it until
+a follow-up change. The [approval design](#approval-design-2026-10-02) still applies, with
+Cua Driver's entries in place of LCU's. This plan replaced the optional, per-computer desktop
+installation described in [Linux desktop](SiloUI-DESKTOP.md) for new computers, and replaced
+Luda.
 
-## Goal
+## Cua Driver (2026-11-03)
+
+Owner decision 2026-11-03: Silo drops the ChatGPT for Linux download and LCU on Linux guests.
+[Cua Driver](https://github.com/trycua/cua) 0.38.0 (MIT) provides computer use. Background and
+the comparison with Codex's own computer use:
+[Cua Driver vs Codex computer use](research/cua-vs-codex-computer-use-2026-11-03.md).
+
+Why: the ChatGPT app was a 1.5 GB per-device download that blocked "created means ready",
+needed a read-only mount, a pinned app/LCU pair and a compatibility table, and tied Linux
+computer use to a private OpenAI app. Cua Driver is one MIT binary (about 37 MB archive) that
+speaks MCP over stdio, runs on X11 and AT-SPI, and needs no app.
+
+What is implemented:
+
+- **Pin.** `guest/cua-driver-lock.json` (version, and URL, SHA-256 and size per architecture).
+  Only the `cua-driver` binary is used. cua-perception and cua-som (AGPL) are not shipped.
+- **Image.** The recipe in `guest-image/Dockerfile` is now `ubuntu-24.04-v5`: Cua Driver
+  verified at build in `/usr/local/lib/silo/cua-driver/<version>/` with a
+  `/usr/local/bin/cua-driver` link, telemetry and update checks off system-wide, the MIT
+  licence in `/usr/share/doc/silo-guest-third-party/`, no ChatGPT-only system packages,
+  capabilities `["desktop","accessibility","cua-driver"]` and `cuaDriverVersion` in the marker.
+  v5 is not published. `guest-image/image-lock.json` stays on v4, so new computers still come
+  from v4 and the guest helper downloads and verifies the pinned archive once. Publishing is
+  the owner's step ([guest images](SiloUI-GUEST-IMAGES.md#guest-image-v5-recipe-unpublished)).
+- **Guest helper.** `silo-computer-use.py` (receipt `schemaVersion` 2) ensures the driver,
+  registers it, applies the approval mode, removes LCU leftovers and checks readiness with
+  `cua-driver doctor --json`. Registered agents: Claude Code and Codex only. Pi, OMP, Hermes and
+  OpenCode are no longer registered. The MCP command is the launcher
+  `/usr/local/libexec/silo-cua-driver-mcp`, which reads the live desktop session environment
+  and runs `cua-driver mcp`, because MCP servers started from SSH shells have no `DISPLAY` or
+  D-Bus address.
+- **Approvals.** `mcp__cua-driver` in Claude Code `permissions.allow`;
+  `default_tools_approval_mode = "approve"` under Codex `[mcp_servers.cua-driver]`.
+- **Telemetry.** Cua Driver's telemetry is on by default and so is its update check. Both are
+  off in the guest (`CUA_DRIVER_RS_TELEMETRY_ENABLED=0`, `CUA_DRIVER_RS_UPDATE_CHECK=false`).
+- **Host.** Creation waits only for the computer image. There is no ChatGPT download, no
+  preparation item for it, no "Finish without computer use", and the API no longer has
+  `cause`, `compatibility`, `warning`, `appVersion` or `runtimeVersion`; it has `driverVersion`.
+  Reasons: `driver-archive-unavailable` (retried), `driver-archive-mismatch`,
+  `driver-archive-invalid`, `doctor-failed`, `session-unavailable`.
+- **Existing v4 computers.** Their recorded `/opt/silo/chatgpt` and `/opt/silo/lcu` mounts keep
+  working with empty host folders; export strips both; the old downloads are deleted at startup
+  when no computer is running.
+- **Not changed.** macOS computers keep LCU and the ChatGPT app; a follow-up moves them to
+  Cua Driver.
+
+Open risks: Codex's sandbox reaching X11, GTK4 and VTE input through the driver, and whether
+Claude Code's permission rule for a hyphenated server name behaves as expected. Live tests are
+in [Rust test support](SiloUI-RUST-TEST-SUPPORT.md).
+
+Everything from "Goal" through "Integration contract", and the LCU pin sections after the
+approval design, describe the superseded design.
+
+## Goal (superseded)
 
 A new computer has a Linux desktop and agent computer use ready with no setup: a
 user creates a computer, starts an agent (Claude Code, Codex, Pi, OMP or Hermes), and
@@ -14,7 +71,7 @@ own approvals, which a per-computer switch can turn off for computer use. That s
 configures the agents' approval prompts; it is a convenience, not a security
 boundary (see [Approval](#approval-design-2026-10-02)).
 
-## Decisions
+## Decisions (superseded)
 
 - The desktop is part of every new computer, baked into a published v4 guest image.
   It starts with the computer because LCU needs a running Xfce session.
@@ -35,7 +92,7 @@ boundary (see [Approval](#approval-design-2026-10-02)).
 - Per-computer approvals switch, off (ask) by default, driven by the host and never
   defended against the guest (see [Approval](#approval-design-2026-10-02)).
 
-## Evidence (2026-10-01)
+## Evidence (2026-10-01, superseded)
 
 Measurements and tests are in [guest image size](SiloUI-GUEST-IMAGE-SIZE.md)
 and were reproduced by parallel investigations; the summaries below are the
@@ -96,7 +153,7 @@ facts the plan depends on.
   open issues #1701/#1702 report that the first statfs on a large read-only
   mount walks the whole host tree.
 
-## Work
+## Work (superseded)
 
 ### 1. LCU
 
@@ -147,7 +204,7 @@ absolute).
 Done: lock (`lcuVersion` 0.11.0), download, verification, extraction and
 publication under `<app data>/chatgpt/published/`, started automatically at app
 start with retries (2026-10-02, replacing the one-time notice), cached status
-reads and a device-level Retry. See [ChatGPT app](SiloUI-CHATGPT-APP.md).
+reads and a device-level Retry. See [ChatGPT app](archive/SiloUI-CHATGPT-APP.md).
 
 ### 5. Computer integration
 
@@ -276,7 +333,7 @@ Findings left open:
 - Silo's `computerUse.state` after a restart comes from the receipt on disk; only `lcu doctor` proves it
   (the lifecycle test checks both).
 
-## Integration contract
+## Integration contract (superseded)
 
 Backend (Rust, guest scripts) and frontend implement this together.
 
@@ -349,6 +406,9 @@ Backend (Rust, guest scripts) and frontend implement this together.
   request; `status` reads the receipt only and never reports approval.
 
 ## Approval design (2026-10-02)
+
+Since 2026-11-03 the entries the switch adds and removes are Cua Driver's (`mcp__cua-driver`,
+Codex `default_tools_approval_mode`); the text below names LCU's entries where it was written.
 
 The per-computer "Allow without asking" switch is a convenience, not a security boundary.
 Agents in the computer have root and can edit their own harness settings
@@ -428,7 +488,7 @@ replaced by a model in which the host drives the guest and the guest cannot veto
   panel say once that the switch configures the agents' approval prompts and is not a
   security boundary inside the computer.
 
-### LCU 0.8.2 pin (2026-10-02)
+### LCU 0.8.2 pin (2026-10-02, superseded)
 
 Silo pins LCU 0.8.2 (`guest/lcu-lock.json`, `chatgpt-app-lock.json` `lcuVersion`).
 0.8.2 fixes the Linux X11 "Operation not permitted" for every harness: it supplies

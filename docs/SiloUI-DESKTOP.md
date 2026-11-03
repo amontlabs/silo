@@ -262,10 +262,13 @@ the text default. The image describes itself in
 ## Built-in computer use
 
 A computer created from a v4 or later image (`desktop.builtIn`) has agent computer use
-ready with no setup. Implementation: `src-tauri/src/computer_use.rs`,
-`guest/silo-computer-use.py`, image recipe in `guest-image/Dockerfile`; the
-mounted app is described in [ChatGPT app](SiloUI-CHATGPT-APP.md) and the design
-in the [computer use plan](SiloUI-COMPUTER-USE-PLAN.md).
+ready with no setup. Since 2026-11-03 Linux computers use [Cua Driver](https://github.com/trycua/cua)
+0.38.0 (MIT) over MCP; the ChatGPT Linux app and LCU are no longer used on Linux. macOS
+computers still use LCU and the ChatGPT app until a follow-up change. Implementation:
+`engine/src/computer_use.rs`, `guest/silo-computer-use.py`, `guest/silo-cua-driver-mcp`, pin in
+`guest/cua-driver-lock.json`, image recipe in `guest-image/Dockerfile`. The design and the
+decision are in the [computer use plan](SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03); the
+removed ChatGPT app manager is kept in [archive](archive/SiloUI-CHATGPT-APP.md).
 
 The guest receipt writer applies the final `0644` permissions before flushing
 the temporary file, then syncs the parent directory after replacement. It returns
@@ -275,107 +278,90 @@ as desktop preferences. Failure-injection tests inspect the complete receipt
 and permissions before publication and reject success after a directory-sync
 error. They use temporary paths without running a computer.
 
-- **Image.** The pinned LCU archive (`guest/lcu-lock.json`, SHA-256 verified at
-  build) is staged unextracted in `/usr/local/share/silo/lcu/`. LCU itself and
-  any OpenAI file are not in the image.
-- **Mount.** This device's published ChatGPT folder is mounted read-only at
-  `/opt/silo/chatgpt` (see the ChatGPT app doc; restores pass it again).
-- **During creation.** "Created" means ready: the first start is only a start.
-  The create toast shows one line and a bar. Before it takes the device-wide
-  operation gate, creation waits (`creation_inputs.rs`) for the background VM image
-  import ("Waiting for the VM image", `preparation::ensure_image`) and, for a
-  built-in computer, for ChatGPT for Linux ("Downloading ChatGPT for Linux · 62%", from
-  the `chatgpt-app-status` cache). The waits hold no gate, so lifecycle operations
-  and Quit are never queued behind them, and Quit ends them. If the download fails,
-  the toast shows the reason with **Retry** and **Finish without computer use**;
-  the latter creates the computer without the apply and computer use finishes at first
-  start as for any computer. After the desktop configuration boot, creation runs the
-  apply once more in a deliberate temporary boot with the desktop session up
-  ("Setting up the desktop and computer use", approval mode, then the usual stop).
+- **Image.** The v5 image recipe bakes the pinned Cua Driver into the guest as
+  `/usr/local/bin/cua-driver` (SHA-256 verified at build), with telemetry and update checks off in
+  `/etc/environment` and `/etc/profile.d`. v5 is not published yet and `image-lock.json` still
+  points at v4, so new computers currently start from v4 and the guest helper downloads and
+  verifies the pinned archive once (see below).
+- **During creation.** "Created" means ready: the first start is only a start. Creation waits
+  (`creation_inputs.rs`) only for the background VM image import ("Waiting for the VM image",
+  `preparation::ensure_image`), before it takes the device-wide operation gate. The wait holds
+  no gate, so lifecycle operations and Quit are never queued behind it, and Quit ends it. There
+  is no download wait and no "Finish without computer use". After the desktop configuration
+  boot, creation runs the apply once more in a deliberate temporary boot with the desktop
+  session up ("Setting up the desktop and computer use", approval mode, then the usual stop).
   If that fails the computer is still created and the Created toast says computer use
   finishes at first start; the boot apply retries as always.
-- **LCU archive mount.** When Silo holds the verified pinned LCU archive
-  (`preparation::lcu_folder()`), new computers also get it read-only at `/opt/silo/lcu`;
-  the helper prefers that copy (hash must match the lock), then the staged image
-  copy, then the download. Existing computers are unchanged.
 - **After every boot** (`prepare_booted`, so start and restore) Silo pushes
   `/usr/local/libexec/silo-computer-use`, `/var/lib/silo-computer-use/pinned.json`
-  (the tested app/LCU pair) and runs `silo-computer-use apply --boot --approval
-  <mode>` to completion on a host background thread, inside the computer's operation turn
-  and within a bound; the boot never waits for it or fails because of it, and a stop,
-  delete or Quit cancels it. Pushing
-  the helper each time keeps it current with Silo, which the image cannot. The same
-  runs when the app becomes ready while the computer runs (after the automatic
-  download), so a computer created before the app was published gains computer use
-  without a restart.
-- **`apply`** is idempotent and does nothing when the receipt matches the pinned
-  pair and shows the approval mode applied completely. Otherwise: require the read-only mount and the
-  app folder (else `needs-app`); use the staged archive if its hash matches the
-  lock, else download the locked URL and verify it; extract it to local disk
-  (never the shared folder: its Node symlink dangles there); run
-  `scripts/install.sh --user silo --runtime-only --skip-system --offline
-  --existing-app <folder> --yes`; run `lcu setup --agent all --allow-missing
-  --session direct --yes --approval ask|auto` as `silo` (LCU before 0.8.8 lacks the
-  flag: the helper detects that from `lcu setup --help` and uses `--agent auto`); read `lcu status --json`; wait for the
-  desktop session (bounded: 300 s after a boot, else 90 s; after a boot a session
-  that is `failed` or `stopped` while the desktop starts with the computer is started
-  again with `silo-desktop start`, up to three times with 2, 4 and 8 s of backoff,
-  before the setup fails with `desktop-session-not-running`) and run
-  `lcu-session --user silo -- lcu doctor
-  --non-interactive --require-ready` as `silo`. The result is
-  `/var/lib/silo-computer-use/receipt.json`; `apply` also reports this run's approval
-  outcome (`applied`, `partial` when `lcu setup` configured some agents and failed for
-  others, else `failed`) from `lcu setup`'s per-agent lines; agents not installed yet are
-  recorded by LCU as pending (the receipt lists `agents` and `pending`) and are not a
-  failure; the log is
-  `/var/log/silo-computer-use.log`. A reinstall happens only when LCU's recorded
-  app path or version differs from the pinned pair.
-- **Agents installed later.** Every supported agent is registered automatically; there is
-  no action to run. `lcu setup --reconcile` registers a pending agent once its binary
-  exists, with the saved approval, and is a quiet no-op otherwise (see the
-  [research](research/lcu-agent-preregistration-2026-10-03.md)). The helper runs it at the
-  end of every `apply` (every boot and app-ready, also when nothing else changed). While the
-  computer runs, the guest has no init system (no systemd, no inotify tools in the image), so
-  `apply` starts `silo-computer-use watch` (one instance under a lock) that checks the
-  agents' install directories (`~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`,
-  `~/.npm-global/bin`, `/usr/local/bin`) every 5 s while an agent is pending and runs
-  `silo-computer-use reconcile` when a pending binary appears. It ends when nothing is
-  pending. `/etc/profile.d/silo-computer-use.sh` is a fallback for the `silo` account's login
-  shells. Reconcile is skipped while an `apply` holds the helper lock (that run reconciles).
+  (the Cua Driver lock) and runs `silo-computer-use apply --boot --approval <mode>` to
+  completion on a host background thread, inside the computer's operation turn and within a
+  bound; the boot never waits for it or fails because of it, and a stop, delete or Quit cancels
+  it. Pushing the helper each time keeps it current with Silo, which the image cannot.
+- **`apply`** is idempotent and cheap when nothing changed. It
+  1. requires `/usr/local/bin/cua-driver` to report the pinned version; otherwise (v4 computers)
+     it downloads the pinned archive for the guest architecture, verifies size and SHA-256,
+     extracts only `cua-driver` to `/opt/cua-driver/<version>/` and links it, once, with
+     bounded backoff. A network failure is `driver-archive-unavailable` and is retried at the
+     next start; `driver-archive-mismatch` and `driver-archive-invalid` are not retried;
+  2. writes the launcher `/usr/local/libexec/silo-cua-driver-mcp` and registers it, as `silo`,
+     as the stdio MCP server `cua-driver` in Claude Code (`~/.claude.json`) and Codex
+     (`~/.codex/config.toml`). Claude Code and Codex are the only registered agents; Pi, OMP,
+     Hermes and OpenCode are not registered. The launcher exists because an MCP server started
+     from an SSH shell has no desktop environment and the D-Bus address changes with every
+     desktop start: it reads `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` from the
+     running `xfce4-session`, sets the telemetry and update-check switches off, and runs
+     `cua-driver mcp`;
+  3. removes leftovers of the earlier LCU setup (its registrations, approval entries, login
+     hook and `/opt/lcu`);
+  4. waits for the desktop session (bounded: 300 s after a boot, else 90 s; after a boot a
+     session that is `failed` or `stopped` is started again with `silo-desktop start`, up to
+     three times with 2, 4 and 8 s of backoff, before the setup fails with
+     `session-unavailable`) and runs `cua-driver doctor --json` as `silo` in that session
+     (`doctor-failed` otherwise).
+
+  The result is `/var/lib/silo-computer-use/receipt.json` (`schemaVersion` 2; an older receipt
+  counts as not set up) and the log is `/var/log/silo-computer-use.log`. `apply` also reports
+  this run's approval outcome (`applied`, `partial`, `failed`); an agent that is not installed
+  yet is pending and not a failure.
+- **Agents installed later.** Claude Code and Codex are registered as soon as their binary
+  exists. The helper runs `reconcile` at the end of every `apply`. While the computer runs, the
+  guest has no init system, so `apply` starts `silo-computer-use watch` (one instance under a
+  lock) that checks the agents' install directories (`~/.local/bin`, `~/.bun/bin`,
+  `~/.cargo/bin`, `~/.npm-global/bin`, `/usr/local/bin`) every 5 s while an agent is pending
+  and runs `reconcile` when a pending binary appears. It ends when nothing is pending.
+  `/etc/profile.d/silo-computer-use.sh` is a fallback for the `silo` account's login shells.
+  Reconcile is skipped while an `apply` holds the helper lock.
 - **Approval.** Per computer in `<storage>/computer-use/<id>.json`: the mode the user chose
   (default `ask`), the last mode applied and the last attempt. The host applies changes
   itself, one at a time per computer, on a background thread (see the
   [approval design](SiloUI-COMPUTER-USE-PLAN.md#approval-design-2026-10-02)); a stopped
-  computer picks a changed mode up at its next boot. `ask` removes only LCU's own harness
-  entries, `auto` adds them (Claude Code `permissions.allow`, Codex
-  `default_tools_approval_mode`); native app permissions and the original runtime's own
-  approvals are unchanged. The switch configures the agents' approval prompts and is not
+  computer picks a changed mode up at its next boot. `auto` adds `mcp__cua-driver` to Claude
+  Code's `permissions.allow` (`~/.claude/settings.json`) and
+  `default_tools_approval_mode = "approve"` under `[mcp_servers.cua-driver]` in Codex's
+  config; `ask` removes them. The switch configures the agents' approval prompts and is not
   a security boundary inside the computer: agents there have root. A fork starts with its
   source's mode; an import starts with `ask`.
-- **Desktop state.** `read_desktop_state` adds `computerUse` for built-in computers,
-  also while stopped (`state: "computer-stopped"` keeps the approval and the last
-  versions seen): `state` (`unavailable`, `preparing`,
-  `installing`, `ready`, `failed`), `reason`, `compatibility` (`tested`,
-  `untested`, `unknown`), `warning`, `approval`, `appliedApproval`, `approvalApply`,
-  `approvalApplyReason`, `appVersion`, `runtimeVersion`, `lcuVersion`, `agents`. The running read costs one guest command that also
-  returns the helper's `status`, which only reads the receipt. The legacy `lcu*`
-  fields stay for computers created before v4.
-- **Commands.** `set_computer_use_approval { computer, mode: "ask" | "auto" }`
-  stores the mode and, when the computer runs, starts applying it in the background and
-  returns at once (`approvalApply: pending`); the `setup-computer-use`
-  desktop action reruns `lcu setup` (the panel's "Try again" after a failed setup; it
-  works for every v4 computer, whether or not the desktop is reachable). Both route to the owning
-  device. An older Silo there answers "Update Silo on that device to use
-  computer use."
-
-Legacy computers: `setup-lcu` keeps working for computers created before v4 with the 0.4.0
-lock (`guest/lcu-legacy-lock.json`); it is refused for built-in computers.
-Its receipt writer uses the same file-sync, replacement and directory-sync
-sequence as desktop preferences. Failed file synchronization preserves the
-previous receipt, and failed directory synchronization rejects completion.
-Tests inject both failures and verify cleanup and retry using temporary paths.
-
-LCU installation on computers created before v4 is separate and unchanged.
+- **Telemetry.** Cua Driver sends telemetry and checks for updates by default. Silo turns both
+  off (`CUA_DRIVER_RS_TELEMETRY_ENABLED=0`, `CUA_DRIVER_RS_UPDATE_CHECK=false`) in the image
+  environment and in the launcher.
+- **Desktop state.** `read_desktop_state` adds `computerUse` for built-in computers, also
+  while stopped (`state: "computer-stopped"` keeps the approval and the last versions seen):
+  `state` (`unavailable`, `installing`, `ready`, `failed`), `reason`, `approval`,
+  `appliedApproval`, `approvalApply`, `approvalApplyReason`, `driverVersion`, `agents`. The
+  running read costs one guest command that also returns the helper's `status`, which only
+  reads the receipt. `chatgptVersion` and `lcuVersion` remain in the API for macOS computers.
+- **Commands.** `set_computer_use_approval { computer, mode: "ask" | "auto" }` stores the mode
+  and, when the computer runs, starts applying it in the background and returns at once
+  (`approvalApply: pending`); the `setup-computer-use` desktop action reruns the apply (the
+  panel's "Try again" after a failed setup). Both route to the owning device. An older Silo
+  there answers "Update Silo on that device to use computer use."
+- **Computers created from the v4 image.** They recorded read-only mounts of
+  `/opt/silo/chatgpt` and `/opt/silo/lcu`. Silo keeps those working by recreating the (now
+  empty) host folders before a start, restore or fork, and removes both mounts from an export.
+  New computers never get them. At startup, when no computer is running, Silo empties the old
+  `chatgpt` and `lcu` download folders in the app data directory
+  (`engine/src/legacy_mounts.rs`). The old `setup-lcu` action is gone from Linux.
 
 ## Applications and external tools
 
@@ -392,12 +378,10 @@ rules, including on new computers when files were deliberately created with sudo
 Conflicting pre-existing VNC configuration is reported before installation,
 rather than overwritten. See [working accounts](SiloUI-WORKING-ACCOUNT.md).
 
-On computers created before v4, adding a desktop does not install agent tools;
-[LCU](SiloUI-COMPUTER-USE-PLAN.md) setup remains an explicit action on a running
-computer. Built-in desktops use the [automatic computer-use setup](#built-in-computer-use)
-after boot; the [boot handler](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs) schedules
-it, and [desktop actions](../app/SiloUI/src-tauri/engine/src/desktop.rs) keep legacy
-`setup-lcu` separate from built-in `setup-computer-use`.
+On computers created before v4, adding a desktop does not install agent tools. Built-in
+desktops use the [automatic computer-use setup](#built-in-computer-use) after boot; the
+[boot handler](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs) schedules it, and
+[desktop actions](../app/SiloUI/src-tauri/engine/src/desktop.rs) run `setup-computer-use`.
 Silo previously installed [Luda](SiloUI-LUDA.md) (now historical). Existing
 desktops that have Luda keep it untouched, and Silo ignores its status.
 Silo does not install or authenticate the agents themselves. Tools running in a

@@ -127,7 +127,7 @@ test("the recipe matches the version and never leaves package files in a layer",
   assert.ok(dockerfile.includes("/usr/local/share/silo/guest-image.json"))
   assert.doesNotMatch(dockerfile.replace(/^#.*$/gm, ""), /openai|oaistatic|chatgpt/i)
   const ignore = readFileSync(new URL("../guest-image/Dockerfile.dockerignore", import.meta.url), "utf8")
-  for (const input of ["desktop-streamer-lock.json", "desktop-packages.txt", "silo-accessibility.py", "setup-github.sh", "guest-third-party-notices.md"]) {
+  for (const input of ["desktop-streamer-lock.json", "desktop-packages.txt", "silo-accessibility.py", "silo-cua-driver-mcp", "setup-github.sh", "guest-third-party-notices.md"]) {
     assert.ok(ignore.includes(`!src-tauri/guest/${input}`), input)
   }
 })
@@ -237,6 +237,7 @@ for (const [name, mutation] of [
   ["a different Cua Driver binary", "echo x >> /usr/local/lib/silo/cua-driver/*/cua-driver"],
   ["an extra file beside Cua Driver", "touch /usr/local/lib/silo/cua-driver/*/libcua_driver_sdk.so"],
   ["telemetry on system-wide", "sed -i /TELEMETRY/d /etc/environment"],
+  ["missing MCP launcher", "rm -f /usr/local/libexec/silo-cua-driver-mcp"],
   ["LCU installed in the image", "mkdir -p /opt/lcu"],
 ]) {
   test(`offline image check rejects ${name}`, { skip: !image }, () => {

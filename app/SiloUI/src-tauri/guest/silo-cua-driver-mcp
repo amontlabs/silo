@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+"""Starts the Cua Driver MCP server inside the current Silo desktop session.
+
+Agents start MCP servers from SSH shells and terminals that may predate the desktop session,
+and the session's D-Bus address changes with every desktop start. This launcher reads the
+environment of the running session (the `xfce4-session` process of the same user) when the
+server starts, turns off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
+Installed by the guest image and refreshed by silo-computer-use.
+"""
+import os
+import sys
+
+DRIVER = '/usr/local/bin/cua-driver'
+KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
+
+
+def session_env(proc='/proc', uid=None):
+    uid = os.getuid() if uid is None else uid
+    found = {}
+    try:
+        pids = sorted((n for n in os.listdir(proc) if n.isdigit()), key=int)
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            base = os.path.join(proc, pid)
+            with open(os.path.join(base, 'comm')) as handle:
+                if handle.read().strip() != 'xfce4-session':
+                    continue
+            if os.stat(base).st_uid != uid:
+                continue
+            with open(os.path.join(base, 'environ'), 'rb') as handle:
+                raw = handle.read()
+        except OSError:
+            continue
+        for item in raw.split(b'\0'):
+            key, _, value = item.decode('utf-8', 'replace').partition('=')
+            if key in KEYS and value:
+                found[key] = value
+        if 'DBUS_SESSION_BUS_ADDRESS' in found:
+            break
+    runtime = found.get('XDG_RUNTIME_DIR') or (
+        '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
+    found.setdefault('DISPLAY', ':1')
+    found['XDG_RUNTIME_DIR'] = runtime
+    found.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path={runtime}/bus')
+    return found
+
+
+def main(argv):
+    environment = dict(os.environ)
+    environment.update(session_env())
+    environment['CUA_DRIVER_RS_TELEMETRY_ENABLED'] = '0'
+    environment['CUA_DRIVER_RS_UPDATE_CHECK'] = 'false'
+    os.execve(DRIVER, [DRIVER, 'mcp', *argv[1:]], environment)
+
+
+if __name__ == '__main__':
+    main(sys.argv)

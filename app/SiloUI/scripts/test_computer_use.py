@@ -1,6 +1,7 @@
 import contextlib
 import fcntl
 import hashlib
+import importlib.machinery
 import importlib.util
 import io
 import json
@@ -100,6 +101,7 @@ class Guest(unittest.TestCase):
             mock.patch.object(cu, 'STAGE', self.state / 'stage'),
             mock.patch.object(cu, 'LOG', root / 'log'),
             mock.patch.object(cu, 'DRIVER_LINK', self.link),
+            mock.patch.object(cu, 'LAUNCHER', root / 'libexec/silo-cua-driver-mcp'),
             mock.patch.object(cu, 'INSTALL_ROOT', root / 'opt-cua-driver'),
             mock.patch.object(cu, 'LEGACY_PREFIX', self.legacy_prefix),
             mock.patch.object(cu, 'LEGACY_RECEIPT', self.legacy_receipt),
@@ -530,21 +532,31 @@ class Registration(Guest):
         super().setUp()
         self.install_image_driver()
 
-    def test_claude_code_gets_a_plain_stdio_server_with_the_session_environment(self):
+    def test_claude_code_gets_a_plain_stdio_server_through_the_launcher(self):
         cu.apply('ask')
         self.assertEqual(self.claude()['mcpServers']['cua-driver'], {
-            'type': 'stdio', 'command': str(self.link), 'args': ['mcp'],
-            'env': {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false',
-                    'DBUS_SESSION_BUS_ADDRESS': SESSION['DBUS_SESSION_BUS_ADDRESS'],
-                    'DISPLAY': ':1', 'XDG_RUNTIME_DIR': '/run/silo-desktop/user'}})
+            'type': 'stdio', 'command': str(cu.LAUNCHER), 'args': [],
+            'env': {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}})
 
     def test_codex_gets_the_same_server_in_its_own_section(self):
         cu.apply('auto')
         server = self.codex_config()['mcp_servers']['cua-driver']
-        self.assertEqual((server['command'], server['args']), (str(self.link), ['mcp']))
+        self.assertEqual((server['command'], server['args']), (str(cu.LAUNCHER), []))
         self.assertEqual(server['default_tools_approval_mode'], 'approve')
-        self.assertEqual(server['env']['DISPLAY'], ':1')
-        self.assertEqual(server['env']['CUA_DRIVER_RS_TELEMETRY_ENABLED'], '0')
+        self.assertEqual(server['env'], {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'})
+
+    def test_the_launcher_is_written_on_every_apply_and_matches_the_shipped_file(self):
+        shipped = (SCRIPT.parent / 'silo-cua-driver-mcp').read_text()
+        self.assertEqual(cu.LAUNCHER_TEXT, shipped)
+        cu.apply('ask')
+        self.assertEqual(cu.LAUNCHER.read_text(), shipped)
+        self.assertTrue(os.access(cu.LAUNCHER, os.X_OK))
+        cu.LAUNCHER.write_text('old')
+        cu.apply('ask')
+        self.assertEqual(cu.LAUNCHER.read_text(), shipped)
+        cu.LAUNCHER.write_text('old')
+        cu.reconcile()
+        self.assertEqual(cu.LAUNCHER.read_text(), shipped)
 
     def test_registration_is_idempotent_and_rewrites_nothing(self):
         cu.apply('auto')
@@ -643,16 +655,13 @@ class Registration(Guest):
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.assertEqual(cu.reconcile(), {'reconcile': 'busy'})
 
-    def test_a_restarted_desktop_session_updates_the_registrations(self):
+    def test_no_session_address_is_stored_in_a_registration(self):
         cu.apply('ask')
         self.session_environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=/tmp/dbus-BBBB'
-        self.commands.clear()
         cu.apply('ask')
-        self.assertEqual(self.claude()['mcpServers']['cua-driver']['env']['DBUS_SESSION_BUS_ADDRESS'],
-                         'unix:path=/tmp/dbus-BBBB')
-        self.assertEqual(self.codex_config()['mcp_servers']['cua-driver']['env']['DBUS_SESSION_BUS_ADDRESS'],
-                         'unix:path=/tmp/dbus-BBBB')
-        self.assertEqual(self.receipt()['sessionEnv']['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/tmp/dbus-BBBB')
+        for text in (self.claude_state.read_text(), self.codex.read_text(), json.dumps(self.receipt())):
+            self.assertNotIn('dbus', text.lower())
+            self.assertNotIn('DISPLAY', text)
 
     def test_an_unreadable_agent_file_is_partial_when_others_are_configured(self):
         self.claude_state.parent.mkdir(parents=True)
@@ -678,7 +687,7 @@ class Registration(Guest):
         self.codex.write_text('a = [\n')
         original = self.codex.read_text()
         with self.assertRaises(cu.Failure):
-            cu.edit_codex(cu.server_entry(self.link, SESSION), 'ask')
+            cu.edit_codex(cu.server_entry(), 'ask')
         self.assertEqual(self.codex.read_text(), original)
 
     def test_agents_are_reported_in_the_order_of_their_ids(self):
@@ -736,6 +745,53 @@ class SessionEnvironment(unittest.TestCase):
             with self.assertRaises(cu.Failure) as caught:
                 cu.session_env(Path(directory), strict=True)
         self.assertEqual(caught.exception.reason, 'session-unavailable')
+
+
+class Launcher(unittest.TestCase):
+    def load(self):
+        spec = importlib.util.spec_from_file_location('launcher', SCRIPT.parent / 'silo-cua-driver-mcp',
+                                                      loader=importlib.machinery.SourceFileLoader(
+                                                          'launcher', str(SCRIPT.parent / 'silo-cua-driver-mcp')))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def proc(self, directory, pid, comm, environ, uid=None):
+        path = Path(directory) / str(pid)
+        path.mkdir()
+        (path / 'comm').write_text(comm + '\n')
+        (path / 'environ').write_bytes(environ.encode())
+
+    def test_it_reads_the_current_session_of_its_own_user(self):
+        launcher = self.load()
+        with tempfile.TemporaryDirectory() as directory:
+            self.proc(directory, 5, 'xfce4-session', 'DISPLAY=:1\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-NEW\0'
+                      'XDG_RUNTIME_DIR=/run/silo-desktop/user\0XAUTHORITY=/run/xauth\0PATH=/bin')
+            self.proc(directory, 6, 'bash', 'DISPLAY=:9')
+            found = launcher.session_env(directory, uid=os.getuid())
+            self.assertEqual(found, {'DISPLAY': ':1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-NEW',
+                                     'XDG_RUNTIME_DIR': '/run/silo-desktop/user', 'XAUTHORITY': '/run/xauth'})
+            # Another user's session is not used.
+            other = launcher.session_env(directory, uid=os.getuid() + 1)
+            self.assertNotIn('XAUTHORITY', other)
+            self.assertEqual(other['DISPLAY'], ':1')
+
+    def test_without_a_session_it_falls_back_to_the_standard_addresses(self):
+        launcher = self.load()
+        with tempfile.TemporaryDirectory() as directory:
+            found = launcher.session_env(directory, uid=1234)
+        self.assertEqual(found['DISPLAY'], ':1')
+        self.assertTrue(found['DBUS_SESSION_BUS_ADDRESS'].endswith('/bus'))
+
+    def test_it_execs_the_driver_with_privacy_variables_and_the_arguments(self):
+        launcher = self.load()
+        with mock.patch.object(launcher.os, 'execve') as execve, \
+                mock.patch.object(launcher, 'session_env', return_value={'DISPLAY': ':1'}):
+            launcher.main(['launcher', '--extra'])
+        path, argv, environment = execve.call_args.args
+        self.assertEqual((path, argv), ('/usr/local/bin/cua-driver', ['/usr/local/bin/cua-driver', 'mcp', '--extra']))
+        self.assertEqual((environment['CUA_DRIVER_RS_TELEMETRY_ENABLED'], environment['CUA_DRIVER_RS_UPDATE_CHECK'],
+                          environment['DISPLAY']), ('0', 'false', ':1'))
 
 
 class CommandLine(Guest):

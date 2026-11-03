@@ -7,7 +7,7 @@ The Silo app is a desktop app for Apple Silicon Macs built on the Silo engine. T
 1. **Create a computer.** Follow setup to choose its name, CPU, memory, and disk size. GitHub is optional. The Linux desktop and computer use are built in. Use **Add → New computer** to create more later.
 2. **Open your project.** Start the computer and open its terminal. Create or clone your project in `/workspace`; use HTTPS URLs for Silo's GitHub integration. In **Files**, open a folder in your preferred editor.
 3. **Open a development server.** Run it inside the computer, listening on `0.0.0.0`. In **Network**, connect a discovered port or choose **Add port**, then open the displayed address on your device.
-4. **Open the desktop.** Choose **Open Linux desktop** from the computer's actions. Closing the viewer leaves its graphical apps running. A computer created before the built-in desktop keeps its current setup: add a desktop with **Add Linux desktop**, then choose **Set up LCU** in the viewer, which needs the official ChatGPT Linux app inside the computer. Create a new computer for automatic computer use.
+4. **Open the desktop.** Choose **Open Linux desktop** from the computer's actions. Closing the viewer leaves its graphical apps running. A computer created before the built-in desktop keeps its current setup: add a desktop with **Add Linux desktop**; Silo does not set up computer use there. Create a new computer for automatic computer use (Cua Driver).
 
 Stopping a computer ends its running programs and preserves its files. Names and disk sizes are fixed after creation; changing CPU or memory stops the computer and applies on its next start. Quitting Silo stops local computers; computers on other devices keep running.
 

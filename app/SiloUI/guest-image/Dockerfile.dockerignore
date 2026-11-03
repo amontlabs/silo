@@ -7,6 +7,7 @@
 !src-tauri/guest/setup-github.sh
 !src-tauri/guest/desktop-streamer-lock.json
 !src-tauri/guest/silo-accessibility.py
+!src-tauri/guest/silo-cua-driver-mcp
 !src-tauri/guest/desktop-packages.txt
 !src-tauri/guest/cua-driver-lock.json
 !src-tauri/guest/guest-third-party-notices.md

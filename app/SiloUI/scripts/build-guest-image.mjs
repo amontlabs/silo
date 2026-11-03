@@ -40,6 +40,7 @@ test "$(readlink -f /usr/local/bin/cua-driver)" = /usr/local/lib/silo/cua-driver
 ! ldd /usr/local/bin/cua-driver | grep -q 'not found' || { echo "Cua Driver has unresolved libraries" >&2; exit 1; }
 grep -qx 'CUA_DRIVER_RS_TELEMETRY_ENABLED=0' /etc/environment && grep -qx 'CUA_DRIVER_RS_UPDATE_CHECK=false' /etc/environment || { echo "Cua Driver telemetry and update check must be off system-wide" >&2; exit 1; }
 test "$(sh -c '. /etc/profile.d/silo-cua-driver.sh; echo "$CUA_DRIVER_RS_TELEMETRY_ENABLED $CUA_DRIVER_RS_UPDATE_CHECK"')" = "0 false"
+test -x /usr/local/libexec/silo-cua-driver-mcp && python3 -c 'import py_compile; py_compile.compile("/usr/local/libexec/silo-cua-driver-mcp", cfile="/tmp/silo-cua-driver-mcp.pyc", doraise=True)' || { echo "The Cua Driver MCP launcher is missing or does not compile" >&2; exit 1; }
 test ! -e /opt/lcu && test ! -e /usr/lib/chatgpt && test ! -e /opt/silo && test ! -e /usr/local/share/silo/lcu || { echo "The image must not contain LCU or a ChatGPT app" >&2; exit 1; }
 test ! -e /usr/bin/ffmpeg && ! dpkg -s bubblewrap >/dev/null 2>&1 || { echo "The ChatGPT-only packages must not be installed" >&2; exit 1; }
 test -s /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'x264' /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'Cua Driver' /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'Permission is hereby granted' /usr/share/doc/silo-guest-third-party/NOTICES.md || { echo "The third-party notices are missing from the image" >&2; exit 1; }

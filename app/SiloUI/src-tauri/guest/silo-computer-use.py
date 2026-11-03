@@ -12,10 +12,11 @@ idempotent and cheap when nothing changed:
   verified and only the `cua-driver` binary is extracted to /opt/cua-driver/<version>/;
 * Silo registers the driver as a plain stdio MCP server named `cua-driver` for the agents it
   knows a generic configuration for, as the working account: Claude Code
-  (`~/.claude.json`) and Codex (`~/.codex/config.toml`). The registration carries the
-  desktop session's environment (DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR) because
-  an MCP server started from an SSH shell has none, and switches telemetry and the update
-  check off. An agent that is not installed yet is pending: `reconcile` (run at the end of
+  (`~/.claude.json`) and Codex (`~/.codex/config.toml`). The command is the launcher
+  /usr/local/libexec/silo-cua-driver-mcp (written on every apply), which reads the running
+  desktop session's environment (DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR) each time
+  the server starts, because an MCP server started from an SSH shell has none and the bus
+  address changes with every desktop start; telemetry and the update check are off. An agent that is not installed yet is pending: `reconcile` (run at the end of
   every `apply`, from a login hook in /etc/profile.d and from a small `watch` process that
   polls the install directories) registers it once its binary exists;
 * the approval switch adds or removes `mcp__cua-driver` in Claude Code's
@@ -74,6 +75,70 @@ USER_BIN = [f'{HOME}/.local/bin', f'{HOME}/.bun/bin', f'{HOME}/.cargo/bin', f'{H
             '/usr/local/bin', '/usr/bin', '/bin']
 USER_PATH = ':'.join(USER_BIN)
 SERVER = 'cua-driver'
+# The MCP command of every registration: it reads the running desktop session when the server
+# starts, so no session address is stored. Rust pushes only this helper, so the text is embedded
+# here (guest/silo-cua-driver-mcp is the same file; the image installs it too).
+LAUNCHER = Path('/usr/local/libexec/silo-cua-driver-mcp')
+LAUNCHER_TEXT = r'''#!/usr/bin/python3
+"""Starts the Cua Driver MCP server inside the current Silo desktop session.
+
+Agents start MCP servers from SSH shells and terminals that may predate the desktop session,
+and the session's D-Bus address changes with every desktop start. This launcher reads the
+environment of the running session (the `xfce4-session` process of the same user) when the
+server starts, turns off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
+Installed by the guest image and refreshed by silo-computer-use.
+"""
+import os
+import sys
+
+DRIVER = '/usr/local/bin/cua-driver'
+KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
+
+
+def session_env(proc='/proc', uid=None):
+    uid = os.getuid() if uid is None else uid
+    found = {}
+    try:
+        pids = sorted((n for n in os.listdir(proc) if n.isdigit()), key=int)
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            base = os.path.join(proc, pid)
+            with open(os.path.join(base, 'comm')) as handle:
+                if handle.read().strip() != 'xfce4-session':
+                    continue
+            if os.stat(base).st_uid != uid:
+                continue
+            with open(os.path.join(base, 'environ'), 'rb') as handle:
+                raw = handle.read()
+        except OSError:
+            continue
+        for item in raw.split(b'\0'):
+            key, _, value = item.decode('utf-8', 'replace').partition('=')
+            if key in KEYS and value:
+                found[key] = value
+        if 'DBUS_SESSION_BUS_ADDRESS' in found:
+            break
+    runtime = found.get('XDG_RUNTIME_DIR') or (
+        '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
+    found.setdefault('DISPLAY', ':1')
+    found['XDG_RUNTIME_DIR'] = runtime
+    found.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path={runtime}/bus')
+    return found
+
+
+def main(argv):
+    environment = dict(os.environ)
+    environment.update(session_env())
+    environment['CUA_DRIVER_RS_TELEMETRY_ENABLED'] = '0'
+    environment['CUA_DRIVER_RS_UPDATE_CHECK'] = 'false'
+    os.execve(DRIVER, [DRIVER, 'mcp', *argv[1:]], environment)
+
+
+if __name__ == '__main__':
+    main(sys.argv)
+'''
 # The agents Silo registers the driver with, and the executable that shows each is installed.
 AGENTS = {'claude-code': 'claude', 'codex': 'codex'}
 EXECUTABLES = AGENTS
@@ -468,8 +533,19 @@ def session_env(proc=Path('/proc'), strict=False):
     return environment
 
 
-def registration_env(session):
-    return dict(sorted({**session, **PRIVACY_ENV}.items()))
+def write_launcher():
+    """Installs (or refreshes) the MCP launcher; root-owned and executable by everyone."""
+    try:
+        if LAUNCHER.is_file() and LAUNCHER.read_text() == LAUNCHER_TEXT and os.access(LAUNCHER, os.X_OK):
+            return
+        LAUNCHER.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix='.tmp-', dir=LAUNCHER.parent)
+        with os.fdopen(fd, 'w') as output:
+            output.write(LAUNCHER_TEXT)
+            os.fchmod(output.fileno(), 0o755)
+        os.replace(temporary, LAUNCHER)
+    except OSError as error:
+        raise Failure('setup-failed', f'could not write {LAUNCHER}: {error}') from None
 
 
 @contextlib.contextmanager
@@ -517,8 +593,8 @@ LEGACY = re.compile(r'(?<![A-Za-z0-9])lcu(?![A-Za-z0-9])|mcp__lcu|/opt/lcu', re.
 APPROVAL_RULE = 'mcp__' + SERVER
 
 
-def server_entry(command, session):
-    return {'type': 'stdio', 'command': str(command), 'args': ['mcp'], 'env': registration_env(session)}
+def server_entry(command=None):
+    return {'type': 'stdio', 'command': str(command or LAUNCHER), 'args': [], 'env': dict(sorted(PRIVACY_ENV.items()))}
 
 
 def read_object(path):
@@ -684,10 +760,10 @@ def binary_installed(name, directories=None):
     return None
 
 
-def configure(names, approval, session):
+def configure(names, approval):
     """Registers the driver with the agents in `names` that are installed. Returns
     `(registered, pending, failed)`: pending agents are not installed yet."""
-    entry = server_entry(DRIVER_LINK, session)
+    entry = server_entry()
     registered, pending, failed = [], [], []
     for name in names:
         if not binary_installed(AGENTS[name]):
@@ -807,20 +883,16 @@ def watch(interval=WATCH_INTERVAL, directories=None, rounds=None):
 
 
 
-def reconcile_agents(receipt, session, force=False):
-    """Registers the agents in the receipt's `pending` list whose binary now exists, and
-    registers every installed agent again when the desktop session's environment differs from
-    the one recorded (`force` does so regardless). Returns `(agents, pending, registered)`;
-    an agent that could not be registered stays pending and is tried again."""
+def reconcile_agents(receipt):
+    """Registers the agents in the receipt's `pending` list whose binary now exists. Returns
+    `(agents, pending)`; an agent that could not be registered stays pending."""
     approval = receipt.get('approval') if receipt.get('approval') in APPROVALS else 'ask'
     agents, pending = list(receipt.get('agents') or []), list(receipt.get('pending') or [])
-    changed_env = force or receipt.get('sessionEnv') != session
-    names = sorted(set(pending) | (set(agents) if changed_env else set()))
-    names = [name for name in names if name in AGENTS]
-    registered, still_pending, failed = configure(names, approval, session) if names else ([], [], [])
-    agents = sorted((set(agents) | set(registered)) - set(still_pending) - set(failed))
+    names = [name for name in sorted(pending) if name in AGENTS]
+    registered, still_pending, failed = configure(names, approval) if names else ([], [], [])
+    agents = sorted(set(agents) | set(registered))
     pending = sorted((set(pending) - set(registered)) | set(still_pending) | set(failed))
-    return agents, pending, registered
+    return agents, pending
 
 
 def reconcile():
@@ -836,12 +908,10 @@ def reconcile():
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {'reconcile': 'busy'}
-        session = session_env()
-        agents, pending, _ = reconcile_agents(receipt, session)
-        if (agents, pending) != (receipt.get('agents') or [], receipt.get('pending') or []) or \
-                receipt.get('sessionEnv') != session:
-            write_json(RECEIPT, dict(receipt, agents=agents, pending=pending, sessionEnv=session,
-                                     updatedAt=now()))
+        write_launcher()
+        agents, pending = reconcile_agents(receipt)
+        if (agents, pending) != (receipt.get('agents') or [], receipt.get('pending') or []):
+            write_json(RECEIPT, dict(receipt, agents=agents, pending=pending, updatedAt=now()))
     return {'reconcile': 'done', 'agents': agents, 'pending': pending}
 
 
@@ -962,12 +1032,10 @@ def update(pinned, mode, force, boot):
     if configured and not boot and driver_version(DRIVER_LINK) == pinned['version']:
         # The receipt shows this mode applied completely. An agent installed since then is
         # registered, and registrations follow a desktop session that was started again.
-        session = session_env()
-        agents, pending, _ = reconcile_agents(existing, session)
-        if (agents, pending) != (existing.get('agents') or [], existing.get('pending') or []) or \
-                existing.get('sessionEnv') != session:
-            write_json(RECEIPT, dict(existing, agents=agents, pending=pending, sessionEnv=session,
-                                     updatedAt=now()))
+        write_launcher()
+        agents, pending = reconcile_agents(existing)
+        if (agents, pending) != (existing.get('agents') or [], existing.get('pending') or []):
+            write_json(RECEIPT, dict(existing, agents=agents, pending=pending, updatedAt=now()))
         ensure_triggers(pending)
         return report(mode, 'applied')
     write_receipt(pinned, mode, 'installing')
@@ -977,22 +1045,22 @@ def update(pinned, mode, force, boot):
         STAGE.mkdir(mode=0o700, parents=True, exist_ok=True)
         ensure_driver(pinned, STAGE)
         remove_legacy()
-        # The registration needs the session's bus address; a session that is not running
-        # fails the run after the registration was made with what is known.
+        # The launcher finds the session when an agent starts the server, so the registration
+        # does not wait for the desktop; a session that is not running fails the run after it.
         session_error = None
         try:
             wait_for_session(SESSION_WAIT_BOOT if boot else SESSION_WAIT, repair=boot)
         except Failure as failure:
             session_error = failure
-        session = session_env()
-        registered, pending, failed = configure(sorted(AGENTS), mode, session)
+        write_launcher()
+        registered, pending, failed = configure(sorted(AGENTS), mode)
         if failed and not registered:
             raise Failure('setup-failed', 'could not register the driver with ' + ', '.join(failed))
         outcome = 'partial' if failed else 'applied'
         result = report(mode, outcome, 'setup-partial' if failed else None)
         pending = sorted(set(pending) | set(failed))
         ensure_triggers(pending)
-        fields = dict(agents=registered, pending=pending, approvalOutcome=outcome, sessionEnv=session)
+        fields = dict(agents=registered, pending=pending, approvalOutcome=outcome)
         if session_error is not None:
             raise Failure('session-unavailable', str(session_error))
         if not doctor(0):

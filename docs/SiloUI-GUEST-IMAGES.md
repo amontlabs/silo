@@ -185,13 +185,13 @@ SFTP server) and adds, in one further layer:
   package file and delete it later: that keeps it (about 60 MB) in a layer.
   The runtime pieces of `setup-desktop.sh` (Selkies web-client patch, connection
   credentials, receipts, `silo-desktop`) are not part of the image.
-- **ChatGPT and LCU system libraries.** The LCU `SYSTEM_PACKAGES` (checked against
+- **ChatGPT and LCU system libraries (replaced in v5).** The LCU `SYSTEM_PACKAGES` (checked against
   v0.8.1, unchanged through v0.8.4; v0.8.5 adds libxres1, which the published v4 image already contains,
   [source](https://github.com/0xpolarzero/lcu/blob/v0.8.1/scripts/install.py)),
   a superset of the ChatGPT Linux `.deb` dependencies on Ubuntu 24.04, so LCU
   installs with `--skip-system --offline`. No OpenAI file and no installed LCU
   are in the image.
-- **LCU archive.** `src-tauri/guest/lcu-lock.json` is the one place that pins LCU
+- **LCU archive (replaced in v5; the lock file is removed).** `src-tauri/guest/lcu-lock.json` is the one place that pins LCU
   (version, and URL and SHA-256 per architecture; the ChatGPT app lock's
   `lcuVersion` must agree, which a test checks). The same `RUN` downloads the
   archive for the build architecture, verifies it with `sha256sum --check` and
@@ -260,6 +260,49 @@ pixelflux without its GPL codecs (`PIXELFLUX_ENABLE_GPL=0`; needs Silo-built whe
 4:4:4). When bumping `desktop-streamer-lock.json`, update the notice table and the source mirror
 in the same change.
 
+## Guest image v5 recipe (unpublished)
+
+`GUEST_IMAGE_VERSION` in `scripts/build-guest-image.mjs` and the recipe in
+`guest-image/Dockerfile` are `ubuntu-24.04-v5`. v5 is not published: `guest-image/image-lock.json`
+still pins v4, so new computers use v4. On a v4 computer the guest helper downloads the pinned
+Cua Driver archive once and verifies it (see
+[built-in computer use](SiloUI-DESKTOP.md#built-in-computer-use)). Once v5 is published and the
+lock points at it, new computers have the driver from the start.
+
+v5 changes the v4 recipe in these ways:
+
+- **Cua Driver instead of LCU.** `src-tauri/guest/cua-driver-lock.json` pins the release
+  (0.38.0, URL, SHA-256 and size per architecture; a bind mount, never a `COPY`). One `RUN`
+  downloads the archive, checks size and SHA-256, and installs only the `cua-driver` binary as
+  `/usr/local/lib/silo/cua-driver/<version>/cua-driver` with a `/usr/local/bin/cua-driver` link.
+  The build fails if `cua-driver --version` differs from the lock or `ldd` finds a missing library.
+- **No telemetry.** `CUA_DRIVER_RS_TELEMETRY_ENABLED=0` and `CUA_DRIVER_RS_UPDATE_CHECK=false`
+  go into `/etc/environment` and `/etc/profile.d/silo-cua-driver.sh`.
+- **MCP launcher.** `guest/silo-cua-driver-mcp` is installed as
+  `/usr/local/libexec/silo-cua-driver-mcp` (the helper refreshes it on every apply).
+- **Licence.** Cua Driver's MIT licence text is in `/usr/share/doc/silo-guest-third-party/`
+  (from `guest/guest-third-party-notices.md`).
+- **Fewer packages.** The ChatGPT-only system libraries are dropped. Kept: the Xfce desktop,
+  Selkies, AT-SPI, XTest and what `cua-driver` links (libX11, libXi, libxkbcommon, libxcb,
+  libXext, libXau, libXdmcp, libbsd, libmd).
+- **Marker.** `/usr/local/share/silo/guest-image.json` has capabilities
+  `["desktop","accessibility","cua-driver"]` and `cuaDriverVersion`. `verifyGuestImage` checks
+  them and that the removed `lcu-lock.json`, `lcu-legacy-lock.json`, `chatgpt-app-lock.json` and
+  `setup-lcu.py` are not part of the build.
+
+### Publishing v5 (owner step)
+
+1. Build the image locally and check it: `npm --prefix app/SiloUI run guest:image:build`, then
+   start a computer from it and run `cua-driver doctor --json` in the desktop session.
+2. Run the `guest-image` workflow for `ubuntu-24.04-v5` and approve the `guest-image-publish`
+   environment. The workflow attaches `cua-driver-lock.json` and `silo-cua-driver-mcp` to the
+   release (`guest-ubuntu-24.04-v5`). Never reuse a published tag.
+3. Check that the GHCR package is public and pulls anonymously.
+4. Copy the release manifests into `guest-image/image-lock.json` (release URL, per-architecture
+   archive hash, size and config digest) in a separate change, and run
+   `npm --prefix app/SiloUI run test:release`.
+5. Run the live tests in [Rust test support](SiloUI-RUST-TEST-SUPPORT.md) against the new image.
+
 ## Runtime behavior
 
 The app downloads and verifies the pinned archive (below), then imports it into its private
@@ -287,11 +330,10 @@ pushed the APT repository past its [900 MiB budget](SiloUI-LINUX-UPDATES.md).
   key matches.
 - **Where.** `<app data>/guest-image/<version>/image.tar.gz` (the app data directory is per
   [channel](SiloUI-BUILD-CHANNELS.md), so Silo and Silo Dev never share it), mode 0444 in a 0555
-  folder, written by `preparation::download_and_publish` (the same code that publishes the LCU
-  archive). `RuntimePaths.guest_image` is that root. The archive stays after the import so a
+  folder, written by `preparation::download_and_publish`. `RuntimePaths.guest_image` is that root. The archive stays after the import so a
   device that loses its cache or selects another storage location imports it again without the
   network.
-- **How.** `chatgpt_app::HttpDownloader`: unauthenticated HTTPS only, at most five redirects
+- **How.** `download::HttpDownloader`: unauthenticated HTTPS only, at most five redirects
   (release assets redirect to `objects.githubusercontent.com`), no GitHub token, resume of a
   partial file in `.download/<version>-image.tar.gz.part`, five attempts with backoff, a hard
   stop at the pinned length. Free space for the missing bytes is checked first. The size and the
