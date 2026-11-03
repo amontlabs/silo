@@ -9,7 +9,7 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 ## What it does
 
 - **Run computers.** Create, start, stop, and monitor virtual machines, each with its own files, tools, and processes, sandboxed from the Mac. Linux computers run on [MicroSandbox](https://github.com/superradcompany/microsandbox); macOS computers run on Apple's Virtualization framework. See [macOS computers](docs/SiloUI-MACOS-COMPUTERS.md).
-- **Give agents a desktop.** New Linux computers have a desktop built in, with computer use for agents; agents (Claude Code and Codex) use it through [Cua Driver](https://github.com/trycua/cua), which comes with the computer image. macOS computers are set up for computer use after installation, still with ChatGPT and LCU until a later update. See the [computer-use plan](docs/SiloUI-COMPUTER-USE-PLAN.md).
+- **Give agents a desktop.** New Linux computers have a desktop built in, with computer use for agents; Silo downloads ChatGPT for Linux from OpenAI and sets up computer use once the computer is ready. macOS computers are set up for computer use after installation. See the [computer-use plan](docs/SiloUI-COMPUTER-USE-PLAN.md).
 - **Reach a computer's files and services.** Browse files, open terminals, connect development servers to local addresses, and enable SSH access per computer.
 - **Control GitHub access.** Connect through OAuth and select repositories for each computer, with read-only access by default, or use a [personal token](docs/SiloUI-GITHUB-PERSONAL-TOKENS.md), which grants the token's full permissions.
 - **Scope API credentials.** Store credentials in the Mac's Keychain and choose the computers and HTTPS domains that can use them. See [how secrets work](docs/SiloUI-SECRETS.md).
@@ -47,7 +47,7 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, base Linux image, and Git tools are bundled. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, base Linux image, and Git tools are bundled. Silo downloads ChatGPT for Linux in the background for computer use. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
