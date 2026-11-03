@@ -21,7 +21,7 @@ allowed, and there is no per-host egress filter yet.
 
 | The agent in a computer can | The agent in a computer cannot (if the boundary holds) |
 | --- | --- |
-| Read and change everything in that computer, as root | Read or write the Mac's files, except two read-only folders lent to Linux computers |
+| Read and change everything in that computer, as root | Read or write the Mac's files, except two read-only folders lent to Linux computers and the runtime's own control folder at `/.msb` |
 | Connect to any public internet address, any port | Connect to the Mac's loopback, private-range (LAN, VPN) addresses, link-local or cloud-metadata addresses, or another computer (macOS computers: only once setup is complete) |
 | Use an assigned secret against that secret's allowed HTTPS hosts | Read the secret's value, or send it to any other host |
 | Read granted repositories; write only those granted for changes | Read the user's GitHub sign-in or any GitHub token; touch ungranted repositories (OAuth mode) |
@@ -244,9 +244,21 @@ Limits:
 Each Linux computer's `/workspace` is an owned disk image attached as a block device
 (`--mount-owned /workspace:kind=disk`,
 [`runtime/mod.rs#L6292`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
-filesystem is a separate disk. No host folder of the user's is shared into a computer. The only
-host folders a Linux computer sees are two Silo-managed, **read-only** shares for built-in computer
-use: the downloaded ChatGPT for Linux package at `/opt/silo/chatgpt` and the verified LCU archive at
+filesystem is a separate disk. No host folder of the user's is shared into a computer. A Linux
+computer sees three host folders.
+
+The first is MicroSandbox's own per-computer runtime directory, mounted **read-write** at `/.msb`
+(virtiofs tag `msb_runtime`). It is a control channel: the host writes scripts and TLS
+certificates into it, and the guest writes a heartbeat file that the host reads. MicroSandbox
+serves it from a passthrough filesystem rooted at that directory, refuses a symlinked root, and
+caps guest writes at 16 MiB
+([MicroSandbox `vm.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/runtime/lib/runner/vm.rs#L2014),
+[`protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs#L79)). An eval run on a Mac
+found the share read-write from the guest and could not reach a host canary file through it.
+**This share has not had a security review.** The guest can change what the host later reads
+there, and any escape from the passthrough root would be a host file write.
+
+The other two are Silo-managed, **read-only** shares for built-in computer use: the downloaded ChatGPT for Linux package at `/opt/silo/chatgpt` and the verified LCU archive at
 `/opt/silo/lcu` ([`computer_use.rs#L663`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L663),
 [`#L708`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L708)).
 
