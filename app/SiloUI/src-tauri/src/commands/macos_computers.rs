@@ -149,30 +149,42 @@ pub(crate) async fn act(
             cpus,
             memory_gib,
             expected,
-        } => {
-            let change = ComputerConfigurationChange::MacosResources {
-                computer_id: id.to_owned(),
-                expected: MacosResourceConfiguration {
-                    cpus: expected.cpus,
-                    memory_gib: expected.memory_gib,
-                    disk_gib: expected.disk_gib,
-                },
-                cpus,
-                memory_gib,
-                request_id: uuid::Uuid::new_v4().to_string(),
-            };
-            engine
-                .run_job(requests::computers_configuration_change(
-                    ComputerConfigurationChangeParams {
-                        change,
-                        request_id: None,
-                        retry_computer_id: None,
-                        device_id: None,
-                    },
-                ))
-                .await?;
-        }
+        } => change_resources(engine, id, None, cpus, memory_gib, expected).await?,
     }
+    Ok(())
+}
+
+/// Changes a stopped computer's CPUs and memory, for this Mac (`device_id` `None`) or for
+/// a computer hosted by a connected device. `expected` is what the form was opened with.
+pub(crate) async fn change_resources(
+    engine: &EngineClient,
+    computer_id: &str,
+    device_id: Option<&str>,
+    cpus: u64,
+    memory_gib: u64,
+    expected: Expected,
+) -> Result<(), EngineError> {
+    let change = ComputerConfigurationChange::MacosResources {
+        computer_id: computer_id.to_owned(),
+        expected: MacosResourceConfiguration {
+            cpus: expected.cpus,
+            memory_gib: expected.memory_gib,
+            disk_gib: expected.disk_gib,
+        },
+        cpus,
+        memory_gib,
+        request_id: uuid::Uuid::new_v4().to_string(),
+    };
+    engine
+        .run_job(requests::computers_configuration_change(
+            ComputerConfigurationChangeParams {
+                change,
+                request_id: None,
+                retry_computer_id: None,
+                device_id: device_id.map(str::to_owned),
+            },
+        ))
+        .await?;
     Ok(())
 }
 

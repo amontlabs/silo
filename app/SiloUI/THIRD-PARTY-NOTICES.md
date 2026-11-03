@@ -50,13 +50,6 @@ list comes from `go list -deps` for the actual guest build target; upstream
 `go.sum` and the Go checksum database verify module source. Corresponding
 source and redistribution review remain part of release preparation.
 
-# Bundled LCU release archive (macOS computers)
-
-Silo's macOS computers still install LCU for the sandbox's built-in computer use (`app/SiloUI/src-tauri/guest/macos/lcu-lock.json`); LCU is MIT-licensed and its license text is inside the release archive. The Linux guest images contain neither LCU nor any ChatGPT application; they use Cua Driver (see below).
-
-- Project: https://github.com/amontlabs/lcu
-- Release: https://github.com/amontlabs/lcu/releases/tag/v0.11.0
-
 # Silo guest image: Selkies desktop streamer and codecs
 
 Silo's published guest images from `ubuntu-24.04-v4` on (GitHub release `guest-ubuntu-24.04-v4` and
@@ -158,6 +151,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+# Cua Driver on macOS computers
+
+Silo's macOS computers install the same Cua Driver release's universal macOS archive (`CuaDriver.app`,
+signed by Cua AI, Inc. with team identifier YCK386LBJ7) from the device's download cache into the
+computer (`app/SiloUI/src-tauri/guest/macos/cua-driver-lock.json`). It is covered by the MIT licence
+above. No ChatGPT application and no LCU are installed on any guest.
+
+- Release: https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.38.0
+- macOS universal archive SHA-256: `121cf20cafd2cfa69dd720e8967350c6406b22e558be6889de7a1ae3343b6d4b`
 
 # noVNC
 

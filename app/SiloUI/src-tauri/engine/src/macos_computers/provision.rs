@@ -517,7 +517,7 @@ impl Provision<'_> {
         }
     }
 
-    /// Checks a restarted copy: LCU's receipt came along, and macOS logged in on its own
+    /// Checks a restarted copy: the computer-use receipt came along, and macOS logged in on its own
     /// with the new password.
     fn verify_personalized(&self) -> Result<(), Stop> {
         let (layout, record) = layout_and_record(self.app, &self.id)?;
@@ -778,7 +778,7 @@ enum LoginKey {
     Own,
 }
 
-/// Prints whether LCU's receipt exists, who owns the console and whether `sudo -n` works.
+/// Prints whether the computer-use receipt exists, who owns the console and whether `sudo -n` works.
 const GUEST_STATE_COMMAND: &str = "/bin/test -f \"$HOME/Library/Application Support/Silo/computer-use-receipt.json\" && /bin/echo SILO_RECEIPT; /usr/bin/stat -f 'SILO_CONSOLE=%Su' /dev/console; /usr/bin/sudo -n true && /bin/echo SILO_SUDO";
 
 #[derive(Debug, PartialEq, Eq)]
