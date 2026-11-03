@@ -46,7 +46,7 @@ On a fresh app identity, open onboarding's Dependencies step:
 4. A failed check shows its concrete error and Retry checks. Retrying resets the
    results while new read-only probes run. No install or repair happens here.
 
-macOS checks the declared macOS 15 floor, arm64 target and `kern.hv_support`.
+macOS checks the declared macOS 14 floor, arm64 target and `kern.hv_support`.
 Linux checks a supported GNU/Linux target, glibc 2.34 or later, access to
 `/dev/kvm` and KVM API version 12. It never creates a computer to probe support.
 Both validate bundled files and bounded version commands. Failed, unsupported,

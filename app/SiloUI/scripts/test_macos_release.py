@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
             'CFBundleExecutable': 'silo-ui', 'CFBundleIdentifier': 'org.silo.test',
             'CFBundleName': 'Silo', 'CFBundlePackageType': 'APPL',
             'CFBundleVersion': '1', 'CFBundleShortVersionString': '0.1.1',
-            'LSMinimumSystemVersion': '15.0',
+            'LSMinimumSystemVersion': '14.0',
         }))
         for name in TOOLS:
             shutil.copy2(self.root / 'executable', self.binaries / name)

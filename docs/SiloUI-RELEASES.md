@@ -444,9 +444,11 @@ build runner also exercises the constraint tests. GitHub's macOS 14.8.9 and
 restrictions and records the two signature-enforcement controls as skipped.
 A passing hosted result does not establish signature enforcement. Public release
 also requires the full suite on a Mac with SIP enabled.
-Silo required macOS 14 until 0.12.0. GitHub
-[retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
-so the minimum is now macOS 15 and the required job runs on `macos-15`.
+GitHub [retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
+so the supported minimum is now macOS 15 and the required job runs on `macos-15`.
+The bundle keeps `minimumSystemVersion` 14.0 on purpose: the update feed has
+one `darwin-aarch64` package and existing clients do not check the OS version,
+so raising it would update macOS 14 installations to an app that cannot open.
 This CI test checks library enforcement, not nested VM execution.
 
 ### Build and publish

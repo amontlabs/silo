@@ -365,7 +365,7 @@ fn expected_git_archive(
             "dugite-native-v2.53.0-4098283-macOS-arm64.tar.gz",
             "f9dc64635a5b62fbd7ad95db73268bbb8912255ac516d65d37bf7af22fcb8ffe",
             "git version 2.53.0",
-            "macOS 12.0 (Silo declares macOS 15.0)",
+            "macOS 12.0 (Silo declares macOS 14.0)",
         )),
         "aarch64-unknown-linux-gnu" => Some((
             "dugite-native-v2.53.0-4098283-ubuntu-arm64.tar.gz",
@@ -605,7 +605,7 @@ fn system_check(deadline: Instant) -> DependencyCheck {
                 std::env::consts::OS,
                 std::env::consts::ARCH
             ),
-            "Use Silo on macOS 15 or later on Apple silicon, or a supported Linux build.",
+            "Use Silo on macOS 14 or later on Apple silicon, or a supported Linux build.",
         );
     }
     #[cfg(target_os = "macos")]
@@ -628,13 +628,13 @@ fn system_check(deadline: Instant) -> DependencyCheck {
             return ProbeError::Malformed("macOS returned an invalid version.".into())
                 .to_check(id, title, false);
         }
-        if major.unwrap() < 15 {
+        if major.unwrap() < 14 {
             return DependencyCheck::failure(
                 id,
                 title,
                 CheckStatus::Failed,
                 format!("macOS {version} is not supported by this Silo build."),
-                "Update macOS to version 15 or later, then retry checks.",
+                "Update macOS to version 14 or later, then retry checks.",
             );
         }
         return DependencyCheck::pass(id, title, format!("macOS {version} · Apple silicon"));
@@ -716,7 +716,7 @@ fn virtualization_check(deadline: Instant) -> DependencyCheck {
             }
             Ok(_) => DependencyCheck::failure(id, title, CheckStatus::Failed,
                 "Apple Hypervisor support is unavailable on this Mac.",
-                "Use an Apple silicon Mac with macOS 15 or later. If Silo is inside a VM, its host must support and enable nested virtualization."),
+                "Use an Apple silicon Mac with macOS 14 or later. If Silo is inside a VM, its host must support and enable nested virtualization."),
             Err(error) => error.to_check(id, title, false),
         };
     }

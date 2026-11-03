@@ -83,7 +83,7 @@
     ],
     "createUpdaterArtifacts": true,
     "macOS": {
-      "minimumSystemVersion": "15.0",
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     },
     "linux": {
