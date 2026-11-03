@@ -93,7 +93,7 @@ Researched 2026-11-03 from each project's own documentation; corrections welcome
 
 | | Today | Next |
 | --- | --- | --- |
-| Host | macOS 14+ on Apple Silicon: engine releases and the Silo app | Linux host: `silo-engine` builds and passes its tests in CI; `silod` for Linux (systemd user service) and Linux engine releases are the next milestone |
+| Host | macOS 15+ on Apple Silicon: engine releases and the Silo app | Linux host: `silo-engine` builds and passes its tests in CI; `silod` for Linux (systemd user service) and Linux engine releases are the next milestone |
 | Guests | Linux (Ubuntu 24.04, arm64 on Apple Silicon) and macOS | Unchanged |
 | Intel Macs | Not supported | Not planned |
 
@@ -102,7 +102,7 @@ Silo app releases up to v0.11.1 also shipped Linux `.deb` and AppImage packages.
 ## How it fits together
 
 - **`silod`** is the engine daemon. One runs per Mac and build channel, started by launchd as a LaunchAgent. It owns the computers, credentials, and VM windows, and keeps running when the apps that use it quit.
-- **Socket and protocol.** Clients connect to `~/.silo/engine.sock` and exchange JSON frames, each prefixed with a 4-byte big-endian length. A handshake negotiates the protocol version (currently 6). Requests and responses are matched by id; the engine also pushes job progress and events. Methods are grouped by area, such as `computers`, `checkpoints`, `desktop`, `github`, `secrets`, and `exports` ([`api/src/methods`](app/SiloUI/api/src/methods)).
+- **Socket and protocol.** Clients connect to `~/.silo/engine.sock` and exchange JSON frames, each prefixed with a 4-byte big-endian length. A handshake negotiates the protocol version (currently 7). Requests and responses are matched by id; the engine also pushes job progress and events. Methods are grouped by area, such as `computers`, `checkpoints`, `desktop`, `github`, `secrets`, and `exports` ([`api/src/methods`](app/SiloUI/api/src/methods)).
 - **Crates** in the [`app/SiloUI`](app/SiloUI) Cargo workspace:
   - `silo-api` ([`api`](app/SiloUI/api)): the wire contract as serde types, the generated [JSON schema](app/SiloUI/api/schema/silo-api.schema.json), and a typed request constructor for each method.
   - `silo-client` ([`client`](app/SiloUI/client)): a thin Rust client with framing, the handshake, request correlation, and the event feed.
