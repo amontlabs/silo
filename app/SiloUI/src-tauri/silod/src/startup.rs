@@ -64,6 +64,7 @@ pub fn start_background(
     update_recovery: Arc<UpdateRecoveryOutcome>,
 ) {
     drive_launch_migration(context.clone(), exports.clone());
+    install_creation_inputs(context.clone());
     start_computer_use(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
@@ -123,6 +124,59 @@ fn run_launch_migration(
         }
         Ok(silo_engine::runtime_migration::LaunchDrive::Nothing) => {}
         Err(error) => eprintln!("silod: the launch migration failed: {error}"),
+    }
+}
+
+// MARK: Creation inputs
+
+/// Installs what `computers.create` waits for before it takes the operation gate: the VM
+/// image import. Without it every Linux creation through the socket fails with "Creation
+/// inputs are not available yet".
+fn install_creation_inputs(context: Arc<SilodContext>) {
+    let provider: Arc<dyn silo_engine::creation_inputs::InputsProvider> =
+        Arc::new(SilodCreationInputs { context });
+    if let Err(error) = silo_engine::creation_inputs::install_provider(provider) {
+        eprintln!("silod: {error}");
+    }
+}
+
+struct SilodCreationInputs {
+    context: Arc<SilodContext>,
+}
+
+impl silo_engine::creation_inputs::InputsProvider for SilodCreationInputs {
+    fn create(
+        &self,
+        paths: &runtime::RuntimePaths,
+        request_id: &str,
+    ) -> Arc<dyn silo_engine::creation_inputs::Inputs> {
+        Arc::new(SilodCreationWait {
+            context: self.context.clone(),
+            paths: paths.clone(),
+            request_id: request_id.to_owned(),
+        })
+    }
+}
+
+/// One creation's wait, backed by the engine's own preparation worker.
+struct SilodCreationWait {
+    context: Arc<SilodContext>,
+    paths: runtime::RuntimePaths,
+    request_id: String,
+}
+
+impl silo_engine::creation_inputs::Inputs for SilodCreationWait {
+    fn ensure_image(&self) -> Result<(), String> {
+        silo_engine::preparation::ensure_image(&self.paths, &|_| {})
+    }
+
+
+    fn quitting(&self) -> bool {
+        self.context.engine_state().shutting_down
+    }
+
+    fn show(&self, step: &silo_engine::creation_inputs::Step) {
+        runtime::publish_creation_wait(&self.request_id, step);
     }
 }
 
