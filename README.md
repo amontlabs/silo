@@ -4,7 +4,7 @@ Computers for agents. Silo is an engine that runs sandboxed Linux and macOS virt
 
 Apps embed Silo through `silod`, a daemon they talk to over a local socket with a versioned JSON protocol. [Fjord](https://github.com/amontlabs/fjord) is built on it.
 
-[Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Roadmap](docs/ROADMAP.md) · [Silo app](#silo-app) · [Website and demo](https://silo.amontlabs.com)
+[Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Threat model](docs/THREAT-MODEL.md) · [Roadmap](docs/ROADMAP.md) · [Silo app](#silo-app) · [Website and demo](https://silo.amontlabs.com)
 
 ## What it does
 

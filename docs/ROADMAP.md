@@ -1,7 +1,7 @@
 # Silo roadmap
 
 This is the work planned after the current release, in order. It starts from what Silo does not
-do today, as stated in the threat model (`docs/THREAT-MODEL.md`) and measured by the isolation evals (`docs/evals/`), and says which
+do today, as stated in the [threat model](THREAT-MODEL.md) and measured by the [isolation evals](evals/README.md), and says which
 milestone closes or narrows each gap.
 
 Last updated 2026-11-03. When a milestone lands, its section here is shortened to a line under
