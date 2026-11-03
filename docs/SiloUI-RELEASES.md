@@ -5,7 +5,7 @@ Every native Silo build requires the GitHub App configuration. The build reads
 Explicit environment variables take precedence, which is how GitHub Actions
 supplies the same configuration. Missing, empty, malformed, or multiline values
 stop the native build instead of producing an app with broken GitHub access.
-Silo's supported host is Apple Silicon macOS 14+. Linux host apps and packages
+Silo's supported host is Apple Silicon macOS 15+. Linux host apps and packages
 are discontinued; Linux computers remain supported as guests on a Mac.
 
 ## Release a new version
@@ -437,21 +437,18 @@ entire ad-hoc-signed app. Each update gets a constraint for its own engine.
 The packager regenerates both the DMG and signed updater archive from the same
 finished app, with no AppleDouble archive entries.
 
-The minimum macOS 14 constraint tests are required before draft creation; the
+The minimum macOS 15 constraint tests are required before draft creation; the
 build runner also exercises the constraint tests. GitHub's macOS 14.8.9 and
 15.7.9 runners were verified to have System Integrity Protection disabled on
 2026-09-10. Their explicit `--constraints-only` mode checks library fingerprint
 restrictions and records the two signature-enforcement controls as skipped.
 A passing hosted result does not establish signature enforcement. Public release
-also requires the full suite on a Mac with SIP enabled, including the minimum
-supported macOS version. GitHub currently provides
-macOS 14 runners until November 2, 2026, with
-[announced October brownouts](https://github.com/actions/runner-images/issues/13518)
-that fail jobs before retirement. The first window is October 5 at 14:00 UTC
-through October 6 at 00:00 UTC. Draft creation requires this job, so qualify a
-maintained replacement before that window; rerunning outside brownout windows
-is only a temporary workaround. Before their retirement, replace this
-minimum-version proof with a maintained runner rather than silently omitting it.
+also requires the full suite on a Mac with SIP enabled.
+GitHub [retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
+so the supported minimum is now macOS 15 and the required job runs on `macos-15`.
+The bundle keeps `minimumSystemVersion` 14.0 on purpose: the update feed has
+one `darwin-aarch64` package and existing clients do not check the OS version,
+so raising it would update macOS 14 installations to an app that cannot open.
 This CI test checks library enforcement, not nested VM execution.
 
 ### Build and publish
@@ -600,7 +597,7 @@ version that differs from the production manifest's `engineVersion`.
 - [Tauri AppImage packaging](https://v2.tauri.app/distribute/appimage/)
 - [AppImage filesystem/runtime layout](https://docs.appimage.org/introduction/software-overview.html)
 - [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
-- [GitHub macOS 14 runner retirement](https://github.com/actions/runner-images/issues/13518)
+- [GitHub macOS 14 runner retirement (November 2, 2026)](https://github.com/actions/runner-images/issues/13518)
 - [Apple library constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints)
 - [GitHub release immutability](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 - [GitHub deployment environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/managing-environments-for-deployment)
