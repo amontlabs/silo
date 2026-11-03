@@ -51,7 +51,7 @@ The engine, computer runtime, base Linux image, and Git tools are bundled. Silo 
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
-| macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
+| macOS | Apple Silicon, macOS 15+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 

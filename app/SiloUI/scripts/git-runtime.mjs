@@ -40,7 +40,7 @@ export const gitRuntimeTargets = Object.freeze({
     archive: "dugite-native-v2.53.0-4098283-macOS-arm64.tar.gz",
     sha256: "f9dc64635a5b62fbd7ad95db73268bbb8912255ac516d65d37bf7af22fcb8ffe",
     gitVersionOutput: "git version 2.53.0",
-    minimumPlatform: "macOS 12.0 (Silo declares macOS 14.0)",
+    minimumPlatform: "macOS 12.0 (Silo declares macOS 15.0)",
     needsCertificateBundle: false,
   }),
   "aarch64-unknown-linux-gnu": Object.freeze({

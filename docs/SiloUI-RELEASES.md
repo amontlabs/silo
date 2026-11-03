@@ -5,7 +5,7 @@ Every native Silo build requires the GitHub App configuration. The build reads
 Explicit environment variables take precedence, which is how GitHub Actions
 supplies the same configuration. Missing, empty, malformed, or multiline values
 stop the native build instead of producing an app with broken GitHub access.
-Silo's supported host is Apple Silicon macOS 14+. Linux host apps and packages
+Silo's supported host is Apple Silicon macOS 15+. Linux host apps and packages
 are discontinued; Linux computers remain supported as guests on a Mac.
 
 ## Release a new version
@@ -437,21 +437,16 @@ entire ad-hoc-signed app. Each update gets a constraint for its own engine.
 The packager regenerates both the DMG and signed updater archive from the same
 finished app, with no AppleDouble archive entries.
 
-The hosted library constraint tests are required before draft creation; the
+The minimum macOS 15 constraint tests are required before draft creation; the
 build runner also exercises the constraint tests. GitHub's macOS 14.8.9 and
 15.7.9 runners were verified to have System Integrity Protection disabled on
 2026-09-10. Their explicit `--constraints-only` mode checks library fingerprint
 restrictions and records the two signature-enforcement controls as skipped.
 A passing hosted result does not establish signature enforcement. Public release
-also requires the full suite on a Mac with SIP enabled, including the minimum
-supported macOS version.
-GitHub [retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
-so the required hosted job now runs on `macos-15` and no longer proves the
-minimum version. The macOS 14 proof is the full suite
-(`app/SiloUI/scripts/test-macos-library-constraints.py` without
-`--constraints-only`) in a macOS 14 VM with SIP enabled, as described in
-[library constraints](SiloUI-LIBRARY-CONSTRAINTS.md#minimum-os-and-final-package-checks).
-Attach its `results.json` to the release acceptance evidence.
+also requires the full suite on a Mac with SIP enabled.
+Silo required macOS 14 until 0.12.0. GitHub
+[retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
+so the minimum is now macOS 15 and the required job runs on `macos-15`.
 This CI test checks library enforcement, not nested VM execution.
 
 ### Build and publish
@@ -485,9 +480,6 @@ guest computers on Mac hosts remain supported.
 ### Required release acceptance evidence
 
 - Clean install from the actual downloaded DMG.
-- Full library constraint suite (`test-macos-library-constraints.py` without
-  `--constraints-only`) in a macOS 14 VM with SIP enabled, with its
-  `results.json`, whenever packaging or signing changed since the last proof.
 - Real signed version-to-version update and app relaunch; preserved settings,
   account, secrets, computer disks and previous running state.
 - Invalid signature, interrupted/offline download, low disk space, read-only
@@ -749,7 +741,7 @@ individual projects because project limits override the CLI root limit.
 
 The release workflow runs native and updater checks on macOS in parallel with
 the app build. The draft job requires the native checks, frontend checks,
-package checks and hosted library constraint checks to pass. Native
+package checks and minimum-macOS checks to pass. Native
 test jobs receive no signing credentials. Only the reviewed public release dependencies
 described above are cached; application and native-test products are excluded.
 

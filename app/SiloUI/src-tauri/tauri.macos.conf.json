@@ -15,7 +15,7 @@
       "frameworks": [
         "runtime/microsandbox/aarch64-apple-darwin/lib/libkrunfw.5.dylib"
       ],
-      "minimumSystemVersion": "14.0"
+      "minimumSystemVersion": "15.0"
     }
   }
 }

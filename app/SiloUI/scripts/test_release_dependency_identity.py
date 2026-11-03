@@ -21,7 +21,7 @@ class SemanticIdentityTests(unittest.TestCase):
                                       {'name': 'itoa', 'version': '1.0.0', 'source': 'registry', 'checksum': 'a' * 64}]},
             {'package': {'name': 'silo-ui', 'version': version, 'edition': '2021'},
              'dependencies': {'itoa': '1'}, 'profile': {'release': {'lto': False}}},
-            {'version': version, 'bundle': {'macOS': {'minimumSystemVersion': '14.0'}}},
+            {'version': version, 'bundle': {'macOS': {'minimumSystemVersion': '15.0'}}},
             {'rustc': '1.94.0', 'sdk': 'macOS26', 'targetDir': '/stable/target'}]
 
     def digest(self, inputs):
@@ -41,7 +41,7 @@ class SemanticIdentityTests(unittest.TestCase):
             lambda x: x[0]['resolve']['nodes'][0]['dependencies'].clear(),
             lambda x: x[2]['profile']['release'].update(lto=True),
             lambda x: x[2]['dependencies'].update(itoa='2'),
-            lambda x: x[3]['bundle']['macOS'].update(minimumSystemVersion='15.0'),
+            lambda x: x[3]['bundle']['macOS'].update(minimumSystemVersion='26.0'),
             lambda x: x[3].update(app={'macOSPrivateApi': True}),
             lambda x: x[4].update(rustc='1.95.0'),
             lambda x: x[4].update(sdk='macOS27'),
