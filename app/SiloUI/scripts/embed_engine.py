@@ -1,7 +1,10 @@
 """Embed the engine (`silod`) in a Silo app bundle so Silo registers it at launch.
 
 The app carries a sealed `Silo Engine.app` and a copy of its LaunchAgent plist whose
-`BundleProgram` points at the nested helper. Service Management resolves agent plists from
+`BundleProgram` points at the nested helper. silod finds MicroSandbox, its library, the Git
+tools, the network gateway and the guest bootstrap beside its own executable and resources, so
+the engine bundle carries copies of the app's already-signed tools (`ENGINE_TOOLS`,
+`ENGINE_FRAMEWORKS`, `ENGINE_RESOURCES`). Service Management resolves agent plists from
 the calling bundle (`Contents/Library/LaunchAgents`), while the executable stays inside its own
 bundle so it sees its own identifier, manifest and resources. Fjord embeds the identical
 distribution; whichever app registers first supplies the one engine per Mac.
@@ -17,6 +20,16 @@ import subprocess
 APP = Path(__file__).resolve().parent.parent
 SILOD = APP / 'src-tauri/silod'
 DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
+# What silod resolves inside its own bundle, copied from the app that Tauri built:
+# `Contents/MacOS` (bundled_tools::resolve, the gateway and bootstrap lookups),
+# `Contents/Frameworks` (bundled_runtime_library) and `Contents/Resources` (the runtime and Git
+# manifests, Git templates and the LFS transfer helper, and their licenses).
+ENGINE_TOOLS = (
+    'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
+    'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+)
+ENGINE_FRAMEWORKS = ('libkrunfw.5.dylib',)
+ENGINE_RESOURCES = ('microsandbox', 'git-support', 'THIRD-PARTY-NOTICES.md')
 
 
 SIGNING_IDENTITY_ENV = 'SILO_ENGINE_SIGNING_IDENTITY'
@@ -90,9 +103,26 @@ def codesign_engine(engine, entitlements, run=subprocess.run, environ=os.environ
     run(['codesign', '--verify', '--strict', str(engine)], check=True, capture_output=True)
 
 
+def bundled_inputs(bundle):
+    """The app's tools, library and runtime resources the engine needs, keyed by their path under
+    `Contents`. They are copied as they are, so the app's signatures (and the VM helper's library
+    constraint, which names the library's code hash) carry over unchanged."""
+    contents = Path(bundle) / 'Contents'
+    inputs = {f'MacOS/{name}': contents / 'MacOS' / name for name in ENGINE_TOOLS}
+    inputs.update({f'Frameworks/{name}': contents / 'Frameworks' / name for name in ENGINE_FRAMEWORKS})
+    inputs.update({f'Resources/{name}': contents / 'Resources' / name for name in ENGINE_RESOURCES})
+    missing = [str(path) for path in inputs.values() if not path.exists()]
+    if missing:
+        raise FileNotFoundError('The app is missing what the engine needs: ' + ', '.join(missing))
+    return inputs
+
+
 def embed_engine(bundle, silod_binary, *, identifier='org.silo.preview', build,
                  source=SILOD, sign=None, requirement=None, environ=os.environ, run=subprocess.run):
     """Copies the engine into `bundle` and signs it. `build` names the engine build.
+
+    The app's tools must already carry their final signatures (`sign_helpers` for an optimized
+    build): sealing the engine records them, and the app is sealed again afterwards.
 
     `requirement` is written to the engine's Info.plist before signing; by default it is derived
     from the signing identity (`engine_requirement`)."""
@@ -113,6 +143,7 @@ def embed_engine(bundle, silod_binary, *, identifier='org.silo.preview', build,
     for name, path in inputs.items():
         if not path.is_file():
             raise FileNotFoundError(f'Missing engine {name}: {path}')
+    bundled = bundled_inputs(bundle)
 
     engine = bundle / DISTRIBUTION
     shutil.rmtree(engine, ignore_errors=True)
@@ -122,6 +153,13 @@ def embed_engine(bundle, silod_binary, *, identifier='org.silo.preview', build,
     executable = contents / 'MacOS/silod'
     shutil.copy2(inputs['binary'], executable)
     executable.chmod(0o755)
+    for relative, path in bundled.items():
+        destination = contents / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_dir():
+            shutil.copytree(path, destination, symlinks=True)
+        else:
+            shutil.copy2(path, destination)
     info = plistlib.loads(inputs['info'].read_bytes())
     info[REQUIREMENT_KEY] = requirement or engine_requirement(f'{identifier}.engine', identity, run)
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
