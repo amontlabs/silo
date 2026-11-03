@@ -92,6 +92,8 @@ class Guest(unittest.TestCase):
         self.legacy_receipt = root / 'lcu.json'
         patches = [
             mock.patch.object(cu, 'PROFILE_HOOK', self.hook),
+            mock.patch.object(cu, 'PRIVACY_PROFILE', root / 'profile-cua-driver.sh'),
+            mock.patch.object(cu, 'SYSTEM_ENVIRONMENT', root / 'environment'),
             mock.patch.object(cu, 'WATCH_LOCK', self.state / 'watch.lock'),
             mock.patch.object(cu, 'spawn_watcher', lambda: self.spawned.append(True)),
             mock.patch.object(cu, 'STATE', self.state),
@@ -195,7 +197,7 @@ class Guest(unittest.TestCase):
         return json.loads(self.claude_state.read_text())
 
     def allowed(self):
-        return json.loads(self.claude_settings.read_text())['permissions']['allow']
+        return json.loads(self.claude_settings.read_text()).get('permissions', {}).get('allow', [])
 
     def codex_config(self):
         return tomllib.loads(self.codex.read_text())
@@ -291,7 +293,7 @@ class Driver(Guest):
         # Only the binary is extracted.
         self.assertEqual([p.name for p in installed.iterdir()], ['cua-driver'])
         self.assertTrue(self.link.is_symlink())
-        self.assertEqual(os.path.realpath(self.link), str(installed / 'cua-driver'))
+        self.assertEqual(os.path.realpath(self.link), os.path.realpath(installed / 'cua-driver'))
         self.assertFalse((self.state / 'stage').exists())
 
     def test_an_image_driver_of_another_version_is_replaced_by_the_pinned_one(self):
@@ -557,6 +559,34 @@ class Registration(Guest):
         cu.LAUNCHER.write_text('old')
         cu.reconcile()
         self.assertEqual(cu.LAUNCHER.read_text(), shipped)
+
+    def test_ask_leaves_no_empty_permissions_behind(self):
+        cu.apply('auto')
+        self.assertEqual(self.allowed(), ['mcp__cua-driver'])
+        cu.apply('ask')
+        self.assertNotIn('permissions', json.loads(self.claude_settings.read_text()))
+
+    def test_ask_keeps_other_rules(self):
+        self.claude_settings.parent.mkdir(parents=True)
+        self.claude_settings.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)', 'mcp__cua-driver']}}))
+        cu.apply('ask')
+        self.assertEqual(json.loads(self.claude_settings.read_text())['permissions'], {'allow': ['Bash(ls)']})
+
+    def test_telemetry_is_switched_off_for_every_shell(self):
+        environment = cu.SYSTEM_ENVIRONMENT
+        environment.write_text('PATH="/usr/bin"\nCUA_DRIVER_RS_UPDATE_CHECK=false')
+        cu.apply('ask')
+        self.assertEqual(cu.PRIVACY_PROFILE.read_text(), cu.PRIVACY_PROFILE_TEXT)
+        self.assertEqual(environment.read_text(),
+                         'PATH="/usr/bin"\nCUA_DRIVER_RS_UPDATE_CHECK=false\nCUA_DRIVER_RS_TELEMETRY_ENABLED=0\n')
+        before = environment.stat().st_mtime_ns
+        cu.apply('ask', force=True)
+        self.assertEqual(environment.stat().st_mtime_ns, before)
+
+    def test_image_privacy_profile_matches_the_helper(self):
+        dockerfile = (Path(__file__).parents[1] / 'guest-image/Dockerfile').read_text()
+        for line in cu.PRIVACY_PROFILE_TEXT.splitlines():
+            self.assertIn(f"'{line}'", dockerfile)
 
     def test_registration_is_idempotent_and_rewrites_nothing(self):
         cu.apply('auto')

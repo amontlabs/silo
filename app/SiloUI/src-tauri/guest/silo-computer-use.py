@@ -153,6 +153,14 @@ PRIVACY_ENV = {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHE
 WATCH_LOCK = STATE / 'watch.lock'
 WATCH_INTERVAL = 5
 PROFILE_HOOK = Path('/etc/profile.d/silo-computer-use.sh')
+# Cua Driver sends telemetry and checks for updates by default; these switch both off for any
+# shell, not only for agents that go through the launcher. The v5 image ships the same files.
+PRIVACY_PROFILE = Path('/etc/profile.d/silo-cua-driver.sh')
+PRIVACY_PROFILE_TEXT = '''# Cua Driver: no telemetry, no update check (Silo guest image).
+export CUA_DRIVER_RS_TELEMETRY_ENABLED=0
+export CUA_DRIVER_RS_UPDATE_CHECK=false
+'''
+SYSTEM_ENVIRONMENT = Path('/etc/environment')
 HOOK = '''# Registers agents installed after computer use was set up (silo-computer-use).
 if [ "$(id -un)" = silo ] && grep -q '"pending": \\["' /var/lib/silo-computer-use/receipt.json 2>/dev/null; then
     (sudo -n /usr/local/libexec/silo-computer-use reconcile >/dev/null 2>&1 &)
@@ -548,6 +556,33 @@ def write_launcher():
         raise Failure('setup-failed', f'could not write {LAUNCHER}: {error}') from None
 
 
+def write_privacy_env():
+    """Switches Cua Driver's telemetry and update check off for every account: a profile.d
+    script for login shells and /etc/environment for PAM sessions. Lines already present are
+    kept; nothing else in /etc/environment changes."""
+    try:
+        if not (PRIVACY_PROFILE.is_file() and PRIVACY_PROFILE.read_text() == PRIVACY_PROFILE_TEXT):
+            PRIVACY_PROFILE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix='.tmp-', dir=PRIVACY_PROFILE.parent)
+            with os.fdopen(fd, 'w') as output:
+                output.write(PRIVACY_PROFILE_TEXT)
+                os.fchmod(output.fileno(), 0o644)
+            os.replace(temporary, PRIVACY_PROFILE)
+        current = SYSTEM_ENVIRONMENT.read_text() if SYSTEM_ENVIRONMENT.is_file() else ''
+        lines = current.splitlines()
+        missing = [f'{key}={value}' for key, value in PRIVACY_ENV.items()
+                   if not any(line.strip().startswith(f'{key}=') for line in lines)]
+        if missing:
+            text = current + ('' if not current or current.endswith('\n') else '\n') + '\n'.join(missing) + '\n'
+            fd, temporary = tempfile.mkstemp(prefix='.tmp-', dir=SYSTEM_ENVIRONMENT.parent)
+            with os.fdopen(fd, 'w') as output:
+                output.write(text)
+                os.fchmod(output.fileno(), 0o644)
+            os.replace(temporary, SYSTEM_ENVIRONMENT)
+    except OSError as error:
+        log(f'could not switch off Cua Driver telemetry system-wide: {error}')
+
+
 @contextlib.contextmanager
 def as_user():
     """Runs file edits as the working account, so nothing it owns is written through root."""
@@ -683,6 +718,11 @@ def edit_claude(entry, approval):
             permissions['allow'] = [*(allow or []), APPROVAL_RULE]
     elif approval == 'ask' and allow and APPROVAL_RULE in allow:
         permissions['allow'] = [rule for rule in allow if rule != APPROVAL_RULE]
+        # Leave no empty containers behind for a rule only Silo added.
+        if not permissions['allow']:
+            del permissions['allow']
+        if not permissions:
+            del settings['permissions']
     if json.dumps(settings, sort_keys=True) != original:
         write_text(CLAUDE_SETTINGS, json.dumps(settings, indent=2) + '\n')
 
@@ -909,6 +949,7 @@ def reconcile():
         except BlockingIOError:
             return {'reconcile': 'busy'}
         write_launcher()
+        write_privacy_env()
         agents, pending = reconcile_agents(receipt)
         if (agents, pending) != (receipt.get('agents') or [], receipt.get('pending') or []):
             write_json(RECEIPT, dict(receipt, agents=agents, pending=pending, updatedAt=now()))
@@ -1033,6 +1074,7 @@ def update(pinned, mode, force, boot):
         # The receipt shows this mode applied completely. An agent installed since then is
         # registered, and registrations follow a desktop session that was started again.
         write_launcher()
+        write_privacy_env()
         agents, pending = reconcile_agents(existing)
         if (agents, pending) != (existing.get('agents') or [], existing.get('pending') or []):
             write_json(RECEIPT, dict(existing, agents=agents, pending=pending, updatedAt=now()))
@@ -1053,6 +1095,7 @@ def update(pinned, mode, force, boot):
         except Failure as failure:
             session_error = failure
         write_launcher()
+        write_privacy_env()
         registered, pending, failed = configure(sorted(AGENTS), mode)
         if failed and not registered:
             raise Failure('setup-failed', 'could not register the driver with ' + ', '.join(failed))
