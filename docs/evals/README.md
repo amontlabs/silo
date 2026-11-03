@@ -100,9 +100,9 @@ Network services used: `example.com` (connectivity control), `httpbingo.org` and
 
 | Date | Eval commit | Silo app | Result |
 | --- | --- | --- | --- |
-| not yet run | | | See the [results template](results/TEMPLATE.md) for the report format. |
+| 2026-11-03 | `0dae8805` | Silo Dev 0.11.1, engine 0.1.1 | [6 pass, 3 known-gap, 1 skipped](results/2026-11-03-0dae8805.md); `github-scope` not yet run |
 
-Add a row per published run, linking its report in `results/`.
+Add a row per published run, linking its report in `results/`. See the [results template](results/TEMPLATE.md) for the report format.
 
 ## Files
 
