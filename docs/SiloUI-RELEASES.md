@@ -437,21 +437,21 @@ entire ad-hoc-signed app. Each update gets a constraint for its own engine.
 The packager regenerates both the DMG and signed updater archive from the same
 finished app, with no AppleDouble archive entries.
 
-The minimum macOS 14 constraint tests are required before draft creation; the
+The hosted library constraint tests are required before draft creation; the
 build runner also exercises the constraint tests. GitHub's macOS 14.8.9 and
 15.7.9 runners were verified to have System Integrity Protection disabled on
 2026-09-10. Their explicit `--constraints-only` mode checks library fingerprint
 restrictions and records the two signature-enforcement controls as skipped.
 A passing hosted result does not establish signature enforcement. Public release
 also requires the full suite on a Mac with SIP enabled, including the minimum
-supported macOS version. GitHub currently provides
-macOS 14 runners until November 2, 2026, with
-[announced October brownouts](https://github.com/actions/runner-images/issues/13518)
-that fail jobs before retirement. The first window is October 5 at 14:00 UTC
-through October 6 at 00:00 UTC. Draft creation requires this job, so qualify a
-maintained replacement before that window; rerunning outside brownout windows
-is only a temporary workaround. Before their retirement, replace this
-minimum-version proof with a maintained runner rather than silently omitting it.
+supported macOS version.
+GitHub [retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
+so the required hosted job now runs on `macos-15` and no longer proves the
+minimum version. The macOS 14 proof is the full suite
+(`app/SiloUI/scripts/test-macos-library-constraints.py` without
+`--constraints-only`) in a macOS 14 VM with SIP enabled, as described in
+[library constraints](SiloUI-LIBRARY-CONSTRAINTS.md#minimum-os-and-final-package-checks).
+Attach its `results.json` to the release acceptance evidence.
 This CI test checks library enforcement, not nested VM execution.
 
 ### Build and publish
@@ -601,7 +601,7 @@ version that differs from the production manifest's `engineVersion`.
 - [Tauri AppImage packaging](https://v2.tauri.app/distribute/appimage/)
 - [AppImage filesystem/runtime layout](https://docs.appimage.org/introduction/software-overview.html)
 - [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
-- [GitHub macOS 14 runner retirement](https://github.com/actions/runner-images/issues/13518)
+- [GitHub macOS 14 runner retirement (November 2, 2026)](https://github.com/actions/runner-images/issues/13518)
 - [Apple library constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints)
 - [GitHub release immutability](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 - [GitHub deployment environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/managing-environments-for-deployment)
