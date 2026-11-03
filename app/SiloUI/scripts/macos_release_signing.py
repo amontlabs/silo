@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import tempfile
 
-from embed_engine import REQUIREMENT_KEY
+from embed_engine import ENGINE_FRAMEWORKS, ENGINE_RESOURCES, ENGINE_TOOLS, REQUIREMENT_KEY
 
 TOOLS = (
     'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
@@ -54,7 +54,9 @@ def sign_helper(helper, entitlements, constraint):
             '--enforce-constraint-validity', '--library-constraint', constraint, helper)
 
 
-def sign_runtime(app):
+def sign_helpers(app):
+    """Gives the app's VM helper, gateway and bootstrap their final signatures. Run it before
+    `embed_engine`, which copies them into the engine and seals it."""
     with tempfile.TemporaryDirectory(prefix='silo-sign-') as temporary:
         entitlements, constraint = policy_files(app, Path(temporary))
         gateway_entitlements = Path(temporary) / 'gateway.plist'
@@ -68,8 +70,13 @@ def sign_runtime(app):
         command('codesign', '--force', '--sign', '-', '--options', 'runtime',
                 '--preserve-metadata=identifier,runtime',
                 app / 'Contents/MacOS/silo-network-bootstrap')
-    # Re-seal the outer bundle without re-signing its nested executables.
-    command('codesign', '--force', '--sign', '-', '--options', 'runtime',
+
+
+def seal_app(app, *, hardened=True):
+    """Re-seals the outer bundle without re-signing its nested code (the engine and the tools).
+    `hardened=False` keeps a development bundle as Tauri signed it, without hardened runtime."""
+    options = ['--options', 'runtime'] if hardened else []
+    command('codesign', '--force', '--sign', '-', *options,
             '--entitlements', Path(__file__).resolve().parent.parent / 'src-tauri/Entitlements.plist', app)
 
 
@@ -84,13 +91,27 @@ def verify_engine_requirement(engine):
         raise RuntimeError(f'The engine Info.plist must set {REQUIREMENT_KEY}; silod refuses to start without it.')
 
 
+def verify_engine_contents(app):
+    """The engine carries every tool, library and resource silod resolves in its own bundle, and
+    each signed copy is the app's own (equal code hashes keep the VM helper's library constraint)."""
+    engine = app / ENGINE_DISTRIBUTION / 'Contents'
+    copies = [f'MacOS/{name}' for name in ENGINE_TOOLS] + [f'Frameworks/{name}' for name in ENGINE_FRAMEWORKS]
+    for relative in copies + [f'Resources/{name}' for name in ENGINE_RESOURCES]:
+        if not (engine / relative).exists():
+            raise RuntimeError(f'The embedded engine is missing {relative}; silod cannot run computers without it.')
+    for relative in copies:
+        if code_hash(engine / relative) != code_hash(app / 'Contents' / relative):
+            raise RuntimeError(f'The embedded engine\'s {relative} is not the app\'s signed copy.')
+
+
 def verify_engine(app, identifier):
-    """The embedded engine is sealed with the virtualization entitlement, and the app's LaunchAgent
-    plist points at it."""
+    """The embedded engine is sealed with the virtualization entitlement, carries its tools, and the
+    app's LaunchAgent plist points at it."""
     engine = app / ENGINE_DISTRIBUTION
     executable = engine / 'Contents/MacOS/silod'
     command('codesign', '--verify', '--strict', engine)
     verify_engine_requirement(engine)
+    verify_engine_contents(app)
     display = command('codesign', '--display', '--verbose=4', executable).stderr
     if not re.search(rb'flags=0x[0-9a-f]+\([^\n)]*\bruntime\b', display):
         raise RuntimeError('silod must retain hardened runtime.')

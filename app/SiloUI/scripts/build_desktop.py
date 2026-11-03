@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from macos_release_signing import sign_runtime, verify_bundle
+from macos_release_signing import seal_app, sign_helpers, verify_bundle, verify_engine, verify_engine_contents
 from channel_names import channel_names
 from embed_engine import embed_engine
 
@@ -43,7 +43,7 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
             '--config', json.dumps({'bundle': {'createUpdaterArtifacts': False}}),
         ] + cargo_arguments, cwd=root, check=True)
         return None
-    if (platform != 'darwin' or options.debug or options.no_bundle or options.help or options.version
+    if (platform != 'darwin' or options.no_bundle or options.help or options.version
             or (options.target and not options.target.endswith('apple-darwin'))):
         run(tauri + arguments + cargo_arguments, cwd=root, check=True)
         return None
@@ -59,23 +59,36 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
     target = Path(json.loads(metadata.stdout)['target_directory'])
     if options.target:
         target /= options.target
-    production = channel_names()['production']
-    bundle = target / 'release/bundle/macos' / f"{production['productName']}.app"
+    names = channel_names()['development' if options.debug else 'production']
+    profile = 'debug' if options.debug else 'release'
+    bundle = target / profile / 'bundle/macos' / f"{names['productName']}.app"
     # Generate only the app here. Installers and updater archives must be made
     # after runtime finalization by package-macos-release.py.
-    config = json.dumps({'identifier': production['identifier'], 'productName': production['productName'],
-                         'bundle': {'active': True, 'createUpdaterArtifacts': False,
-                                    'macOS': {'hardenedRuntime': True}}})
     args = arguments + ([] if options.bundles else ['--bundles', 'app'])
-    run(tauri + args + ['--config', config], cwd=root, check=True)
-    # The app is a client of the engine and carries its own copy for Service Management.
-    run(['cargo', 'build', '--locked', '--release', '-p', 'silod'] + (['--target', options.target] if options.target else []),
-        cwd=root, check=True)
+    if not options.debug:
+        args += ['--config', json.dumps({
+            'identifier': names['identifier'], 'productName': names['productName'],
+            'bundle': {'active': True, 'createUpdaterArtifacts': False, 'macOS': {'hardenedRuntime': True}}})]
+    run(tauri + args, cwd=root, check=True)
+    # The app is a client of the engine and carries its own copy for Service Management. The
+    # engine runs computers itself, so it needs the app's tools too (embed_engine copies them).
+    run(['cargo', 'build', '--locked'] + ([] if options.debug else ['--release']) + ['-p', 'silod']
+        + (['--target', options.target] if options.target else []), cwd=root, check=True)
     commit = (run(['git', 'rev-parse', 'HEAD'], cwd=root, check=False, capture_output=True, text=True).stdout or '').strip() or 'unknown'
-    silod = target / 'release/silod'
-    embed_engine(bundle, silod, identifier=production['identifier'], build=f'silo-{commit}')
-    sign_runtime(bundle)
+    silod = target / profile / 'silod'
+    if options.debug:
+        # A development bundle keeps Tauri's signatures (no hardened runtime), so its tools are
+        # copied as they are; only the outer seal is renewed around the new engine.
+        embed_engine(bundle, silod, identifier=names['identifier'], build=f'silo-{commit}')
+        seal_app(bundle, hardened=False)
+        run(['codesign', '--verify', '--deep', '--strict', str(bundle)], check=True, capture_output=True)
+        verify_engine_contents(bundle)
+        return bundle
+    sign_helpers(bundle)
+    embed_engine(bundle, silod, identifier=names['identifier'], build=f'silo-{commit}')
+    seal_app(bundle)
     verify_bundle(bundle)
+    verify_engine(bundle, names['identifier'])
     return bundle
 
 
@@ -84,6 +97,6 @@ if __name__ == '__main__':
         bundle = build(sys.argv[1:])
         if bundle:
             print(f'Verified local macOS app: {bundle}')
-    except (ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+    except (ValueError, RuntimeError, FileNotFoundError, subprocess.CalledProcessError) as error:
         print(f'Desktop build failed: {error}', file=sys.stderr)
         sys.exit(1)

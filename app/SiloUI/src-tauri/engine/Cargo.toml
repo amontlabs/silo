@@ -1,6 +1,8 @@
 [package]
 name = "silo-engine"
 version = "0.1.0"
+license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 
