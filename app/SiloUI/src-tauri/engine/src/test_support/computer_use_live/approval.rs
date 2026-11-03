@@ -75,16 +75,16 @@ fn install_harnesses(fixture: &Fixture, name: &str) -> bool {
 }
 
 /// The approval switch through Silo's own `apply_approval_with`: `auto` adds exactly
-/// LCU's approval entries to the harnesses that are present (Codex: a per-server approval
+/// the Cua Driver approval entries to the harnesses that are present (Codex: a per-server approval
 /// mode; Claude Code: an allow rule) and `ask` removes exactly those. Phase one runs
 /// before any harness was installed; phase two installs Codex and Claude Code from npm
 /// (skipped with `SILO_LIVE_SKIP_HARNESS_INSTALL=1` when the guest has no network).
 #[test]
-#[ignore = "requires the v4 guest image, a published ChatGPT app and hardware virtualization"]
+#[ignore = "requires the v4 guest image, network access and hardware virtualization"]
 fn live_approval_switch_edits_only_the_installed_harnesses() {
     use crate::computer_use::{apply_approval_with, Approval};
     let _state = crate::test_support::global_state();
-    let mut fixture = Fixture::new("silo-appr-", None, true);
+    let mut fixture = Fixture::new("silo-appr-", None);
     let name = "e2e-appr";
     let configuration = fixture.create(name);
     runtime::start_disposable_test_computer(&fixture.paths, name).unwrap();
@@ -113,8 +113,8 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
     let claude_json = || guest_file(&fixture, name, "/home/silo/.claude.json");
     let approve_line = "default_tools_approval_mode = \"approve\"";
 
-    // Phase one: nothing installed. LCU's own installer leaves `~/.codex`, so Codex counts
-    // as present; Claude Code never does.
+    // Phase one: nothing installed. Codex and Claude Code are not in the image, so neither
+    // gets entries.
     let ask_codex = codex();
     eprintln!("codex config (ask, no harness installed):\n{ask_codex}");
     assert!(!ask_codex.contains(approve_line));
@@ -150,10 +150,10 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
     assert!(auto_codex.contains(approve_line), "{auto_codex}");
     assert_eq!(
         auto_settings["permissions"]["allow"],
-        serde_json::json!(["mcp__lcu"]),
+        serde_json::json!(["mcp__cua-driver"]),
         "{auto_settings}"
     );
-    assert!(auto_claude_json["mcpServers"]["lcu"].is_object());
+    assert!(auto_claude_json["mcpServers"]["cua-driver"].is_object());
     switch(Approval::Ask);
     // `ask` removes exactly the approval entries and nothing else.
     assert_eq!(

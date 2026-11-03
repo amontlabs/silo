@@ -70,73 +70,6 @@ fn test_gate() -> &'static runtime::operation_gate::OperationGate {
     Box::leak(Box::new(runtime::operation_gate::OperationGate::new()))
 }
 
-fn with_published<T>(work: impl FnOnce(&Path) -> T) -> T {
-    let directory = tempfile::tempdir().unwrap();
-    set_test_published_dir(Some(directory.path().to_path_buf()));
-    let result = work(directory.path());
-    set_test_published_dir(None);
-    result
-}
-
-// ---------------------------------------------------------------- mount
-
-#[test]
-fn only_built_in_computers_get_the_mount_and_it_is_read_only() {
-    with_published(|dir| {
-        assert_eq!(
-            mount_args(&computer_configuration(false)).unwrap(),
-            Vec::<String>::new()
-        );
-        let args = mount_args(&computer_configuration(true)).unwrap();
-        assert_eq!(
-            args,
-            [
-                "-v",
-                &format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", dir.display())
-            ]
-        );
-    });
-}
-
-#[test]
-fn the_lcu_folder_is_lent_read_only_when_silo_has_one() {
-    with_published(|_| {
-        let lcu = tempfile::tempdir().unwrap();
-        let without = mount_args_with(&computer_configuration(true), None).unwrap();
-        assert_eq!(without.len(), 2);
-        let with = mount_args_with(
-            &computer_configuration(true),
-            Some(lcu.path().to_path_buf()),
-        )
-        .unwrap();
-        assert_eq!(with[..2], without[..]);
-        assert_eq!(
-            with[2..],
-            [
-                "-v".to_owned(),
-                format!(
-                    "{}:/opt/silo/lcu:ro,uid=0,gid=0",
-                    lcu.path().canonicalize().unwrap().display()
-                )
-            ]
-        );
-        // A folder that is gone is skipped, and a computer without computer use gets nothing.
-        let gone = lcu.path().join("gone");
-        assert_eq!(
-            mount_args_with(&computer_configuration(true), Some(gone))
-                .unwrap()
-                .len(),
-            2
-        );
-        assert!(mount_args_with(
-            &computer_configuration(false),
-            Some(lcu.path().to_path_buf())
-        )
-        .unwrap()
-        .is_empty());
-    });
-}
-
 #[test]
 fn creation_applies_computer_use_in_one_temporary_boot_and_records_it() {
     let directory = tempfile::tempdir().unwrap();
@@ -163,106 +96,11 @@ fn creation_applies_computer_use_in_one_temporary_boot_and_records_it() {
 fn a_failed_creation_apply_is_reported_short_and_left_for_the_first_start() {
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    let recorder = Recorder::new("{\"state\":\"ready\",\"apply\":{\"approval\":\"ask\",\"outcome\":\"failed\",\"reason\":\"lcu-archive-unavailable\"}}\n");
+    let recorder = Recorder::new("{\"state\":\"ready\",\"apply\":{\"approval\":\"ask\",\"outcome\":\"failed\",\"reason\":\"driver-archive-unavailable\"}}\n");
     assert_eq!(
         finish_in_creation(&recorder, &paths, COMPUTER_ID, "dev"),
-        Err("lcu-archive-unavailable".into())
+        Err("driver-archive-unavailable".into())
     );
-    let missing = Recorder::new("{\"state\":\"ready\",\"apply\":{\"approval\":\"ask\",\"outcome\":\"failed\",\"reason\":\"app-missing\"}}\n");
-    assert!(finish_in_creation(&missing, &paths, COMPUTER_ID, "dev").is_err());
-}
-
-#[test]
-fn an_existing_but_empty_shared_folder_never_blocks_the_mount() {
-    with_published(|dir| {
-        assert_eq!(std::fs::read_dir(dir).unwrap().count(), 0);
-        assert_eq!(mount_args(&computer_configuration(true)).unwrap().len(), 2);
-        // Still mounted unchanged once the app (or anything else) is published into it.
-        std::fs::create_dir(dir.join("1.0-arm64")).unwrap();
-        assert_eq!(mount_args(&computer_configuration(true)).unwrap().len(), 2);
-    });
-}
-
-#[test]
-fn a_missing_or_unusable_shared_folder_blocks_the_mount() {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("file");
-    std::fs::write(&file, b"x").unwrap();
-    for bad in [directory.path().join("gone"), file] {
-        set_test_published_dir(Some(bad));
-        let error = mount_args(&computer_configuration(true))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("shared ChatGPT folder"), "{error}");
-        assert!(mount_args(&computer_configuration(false))
-            .unwrap()
-            .is_empty());
-    }
-    set_test_published_dir(None);
-}
-
-#[test]
-fn a_built_in_computer_without_a_shared_folder_is_an_error_not_a_silent_omission() {
-    let _state = crate::test_support::global_state();
-    reset_published_for_test();
-    set_test_published_dir(None);
-    let error = mount_args(&computer_configuration(true))
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("shared ChatGPT folder"), "{error}");
-    assert!(mount_args(&computer_configuration(false))
-        .unwrap()
-        .is_empty());
-}
-
-#[test]
-fn the_mount_check_needs_a_read_only_bind_at_the_guest_path() {
-    let bind = |guest: &str, readonly: bool| {
-        json!({"type":"Bind","host":"/h/chatgpt/published","guest":guest,
-            "options":{"readonly":readonly,"noexec":false}})
-    };
-    let computer = json!({"type":"Owned","guest":"/workspace",
-        "storage":{"kind":"disk","capacity_mib":1024}});
-    let config = |mounts: Value| json!({"mounts": mounts});
-    let built_in = computer_configuration(true);
-    assert!(mount_present(
-        &config(json!([computer, bind("/opt/silo/chatgpt", true)])),
-        &built_in
-    ));
-    assert!(!mount_present(&config(json!([computer])), &built_in));
-    assert!(!mount_present(
-        &config(json!([computer, bind("/opt/silo/chatgpt", false)])),
-        &built_in
-    ));
-    assert!(!mount_present(
-        &config(json!([computer, bind("/elsewhere", true)])),
-        &built_in
-    ));
-    assert!(!mount_present(&json!({}), &built_in));
-    // A computer without built-in computer use needs no mount.
-    assert!(mount_present(
-        &config(json!([computer])),
-        &computer_configuration(false)
-    ));
-}
-
-#[test]
-fn export_drops_the_host_specific_mount_and_refuses_a_writable_one() {
-    let computer = json!({"type":"Owned","guest":"/workspace"});
-    let mount = json!({"type":"Bind","host":"/h/chatgpt/published","guest":"/opt/silo/chatgpt",
-        "options":{"readonly":true}});
-    let mut config = json!({"mounts":[computer.clone(), mount.clone()]});
-    strip_mount_for_export(&mut config).unwrap();
-    assert_eq!(config["mounts"], json!([computer]));
-    let mut writable = json!({"mounts":[{"type":"Bind","host":"/h","guest":"/opt/silo/chatgpt",
-        "options":{"readonly":false}}]});
-    assert!(strip_mount_for_export(&mut writable).is_err());
-    // Another bind mount is not ours to remove; the export's own checks reject it.
-    let mut other = json!({"mounts":[{"type":"Bind","host":"/h","guest":"/data",
-        "options":{"readonly":true}}]});
-    strip_mount_for_export(&mut other).unwrap();
-    assert_eq!(other["mounts"].as_array().unwrap().len(), 1);
-    strip_mount_for_export(&mut json!({})).unwrap();
 }
 
 // ------------------------------------------------------------- settings
@@ -443,7 +281,7 @@ fn forks_inherit_only_the_approval_and_deleted_computers_are_forgotten() {
         COMPUTER_ID,
         Known {
             state: "ready".into(),
-            app_version: Some("1".into()),
+            driver_version: Some("1".into()),
             ..Known::default()
         },
     );
@@ -469,59 +307,48 @@ fn attempt(mode: Approval, outcome: Outcome, reason: Option<&str>) -> Attempt {
     }
 }
 
-// -------------------------------------------------------- pinned pair
+// ------------------------------------------------------ pinned driver
 
 #[test]
-fn the_pinned_pair_comes_from_the_two_locks_and_agrees() {
-    let lcu: Value = serde_json::from_str(LCU_LOCK).unwrap();
-    assert_eq!(lcu["version"], "0.11.0");
+fn the_pinned_driver_comes_from_the_lock() {
+    let lock = pinned().unwrap();
+    assert_eq!(lock["version"], "0.38.0");
+    assert_eq!(pinned_version().as_deref(), Some("0.38.0"));
     assert_eq!(
-        lcu["assets"]["arm64"]["sha256"],
-        "bfb91127e103065e47088545c4d71dcb00714eec05fcf72ff30913212c485dc8"
+        lock["assets"]["amd64"]["sha256"],
+        "31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd"
     );
     assert_eq!(
-        lcu["assets"]["amd64"]["sha256"],
-        "12919c3bd94f1d74874e8a4da4e5d7c713138079b613df05e5f81a1e03e6a62c"
+        lock["assets"]["arm64"]["sha256"],
+        "80c9ae66bc7322052dd426c6133c96086b33894bf06c972bca8215384400b33d"
     );
-    for (arch, archive) in [
-        (DebArch::Arm64, "lcu-0.11.0-linux-arm64.tar.gz"),
-        (DebArch::Amd64, "lcu-0.11.0-linux-x64.tar.gz"),
-    ] {
-        let pair = pinned(arch).unwrap();
-        assert_eq!(pair["lcu"]["version"], "0.11.0");
-        assert_eq!(pair["lcu"]["archive"], archive);
-        assert!(pair["lcu"]["url"].as_str().unwrap().ends_with(archive));
-        let app = chatgpt_app::Lock::bundled().unwrap();
-        assert_eq!(pair["app"]["dir"], app.directory_name(arch));
-        assert_eq!(pair["app"]["version"], app.version);
+    for arch in ["amd64", "arm64"] {
+        assert!(lock["assets"][arch]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://github.com/trycua/cua/releases/download/"));
     }
 }
 
 #[test]
-fn the_pushed_helper_registers_every_agent_and_agents_installed_later() {
-    // Each boot and app-ready runs `apply --boot`, which reconciles even when nothing else
-    // changed; the same pushed helper carries the commands the watcher and login hook use.
+fn the_pushed_helper_registers_agents_and_follows_agents_installed_later() {
+    // Each boot runs `apply --boot`, which reconciles even when nothing else changed; the
+    // same pushed helper carries the commands the watcher and login hook use.
     for part in [
-        "'--agent', 'all', '--allow-missing'",
-        "'--agent', 'auto'",
-        "'--reconcile'",
         "commands.add_parser('reconcile')",
         "commands.add_parser('watch')",
         "/etc/profile.d/silo-computer-use.sh",
+        "mcp__cua-driver",
     ] {
         assert!(HELPER.contains(part), "{part}");
     }
-    let script = guest_script(
-        &pinned(DebArch::Arm64).unwrap(),
-        &apply_command(Approval::Ask, false, true),
-    );
+    let script = guest_script(&apply_command(Approval::Ask, false, true));
     assert!(script.contains("silo-computer-use apply --approval ask --boot"));
 }
 
 #[test]
-fn the_guest_script_installs_the_helper_and_pair_before_running_the_command() {
-    let pair = pinned(DebArch::Arm64).unwrap();
-    let script = guest_script(&pair, &apply_command(Approval::Auto, true, false));
+fn the_guest_script_installs_the_helper_and_lock_before_running_the_command() {
+    let script = guest_script(&apply_command(Approval::Auto, true, false));
     let helper_at = script.find("SILO_CU_HELPER_EOF").unwrap();
     let pinned_at = script.find("SILO_CU_PINNED_EOF").unwrap();
     let run_at = script
@@ -529,8 +356,10 @@ fn the_guest_script_installs_the_helper_and_pair_before_running_the_command() {
         .unwrap();
     assert!(helper_at < pinned_at && pinned_at < run_at);
     assert!(script.contains("#!/usr/bin/python3"));
-    assert!(script.contains(&pair.to_string()));
-    // Quoted delimiters keep the helper and the pair literal.
+    // The lock is pushed verbatim.
+    assert!(script.contains(DRIVER_LOCK.trim_end()));
+    assert!(script.contains("/var/lib/silo-computer-use/pinned.json"));
+    // Quoted delimiters keep the helper and the lock literal.
     assert!(script.contains("<<'SILO_CU_HELPER_EOF'"));
     assert!(script.contains("<<'SILO_CU_PINNED_EOF'"));
     assert_eq!(
@@ -611,7 +440,7 @@ struct Guest {
     plan: StdMutex<std::collections::VecDeque<Reply>>,
     /// `(mode, force, boot, timeout)` of every run, in the order they reached the guest.
     runs: StdMutex<Vec<(String, bool, bool, Duration)>>,
-    /// The mode `lcu setup` last left in the agents' configuration.
+    /// The mode the helper last left in the agents' configuration.
     configured: StdMutex<Option<String>>,
     /// Set while the next run must stall; it signals `entered` first.
     stall: StdMutex<Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>)>>,
@@ -707,7 +536,7 @@ impl RuntimeRunner for Guest {
                 detail: detail.into(),
             }),
             Reply::Report(outcome, reason) => {
-                // `lcu setup` changed the configuration of the agents it reached.
+                // The helper changed the configuration of the agents it reached.
                 if outcome != "failed" {
                     *self.configured.lock().unwrap() = Some(mode.clone());
                 }
@@ -1184,7 +1013,13 @@ fn the_guest_helper_is_started_with_a_bounded_timeout_argument() {
     let paths = paths(&directory);
     let recorder = Recorder::new("{\"state\":\"ready\",\"apply\":{\"approval\":\"ask\",\"outcome\":\"applied\",\"reason\":null}}\n");
     let (_, report) = run_helper(&recorder, &paths, "dev", Approval::Ask, false, false).unwrap();
-    assert_eq!(report, Report::Done(Outcome::Applied, None));
+    assert_eq!(
+        report,
+        Report {
+            outcome: Outcome::Applied,
+            reason: None
+        }
+    );
     let calls = recorder.calls.lock().unwrap().clone();
     let timeout = calls[0].iter().position(|arg| arg == "--timeout").unwrap();
     assert_eq!(
@@ -1210,9 +1045,9 @@ fn failed_partial_and_unreachable_results_are_kept_and_reported() {
         ),
         (Reply::Unreachable, "failed", "could not reach"),
         (
-            Reply::Report("failed", Some("mount-writable")),
+            Reply::Report("failed", Some("session-unavailable")),
             "failed",
-            "writable",
+            "approval settings",
         ),
     ] {
         let id = computer();
@@ -1296,28 +1131,6 @@ fn a_partial_result_is_never_taken_for_applied_even_after_the_choice_changes_bac
 }
 
 #[test]
-fn an_app_that_is_not_there_yet_is_not_a_result_and_the_apply_stays_pending() {
-    let directory = tempfile::tempdir().unwrap();
-    let paths = paths(&directory);
-    let id = computer();
-    write_computers_of(&paths, &id);
-    let guest = Guest::new(&id);
-    guest.plan([Reply::Report("failed", Some("app-missing"))]);
-    boot_of(test_gate(), &guest, &paths)
-        .unwrap()
-        .join()
-        .unwrap();
-    assert!(settings(&paths, &id).last.is_none());
-    assert_eq!(answer_of(&paths, &id, true)["approvalApply"], "pending");
-    // When the app becomes ready the apply runs for real.
-    boot_of(test_gate(), &guest, &paths)
-        .unwrap()
-        .join()
-        .unwrap();
-    assert_eq!(answer_of(&paths, &id, true)["approvalApply"], "applied");
-}
-
-#[test]
 fn a_report_the_host_cannot_read_is_a_failed_attempt_not_a_crash() {
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
@@ -1325,7 +1138,7 @@ fn a_report_the_host_cannot_read_is_a_failed_attempt_not_a_crash() {
     let run = run_helper(&broken, &paths, "dev", Approval::Ask, false, false);
     assert!(matches!(run, Err(RuntimeError::Malformed(_))));
     assert_eq!(
-        attempt_of(Approval::Ask, &run).unwrap().reason.as_deref(),
+        attempt_of(Approval::Ask, &run).reason.as_deref(),
         Some("invalid-report")
     );
     let missing = Recorder::new("{\"state\":\"ready\"}\n");
@@ -1394,15 +1207,13 @@ fn app_start_applies_where_the_last_attempt_is_missing_failed_or_for_another_mod
     assert_eq!(reconcile(gate), 1);
     assert_eq!(guest.modes(), ["ask"]);
     // Everything is current: nothing runs, and the guest is not even asked.
-    let pinned = serde_json::from_str::<Value>(LCU_LOCK).unwrap()["version"]
-        .as_str()
-        .map(str::to_owned);
+    let pinned = pinned_version();
     remember(
         &paths,
         &id,
         Known {
             state: "ready".into(),
-            lcu_version: pinned,
+            driver_version: pinned,
             ..Known::default()
         },
     );
@@ -1547,118 +1358,61 @@ fn defaults() -> Settings {
     Settings::default()
 }
 
-fn ready() -> Status {
-    Status::Ready {
-        path: PathBuf::from("/x"),
-        version: "26.928.31416".into(),
-    }
-}
 
 fn guest_status(state: &str, reason: Option<&str>) -> Value {
-    json!({"state":state,"reason":reason,"compatibility":"tested","warning":null,
-        "appVersion":"26.928.31416","runtimeVersion":"0.0.27/20260927214556-b77d38801cca",
-        "lcuVersion":"0.8.0","agents":["claude-code"],"mount":"ok"})
+    json!({"schemaVersion":2,"state":state,"reason":reason,"driverVersion":"0.38.0",
+        "agents":["claude-code"]})
 }
 
 #[test]
-fn app_status_maps_to_the_computer_use_state() {
+fn a_computer_without_a_report_is_unavailable() {
     let settings = defaults();
-    let map = |app: Option<&Status>| {
-        state(Inputs {
-            app,
-            computer_running: true,
-            guest: None,
-            settings: &settings,
-            pending: false,
-            retrying: false,
-        })
-    };
-    assert_eq!(map(None)["state"], "preparing");
-    assert_eq!(map(Some(&Status::Idle))["state"], "preparing");
-    for status in [
-        Status::Downloading {
-            received_bytes: 1,
-            total_bytes: 2,
-        },
-        Status::Verifying,
-        Status::Extracting,
-    ] {
-        assert_eq!(map(Some(&status))["state"], "preparing");
-    }
-    let failed = map(Some(&Status::Failed {
-        reason: "No space left.".into(),
-        retryable: true,
-    }));
-    // Silo retries by itself, so a retryable failure is still "preparing".
-    assert_eq!(failed["state"], "preparing");
-    assert!(failed["reason"]
-        .as_str()
-        .unwrap()
-        .starts_with("No space left."));
-    let final_failure = map(Some(&Status::Failed {
-        reason: "The checksum did not match.".into(),
-        retryable: false,
-    }));
-    assert_eq!(
-        (
-            final_failure["state"].as_str(),
-            final_failure["reason"].as_str()
-        ),
-        (Some("failed"), Some("The checksum did not match."))
-    );
-    assert_eq!(final_failure["cause"], "app-download");
-    assert!(failed.get("cause").is_none());
-    // Ready app, running computer, no helper yet.
-    let waiting = map(Some(&ready()));
-    assert_eq!(waiting["state"], "unavailable");
-    assert!(waiting["reason"]
-        .as_str()
-        .unwrap()
-        .contains("not set up yet"));
+    let value = state(Inputs {
+        computer_running: true,
+        guest: None,
+        settings: &settings,
+        pending: false,
+        retrying: false,
+    });
+    assert_eq!(value["state"], "unavailable");
+    assert!(value["reason"].as_str().unwrap().contains("not set up yet"));
+    let stopped = state(Inputs {
+        computer_running: false,
+        guest: None,
+        settings: &settings,
+        pending: false,
+        retrying: false,
+    });
+    assert_eq!(stopped["state"], "unavailable");
 }
 
 #[test]
-fn the_confirmed_approval_is_reported_whatever_the_download_state() {
+fn the_confirmed_approval_is_reported_whatever_the_guest_state() {
     // The last mode that was applied completely is the host's own record: it never
-    // disappears because the ChatGPT app is downloading, failed to download or is unknown.
+    // disappears because the guest has no report or the computer is stopped.
     let settings = Settings {
         approval: Approval::Ask,
         applied: Some(Approval::Auto),
         last: Some(attempt(Approval::Auto, Outcome::Applied, None)),
         ..Settings::default()
     };
-    let statuses = [
+    for guest in [
         None,
-        Some(Status::Idle),
-        Some(Status::Downloading {
-            received_bytes: 1,
-            total_bytes: 2,
-        }),
-        Some(Status::Verifying),
-        Some(Status::Extracting),
-        Some(Status::Failed {
-            reason: "No space left.".into(),
-            retryable: true,
-        }),
-        Some(Status::Failed {
-            reason: "The checksum did not match.".into(),
-            retryable: false,
-        }),
-        Some(ready()),
-    ];
-    for app in statuses {
+        Some(guest_status("installing", None)),
+        Some(guest_status("failed", Some("doctor-failed"))),
+        Some(guest_status("ready", None)),
+    ] {
         for running in [false, true] {
             let value = state(Inputs {
-                app: app.as_ref(),
                 computer_running: running,
-                guest: None,
+                guest: guest.as_ref(),
                 settings: &settings,
                 pending: false,
                 retrying: false,
             });
-            assert_eq!(value["approval"], "ask", "{app:?} {running}");
-            assert_eq!(value["appliedApproval"], "auto", "{app:?} {running}");
-            assert_eq!(value["approvalApply"], "pending", "{app:?} {running}");
+            assert_eq!(value["approval"], "ask", "{guest:?} {running}");
+            assert_eq!(value["appliedApproval"], "auto", "{guest:?} {running}");
+            assert_eq!(value["approvalApply"], "pending", "{guest:?} {running}");
         }
     }
 }
@@ -1671,10 +1425,8 @@ fn guest_status_maps_to_the_contract_fields() {
         last: Some(attempt(Approval::Auto, Outcome::Applied, None)),
         ..Settings::default()
     };
-    let app = ready();
     let map = |guest: Value| {
         computer_use_state(&Inputs {
-            app: Some(&app),
             computer_running: true,
             guest: Some(&guest),
             settings: &settings,
@@ -1686,19 +1438,16 @@ fn guest_status_maps_to_the_contract_fields() {
     assert_eq!(
         value,
         json!({
-            "state": "ready", "reason": null, "compatibility": "tested", "warning": null,
+            "state": "ready", "reason": null,
             "approval": "auto", "appliedApproval": "auto", "approvalApply": "applied",
-            "approvalApplyReason": null, "appVersion": "26.928.31416",
-            "runtimeVersion": "0.0.27/20260927214556-b77d38801cca",
-            "lcuVersion": "0.8.0", "agents": ["claude-code"],
+            "approvalApplyReason": null, "driverVersion": "0.38.0",
+            "agents": ["claude-code"],
         })
     );
     assert_eq!(remembered.unwrap().state, "ready");
     let (installing, remembered) = map(guest_status("installing", None));
     assert_eq!(installing["state"], "installing");
     assert!(remembered.is_none(), "transient states are not remembered");
-    let (needs_app, _) = map(guest_status("needs-app", Some("app-missing")));
-    assert_eq!(needs_app["state"], "preparing");
     let (failed, remembered) = map(guest_status("failed", Some("doctor-failed")));
     assert_eq!(failed["state"], "failed");
     assert!(failed["reason"]
@@ -1708,17 +1457,6 @@ fn guest_status_maps_to_the_contract_fields() {
     assert_eq!(remembered.unwrap().state, "failed");
     let (not_set_up, _) = map(guest_status("not-set-up", Some("not-configured")));
     assert_eq!(not_set_up["state"], "unavailable");
-    // An untested pair is shown with its warning, not blocked.
-    let mut untested = guest_status("ready", None);
-    untested["compatibility"] = json!("untested");
-    untested["warning"] = json!("Not tested with this app.");
-    let (untested, _) = map(untested);
-    assert_eq!(untested["compatibility"], "untested");
-    assert_eq!(untested["warning"], "Not tested with this app.");
-    // An unknown compatibility value never reaches the UI.
-    let mut odd = guest_status("ready", None);
-    odd["compatibility"] = json!("surprise");
-    assert_eq!(map(odd).0["compatibility"], "unknown");
 }
 
 #[test]
@@ -1731,14 +1469,12 @@ fn what_the_guest_reports_about_approval_never_changes_what_the_host_reports() {
         last: Some(attempt(Approval::Ask, Outcome::Applied, None)),
         ..Settings::default()
     };
-    let app = ready();
     let mut guest = guest_status("ready", None);
     guest["approval"] = json!("auto");
     guest["approvalRevision"] = json!(u64::MAX);
     guest["approvalGeneration"] = json!("someone-else");
     guest["approvalConfirmed"] = json!(true);
     let value = state(Inputs {
-        app: Some(&app),
         computer_running: true,
         guest: Some(&guest),
         settings: &settings,
@@ -1796,17 +1532,20 @@ fn approval_apply_follows_the_last_attempt_for_the_chosen_mode() {
 }
 
 #[test]
-fn every_failure_code_has_a_message_and_mount_problems_are_explained() {
+fn every_failure_code_has_a_message() {
     for code in [
         "interrupted",
         "doctor-failed",
-        "cross-turn-failed",
         "desktop-session-not-running",
         "timed-out",
-        "lcu-archive-unavailable",
-        "lcu-archive-mismatch",
-        "mount-missing",
-        "mount-writable",
+        "driver-archive-unavailable",
+        "driver-archive-mismatch",
+        "driver-archive-invalid",
+        "session-unavailable",
+        "setup-failed",
+        "setup-partial",
+        "busy",
+        "not-configured",
         "command-failed",
         "anything-else",
     ] {
@@ -1819,34 +1558,26 @@ fn every_failure_code_has_a_message_and_mount_problems_are_explained() {
         "invalid-report",
         "setup-partial",
         "setup-failed",
-        "mount-missing",
         "anything-else",
     ] {
         assert!(!approval_reason_text(code).is_empty(), "{code}");
         assert!(!approval_reason_text(code).contains(code), "{code}");
     }
-    assert!(reason_text("mount-missing").contains("new computer"));
     assert!(!reason_text("anything-else").contains("anything-else"));
 }
 
 #[test]
 fn a_stopped_computer_keeps_its_approval_and_last_known_versions() {
-    let app = ready();
     let settings = Settings {
         approval: Approval::Auto,
         known: Some(Known {
             state: "ready".into(),
-            compatibility: Some("untested".into()),
-            warning: Some("Not tested.".into()),
-            app_version: Some("26.928.31416".into()),
-            runtime_version: Some("0.0.27/20260927214556-b77d38801cca".into()),
-            lcu_version: Some("0.8.0".into()),
+            driver_version: Some("0.38.0".into()),
             agents: Some(vec!["codex".into()]),
         }),
         ..Settings::default()
     };
     let (value, remembered) = computer_use_state(&Inputs {
-        app: Some(&app),
         computer_running: false,
         guest: None,
         settings: &settings,
@@ -1855,14 +1586,11 @@ fn a_stopped_computer_keeps_its_approval_and_last_known_versions() {
     });
     assert_eq!(value["state"], "ready");
     assert_eq!(value["approval"], "auto");
-    assert_eq!(value["appVersion"], "26.928.31416");
-    assert_eq!(value["lcuVersion"], "0.8.0");
-    assert_eq!(value["compatibility"], "untested");
+    assert_eq!(value["driverVersion"], "0.38.0");
     assert_eq!(value["agents"], json!(["codex"]));
     assert!(remembered.is_none());
     // Nothing known yet: unavailable, with the approval still shown.
     let (fresh, _) = computer_use_state(&Inputs {
-        app: Some(&app),
         computer_running: false,
         guest: None,
         settings: &Settings {
@@ -1874,20 +1602,6 @@ fn a_stopped_computer_keeps_its_approval_and_last_known_versions() {
     });
     assert_eq!(fresh["state"], "unavailable");
     assert_eq!(fresh["approval"], "auto");
-    // App problems still win for a stopped computer.
-    let (download, _) = computer_use_state(&Inputs {
-        app: Some(&Status::Failed {
-            reason: "The checksum did not match.".into(),
-            retryable: false,
-        }),
-        computer_running: false,
-        guest: None,
-        settings: &settings,
-        pending: false,
-        retrying: false,
-    });
-    assert_eq!(download["state"], "failed");
-    assert_eq!(download["approval"], "auto");
 }
 
 #[test]
@@ -1904,11 +1618,9 @@ fn desktop_state_is_reported_only_for_built_in_computers() {
 fn a_ready_report_is_remembered_for_the_stopped_computer() {
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    let app = ready();
     let report = guest_status("ready", None);
     let current = settings(&paths, COMPUTER_ID);
     let (_, remembered) = computer_use_state(&Inputs {
-        app: Some(&app),
         computer_running: true,
         guest: Some(&report),
         settings: &current,
@@ -1917,7 +1629,7 @@ fn a_ready_report_is_remembered_for_the_stopped_computer() {
     });
     remember(&paths, COMPUTER_ID, remembered.unwrap());
     let known = settings(&paths, COMPUTER_ID).known.unwrap();
-    assert_eq!(known.lcu_version.as_deref(), Some("0.8.0"));
+    assert_eq!(known.driver_version.as_deref(), Some("0.38.0"));
     assert_eq!(known.agents, Some(vec!["claude-code".to_owned()]));
 }
 
@@ -1950,7 +1662,7 @@ fn status_reads_never_rewrite_the_policy() {
         &id,
         Known {
             state: "ready".into(),
-            lcu_version: Some("0.8.3".into()),
+            driver_version: Some("0.38.1".into()),
             ..Known::default()
         },
     );
@@ -1979,7 +1691,7 @@ fn recording_an_attempt_never_loses_the_users_choice() {
                         COMPUTER_ID,
                         Known {
                             state: "ready".into(),
-                            app_version: Some(format!("{reader}-{round}")),
+                            driver_version: Some(format!("{reader}-{round}")),
                             ..Known::default()
                         },
                     );
@@ -2544,22 +2256,6 @@ fn an_attempt_that_never_ended_is_applied_again_even_when_the_last_result_matche
 }
 
 #[test]
-fn a_run_that_was_not_an_attempt_leaves_the_unfinished_marker_as_it_was() {
-    let directory = tempfile::tempdir().unwrap();
-    let paths = paths(&directory);
-    let id = computer();
-    write_computers_of(&paths, &id);
-    let guest = Guest::new(&id);
-    guest.plan([Reply::Report("failed", Some("app-missing"))]);
-    boot_of(test_gate(), &guest, &paths)
-        .unwrap()
-        .join()
-        .unwrap();
-    let stored = read_policy(&paths, &id);
-    assert_eq!((stored.unfinished, stored.last), (None, None));
-}
-
-#[test]
 fn the_runtimes_exec_timeout_is_a_timed_out_attempt_not_an_unreachable_computer() {
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
@@ -2794,7 +2490,7 @@ fn manual_setup_converges_on_a_choice_saved_while_its_helper_runs() {
 
 // ------------------------------------------------- network retry
 
-const UNAVAILABLE: Reply = Reply::Report("failed", Some("lcu-archive-unavailable"));
+const UNAVAILABLE: Reply = Reply::Report("failed", Some("driver-archive-unavailable"));
 const SHORT: &[Duration] = &[Duration::from_millis(20), Duration::from_millis(20)];
 const LONG: &[Duration] = &[Duration::from_secs(3600)];
 
@@ -2863,7 +2559,7 @@ fn retries_are_bounded_and_the_failure_then_stays() {
     let last = settings(&paths, &id).last.unwrap();
     assert_eq!(
         (last.outcome, last.reason.as_deref()),
-        (Outcome::Failed, Some("lcu-archive-unavailable"))
+        (Outcome::Failed, Some("driver-archive-unavailable"))
     );
     assert!(!retry_scheduled(&id));
 }
@@ -2876,7 +2572,7 @@ fn other_failures_are_not_retried() {
     write_computers_of(&paths, &id);
     let guest = Guest::new(&id);
     guest.plan([
-        Reply::Report("failed", Some("lcu-archive-mismatch")),
+        Reply::Report("failed", Some("driver-archive-mismatch")),
         UNAVAILABLE,
     ]);
     boot_with(&guest, &paths, SHORT).join().unwrap();
@@ -2893,12 +2589,10 @@ fn a_waiting_retry_is_visible_and_can_be_cancelled() {
     guest.plan([UNAVAILABLE]);
     let handle = boot_with(&guest, &paths, LONG);
     wait_for("the retry to be scheduled", || retry_scheduled(&id));
-    // While it waits the guest's failure is shown as preparing, with the reason.
+    // While it waits the guest's failure is shown as installing, with the reason.
     let settings_now = settings(&paths, &id);
-    let app = ready();
-    let guest_state = guest_status("failed", Some("lcu-archive-unavailable"));
+    let guest_state = guest_status("failed", Some("driver-archive-unavailable"));
     let inputs = |retrying| Inputs {
-        app: Some(&app),
         computer_running: true,
         guest: Some(&guest_state),
         settings: &settings_now,
@@ -2906,7 +2600,7 @@ fn a_waiting_retry_is_visible_and_can_be_cancelled() {
         retrying,
     };
     let waiting = state(inputs(retry_scheduled(&id)));
-    assert_eq!(waiting["state"], "preparing");
+    assert_eq!(waiting["state"], "installing");
     assert!(waiting["reason"].as_str().unwrap().contains("network"));
     cancel_retry(&id);
     handle.join().unwrap();
@@ -2982,14 +2676,11 @@ fn a_retry_ends_when_the_computer_is_no_longer_the_same_running_instance() {
 }
 
 #[test]
-fn a_running_computer_with_another_lcu_than_the_pin_is_set_up_again_at_app_start() {
-    let pinned = serde_json::from_str::<Value>(LCU_LOCK).unwrap()["version"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+fn a_running_computer_with_another_driver_than_the_pin_is_set_up_again_at_app_start() {
+    let pinned = pinned_version().unwrap();
     let known = |version: Option<&str>| Known {
         state: "ready".into(),
-        lcu_version: version.map(str::to_owned),
+        driver_version: version.map(str::to_owned),
         ..Known::default()
     };
     assert!(!pin_is_stale(Some(&known(Some(&pinned)))));

@@ -605,11 +605,11 @@ fn pinned_version() -> Option<String> {
 
 /// A shell script that installs the helper and the pinned driver lock in the guest, then
 /// runs `command` (a helper invocation).
-fn guest_script(pinned: &Value, command: &str) -> String {
+fn guest_script(command: &str) -> String {
     format!(
         "set -eu\ncu_stage=$(mktemp -d /tmp/silo-cu.XXXXXXXX)\ntrap 'rm -rf \"$cu_stage\"' EXIT\n\
 cat > \"$cu_stage/helper\" <<'SILO_CU_HELPER_EOF'\n{HELPER}\nSILO_CU_HELPER_EOF\n\
-cat > \"$cu_stage/pinned.json\" <<'SILO_CU_PINNED_EOF'\n{pinned}\nSILO_CU_PINNED_EOF\n\
+cat > \"$cu_stage/pinned.json\" <<'SILO_CU_PINNED_EOF'\n{DRIVER_LOCK}\nSILO_CU_PINNED_EOF\n\
 install -d -m 0755 /usr/local/libexec /var/lib/silo-computer-use\n\
 install -m 0755 -o root -g root \"$cu_stage/helper\" {GUEST_HELPER}\n\
 install -m 0644 -o root -g root \"$cu_stage/pinned.json\" /var/lib/silo-computer-use/pinned.json\n\
@@ -688,12 +688,13 @@ fn run_helper_with(
     boot: bool,
     allow_boot: bool,
 ) -> Run {
-    let pinned = pinned().map_err(RuntimeError::Unavailable)?;
+    // Validated here so a damaged lock fails the run before anything is pushed.
+    pinned().map_err(RuntimeError::Unavailable)?;
     let output = desktop::guest_within(
         runner,
         paths,
         name,
-        &guest_script(&pinned, &apply_command(mode, force, boot)),
+        &guest_script(&apply_command(mode, force, boot)),
         APPLY_TIMEOUT,
         APPLY_GRACE,
         allow_boot,

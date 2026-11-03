@@ -3910,15 +3910,15 @@ fn live_checkpoint_restore_and_fork_use_the_runtimes_names() {
 /// A built-in computer's whole life against the real runtime: restart, stop and start
 /// (the app's own actions), then a checkpoint of the running computer, a fork of it and
 /// an in-place restore. Every boot must end with the desktop session running and
-/// computer use ready, the ChatGPT folder mounted read-only, and the approval mode
+/// computer use ready, nothing mounted from the host, and the approval mode
 /// kept. Needs the same inputs as the other built-in live tests (see
 /// `test_support::computer_use_live`).
 #[test]
-#[ignore = "requires the v4 guest image, a published ChatGPT app and hardware virtualization"]
+#[ignore = "requires the v4 guest image, network access and hardware virtualization"]
 fn live_built_in_lifecycle_keeps_the_desktop_and_computer_use() {
     use crate::test_support::computer_use_live::Fixture;
     let _test_state = crate::test_support::global_state();
-    let mut fixture = Fixture::new("silo-life-", None, true);
+    let mut fixture = Fixture::new("silo-life-", None);
     let (source, fork_name) = ("e2e-life-src", "e2e-life-fork");
     let configuration = fixture.create(source);
     fixture.track(fork_name);
@@ -3935,9 +3935,9 @@ fn live_built_in_lifecycle_keeps_the_desktop_and_computer_use() {
         let (status, elapsed) = fixture.wait_ready(name, label);
         eprintln!("RESULT {label}: ready {}s after start", elapsed.as_secs());
         assert_eq!(status["computerUse"]["approval"], "auto", "{label}");
-        let mounts = fixture.exec_status(name, "grep ' /opt/silo/chatgpt ' /proc/mounts");
-        assert!(mounts.contains(" ro,"), "{label}: {mounts}");
-        // Not only what Silo reports: LCU lists windows and takes a screenshot.
+        let mounts = fixture.exec_status(name, "grep -c ' /opt/silo/' /proc/mounts");
+        assert!(mounts.starts_with('0'), "{label}: {mounts}");
+        // Not only what Silo reports: Cua Driver's own readiness check passes.
         fixture.wait_doctor(name, label);
     };
     checks(source, "fresh");
@@ -4026,7 +4026,7 @@ fn live_pre_v4_computer_gets_no_mount_no_desktop_and_keeps_its_flows() {
     use crate::test_support::computer_use_live::Fixture;
     let _test_state = crate::test_support::global_state();
     let image = std::path::PathBuf::from(std::env::var("SILO_TEST_V3_GUEST_IMAGE").unwrap());
-    let mut fixture = Fixture::new("silo-v3-", Some(image), false);
+    let mut fixture = Fixture::new("silo-v3-", Some(image));
     let (source, fork_name) = ("e2e-v3-src", "e2e-v3-fork");
     let configuration = fixture.create(source);
     fixture.track(fork_name);
