@@ -1,5 +1,0 @@
----
-"silo-ui": minor
----
-
-Computer use in Linux and macOS computers now runs on Cua Driver, an open-source tool, instead of LCU and the ChatGPT app. Silo no longer downloads the ChatGPT app. On Linux Cua Driver comes with the computer image, so creating a computer waits only for the image; on macOS Silo downloads the signed Cua Driver app (about 85 MB) once and installs it during setup, and there is no "Finish without computer use" step. Computer use is set up for Claude Code and Codex; Pi, OMP, Hermes and OpenCode are no longer set up. Cua Driver's usage reporting and update checks are turned off. Until the new computer image is published, new computers download the small Cua Driver package once, from inside the computer. Computers you already have keep working, and Silo frees the disk space of the old ChatGPT and LCU downloads when no computer is running. Existing macOS computers switch to Cua Driver at their next start, showing "Updating Computer Use", and lose the ChatGPT app and LCU.
