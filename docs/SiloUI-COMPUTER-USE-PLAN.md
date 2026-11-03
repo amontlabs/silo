@@ -41,7 +41,19 @@ What is implemented:
   and runs `cua-driver mcp`, because MCP servers started from SSH shells have no `DISPLAY` or
   D-Bus address.
 - **Approvals.** `mcp__cua-driver` in Claude Code `permissions.allow`;
-  `default_tools_approval_mode = "approve"` under Codex `[mcp_servers.cua-driver]`.
+  `default_tools_approval_mode = "approve"` under Codex `[mcp_servers.cua-driver]`. As with
+  `mcp__lcu` before, auto covers every tool of the server. Cua Driver 0.38.0's `tools/list`
+  (66 tools, checked 2026-11-03) has no shell or file tool: it lists, launches, kills and
+  arranges apps and windows; clicks, types, scrolls and drags through X11 and AT-SPI; reads and
+  writes the clipboard; captures the screen; drives browsers over CDP (`browser_*`, including
+  `browser_set_input_files` and `browser_download` into an approved directory); records and
+  replays trajectories; runs `run_script` JavaScript in a sandbox with no filesystem, network
+  or process access; and has three tools that reach the network when an agent calls them:
+  `check_for_update` (GitHub), `install_extension` (a signed perception extension) and
+  `install_ffmpeg` (the package manager), the last two only with `confirm: true`. In auto mode
+  an agent controls the desktop without prompts, and through it anything the working account
+  can reach, including the computer's shared host folders; the computer's VM is the boundary.
+  Re-check the tool list at every pin bump.
 - **Telemetry.** Cua Driver's telemetry is on by default and so is its update check. Both are
   off in the guest (`CUA_DRIVER_RS_TELEMETRY_ENABLED=0`, `CUA_DRIVER_RS_UPDATE_CHECK=false`).
 - **Host.** Creation waits only for the computer image. There is no ChatGPT download, no
