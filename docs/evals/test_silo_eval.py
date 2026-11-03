@@ -109,6 +109,7 @@ class FakeEngine:
             request = params["request"]
             self.secrets = [{"id": "secret:1", "name": request["name"], "computerIds": request["computerIds"], "allowedDomains": request["allowedDomains"]}]
             self.saved_value = request["value"]
+            self.guest_env[request["name"]] = "$MSB_" + request["name"]
             return self.secrets
         if method == "secrets.remove":
             self.secrets = []
@@ -172,8 +173,6 @@ class WireFormatTests(FakeEngineCase):
 class UnisolatedGuestTests(FakeEngineCase):
     """A guest that is really the host: every boundary scenario must report `fail`."""
 
-    guest_env = {"EVAL_CANARY": "$MSB_EVAL_CANARY"}
-
     def test_scenarios_detect_a_guest_without_isolation(self) -> None:
         rows = self.run_evals("--peer", "silo-eval-b", "--only", "host-files", "computer-to-computer", "secret-in-guest", "engine-socket", "same-user-client")
         self.assertEqual(rows["host-files"]["verdict"], "fail", rows["host-files"])
@@ -191,7 +190,8 @@ class UnisolatedGuestTests(FakeEngineCase):
 
         def leak(method: str, params: Dict[str, Any]) -> Any:
             if method in ("guest.exec", "guest.exec.start"):
-                self.engine.guest_env["EVAL_CANARY"] = getattr(self.engine, "saved_value", "")
+                for name in [s["name"] for s in self.engine.secrets]:
+                    self.engine.guest_env[name] = self.engine.saved_value
             return original(method, params)
 
         self.engine.handle = leak
@@ -215,6 +215,53 @@ class IsolatedGuestTests(FakeEngineCase):
         os.chmod(self.home / ".silo", 0o755)
         rows = self.run_evals("--only", "engine-socket")
         self.assertEqual(rows["engine-socket"]["verdict"], "fail")
+
+
+class VerdictTests(unittest.TestCase):
+    """Scenario verdicts from canned guest output, for paths a fake guest cannot produce."""
+
+    def context(self) -> "silo_eval.Context":
+        ctx = silo_eval.Context(silo_eval.parse_args([]), client=None)
+        ctx.computer = {"configuration": {"id": "id-a", "name": "silo-eval-a"}}
+        ctx.secret_value = "real-value"
+        return ctx
+
+    def result(self, scenario_id: str) -> "silo_eval.Result":
+        return silo_eval.Result(next(s for s in silo_eval.SCENARIOS if s.id == scenario_id))
+
+    def test_a_metadata_connection_fails_host_network(self) -> None:
+        ctx = self.context()
+
+        def guest_python(_computer, probe, *argv, **_kwargs):
+            if probe == "net_info.py":
+                return {"gateway": "10.0.0.1", "hostMicrosandboxInternal": [], "ownAddresses": [], "nameservers": []}
+            return [dict(t, connected=t["host"] in ("example.com", "169.254.169.254")) for t in json.loads(argv[0])]
+
+        ctx.guest_python = guest_python
+        result = self.result("host-network")
+        silo_eval.scenario_host_network(ctx, result)
+        for cleanup in ctx.cleanups:
+            cleanup()
+        self.assertEqual(result.verdict, "fail", result.summary)
+
+    def test_secret_other_hosts_needs_an_echo_for_every_case(self) -> None:
+        ctx = self.context()
+        placeholder = "$MSB_" + ctx.secret_name
+        replies = {silo_eval.ECHO_OTHER: {"status": "200", "body": placeholder},
+                   silo_eval.ECHO_ALLOWED_PLAIN_HTTP: {"status": "000", "body": ""}}
+        with mock.patch.object(silo_eval, "guest_curl", lambda _ctx, url, **_: dict(replies[url], url=url, stderr="", exit=0)):
+            result = self.result("secret-other-hosts")
+            silo_eval.scenario_secret_other_hosts(ctx, result)
+            self.assertEqual(result.verdict, "inconclusive", result.summary)
+            replies[silo_eval.ECHO_ALLOWED_PLAIN_HTTP] = {"status": "200", "body": placeholder}
+            result = self.result("secret-other-hosts")
+            silo_eval.scenario_secret_other_hosts(ctx, result)
+            self.assertEqual(result.verdict, "pass", result.summary)
+
+    def test_each_run_uses_its_own_secret_name(self) -> None:
+        first, second = self.context(), self.context()
+        self.assertNotEqual(first.secret_name, second.secret_name)
+        self.assertTrue(first.secret_name.startswith(silo_eval.SECRET_PREFIX + "_"))
 
 
 class SafetyTests(unittest.TestCase):

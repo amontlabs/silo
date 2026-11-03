@@ -77,7 +77,7 @@ engine over `~/.silo/engine.sock`, the same socket the app uses.
 What the run changes, and undoes at the end: a canary file in your home folder and
 `/tmp`; a listener on `127.0.0.1` and on your LAN address for a few seconds (macOS
 may ask whether Python may accept incoming connections: either answer works, and
-Deny is the stricter test); a secret named `EVAL_CANARY` assigned to `silo-eval-a`
+Deny is the stricter test); a secret named `EVAL_CANARY_<random>` (a new name each run, so none of your secrets is touched) assigned to `silo-eval-a`
 with allowed host `httpbingo.org` (macOS may ask for Keychain access); one restart of
 `silo-eval-a`; a published port on `silo-eval-b`; temporary files in both guests.
 

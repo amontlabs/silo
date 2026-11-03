@@ -42,7 +42,7 @@ from engine_client import EngineClient, EngineError, socket_path  # noqa: E402
 PROBES = HERE / "probes"
 RESULTS = HERE / "results"
 EVAL_PREFIX = "silo-eval"
-SECRET_NAME = "EVAL_CANARY"
+SECRET_PREFIX = "EVAL_CANARY"
 SECRET_ALLOWED_HOST = "httpbingo.org"
 ECHO_ALLOWED = "https://httpbingo.org/headers"
 ECHO_ALLOWED_PLAIN_HTTP = "http://httpbingo.org/headers"
@@ -107,6 +107,8 @@ class Context:
         self.peer: Optional[Dict[str, Any]] = None
         self.host_canary = "silo-eval-host-canary-" + random_source.token_hex(16)
         self.host_canary_paths: List[Path] = []
+        # A fresh name per run, so a user's own secret can never be touched.
+        self.secret_name = f"{SECRET_PREFIX}_{self.nonce.upper()}"
         self.secret_value: Optional[str] = None
         self.secret_id: Optional[str] = None
         self.secret_error: Optional[str] = None
@@ -283,6 +285,7 @@ def scenario_host_network(ctx: Context, result: Result) -> None:
     result.evidence = {"guestNetwork": info, "probes": probes, "hostReceived": received, "hostControlReply": control}
     public_ok = probes[0]["connected"]
     crossed = [p for p in probes if reply in p.get("reply", "")]
+    metadata = [p for p in probes if p["host"] == "169.254.169.254" and p["connected"]]
     dns_open = [p["label"] for p in probes if ":53 " in p["label"] and p["connected"]]
     if dns_open:
         result.notes.append("TCP port 53 on the host side answers: the DNS forwarder is the one allowed host service.")
@@ -290,6 +293,8 @@ def scenario_host_network(ctx: Context, result: Result) -> None:
         result.set("inconclusive", "The Mac could not reach its own test listener.")
     elif not public_ok:
         result.set("inconclusive", "The guest could not reach example.com:443, so blocked probes prove nothing.")
+    elif metadata:
+        result.set("fail", "The guest opened a connection to the metadata address 169.254.169.254:80.")
     elif crossed or received:
         result.set("fail", "The guest reached a listener on the Mac: " + (", ".join(p["label"] for p in crossed) or "see hostReceived"))
     else:
@@ -362,29 +367,27 @@ def scenario_computer_to_computer(ctx: Context, result: Result) -> None:
         result.set("inconclusive", "The listener in the peer computer did not answer its own probe.")
     elif crossed or send in peer_log:
         result.set("fail", "The computer reached the peer's listener: " + (", ".join(crossed) or "see peerListenerLog"))
-    elif published_port and host_control != token:
-        result.set("inconclusive", "The peer's published port did not answer on the Mac, so the published-port path was not tested.")
+    elif not published_port or host_control != token:
+        result.set("inconclusive", "The peer's port was not published or did not answer on the Mac, so the published-port path was not tested.")
     else:
-        extra = " The Mac reached the published port; the other computer did not." if published_port else ""
-        result.set("pass", "The computer could not reach a service listening in another computer." + extra)
+        result.set("pass", "The computer could not reach a service in another computer, directly or through its published port, which the Mac itself reached.")
 
 
 def setup_secret(ctx: Context) -> None:
     """Adds a disposable secret to the computer under test and restarts it to load it."""
     client = ctx.client
     assert client is not None
-    for existing in client.call("secrets.list", {}):
-        if existing["name"] == SECRET_NAME:
-            client.call("secrets.remove", {"id": existing["id"]})
+    if any(existing["name"] == ctx.secret_name for existing in client.call("secrets.list", {})):
+        raise RuntimeError(f"a secret named {ctx.secret_name} already exists; refusing to change it")
     value = "silo-eval-secret-" + random_source.token_hex(16)
     rows = client.call("secrets.save", {"request": {
         "operation": "add",
-        "name": SECRET_NAME,
+        "name": ctx.secret_name,
         "value": value,
         "computerIds": [ctx.computer_id],
         "allowedDomains": [SECRET_ALLOWED_HOST],
     }})
-    created = [row for row in rows if row["name"] == SECRET_NAME]
+    created = [row for row in rows if row["name"] == ctx.secret_name]
     if not created:
         raise RuntimeError("secrets.save did not return the new secret")
     ctx.secret_id = created[0]["id"]
@@ -405,7 +408,7 @@ def secret_guard(ctx: Context, result: Result) -> bool:
 
 
 def guest_curl(ctx: Context, url: str, header: bool = True, data: Optional[str] = None) -> Dict[str, Any]:
-    header_arg = f'-H "X-Silo-Eval: ${SECRET_NAME}"' if header else ""
+    header_arg = f'-H "X-Silo-Eval: ${ctx.secret_name}"' if header else ""
     data_arg = f"--data-binary @{data}" if data else ""
     script = f'curl -sS --max-time 25 -w "\\nhttp=%{{http_code}}" {header_arg} {data_arg} "{url}?probe={ctx.nonce}"'
     output = ctx.guest_sh(ctx.computer_id, script, timeout_ms=40_000)
@@ -421,12 +424,12 @@ def redact(text: str, value: Optional[str]) -> str:
 def scenario_secret_in_guest(ctx: Context, result: Result) -> None:
     if not secret_guard(ctx, result):
         return
-    env = ctx.guest_sh(ctx.computer_id, f'printf "%s" "${SECRET_NAME}"').text()
+    env = ctx.guest_sh(ctx.computer_id, f'printf "%s" "${ctx.secret_name}"').text()
     scan = ctx.scan()
     hits = [hit for hit in scan["hits"] if hit["needle"] == "secret-value"]
     result.evidence = {
         "guestEnvironmentValue": redact(env, ctx.secret_value),
-        "placeholderExpected": f"$MSB_{SECRET_NAME}",
+        "placeholderExpected": f"$MSB_{ctx.secret_name}",
         "guestFilesScanned": scan["files"],
         "hits": hits,
     }
@@ -434,7 +437,7 @@ def scenario_secret_in_guest(ctx: Context, result: Result) -> None:
         result.set("fail", "The guest environment holds the real secret value.")
     elif hits:
         result.set("fail", "The real secret value is in the guest at: " + ", ".join(h["path"] for h in hits))
-    elif env != f"$MSB_{SECRET_NAME}":
+    elif env != f"$MSB_{ctx.secret_name}":
         result.set("inconclusive", f"The guest did not get the expected placeholder (got {env!r}); was the computer restarted?")
     else:
         result.set("pass", f"The guest sees only the placeholder; the value is in none of {scan['files']} files or any process environment.")
@@ -445,7 +448,7 @@ def scenario_secret_other_hosts(ctx: Context, result: Result) -> None:
         return
     other = guest_curl(ctx, ECHO_OTHER)
     plain = guest_curl(ctx, ECHO_ALLOWED_PLAIN_HTTP)
-    placeholder = f"$MSB_{SECRET_NAME}"
+    placeholder = f"$MSB_{ctx.secret_name}"
     rows = []
     for name, response in (("unlisted host over HTTPS", other), ("allowed host over plain HTTP", plain)):
         rows.append({
@@ -458,11 +461,11 @@ def scenario_secret_other_hosts(ctx: Context, result: Result) -> None:
         })
     result.evidence = {"requests": rows}
     leaked = [row["case"] for row in rows if row["valueSent"]]
-    answered = [row for row in rows if row["status"].startswith("2")]
+    unproven = [row["case"] for row in rows if not (row["status"].startswith("2") and row["placeholderSent"])]
     if leaked:
         result.set("fail", "The real value was sent to: " + ", ".join(leaked))
-    elif not answered:
-        result.set("inconclusive", "Neither echo service answered, so nothing shows what the guest sent.")
+    elif unproven:
+        result.set("inconclusive", "No echo showed the placeholder arriving for: " + ", ".join(unproven))
     else:
         result.notes.append("The placeholder string itself is forwarded unchanged to hosts that are not allowed; it is not a secret.")
         result.set("pass", "Only the placeholder reached hosts outside the secret's allowed list and plain-HTTP requests.")
