@@ -594,10 +594,13 @@ fn restoring_a_built_in_computer_adds_no_host_mount() {
         .any(|arg| arg == "-v" || arg.contains("/opt/silo")));
 }
 
-/// A runtime whose source computer still records the read-only folders that computers from
-/// before Cua Driver mounted; the restore itself fails.
+/// A built-in computer from before Cua Driver that still records the read-only ChatGPT folder,
+/// through an in-place restore: the original is removed, then the checkpoint is restored, which
+/// itself fails.
 struct LegacySource {
     host: PathBuf,
+    state: Mutex<&'static str>,
+    recovery: Mutex<Option<String>>,
     calls: Mutex<Vec<Vec<String>>>,
 }
 impl RuntimeRunner for LegacySource {
@@ -608,24 +611,45 @@ impl RuntimeRunner for LegacySource {
         _timeout: Duration,
     ) -> Result<CommandOutput, RuntimeError> {
         self.calls.lock().unwrap().push(args.to_vec());
-        let stdout = match args.first().map(String::as_str) {
-            Some("snapshot") => serde_json::json!([{
-                "group":"silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
-                "name":"silo-backup-0-330418-1790360984903",
-                "scope":"disk", "availability":"ready"
-            }])
-            .to_string(),
-            Some("list") => "[]".into(),
-            Some("restore") => return Err(error("synthetic restore failure")),
-            Some("inspect") if args[1] == "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9" => {
-                serde_json::json!({"name":args[1],"status":"Stopped","config":{"mounts":[
-                    {"type":"Owned","guest":"/workspace"},
+        let state = *self.state.lock().unwrap();
+        let stdout = match args[0].as_str() {
+            "inspect" if state == "Removed" => return Err(error("computer not found")),
+            "inspect" => serde_json::json!({"name":"dev","status":state,"config":{
+                "labels":{"silo.managed":"true","silo.machine-id":ID},
+                "mounts":[
+                    {"guest":"/workspace","type":"Owned","storage":{"kind":"disk","capacity_mib":1024}},
                     {"type":"Bind","host":self.host,"guest":"/opt/silo/chatgpt",
                         "options":{"readonly":true}},
-                ]}})
-                .to_string()
+                ],
+                "network":{"policy":{"default_egress":"deny","default_ingress":"allow","rules":[]}}
+            }})
+            .to_string(),
+            "snapshot" if args[1] == "list" => {
+                let mut entries = vec![serde_json::json!({"group":"dev","name":"c000000000000000000000000000000","scope":"full","availability":"ready"})];
+                if let Some(id) = self.recovery.lock().unwrap().as_ref() {
+                    entries.push(serde_json::json!({"group":"dev","name":id,"scope":"full","availability":"ready"}));
+                }
+                serde_json::to_string(&entries).unwrap()
             }
-            Some("inspect") => return Err(error("computer not found")),
+            "snapshot" if args[1] == "create" => {
+                *self.recovery.lock().unwrap() = Some(args[2].clone());
+                String::new()
+            }
+            "snapshot" if args[1] == "verify" => String::new(),
+            "pause" => {
+                *self.state.lock().unwrap() = "Paused";
+                String::new()
+            }
+            "stop" => {
+                *self.state.lock().unwrap() = "Stopped";
+                String::new()
+            }
+            "remove" => {
+                *self.state.lock().unwrap() = "Removed";
+                String::new()
+            }
+            "list" => "[]".into(),
+            "restore" => return Err(error("synthetic restore failure")),
             _ => panic!("unexpected command: {args:?}"),
         };
         Ok(CommandOutput {
@@ -640,13 +664,35 @@ fn restoring_from_a_computer_with_legacy_mounts_passes_them_again() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![built_in_computer()],
+        },
+    )
+    .unwrap();
+    let mut record = Record::default();
+    record.checkpoints.push(Checkpoint {
+        id: "c000000000000000000000000000000".into(),
+        native_id: None,
+        name: "Selected".into(),
+        created_at: 1,
+        scope: "full".into(),
+        reason: "manual".into(),
+        kind: "manual".into(),
+    });
+    save(&paths, ID, &record).unwrap();
     let published = directory.path().join("published");
     std::fs::create_dir(&published).unwrap();
-    pending_import(&paths);
     let runner = LegacySource {
         host: published.clone(),
+        state: Mutex::new("Running"),
+        recovery: Mutex::new(None),
         calls: Mutex::new(Vec::new()),
     };
+    restore_with(&runner, &paths, ID, "c000000000000000000000000000000").unwrap();
+    assert_eq!(*runner.state.lock().unwrap(), "Removed");
     assert!(start_pending(&runner, &paths, &built_in_computer()).is_err());
     let calls = runner.calls.lock().unwrap();
     let restore = calls.iter().find(|args| args[0] == "restore").unwrap();

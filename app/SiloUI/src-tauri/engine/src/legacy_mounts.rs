@@ -134,6 +134,29 @@ pub(crate) fn restore_args(
     mount_args(&inspected.config)
 }
 
+/// The legacy mounts `config` records, kept for a restore after the computer is removed.
+pub(crate) fn recorded(config: &Value) -> Vec<Value> {
+    config
+        .get("mounts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|mount| is_legacy_mount(mount))
+        .cloned()
+        .collect()
+}
+
+/// The `msb restore` arguments for mounts kept by [`recorded`], recreating missing sources as
+/// [`restore_args`] does.
+pub(crate) fn restore_args_for(mounts: &[Value]) -> Vec<String> {
+    if mounts.is_empty() {
+        return Vec::new();
+    }
+    let config = serde_json::json!({ "mounts": mounts });
+    restore_missing(&config, &roots());
+    mount_args(&config)
+}
+
 /// `-v host:guest:ro,uid=0,gid=0` for each read-only legacy mount of `config` whose source
 /// exists. `uid=0,gid=0` pins the guest owner as the original mount did.
 fn mount_args(config: &Value) -> Vec<String> {

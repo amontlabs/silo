@@ -102,6 +102,11 @@ pub(super) struct Record {
     desired_environment: Vec<Environment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     restore_journal: Option<RestoreJournal>,
+    /// The read-only ChatGPT and LCU mounts the original recorded when an in-place restore
+    /// began. The original is removed before the checkpoint is restored, so they cannot be
+    /// read from it then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    legacy_mounts: Vec<Value>,
     pub(super) pending_checkpoint_restore: Option<PendingRestore>,
     pub(super) checkpoint_operation: Option<Operation>,
 }
@@ -1605,12 +1610,19 @@ pub(super) fn start_pending(
     args.extend(network_args);
     // A snapshot never carries host mounts. Computers created before Cua Driver recorded the
     // read-only ChatGPT and LCU folders; a checkpoint of one is restored with them again.
+    // An in-place restore recorded them before the original was removed; a fork reads them
+    // from its source.
     if crate::computer_use::is_built_in(configuration) {
-        for computer in [pending.source_computer.as_str(), configuration.name()] {
-            let mounts = crate::legacy_mounts::restore_args(runner, paths, computer);
-            if !mounts.is_empty() {
-                args.extend(mounts);
-                break;
+        let recorded = crate::legacy_mounts::restore_args_for(&record.legacy_mounts);
+        if !recorded.is_empty() {
+            args.extend(recorded);
+        } else {
+            for computer in [pending.source_computer.as_str(), configuration.name()] {
+                let mounts = crate::legacy_mounts::restore_args(runner, paths, computer);
+                if !mounts.is_empty() {
+                    args.extend(mounts);
+                    break;
+                }
             }
         }
     }
@@ -2321,6 +2333,7 @@ fn restore_steps(
             kind: "manual".into(),
         };
         record.desired_network_policy = Some(policy);
+        record.legacy_mounts = crate::legacy_mounts::recorded(&inspected.config);
         record.restore_journal = Some(RestoreJournal {
             target_checkpoint_id: checkpoint_id.into(),
             recovery_checkpoint: recovery,

@@ -7,8 +7,7 @@ const INSTALL_HARNESS_PACKAGES: &str = r#"install_output=$(npm install -g --pref
     printf '%s\n' "$install_output" | tail -2
     exit 1
 }
-printf '%s\n' "$install_output" | tail -2
-"#;
+printf '%s\n' "$install_output" | tail -2"#;
 
 #[test]
 fn harness_package_install_rejects_npm_failure() {
@@ -77,8 +76,9 @@ fn install_harnesses(fixture: &Fixture, name: &str) -> bool {
 /// The approval switch through Silo's own `apply_approval_with`: `auto` adds exactly
 /// the Cua Driver approval entries to the harnesses that are present (Codex: a per-server approval
 /// mode; Claude Code: an allow rule) and `ask` removes exactly those. Phase one runs
-/// before any harness was installed; phase two installs Codex and Claude Code from npm
-/// (skipped with `SILO_LIVE_SKIP_HARNESS_INSTALL=1` when the guest has no network).
+/// before any harness was installed: both stay pending and get no entries. Phase two installs
+/// Codex and Claude Code from npm, and the next apply registers them (skipped with
+/// `SILO_LIVE_SKIP_HARNESS_INSTALL=1` when the guest has no network).
 #[test]
 #[ignore = "requires the v4 guest image, network access and hardware virtualization"]
 fn live_approval_switch_edits_only_the_installed_harnesses() {
@@ -103,7 +103,22 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
             true,
         )
         .unwrap();
-        let (status, _) = fixture.wait_ready(name, &format!("approval {approval:?}"));
+        // The apply runs in the background, and until it starts the status still reads ready
+        // from the previous mode: wait until this mode is the one applied.
+        let started = std::time::Instant::now();
+        let status = loop {
+            let (status, _) = fixture.wait_ready(name, &format!("approval {approval:?}"));
+            if status["computerUse"]["appliedApproval"] == approval.as_str()
+                && status["computerUse"]["approvalApply"] == "applied"
+            {
+                break status;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(300),
+                "approval {approval:?} was never applied: {status}"
+            );
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        };
         assert_eq!(status["computerUse"]["approval"], approval.as_str());
         assert_eq!(status["computerUse"]["state"], "ready", "{status}");
         status
@@ -113,22 +128,22 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
     let claude_json = || guest_file(&fixture, name, "/home/silo/.claude.json");
     let approve_line = "default_tools_approval_mode = \"approve\"";
 
-    // Phase one: nothing installed. Codex and Claude Code are not in the image, so neither
-    // gets entries.
-    let ask_codex = codex();
-    eprintln!("codex config (ask, no harness installed):\n{ask_codex}");
-    assert!(!ask_codex.contains(approve_line));
-    assert!(claude_json().is_empty() && claude_settings().is_empty());
+    let unconfigured = || codex().is_empty() && claude_json().is_empty() && claude_settings().is_empty();
+    let pending = || -> Value {
+        let receipt = guest_file(&fixture, name, "/var/lib/silo-computer-use/receipt.json");
+        serde_json::from_str::<Value>(&receipt).unwrap()["pending"].clone()
+    };
+
+    // Phase one: nothing installed. Codex and Claude Code are not in the image, so both stay
+    // pending and neither gets entries, whatever the approval.
+    assert!(unconfigured(), "{}", codex());
+    assert_eq!(pending(), serde_json::json!(["claude-code", "codex"]));
     let status = switch(Approval::Auto);
-    eprintln!("agents on auto: {}", status["computerUse"]["agents"]);
-    assert!(codex().contains(approve_line), "{}", codex());
-    assert!(
-        claude_json().is_empty() && claude_settings().is_empty(),
-        "Claude Code is not installed and must get no entries"
-    );
+    assert_eq!(status["computerUse"]["agents"], serde_json::json!([]));
+    assert!(unconfigured(), "an agent that is not installed gets no entries: {}", codex());
+    assert_eq!(pending(), serde_json::json!(["claude-code", "codex"]));
     switch(Approval::Ask);
-    assert!(!codex().contains(approve_line));
-    assert!(claude_json().is_empty() && claude_settings().is_empty());
+    assert!(unconfigured(), "{}", codex());
 
     if std::env::var("SILO_LIVE_SKIP_HARNESS_INSTALL").is_ok() {
         fixture.stop(name);
@@ -144,6 +159,11 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
         "agents on auto with harnesses: {}",
         status["computerUse"]["agents"]
     );
+    assert_eq!(
+        status["computerUse"]["agents"],
+        serde_json::json!(["claude-code", "codex"])
+    );
+    assert_eq!(pending(), serde_json::json!([]));
     let auto_codex = codex();
     let auto_settings: Value = serde_json::from_str(&claude_settings()).unwrap();
     let auto_claude_json: Value = serde_json::from_str(&claude_json()).unwrap();
@@ -161,11 +181,13 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
         codex(),
         "ask must remove only the approval line"
     );
+    // `ask` removes the allow rule, and the `permissions` object too when nothing else is in it.
     let mut expected = auto_settings.clone();
-    expected["permissions"]
-        .as_object_mut()
-        .unwrap()
-        .remove("allow");
+    let permissions = expected["permissions"].as_object_mut().unwrap();
+    permissions.remove("allow");
+    if permissions.is_empty() {
+        expected.as_object_mut().unwrap().remove("permissions");
+    }
     let ask_settings: Value = serde_json::from_str(&claude_settings()).unwrap();
     assert_eq!(
         expected, ask_settings,

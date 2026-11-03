@@ -14,25 +14,29 @@ impl Fixture {
             .unwrap_or_else(|error| format!("exec failed: {error}"))
     }
 
-    /// Runs `script` as the silo account with the desktop session's environment, which the
-    /// helper records in its receipt, the way an agent's MCP server gets it.
+    /// Runs `script` as the silo account with the environment of the running desktop session,
+    /// read from the silo-owned `xfce4-session` the way `/usr/local/libexec/silo-cua-driver-mcp`
+    /// reads it, so it behaves as an agent's MCP server does.
     pub(crate) fn exec_in_session(&self, name: &str, script: &str) -> String {
         self.exec_status(
             name,
             &format!(
-                "session=$(python3 -c \"import json;print(' '.join(f'{{k}}={{v}}' for k,v in json.load(open('/var/lib/silo-computer-use/receipt.json')).get('sessionEnv',{{}}).items()))\"); \
+                "session=$(python3 - <<'PY'\n{SESSION_ENVIRONMENT}\nPY\n); \
                  runuser -u silo -- env HOME=/home/silo USER=silo LOGNAME=silo CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false $session {script}"
             ),
         )
     }
 
-    /// Waits for `cua-driver doctor` to pass in the desktop session: computer use really
-    /// works, not only what Silo's status reports. Returns how long it took.
+    /// Waits for `cua-driver doctor` to pass in the desktop session with a working display,
+    /// X11 connection and accessibility bus: computer use really works, not only what Silo's
+    /// status reports. Returns how long it took.
     pub(crate) fn wait_doctor(&self, name: &str, label: &str) -> std::time::Duration {
         let started = Instant::now();
         loop {
-            let doctor = self.exec_in_session(name, "/usr/local/bin/cua-driver doctor --json");
-            if doctor.contains("EXIT:0") {
+            let output =
+                self.exec_in_session(name, "/usr/local/bin/cua-driver doctor --json 2>/dev/null");
+            let failing = doctor_failures(&output);
+            if failing.is_empty() {
                 eprintln!(
                     "[{:>4}s] {label}: cua-driver doctor passed",
                     started.elapsed().as_secs()
@@ -41,7 +45,7 @@ impl Fixture {
             }
             assert!(
                 started.elapsed() < std::time::Duration::from_secs(300),
-                "{label}: cua-driver doctor never passed: {doctor}"
+                "{label}: cua-driver doctor never passed ({failing:?}): {output}"
             );
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
@@ -75,6 +79,72 @@ impl Fixture {
             du(self.paths.home.join("sandboxes").join(name)) / 1024,
         );
     }
+}
+
+/// Prints `KEY=value` for the display variables of the silo-owned `xfce4-session`.
+const SESSION_ENVIRONMENT: &str = r#"import os, pwd
+uid = pwd.getpwnam('silo').pw_uid
+keys = (b'DISPLAY', b'DBUS_SESSION_BUS_ADDRESS', b'XDG_RUNTIME_DIR', b'XAUTHORITY')
+for pid in sorted((n for n in os.listdir('/proc') if n.isdigit()), key=int):
+    try:
+        with open(f'/proc/{pid}/comm') as handle:
+            if handle.read().strip() != 'xfce4-session' or os.stat(f'/proc/{pid}').st_uid != uid:
+                continue
+        with open(f'/proc/{pid}/environ', 'rb') as handle:
+            items = handle.read().split(b'\0')
+    except OSError:
+        continue
+    print(' '.join(i.decode() for i in items if i.partition(b'=')[0] in keys and i.partition(b'=')[2]))
+    break"#;
+
+/// The probes a working desktop session needs from `cua-driver doctor --json`.
+const DOCTOR_PROBES: [&str; 3] = ["display server", "X11 connection", "AT-SPI"];
+
+/// What keeps `exec_in_session`'s doctor output from passing: a non-zero exit, `ok` not true,
+/// or one of [`DOCTOR_PROBES`] missing or not `ok`. Empty when it passes.
+fn doctor_failures(output: &str) -> Vec<String> {
+    let Some((json, exit)) = output.trim_end().rsplit_once("EXIT:") else {
+        return vec!["no exit status".into()];
+    };
+    let mut failing = Vec::new();
+    if exit.trim() != "0" {
+        failing.push(format!("exit {}", exit.trim()));
+    }
+    let Ok(report) = serde_json::from_str::<Value>(json.trim()) else {
+        failing.push("no JSON report".into());
+        return failing;
+    };
+    if report["ok"] != true {
+        failing.push("ok is not true".into());
+    }
+    for label in DOCTOR_PROBES {
+        let status = report["probes"]
+            .as_array()
+            .and_then(|probes| probes.iter().find(|probe| probe["label"] == label))
+            .map(|probe| probe["status"].clone());
+        if status != Some(Value::from("ok")) {
+            failing.push(format!("{label}: {status:?}"));
+        }
+    }
+    failing
+}
+
+#[test]
+fn doctor_failures_require_the_session_probes() {
+    let report = |display: &str| {
+        format!(
+            "{}\nEXIT:0",
+            serde_json::json!({"ok": true, "probes": [
+                {"label": "display server", "status": display},
+                {"label": "X11 connection", "status": "ok"},
+                {"label": "AT-SPI", "status": "ok"},
+            ]})
+        )
+    };
+    assert!(doctor_failures(&report("ok")).is_empty());
+    assert_eq!(doctor_failures(&report("warn")), ["display server: Some(String(\"warn\"))"]);
+    assert_eq!(doctor_failures("exec failed: no"), ["no exit status"]);
+    assert_eq!(doctor_failures("{}\nEXIT:1").len(), 5);
 }
 
 /// A fresh v4 computer through Silo's create and Start paths: Cua Driver is installed at the
