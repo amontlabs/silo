@@ -1,10 +1,12 @@
 # Silo engine extraction
 
-The Cargo workspace is rooted at `app/SiloUI/src-tauri/Cargo.toml`. The Tauri
-application remains the `silo-ui` package; the Tauri-free library is the
-workspace member `app/SiloUI/src-tauri/engine` (`silo-engine`). This keeps the
-existing Tauri build and lockfile while allowing `silod` to depend on the engine
-without depending on Tauri.
+The Cargo workspace is rooted at `app/SiloUI/Cargo.toml`, with its lockfile at
+`app/SiloUI/Cargo.lock`. The Tauri application remains the `silo-ui` package
+(`app/SiloUI/src-tauri`); the Tauri-free library is the workspace member
+`app/SiloUI/src-tauri/engine` (`silo-engine`). The other members are `silo-api`
+(`app/SiloUI/api`), `silo-client` (`app/SiloUI/client`), `silo-host`
+(`app/SiloUI/host`) and `silod` (`app/SiloUI/src-tauri/silod`), so `silod`
+depends on the engine without depending on Tauri.
 
 `silo-engine` owns channel identity and defines `EngineContext`, `EnginePaths`,
 `EngineIdentity`, `Event`, `Audience`, `MainThread` and `ProcessControl`. The Silo
@@ -17,8 +19,8 @@ until their group is extracted.
 The build channel, runtime operation gate (including its process-wide
 `OPERATIONS` instance), and image-cache repair logic now live in `silo-engine`.
 `silo-ui` re-exports the gate and image-cache functions for backend modules that
-have not moved yet. Both workspace packages are Cargo's default test members, so
-`cargo test --locked` covers the engine tests.
+have not moved yet. Every workspace member is a Cargo default member, so
+`cargo test --locked` from `app/SiloUI` covers the engine tests.
 
 ## macOS VM window host seam
 

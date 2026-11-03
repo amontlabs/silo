@@ -3,6 +3,7 @@ name = "silo-api"
 version = "0.1.0"
 description = "Canonical serde wire contract for the Silo engine"
 license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 
 [dependencies]
