@@ -105,8 +105,8 @@ pub(super) fn setup_version() -> String {
     )
 }
 
-/// The computer-use fingerprint of a computer set up with `approval`: the pinned ChatGPT
-/// app and LCU, the guest script and the approval mode. It changes whenever those do, and
+/// The computer-use fingerprint of a computer set up with `approval`: the pinned Cua Driver,
+/// the guest script and helpers and the approval mode. It changes whenever those do, and
 /// a computer or template with another one is brought up to date in place; it is never a
 /// reason to install macOS again.
 pub(super) fn computer_use_version_for(approval: crate::computer_use::Approval) -> String {

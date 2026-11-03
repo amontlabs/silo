@@ -101,10 +101,10 @@ computer use is stale: once its setup has updated computer use, a fresh template
 is saved from it (only when its disk is the template's size) and the stale one
 is removed.
 
-**Setup versions.** Two hashes, so that a new LCU never means installing macOS again.
+**Setup versions.** Two hashes, so that a new Cua Driver never means installing macOS again.
 The base version covers the offline account setup and the first-boot finalization
 (everything except computer use). The computer use version covers the pinned
-ChatGPT app and LCU locks, the guest script and the approval mode. The
+Cua Driver lock, the guest script and registration helper, the recorder and the approval mode. The
 computer's record keeps both for what it actually has installed (`setupVersion`,
 `computerUseVersion`, and the approval mode its computer use step ran with), and
 a template is named and made under those, not under the settings at the time of
@@ -121,9 +121,11 @@ taken, and a Restore or fork gives it back (an older checkpoint reads as stale).
 - A computer that already exists is updated the same way after it starts: when
   SSH answers and its computer use version differs, Silo runs the computer use
   script again in the background (row detail "Updating Computer Use", output in the
-  computer's log). The script keeps what already is the pinned app and LCU, replaces what
-  is not, writes the same Accessibility and Screen Recording rows and registers the
-  agents with the current options. The update does not block the computer: Stop,
+  computer's log). The script keeps what already is the pinned Cua Driver, replaces what
+  is not, removes the ChatGPT app and LCU of a computer set up before Cua Driver (the
+  app, LCU's files and LaunchAgent, their TCC rows and agent registrations), writes the same
+  Accessibility and Screen Recording rows for Cua Driver and registers the agents with the
+  current options. The update does not block the computer: Stop,
   Quit, Delete, a checkpoint operation or a new Start ends it, and the version is
   recorded only after it succeeds, while the computer is still the Start that began
   it. A failure is logged and retried at the next Start.
@@ -140,7 +142,7 @@ files (not APFS), the computer is installed instead.
 
 The auxiliary storage carries over because it holds the NVRAM, and System
 Integrity Protection's setting lives in NVRAM: a copy boots with it disabled, as
-the template did. LCU, the ChatGPT app and the TCC rows are on the disk.
+the template did. Cua Driver and the TCC rows are on the disk.
 
 **Personalizing.** The copy still has the template's password, SSH key and host
 keys, so an agent in one computer could log in to every other computer made from
@@ -174,7 +176,7 @@ key from `template-access/`, then runs one script as root (`personalize.rs`):
   that far is recognised by the copy's own key answering.
 
 Silo then shuts the copy down with its own key, forgets the known hosts (the host
-keys changed), boots it again and checks `csrutil status`, that LCU's receipt is
+keys changed), boots it again and checks `csrutil status`, that the computer-use receipt is
 present, and that macOS logged in as `silo` on its own with the new password. The
 state is `setting-up` until then; Retry setup resumes an interrupted
 personalization, and Quit and Delete end it like any setup. While a computer
@@ -295,15 +297,16 @@ to the disk with a notice, as VMPal does. See
 
 ## Provisioning for computer use
 
-Agents use macOS computers through LCU's macOS build, as they use Linux
-computers through its Linux build. Nobody clicks Setup Assistant, a Recovery
+Agents use macOS computers through [Cua Driver](https://github.com/trycua/cua) 0.38.0
+(MIT), as they use Linux computers through its Linux build; both register it as the MCP
+server `cua-driver`. Nobody clicks Setup Assistant, a Recovery
 prompt or an "Allow" dialog: Silo provisions the guest after installation.
 State `setting-up` covers these steps; its detail names the current step.
 
 1. **Account, automatic login and SSH, offline.** With the computer stopped,
    Silo attaches `disk.img` with `hdiutil`, mounts the guest's Data volume and
-   writes the account `silo` (home `/Users/silo`, short enough for LCU's
-   13-byte limit), its random password, `.AppleSetupDone`, the Setup Assistant
+   writes the account `silo` (home `/Users/silo`, a short
+   home folder), its random password, `.AppleSetupDone`, the Setup Assistant
    keys, automatic login (`/etc/kcpassword`), Remote Login, and no sleep or
    screen lock. This ports the offline setup of
    [Lume](https://github.com/trycua/cua/tree/main/libs/lume) (MIT) rather than
@@ -330,29 +333,55 @@ State `setting-up` covers these steps; its detail names the current step.
    names `silo` on the Terminal's last line, and never types when the screen
    cannot be read. The window drops the user's keyboard and pointer input while
    it runs.
-4. **Computer use.** Silo downloads two pinned archives once per device
-   (`guest/macos/chatgpt-app-lock.json`: the official ChatGPT macOS app from
-   OpenAI's Sparkle feed; `guest/macos/lcu-lock.json`: LCU's darwin build),
-   checks their size and SHA-256, copies them with `silo-computer-use.zsh` into
-   the running computer and runs `apply --approval ask|auto` over SSH, the mode
-   coming from the `computerUseAutoApproval` setting as for Linux computers.
-   The script (zsh, as the guest has no Python):
+4. **Computer use.** When the computer lacks the pinned app, Silo downloads the
+   pinned universal Cua Driver archive once per device
+   (`guest/macos/cua-driver-lock.json`: `cua-driver-rs-0.38.0-darwin-universal.tar.gz`
+   from the `trycua/cua` GitHub release, about 85 MB), checks its size and SHA-256,
+   copies it with `silo-computer-use.zsh`, `pinned.json` and the registration helper
+   `silo-cua-register.py` into the running computer and runs
+   `apply --approval ask|auto` over SSH, the mode coming from the
+   `computerUseAutoApproval` setting as for Linux computers. Older files in the
+   download cache (the ChatGPT app and LCU archives) are deleted. The script (zsh;
+   the registration helper needs the Command Line Tools' Python 3, which the developer
+   tools step installs earlier):
    - requires `csrutil status` to say disabled;
-   - installs `/Applications/ChatGPT.app` unless the pinned version is already
+   - removes what a computer set up before Cua Driver has: `/Applications/ChatGPT.app`, LCU
+     (`~/.local/share/lcu`), their TCC rows and ledger entries, and the registrations of
+     `lcu` in Claude Code and Codex with LCU's lifecycle hooks (MCP tool hooks for the `lcu`
+     server) and the trust Codex recorded for them;
+   - switches telemetry and the update check off: both variables for every command of the
+     script, `telemetry_enabled` and `update_check_enabled` set to false in
+     `~/.cua-driver/config.json` (the daemon is started by LaunchServices without the
+     script's environment and reads this file), `~/.zshenv`, and `launchctl setenv`;
+   - installs `/Applications/CuaDriver.app` unless the pinned version is already
      there: SHA-256, `codesign --verify --deep --strict`, bundle identifier
-     `com.openai.codex` and team `2DC432GLL2` are checked before the app is moved
-     in, owned by root, and its quarantine attribute is cleared;
-   - runs LCU's installer (`scripts/install.sh --runtime-only --yes`) as `silo`;
-   - writes Accessibility and Screen Recording rows for `com.openai.codex` and
-     `com.openai.sky.CUAService` (the Computer Use helper inside the app) into
-     the system TCC database. The `access` table's columns are read at run time
+     `com.trycua.driver` and team `YCK386LBJ7` are checked before the app is moved
+     in, owned by root, and registered with Launch Services, then links
+     `/usr/local/bin/cua-driver` to the executable inside the app. Cua Driver starts its
+     daemon under the app's own identity only when it runs from inside the bundle;
+   - writes Accessibility and Screen Recording rows for `com.trycua.driver`
+     into the system TCC database. The `access` table's columns are read at run time
      and only existing ones are written; the csreq blob comes from
      `codesign -d -r-` and `csreq -b`. It reads every row back, pre-writes the
-     Screen Recording reminder ledger of `replayd` (macOS 15 and later) and
-     restarts both `tccd` daemons;
-   - runs `lcu setup --agent all --allow-missing --session direct --yes
-     --approval <mode>` and installs a LaunchAgent that runs
-     `lcu setup --reconcile` at each login, so agents installed later register.
+     Screen Recording consent ledger of `replayd` (macOS 15 and later; Cua Driver
+     counts an entry keyed by the bundle identifier as the user's consent to direct
+     capture) and restarts both `tccd` daemons;
+   - registers the `cua-driver` MCP server (`/usr/local/bin/cua-driver mcp`, with the
+     telemetry and update-check variables in its environment) with Claude Code
+     (`~/.claude.json`) and Codex (`~/.codex/config.toml`); the approval mode adds or
+     removes `mcp__cua-driver` in Claude Code's `permissions.allow` and
+     `default_tools_approval_mode = "approve"` in Codex's section. Both files are written
+     whether or not the agent is installed, so an agent installed into a running computer
+     finds the server at its first start. When an installed agent's files cannot be
+     updated the helper exits 1 and the setup fails (the old approval would otherwise stay
+     in force while the receipt said ready); an absent agent whose files could not be
+     written is pending, and a LaunchAgent (`org.silo.computer-use-reconcile`) runs
+     `silo-cua-register.py reconcile` at each login to try again;
+   - checks readiness: with a login session it starts the daemon the way `cua-driver mcp`
+     does (`open -n -g /Applications/CuaDriver.app --args serve`) and requires
+     `cua-driver permissions status --json` to report Accessibility and Screen Recording
+     as granted, then requires `cua-driver doctor --json` to report `ok`. No LaunchAgent
+     starts the daemon; the first agent session does.
    - turns on the guest's own Screen Sharing for [remote viewing](#on-another-mac):
      `launchctl enable system/com.apple.screensharing` and, unless it is already
      loaded, `bootstrap` of its launch daemon, plus Screen Recording, Accessibility
@@ -361,14 +390,20 @@ State `setting-up` covers these steps; its detail names the current step.
      password mode stays off: viewers sign in with the computer's account. The
      script is part of the computer-use fingerprint, so an existing computer gets
      this through the in-place update at its next start.
-   Per-app approvals ("Allow Computer Use to use X?") stay with LCU and are never
-   seeded. The script keeps a log (`~/Library/Logs/silo-computer-use.log`) and a
-   receipt (`~/Library/Application Support/Silo/computer-use-receipt.json`) in the
-   guest, and is idempotent: a rerun with the same pins and mode changes nothing.
-   Pins: ChatGPT 26.930.61225 (CUA runtime 0.0.27, the runtime LCU's tested macOS
-   pair uses; LCU lists its pairing with 26.928.20755, which the feed no longer
-   serves) and LCU 0.11.0. The home folder `/Users/silo` is within the helper's
-   13-byte limit.
+   Cua Driver's own per-app consent stays with its permission mode (standard,
+   promptless) and is never seeded. The script keeps a log
+   (`~/Library/Logs/silo-computer-use.log`) and a receipt
+   (`~/Library/Application Support/Silo/computer-use-receipt.json`, schema 2: state,
+   reason, `driverVersion`, approval, `agents`, `pending`) in the guest, and is
+   idempotent: a rerun with the same pins and mode changes nothing. Pin: Cua Driver
+   0.38.0 (see the [Cua Driver decision](SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03)).
+   Verified live on 2026-11-03 (macOS 26.6.2 guest copied from a template set up with the
+   ChatGPT app and LCU, standalone Dev engine): the TCC rows and the consent ledger are enough
+   for the daemon to capture the screen without a prompt (`get_desktop_state` through the
+   registered command returned the desktop), and `open` starts the daemon from the SSH
+   session of a console login. `launchctl setenv` does not survive the restart at the end of
+   setup; the daemon reads `~/.cua-driver/config.json` and the agents pass the variables
+   themselves, so nothing depends on it.
    The approach follows prior art rather than inventing one:
    [trycua/cua `seed-tcc.sh`](https://github.com/trycua/cua/blob/main/libs/images/macos/files/seed-tcc.sh)
    and [actions/runner-images `configure-tccdb-macos.sh`](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)
@@ -494,7 +529,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | --- | --- |
 | Checkpoints | [Done](#checkpoints) for local computers. Not done: importing a checkpoint into an existing computer (an exported checkpoint imports as a new computer), a size breakdown (only a memory checkpoint's state file is counted), and abandoning a Restore |
 | Remote computers (Connections) | [Done](#on-another-mac): create, list, start, stop, force stop, delete, setup progress and logs, and Show screen for a computer on a connected Mac. Not done: checkpoints and clipboard transfer for remote computers, and screens before computer use is set up (the installer, Setup Assistant and Recovery); the Recovery step of a remote setup shows its window on the owning Mac |
-| Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
+| Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent. Computers set up with the ChatGPT app and LCU switch to Cua Driver through the in-place update at their next start |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
 | Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |
 | Terminal, editor, Files, network ports, GitHub, secrets, working account | Done in the engine, for local and remote computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. Not done: the UI. A macOS computer has no detail page, so no terminal, editor or Files entry, and the Network, Secrets and GitHub pages list only Linux computers |
@@ -516,6 +551,8 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | UTM guest tools | spice-vdagent, needs macOS 15 and an interactive approval | Not used |
 
 ## Verification
+
+Evidence in the next two sections is from the ChatGPT app and LCU era, before the move to Cua Driver; the Cua Driver setup has not been run live yet.
 
 2026-10-09, Silo Dev built from this branch, driven through its UI with a
 macOS 26.6.2 guest on an Apple Silicon Mac running macOS 26.5:

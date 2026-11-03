@@ -44,12 +44,8 @@ pub struct ComputerUseState {
     pub applied_approval: Option<ComputerUseApprovalState>,
     pub approval_apply: Option<ComputerUseApprovalApplyState>,
     pub approval_apply_reason: Option<String>,
-    /// The installed Cua Driver version on Linux.
+    /// The Cua Driver version installed in the computer.
     pub driver_version: Option<String>,
-    /// macOS receipt field; Linux does not use it.
-    pub chatgpt_version: Option<String>,
-    /// macOS receipt field; Linux does not use it.
-    pub lcu_version: Option<String>,
     pub agents: Option<Vec<String>>,
     /// RFC 3339 receipt time on macOS; null until the receipt has been read.
     pub at: Option<String>,

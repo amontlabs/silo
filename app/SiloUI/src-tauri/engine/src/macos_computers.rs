@@ -2024,17 +2024,11 @@ fn computer_use_projection(record: &Record) -> serde_json::Value {
         "schemaVersion": null,
         "state": null,
         "reason": null,
-        "cause": null,
-        "compatibility": null,
-        "warning": null,
         "approval": desired.as_str(),
         "appliedApproval": applied.map_or("unknown", |approval| approval.as_str()),
         "approvalApply": if applied.is_some() && !updating { "applied" } else { "pending" },
         "approvalApplyReason": null,
-        "appVersion": null,
-        "chatgptVersion": null,
-        "runtimeVersion": null,
-        "lcuVersion": null,
+        "driverVersion": applied.and(guest_computer_use::driver_version()),
         "agents": null,
         "at": null,
     })
@@ -10549,7 +10543,8 @@ mod tests {
         assert_eq!(state["approval"], "ask");
         assert_eq!(state["appliedApproval"], "ask");
         assert_eq!(state["approvalApply"], "applied");
-        assert!(state["state"].is_null() && state["lcuVersion"].is_null());
+        assert!(state["state"].is_null() && state.get("lcuVersion").is_none());
+        assert_eq!(state["driverVersion"], "0.38.0");
         assert!(runtime
             .block_on(has_macos_computer(app.clone(), id))
             .unwrap());

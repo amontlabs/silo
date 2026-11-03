@@ -140,8 +140,8 @@ pub(super) struct Record {
     /// computer use step finished (copies take their template's).
     #[serde(default)]
     pub setup_version: Option<String>,
-    /// The computer-use fingerprint of what the guest has installed (the pinned ChatGPT app
-    /// and LCU, the guest script, the approval mode), fixed when computer use was last set
+    /// The computer-use fingerprint of what the guest has installed (the pinned Cua Driver,
+    /// the guest script and helpers, the approval mode), fixed when computer use was last set
     /// up or updated. A record without one (made before the split) is stale.
     #[serde(default)]
     pub computer_use_version: Option<String>,
