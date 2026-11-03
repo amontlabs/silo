@@ -6,7 +6,7 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 
 **Status.** Work in progress, MIT licensed, built by one person. The host is macOS on Apple Silicon today. On Linux, the `silo-engine` crate builds and passes its tests in CI; a Linux `silod` is the next milestone.
 
-[Why Silo](#why-silo) · [Threat model](docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Security policy](SECURITY.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
+[Why Silo](#why-silo) · [Threat model](docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Security policy](SECURITY.md) · [Roadmap](docs/ROADMAP.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
 
 ## Why Silo
 
