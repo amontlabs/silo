@@ -124,3 +124,27 @@ fn reclaiming_empties_the_download_folders_only_while_no_computer_runs() {
     fs::remove_dir_all(app_data.join("lcu")).unwrap();
     assert!(reclaim_disk_with(&gate, &running, &paths, &app_data));
 }
+
+#[test]
+fn reclaiming_never_follows_a_download_folder_that_is_a_link() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = crate::test_support::paths(directory.path());
+    let app_data = directory.path().join("data");
+    let elsewhere = directory.path().join("moved");
+    fs::create_dir_all(elsewhere.join("2")).unwrap();
+    fs::write(elsewhere.join("2/keep"), b"x").unwrap();
+    fs::write(elsewhere.join("keep"), b"x").unwrap();
+    fs::create_dir_all(&app_data).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, app_data.join("chatgpt")).unwrap();
+
+    let stopped = Listing { status: "stopped" };
+    assert!(reclaim_disk_with(
+        &OperationGate::new(),
+        &stopped,
+        &paths,
+        &app_data
+    ));
+    assert!(elsewhere.join("2/keep").exists());
+    assert!(elsewhere.join("keep").exists());
+    assert!(app_data.join("chatgpt").is_symlink());
+}

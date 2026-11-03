@@ -213,7 +213,9 @@ fn reclaim_disk_with(
     let present: Vec<PathBuf> = ROOT_FOLDERS
         .into_iter()
         .map(|folder| app_data.join(folder))
-        .filter(|root| fs::symlink_metadata(root).is_ok())
+        // Only a real folder: a root that is a link (say, a moved download folder) is not
+        // Silo's to empty, so it is never followed.
+        .filter(|root| fs::symlink_metadata(root).is_ok_and(|meta| meta.is_dir()))
         .collect();
     if present.is_empty() {
         return true;
