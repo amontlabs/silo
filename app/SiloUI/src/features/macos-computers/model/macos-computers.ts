@@ -85,7 +85,7 @@ export type MacosComputerAction = "start" | "stop" | "force-stop" | "delete" | "
   "change-resources": {
     cpus: number
     memoryGiB: number
-    expected: { cpus: number; memoryGiB: number }
+    expected: { cpus: number; memoryGiB: number; diskGiB: number }
   }
 }
 

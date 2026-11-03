@@ -123,7 +123,7 @@ it("edits CPU and memory on a stopped computer for the next start", async () => 
   await user.type(screen.getByRole("spinbutton", { name: "Memory (GiB)" }), "24")
   await user.click(popoverButton("Save"))
   await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-stopped", {
-    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16 } },
+    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16, diskGiB: 128 } },
   }))
   await waitFor(() => expect(row("xcode-build")).toHaveTextContent("8 CPUs · 24 GiB memory · 128 GiB disk"))
 })
@@ -153,7 +153,7 @@ it("keeps the edit form's expected resources when a newer computer snapshot arri
   await user.click(popoverButton("Save"))
 
   await waitFor(() => expect(backend.action).toHaveBeenCalledWith("mac-stopped", {
-    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16 } },
+    "change-resources": { cpus: 8, memoryGiB: 24, expected: { cpus: 6, memoryGiB: 16, diskGiB: 128 } },
   }))
 })
 
@@ -511,7 +511,7 @@ it("invokes the native commands with the contract's payloads", async () => {
   await nativeMacosComputersBackend.create({ name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 })
   await nativeMacosComputersBackend.action("a", "force-stop")
   await nativeMacosComputersBackend.action("a", { "change-resources": {
-    cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+    cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8, diskGiB: 64 },
   } })
   await nativeMacosComputersBackend.openDisplay("a")
   await nativeMacosComputersBackend.clipboard("a", "copy-from")
@@ -525,7 +525,7 @@ it("invokes the native commands with the contract's payloads", async () => {
     ["create_macos_computer", { request: { name: "daily", cpus: 4, memoryGiB: 8, diskGiB: 64 } }],
     ["macos_computer_action", { id: "a", action: "force-stop" }],
     ["macos_computer_action", { id: "a", action: { "change-resources": {
-      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8, diskGiB: 64 },
     } } }],
     ["open_macos_display", { id: "a" }],
     ["macos_computer_clipboard", { id: "a", direction: "copy-from" }],

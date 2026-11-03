@@ -83,10 +83,10 @@ describe("macOS computers on other devices", () => {
     await store.action(id, "start")
     expect(spies.action).toHaveBeenCalledWith("studio", "a", "start")
     await store.action(id, { "change-resources": {
-      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8, diskGiB: 64 },
     } })
     expect(spies.action).toHaveBeenCalledWith("studio", "a", { "change-resources": {
-      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8 },
+      cpus: 8, memoryGiB: 16, expected: { cpus: 4, memoryGiB: 8, diskGiB: 64 },
     } })
     expect(local.action).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(store.getSnapshot().remote.studio?.state?.computers[0].state).toBe("running"))

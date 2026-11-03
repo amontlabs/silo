@@ -57,7 +57,7 @@ export function MacosComputerRow({ computer, store, takenNames = [], device, onE
   const [checkpointsOpen, setCheckpointsOpen] = useState(false)
   const [cpus, setCpus] = useState(String(computer.cpus))
   const [memoryGiB, setMemoryGiB] = useState(String(computer.memoryGiB))
-  const [expectedResources, setExpectedResources] = useState({ cpus: computer.cpus, memoryGiB: computer.memoryGiB })
+  const [expectedResources, setExpectedResources] = useState({ cpus: computer.cpus, memoryGiB: computer.memoryGiB, diskGiB: computer.diskGiB })
   const [resourceError, setResourceError] = useState<string | null>(null)
   const unavailable = Boolean(device && (!device.connected || device.busy))
   const checkpointsAvailable = !device && (canCheckpointMacos(computer) || (computer.checkpoints?.length ?? 0) > 0)
@@ -102,7 +102,7 @@ export function MacosComputerRow({ computer, store, takenNames = [], device, onE
     onSelect: () => {
       setCpus(String(computer.cpus))
       setMemoryGiB(String(computer.memoryGiB))
-      setExpectedResources({ cpus: computer.cpus, memoryGiB: computer.memoryGiB })
+      setExpectedResources({ cpus: computer.cpus, memoryGiB: computer.memoryGiB, diskGiB: computer.diskGiB })
       setResourceError(null)
     },
   })
