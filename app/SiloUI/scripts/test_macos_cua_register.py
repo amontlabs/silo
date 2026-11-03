@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -73,22 +74,55 @@ class RegisterTest(unittest.TestCase):
         self.assertEqual(settings['permissions']['allow'], ['Bash(ls)'])
         self.assertNotIn('approve', self.module.CODEX_CONFIG.read_text())
 
-    def test_agents_installed_later_are_pending_until_reconcile(self):
+    def main(self, *argv):
+        """Runs the command line; returns `(exit code, result object)`."""
+        with mock.patch('sys.stdout', new=io.StringIO()) as out, mock.patch('sys.stderr', new=io.StringIO()):
+            code = self.module.main(list(argv))
+        return code, json.loads(out.getvalue())
+
+    def test_an_agent_that_is_not_installed_is_registered_all_the_same(self):
+        # Codex is not installed: its configuration is written anyway, so a Codex installed into
+        # the running computer finds the server at its first start without another login.
         self.install('claude')
-        result = self.apply('auto')
-        self.assertEqual((result['agents'], result['pending']), (['claude-code'], ['codex']))
-        self.assertFalse(self.module.CODEX_CONFIG.exists())
+        code, result = self.main('apply', '--approval', 'auto')
+        self.assertEqual(code, 0)
+        self.assertEqual((result['agents'], result['pending'], result['failed']), (['claude-code', 'codex'], [], []))
+        codex = tomllib.loads(self.module.CODEX_CONFIG.read_text())
+        self.assertEqual(codex['mcp_servers']['cua-driver']['default_tools_approval_mode'], 'approve')
+        self.assertEqual(self.module.reconcile(), {'reconcile': 'idle'})
+
+    def test_an_absent_agent_whose_files_cannot_be_written_is_pending_until_reconcile(self):
+        self.install('claude')
+        # `~/.codex` is a file, so Codex's configuration cannot be created.
+        self.module.CODEX_CONFIG.parent.write_text('')
+        code, result = self.main('apply', '--approval', 'auto')
+        self.assertEqual(code, 0, 'an absent agent does not fail the setup')
+        self.assertEqual((result['agents'], result['pending'], result['failed']), (['claude-code'], ['codex'], []))
         self.module.RECEIPT.parent.mkdir(parents=True, exist_ok=True)
         self.module.RECEIPT.write_text(json.dumps({'schemaVersion': 2, 'state': 'ready', 'agents': ['claude-code'],
                                                    'pending': ['codex']}))
         self.assertEqual(self.module.reconcile(), {'reconcile': 'done', 'agents': ['claude-code'], 'pending': ['codex']})
-        self.install('codex')
+        self.module.CODEX_CONFIG.parent.unlink()
         result = self.module.reconcile()
         self.assertEqual((result['agents'], result['pending']), (['claude-code', 'codex'], []))
         self.assertIn('default_tools_approval_mode = "approve"', self.module.CODEX_CONFIG.read_text())
         receipt = json.loads(self.module.RECEIPT.read_text())
         self.assertEqual((receipt['agents'], receipt['pending'], receipt['state']), (['claude-code', 'codex'], [], 'ready'))
         self.assertEqual(self.module.reconcile(), {'reconcile': 'idle'})
+
+    def test_an_installed_agent_whose_files_cannot_be_updated_fails_the_setup(self):
+        # Claude Code is installed with the auto rule in place, and its state file cannot be
+        # rewritten: switching to `ask` would leave the rule in force, so the setup must fail.
+        self.install('claude')
+        self.install('codex')
+        self.module.CLAUDE_SETTINGS.parent.mkdir(parents=True)
+        self.module.CLAUDE_SETTINGS.write_text(json.dumps({'permissions': {'allow': ['mcp__cua-driver']}}))
+        self.module.CLAUDE_STATE.write_text('[]')
+        code, result = self.main('apply', '--approval', 'ask')
+        self.assertEqual(code, 1)
+        self.assertEqual((result['agents'], result['pending'], result['failed']), (['codex'], ['claude-code'], ['claude-code']))
+        settings = json.loads(self.module.CLAUDE_SETTINGS.read_text())
+        self.assertEqual(settings['permissions']['allow'], ['mcp__cua-driver'], 'the stale rule is what the failure reports')
 
     def test_lcu_leftovers_are_removed(self):
         self.install('claude')
@@ -130,6 +164,7 @@ class RegisterTest(unittest.TestCase):
         result = self.apply('ask')
         self.assertEqual((result['agents'], result['failed']), (['codex'], ['claude-code']))
         self.assertEqual(result['pending'], ['claude-code'])
+        self.assertEqual(self.main('apply', '--approval', 'ask')[0], 1, 'an installed agent that failed fails the run')
 
 
 class ScriptSourceTest(unittest.TestCase):

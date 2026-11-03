@@ -13,8 +13,12 @@ It registers the driver as a plain stdio MCP server named `cua-driver` for Claud
 command is the `cua-driver` link on PATH; the app launches its own daemon through
 LaunchServices when the first MCP session starts. The approval switch adds or removes
 `mcp__cua-driver` in Claude Code's `permissions.allow` and
-`default_tools_approval_mode = "approve"` in Codex's section. An agent that is not installed yet
-is pending; the reconcile LaunchAgent registers it at the next login once its binary exists.
+`default_tools_approval_mode = "approve"` in Codex's section. Both files are written whether or
+not the agent is installed yet, so an agent installed into a running computer finds the server
+at its first start. `apply` exits 1 when an installed agent's configuration could not be
+updated (the computer-use setup then fails instead of reporting the approval as applied); an
+agent that is absent and whose files could not be written is pending, and the reconcile
+LaunchAgent tries again at the next login.
 
 State: `~/Library/Application Support/Silo/computer-use-agents.json` holds the approval and the
 registered and pending agents; `reconcile` also updates `agents` and `pending` in the receipt.
@@ -251,20 +255,19 @@ def installed(name, directories=None):
 
 
 def configure(names, approval, directories=None):
-    """Registers the driver with the agents in `names` that are installed. Returns
-    `(registered, pending, failed)`: pending agents are not installed yet."""
+    """Registers the driver with every agent in `names`, installed or not: the configuration
+    files are written either way. Returns `(registered, pending, failed)`: `failed` holds an
+    installed agent whose files could not be updated, `pending` an absent one whose files could
+    not be written (the next login tries again)."""
     entry = server_entry()
     registered, pending, failed = [], [], []
     for name in names:
-        if not installed(AGENTS[name], directories):
-            pending.append(name)
-            continue
         try:
             EDITORS[name](entry, approval)
             registered.append(name)
         except (Failure, OSError, ValueError) as error:
             sys.stderr.write('could not register %s with %s: %s: %s\n' % (SERVER, name, type(error).__name__, error))
-            failed.append(name)
+            (failed if installed(AGENTS[name], directories) else pending).append(name)
     return registered, pending, failed
 
 
@@ -300,9 +303,11 @@ def save_state(approval, agents, pending):
 
 
 def apply(approval):
+    """Registers every agent. The result's `failed` names installed agents whose files could
+    not be updated; the caller fails the setup for those. An absent agent whose files could not
+    be written stays pending, so the next login tries again."""
     remove_legacy()
     registered, pending, failed = configure(sorted(AGENTS), approval)
-    # An agent that failed stays pending, so the next login tries again.
     save_state(approval, registered, pending + failed)
     return {'approval': approval, 'agents': sorted(registered), 'pending': sorted(pending + failed), 'failed': sorted(failed)}
 
@@ -345,6 +350,10 @@ def main(argv=None):
         sys.stderr.write('error: %s\n' % error)
         return 1
     print(json.dumps(result))
+    if result.get('failed'):
+        # The agents are installed, so a stale approval would stay in force: fail the setup.
+        sys.stderr.write('error: could not update the configuration of %s\n' % ', '.join(result['failed']))
+        return 1
     return 0
 
 

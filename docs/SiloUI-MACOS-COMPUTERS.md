@@ -369,9 +369,13 @@ State `setting-up` covers these steps; its detail names the current step.
      telemetry and update-check variables in its environment) with Claude Code
      (`~/.claude.json`) and Codex (`~/.codex/config.toml`); the approval mode adds or
      removes `mcp__cua-driver` in Claude Code's `permissions.allow` and
-     `default_tools_approval_mode = "approve"` in Codex's section. An agent that is not
-     installed yet is pending; a LaunchAgent (`org.silo.computer-use-reconcile`) runs
-     `silo-cua-register.py reconcile` at each login, so agents installed later register;
+     `default_tools_approval_mode = "approve"` in Codex's section. Both files are written
+     whether or not the agent is installed, so an agent installed into a running computer
+     finds the server at its first start. When an installed agent's files cannot be
+     updated the helper exits 1 and the setup fails (the old approval would otherwise stay
+     in force while the receipt said ready); an absent agent whose files could not be
+     written is pending, and a LaunchAgent (`org.silo.computer-use-reconcile`) runs
+     `silo-cua-register.py reconcile` at each login to try again;
    - checks readiness: with a login session it starts the daemon the way `cua-driver mcp`
      does (`open -n -g /Applications/CuaDriver.app --args serve`) and requires
      `cua-driver permissions status --json` to report Accessibility and Screen Recording

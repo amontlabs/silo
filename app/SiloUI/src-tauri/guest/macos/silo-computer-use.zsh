@@ -28,8 +28,9 @@
 #      bridge from the controlling device) and grant its two clients Screen Recording,
 #      Accessibility and Post Event, as the "Allow" dialogs would;
 #   6. register the `cua-driver` MCP server with Claude Code and Codex (silo-cua-register.py),
-#      with the approval switch applied, and install a LaunchAgent that registers agents
-#      installed later at each login;
+#      installed or not, with the approval switch applied; the setup fails when an installed
+#      agent's files cannot be updated, and a LaunchAgent retries at each login an absent
+#      agent whose files could not be written;
 #   7. check readiness: `cua-driver permissions status --json` from the daemon (started through
 #      LaunchServices when the computer has a login session) and `cua-driver doctor --json`.
 # Cua Driver's own per-app consent stays with Cua Driver's permission mode and is never seeded.
