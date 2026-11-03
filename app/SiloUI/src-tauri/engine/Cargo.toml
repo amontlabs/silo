@@ -6,6 +6,9 @@ repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 
+[build-dependencies]
+serde_json = "1"
+
 [features]
 test-support = []
 
