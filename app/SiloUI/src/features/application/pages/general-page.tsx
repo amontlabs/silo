@@ -39,8 +39,6 @@ type GeneralPageProps = {
   onApplicationPreferencesChange: (preferences: ApplicationPreferenceSelection) => void
   reduceMotion: boolean
   onReduceMotionChange: (enabled: boolean) => void
-  /** Whether the page is showing; computer use status is only watched then. */
-  active?: boolean
 }
 
 /** Uses the application's settings store; the startup default only ever names local computers. */
@@ -50,7 +48,6 @@ export function GeneralPage({
   onApplicationPreferencesChange,
   reduceMotion,
   onReduceMotionChange,
-  active = true,
 }: GeneralPageProps) {
   const { theme, setTheme } = useTheme()
   const { settings, store, updateSettings } = useSettings()
@@ -134,7 +131,7 @@ export function GeneralPage({
         <SectionHeading>Accessibility</SectionHeading>
         <ListCard><SettingRow icon={Accessibility} title="Reduce motion" description="Disable nonessential interface animation." control={<Switch checked={reduceMotion} onCheckedChange={onReduceMotionChange} aria-label="Reduce motion" />} /></ListCard>
       </section>
-      <div className="grid gap-4 empty:hidden"><ComputerUseSettings source={source} active={active} /></div>
+      <div className="grid gap-4 empty:hidden"><ComputerUseSettings /></div>
       <StorageSection />
     </PageContainer>
   )

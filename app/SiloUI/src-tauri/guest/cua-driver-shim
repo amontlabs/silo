@@ -1,0 +1,6 @@
+#!/bin/sh
+# /usr/local/bin/cua-driver: Cua Driver with its telemetry and update check off, however it is
+# started (MCP launcher, desktop terminal, SSH shell, agent tool). Installed by the Silo guest
+# image and by silo-computer-use, which put the pinned binary's path below.
+export CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false DO_NOT_TRACK=1
+exec @DRIVER@ "$@"

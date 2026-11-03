@@ -77,7 +77,8 @@ it("names the macOS Settings menu for both Silo build channels", () => {
 it("says agents, including ones installed later, are set up for computer use automatically", () => {
   const help = new DOMParser().parseFromString(readFileSync("docs/silo-help.html", "utf8"), "text/html")
   const instructions = [...help.querySelectorAll("p")].find(paragraph => paragraph.textContent?.startsWith("Agents are set up automatically"))
-  expect(instructions?.textContent).toMatch(/every supported agent/i)
-  expect(instructions?.textContent).toMatch(/as soon as you install them/i)
+  expect(instructions?.textContent).toMatch(/Claude Code and Codex, including before they are installed/i)
+  expect(instructions?.textContent).toMatch(/registers a newly installed Claude Code or Codex/i)
   expect(help.body.textContent).not.toMatch(/Set up computer use for new agents/)
+  expect(help.body.textContent).not.toMatch(/Pi, OMP and Hermes|Set up LCU/)
 })

@@ -1,11 +1,9 @@
 //! Background preparation of what each device needs before computers work well: the
-//! pinned VM image downloaded, verified and imported into the runtime, and the pinned LCU
-//! archive downloaded and verified. Both start at launch without the device-wide operation
-//! gate. Actions that need one call `ensure_image` or `ensure_lcu`, which join the work in
-//! flight or run it.
-//! The ChatGPT for Linux download has its own worker (`chatgpt_app`) and status.
+//! pinned VM image downloaded, verified and imported into the runtime. It starts at launch
+//! without the device-wide operation gate. Actions that need the image call `ensure_image`,
+//! which joins the work in flight or runs it.
 use crate::{
-    chatgpt_app::{self, DebArch, Downloader, HttpDownloader},
+    download::{self, Downloader, HttpDownloader},
     runtime::{
         guest_image::{self, PinnedImage},
         ProcessRunner, RuntimePaths, RuntimeRunner,
@@ -25,11 +23,8 @@ use std::{
 };
 
 const STATUS_EVENT: &str = "silo://preparation-status";
-const LCU_LOCK: &str = include_str!("../../guest/lcu-lock.json");
 const DOWNLOAD_DIR: &str = ".download";
 const PUBLISH_PREFIX: &str = ".publish-";
-
-mod lcu_mount;
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +48,6 @@ pub enum TaskState {
 #[serde(rename_all = "camelCase")]
 pub struct PreparationStatus {
     pub image: PreparationTask,
-    pub lcu: PreparationTask,
 }
 
 impl PreparationTask {
@@ -218,14 +212,11 @@ impl Job {
 // -------------------------------------------------------------- globals
 
 static IMAGE: Job = Job::new();
-static LCU: Job = Job::new();
 static PATHS: OnceLock<RuntimePaths> = OnceLock::new();
-static LCU_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn snapshot() -> PreparationStatus {
     PreparationStatus {
         image: IMAGE.task(),
-        lcu: LCU.task(),
     }
 }
 
@@ -248,20 +239,16 @@ fn emit() {
     }
 }
 
-/// Called once after the runtime paths are known. Returns at once; the image import and
-/// the LCU download run on their own threads.
+/// Called once after the runtime paths are known. Returns at once; the image import runs on
+/// its own thread.
 pub fn start_with_paths(paths: RuntimePaths) {
-    let Some(context) = silo_engine::context::current() else {
-        return;
-    };
     if PATHS.set(paths.clone()).is_err() {
         return;
     }
-    let _ = LCU_ROOT.set(context.paths().app_data.join("lcu"));
     kick();
 }
 
-/// Starts any preparation that is not ready; a run already in flight is joined.
+/// Starts the image preparation unless it is ready; a run already in flight is joined.
 fn kick() {
     let Some(paths) = PATHS.get().cloned() else {
         return;
@@ -270,12 +257,6 @@ fn kick() {
         .name("preparation-image".into())
         .spawn(move || {
             let _ = ensure_image(&paths, &|_| {});
-        });
-    let _ = std::thread::Builder::new()
-        .name("preparation-lcu".into())
-        .spawn(|| {
-            let _ = ensure_lcu(&|_| {});
-            lcu_mount::request_collection();
         });
 }
 
@@ -344,44 +325,6 @@ fn percent(received: u64, total: u64) -> u8 {
     (u128::from(received) * 100 / u128::from(total)).min(100) as u8
 }
 
-/// The read-only host folder holding the verified pinned LCU archive for this device's guest
-/// architecture (file name as in guest/lcu-lock.json's URL), once ready. Its path never
-/// changes; an update replaces the archive inside it.
-pub fn lcu_folder() -> Option<PathBuf> {
-    let root = LCU_ROOT.get()?;
-    let spec = ArchiveSpec::lcu().ok()?;
-    published(root, &spec)
-}
-
-/// The folder LCU archives are published under. A computer's recorded mount source may
-/// still name a folder of an older version there.
-pub fn lcu_root() -> Option<PathBuf> {
-    LCU_ROOT.get().cloned()
-}
-
-/// Recreates `source`, a mount source a computer recorded, as an empty folder when it is
-/// missing and is a direct child of the LCU root.
-pub(crate) fn restore_missing_lcu_folder(source: &Path) -> bool {
-    LCU_ROOT
-        .get()
-        .is_some_and(|root| lcu_mount::restore_missing(source, root))
-}
-
-/// Returns the folder once the archive is downloaded and verified (joins or starts the download).
-pub fn ensure_lcu(report: &dyn Fn(Option<u8>)) -> Result<PathBuf, String> {
-    let root = LCU_ROOT
-        .get()
-        .ok_or("Silo is still starting. Retry in a moment.")?;
-    let spec = ArchiveSpec::lcu()?;
-    LCU.ensure(
-        &|| published(root, &spec).is_some(),
-        &|_| download_and_publish(root, &spec, &HttpDownloader::default(), &|_| {}),
-        &emit,
-        report,
-    )?;
-    published(root, &spec).ok_or_else(|| "The LCU download is no longer available. Retry.".into())
-}
-
 /// Starts again whatever failed. Resolves at once; progress follows as events.
 pub fn retry() -> PreparationStatus {
     kick();
@@ -390,84 +333,25 @@ pub fn retry() -> PreparationStatus {
 
 // -------------------------------------------------------------- archives
 
-/// A pinned download published below a root as `<root>/<folder>/<archive>`, where the folder
-/// is the version unless the spec names a stable one.
+/// A pinned download published below a root as `<root>/<version>/<archive>`.
 struct ArchiveSpec {
     version: String,
-    /// A folder whose name never changes, so the host path a computer records as its mount
-    /// source stays valid across updates.
-    stable_folder: Option<&'static str>,
     archive: String,
     url: String,
     sha256: String,
     /// The exact size, or 0 when only the checksum pins the archive.
     bytes: u64,
-    /// What the user-facing messages call it, as in "could not download {what}".
-    what: &'static str,
-    /// The downloaded file, as in "The downloaded {file} did not match".
-    file: &'static str,
-}
-
-fn safe_name(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && !value.starts_with('.')
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
 }
 
 impl ArchiveSpec {
     fn image(pinned: &PinnedImage) -> Self {
         Self {
             version: pinned.manifest.version.clone(),
-            stable_folder: None,
             archive: guest_image::ARCHIVE_FILE.into(),
             url: pinned.url.clone(),
             sha256: pinned.manifest.archive_sha256.clone(),
             bytes: pinned.manifest.archive_bytes,
-            what: "the VM image",
-            file: "VM image file",
         }
-    }
-
-    fn lcu() -> Result<Self, String> {
-        let arch = DebArch::host().map_err(|error| error.message)?;
-        Self::parse_lcu(LCU_LOCK, arch)
-    }
-
-    fn parse_lcu(json: &str, arch: DebArch) -> Result<Self, String> {
-        let invalid = || "LCU lock is invalid.".to_owned();
-        let lock: serde_json::Value = serde_json::from_str(json).map_err(|_| invalid())?;
-        let version = lock["version"].as_str().ok_or_else(invalid)?;
-        let asset = &lock["assets"][arch.name()];
-        let url = asset["url"].as_str().ok_or_else(invalid)?;
-        let sha256 = asset["sha256"].as_str().ok_or_else(invalid)?;
-        let archive = url.rsplit('/').next().unwrap_or_default();
-        if !url.starts_with("https://")
-            || !safe_name(version)
-            || !safe_name(archive)
-            || sha256.len() != 64
-            || !sha256
-                .bytes()
-                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-        {
-            return Err(invalid());
-        }
-        Ok(Self {
-            version: version.into(),
-            stable_folder: Some(lcu_mount::FOLDER),
-            archive: archive.into(),
-            url: url.into(),
-            sha256: sha256.into(),
-            bytes: 0,
-            what: "LCU",
-            file: "LCU file",
-        })
-    }
-
-    fn folder(&self) -> &str {
-        self.stable_folder.unwrap_or(&self.version)
     }
 
     fn part_name(&self) -> String {
@@ -483,7 +367,7 @@ static VERIFIED: Mutex<Vec<Stamp>> = Mutex::new(Vec::new());
 /// The folder of the verified archive, `None` when it is missing or does not match the spec.
 /// The checksum is read once per process and again when the file changes.
 fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
-    let folder = root.join(spec.folder());
+    let folder = root.join(&spec.version);
     let file = folder.join(&spec.archive);
     let meta = fs::symlink_metadata(&file).ok()?;
     if !meta.is_file() || (spec.bytes > 0 && meta.len() != spec.bytes) {
@@ -493,7 +377,7 @@ fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
     if locked(&VERIFIED).contains(&stamp) {
         return Some(folder);
     }
-    if chatgpt_app::sha256_file(&file).ok()? != spec.sha256 {
+    if download::sha256_file(&file).ok()? != spec.sha256 {
         return None;
     }
     let mut verified = locked(&VERIFIED);
@@ -505,57 +389,37 @@ fn published(root: &Path, spec: &ArchiveSpec) -> Option<PathBuf> {
 static UNIQUE: AtomicU64 = AtomicU64::new(0);
 
 fn remove_tree(path: &Path) {
-    let _ = chatgpt_app::make_tree_deletable(path);
+    let _ = download::make_tree_deletable(path);
     let _ = fs::remove_dir_all(path);
 }
 
-fn capitalized(text: &str) -> String {
-    let mut characters = text.chars();
-    characters.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(characters).collect()
-    })
-}
-
-fn failure(spec: &ArchiveSpec, error: &chatgpt_app::Error) -> Failure {
+fn failure(error: &download::Error) -> Failure {
     Failure {
         message: if error.retryable {
-            format!(
-                "Silo could not download {}. Check your network connection, then retry.",
-                spec.what
-            )
+            "Silo could not download the VM image. Check your network connection, then retry."
+                .into()
         } else {
-            format!(
-                "{} is no longer available at its pinned location. Update Silo.",
-                capitalized(spec.what)
-            )
+            "The VM image is no longer available at its pinned location. Update Silo.".into()
         },
         retryable: error.retryable,
     }
 }
 
-fn storage_failure(spec: &ArchiveSpec) -> impl Fn(std::io::Error) -> Failure + '_ {
-    move |_| {
-        Failure::from(format!(
-            "Silo could not save {}. Check free disk space, then retry.",
-            spec.what
-        ))
-    }
+fn storage_failure(_: std::io::Error) -> Failure {
+    Failure::from("Silo could not save the VM image. Check free disk space, then retry.".to_owned())
 }
 
 /// Downloads the pinned archive (resuming a partial file), verifies its size and checksum and
-/// publishes it read-only as `<root>/<folder>/<archive>`. A versioned folder replaces the
-/// previous one and every other version is removed; a stable folder keeps its place and the
-/// archive is renamed into it (`lcu_mount`).
-/// `progress` receives the bytes downloaded so far.
+/// publishes it read-only as `<root>/<version>/<archive>`, replacing the previous folder and
+/// removing every other version. `progress` receives the bytes downloaded so far.
 fn download_and_publish(
     root: &Path,
     spec: &ArchiveSpec,
     downloader: &dyn Downloader,
     progress: &dyn Fn(u64),
 ) -> Result<(), Failure> {
-    let saving = storage_failure(spec);
     let downloads = root.join(DOWNLOAD_DIR);
-    fs::create_dir_all(&downloads).map_err(&saving)?;
+    fs::create_dir_all(&downloads).map_err(storage_failure)?;
     let part = downloads.join(spec.part_name());
     if spec.bytes > 0 {
         let have = fs::metadata(&part).map_or(0, |meta| meta.len());
@@ -566,20 +430,17 @@ fn download_and_publish(
         .fetch(&spec.url, &part, spec.bytes, &mut |received| {
             progress(received)
         })
-        .map_err(|error| failure(spec, &error))?;
+        .map_err(|error| failure(&error))?;
     let size_matches =
         spec.bytes == 0 || fs::metadata(&part).is_ok_and(|meta| meta.len() == spec.bytes);
     let matches =
-        size_matches && chatgpt_app::sha256_file(&part).is_ok_and(|hash| hash == spec.sha256);
+        size_matches && download::sha256_file(&part).is_ok_and(|hash| hash == spec.sha256);
     if !matches {
         let _ = fs::remove_file(&part);
-        return Err(Failure::from(format!(
-            "The downloaded {} did not match its checksum and was removed. Retry.",
-            spec.file
-        )));
-    }
-    if spec.stable_folder.is_some() {
-        return lcu_mount::publish(root, spec, &part).map_err(saving);
+        return Err(Failure::from(
+            "The downloaded VM image file did not match its checksum and was removed. Retry."
+                .to_owned(),
+        ));
     }
     let staging = root.join(format!(
         "{PUBLISH_PREFIX}{}-{}",
@@ -604,7 +465,7 @@ fn download_and_publish(
         if moved.get() {
             remove_tree(&target);
         }
-        return Err(saving(error));
+        return Err(storage_failure(error));
     }
     collect_garbage(root, &spec.version);
     Ok(())

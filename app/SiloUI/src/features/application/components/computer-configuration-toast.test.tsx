@@ -58,16 +58,10 @@ describe("describeConfiguration", () => {
     expect(at("desktop-installation").step).toBe("Setting up the desktop")
   })
 
-  it("names what creation waits for and finishes with computer use setup, with progress where known", () => {
+  it("names what creation waits for and finishes with computer use setup", () => {
     const step = (...events: SiloProgressEvent[]) => describeConfiguration(operation(events), committed)
     expect(step(event("computer-image-wait"))).toMatchObject({ step: "Waiting for the computer image", progress: null })
-    expect(step(event("chatgpt-app-wait"))).toMatchObject({ step: "Waiting for ChatGPT for Linux", progress: null })
-    const download = { ...event("chatgpt-app-download"), downloadedBytes: 620, totalBytes: 1000 }
-    expect(step(download)).toMatchObject({ step: "Downloading ChatGPT for Linux · 62%", progress: 0.62 })
-    expect(step({ ...event("chatgpt-app-download"), downloadedBytes: 5 })).toMatchObject({ step: "Downloading ChatGPT for Linux" })
     expect(step(event("computer-use-setup", 0)).step).toBe("Setting up the desktop and computer use")
-    const failed = { ...event("chatgpt-app-failed"), message: "No network" }
-    expect(step(failed).step).toBe("ChatGPT for Linux failed: No network")
     // The bar still advances monotonically with the added stages.
     const values = ["computer-image-wait", "computer-runtime-preparation", "desktop-installation", "computer-use-setup", "computer-verification"].map(name => step(event(name, 0)).progress!)
     expect(values).toEqual([...values].sort((a, b) => a - b))
@@ -76,7 +70,7 @@ describe("describeConfiguration", () => {
 })
 
 function Harness({ current, computers, onOpen, computerUse = "ready" }: { current: ComputerConfigurationOperation | null; computers: ApplicationComputer[]; onOpen?: (id: string) => void; computerUse?: "ready" | "unavailable" }) {
-  const bridge = createComputerUseBridge(createFixtureComputerUseBackend(computerUse, "idle"))
+  const bridge = createComputerUseBridge(createFixtureComputerUseBackend(computerUse))
   return <SettingsProvider initialSettings={{ theme: "light" }}>
     <ComputerUseProvider bridge={bridge}>
       <Toaster />
@@ -106,14 +100,8 @@ describe("ComputerConfigurationToast", () => {
     expect(onOpen).toHaveBeenCalledWith("vm-new")
   })
 
-  it("lets the user finish without computer use while ChatGPT for Linux fails, and warns when setup is left for the first start", async () => {
-    const failed = { ...event("chatgpt-app-failed"), message: "No network" }
-    const view = render(<Harness current={operation([failed])} computers={existing} />)
-    expect(await screen.findByText("ChatGPT for Linux failed: No network")).toBeVisible()
-    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Finish without computer use" })).toBeVisible()
-
-    view.rerender(<Harness current={operation([event("computer-use-setup", 0), event("computer-use-pending", 0)])} computers={existing} />)
+  it("warns when computer use setup is left for the first start", async () => {
+    const view = render(<Harness current={operation([event("computer-use-setup", 0), event("computer-use-pending", 0)])} computers={existing} />)
     expect(await screen.findByText("Setting up the desktop and computer use")).toBeVisible()
     expect(screen.queryByRole("button", { name: "Finish without computer use" })).not.toBeInTheDocument()
 

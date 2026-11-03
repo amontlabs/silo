@@ -181,19 +181,19 @@ patch and its pinned SHA. This changes the runtime preparation cache key, withou
 changing production retention policy.
 
 The built-in desktop and computer-use live tests share `test_support::computer_use_live`
-(one disposable `/tmp` home per test, `e2e-*` computers, a registered published ChatGPT
-folder). Inputs: `SILO_LIVE_TEST_CONFIRM`, a signed `msb` and libkrunfw (`SILO_TEST_MSB`,
-`SILO_TEST_LIBKRUNFW`), the v4 image directory (`SILO_TEST_GUEST_IMAGE`: manifest.json and
-image.tar.gz) and a published ChatGPT folder (`SILO_TEST_PUBLISHED`; `SILO_LIVE_CHATGPT_ROOT`
-keeps the folder `chatgpt_app::tests::live_download_of_the_pinned_arm64_package` publishes).
+(one disposable `/tmp` home per test, `e2e-*` computers; `driver.rs` and `approval.rs` hold the
+tests). Inputs: `SILO_LIVE_TEST_CONFIRM`, a signed `msb` and libkrunfw (`SILO_TEST_MSB`,
+`SILO_TEST_LIBKRUNFW`), the guest image directory (`SILO_TEST_GUEST_IMAGE`: manifest.json and
+image.tar.gz) and network access, because on the v4 image the guest downloads Cua Driver once.
+No published ChatGPT folder is needed any more.
 `SILO_LIVE_KEEP=1` leaves a failed test's stopped home for inspection;
-`SILO_LIVE_EVIDENCE` names a directory for the drive test's screenshots. The tests:
+`SILO_LIVE_EVIDENCE` names a directory for screenshots. The tests are `#[ignore]`d:
 
 | Test | Proves |
 | --- | --- |
-| `live_lcu_drives_the_desktop_without_a_model` | Create to ready, `lcu status`/`doctor`, read-only mount, a bare MCP client with no `_meta` reaches X11 through the `js` tool (LCU 0.8.2), LCU's own MCP client drives GNOME Text Editor (typeText, paste, Save As, then window-targeted ctrl+a/BackSpace/per-key typing and ctrl+s, LCU 0.8.3) and a terminal (per-key), with the files verified from outside; also records memory, disk and times |
-| `live_approval_switch_edits_only_the_installed_harnesses` | `auto` adds and `ask` removes exactly LCU's approval entries in Codex and Claude Code (installed from npm; `SILO_LIVE_SKIP_HARNESS_INSTALL=1` skips that phase) |
-| `live_built_in_lifecycle_keeps_the_desktop_and_computer_use` | Restart, stop/start, checkpoint of the running computer, fork and in-place restore each end with the session running, computer use ready, the folder read-only and `lcu doctor` passing |
+| `live_cua_driver_is_ready_in_the_desktop` | A fresh computer through Silo's create and start paths: Cua Driver is at the pinned version, `cua-driver doctor` passes in the desktop session, nothing is mounted from the host, and the agent registrations carry the telemetry and update-check switches |
+| `live_approval_switch_edits_only_the_installed_harnesses` | `auto` adds and `ask` removes exactly the Cua Driver approval entries in Codex and Claude Code (installed from npm; `SILO_LIVE_SKIP_HARNESS_INSTALL=1` skips that phase) |
+| `live_built_in_lifecycle_keeps_the_desktop_and_computer_use` | Restart, stop/start, checkpoint of the running computer, fork and in-place restore each end with the session running, computer use ready, nothing mounted from the host and the approval kept |
 | `live_pre_v4_computer_gets_no_mount_no_desktop_and_keeps_its_flows` | A computer from the v3 image (`SILO_TEST_V3_GUEST_IMAGE`) has no mount, no desktop and no helper, and its lifecycle flows work |
 | `live_built_in_computer_use_sets_up_and_survives_export_and_import` | Export and import into a second home with its own folder; the imported computer takes the destination's `ask` |
 | `live_built_in_desktop_boots_repeatedly` | `SILO_BOOT_LOOP_ROUNDS` (default 3) restarts and imports with no desktop failure |

@@ -201,7 +201,6 @@ it("offers the new-computer computer use approval where the other general settin
   const source = applicationSourceForScenario("running")
   const backend: ComputerUseBackend = {
     readDesktopState: async () => ({}), setApproval: async () => ({}), setup: async () => ({}),
-    chatGptStatus: async () => ({ state: "ready", path: "/p", version: "1" }), retry: async () => ({}), listenStatus: async () => () => {},
   }
   render(<SettingsProvider store={store}><SystemIntegrationProvider store={createFixtureSystemIntegrationStore(store)}><ComputerUseProvider bridge={createComputerUseBridge(backend)}>
     <GeneralPage source={source} applicationPreferences={source.preferences} onApplicationPreferencesChange={vi.fn()} reduceMotion={false} onReduceMotionChange={vi.fn()} />

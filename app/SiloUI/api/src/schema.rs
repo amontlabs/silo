@@ -174,7 +174,7 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 148);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 145);
         assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 29);
         assert_eq!(
             schema["$schema"],
@@ -293,7 +293,7 @@ mod tests {
             code: ErrorCode::IncompatibleVersion,
             message: "No common protocol version".to_owned(),
             diagnostics: Some(crate::transport::IncompatibleVersionDiagnostics {
-                engine_protocol_range: crate::transport::ProtocolRange { min: 6, max: 6 },
+                engine_protocol_range: crate::transport::ProtocolRange { min: 7, max: 7 },
                 client_protocol_range: crate::transport::ProtocolRange { min: 5, max: 5 },
                 engine_app_version: "0.1.0".to_owned(),
                 client_app_version: Some("9.8.7".to_owned()),
@@ -307,7 +307,7 @@ mod tests {
                 "code": "incompatible_version",
                 "message": "No common protocol version",
                 "diagnostics": {
-                    "engineProtocolRange": { "min": 6, "max": 6 },
+                    "engineProtocolRange": { "min": 7, "max": 7 },
                     "clientProtocolRange": { "min": 5, "max": 5 },
                     "engineAppVersion": "0.1.0",
                     "clientAppVersion": "9.8.7"
@@ -360,18 +360,6 @@ mod tests {
     }
 
     #[test]
-    fn chatgpt_progress_fields_are_camel_case() {
-        let status = crate::methods::preparation::ChatGptPreparationStatus::Downloading {
-            received_bytes: 4,
-            total_bytes: 8,
-        };
-        assert_eq!(
-            serde_json::to_value(status).unwrap(),
-            serde_json::json!({"state":"downloading","receivedBytes":4,"totalBytes":8})
-        );
-    }
-
-    #[test]
     fn method_params_preserve_absent_and_nullable_settings_values() {
         use crate::methods::settings::{SettingsUpdateParams, SettingsValues};
 
@@ -406,25 +394,22 @@ mod tests {
             schema_version: Some(1),
             state: Some(crate::methods::computer_use::ComputerUseInstallState::Ready),
             reason: None,
-            cause: None,
-            compatibility: Some(crate::methods::computer_use::ComputerUseCompatibility::Unknown),
-            warning: None,
             approval: Some(crate::methods::computer_use::ComputerUseApprovalState::Auto),
             applied_approval: Some(crate::methods::computer_use::ComputerUseApprovalState::Unknown),
             approval_apply: Some(
                 crate::methods::computer_use::ComputerUseApprovalApplyState::Applied,
             ),
             approval_apply_reason: None,
-            app_version: Some("1.2".into()),
+            driver_version: Some("0.38.0".into()),
             chatgpt_version: None,
-            runtime_version: None,
             lcu_version: None,
             agents: Some(vec!["agent-a".into()]),
             at: None,
         };
         let state_json = serde_json::to_value(&state).unwrap();
         assert_eq!(state_json["state"], "ready");
-        assert_eq!(state_json["cause"], serde_json::Value::Null);
+        assert_eq!(state_json["driverVersion"], "0.38.0");
+        assert!(state_json.get("cause").is_none());
         assert_eq!(
             serde_json::from_value::<crate::methods::computer_use::ComputerUseState>(state_json)
                 .unwrap(),

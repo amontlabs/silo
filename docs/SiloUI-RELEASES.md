@@ -5,7 +5,7 @@ Every native Silo build requires the GitHub App configuration. The build reads
 Explicit environment variables take precedence, which is how GitHub Actions
 supplies the same configuration. Missing, empty, malformed, or multiline values
 stop the native build instead of producing an app with broken GitHub access.
-Silo's supported host is Apple Silicon macOS 14+. Linux host apps and packages
+Silo's supported host is Apple Silicon macOS 15+. Linux host apps and packages
 are discontinued; Linux computers remain supported as guests on a Mac.
 
 ## Release a new version
@@ -437,21 +437,18 @@ entire ad-hoc-signed app. Each update gets a constraint for its own engine.
 The packager regenerates both the DMG and signed updater archive from the same
 finished app, with no AppleDouble archive entries.
 
-The minimum macOS 14 constraint tests are required before draft creation; the
+The minimum macOS 15 constraint tests are required before draft creation; the
 build runner also exercises the constraint tests. GitHub's macOS 14.8.9 and
 15.7.9 runners were verified to have System Integrity Protection disabled on
 2026-09-10. Their explicit `--constraints-only` mode checks library fingerprint
 restrictions and records the two signature-enforcement controls as skipped.
 A passing hosted result does not establish signature enforcement. Public release
-also requires the full suite on a Mac with SIP enabled, including the minimum
-supported macOS version. GitHub currently provides
-macOS 14 runners until November 2, 2026, with
-[announced October brownouts](https://github.com/actions/runner-images/issues/13518)
-that fail jobs before retirement. The first window is October 5 at 14:00 UTC
-through October 6 at 00:00 UTC. Draft creation requires this job, so qualify a
-maintained replacement before that window; rerunning outside brownout windows
-is only a temporary workaround. Before their retirement, replace this
-minimum-version proof with a maintained runner rather than silently omitting it.
+also requires the full suite on a Mac with SIP enabled.
+GitHub [retired its macOS 14 runners on November 2, 2026](https://github.com/actions/runner-images/issues/13518),
+so the supported minimum is now macOS 15 and the required job runs on `macos-15`.
+The bundle keeps `minimumSystemVersion` 14.0 on purpose: the update feed has
+one `darwin-aarch64` package and existing clients do not check the OS version,
+so raising it would update macOS 14 installations to an app that cannot open.
 This CI test checks library enforcement, not nested VM execution.
 
 ### Build and publish
@@ -494,13 +491,12 @@ guest computers on Mac hosts remain supported.
 - Built-in computer use qualified on an Apple Silicon Mac using the supported
   Mac host app and Linux guest image. Run the opt-in live tests
   `backup_controller::tests::live_built_in_computer_use_sets_up_and_survives_export_and_import`
-  and `live_built_in_desktop_boots_repeatedly` with the v4 guest image, a
-  published ChatGPT app and the packaged `msb`; see
-  [ChatGPT app](SiloUI-CHATGPT-APP.md#integration-2026-10-02) for the inputs
+  and `live_built_in_desktop_boots_repeatedly` with a guest image and the
+  packaged `msb`; see [Rust test support](SiloUI-RUST-TEST-SUPPORT.md) for the inputs
   and `SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures`. Then confirm on the Mac
   host with throwaway `e2e-*` computers: a fresh boot, a stop and start, a
-  checkpoint restore, an export and import, and LCU readiness (`computerUse` is
-  `ready` and `lcu doctor` passes) after each. Record the device, app version,
+  checkpoint restore, an export and import, and Cua Driver readiness (`computerUse` is
+  `ready` and `cua-driver doctor` passes) after each. Record the device, driver version,
   commands and results with the release evidence.
 - No public-release claim until these checks have real evidence. Unit/build
   success does not substitute for clean installation or computer execution.
@@ -601,7 +597,7 @@ version that differs from the production manifest's `engineVersion`.
 - [Tauri AppImage packaging](https://v2.tauri.app/distribute/appimage/)
 - [AppImage filesystem/runtime layout](https://docs.appimage.org/introduction/software-overview.html)
 - [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/)
-- [GitHub macOS 14 runner retirement](https://github.com/actions/runner-images/issues/13518)
+- [GitHub macOS 14 runner retirement (November 2, 2026)](https://github.com/actions/runner-images/issues/13518)
 - [Apple library constraints](https://developer.apple.com/documentation/security/defining-launch-environment-and-library-constraints)
 - [GitHub release immutability](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)
 - [GitHub deployment environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/managing-environments-for-deployment)
@@ -823,7 +819,7 @@ exit, and checks that `waitpid` reports no unreaped child.
 ### Disk-space diagnostic units
 
 Low-space messages for update installation, computer image preparation, and
-ChatGPT app downloads express their existing binary byte calculations as MiB.
+(formerly) ChatGPT app downloads express their existing binary byte calculations as MiB.
 [NIST's binary-prefix definitions](https://physics.nist.gov/cuu/Units/binary.html)
 distinguish one MiB (1,048,576 bytes) from one MB (1,000,000 bytes). The previous MB
 label understated the represented byte amount. Update preflight regressions cover

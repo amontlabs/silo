@@ -222,12 +222,12 @@ impl Client {
             .request(
                 "engine.handshake",
                 json!({
-                    "protocol": {"min": 6, "max": 6},
+                    "protocol": {"min": 7, "max": 7},
                     "client": {"name": "services-test", "version": "1.0"}
                 }),
             )
             .await;
-        assert_eq!(handshake["protocol"], 6);
+        assert_eq!(handshake["protocol"], 7);
         client
     }
 

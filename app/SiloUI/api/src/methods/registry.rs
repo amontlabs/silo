@@ -81,7 +81,6 @@ define_registry! {
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
-    ComputersCreationSkipComputerUseWait => ("computers.creation.skipComputerUseWait", Command, computers::ComputerCreationSkipWaitParams, ());
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
     ComputersDismissError => ("computers.dismissError", Command, computers::ComputerDismissErrorParams, computers::ApplicationSource);
     ComputersForceStop => ("computers.forceStop", Command, computers::ComputerForceStopParams, ());
@@ -186,8 +185,6 @@ define_registry! {
     OperationsJobAcknowledge => ("operations.job.acknowledge", Command, operations::AcknowledgeJobParams, ());
     OperationsJobGet => ("operations.job.get", Query, operations::GetJobParams, jobs::JobLookupResult);
     OperationsList => ("operations.list", Query, operations::OperationsListParams, operations::OperationQueue);
-    PreparationChatgptRetry => ("preparation.chatgpt.retry", Command, preparation::ChatGptPreparationRetryParams, preparation::ChatGptPreparationStatus);
-    PreparationChatgptStatus => ("preparation.chatgpt.status", Query, preparation::ChatGptPreparationStatusParams, preparation::ChatGptPreparationStatus);
     PreparationRetry => ("preparation.retry", Command, preparation::PreparationRetryParams, preparation::PreparationStatus);
     PreparationStatus => ("preparation.status", Query, preparation::PreparationStatusParams, preparation::PreparationStatus);
     PushDismiss => ("push.dismiss", Command, push::PushDismissParams, ());
@@ -224,20 +221,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 148);
+        assert_eq!(METHOD_REGISTRY.len(), 145);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            47
+            46
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            66
+            64
         );
         assert_eq!(
             METHOD_REGISTRY

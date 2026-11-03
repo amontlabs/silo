@@ -1,5 +1,8 @@
 # Guest image size measurement
 
+> Dated measurements. The ChatGPT app and LCU sections below describe 2026-10 experiments; the
+> v5 recipe (2026-11-03) has neither, and no v5 size has been measured yet (v5 is unpublished).
+
 Measured 2026-09-09 on Apple Silicon using Docker/OrbStack, linux/arm64.
 This is a packaging experiment, not an implemented MicroSandbox image import.
 

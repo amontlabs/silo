@@ -32,7 +32,7 @@ it("stops computer-use reads while the computer page is hidden and refreshes on 
   const dev = source.computers.find(({ configuration }) => configuration.name === "dev")!
   dev.configuration.desktop = { startWithComputer: true }
   const read = vi.fn(async () => fixtureDesktopState("ready"))
-  const bridge = createComputerUseBridge({ ...createFixtureComputerUseBackend("ready", "ready"), readDesktopState: read })
+  const bridge = createComputerUseBridge({ ...createFixtureComputerUseBackend("ready"), readDesktopState: read })
   const page = (active: boolean) => <ComputerUseProvider bridge={bridge}><OverviewPage active={active} source={source} actions={{} as ApplicationActions} onConfigurationsChange={vi.fn()} selectedComputerId={dev.configuration.id} computerTab="overview" onOpenComputer={vi.fn()} onCloseComputer={vi.fn()} onSelectComputerTab={vi.fn()} /></ComputerUseProvider>
   const view = render(page(true))
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })

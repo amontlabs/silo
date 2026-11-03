@@ -155,13 +155,12 @@ fn the_status_serializes_with_the_documented_names() {
             message: None,
             retryable: false,
         },
-        lcu: PreparationTask::new(TaskState::Pending),
     })
     .unwrap();
     assert_eq!(value["image"]["state"], "running");
     assert_eq!(value["image"]["fraction"], 5);
-    assert_eq!(value["lcu"]["state"], "pending");
-    assert_eq!(value["lcu"]["retryable"], false);
+    assert_eq!(value["image"]["retryable"], false);
+    assert!(value.get("lcu").is_none());
 }
 
 // ------------------------------------------------------------------ archives
@@ -175,24 +174,21 @@ const BODY: &[u8] = b"pinned archive body";
 fn spec_of(version: &str, archive: &str, bytes: u64) -> ArchiveSpec {
     ArchiveSpec {
         version: version.into(),
-        stable_folder: None,
         archive: archive.into(),
         url: format!("https://example.test/{archive}"),
         sha256: format!("{:x}", Sha256::digest(BODY)),
         bytes,
-        what: "LCU",
-        file: "LCU file",
     }
 }
 
 fn spec(version: &str) -> ArchiveSpec {
-    spec_of(version, &format!("lcu-{version}-linux-x64.tar.gz"), 0)
+    spec_of(version, &format!("vm-image-{version}.tar.gz"), 0)
 }
 
 /// Serves `full`, or stops after `interrupt_after` bytes once, as a dropped connection does.
 struct Fake {
     full: Vec<u8>,
-    error: Option<chatgpt_app::Error>,
+    error: Option<download::Error>,
     interrupt_after: Mutex<Option<usize>>,
     expected_total: u64,
     calls: AtomicUsize,
@@ -223,7 +219,7 @@ impl Downloader for Fake {
         part: &Path,
         total: u64,
         progress: &mut dyn FnMut(u64),
-    ) -> Result<(), chatgpt_app::Error> {
+    ) -> Result<(), download::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert!(url.starts_with("https://"));
         assert_eq!(total, self.expected_total);
@@ -243,9 +239,9 @@ impl Downloader for Fake {
     }
 }
 
-fn error(retryable: bool) -> chatgpt_app::Error {
-    chatgpt_app::Error {
-        message: "OpenAI-specific text".into(),
+fn error(retryable: bool) -> download::Error {
+    download::Error {
+        message: "Server-specific text".into(),
         retryable,
     }
 }
@@ -257,22 +253,9 @@ fn part_of(root: &Path, spec: &ArchiveSpec) -> PathBuf {
 fn no_progress(_: u64) {}
 
 #[test]
-fn the_bundled_lock_names_an_https_archive_for_each_architecture() {
-    for arch in [DebArch::Arm64, DebArch::Amd64] {
-        let spec = ArchiveSpec::parse_lcu(LCU_LOCK, arch).unwrap();
-        assert!(spec.url.ends_with(&spec.archive));
-        assert!(spec.archive.contains(&spec.version));
-    }
-    let plain = LCU_LOCK.replace("https://", "http://");
-    assert!(ArchiveSpec::parse_lcu(&plain, DebArch::Amd64).is_err());
-    let traversal = LCU_LOCK.replace("lcu-0.11.0-linux-x64.tar.gz", "..");
-    assert!(ArchiveSpec::parse_lcu(&traversal, DebArch::Amd64).is_err());
-}
-
-#[test]
 fn a_verified_archive_is_published_read_only_and_older_versions_are_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
+    let root = dir.path().join("images");
     let old = spec("0.8.1");
     fs::create_dir_all(root.join(&old.version)).unwrap();
     fs::write(root.join(&old.version).join(&old.archive), b"old").unwrap();
@@ -309,7 +292,7 @@ fn a_verified_archive_is_published_read_only_and_older_versions_are_removed() {
 #[test]
 fn an_archive_that_fails_its_checksum_is_discarded_and_not_published() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
+    let root = dir.path().join("images");
     let current = spec("0.11.0");
     let failure = download_and_publish(&root, &current, &Fake::serving(b"tampered"), &no_progress)
         .err()
@@ -324,7 +307,7 @@ fn an_archive_that_fails_its_checksum_is_discarded_and_not_published() {
 #[test]
 fn a_published_archive_that_changed_is_no_longer_ready() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
+    let root = dir.path().join("images");
     let current = spec("0.11.0");
     download_and_publish(&root, &current, &Fake::serving(BODY), &no_progress)
         .map_err(|f| f.message)
@@ -339,9 +322,9 @@ fn a_published_archive_that_changed_is_no_longer_ready() {
 }
 
 #[test]
-fn download_failures_say_what_to_do_without_naming_another_vendor() {
+fn download_failures_say_what_to_do_without_echoing_the_server_text() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
+    let root = dir.path().join("images");
     let current = spec("0.11.0");
     let mut downloader = Fake::serving(BODY);
     downloader.error = Some(error(true));
@@ -349,7 +332,7 @@ fn download_failures_say_what_to_do_without_naming_another_vendor() {
         .err()
         .unwrap();
     assert!(transient.retryable);
-    assert!(transient.message.contains("retry") && !transient.message.contains("OpenAI"));
+    assert!(transient.message.contains("retry") && !transient.message.contains("Server-specific"));
     downloader.error = Some(error(false));
     let removed = download_and_publish(&root, &current, &downloader, &no_progress)
         .err()
@@ -361,7 +344,7 @@ fn download_failures_say_what_to_do_without_naming_another_vendor() {
 #[test]
 fn ensuring_the_archive_through_a_job_downloads_once_then_is_ready() {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
+    let root = dir.path().join("images");
     let current = spec("0.11.0");
     let job = Job::new();
     let downloader = Fake::serving(BODY);
@@ -663,7 +646,6 @@ fn preparation_status_publication_targets_only_the_main_client() {
     let context = RecordingContext::default();
     let status = PreparationStatus {
         image: PreparationTask::new(TaskState::Running),
-        lcu: PreparationTask::new(TaskState::Pending),
     };
 
     publish_status(&context, &status);
@@ -681,23 +663,4 @@ fn preparation_status_publication_targets_only_the_main_client() {
     );
     assert_eq!(published[1].0.name, STATUS_EVENT);
     assert_eq!(published[1].1, Audience::Client(ClientId::new("main")));
-}
-
-#[test]
-fn the_lcu_archive_is_published_in_a_folder_that_does_not_change_with_the_version() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("lcu");
-    let mut first = ArchiveSpec::parse_lcu(LCU_LOCK, DebArch::Amd64).unwrap();
-    first.sha256 = format!("{:x}", Sha256::digest(BODY));
-    let mut second = ArchiveSpec::parse_lcu(LCU_LOCK, DebArch::Amd64).unwrap();
-    second.version = "0.12.0".into();
-    second.archive = "lcu-0.12.0-linux-x64.tar.gz".into();
-    second.sha256 = first.sha256.clone();
-    for spec in [&first, &second] {
-        download_and_publish(&root, spec, &Fake::serving(BODY), &no_progress)
-            .map_err(|f| f.message)
-            .unwrap();
-        assert_eq!(published(&root, spec).unwrap(), root.join("current"));
-    }
-    assert!(published(&root, &first).is_none());
 }
