@@ -118,6 +118,61 @@ jobs:
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
           'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
 
+  # The engine is embeddable, so it must keep building and passing its tests on a
+  # Linux host even though the shipped daemon is macOS only. macOS computers are
+  # stubbed there and their host-only tests are ignored.
+  engine-linux:
+    name: Engine tests (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app/SiloUI
+    env:
+      # Synthetic build values from the release guide, as in the macOS job.
+      SILO_GITHUB_APP_SLUG: silo-ci-test
+      SILO_GITHUB_CLIENT_ID: test-client
+      SILO_GITHUB_CLIENT_SECRET: test-secret
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/preflight.mjs
+      # silo-host links GTK on Linux; the tests also run OpenSSH and zsh.
+      - name: Install Linux build and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config openssh-client zsh
+      - name: Install pinned Rust toolchain
+        run: |
+          runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
+          rustup toolchain install "$runtime_toolchain" --profile minimal
+          rustup default "$runtime_toolchain"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: app/SiloUI
+      - name: Restore the pinned Git download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: silo-git-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/SiloUI/scripts/git-runtime.mjs') }}
+          path: app/SiloUI/src-tauri/target/runtime-cache/dugite
+      # Host-push tests drive the bundled Git; stage only that part of the
+      # runtime (pinned and checksummed), not MicroSandbox.
+      - name: Stage the bundled Git runtime
+        run: >-
+          node --input-type=module -e 'import { execFileSync } from "node:child_process";
+          import { stageGitRuntime } from "./scripts/git-runtime.mjs";
+          import { fetchStream } from "./scripts/build-input.mjs";
+          const targetTriple = execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
+          await stageGitRuntime({ appRoot: process.cwd(), targetTriple, fetchStream })'
+      - name: Run engine tests
+        timeout-minutes: 30
+        run: cargo test -p silo-engine --locked
+
   rust:
     name: Rust tests
     runs-on: macos-15

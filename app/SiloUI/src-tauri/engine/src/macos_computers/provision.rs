@@ -1029,6 +1029,7 @@ mod tests {
         assert!(store::setup_allowed(store::State::Stopped, &record).is_ok());
         assert!(!setup_finished(&record, &developer_tools::version()));
         // The retry boots over the temporary Apple NAT, never behind the gateway.
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(!engine::boots_behind_gateway(&record));
 
         let mut staged = 0;
@@ -1044,6 +1045,7 @@ mod tests {
         assert!(record.setup_complete());
         assert!(setup_finished(&record, &developer_tools::version()));
         assert!(store::setup_allowed(store::State::Stopped, &record).is_err());
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(engine::boots_behind_gateway(&record));
     }
 
