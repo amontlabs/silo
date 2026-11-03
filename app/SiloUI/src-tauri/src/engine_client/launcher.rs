@@ -191,8 +191,14 @@ impl Launcher for BundleLauncher {
                 // copy of the app), and then nothing would ever start it: register again.
                 // Only a job launchd reports missing is touched, never one still starting.
                 if self.service.job_loaded() == Some(false) {
-                    // Registering an Enabled agent is a no-op until it is unregistered.
-                    let _ = self.service.unregister();
+                    // Registering an Enabled agent is a no-op until it is unregistered, so a
+                    // failed unregister means nothing will start it: say why.
+                    self.service.unregister().map_err(|message| {
+                        LaunchError::new(format!(
+                            "{} could not register its engine again: {message}",
+                            self.product
+                        ))
+                    })?;
                     self.check_registration(ServiceStatus::Enabled, self.service.register())?;
                 }
             }
@@ -327,6 +333,7 @@ mod tests {
         listener_path: Option<PathBuf>,
         listener: Mutex<Option<UnixListener>>,
         unregistered: Mutex<u32>,
+        unregister_error: Option<String>,
         job_loaded: Option<bool>,
     }
 
@@ -341,6 +348,7 @@ mod tests {
                 listener_path: None,
                 listener: Mutex::new(None),
                 unregistered: Mutex::new(0),
+                unregister_error: None,
                 job_loaded: None,
             }
         }
@@ -366,6 +374,9 @@ mod tests {
 
         fn unregister(&self) -> Result<(), String> {
             *self.unregistered.lock().unwrap() += 1;
+            if let Some(error) = &self.unregister_error {
+                return Err(error.clone());
+            }
             *self.status.lock().unwrap() = ServiceStatus::NotRegistered;
             Ok(())
         }
@@ -533,6 +544,22 @@ mod tests {
         assert!(error
             .message
             .contains("could not register its engine: denied"));
+    }
+
+    #[test]
+    fn a_failed_unregister_of_a_dropped_agent_is_explained() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(false);
+        service.unregister_error = Some("operation not permitted".into());
+        let service = Arc::new(service);
+        let error = launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap_err();
+        assert!(error
+            .message
+            .contains("could not register its engine again: operation not permitted"));
+        assert_eq!(*service.registered.lock().unwrap(), 0);
     }
 
     #[test]
