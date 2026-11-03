@@ -206,6 +206,70 @@ def legacy_toml_hook(text):
     return bool(LEGACY.search(text) or LEGACY_HOOK_SERVER.search(text))
 
 
+def toml_items(body):
+    """The comma-separated items of an inline TOML array or table body, split at depth 0 so
+    strings and nested arrays or tables stay whole."""
+    items, depth, quote, start, i = [], 0, None, 0, 0
+    while i < len(body):
+        char = body[i]
+        if quote:
+            if quote == '"' and char == '\\':
+                i += 1
+            elif char == quote:
+                quote = None
+        elif char in '"\'':
+            quote = char
+        elif char in '[{':
+            depth += 1
+        elif char in ']}':
+            depth -= 1
+        elif char == ',' and depth == 0:
+            items.append(body[start:i].strip())
+            start = i + 1
+        i += 1
+    items.append(body[start:].strip())
+    return [item for item in items if item]
+
+
+HOOK_LINE = re.compile(r'^(\s*"?[A-Za-z]+"?\s*=\s*)\[(.*)\](\s*(?:#.*)?)$')
+HOOK_GROUP = re.compile(r'^\{(.*)\}$', re.S)
+HOOK_LIST = re.compile(r'^(hooks\s*=\s*)\[(.*)\]$', re.S)
+
+
+def strip_legacy_hook_line(line):
+    """One event of Codex's `[hooks]` table without LCU's hooks: the line as it is, the line with
+    only the other hooks left, or None when nothing is left."""
+    if not legacy_toml_hook(line):
+        return line
+    match = HOOK_LINE.match(line)
+    if not match:
+        return None
+    groups = []
+    for group in toml_items(match.group(2)):
+        if not legacy_toml_hook(group):
+            groups.append(group)
+            continue
+        table = HOOK_GROUP.match(group)
+        kept = []
+        for field in toml_items(table.group(1)) if table else []:
+            hooks = HOOK_LIST.match(field)
+            if hooks:
+                left = [h for h in toml_items(hooks.group(2)) if not legacy_toml_hook(h)]
+                if not left:
+                    kept = []
+                    break
+                field = '%s[%s]' % (hooks.group(1), ', '.join(left))
+            elif legacy_toml_hook(field):
+                kept = []
+                break
+            kept.append(field)
+        if kept:
+            groups.append('{ %s }' % ', '.join(kept))
+    if not groups:
+        return None
+    return '%s[%s]%s' % (match.group(1), ', '.join(groups), match.group(3))
+
+
 def stale_trust(name, events):
     """Whether section `name` is Codex's trust for a hook of this config file under an event that
     has no hook left in it."""
@@ -269,7 +333,7 @@ def edit_codex(entry, approval):
                     and legacy_toml_hook('\n'.join([name] + lines))):
                 continue
             if name == 'hooks':
-                lines = [line for line in lines if not legacy_toml_hook(line)]
+                lines = [line for line in map(strip_legacy_hook_line, lines) if line is not None]
                 if not any(line.strip() for line in lines[1:]):
                     continue
         kept.append((name, lines))

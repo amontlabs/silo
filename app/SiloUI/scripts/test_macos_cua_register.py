@@ -179,6 +179,25 @@ class RegisterTest(unittest.TestCase):
                          sorted(['%s:session_start:0:0' % config, '/Users/silo/project/.codex/config.toml:stop:0:0']))
         self.assertEqual(sorted(codex['mcp_servers']), ['cua-driver'])
 
+    def test_lcus_codex_hooks_go_but_hooks_sharing_their_event_stay(self):
+        self.install('codex')
+        lcu = '{ type = "mcp_tool", server = "lcu", tool = "turn_ended", input = { turn_id = "${turn_id}" } }'
+        mine = '{ type = "command", command = "echo \\"done, [ok]\\"" }'
+        self.module.CODEX_CONFIG.parent.mkdir(parents=True)
+        self.module.CODEX_CONFIG.write_text(
+            '[hooks]\n'
+            'Stop = [{ hooks = [%s] }, { hooks = [%s] }]  # mine\n' % (lcu, mine)
+            + 'SubagentStop = [{ matcher = "x", hooks = [%s, %s] }]\n' % (lcu, mine)
+            + 'Interrupt = [{ hooks = [%s] }]\n' % lcu)
+        self.apply('ask')
+        text = self.module.CODEX_CONFIG.read_text()
+        self.assertNotIn('server = "lcu"', text)
+        self.assertIn('# mine', text)
+        hooks = tomllib.loads(text)['hooks']
+        command = {'type': 'command', 'command': 'echo "done, [ok]"'}
+        self.assertEqual(hooks, {'Stop': [{'hooks': [command]}],
+                                 'SubagentStop': [{'matcher': 'x', 'hooks': [command]}]})
+
     def test_removal_keeps_rules_and_hooks_that_merely_mention_lcu(self):
         self.install('claude')
         self.install('codex')
