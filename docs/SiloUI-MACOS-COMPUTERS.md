@@ -497,12 +497,12 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), upgrading the pinned app or LCU in computers that already have them (a newer Silo's `apply` reinstalls the app and LCU, but nothing triggers it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
 | Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |
-| Terminal, editor, Files, network ports, GitHub, secrets, working account | None. These use the Linux guest bridge over SSH, which macOS computers do not have |
-| Export, import and backup | None |
+| Terminal, editor, Files, network ports, GitHub, secrets, working account | Done in the engine, for local and remote computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. Not done: the UI. A macOS computer has no detail page, so no terminal, editor or Files entry, and the Network, Secrets and GitHub pages list only Linux computers |
+| Export, import and backup | Done for local computers: export from the row menu, import (with new guest keys), and cleanup after an interrupted export. Not done: export of a remote computer, and export and import of a single checkpoint |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
 | Shared folders | None. The framework offers a VirtioFS share |
-| Editing resources after creation | None. CPUs and memory are fixed at creation; disk size cannot change. A new computer's disk is at least its template's |
-| Status panel, tray, notifications, start with Silo | None |
+| Editing resources after creation | CPUs and memory: Edit CPU & memory while the computer is stopped, for local and remote computers. Disk size cannot change. A new computer's disk is at least its template's |
+| Status panel, tray, notifications, start with Silo | Start with Silo is done for local computers. Status panel, tray and notifications: none |
 | Linux devices and Intel Macs | Not possible: the framework runs macOS guests only on Apple Silicon |
 
 ## Prior art for the clipboard
