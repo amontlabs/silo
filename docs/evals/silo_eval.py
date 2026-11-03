@@ -263,6 +263,7 @@ def scenario_host_network(ctx: Context, result: Result) -> None:
         except OSError as error:
             result.notes.append(f"Could not listen on the Mac's LAN address {lan_address}: {error}")
     control = tcp_exchange("127.0.0.1", loopback.port, "host-control")
+    lan_control = tcp_exchange(lan.address, lan.port, "host-control") if lan else None
     info = ctx.guest_python(ctx.computer_id, "net_info.py")
     send = "probe-" + ctx.nonce
     targets = [{"label": "public-control example.com:443", "host": "example.com", "port": 443, "send": ""}]
@@ -282,21 +283,24 @@ def scenario_host_network(ctx: Context, result: Result) -> None:
     probes = ctx.guest_python(ctx.computer_id, "tcp_probe.py", json.dumps(targets))
     time.sleep(1)
     received = [line for line in loopback.lines + (lan.lines if lan else []) if send in line["line"]]
-    result.evidence = {"guestNetwork": info, "probes": probes, "hostReceived": received, "hostControlReply": control}
+    result.evidence = {"guestNetwork": info, "probes": probes, "hostReceived": received, "hostControlReply": control,
+                       "lanAddress": lan.address if lan else lan_address, "lanControlReply": lan_control}
     public_ok = probes[0]["connected"]
     crossed = [p for p in probes if reply in p.get("reply", "")]
     metadata = [p for p in probes if p["host"] == "169.254.169.254" and p["connected"]]
     dns_open = [p["label"] for p in probes if ":53 " in p["label"] and p["connected"]]
     if dns_open:
         result.notes.append("TCP port 53 on the host side answers: the DNS forwarder is the one allowed host service.")
-    if control != reply:
-        result.set("inconclusive", "The Mac could not reach its own test listener.")
-    elif not public_ok:
-        result.set("inconclusive", "The guest could not reach example.com:443, so blocked probes prove nothing.")
+    if crossed or received:
+        result.set("fail", "The guest reached a listener on the Mac: " + (", ".join(p["label"] for p in crossed) or "see hostReceived"))
     elif metadata:
         result.set("fail", "The guest opened a connection to the metadata address 169.254.169.254:80.")
-    elif crossed or received:
-        result.set("fail", "The guest reached a listener on the Mac: " + (", ".join(p["label"] for p in crossed) or "see hostReceived"))
+    elif control != reply:
+        result.set("inconclusive", "The Mac could not reach its own loopback test listener.")
+    elif lan is None or lan_control != reply:
+        result.set("inconclusive", "No working listener on the Mac's LAN address, so the LAN path was not tested.")
+    elif not public_ok:
+        result.set("inconclusive", "The guest could not reach example.com:443, so blocked probes prove nothing.")
     else:
         result.set("pass", "The guest reached the internet but not the Mac's loopback, its LAN address, or the metadata address.")
 
@@ -502,19 +506,36 @@ def scenario_open_egress(ctx: Context, result: Result) -> None:
         result.set("inconclusive", "The public host answered but did not show the data.")
 
 
+def github_grant_problem(policy: Optional[Dict[str, Any]], readable: str, ungranted: str) -> Optional[str]:
+    """Why the computer's saved GitHub grants cannot support this scenario, or None."""
+    if policy is None:
+        return "The computer has no GitHub access; grant it one repository read-only in Silo first."
+    if policy.get("authenticationMethod") != "oauth":
+        return "The computer uses a personal token, which grants the token's full permissions; use the Silo GitHub App."
+    if policy.get("repositoryMode") != "selected":
+        return "The computer has access to all repositories; select repositories so one stays ungranted."
+    grants = {g["repository"].lower(): g.get("allowPushes", False) for g in policy.get("repositories", [])}
+    if readable.lower() not in grants:
+        return f"{readable} is not granted to the computer; grant it read-only in Silo first."
+    if grants[readable.lower()]:
+        return f"{readable} is granted with changes allowed; it must be read-only for this scenario."
+    if ungranted.lower() in grants:
+        return f"{ungranted} is granted to the computer; it must not be for this scenario."
+    return None
+
+
 def scenario_github_scope(ctx: Context, result: Result) -> None:
     readable, ungranted = ctx.args.github_readable, ctx.args.github_ungranted
     if not readable or not ungranted:
         result.set("skipped", "Pass --github-readable and --github-ungranted to run this scenario.")
         return
-    assert ctx.computer is not None
-    granted = [name.lower() for name in ctx.computer.get("githubRepositories", [])]
-    result.evidence["grantedRepositories"] = ctx.computer.get("githubRepositories", [])
-    if readable.lower() not in granted:
-        result.set("inconclusive", f"{readable} is not granted to the computer; grant it read-only in Silo first.")
-        return
-    if ungranted.lower() in granted:
-        result.set("inconclusive", f"{ungranted} is granted to the computer; it must not be for this scenario.")
+    assert ctx.client is not None
+    state = ctx.client.call("github.state", {})
+    policy = next((p for p in state.get("computers", []) if p.get("computerId") == ctx.computer_id), None)
+    problem = github_grant_problem(policy, readable, ungranted)
+    result.evidence["githubPolicy"] = policy
+    if problem:
+        result.set("inconclusive", problem)
         return
     branch = f"silo-eval-{ctx.nonce}"
     work = f"/tmp/silo-eval-gh-{ctx.nonce}"
@@ -571,15 +592,20 @@ def scenario_engine_socket(ctx: Context, result: Result) -> None:
             "except OSError as e: print(type(e).__name__)\n"
         )
         run = subprocess.run(["sudo", "-n", "-u", ctx.args.other_user, sys.executable, "-c", code], capture_output=True, text=True, timeout=30)
-        other = (run.stdout + run.stderr).strip()
-        result.evidence["otherUserAttempt"] = {"user": ctx.args.other_user, "output": other}
+        other = run.stdout.strip()
+        result.evidence["otherUserAttempt"] = {"user": ctx.args.other_user, "exit": run.returncode,
+                                               "stdout": other, "stderr": run.stderr.strip()[-500:]}
+        if run.returncode != 0 or not (other == "connected" or other.endswith("Error")):
+            other = "unrecognized"
     private_dir = stat.S_IMODE(directory.st_mode) & 0o077 == 0
     if info.st_uid != os.getuid() or directory.st_uid != os.getuid():
         result.set("fail", "The engine socket or its folder is owned by another user.")
     elif not private_dir:
         result.set("fail", f"The socket's folder is accessible to other users ({oct(stat.S_IMODE(directory.st_mode))}).")
-    elif other is not None and other.endswith("connected"):
+    elif other == "connected":
         result.set("fail", f"User {ctx.args.other_user} connected to the engine socket.")
+    elif other == "unrecognized":
+        result.set("inconclusive", f"The probe as {ctx.args.other_user} did not run (sudo -n failed or gave no result).")
     else:
         checked = f" and {ctx.args.other_user} could not connect ({other})" if other is not None else ""
         result.set("pass", f"The socket's folder is private to its owner{checked}; silod also rejects peers whose uid differs.")

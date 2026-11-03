@@ -258,6 +258,49 @@ class VerdictTests(unittest.TestCase):
             silo_eval.scenario_secret_other_hosts(ctx, result)
             self.assertEqual(result.verdict, "pass", result.summary)
 
+    def test_host_network_without_a_lan_listener_is_inconclusive(self) -> None:
+        ctx = self.context()
+
+        def guest_python(_computer, probe, *argv, **_kwargs):
+            if probe == "net_info.py":
+                return {"gateway": "10.0.0.1", "hostMicrosandboxInternal": [], "ownAddresses": [], "nameservers": []}
+            return [dict(t, connected=t["host"] == "example.com") for t in json.loads(argv[0])]
+
+        ctx.guest_python = guest_python
+        with mock.patch.object(silo_eval, "host_lan_address", lambda: None):
+            result = self.result("host-network")
+            silo_eval.scenario_host_network(ctx, result)
+        for cleanup in ctx.cleanups:
+            cleanup()
+        self.assertEqual(result.verdict, "inconclusive", result.summary)
+
+    def test_github_grants_must_be_app_read_only_and_selected(self) -> None:
+        def policy(**overrides):
+            base = {"authenticationMethod": "oauth", "repositoryMode": "selected",
+                    "repositories": [{"repository": "o/read", "allowPushes": False}]}
+            base.update(overrides)
+            return base
+
+        check = silo_eval.github_grant_problem
+        self.assertIsNone(check(policy(), "o/read", "o/other"))
+        self.assertIsNotNone(check(None, "o/read", "o/other"))
+        self.assertIsNotNone(check(policy(authenticationMethod="token"), "o/read", "o/other"))
+        self.assertIsNotNone(check(policy(repositoryMode="all"), "o/read", "o/other"))
+        self.assertIsNotNone(check(policy(repositories=[{"repository": "o/read", "allowPushes": True}]), "o/read", "o/other"))
+        self.assertIsNotNone(check(policy(), "o/missing", "o/other"))
+        self.assertIsNotNone(check(policy(), "o/read", "o/read"))
+
+    def test_a_failed_sudo_is_not_a_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
+            (Path(home) / ".silo").mkdir(mode=0o700)
+            (Path(home) / ".silo" / "engine.sock").touch()
+            ctx = silo_eval.Context(silo_eval.parse_args(["--other-user", "nobody"]), client=None)
+            failed = subprocess.CompletedProcess([], 1, stdout="", stderr="sudo: a password is required")
+            with mock.patch.object(silo_eval.subprocess, "run", return_value=failed):
+                result = self.result("engine-socket")
+                silo_eval.scenario_engine_socket(ctx, result)
+        self.assertEqual(result.verdict, "inconclusive", result.summary)
+
     def test_each_run_uses_its_own_secret_name(self) -> None:
         first, second = self.context(), self.context()
         self.assertNotEqual(first.secret_name, second.secret_name)
