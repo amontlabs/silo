@@ -2258,7 +2258,7 @@ fn a_fork_keeps_its_sources_legacy_mounts_for_its_first_start() {
     *runner.state.lock().unwrap() = "Removed";
     let mounts = load(&paths, child.id()).unwrap().legacy_mounts;
     assert_eq!(
-        crate::legacy_mounts::restore_args_for(&mounts),
+        crate::legacy_mounts::restore_args_for(&mounts).unwrap(),
         [
             "-v".to_owned(),
             format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", published.display())

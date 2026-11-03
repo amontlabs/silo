@@ -7,7 +7,7 @@ import { dirname, join } from "node:path"
 import { gunzipSync } from "node:zlib"
 import { createHash } from "node:crypto"
 import test from "node:test"
-import { GUEST_IMAGE_VERSION, guestImageMetadata, cuaDriverArchive, verifyGuestImage } from "./build-guest-image.mjs"
+import { GUEST_IMAGE_VERSION, guestImageMetadata, cuaDriverArchive, cuaDriverShim, verifyGuestImage } from "./build-guest-image.mjs"
 
 test("metadata CLI works through a symlink to the script", async t => {
   const root = await mkdtemp(join(tmpdir(), "silo-guest-cli-link-"))
@@ -34,6 +34,7 @@ for (const saveExit of [1, 0, "write-error"]) {
     await writeFile(script, await readFile(new URL("./build-guest-image.mjs", import.meta.url)))
     await writeFile(join(guest, "cua-driver-lock.json"), await readFile(new URL("../src-tauri/guest/cua-driver-lock.json", import.meta.url)))
     await writeFile(join(guest, "verify-tools.sh"), "true\n")
+    await writeFile(join(guest, "cua-driver-shim"), await readFile(new URL("../src-tauri/guest/cua-driver-shim", import.meta.url)))
     await writeFile(join(root, "package.json"), '{"repository":{"url":"https://github.com/fixture/silo"}}')
     await writeFile(join(output, "image.tar.gz"), "previous verified archive")
     await writeFile(join(output, "manifest.json"), "previous manifest")
@@ -127,7 +128,7 @@ test("the recipe matches the version and never leaves package files in a layer",
   assert.ok(dockerfile.includes("/usr/local/share/silo/guest-image.json"))
   assert.doesNotMatch(dockerfile.replace(/^#.*$/gm, ""), /openai|oaistatic|chatgpt/i)
   const ignore = readFileSync(new URL("../guest-image/Dockerfile.dockerignore", import.meta.url), "utf8")
-  for (const input of ["desktop-streamer-lock.json", "desktop-packages.txt", "silo-accessibility.py", "silo-cua-driver-mcp", "setup-github.sh", "guest-third-party-notices.md"]) {
+  for (const input of ["desktop-streamer-lock.json", "desktop-packages.txt", "silo-accessibility.py", "silo-cua-driver-mcp", "cua-driver-shim", "setup-github.sh", "guest-third-party-notices.md"]) {
     assert.ok(ignore.includes(`!src-tauri/guest/${input}`), input)
   }
 })
@@ -160,9 +161,20 @@ test("the pinned Cua Driver is installed from one lock, hash-checked, binary onl
   assert.match(code, /source=src-tauri\/guest\/cua-driver-lock\.json,target=\/mnt\/cua-driver-lock\.json/)
   assert.match(code, /echo "\$cua_sha256  \/tmp\/cua-driver\.tar\.gz" \| sha256sum --check --status/)
   assert.match(code, /stat -c %s \/tmp\/cua-driver\.tar\.gz/)
-  // Only the binary is extracted, to the versioned directory behind the /usr/local/bin link.
+  assert.ok(code.includes('echo "$cua_binary_sha256  /usr/local/lib/silo/cua-driver/$cua_version/cua-driver" | sha256sum --check --status'))
+  assert.match(code, /--proto-redir '=https'/)
+  // Only the binary is extracted, to the versioned directory the /usr/local/bin shim runs.
   assert.match(code, /tar -xzf \/tmp\/cua-driver\.tar\.gz -C "\/usr\/local\/lib\/silo\/cua-driver\/\$cua_version" --no-same-owner cua-driver/)
-  assert.match(code, /ln -sf "\/usr\/local\/lib\/silo\/cua-driver\/\$cua_version\/cua-driver" \/usr\/local\/bin\/cua-driver/)
+  assert.match(code, /source=src-tauri\/guest\/cua-driver-shim,target=\/mnt\/cua-driver-shim/)
+  assert.ok(code.includes('sed "s#@DRIVER@#/usr/local/lib/silo/cua-driver/$cua_version/cua-driver#" /mnt/cua-driver-shim > /usr/local/bin/cua-driver'))
+  assert.doesNotMatch(code, /ln -sf .*\/usr\/local\/bin\/cua-driver/)
+  // The shim switches telemetry and the update check off for every caller and runs the pinned binary.
+  const pinnedVersion = cuaDriverArchive("arm64").version
+  const shim = cuaDriverShim(pinnedVersion)
+  assert.match(shim, /^#!\/bin\/sh\n/)
+  assert.ok(shim.includes("export CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false DO_NOT_TRACK=1\n"))
+  assert.ok(shim.endsWith(`exec /usr/local/lib/silo/cua-driver/${pinnedVersion}/cua-driver "$@"\n`))
+  assert.doesNotMatch(shim, /@DRIVER@/)
   assert.match(code, /CUA_DRIVER_RS_TELEMETRY_ENABLED=0/)
   assert.match(code, /CUA_DRIVER_RS_UPDATE_CHECK=false/)
   assert.match(code, /\/etc\/profile\.d\/silo-cua-driver\.sh/)
@@ -186,6 +198,9 @@ test("the pinned Cua Driver is installed from one lock, hash-checked, binary onl
     assert.equal(archive.version, lock.version)
     assert.match(archive.name, new RegExp(`^cua-driver-rs-${lock.version.replaceAll(".", "\\.")}-linux-(arm64|x86_64)-binary\\.tar\\.gz$`))
     assert.match(archive.sha256, /^[0-9a-f]{64}$/)
+    // The installed binary is checked against its own digest, not only the archive's.
+    assert.match(archive.binarySha256, /^[0-9a-f]{64}$/)
+    assert.notEqual(archive.binarySha256, archive.sha256)
     assert.ok(archive.bytes > 0)
   }
   assert.throws(() => cuaDriverArchive("riscv64"), /Cua Driver lock/)
@@ -235,6 +250,8 @@ for (const [name, mutation] of [
   ["autostart entry naming a missing program", "sed -i 's#^Exec=.*#Exec=/usr/local/libexec/missing#' /etc/xdg/autostart/silo-accessibility.desktop"],
   ["leftover package file", "touch /var/cache/selkies.deb"],
   ["a different Cua Driver binary", "echo x >> /usr/local/lib/silo/cua-driver/*/cua-driver"],
+  ["a link in place of the telemetry-off shim", "ln -sf /usr/local/lib/silo/cua-driver/*/cua-driver /usr/local/bin/cua-driver"],
+  ["a shim that keeps telemetry on", "sed -i 's/DO_NOT_TRACK=1//' /usr/local/bin/cua-driver"],
   ["an extra file beside Cua Driver", "touch /usr/local/lib/silo/cua-driver/*/libcua_driver_sdk.so"],
   ["telemetry on system-wide", "sed -i /TELEMETRY/d /etc/environment"],
   ["missing MCP launcher", "rm -f /usr/local/libexec/silo-cua-driver-mcp"],

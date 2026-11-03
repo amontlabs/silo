@@ -573,8 +573,14 @@ pub fn is_built_in(configuration: &ComputerConfiguration) -> bool {
 /// The Cua Driver release this build installs, with its download for every guest
 /// architecture. The guest helper picks the one for its own architecture.
 pub(crate) fn pinned() -> Result<Value, String> {
+    validated_lock(DRIVER_LOCK)
+}
+
+/// The lock in `text` when it is well formed and every archive comes from the driver's own
+/// GitHub release for the pinned version, as the guest helper and the image recipe require.
+fn validated_lock(text: &str) -> Result<Value, String> {
     let invalid = || "Silo's Cua Driver information is invalid.".to_owned();
-    let lock: Value = serde_json::from_str(DRIVER_LOCK).map_err(|_| invalid())?;
+    let lock: Value = serde_json::from_str(text).map_err(|_| invalid())?;
     let version = lock["version"].as_str().ok_or_else(invalid)?;
     let valid_version = !version.is_empty()
         && version.len() <= 64
@@ -582,16 +588,20 @@ pub(crate) fn pinned() -> Result<Value, String> {
         && version
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'~' | b'-'));
+    let release =
+        format!("https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/");
     let valid_assets = ["arm64", "amd64"].into_iter().all(|arch| {
         let asset = &lock["assets"][arch];
         asset["url"]
             .as_str()
-            .is_some_and(|url| url.starts_with("https://"))
-            && asset["sha256"].as_str().is_some_and(|sha256| {
-                sha256.len() == 64
-                    && sha256
-                        .bytes()
-                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+            .is_some_and(|url| url.starts_with(&release) && url.len() > release.len())
+            && ["sha256", "binarySha256"].into_iter().all(|key| {
+                asset[key].as_str().is_some_and(|sha256| {
+                    sha256.len() == 64
+                        && sha256
+                            .bytes()
+                            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                })
             })
             && asset["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
     });
@@ -792,10 +802,15 @@ fn run_attempt_with(
     run
 }
 
+/// The helper's reason while a computer is being created and its image has no driver: it never
+/// downloads then (the host holds the device-wide gate), so the first start sets it up.
+pub(crate) const LEFT_TO_FIRST_START: &str = "driver-archive-unavailable";
+
 /// Sets computer use up as the last step of creating a built-in computer: one deliberate boot with
 /// the desktop session up, the guest helper's apply in the computer's approval mode, and the
 /// stop that ends every temporary boot. The attempt is recorded like any other, so a
-/// failure is retried by the first start. `Err` is a short reason for the caller to show.
+/// failure is retried by the first start, except [`LEFT_TO_FIRST_START`], which is not a failure:
+/// the computer shows computer use as pending. `Err` is a short reason for the caller to show.
 pub(crate) fn finish_in_creation(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -803,7 +818,31 @@ pub(crate) fn finish_in_creation(
     name: &str,
 ) -> Result<(), String> {
     let mode = policy_for_apply(paths, id).approval;
-    match run_attempt_with(runner, paths, id, name, mode, false, true, true) {
+    if let Err(error) = begin_attempt(paths, id, mode) {
+        record_attempt(
+            paths,
+            id,
+            Attempt {
+                mode,
+                outcome: Outcome::Failed,
+                at: unix_seconds(),
+                reason: Some("state-not-saved".into()),
+            },
+        );
+        return Err(error.to_string());
+    }
+    let run = run_helper_with(runner, paths, name, mode, false, true, true);
+    let left_to_first_start = matches!(
+        &run,
+        Ok((_, report)) if report.outcome != Outcome::Applied
+            && report.reason.as_deref() == Some(LEFT_TO_FIRST_START)
+    );
+    if left_to_first_start {
+        end_attempt_unrecorded(paths, id);
+    } else {
+        record_attempt(paths, id, attempt_of(mode, &run));
+    }
+    match run {
         Ok((
             _,
             Report {
@@ -814,6 +853,17 @@ pub(crate) fn finish_in_creation(
         Ok((_, report)) => Err(report.reason.unwrap_or_else(|| "not-applied".into())),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// Clears the started marker without recording an attempt, for a run that only deferred the
+/// setup: the computer's apply state stays pending.
+fn end_attempt_unrecorded(paths: &RuntimePaths, id: &str) {
+    let _lock = lock_policies();
+    let Some(mut policy) = read_policy_checked(paths, id) else {
+        return;
+    };
+    policy.unfinished = None;
+    let _ = write_atomic(paths, policy_path(paths, id), &policy);
 }
 
 // ---------------------------------------------------------------- hooks

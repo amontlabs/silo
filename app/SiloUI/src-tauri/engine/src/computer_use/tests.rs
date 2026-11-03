@@ -101,6 +101,31 @@ fn a_failed_creation_apply_is_reported_short_and_left_for_the_first_start() {
         finish_in_creation(&recorder, &paths, COMPUTER_ID, "dev"),
         Err("driver-archive-unavailable".into())
     );
+    // Not a failure: the image has no driver and creation never downloads, so the first
+    // start sets it up and the computer shows computer use as pending meanwhile.
+    let policy = read_policy(&paths, COMPUTER_ID);
+    assert!(policy.last.is_none() && policy.unfinished.is_none());
+    assert_eq!(
+        approval_apply(&settings(&paths, COMPUTER_ID), false),
+        "pending"
+    );
+}
+
+#[test]
+fn a_real_creation_failure_is_recorded_for_the_first_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let recorder = Recorder::new("{\"state\":\"failed\",\"apply\":{\"approval\":\"ask\",\"outcome\":\"failed\",\"reason\":\"doctor-failed\"}}\n");
+    assert_eq!(
+        finish_in_creation(&recorder, &paths, COMPUTER_ID, "dev"),
+        Err("doctor-failed".into())
+    );
+    assert_eq!(
+        read_policy(&paths, COMPUTER_ID)
+            .last
+            .map(|attempt| attempt.outcome),
+        Some(Outcome::Failed)
+    );
 }
 
 // ------------------------------------------------------------- settings
@@ -327,6 +352,39 @@ fn the_pinned_driver_comes_from_the_lock() {
             .as_str()
             .unwrap()
             .starts_with("https://github.com/trycua/cua/releases/download/"));
+    }
+}
+
+#[test]
+fn a_lock_whose_archive_is_not_the_drivers_own_release_is_refused() {
+    let lock = |arm64: &str| {
+        let sha = "0".repeat(64);
+        serde_json::json!({
+            "schemaVersion": 1,
+            "version": "0.38.0",
+            "assets": {
+                "arm64": {"url": arm64, "sha256": sha, "binarySha256": sha, "bytes": 1},
+                "amd64": {
+                    "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/a.tar.gz",
+                    "sha256": sha,
+                    "binarySha256": sha,
+                    "bytes": 1
+                }
+            }
+        })
+        .to_string()
+    };
+    assert!(validated_lock(&lock(
+        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/b.tar.gz"
+    ))
+    .is_ok());
+    for url in [
+        "https://example.invalid/b.tar.gz",
+        "http://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/b.tar.gz",
+        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.30.0/b.tar.gz",
+        "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.38.0/",
+    ] {
+        assert!(validated_lock(&lock(url)).is_err(), "{url}");
     }
 }
 

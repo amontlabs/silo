@@ -48,20 +48,26 @@ fn missing_sources_are_recreated_empty_only_below_the_silo_folders() {
 }
 
 #[test]
-fn restore_arguments_repeat_read_only_legacy_mounts_whose_source_exists() {
+fn restore_arguments_repeat_read_only_legacy_mounts_and_refuse_ones_they_cannot_give_back() {
     let directory = tempfile::tempdir().unwrap();
     let base = directory.path().to_str().unwrap();
     fs::create_dir_all(directory.path().join("chatgpt/1")).unwrap();
+    // The LCU source is missing: restoring without it would resume a guest that lost it.
+    let missing = mount_args(&config(base)).unwrap_err();
+    assert!(missing.contains(LCU_GUEST_MOUNT), "{missing}");
+    fs::create_dir_all(directory.path().join("lcu/2")).unwrap();
     assert_eq!(
-        mount_args(&config(base)),
+        mount_args(&config(base)).unwrap(),
         [
             "-v",
-            &format!("{base}/chatgpt/1:{CHATGPT_GUEST_MOUNT}:ro,uid=0,gid=0")
+            &format!("{base}/chatgpt/1:{CHATGPT_GUEST_MOUNT}:ro,uid=0,gid=0"),
+            "-v",
+            &format!("{base}/lcu/2:{LCU_GUEST_MOUNT}:ro,uid=0,gid=0"),
         ]
     );
-    assert!(mount_args(&json!({})).is_empty());
+    assert!(mount_args(&json!({})).unwrap().is_empty());
     let writable = json!({"mounts": [mount(base, LCU_GUEST_MOUNT, false)]});
-    assert!(mount_args(&writable).is_empty());
+    assert!(mount_args(&writable).is_err());
 }
 
 #[test]
@@ -123,4 +129,28 @@ fn reclaiming_empties_the_download_folders_only_while_no_computer_runs() {
     // Nothing to do once the folders are gone.
     fs::remove_dir_all(app_data.join("lcu")).unwrap();
     assert!(reclaim_disk_with(&gate, &running, &paths, &app_data));
+}
+
+#[test]
+fn reclaiming_never_follows_a_download_folder_that_is_a_link() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = crate::test_support::paths(directory.path());
+    let app_data = directory.path().join("data");
+    let elsewhere = directory.path().join("moved");
+    fs::create_dir_all(elsewhere.join("2")).unwrap();
+    fs::write(elsewhere.join("2/keep"), b"x").unwrap();
+    fs::write(elsewhere.join("keep"), b"x").unwrap();
+    fs::create_dir_all(&app_data).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, app_data.join("chatgpt")).unwrap();
+
+    let stopped = Listing { status: "stopped" };
+    assert!(reclaim_disk_with(
+        &OperationGate::new(),
+        &stopped,
+        &paths,
+        &app_data
+    ));
+    assert!(elsewhere.join("2/keep").exists());
+    assert!(elsewhere.join("keep").exists());
+    assert!(app_data.join("chatgpt").is_symlink());
 }

@@ -22,11 +22,11 @@ speaks MCP over stdio, runs on X11 and AT-SPI, and needs no app.
 
 What is implemented:
 
-- **Pin.** `guest/cua-driver-lock.json` (version, and URL, SHA-256 and size per architecture).
+- **Pin.** `guest/cua-driver-lock.json` (version, and URL, archive SHA-256, size and binary SHA-256 per architecture; every URL must be the driver's own GitHub release).
   Only the `cua-driver` binary is used. cua-perception and cua-som (AGPL) are not shipped.
 - **Image.** The recipe in `guest-image/Dockerfile` is now `ubuntu-24.04-v5`: Cua Driver
-  verified at build in `/usr/local/lib/silo/cua-driver/<version>/` with a
-  `/usr/local/bin/cua-driver` link, telemetry and update checks off system-wide, the MIT
+  verified at build in `/usr/local/lib/silo/cua-driver/<version>/` behind a telemetry-off
+  `/usr/local/bin/cua-driver` shim, telemetry and update checks off system-wide, the MIT
   licence in `/usr/share/doc/silo-guest-third-party/`, no ChatGPT-only system packages,
   capabilities `["desktop","accessibility","cua-driver"]` and `cuaDriverVersion` in the marker.
   v5 is not published. `guest-image/image-lock.json` stays on v4, so new computers still come
@@ -40,7 +40,19 @@ What is implemented:
   and runs `cua-driver mcp`, because MCP servers started from SSH shells have no `DISPLAY` or
   D-Bus address.
 - **Approvals.** `mcp__cua-driver` in Claude Code `permissions.allow`;
-  `default_tools_approval_mode = "approve"` under Codex `[mcp_servers.cua-driver]`.
+  `default_tools_approval_mode = "approve"` under Codex `[mcp_servers.cua-driver]`. As with
+  `mcp__lcu` before, auto covers every tool of the server. Cua Driver 0.38.0's `tools/list`
+  (66 tools, checked 2026-11-03) has no shell or file tool: it lists, launches, kills and
+  arranges apps and windows; clicks, types, scrolls and drags through X11 and AT-SPI; reads and
+  writes the clipboard; captures the screen; drives browsers over CDP (`browser_*`, including
+  `browser_set_input_files` and `browser_download` into an approved directory); records and
+  replays trajectories; runs `run_script` JavaScript in a sandbox with no filesystem, network
+  or process access; and has three tools that reach the network when an agent calls them:
+  `check_for_update` (GitHub), `install_extension` (a signed perception extension) and
+  `install_ffmpeg` (the package manager), the last two only with `confirm: true`. In auto mode
+  an agent controls the desktop without prompts, and through it anything the working account
+  can reach, including the computer's shared host folders; the computer's VM is the boundary.
+  Re-check the tool list at every pin bump.
 - **Telemetry.** Cua Driver's telemetry is on by default and so is its update check. Both are
   off in the guest (`CUA_DRIVER_RS_TELEMETRY_ENABLED=0`, `CUA_DRIVER_RS_UPDATE_CHECK=false`).
 - **Host.** Creation waits only for the computer image. There is no ChatGPT download, no

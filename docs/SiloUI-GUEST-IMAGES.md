@@ -168,9 +168,11 @@ built from source commit `aae2ed939339cb559d81915b4e8df8a150cb8a90` (its
 `source-commit.txt`), and `guest-image/image-lock.json` pins it: both manifests are
 copied into the lock, and new computers use the image with the built-in desktop.
 Compressed archives are 414,843,188 bytes (ARM64) and 423,476,714 bytes (x86-64).
-That release predates attaching `src-tauri/guest/lcu-lock.json`, which the image
-build consumes; the publication workflow now attaches it, so later releases include
-it. The published v4 release itself is unchanged. Publication needs the owner's
+That release predates attaching `src-tauri/guest/lcu-lock.json`, which the v4 image
+build consumed; the publication workflow attached it for releases between v4 and v5. v5
+attaches `src-tauri/guest/cua-driver-lock.json` and `src-tauri/guest/cua-driver-shim`
+instead (the workflow attaches every guest input the recipe consumes). The published v4
+release itself is unchanged. Publication needs the owner's
 reviewer approval in the `guest-image-publish` environment.
 
 v4 builds on the unchanged v3 layer (`setup-github.sh`, sudo, Python 3, OpenSSH
@@ -272,9 +274,11 @@ lock points at it, new computers have the driver from the start.
 v5 changes the v4 recipe in these ways:
 
 - **Cua Driver instead of LCU.** `src-tauri/guest/cua-driver-lock.json` pins the release
-  (0.38.0, URL, SHA-256 and size per architecture; a bind mount, never a `COPY`). One `RUN`
-  downloads the archive, checks size and SHA-256, and installs only the `cua-driver` binary as
-  `/usr/local/lib/silo/cua-driver/<version>/cua-driver` with a `/usr/local/bin/cua-driver` link.
+  (0.38.0, URL, SHA-256, size and the binary's own SHA-256 per architecture; a bind mount, never
+  a `COPY`). One `RUN` downloads the archive (HTTPS only, redirects included), checks size and
+  SHA-256, and installs only the `cua-driver` binary, checked against `binarySha256`, as
+  `/usr/local/lib/silo/cua-driver/<version>/cua-driver`. `/usr/local/bin/cua-driver` is the
+  shim `guest/cua-driver-shim`, which switches telemetry and the update check off and runs it.
   The build fails if `cua-driver --version` differs from the lock or `ldd` finds a missing library.
 - **No telemetry.** `CUA_DRIVER_RS_TELEMETRY_ENABLED=0` and `CUA_DRIVER_RS_UPDATE_CHECK=false`
   go into `/etc/environment` and `/etc/profile.d/silo-cua-driver.sh`.

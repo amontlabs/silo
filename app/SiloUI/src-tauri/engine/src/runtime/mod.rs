@@ -6326,7 +6326,9 @@ fn create_computer_with_progress(
         progress("computer-use-setup", name, 0);
         let finished = crate::computer_use::finish_in_creation(runner, paths, id, name)
             .map_err(|reason| {
-                eprintln!("Computer use was not set up while creating {name}: {reason}")
+                if reason != crate::computer_use::LEFT_TO_FIRST_START {
+                    eprintln!("Computer use was not set up while creating {name}: {reason}")
+                }
             })
             .is_ok();
         // The first start applies it, as it does for any apply that did not finish.

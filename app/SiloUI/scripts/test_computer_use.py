@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import tarfile
@@ -37,6 +38,10 @@ REAL_RUN = cu.run
 REAL_BINARY_INSTALLED = cu.binary_installed
 
 VERSION = '0.38.0'
+RELEASE = f'https://github.com/trycua/cua/releases/download/cua-driver-rs-v{VERSION}/'
+# The fixture binary is a file holding its version, so the pinned binary's digest is that of VERSION.
+BINARY_SHA256 = hashlib.sha256(VERSION.encode()).hexdigest()
+SHIM_FILE = Path(__file__).parents[1] / 'src-tauri/guest/cua-driver-shim'
 SESSION = {'DISPLAY': ':1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-AAAA',
            'XDG_RUNTIME_DIR': '/run/silo-desktop/user'}
 DOCTOR_OK = {'ok': True, 'probes': [{'label': 'binary', 'status': 'ok'},
@@ -105,11 +110,19 @@ class Guest(unittest.TestCase):
             mock.patch.object(cu, 'DRIVER_LINK', self.link),
             mock.patch.object(cu, 'LAUNCHER', root / 'libexec/silo-cua-driver-mcp'),
             mock.patch.object(cu, 'INSTALL_ROOT', root / 'opt-cua-driver'),
+            mock.patch.object(cu, 'IMAGE_ROOT', root / 'image-cua-driver'),
             mock.patch.object(cu, 'LEGACY_PREFIX', self.legacy_prefix),
             mock.patch.object(cu, 'LEGACY_RECEIPT', self.legacy_receipt),
             mock.patch.object(cu, 'CLAUDE_STATE', self.claude_state),
             mock.patch.object(cu, 'CLAUDE_SETTINGS', self.claude_settings),
             mock.patch.object(cu, 'CODEX_CONFIG', self.codex),
+            mock.patch.object(cu, 'LEGACY_DATA', root / 'home/.local/share/lcu'),
+            mock.patch.object(cu, 'LEGACY_SKILL_DIRS', [root / 'home' / d for d in
+                                                        ('.claude/skills', '.codex/skills', '.agents/skills',
+                                                         '.pi/agent/skills')]),
+            mock.patch.object(cu, 'PI_SETTINGS', root / 'home/.pi/agent/settings.json'),
+            mock.patch.object(cu, 'AGENT_BIN_GLOBS', [str(root / 'home/.nvm/versions/node/*/bin')]),
+            mock.patch.object(cu, 'USER_BIN', [str(root / 'home/.local/bin')]),
             mock.patch.object(cu, 'as_user', contextlib.nullcontext),
             mock.patch.object(cu, 'architecture', lambda: 'amd64'),
             mock.patch.object(cu, 'binary_installed', lambda name, directories=None: name in self.installed_agents),
@@ -150,20 +163,43 @@ class Guest(unittest.TestCase):
         return value if isinstance(value, dict) else None
 
     def write_pinned(self, **changes):
-        asset = {'url': 'https://example.invalid/driver.tar.gz', 'sha256': self.sha, 'bytes': self.size}
+        asset = {'url': RELEASE + 'driver.tar.gz', 'sha256': self.sha, 'bytes': self.size,
+                 'binarySha256': BINARY_SHA256}
         pinned = {'schemaVersion': 1, 'version': VERSION, 'source': 'https://example.invalid/',
                   'assets': {'arm64': dict(asset), 'amd64': dict(asset)}}
         pinned.update(changes)
+        # Assets a test passes without the binary digest get the pinned one.
+        for value in (pinned.get('assets') or {}).values() if isinstance(pinned.get('assets'), dict) else ():
+            if isinstance(value, dict):
+                value.setdefault('binarySha256', BINARY_SHA256)
         (self.state / 'pinned.json').write_text(json.dumps(pinned))
 
     def install_image_driver(self, version=VERSION):
-        self.link.write_text(version)
+        """What the v5 image ships: the binary under IMAGE_ROOT and the shim that runs it."""
+        binary = self.root / 'image-cua-driver' / version / 'cua-driver'
+        binary.parent.mkdir(parents=True)
+        binary.write_text(version)
+        self.link.write_text(cu.shim_text(binary))
+        self.link.chmod(0o755)
+        return binary
+
+    def shim_target(self):
+        """The binary the installed shim runs."""
+        text = self.link.read_text()
+        self.assertFalse(self.link.is_symlink())
+        self.assertTrue(os.access(self.link, os.X_OK))
+        match = re.search(r'^exec (\S+) "\$@"$', text, re.MULTILINE)
+        self.assertEqual(text, cu.shim_text(match.group(1)))
+        return Path(match.group(1))
 
     def fake_run(self, argv, *, user=False, timeout=900, check=True, cwd=None, extra_env=None, quiet=False):
         self.commands.append((list(argv), bool(user), dict(extra_env or {})))
         name = Path(argv[0]).name
         if name == 'cua-driver' or argv[0] == str(self.link) or Path(argv[0]).name == 'cua-driver':
             path = Path(argv[0])
+            if path.is_file() and path.read_text().startswith('#!'):
+                # The shim: run the binary it names.
+                path = Path(re.search(r'^exec (\S+) "\$@"$', path.read_text(), re.MULTILINE).group(1))
             if argv[1:2] == ['--version']:
                 if not path.exists():
                     return subprocess.CompletedProcess(argv, 127, stdout='', stderr='')
@@ -233,8 +269,14 @@ class Status(Guest):
         for change in ({'schemaVersion': 2}, {'version': '$(id)'}, {'assets': {}},
                        {'assets': {'arm64': {'url': 'http://x/', 'sha256': self.sha, 'bytes': 1},
                                    'amd64': {'url': 'https://x/', 'sha256': self.sha, 'bytes': 1}}},
-                       {'assets': {'arm64': {'url': 'https://x/', 'sha256': 'abc', 'bytes': 1},
-                                   'amd64': {'url': 'https://x/', 'sha256': self.sha, 'bytes': 1}}}):
+                       {'assets': {'arm64': {'url': RELEASE + 'x', 'sha256': 'abc', 'bytes': 1},
+                                   'amd64': {'url': RELEASE + 'x', 'sha256': self.sha, 'bytes': 1}}},
+                       # Only the driver's own GitHub release, for the pinned version.
+                       {'assets': {'arm64': {'url': 'https://example.invalid/d.tar.gz', 'sha256': self.sha, 'bytes': 1},
+                                   'amd64': {'url': RELEASE + 'x', 'sha256': self.sha, 'bytes': 1}}},
+                       {'assets': {'arm64': {'url': RELEASE.replace(VERSION, '0.30.0') + 'x', 'sha256': self.sha,
+                                             'bytes': 1},
+                                   'amd64': {'url': RELEASE + 'x', 'sha256': self.sha, 'bytes': 1}}}):
             self.write_pinned(**change)
             self.assertEqual(cu.status()['reason'], 'not-configured', change)
 
@@ -281,26 +323,25 @@ class Driver(Guest):
         result = cu.apply('ask')
         self.assertEqual((result['state'], result['driverVersion']), ('ready', VERSION))
         self.assertEqual(self.curls(), [])
-        self.assertFalse(self.link.is_symlink())
+        self.assertEqual(self.shim_target(), self.root / 'image-cua-driver' / VERSION / 'cua-driver')
 
     def test_without_the_driver_the_pinned_archive_is_downloaded_verified_and_linked(self):
         result = cu.apply('ask')
         self.assertEqual(result['state'], 'ready')
         curl, = self.curls()
         self.assertEqual(curl[curl.index('--proto') + 1], '=https')
-        self.assertIn('https://example.invalid/driver.tar.gz', curl)
+        self.assertIn(RELEASE + 'driver.tar.gz', curl)
         installed = self.root / 'opt-cua-driver' / VERSION
         # Only the binary is extracted.
         self.assertEqual([p.name for p in installed.iterdir()], ['cua-driver'])
-        self.assertTrue(self.link.is_symlink())
-        self.assertEqual(os.path.realpath(self.link), os.path.realpath(installed / 'cua-driver'))
+        self.assertEqual(self.shim_target(), installed / 'cua-driver')
         self.assertFalse((self.state / 'stage').exists())
 
     def test_an_image_driver_of_another_version_is_replaced_by_the_pinned_one(self):
         self.install_image_driver('0.30.0')
         self.assertEqual(cu.apply('ask')['state'], 'ready')
         self.assertEqual(len(self.curls()), 1)
-        self.assertEqual(self.link.read_text(), VERSION)
+        self.assertEqual(self.shim_target(), self.root / 'opt-cua-driver' / VERSION / 'cua-driver')
 
     def test_an_earlier_install_of_the_pinned_version_is_linked_without_a_download(self):
         cu.apply('ask')
@@ -308,7 +349,44 @@ class Driver(Guest):
         self.commands.clear()
         self.assertEqual(cu.apply('ask', force=True)['state'], 'ready')
         self.assertEqual(self.curls(), [])
-        self.assertTrue(self.link.is_symlink())
+        self.assertEqual(self.shim_target(), self.root / 'opt-cua-driver' / VERSION / 'cua-driver')
+
+    def test_the_shim_matches_the_shipped_file_and_turns_telemetry_off(self):
+        self.assertEqual(cu.SHIM_TEMPLATE, SHIM_FILE.read_text())
+        text = cu.shim_text('/opt/cua-driver/0.38.0/cua-driver')
+        self.assertIn('export CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false DO_NOT_TRACK=1\n', text)
+        self.assertTrue(text.endswith('exec /opt/cua-driver/0.38.0/cua-driver "$@"\n'))
+        # The shim runs: the binary it names sees the switches whatever the caller's environment.
+        binary = self.root / 'real-driver'
+        binary.write_text('#!/bin/sh\necho "$CUA_DRIVER_RS_TELEMETRY_ENABLED $CUA_DRIVER_RS_UPDATE_CHECK $DO_NOT_TRACK $*"\n')
+        binary.chmod(0o755)
+        shim = self.root / 'shim'
+        shim.write_text(cu.shim_text(binary))
+        shim.chmod(0o755)
+        output = subprocess.run([str(shim), 'doctor', '--json'], capture_output=True, text=True, check=True,
+                                env=dict(os.environ, CUA_DRIVER_RS_TELEMETRY_ENABLED='1')).stdout
+        self.assertEqual(output, '0 false 1 doctor --json\n')
+
+    def test_a_symlink_left_by_an_earlier_helper_is_replaced_by_the_shim(self):
+        installed = self.root / 'opt-cua-driver' / VERSION / 'cua-driver'
+        installed.parent.mkdir(parents=True)
+        installed.write_text(VERSION)
+        self.link.symlink_to(installed)
+        self.assertEqual(cu.apply('ask')['state'], 'ready')
+        self.assertEqual(self.curls(), [])
+        self.assertEqual(self.shim_target(), installed)
+        # A configured computer that still has the symlink gets the shim on its next apply too.
+        self.link.unlink()
+        self.link.symlink_to(installed)
+        self.assertEqual(cu.apply('ask')['state'], 'ready')
+        self.assertEqual(self.shim_target(), installed)
+
+    def test_an_unchanged_shim_is_not_rewritten(self):
+        self.install_image_driver()
+        cu.apply('ask')
+        before = self.link.stat().st_ino
+        cu.apply('ask', force=True)
+        self.assertEqual(self.link.stat().st_ino, before)
 
     def test_the_driver_runs_as_the_working_account_with_telemetry_off(self):
         self.install_image_driver()
@@ -367,7 +445,7 @@ class Driver(Guest):
             self.assertIn(option, curl)
 
     def test_a_hash_mismatch_is_refused_and_never_retried(self):
-        asset = {'url': 'https://example.invalid/d.tar.gz', 'sha256': '0' * 64, 'bytes': self.size}
+        asset = {'url': RELEASE + 'd.tar.gz', 'sha256': '0' * 64, 'bytes': self.size}
         self.write_pinned(assets={'arm64': asset, 'amd64': asset})
         result = cu.apply('ask')
         self.assertEqual((result['state'], result['reason']), ('failed', 'driver-archive-mismatch'))
@@ -376,7 +454,7 @@ class Driver(Guest):
         self.assertFalse(self.link.exists() or self.link.is_symlink())
 
     def test_a_size_mismatch_is_refused(self):
-        asset = {'url': 'https://example.invalid/d.tar.gz', 'sha256': self.sha, 'bytes': self.size + 1}
+        asset = {'url': RELEASE + 'd.tar.gz', 'sha256': self.sha, 'bytes': self.size + 1}
         self.write_pinned(assets={'arm64': asset, 'amd64': asset})
         self.assertEqual(cu.apply('ask')['reason'], 'driver-archive-mismatch')
 
@@ -410,11 +488,40 @@ class Driver(Guest):
     def test_a_downloaded_driver_of_the_wrong_version_is_not_linked(self):
         wrong, sha, size = make_archive(self.root, version='0.1.0')
         self.served = wrong
-        asset = {'url': 'https://example.invalid/d.tar.gz', 'sha256': sha, 'bytes': size}
+        asset = {'url': RELEASE + 'd.tar.gz', 'sha256': sha, 'bytes': size}
         self.write_pinned(assets={'arm64': asset, 'amd64': asset})
         result = cu.apply('ask')
         self.assertEqual((result['state'], result['reason']), ('failed', 'driver-archive-invalid'))
         self.assertFalse(self.link.exists() or self.link.is_symlink())
+
+    def test_a_lock_without_a_valid_binary_digest_is_ignored(self):
+        for digest in (None, 'abc'):
+            asset = {'url': RELEASE + 'd.tar.gz', 'sha256': self.sha, 'bytes': self.size, 'binarySha256': digest}
+            if digest is None:
+                del asset['binarySha256']
+                pinned = json.loads((self.state / 'pinned.json').read_text())
+                pinned['assets'] = {'arm64': asset, 'amd64': asset}
+                (self.state / 'pinned.json').write_text(json.dumps(pinned))
+            else:
+                self.write_pinned(assets={'arm64': asset, 'amd64': asset})
+            self.assertEqual(cu.status()['reason'], 'not-configured', digest)
+
+    def test_an_archive_whose_binary_is_not_the_pinned_one_is_refused(self):
+        # Same version string, other bytes: the archive matches its lock entry, the binary does not.
+        other, sha, size = make_archive(self.root, members=(('cua-driver', b'0.38.0\n', 0o755),))
+        self.served = other
+        self.write_pinned(assets={a: {'url': RELEASE + 'd.tar.gz', 'sha256': sha, 'bytes': size} for a in ('arm64', 'amd64')})
+        result = cu.apply('ask')
+        self.assertEqual((result['state'], result['reason']), ('failed', 'driver-archive-invalid'))
+        self.assertFalse(self.link.exists() or self.link.is_symlink())
+        self.assertFalse((self.root / 'opt-cua-driver' / VERSION / 'cua-driver').exists())
+
+    def test_a_tampered_image_or_earlier_binary_is_not_used(self):
+        binary = self.install_image_driver()
+        binary.write_text(VERSION + '\n')
+        self.assertEqual(cu.apply('ask')['state'], 'ready')
+        self.assertEqual(len(self.curls()), 1)
+        self.assertEqual(self.shim_target(), self.root / 'opt-cua-driver' / VERSION / 'cua-driver')
 
     def test_an_unsupported_architecture_has_no_driver(self):
         with mock.patch.object(cu, 'architecture', lambda: None):
@@ -553,6 +660,73 @@ class Apply(Guest):
 
 
 class Registration(Guest):
+    def test_null_containers_count_as_absent(self):
+        self.claude_state.parent.mkdir(parents=True)
+        self.claude_state.write_text(json.dumps({'mcpServers': None, 'theme': 'dark'}))
+        self.claude_settings.parent.mkdir(parents=True)
+        self.claude_settings.write_text(json.dumps({'permissions': None}))
+        result = cu.apply('auto')
+        self.assertEqual((result['state'], result['agents']), ('ready', ['claude-code', 'codex']))
+        self.assertIn('cua-driver', self.claude()['mcpServers'])
+        self.assertEqual(self.allowed(), ['mcp__cua-driver'])
+        self.claude_settings.write_text(json.dumps({'permissions': {'allow': None}}))
+        cu.apply('auto', force=True)
+        self.assertEqual(self.allowed(), ['mcp__cua-driver'])
+
+    def test_one_agents_unusual_configuration_fails_only_that_agent(self):
+        with mock.patch.dict(cu.EDITORS, {'claude-code': mock.Mock(side_effect=TypeError('odd'))}):
+            result = cu.apply('ask')
+        self.assertIn('codex', result['agents'])
+        self.assertNotIn('claude-code', result['agents'])
+        self.assertIn('cua-driver', self.codex_config()['mcp_servers'])
+
+    def test_a_registration_removed_since_the_last_apply_is_made_again(self):
+        cu.apply('auto')
+        state = self.claude()
+        del state['mcpServers']['cua-driver']
+        self.claude_state.write_text(json.dumps(state))
+        self.assertEqual(cu.apply('auto')['apply']['outcome'], 'applied')
+        self.assertIn('cua-driver', self.claude()['mcpServers'])
+        # The approval rule and the Codex section are checked too.
+        self.claude_settings.write_text(json.dumps({}))
+        cu.apply('auto')
+        self.assertEqual(self.allowed(), ['mcp__cua-driver'])
+        self.codex.write_text('model = "x"\n')
+        cu.apply('auto')
+        self.assertEqual(self.codex_config()['mcp_servers']['cua-driver']['default_tools_approval_mode'], 'approve')
+        # Nothing changed: the fast path runs no readiness check.
+        self.commands.clear()
+        cu.apply('auto')
+        self.assertFalse([argv for argv, *_ in self.commands if argv[1:2] == ['doctor']])
+
+    def test_lcu_skills_data_and_pi_package_are_removed_and_nothing_else(self):
+        home = self.root / 'home'
+        for directory in ('.claude/skills/lcu', '.codex/skills/lcu-desktop', '.agents/skills/lcu',
+                          '.pi/agent/skills/lcu', '.claude/skills/mine', '.local/share/lcu/state'):
+            (home / directory).mkdir(parents=True)
+        (home / '.claude/skills/lcu/SKILL.md').write_text('x')
+        pi = home / '.pi/agent/settings.json'
+        pi.write_text(json.dumps({'packages': ['/opt/lcu/current/pi', {'source': '/home/silo/.local/share/lcu/pi'},
+                                               'npm:keep-me'], 'theme': 'dark'}))
+        cu.apply('ask')
+        for gone in ('.claude/skills/lcu', '.codex/skills/lcu-desktop', '.agents/skills/lcu', '.pi/agent/skills/lcu',
+                     '.local/share/lcu'):
+            self.assertFalse((home / gone).exists(), gone)
+        self.assertTrue((home / '.claude/skills/mine').is_dir())
+        self.assertEqual(json.loads(pi.read_text()), {'packages': ['npm:keep-me'], 'theme': 'dark'})
+
+    def test_pi_settings_are_never_created(self):
+        cu.apply('ask')
+        self.assertFalse((self.root / 'home/.pi').exists())
+
+    def test_agents_installed_by_version_managers_are_found(self):
+        node_bin = self.root / 'home/.nvm/versions/node/v22.1.0/bin'
+        node_bin.mkdir(parents=True)
+        (node_bin / 'claude').write_text('#!/bin/sh\n')
+        (node_bin / 'claude').chmod(0o755)
+        self.assertIsNotNone(REAL_BINARY_INSTALLED('claude'))
+        self.assertIsNone(REAL_BINARY_INSTALLED('codex'))
+
     def setUp(self):
         super().setUp()
         self.install_image_driver()
@@ -641,9 +815,11 @@ class Registration(Guest):
         self.claude_state.write_text(json.dumps({'mcpServers': {'lcu': {'command': 'node'}, 'other': {}}}))
         self.claude_settings.parent.mkdir(parents=True)
         self.claude_settings.write_text(json.dumps({
-            'permissions': {'allow': ['mcp__lcu', 'Bash(ls)'], 'deny': ['mcp__lcu__host_only']},
+            'permissions': {'allow': ['mcp__lcu', 'Bash(ls)', 'Read(~/lcu-notes/**)', 'Bash(lcu status)'],
+                            'deny': ['mcp__lcu__host_only', 'mcp__lcutils']},
             'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': '/opt/lcu/current/bin/lcu hook'}]},
-                               {'hooks': [{'type': 'command', 'command': 'echo mine'}]}],
+                               {'hooks': [{'type': 'command', 'command': 'echo mine'}]},
+                               {'hooks': [{'type': 'command', 'command': 'cp log /opt/lcu-archive/'}]}],
                       'PreToolUse': [{'hooks': [{'type': 'command', 'command': '/opt/lcu/x'}]}]}}))
         self.codex.parent.mkdir(parents=True)
         self.codex.write_text('[mcp_servers.lcu]\ncommand = "lcu"\ndefault_tools_approval_mode = "approve"\n\n'
@@ -654,8 +830,11 @@ class Registration(Guest):
         cu.apply('ask')
         self.assertEqual(list(self.claude()['mcpServers']), ['other', 'cua-driver'])
         settings = json.loads(self.claude_settings.read_text())
-        self.assertEqual(settings['permissions'], {'allow': ['Bash(ls)'], 'deny': []})
-        self.assertEqual(settings['hooks'], {'Stop': [{'hooks': [{'type': 'command', 'command': 'echo mine'}]}]})
+        # Only what LCU wrote goes; the user's own rules and hooks that mention "lcu" stay.
+        self.assertEqual(settings['permissions'], {'allow': ['Bash(ls)', 'Read(~/lcu-notes/**)', 'Bash(lcu status)'],
+                                                   'deny': ['mcp__lcutils']})
+        self.assertEqual(settings['hooks'], {'Stop': [{'hooks': [{'type': 'command', 'command': 'echo mine'}]},
+                                                      {'hooks': [{'type': 'command', 'command': 'cp log /opt/lcu-archive/'}]}]})
         config = self.codex_config()
         self.assertEqual(sorted(config['mcp_servers']), ['cua-driver', 'keep'])
         self.assertNotIn('hooks', config)
@@ -748,6 +927,27 @@ class Registration(Guest):
 
 
 class Watcher(Guest):
+    def test_the_watcher_ends_when_the_receipt_is_not_ready_or_after_its_maximum(self):
+        self.install_image_driver()
+        bin_dir = self.root / 'agentbin'
+        bin_dir.mkdir()
+        self.installed_agents = set()
+        cu.apply('ask')
+        receipt = self.receipt()
+        binary = bin_dir / 'codex'
+        binary.write_text('#!/bin/sh\n')
+        binary.chmod(0o755)
+        runs = []
+        with mock.patch.object(cu.subprocess, 'run', lambda argv, **k: runs.append(argv)), \
+                mock.patch.object(cu, 'binary_installed', REAL_BINARY_INSTALLED):
+            (self.state / 'receipt.json').write_text(json.dumps(dict(receipt, state='failed')))
+            cu.watch(interval=0, directories=[bin_dir])
+            self.assertEqual(runs, [], 'a receipt that is not ready ends the watcher at once')
+            (self.state / 'receipt.json').write_text(json.dumps(receipt))
+            with mock.patch.object(cu, 'WATCH_MAX', 0):
+                cu.watch(interval=0, directories=[bin_dir])
+            self.assertEqual(runs, [], 'the watcher ends after WATCH_MAX')
+
     def test_the_watcher_reconciles_once_when_a_pending_binary_appears_and_ends_when_none_is_pending(self):
         self.install_image_driver()
         bin_dir = self.root / 'agentbin'
