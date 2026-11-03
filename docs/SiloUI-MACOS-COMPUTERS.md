@@ -347,7 +347,8 @@ State `setting-up` covers these steps; its detail names the current step.
    - requires `csrutil status` to say disabled;
    - removes what a computer set up before Cua Driver has: `/Applications/ChatGPT.app`, LCU
      (`~/.local/share/lcu`), their TCC rows and ledger entries, and the registrations of
-     `lcu` in Claude Code and Codex;
+     `lcu` in Claude Code and Codex with LCU's lifecycle hooks (MCP tool hooks for the `lcu`
+     server) and the trust Codex recorded for them;
    - switches telemetry and the update check off: both variables for every command of the
      script, `telemetry_enabled` and `update_check_enabled` set to false in
      `~/.cua-driver/config.json` (the daemon is started by LaunchServices without the
@@ -396,9 +397,13 @@ State `setting-up` covers these steps; its detail names the current step.
    reason, `driverVersion`, approval, `agents`, `pending`) in the guest, and is
    idempotent: a rerun with the same pins and mode changes nothing. Pin: Cua Driver
    0.38.0 (see the [Cua Driver decision](SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03)).
-   Not verified live yet: the TCC rows and the consent ledger being enough for the daemon
-   to capture the screen without a prompt, and `open` starting the daemon from the SSH
-   session of a console login.
+   Verified live on 2026-11-03 (macOS 26.6.2 guest copied from a template set up with the
+   ChatGPT app and LCU, standalone Dev engine): the TCC rows and the consent ledger are enough
+   for the daemon to capture the screen without a prompt (`get_desktop_state` through the
+   registered command returned the desktop), and `open` starts the daemon from the SSH
+   session of a console login. `launchctl setenv` does not survive the restart at the end of
+   setup; the daemon reads `~/.cua-driver/config.json` and the agents pass the variables
+   themselves, so nothing depends on it.
    The approach follows prior art rather than inventing one:
    [trycua/cua `seed-tcc.sh`](https://github.com/trycua/cua/blob/main/libs/images/macos/files/seed-tcc.sh)
    and [actions/runner-images `configure-tccdb-macos.sh`](https://github.com/actions/runner-images/blob/main/images/macos/scripts/build/configure-tccdb-macos.sh)

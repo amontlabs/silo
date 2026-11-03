@@ -60,6 +60,9 @@ LEGACY = re.compile(r'(?<![A-Za-z0-9_])mcp__lcu(?:__[A-Za-z0-9_-]+)?(?![A-Za-z0-
                     r'|/\.local/bin/lcu(?=$|[\s"\':])'
                     r'|/\.hermes/plugins/lcu-cua(?=/|$|[\s"\':])'
                     r'|/Applications/ChatGPT\.app(?=/|$|[\s"\':])')
+# LCU's turn lifecycle hooks are MCP tool hooks addressed to its server, `lcu`: JSON in Claude
+# Code's settings, an inline table on one line of Codex's `[hooks]` table.
+LEGACY_HOOK_SERVER = re.compile(r'(?<![A-Za-z0-9_])server\s*=\s*"lcu"')
 
 
 class Failure(Exception):
@@ -102,6 +105,14 @@ def server_entry():
     return {'type': 'stdio', 'command': DRIVER, 'args': ['mcp'], 'env': dict(sorted(PRIVACY_ENV.items()))}
 
 
+def legacy_hook(hook):
+    """Whether a Claude Code hook is LCU's: an MCP tool hook for the `lcu` server, or a command
+    that names LCU's files."""
+    if isinstance(hook, dict) and hook.get('type') == 'mcp_tool' and hook.get('server') == 'lcu':
+        return True
+    return bool(LEGACY.search(json.dumps(hook)))
+
+
 def strip_legacy_rules(settings):
     """Removes LCU's permission rules and hooks from Claude Code settings."""
     permissions = settings.get('permissions')
@@ -120,12 +131,12 @@ def strip_legacy_rules(settings):
             for entry in entries:
                 inner = entry.get('hooks') if isinstance(entry, dict) else None
                 if isinstance(inner, list):
-                    left = [h for h in inner if not LEGACY.search(json.dumps(h))]
+                    left = [h for h in inner if not legacy_hook(h)]
                     if len(left) != len(inner):
                         if not left:
                             continue
                         entry = dict(entry, hooks=left)
-                elif LEGACY.search(json.dumps(entry)):
+                elif legacy_hook(entry):
                     continue
                 kept.append(entry)
             if kept:
@@ -182,6 +193,24 @@ def edit_claude(entry, approval):
 TOML_HEADER = re.compile(r'^\s*\[\[?\s*([^\[\]]+?)\s*\]\]?\s*(?:#.*)?$')
 LEGACY_SERVER = re.compile(r'^mcp_servers\.("?)lcu\1(\.|$)')
 OWN_SERVER = re.compile(r'^mcp_servers\.("?)' + re.escape(SERVER) + r'\1(\.|$)')
+# Codex keeps the trust of a hook from config.toml as `[hooks.state."<file>:<event>:<group>:<hook>"]`.
+HOOK_TRUST = re.compile(r'^hooks\.state\."(.*):([a-z_]+):\d+:\d+"$')
+HOOK_EVENT = re.compile(r'^\s*"?([A-Za-z]+)"?\s*=')
+
+
+def snake_case(event):
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', event).lower()
+
+
+def legacy_toml_hook(text):
+    return bool(LEGACY.search(text) or LEGACY_HOOK_SERVER.search(text))
+
+
+def stale_trust(name, events):
+    """Whether section `name` is Codex's trust for a hook of this config file under an event that
+    has no hook left in it."""
+    match = HOOK_TRUST.match(name or '')
+    return bool(match) and match.group(1) == str(CODEX_CONFIG) and match.group(2) not in events
 
 
 def toml_sections(text):
@@ -236,11 +265,23 @@ def edit_codex(entry, approval):
         if name is not None:
             if LEGACY_SERVER.match(name) or (entry is not None and OWN_SERVER.match(name)):
                 continue
-            if name.split('.')[0] == 'hooks' and name != 'hooks' and LEGACY.search('\n'.join([name] + lines)):
+            if (name.split('.')[0] == 'hooks' and name != 'hooks' and not name.startswith('hooks.state.')
+                    and legacy_toml_hook('\n'.join([name] + lines))):
                 continue
             if name == 'hooks':
-                lines = [line for line in lines if not LEGACY.search(line)]
+                lines = [line for line in lines if not legacy_toml_hook(line)]
+                if not any(line.strip() for line in lines[1:]):
+                    continue
         kept.append((name, lines))
+    # The trust Codex recorded for a hook of this file whose event has no hook left here is stale:
+    # it belonged to the LCU hooks removed above (trust for other files' hooks stays).
+    events = set()
+    for name, lines in kept:
+        if name == 'hooks':
+            events.update(snake_case(m.group(1)) for m in map(HOOK_EVENT.match, lines[1:]) if m)
+        elif name is not None and name.split('.')[0] == 'hooks' and not name.startswith('hooks.state.'):
+            events.add(snake_case(name.split('.')[1].strip('"')))
+    kept = [(name, lines) for name, lines in kept if not stale_trust(name, events)]
     text = '\n'.join(line for _, lines in kept for line in lines).rstrip()
     if entry is not None:
         text = (text + '\n\n' if text else '') + '\n'.join(codex_block(entry, approval))

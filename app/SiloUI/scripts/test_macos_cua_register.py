@@ -146,6 +146,39 @@ class RegisterTest(unittest.TestCase):
         self.assertNotIn('lcu', codex)
         self.assertEqual(sorted(tomllib.loads(codex)['mcp_servers']), ['cua-driver', 'keep'])
 
+    def test_lcus_mcp_lifecycle_hooks_and_their_codex_trust_are_removed(self):
+        # The hooks `lcu setup` wrote: MCP tool hooks for its `lcu` server, and Codex's trust for them.
+        self.install('claude')
+        self.install('codex')
+        lcu_hook = lambda tool: {'type': 'mcp_tool', 'server': 'lcu', 'tool': tool, 'input': {'session_id': '${session_id}'}}
+        self.module.CLAUDE_SETTINGS.parent.mkdir(parents=True)
+        self.module.CLAUDE_SETTINGS.write_text(json.dumps({
+            'permissions': {'deny': []},
+            'hooks': {'PreToolUse': [{'matcher': 'mcp__lcu__js|mcp__lcu__js_reset', 'hooks': [lcu_hook('set_turn_context')]}],
+                      'Stop': [{'hooks': [lcu_hook('turn_ended')]},
+                               {'hooks': [{'type': 'mcp_tool', 'server': 'lcu-notes', 'tool': 'turn_ended'}]}],
+                      'StopFailure': [{'hooks': [lcu_hook('turn_ended')]}],
+                      'SubagentStop': [{'hooks': [lcu_hook('turn_ended')]}]}}))
+        config = str(self.module.CODEX_CONFIG)
+        hook = '[{ hooks = [{ type = "mcp_tool", server = "lcu", tool = "turn_ended", input = { turn_id = "${turn_id}" } }] }]'
+        self.module.CODEX_CONFIG.parent.mkdir(parents=True)
+        self.module.CODEX_CONFIG.write_text(
+            '[hooks]\nInterrupt = %s\nStop = %s\nSubagentStop = %s\n\n' % (hook, hook, hook)
+            + ''.join('[hooks.state."%s:%s:0:0"]\ntrusted_hash = "sha256:00"\n\n' % (config, event)
+                      for event in ('subagent_stop', 'stop', 'interrupt', 'session_start', 'user_prompt_submit'))
+            + '[hooks.state."/Users/silo/project/.codex/config.toml:stop:0:0"]\ntrusted_hash = "sha256:11"\n\n'
+            + '[hooks.SessionStart]\ncommand = "echo keep"\n')
+        self.apply('ask')
+        settings = json.loads(self.module.CLAUDE_SETTINGS.read_text())
+        self.assertEqual(settings['hooks'], {'Stop': [{'hooks': [{'type': 'mcp_tool', 'server': 'lcu-notes', 'tool': 'turn_ended'}]}]})
+        text = self.module.CODEX_CONFIG.read_text()
+        self.assertNotIn('server = "lcu"', text)
+        codex = tomllib.loads(text)
+        self.assertEqual(sorted(codex['hooks']), ['SessionStart', 'state'])
+        self.assertEqual(sorted(codex['hooks']['state']),
+                         sorted(['%s:session_start:0:0' % config, '/Users/silo/project/.codex/config.toml:stop:0:0']))
+        self.assertEqual(sorted(codex['mcp_servers']), ['cua-driver'])
+
     def test_removal_keeps_rules_and_hooks_that_merely_mention_lcu(self):
         self.install('claude')
         self.install('codex')
