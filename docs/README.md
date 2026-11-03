@@ -22,6 +22,7 @@ that every platform or live VM workflow has been exercised.
 
 | Area | Documents |
 | --- | --- |
+| Security | [Threat model](THREAT-MODEL.md): attacker, assets, trust boundaries with code references, and non-goals |
 | Vocabulary | [Silo vocabulary](SiloUI-VOCABULARY.md): the terms (computer, device, Connections, workspace, sandboxed) and the identifiers that keep older names |
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [historical Linux system updates](SiloUI-LINUX-UPDATES.md), [historical distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
 | Using the app | [Using the Silo app](SiloUI-APP.md): create a computer, open a project and development server, open the desktop, and connect another device |
