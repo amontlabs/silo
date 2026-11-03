@@ -278,9 +278,13 @@ as desktop preferences. Failure-injection tests inspect the complete receipt
 and permissions before publication and reject success after a directory-sync
 error. They use temporary paths without running a computer.
 
-- **Image.** The v5 image recipe bakes the pinned Cua Driver into the guest as
-  `/usr/local/bin/cua-driver` (SHA-256 verified at build), with telemetry and update checks off in
-  `/etc/environment` and `/etc/profile.d`. v5 is not published yet and `image-lock.json` still
+- **Image.** The v5 image recipe bakes the pinned Cua Driver into the guest (archive and binary
+  SHA-256 verified at build). `/usr/local/bin/cua-driver` is a root-owned shim
+  (`guest/cua-driver-shim`) that sets `CUA_DRIVER_RS_TELEMETRY_ENABLED=0`,
+  `CUA_DRIVER_RS_UPDATE_CHECK=false` and `DO_NOT_TRACK=1` and runs the binary, so telemetry and
+  the update check stay off however the driver is started (MCP launcher, desktop terminal, SSH
+  shell, an agent's own command); `/etc/environment`, `/etc/profile.d` and the desktop session's
+  environment set the same switches. v5 is not published yet and `image-lock.json` still
   points at v4, so new computers currently start from v4 and the guest helper downloads and
   verifies the pinned archive once (see below).
 - **During creation.** "Created" means ready: the first start is only a start. Creation waits
@@ -302,10 +306,13 @@ error. They use temporary paths without running a computer.
   bound; the boot never waits for it or fails because of it, and a stop, delete or Quit cancels
   it. Pushing the helper each time keeps it current with Silo, which the image cannot.
 - **`apply`** is idempotent and cheap when nothing changed. It
-  1. requires `/usr/local/bin/cua-driver` to report the pinned version; otherwise (v4 computers)
-     it downloads the pinned archive for the guest architecture, verifies size and SHA-256,
-     extracts only `cua-driver` to `/opt/cua-driver/<version>/` and links it, once, with
-     bounded backoff. A network failure is `driver-archive-unavailable` and is retried at the
+  1. uses the image's binary, or an earlier install of its own, when its SHA-256 is the lock's
+     `binarySha256` and it reports the pinned version; otherwise (v4 computers) it downloads the
+     pinned archive for the guest architecture (only from the driver's GitHub release, HTTPS
+     only, redirects included), verifies size and SHA-256, extracts only `cua-driver` to
+     `/opt/cua-driver/<version>/` and checks its `binarySha256`, once, with bounded backoff.
+     Either way it writes the telemetry-off shim at `/usr/local/bin/cua-driver` (replacing a
+     link an earlier helper left). A network failure is `driver-archive-unavailable` and is retried at the
      next start; `driver-archive-mismatch` and `driver-archive-invalid` are not retried;
   2. writes the launcher `/usr/local/libexec/silo-cua-driver-mcp` and registers it, as `silo`,
      as the stdio MCP server `cua-driver` in Claude Code (`~/.claude.json`) and Codex
@@ -315,8 +322,10 @@ error. They use temporary paths without running a computer.
      desktop start: it reads `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` from the
      running `xfce4-session`, sets the telemetry and update-check switches off, and runs
      `cua-driver mcp`;
-  3. removes leftovers of the earlier LCU setup (its registrations, approval entries, login
-     hook and `/opt/lcu`);
+  3. removes leftovers of the earlier LCU setup: its registrations, approval entries and hooks
+     (only `mcp__lcu*` and commands under `/opt/lcu` or `/usr/local/bin/lcu`; a user's own rule
+     that mentions "lcu" stays), its `lcu*` skills, `~/.local/share/lcu`, its Pi package entry,
+     login hook and `/opt/lcu`;
   4. waits for the desktop session (bounded: 300 s after a boot, else 90 s; after a boot a
      session that is `failed` or `stopped` is started again with `silo-desktop start`, up to
      three times with 2, 4 and 8 s of backoff, before the setup fails with
@@ -331,10 +340,15 @@ error. They use temporary paths without running a computer.
   exists. The helper runs `reconcile` at the end of every `apply`. While the computer runs, the
   guest has no init system, so `apply` starts `silo-computer-use watch` (one instance under a
   lock) that checks the agents' install directories (`~/.local/bin`, `~/.bun/bin`,
-  `~/.cargo/bin`, `~/.npm-global/bin`, `/usr/local/bin`) every 5 s while an agent is pending
-  and runs `reconcile` when a pending binary appears. It ends when nothing is pending.
+  `~/.cargo/bin`, `~/.npm-global/bin`, `/usr/local/bin`, and the version managers'
+  `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.asdf/shims`, `~/.local/share/pnpm`,
+  `/snap/bin`) every 5 s while an agent is pending and runs `reconcile` when a pending binary
+  appears. It ends when nothing is pending, when the receipt is no longer `ready`, or after 6 h.
   `/etc/profile.d/silo-computer-use.sh` is a fallback for the `silo` account's login shells.
-  Reconcile is skipped while an `apply` holds the helper lock.
+  Reconcile is skipped while an `apply` holds the helper lock. An `apply` waits at most 600 s
+  for that lock, under the host's 900 s bound. The cheap path of `apply` (nothing changed)
+  still reads each registered agent's configuration and runs the full setup again when Silo's
+  registration or the mode's approval is gone from it.
 - **Approval.** Per computer in `<storage>/computer-use/<id>.json`: the mode the user chose
   (default `ask`), the last mode applied and the last attempt. The host applies changes
   itself, one at a time per computer, on a background thread (see the

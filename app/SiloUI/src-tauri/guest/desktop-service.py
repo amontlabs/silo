@@ -992,7 +992,10 @@ def supervise_selkies():
                                DISPLAY=':1', XAUTHORITY=str(RUN / 'user/Xauthority'),
                                XDG_RUNTIME_DIR=str(RUN / 'user'), XDG_CURRENT_DESKTOP='XFCE',
                                PULSE_RUNTIME_PATH=str(RUN / 'user/pulse'),
-                               PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}')
+                               PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}',
+                               # Cua Driver's telemetry and update check stay off for anything
+                               # started from the desktop (terminals, agents).
+                               CUA_DRIVER_RS_TELEMETRY_ENABLED='0', CUA_DRIVER_RS_UPDATE_CHECK='false')
             try:
                 reset_desktop_density(account)
             except Exception as error:

@@ -23,11 +23,11 @@ speaks MCP over stdio, runs on X11 and AT-SPI, and needs no app.
 
 What is implemented:
 
-- **Pin.** `guest/cua-driver-lock.json` (version, and URL, SHA-256 and size per architecture).
+- **Pin.** `guest/cua-driver-lock.json` (version, and URL, archive SHA-256, size and binary SHA-256 per architecture; every URL must be the driver's own GitHub release).
   Only the `cua-driver` binary is used. cua-perception and cua-som (AGPL) are not shipped.
 - **Image.** The recipe in `guest-image/Dockerfile` is now `ubuntu-24.04-v5`: Cua Driver
-  verified at build in `/usr/local/lib/silo/cua-driver/<version>/` with a
-  `/usr/local/bin/cua-driver` link, telemetry and update checks off system-wide, the MIT
+  verified at build in `/usr/local/lib/silo/cua-driver/<version>/` behind a telemetry-off
+  `/usr/local/bin/cua-driver` shim, telemetry and update checks off system-wide, the MIT
   licence in `/usr/share/doc/silo-guest-third-party/`, no ChatGPT-only system packages,
   capabilities `["desktop","accessibility","cua-driver"]` and `cuaDriverVersion` in the marker.
   v5 is not published. `guest-image/image-lock.json` stays on v4, so new computers still come

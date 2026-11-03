@@ -13,17 +13,25 @@ export function cuaDriverArchive(architecture) {
   const lock = JSON.parse(readFileSync(resolve(root, "src-tauri/guest/cua-driver-lock.json"), "utf8"))
   const asset = lock.assets?.[architecture]
   if (lock.schemaVersion !== 1 || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(lock.version) || !asset
-    || !/^[0-9a-f]{64}$/.test(asset.sha256) || !Number.isInteger(asset.bytes) || asset.bytes <= 0
+    || !/^[0-9a-f]{64}$/.test(asset.sha256) || !/^[0-9a-f]{64}$/.test(asset.binarySha256 ?? "")
+    || !Number.isInteger(asset.bytes) || asset.bytes <= 0
     || !asset.url.startsWith(`https://github.com/trycua/cua/releases/download/cua-driver-rs-v${lock.version}/`)) {
     throw new Error("The Cua Driver lock is invalid")
   }
-  return { version: lock.version, url: asset.url, sha256: asset.sha256, bytes: asset.bytes, name: asset.url.split("/").pop() }
+  return { version: lock.version, url: asset.url, sha256: asset.sha256, binarySha256: asset.binarySha256, bytes: asset.bytes, name: asset.url.split("/").pop() }
+}
+
+/** /usr/local/bin/cua-driver in the image: guest/cua-driver-shim for the pinned binary. */
+export function cuaDriverShim(version) {
+  return readFileSync(resolve(root, "src-tauri/guest/cua-driver-shim"), "utf8")
+    .replaceAll("@DRIVER@", `/usr/local/lib/silo/cua-driver/${version}/cua-driver`)
 }
 
 export function verifyGuestImage(architecture, imageReference, { run = execFileSync } = {}) {
   if (!["arm64", "amd64"].includes(architecture)) throw new Error("Unsupported guest image architecture")
   const tools = readFileSync(resolve(root, "src-tauri/guest/verify-tools.sh"), "utf8")
   const driver = cuaDriverArchive(architecture)
+  const shimSha256 = createHash("sha256").update(cuaDriverShim(driver.version)).digest("hex")
   const check = `${tools}
 curl --version
 curl -fsS file:///etc/os-release -o /dev/null
@@ -35,9 +43,12 @@ test -x /usr/bin/xfce4-session || { echo "Guest image is missing the Xfce sessio
 python3 -c 'import json; m = json.load(open("/usr/local/share/silo/guest-image.json")); assert m["schemaVersion"] == 1 and m["version"] == "'${GUEST_IMAGE_VERSION}'" and {"desktop", "accessibility"} <= set(m["capabilities"]) and m["streamerVersion"] == "2.0.0"'
 python3 -c 'import json; m = json.load(open("/usr/local/share/silo/guest-image.json")); assert "cua-driver" in m["capabilities"] and m["cuaDriverVersion"] == "${driver.version}"'
 # The pinned Cua Driver (guest/cua-driver-lock.json): only its binary is installed, it runs, links nothing missing and sends no telemetry.
-test "$(CUA_DRIVER_RS_TELEMETRY_ENABLED=0 /usr/local/bin/cua-driver --version)" = "cua-driver ${driver.version}" || { echo "The image's Cua Driver is not the pinned version" >&2; exit 1; }
-test "$(readlink -f /usr/local/bin/cua-driver)" = /usr/local/lib/silo/cua-driver/${driver.version}/cua-driver && test "$(ls /usr/local/lib/silo/cua-driver/${driver.version} | wc -l)" = 1 || { echo "Only the pinned cua-driver binary may be installed" >&2; exit 1; }
-! ldd /usr/local/bin/cua-driver | grep -q 'not found' || { echo "Cua Driver has unresolved libraries" >&2; exit 1; }
+test "$(CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false /usr/local/bin/cua-driver --version)" = "cua-driver ${driver.version}" || { echo "The image's Cua Driver is not the pinned version" >&2; exit 1; }
+# /usr/local/bin/cua-driver is the shim (guest/cua-driver-shim) that switches telemetry and the update check off.
+test ! -L /usr/local/bin/cua-driver && test -x /usr/local/bin/cua-driver && test "$(stat -c %u /usr/local/bin/cua-driver)" = 0 && test "$(sha256sum < /usr/local/bin/cua-driver | cut -d' ' -f1)" = ${shimSha256} || { echo "/usr/local/bin/cua-driver is not Silo's telemetry-off shim" >&2; exit 1; }
+test ! -L /usr/local/lib/silo/cua-driver/${driver.version}/cua-driver && test "$(sha256sum < /usr/local/lib/silo/cua-driver/${driver.version}/cua-driver | cut -d' ' -f1)" = ${driver.binarySha256} || { echo "The image's Cua Driver binary is not the pinned binary" >&2; exit 1; }
+test "$(ls /usr/local/lib/silo/cua-driver/${driver.version} | wc -l)" = 1 || { echo "Only the pinned cua-driver binary may be installed" >&2; exit 1; }
+! ldd /usr/local/lib/silo/cua-driver/${driver.version}/cua-driver | grep -q 'not found' || { echo "Cua Driver has unresolved libraries" >&2; exit 1; }
 grep -qx 'CUA_DRIVER_RS_TELEMETRY_ENABLED=0' /etc/environment && grep -qx 'CUA_DRIVER_RS_UPDATE_CHECK=false' /etc/environment || { echo "Cua Driver telemetry and update check must be off system-wide" >&2; exit 1; }
 test "$(sh -c '. /etc/profile.d/silo-cua-driver.sh; echo "$CUA_DRIVER_RS_TELEMETRY_ENABLED $CUA_DRIVER_RS_UPDATE_CHECK"')" = "0 false"
 test -x /usr/local/libexec/silo-cua-driver-mcp && python3 -c 'import py_compile; py_compile.compile("/usr/local/libexec/silo-cua-driver-mcp", cfile="/tmp/silo-cua-driver-mcp.pyc", doraise=True)' || { echo "The Cua Driver MCP launcher is missing or does not compile" >&2; exit 1; }

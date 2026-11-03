@@ -7,9 +7,12 @@ boot and whenever the user changes the computer's approval switch. The helper is
 executor: the host decides the mode, serializes the runs and keeps the result. `apply` is
 idempotent and cheap when nothing changed:
 
-* `/usr/local/bin/cua-driver` must report the pinned version. The guest image (v5 and later)
-  ships it; otherwise the pinned archive is downloaded once (bounded backoff), its hash is
-  verified and only the `cua-driver` binary is extracted to /opt/cua-driver/<version>/;
+* `/usr/local/bin/cua-driver` must report the pinned version. It is a small root-owned shell
+  shim that switches Cua Driver's telemetry and update check off and runs the pinned binary,
+  so they stay off however the driver is started. The guest image (v5 and later) ships the
+  binary under /usr/local/lib/silo/cua-driver/<version>/; otherwise the pinned archive is
+  downloaded once (bounded backoff), its hash is verified and only the `cua-driver` binary is
+  extracted to /opt/cua-driver/<version>/;
 * Silo registers the driver as a plain stdio MCP server named `cua-driver` for the agents it
   knows a generic configuration for, as the working account: Claude Code
   (`~/.claude.json`) and Codex (`~/.codex/config.toml`). The command is the launcher
@@ -38,6 +41,7 @@ computer have root, so it is a convenience and not a security boundary.
 import argparse
 import contextlib
 import fcntl
+import glob
 import hashlib
 import json
 import os
@@ -59,9 +63,20 @@ RECEIPT = STATE / 'receipt.json'
 LOCK = STATE / 'lock'
 STAGE = STATE / 'stage'
 LOG = Path('/var/log/silo-computer-use.log')
-# The driver: the image's copy, else Silo's own install under INSTALL_ROOT.
+# The driver: a shim (SHIM_TEMPLATE) that runs the image's copy under IMAGE_ROOT, else Silo's
+# own install under INSTALL_ROOT.
 DRIVER_LINK = Path('/usr/local/bin/cua-driver')
+IMAGE_ROOT = Path('/usr/local/lib/silo/cua-driver')
 INSTALL_ROOT = Path('/opt/cua-driver')
+# guest/cua-driver-shim is the same text; the image installs it too. Rust pushes only this
+# helper, so it is embedded here.
+SHIM_TEMPLATE = '''#!/bin/sh
+# /usr/local/bin/cua-driver: Cua Driver with its telemetry and update check off, however it is
+# started (MCP launcher, desktop terminal, SSH shell, agent tool). Installed by the Silo guest
+# image and by silo-computer-use, which put the pinned binary's path below.
+export CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false DO_NOT_TRACK=1
+exec @DRIVER@ "$@"
+'''
 LEGACY_PREFIX = Path('/opt/lcu')
 LEGACY_RECEIPT = Path('/var/lib/silo-desktop/lcu.json')
 DESKTOP_COMMAND = '/usr/local/bin/silo-desktop'
@@ -145,6 +160,14 @@ EXECUTABLES = AGENTS
 CLAUDE_STATE = Path(HOME) / '.claude.json'
 CLAUDE_SETTINGS = Path(HOME) / '.claude/settings.json'
 CODEX_CONFIG = Path(HOME) / '.codex/config.toml'
+# What LCU left in the working account besides agent configuration: its data, the `lcu*`
+# skills it installed for the agents, and its package entry in Pi's settings.
+LEGACY_DATA = Path(HOME) / '.local/share/lcu'
+LEGACY_SKILL_DIRS = [Path(HOME) / d for d in ('.claude/skills', '.codex/skills', '.agents/skills', '.pi/agent/skills')]
+PI_SETTINGS = Path(HOME) / '.pi/agent/settings.json'
+# Where version managers put the agents' executables, besides USER_BIN (globs, no login shell).
+AGENT_BIN_GLOBS = [f'{HOME}/.nvm/versions/node/*/bin', f'{HOME}/.volta/bin', f'{HOME}/.asdf/shims',
+                   f'{HOME}/.local/share/pnpm', '/snap/bin']
 # The default session environment of the Silo desktop (setup-desktop.sh, desktop-service.py).
 SESSION_DISPLAY = ':1'
 SESSION_RUNTIME_DIR = '/run/silo-desktop/user'
@@ -152,6 +175,9 @@ SESSION_PROCESS = 'xfce4-session'
 PRIVACY_ENV = {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}
 WATCH_LOCK = STATE / 'watch.lock'
 WATCH_INTERVAL = 5
+# The watcher ends after this long even with agents still pending; the next boot, login or
+# apply starts a new one.
+WATCH_MAX = 6 * 3600
 PROFILE_HOOK = Path('/etc/profile.d/silo-computer-use.sh')
 # Cua Driver sends telemetry and checks for updates by default; these switch both off for any
 # shell, not only for agents that go through the launcher. The v5 image ships the same files.
@@ -178,7 +204,9 @@ SESSION_WAIT = 90
 # SESSION_REPAIR_BASE * 2 ** (n - 1) seconds before attempt n.
 SESSION_REPAIR_ATTEMPTS = 3
 SESSION_REPAIR_BASE = 2
-LOCK_WAIT = 1800
+# Below the host's own timeout for one apply (APPLY_TIMEOUT in engine/src/computer_use.rs, 900 s),
+# so a run waiting for the lock gives up before the host does.
+LOCK_WAIT = 600
 # The driver download: waits between attempts (so five attempts), the longest one curl
 # attempt may take, and the total time after which no new attempt starts.
 DOWNLOAD_BACKOFF = (5, 10, 20, 40)
@@ -247,6 +275,11 @@ def read_json(path):
     return value if isinstance(value, dict) else None
 
 
+def release_prefix(version):
+    """Where every pinned archive must come from: the driver's own GitHub release."""
+    return f'https://github.com/trycua/cua/releases/download/cua-driver-rs-v{version}/'
+
+
 def load_pinned():
     """The driver lock the host pinned (`guest/cua-driver-lock.json`), or None when absent or
     malformed."""
@@ -259,7 +292,8 @@ def load_pinned():
             return None
         for arch in ('arm64', 'amd64'):
             asset = assets[arch]
-            if (not str(asset['url']).startswith('https://') or not SHA256.fullmatch(asset['sha256']) or
+            if (not str(asset['url']).startswith(release_prefix(value['version'])) or not SHA256.fullmatch(asset['sha256']) or
+                    not SHA256.fullmatch(asset['binarySha256']) or
                     not isinstance(asset['bytes'], int) or isinstance(asset['bytes'], bool) or
                     asset['bytes'] <= 0):
                 return None
@@ -397,7 +431,7 @@ def download(url, target):
             run(['curl', '--silent', '--show-error', '--fail', '--location',
                  '--retry', '3', '--retry-delay', '2', '--retry-all-errors', '--retry-connrefused',
                  '--connect-timeout', '30', '--max-time', str(max_time),
-                 '--proto', '=https', '--tlsv1.2', url, '--output', str(target)],
+                 '--proto', '=https', '--proto-redir', '=https', '--tlsv1.2', url, '--output', str(target)],
                 timeout=max_time + 60)
             return
         except Failure as failure:
@@ -466,38 +500,68 @@ def driver_version(path=DRIVER_LINK):
     return match.group(1) if match else None
 
 
-def link_driver(target):
-    """Points /usr/local/bin/cua-driver at `target` atomically."""
+def shim_text(target):
+    return SHIM_TEMPLATE.replace('@DRIVER@', str(target))
+
+
+def write_shim(target):
+    """Makes /usr/local/bin/cua-driver the shim that runs `target`, atomically; root-owned, executable
+    by everyone. A symlink left there by an earlier helper is replaced."""
+    text = shim_text(target)
+    try:
+        if (not DRIVER_LINK.is_symlink() and DRIVER_LINK.is_file() and DRIVER_LINK.read_text() == text
+                and os.access(DRIVER_LINK, os.X_OK)):
+            return
+    except (OSError, UnicodeDecodeError):
+        pass
     DRIVER_LINK.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    temporary = DRIVER_LINK.with_name('.cua-driver.tmp')
-    temporary.unlink(missing_ok=True)
-    os.symlink(target, temporary)
-    os.replace(temporary, DRIVER_LINK)
+    fd, temporary = tempfile.mkstemp(prefix='.cua-driver-', dir=DRIVER_LINK.parent)
+    try:
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(text)
+        os.chmod(temporary, 0o755)
+        os.replace(temporary, DRIVER_LINK)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+        raise
+
+
+def shim_is_current(version):
+    """True when /usr/local/bin/cua-driver is the shim for a pinned binary of `version`."""
+    try:
+        text = DRIVER_LINK.read_text() if not DRIVER_LINK.is_symlink() else None
+    except (OSError, UnicodeDecodeError):
+        return False
+    return text in {shim_text(root / version / 'cua-driver') for root in (IMAGE_ROOT, INSTALL_ROOT)}
 
 
 def ensure_driver(pinned, stage):
-    """Makes /usr/local/bin/cua-driver the pinned version and returns its path: the image's
-    copy when it matches, a previous install of Silo's own, else the verified download."""
+    """Makes /usr/local/bin/cua-driver the shim for the pinned version and returns its path: the
+    image's copy when it matches, a previous install of Silo's own, else the verified download."""
     wanted = pinned['version']
-    if driver_version(DRIVER_LINK) == wanted:
-        return DRIVER_LINK
+    binary_sha256 = pinned_asset(pinned)['binarySha256']
+    for candidate in (IMAGE_ROOT / wanted / 'cua-driver', INSTALL_ROOT / wanted / 'cua-driver'):
+        if (candidate.is_file() and not candidate.is_symlink() and sha256_file(candidate) == binary_sha256
+                and driver_version(candidate) == wanted):
+            write_shim(candidate)
+            return DRIVER_LINK
     installed = INSTALL_ROOT / wanted / 'cua-driver'
-    if not installed.is_symlink() and driver_version(installed) == wanted:
-        link_driver(installed)
-        return DRIVER_LINK
     archive = archive_path(pinned, stage)
     directory = INSTALL_ROOT / wanted
     directory.mkdir(mode=0o755, parents=True, exist_ok=True)
     temporary = directory / '.cua-driver.tmp'
     try:
         extract_driver(archive, temporary)
+        if sha256_file(temporary) != binary_sha256:
+            raise Failure('driver-archive-invalid', 'the extracted driver is not the pinned binary')
         os.replace(temporary, installed)
     finally:
         temporary.unlink(missing_ok=True)
     if driver_version(installed) != wanted:
         installed.unlink(missing_ok=True)
         raise Failure('driver-archive-invalid', 'the extracted driver is not the pinned version')
-    link_driver(installed)
+    write_shim(installed)
     return DRIVER_LINK
 
 
@@ -632,7 +696,10 @@ def write_text(path, text, mode=0o600):
 # ------------------------------------------------------------- agent registrations
 
 # What the earlier LCU setup left in an agent's configuration.
-LEGACY = re.compile(r'(?<![A-Za-z0-9])lcu(?![A-Za-z0-9])|mcp__lcu|/opt/lcu', re.IGNORECASE)
+# Only what LCU itself wrote: its MCP tools (`mcp__lcu`, `mcp__lcu__<tool>`) and commands under
+# /opt/lcu or /usr/local/bin/lcu. A user's own rule that merely mentions "lcu" is kept.
+LEGACY = re.compile(r'(?<![A-Za-z0-9_])mcp__lcu(?:__[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-])'
+                    r'|/opt/lcu(?=/|$|[\s"\':])|/usr/local/bin/lcu(?=$|[\s"\':])')
 APPROVAL_RULE = 'mcp__' + SERVER
 
 
@@ -706,7 +773,10 @@ def edit_claude(entry, approval):
     if isinstance(servers, dict):
         servers.pop('lcu', None)
     if entry is not None:
-        state.setdefault('mcpServers', {})[SERVER] = entry
+        if servers is None:
+            # Absent or `null`: both mean no servers yet.
+            servers = state['mcpServers'] = {}
+        servers[SERVER] = entry
     if json.dumps(state, sort_keys=True) != original:
         write_text(CLAUDE_STATE, json.dumps(state, indent=2) + '\n')
     settings = read_object(CLAUDE_SETTINGS)
@@ -721,7 +791,9 @@ def edit_claude(entry, approval):
     if allow is not None and not isinstance(allow, list):
         raise Failure('setup-failed', 'permissions.allow is not a list')
     if approval == 'auto' and entry is not None:
-        permissions = settings.setdefault('permissions', {})
+        if permissions is None:
+            # Absent or `null`: both mean no rules yet.
+            permissions = settings['permissions'] = {}
         if APPROVAL_RULE not in (allow or []):
             permissions['allow'] = [*(allow or []), APPROVAL_RULE]
     elif approval == 'ask' and allow and APPROVAL_RULE in allow:
@@ -799,9 +871,17 @@ def edit_codex(entry, approval):
 EDITORS = {'claude-code': edit_claude, 'codex': edit_codex}
 
 
+def agent_directories():
+    """USER_BIN and the version managers' bin directories that exist (newest nvm Node first)."""
+    found = []
+    for pattern in AGENT_BIN_GLOBS:
+        found += sorted(glob.glob(pattern), reverse=True)
+    return [*USER_BIN, *found]
+
+
 def binary_installed(name, directories=None):
     """The `os.stat_result` of the executable `name` in the agents' install directories, or None."""
-    for directory in directories or USER_BIN:
+    for directory in directories or agent_directories():
         path = Path(directory) / name
         if path.is_file() and os.access(path, os.X_OK):
             return path.stat()
@@ -821,22 +901,54 @@ def configure(names, approval):
             with as_user():
                 EDITORS[name](entry, approval)
             registered.append(name)
-        except (Failure, OSError, ValueError, tomllib.TOMLDecodeError) as error:
+        except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
+            # One agent's unusual configuration fails only that agent.
             log(f'could not register {SERVER} with {name}: {type(error).__name__}: {error}')
             failed.append(name)
     return registered, pending, failed
 
 
+def remove_legacy_user_files():
+    """As the working account: LCU's data, its `lcu*` skills and its Pi package entry. Pi's
+    settings file keeps everything else and is never created."""
+    if LEGACY_DATA.is_symlink() or LEGACY_DATA.is_file():
+        LEGACY_DATA.unlink()
+    elif LEGACY_DATA.is_dir():
+        shutil.rmtree(LEGACY_DATA)
+    for directory in LEGACY_SKILL_DIRS:
+        if directory.is_symlink() or not directory.is_dir():
+            continue
+        for path in directory.glob('lcu*'):
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+    if PI_SETTINGS.is_symlink() or not PI_SETTINGS.is_file():
+        return
+    settings = read_object(PI_SETTINGS)
+    packages = settings.get('packages') if settings else None
+    if isinstance(packages, list):
+        kept = [p for p in packages if '/lcu/' not in (p if isinstance(p, str) else json.dumps(p))]
+        if kept != packages:
+            settings['packages'] = kept
+            write_text(PI_SETTINGS, json.dumps(settings, indent=2) + '\n')
+
+
 def remove_legacy():
     """Removes what the earlier LCU setup left: its agent entries (a file that does not exist
-    is not created; Silo's own registration and approval stay as they are), /opt/lcu, its
-    launchers and its receipt."""
+    is not created; Silo's own registration and approval stay as they are), its skills, data
+    and Pi package, /opt/lcu, its launchers and its receipt."""
     for name, editor in EDITORS.items():
         try:
             with as_user():
                 editor(None, None)
-        except (Failure, OSError, ValueError, tomllib.TOMLDecodeError) as error:
+        except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
             log(f'could not remove the LCU entries for {name}: {type(error).__name__}: {error}')
+    try:
+        with as_user():
+            remove_legacy_user_files()
+    except (OSError, ValueError, TypeError) as error:
+        log(f'could not remove the LCU files of the working account: {type(error).__name__}: {error}')
     try:
         if LEGACY_PREFIX.is_symlink() or LEGACY_PREFIX.is_file():
             LEGACY_PREFIX.unlink()
@@ -898,9 +1010,10 @@ def ensure_triggers(pending):
 
 
 def watch(interval=WATCH_INTERVAL, directories=None, rounds=None):
-    """Runs until nothing is pending: when a pending agent's binary appears (or is replaced),
-    runs `reconcile` once for it. Polling a few paths is cheap and needs neither an init
-    system nor inotify tools in the image. One instance holds WATCH_LOCK."""
+    """Runs until nothing is pending, the receipt is no longer `ready`, or WATCH_MAX has passed:
+    when a pending agent's binary appears (or is replaced), runs `reconcile` once for it.
+    Polling a few paths is cheap and needs neither an init system nor inotify tools in the
+    image. One instance holds WATCH_LOCK."""
     STATE.mkdir(mode=0o755, parents=True, exist_ok=True)
     attempted = {}
     with open(WATCH_LOCK, 'a') as handle:
@@ -908,8 +1021,12 @@ def watch(interval=WATCH_INTERVAL, directories=None, rounds=None):
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
+        deadline = time.monotonic() + WATCH_MAX
         while rounds is None or rounds > 0:
-            pending = [n for n in (read_json(RECEIPT) or {}).get('pending') or [] if isinstance(n, str)]
+            receipt = read_json(RECEIPT) or {}
+            if receipt.get('state') != 'ready' or time.monotonic() >= deadline:
+                return
+            pending = [n for n in receipt.get('pending') or [] if isinstance(n, str)]
             if not pending:
                 return
             for name in sorted({EXECUTABLES.get(n, n) for n in pending}):
@@ -929,6 +1046,36 @@ def watch(interval=WATCH_INTERVAL, directories=None, rounds=None):
             time.sleep(interval)
 
 
+
+
+def registrations_intact(agents, mode):
+    """True when every agent in `agents` still has Silo's registration, with the approval of
+    `mode`, in its configuration: a cheap read, so a file the user (or an agent update)
+    rewrote sends the apply through the full configuration again."""
+    entry = server_entry()
+    try:
+        with as_user():
+            for name in agents:
+                if name == 'claude-code':
+                    state = read_object(CLAUDE_STATE) or {}
+                    if (state.get('mcpServers') or {}).get(SERVER) != entry:
+                        return False
+                    settings = read_object(CLAUDE_SETTINGS) or {}
+                    allow = (settings.get('permissions') or {}).get('allow') or []
+                    if (APPROVAL_RULE in allow) != (mode == 'auto'):
+                        return False
+                elif name == 'codex':
+                    config = tomllib.loads(CODEX_CONFIG.read_text())
+                    server = (config.get('mcp_servers') or {}).get(SERVER) or {}
+                    if server.get('command') != entry['command'] or server.get('env') != entry['env']:
+                        return False
+                    if (server.get('default_tools_approval_mode') == 'approve') != (mode == 'auto'):
+                        return False
+                else:
+                    return False
+    except (OSError, ValueError, TypeError, AttributeError, tomllib.TOMLDecodeError):
+        return False
+    return True
 
 
 def reconcile_agents(receipt):
@@ -1078,7 +1225,9 @@ def update(pinned, mode, force, boot):
     existing = read_json(RECEIPT)
     configured = bool(not force and existing and existing.get('state') == 'ready'
                       and matches(existing, pinned, mode))
-    if configured and not boot and driver_version(DRIVER_LINK) == pinned['version']:
+    if (configured and not boot and shim_is_current(pinned['version'])
+            and driver_version(DRIVER_LINK) == pinned['version']
+            and registrations_intact(existing.get('agents') or [], mode)):
         # The receipt shows this mode applied completely. An agent installed since then is
         # registered, and registrations follow a desktop session that was started again.
         write_launcher()

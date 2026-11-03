@@ -52,6 +52,7 @@ RUN --mount=type=bind,source=src-tauri/guest/desktop-streamer-lock.json,target=/
     --mount=type=bind,source=src-tauri/guest/desktop-packages.txt,target=/mnt/desktop-packages.txt \
     --mount=type=bind,source=src-tauri/guest/silo-accessibility.py,target=/mnt/silo-accessibility.py \
     --mount=type=bind,source=src-tauri/guest/silo-cua-driver-mcp,target=/mnt/silo-cua-driver-mcp \
+    --mount=type=bind,source=src-tauri/guest/cua-driver-shim,target=/mnt/cua-driver-shim \
     --mount=type=bind,source=src-tauri/guest/cua-driver-lock.json,target=/mnt/cua-driver-lock.json \
     --mount=type=bind,source=src-tauri/guest/guest-third-party-notices.md,target=/mnt/guest-third-party-notices.md \
     set -eu \
@@ -70,23 +71,25 @@ RUN --mount=type=bind,source=src-tauri/guest/desktop-streamer-lock.json,target=/
     && apt-get install -y --no-install-recommends /tmp/selkies.deb \
     && test -x /usr/bin/selkies \
     && rm -f /tmp/selkies.deb \
-    && set -- $(python3 -c "import json,re,sys; l=json.load(open('/mnt/cua-driver-lock.json')); a=l['assets'][sys.argv[1]]; assert l['schemaVersion']==1 and re.fullmatch(r'[0-9]+[.][0-9]+[.][0-9]+', l['version']) and a['url'].startswith('https://github.com/trycua/cua/releases/download/cua-driver-rs-v'+l['version']+'/') and re.fullmatch('[0-9a-f]{64}', a['sha256']) and isinstance(a['bytes'], int); print(a['url'], a['sha256'], a['bytes'], l['version'])" "$TARGETARCH") \
-    && cua_url=$1 && cua_sha256=$2 && cua_bytes=$3 && cua_version=$4 \
+    && set -- $(python3 -c "import json,re,sys; l=json.load(open('/mnt/cua-driver-lock.json')); a=l['assets'][sys.argv[1]]; assert l['schemaVersion']==1 and re.fullmatch(r'[0-9]+[.][0-9]+[.][0-9]+', l['version']) and a['url'].startswith('https://github.com/trycua/cua/releases/download/cua-driver-rs-v'+l['version']+'/') and re.fullmatch('[0-9a-f]{64}', a['sha256']) and re.fullmatch('[0-9a-f]{64}', a['binarySha256']) and isinstance(a['bytes'], int); print(a['url'], a['sha256'], a['bytes'], l['version'], a['binarySha256'])" "$TARGETARCH") \
+    && cua_url=$1 && cua_sha256=$2 && cua_bytes=$3 && cua_version=$4 && cua_binary_sha256=$5 \
     && curl --silent --show-error --fail --location --retry 2 --connect-timeout 30 --max-time 600 \
-        --proto '=https' --tlsv1.2 "$cua_url" -o /tmp/cua-driver.tar.gz \
+        --proto '=https' --proto-redir '=https' --tlsv1.2 "$cua_url" -o /tmp/cua-driver.tar.gz \
     && echo "$cua_sha256  /tmp/cua-driver.tar.gz" | sha256sum --check --status \
     && test "$(stat -c %s /tmp/cua-driver.tar.gz)" = "$cua_bytes" \
     && install -d -m 0755 "/usr/local/lib/silo/cua-driver/$cua_version" \
     && tar -xzf /tmp/cua-driver.tar.gz -C "/usr/local/lib/silo/cua-driver/$cua_version" --no-same-owner cua-driver \
     && rm -f /tmp/cua-driver.tar.gz \
     && chmod 0755 "/usr/local/lib/silo/cua-driver/$cua_version/cua-driver" \
-    && ln -sf "/usr/local/lib/silo/cua-driver/$cua_version/cua-driver" /usr/local/bin/cua-driver \
+    && echo "$cua_binary_sha256  /usr/local/lib/silo/cua-driver/$cua_version/cua-driver" | sha256sum --check --status \
+    && sed "s#@DRIVER@#/usr/local/lib/silo/cua-driver/$cua_version/cua-driver#" /mnt/cua-driver-shim > /usr/local/bin/cua-driver \
+    && chmod 0755 /usr/local/bin/cua-driver \
     && printf '%s\n' 'CUA_DRIVER_RS_TELEMETRY_ENABLED=0' 'CUA_DRIVER_RS_UPDATE_CHECK=false' >> /etc/environment \
     && printf '%s\n' '# Cua Driver: no telemetry, no update check (Silo guest image).' \
         'export CUA_DRIVER_RS_TELEMETRY_ENABLED=0' 'export CUA_DRIVER_RS_UPDATE_CHECK=false' > /etc/profile.d/silo-cua-driver.sh \
     && chmod 0644 /etc/profile.d/silo-cua-driver.sh \
-    && test "$(CUA_DRIVER_RS_TELEMETRY_ENABLED=0 /usr/local/bin/cua-driver --version)" = "cua-driver $cua_version" \
-    && ! ldd /usr/local/bin/cua-driver | grep -q 'not found' \
+    && test "$(CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false /usr/local/bin/cua-driver --version)" = "cua-driver $cua_version" \
+    && ! ldd "/usr/local/lib/silo/cua-driver/$cua_version/cua-driver" | grep -q 'not found' \
     && install -D -m 0644 /mnt/guest-third-party-notices.md /usr/share/doc/silo-guest-third-party/NOTICES.md \
     && install -d -m 0755 /usr/local/libexec /etc/dconf/profile /etc/dconf/db/local.d /etc/xdg/autostart \
     && install -m 0755 /mnt/silo-accessibility.py /usr/local/libexec/silo-accessibility \
