@@ -485,6 +485,9 @@ guest computers on Mac hosts remain supported.
 ### Required release acceptance evidence
 
 - Clean install from the actual downloaded DMG.
+- Full library constraint suite (`test-macos-library-constraints.py` without
+  `--constraints-only`) in a macOS 14 VM with SIP enabled, with its
+  `results.json`, whenever packaging or signing changed since the last proof.
 - Real signed version-to-version update and app relaunch; preserved settings,
   account, secrets, computer disks and previous running state.
 - Invalid signature, interrupted/offline download, low disk space, read-only
@@ -746,7 +749,7 @@ individual projects because project limits override the CLI root limit.
 
 The release workflow runs native and updater checks on macOS in parallel with
 the app build. The draft job requires the native checks, frontend checks,
-package checks and minimum-macOS checks to pass. Native
+package checks and hosted library constraint checks to pass. Native
 test jobs receive no signing credentials. Only the reviewed public release dependencies
 described above are cached; application and native-test products are excluded.
 

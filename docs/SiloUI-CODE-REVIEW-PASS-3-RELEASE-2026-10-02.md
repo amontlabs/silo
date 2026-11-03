@@ -132,6 +132,8 @@ No release was published or signed, and no repository or remote release tag was 
 
 **Status.** Left open because no qualified replacement runner or macOS 14 host was provided, and the shared task instructions prohibit app launches and network-heavy builds. Provisioning and qualifying a runner is not a small obvious source fix. The release guide now records the first brownout and the temporary rerun limitation. No CI/environment configuration was changed to bypass this gate.
 
+**Update (2026-11-03).** GitHub retired `macos-14` on November 2, 2026. The hosted job now runs on `macos-15` as a constraints gate only; the minimum-version proof moved to the full suite in a macOS 14 VM, recorded with the release acceptance evidence ([releases](SiloUI-RELEASES.md#required-release-acceptance-evidence)).
+
 ### RL-07 MicroSandbox fallback executable cache ignores compiler flags and build recipe
 
 **P2.** Location: [microsandbox-runtime.mjs](../app/SiloUI/scripts/microsandbox-runtime.mjs), compiled executable cache identity. Confirmed by concurrent review before `abae62fe`.

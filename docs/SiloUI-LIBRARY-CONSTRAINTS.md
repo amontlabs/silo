@@ -83,7 +83,8 @@ library constraints but do not enforce the two signature controls tested here.
 CI therefore runs nine constraint cases with those two controls explicitly
 skipped, not reported as passed. GitHub retired the macOS 14 runners on November 2, 2026; the
 required release job now runs on `macos-15`, so the Sonoma VM run above is the
-only minimum-version proof and is repeated for each release. The full suite on a normally protected Mac
+only minimum-version proof. It is repeated when packaging or signing changes, as
+listed in the release acceptance evidence. The full suite on a normally protected Mac
 remains a separate release acceptance check.
 
 The final local 0.1.1 DMG was mounted read-only and passed bundle verification.
