@@ -527,9 +527,9 @@
                 Agents are prompt-injected through what they read. In
                 <a href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment and Control</a>,
                 pull request titles and issue comments made coding agents in
-                GitHub Actions post their API keys and GitHub tokens back
-                through GitHub itself, so allowing GitHub was enough to leak
-                them. The UK AI Security Institute’s
+                GitHub Actions leak their API keys and GitHub tokens back
+                through GitHub itself, past an egress allowlist that permitted
+                GitHub. The UK AI Security Institute’s
                 <a href="https://www.aisi.gov.uk/blog/can-ai-agents-escape-their-sandboxes-a-benchmark-for-safely-measuring-container-breakout-capabilities">SandboxEscapeBench</a>
                 found frontier models reliably escape common container
                 misconfigurations.
@@ -578,7 +578,7 @@
                   <tr><th scope="row">srt</th><td>OS sandbox, shared kernel</td><td>Deny, or sentinel swapped on egress</td><td>Deny by default, allowlist</td><td>N/A</td><td>Apache-2.0</td></tr>
                   <tr><th scope="row">microsandbox</th><td>microVM</td><td>Secrets bound to allowed hosts</td><td>Host and port allowlist</td><td>Not documented</td><td>Apache-2.0</td></tr>
                   <tr><th scope="row">E2B</th><td>Firecracker microVM, hosted</td><td>Reference, swapped by an egress proxy</td><td>Open by default; allow and deny lists</td><td>Not documented</td><td>Apache-2.0 core</td></tr>
-                  <tr><th scope="row">Daytona</th><td>Container or VM, hosted</td><td>Placeholder, swapped by a proxy</td><td>Firewall and allowlists</td><td>No</td><td>Proprietary service</td></tr>
+                  <tr><th scope="row">Daytona</th><td>Container or VM, hosted</td><td>Placeholder, swapped by a proxy</td><td>Firewall and allowlists</td><td>Yes, on request</td><td>Proprietary service</td></tr>
                   <tr><th scope="row">Apple container</th><td>VM per container</td><td>Not documented</td><td>No filter documented</td><td>No</td><td>Apache-2.0</td></tr>
                 </tbody>
               </table>
