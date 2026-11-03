@@ -50,13 +50,6 @@ list comes from `go list -deps` for the actual guest build target; upstream
 `go.sum` and the Go checksum database verify module source. Corresponding
 source and redistribution review remain part of release preparation.
 
-# Bundled LCU release archive (macOS computers)
-
-Silo's macOS computers still install LCU for the sandbox's built-in computer use (`app/SiloUI/src-tauri/guest/macos/lcu-lock.json`); LCU is MIT-licensed and its license text is inside the release archive. The Linux guest images contain neither LCU nor any ChatGPT application; they use Cua Driver (see below).
-
-- Project: https://github.com/amontlabs/lcu
-- Release: https://github.com/amontlabs/lcu/releases/tag/v0.11.0
-
 # Silo guest image: Selkies desktop streamer and codecs
 
 Silo's published guest images from `ubuntu-24.04-v4` on (GitHub release `guest-ubuntu-24.04-v4` and
@@ -127,13 +120,17 @@ Silo's guest images from `ubuntu-24.04-v5` on contain Cua Driver, installed at
 `/usr/local/lib/silo/cua-driver/<version>/cua-driver` and linked as `/usr/local/bin/cua-driver`. Computers
 created from an earlier image download the same pinned release once when computer use is set up
 (`app/SiloUI/src-tauri/guest/cua-driver-lock.json`). Only the `cua-driver` binary of the release archive is
-used. Cua Driver is MIT-licensed; its licence text follows. The optional `cua-perception` and `cua-som`
+used. Silo's macOS computers install the same release's universal macOS archive (`CuaDriver.app`, signed by
+Cua AI, Inc. with team identifier YCK386LBJ7) from the device's download cache into the computer
+(`app/SiloUI/src-tauri/guest/macos/cua-driver-lock.json`); no ChatGPT application and no LCU are installed
+on any guest. Cua Driver is MIT-licensed; its licence text follows. The optional `cua-perception` and `cua-som`
 extensions (AGPL-3.0) are not part of the image.
 
 - Project: https://github.com/trycua/cua
 - Release: https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.38.0
 - Linux ARM64 archive SHA-256: `80c9ae66bc7322052dd426c6133c96086b33894bf06c972bca8215384400b33d`
 - Linux x86-64 archive SHA-256: `31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd`
+- macOS universal archive SHA-256: `121cf20cafd2cfa69dd720e8967350c6406b22e558be6889de7a1ae3343b6d4b`
 
 ```
 MIT License

@@ -264,7 +264,8 @@ the text default. The image describes itself in
 A computer created from a v4 or later image (`desktop.builtIn`) has agent computer use
 ready with no setup. Since 2026-11-03 Linux computers use [Cua Driver](https://github.com/trycua/cua)
 0.38.0 (MIT) over MCP; the ChatGPT Linux app and LCU are no longer used on Linux. macOS
-computers still use LCU and the ChatGPT app until a follow-up change. Implementation:
+computers use the same Cua Driver version through `guest/macos/silo-computer-use.zsh`
+([macOS computers](SiloUI-MACOS-COMPUTERS.md#provisioning-for-computer-use)). Implementation:
 `engine/src/computer_use.rs`, `guest/silo-computer-use.py`, `guest/silo-cua-driver-mcp`, pin in
 `guest/cua-driver-lock.json`, image recipe in `guest-image/Dockerfile`. The design and the
 decision are in the [computer use plan](SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03); the
@@ -353,7 +354,7 @@ error. They use temporary paths without running a computer.
   `state` (`unavailable`, `installing`, `ready`, `failed`), `reason`, `approval`,
   `appliedApproval`, `approvalApply`, `approvalApplyReason`, `driverVersion`, `agents`. The
   running read costs one guest command that also returns the helper's `status`, which only
-  reads the receipt. `chatgptVersion` and `lcuVersion` remain in the API for macOS computers.
+  reads the receipt. macOS computers fill `driverVersion` too; `chatgptVersion` and `lcuVersion` are gone from the API.
 - **Commands.** `set_computer_use_approval { computer, mode: "ask" | "auto" }` stores the mode
   and, when the computer runs, starts applying it in the background and returns at once
   (`approvalApply: pending`); the `setup-computer-use` desktop action reruns the apply (the

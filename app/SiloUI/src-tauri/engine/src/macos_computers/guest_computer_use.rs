@@ -1,10 +1,11 @@
-//! Computer use inside the guest: the official ChatGPT macOS app and LCU's macOS build,
-//! with the Accessibility and Screen Recording grants they need.
+//! Computer use inside the guest: Cua Driver 0.38.0 (`CuaDriver.app`, MIT) with the
+//! Accessibility and Screen Recording grants it needs.
 //!
-//! The host downloads the two pinned archives (`guest/macos/*-lock.json`) into its own cache,
-//! checks their SHA-256, copies them with `guest/macos/silo-computer-use.zsh` into the running
+//! The host downloads the pinned universal archive (`guest/macos/cua-driver-lock.json`) into its
+//! own cache when the computer lacks the pinned app, checks its SHA-256, copies it with
+//! `guest/macos/silo-computer-use.zsh` and the agent registration helper into the running
 //! computer and runs the script there as `silo`. The script does the installation, writes the
-//! TCC rows and registers LCU's agents; see its header for the steps.
+//! TCC rows and registers the MCP server with the agents; see its header for the steps.
 use super::guest_access::{self as access, CommandOutput};
 use super::store::Layout;
 use super::MacosContext;
@@ -23,14 +24,15 @@ use std::{
     time::Duration,
 };
 
-const APP_LOCK: &str = include_str!("../../../guest/macos/chatgpt-app-lock.json");
-const LCU_LOCK: &str = include_str!("../../../guest/macos/lcu-lock.json");
+const LOCK: &str = include_str!("../../../guest/macos/cua-driver-lock.json");
+const REGISTER: &str = include_str!("../../../guest/macos/silo-cua-register.py");
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-computer-use.zsh");
 const RECORDER_SOURCE: &str = include_str!("../../../guest/macos/SiloGuestRecorder.swift");
 const RECORDER_INFO: &str = include_str!("../../../guest/macos/SiloGuestRecorder-Info.plist");
 const RECORDER_AGENT: &str =
     include_str!("../../../guest/macos/SiloGuestRecorder-LaunchAgent.plist");
 const SCRIPT_NAME: &str = "silo-computer-use.zsh";
+const REGISTER_NAME: &str = "silo-cua-register.py";
 const RECORDER_SOURCE_NAME: &str = "SiloGuestRecorder.swift";
 const RECORDER_INFO_NAME: &str = "SiloGuestRecorder-Info.plist";
 const RECORDER_AGENT_NAME: &str = "SiloGuestRecorder-LaunchAgent.plist";
@@ -38,12 +40,13 @@ const PINNED_NAME: &str = "pinned.json";
 /// Where the files are staged in the guest. The script keeps its work folder inside it.
 const STAGE: &str = "/private/tmp/silo-computer-use";
 const CACHE_DIR: &str = "macos-computer-use";
-const ARCHITECTURE: &str = "arm64";
-const APP_HOST: &str = "persistent.oaistatic.com";
-const LCU_HOST: &str = "github.com";
-const MAX_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// The driver ships one universal archive (arm64 and x86_64) for every Mac.
+const ARCHITECTURE: &str = "universal";
+const DRIVER_HOST: &str = "github.com";
+const BUNDLE_IDENTIFIER: &str = "com.trycua.driver";
+const MAX_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const SMALL_COPY: Duration = Duration::from_secs(120);
-const APP_COPY: Duration = Duration::from_secs(1800);
+const DRIVER_COPY: Duration = Duration::from_secs(900);
 const QUICK_COMMAND: Duration = Duration::from_secs(60);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(1800);
 /// Lines of the script's output a failure quotes.
@@ -189,28 +192,18 @@ struct Asset {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AppLock {
+struct DriverLock {
     schema_version: u32,
     version: String,
     bundle_identifier: String,
     team_identifier: String,
-    lcu_version: String,
-    architectures: std::collections::HashMap<String, Asset>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LcuLock {
-    schema_version: u32,
-    version: String,
     assets: std::collections::HashMap<String, Asset>,
 }
 
 /// What this build installs in a computer.
 #[derive(Debug)]
 struct Pins {
-    app: AppLock,
-    lcu: LcuLock,
+    driver: DriverLock,
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -261,66 +254,59 @@ fn file_name(url: &str) -> Option<String> {
 }
 
 impl Pins {
-    fn parse(app: &str, lcu: &str) -> Result<Self, String> {
+    fn parse(lock: &str) -> Result<Self, String> {
         let invalid = || "Silo's computer use information is invalid.".to_string();
         let pins = Self {
-            app: serde_json::from_str(app).map_err(|_| invalid())?,
-            lcu: serde_json::from_str(lcu).map_err(|_| invalid())?,
+            driver: serde_json::from_str(lock).map_err(|_| invalid())?,
         };
-        if pins.app.schema_version != 1
-            || pins.lcu.schema_version != 1
-            || !valid_version(&pins.app.version)
-            || !valid_version(&pins.lcu.version)
-            || pins.app.lcu_version != pins.lcu.version
-            || pins.app.bundle_identifier != "com.openai.codex"
-            || pins.app.team_identifier.len() != 10
+        if pins.driver.schema_version != 1
+            || !valid_version(&pins.driver.version)
+            || pins.driver.bundle_identifier != BUNDLE_IDENTIFIER
+            || pins.driver.team_identifier.len() != 10
             || !pins
-                .app
+                .driver
                 .team_identifier
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric())
         {
             return Err(invalid());
         }
-        checked_asset(&pins.app.architectures, APP_HOST)?;
-        checked_asset(&pins.lcu.assets, LCU_HOST)?;
+        checked_asset(&pins.driver.assets, DRIVER_HOST)?;
         Ok(pins)
     }
 
     fn bundled() -> Result<Self, String> {
-        Self::parse(APP_LOCK, LCU_LOCK)
+        Self::parse(LOCK)
     }
 
-    fn app_asset(&self) -> &Asset {
-        &self.app.architectures[ARCHITECTURE]
-    }
-
-    fn lcu_asset(&self) -> &Asset {
-        &self.lcu.assets[ARCHITECTURE]
+    fn asset(&self) -> &Asset {
+        &self.driver.assets[ARCHITECTURE]
     }
 
     /// The file the script reads its pins from.
     fn pinned_json(&self) -> String {
         serde_json::json!({
-            "chatgptVersion": self.app.version,
-            "chatgptArchive": file_name(&self.app_asset().url),
-            "chatgptSha256": self.app_asset().sha256,
-            "bundleIdentifier": self.app.bundle_identifier,
-            "teamIdentifier": self.app.team_identifier,
-            "lcuVersion": self.lcu.version,
-            "lcuArchive": file_name(&self.lcu_asset().url),
-            "lcuSha256": self.lcu_asset().sha256,
+            "driverVersion": self.driver.version,
+            "driverArchive": file_name(&self.asset().url),
+            "driverSha256": self.asset().sha256,
+            "bundleIdentifier": self.driver.bundle_identifier,
+            "teamIdentifier": self.driver.team_identifier,
         })
         .to_string()
     }
 }
 
-/// The pinned archives and the script, which decide what a computer holds after setup.
+/// The Cua Driver version this build installs in a computer.
+pub(super) fn driver_version() -> Option<String> {
+    Pins::bundled().ok().map(|pins| pins.driver.version)
+}
+
+/// The pinned driver, the script and the helpers, which decide what a computer holds after setup.
 pub(super) fn setup_inputs() -> [&'static str; 6] {
     [
-        APP_LOCK,
-        LCU_LOCK,
+        LOCK,
         SCRIPT,
+        REGISTER,
         RECORDER_SOURCE,
         RECORDER_INFO,
         RECORDER_AGENT,
@@ -367,8 +353,9 @@ pub(super) fn install(
 }
 
 /// Installs or updates computer use in the running computer `id`. The script is idempotent:
-/// it keeps what already is the pinned app and LCU, replaces what is not, writes the same
-/// grants again and registers the agents with the current options.
+/// it keeps what already is the pinned app, replaces what is not, writes the same
+/// grants again, removes the earlier ChatGPT app and LCU, and registers the agents with the
+/// current options.
 pub(super) fn install_with(
     app: &MacosContext,
     id: &str,
@@ -377,13 +364,13 @@ pub(super) fn install_with(
 ) -> Result<(), String> {
     let pins = Pins::bundled()?;
     let cache = app_data(app)?.join(CACHE_DIR);
-    let lcu_archive = cached(job, &cache, "LCU", pins.lcu_asset())?;
+    prune_cache(&cache, &file_name(&pins.asset().url).unwrap_or_default());
     let (layout, record) = layout_and_record(app, id)?;
 
     (job.announce)("Copying computer use to the computer");
     job.ensure()?;
     let cancelled = || !(job.live)();
-    stage(&layout, &record, &pins, &lcu_archive, &cancelled)?;
+    stage(&layout, &record, &pins, &cancelled)?;
     let present = access::run_cancellable(
         &layout,
         &record,
@@ -392,19 +379,19 @@ pub(super) fn install_with(
         &cancelled,
     )?;
     if present.status != 0 {
-        // The large download happens only when the computer lacks the pinned app.
-        let app_zip = cached(job, &cache, "ChatGPT", pins.app_asset())?;
-        (job.announce)("Copying the ChatGPT app to the computer");
+        // The download happens only when the computer lacks the pinned app.
+        let archive = cached(job, &cache, "Cua Driver", pins.asset())?;
+        (job.announce)("Copying Cua Driver to the computer");
         job.ensure()?;
         access::copy_cancellable(
             &layout,
             &record,
-            &app_zip,
+            &archive,
             &format!(
                 "{STAGE}/{}",
-                file_name(&pins.app_asset().url).unwrap_or_default()
+                file_name(&pins.asset().url).unwrap_or_default()
             ),
-            APP_COPY,
+            DRIVER_COPY,
             &cancelled,
         )?;
     }
@@ -686,12 +673,11 @@ fn failure(output: &CommandOutput) -> String {
     format!("Computer use could not be installed in the computer: {reason}")
 }
 
-/// Copies the script, the pins and LCU's archive to the guest's staging folder.
+/// Copies the script, the pins and the helpers to the guest's staging folder.
 fn stage(
     layout: &Layout,
     record: &super::store::Record,
     pins: &Pins,
-    lcu_archive: &Path,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     let prepared = access::run_cancellable(
@@ -708,11 +694,13 @@ fn stage(
         .map_err(|error| super::store::io_error("prepare computer use", &error))?;
     let script = local.path().join(SCRIPT_NAME);
     let pinned = local.path().join(PINNED_NAME);
+    let register = local.path().join(REGISTER_NAME);
     let recorder_source = local.path().join(RECORDER_SOURCE_NAME);
     let recorder_info = local.path().join(RECORDER_INFO_NAME);
     let recorder_agent = local.path().join(RECORDER_AGENT_NAME);
     fs::write(&script, SCRIPT)
         .and_then(|()| fs::write(&pinned, pins.pinned_json()))
+        .and_then(|()| fs::write(&register, REGISTER))
         .and_then(|()| fs::write(&recorder_source, RECORDER_SOURCE))
         .and_then(|()| fs::write(&recorder_info, RECORDER_INFO))
         .and_then(|()| fs::write(&recorder_agent, RECORDER_AGENT))
@@ -720,6 +708,7 @@ fn stage(
     for (file, name) in [
         (&script, SCRIPT_NAME),
         (&pinned, PINNED_NAME),
+        (&register, REGISTER_NAME),
         (&recorder_source, RECORDER_SOURCE_NAME),
         (&recorder_info, RECORDER_INFO_NAME),
         (&recorder_agent, RECORDER_AGENT_NAME),
@@ -733,17 +722,25 @@ fn stage(
             cancelled,
         )?;
     }
-    access::copy_cancellable(
-        layout,
-        record,
-        lcu_archive,
-        &format!(
-            "{STAGE}/{}",
-            file_name(&pins.lcu_asset().url).unwrap_or_default()
-        ),
-        SMALL_COPY,
-        cancelled,
-    )
+    Ok(())
+}
+
+/// Removes what earlier versions of Silo downloaded into `cache` (the ChatGPT app and LCU
+/// archives) so only files of the pinned driver archive `keep` stay. Best effort.
+fn prune_cache(cache: &Path, keep: &str) {
+    let Ok(entries) = fs::read_dir(cache) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(keep) {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+        }
+    }
 }
 
 /// The downloaded, verified file for `asset` in `cache`.
@@ -819,13 +816,33 @@ mod tests {
     #[test]
     fn the_bundled_pins_are_valid_and_agree() {
         let pins = Pins::bundled().unwrap();
-        assert_eq!(pins.app.lcu_version, pins.lcu.version);
-        assert!(file_name(&pins.app_asset().url)
+        assert!(file_name(&pins.asset().url)
             .unwrap()
-            .contains(&pins.app.version));
-        assert!(file_name(&pins.lcu_asset().url)
-            .unwrap()
-            .contains(&pins.lcu.version));
+            .contains(&pins.driver.version));
+        assert!(pins.asset().url.ends_with("-darwin-universal.tar.gz"));
+        assert_eq!(pins.driver.bundle_identifier, "com.trycua.driver");
+        assert_eq!(pins.driver.team_identifier, "YCK386LBJ7");
+    }
+
+    #[test]
+    fn the_script_names_the_pinned_app_and_nothing_of_the_earlier_setup() {
+        for path in [
+            "CuaDriver.app",
+            "/usr/local/bin",
+            "doctor --json",
+            "permissions status --json",
+        ] {
+            assert!(SCRIPT.contains(path), "{path}");
+        }
+        assert!(SCRIPT.contains("codesign --verify --deep --strict"));
+        assert!(SCRIPT.contains("CUA_DRIVER_RS_TELEMETRY_ENABLED=0"));
+        assert!(SCRIPT.contains("CUA_DRIVER_RS_UPDATE_CHECK=false"));
+        assert!(REGISTER.contains("SERVER = 'cua-driver'"));
+        assert!(REGISTER.contains("default_tools_approval_mode"));
+        assert!(REGISTER.contains("mcp__"));
+        // The only mentions of the earlier setup are its removal.
+        assert!(!SCRIPT.contains("install.sh --runtime-only"));
+        assert!(!SCRIPT.contains("lcu setup"));
     }
 
     #[test]
@@ -975,13 +992,15 @@ mod tests {
 
     #[test]
     fn pins_with_a_foreign_host_or_a_bad_digest_are_refused() {
-        let wrong_host = APP_LOCK.replace("persistent.oaistatic.com", "example.com");
-        assert!(Pins::parse(&wrong_host, LCU_LOCK).is_err());
-        let digest = Pins::bundled().unwrap().lcu_asset().sha256.clone();
-        let short = LCU_LOCK.replace(&digest, &digest[..63]);
-        assert!(Pins::parse(APP_LOCK, &short).is_err());
-        let other_lcu = LCU_LOCK.replace("0.11.0", "0.11.1");
-        assert!(Pins::parse(APP_LOCK, &other_lcu).is_err());
+        let wrong_host = LOCK.replace("github.com", "example.com");
+        assert!(Pins::parse(&wrong_host).is_err());
+        let digest = Pins::bundled().unwrap().asset().sha256.clone();
+        let short = LOCK.replace(&digest, &digest[..63]);
+        assert!(Pins::parse(&short).is_err());
+        let other_team = LOCK.replace("YCK386LBJ7", "SHORT");
+        assert!(Pins::parse(&other_team).is_err());
+        let other_app = LOCK.replace("com.trycua.driver", "com.example.driver");
+        assert!(Pins::parse(&other_app).is_err());
     }
 
     #[test]
@@ -989,18 +1008,41 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&Pins::bundled().unwrap().pinned_json()).unwrap();
         for key in [
-            "chatgptVersion",
-            "chatgptArchive",
-            "chatgptSha256",
+            "driverVersion",
+            "driverArchive",
+            "driverSha256",
             "bundleIdentifier",
             "teamIdentifier",
-            "lcuVersion",
-            "lcuArchive",
-            "lcuSha256",
         ] {
             assert!(json[key].is_string(), "{key}");
             assert!(SCRIPT.contains(&format!("pinned {key}")), "{key}");
         }
+    }
+
+    #[test]
+    fn the_cache_keeps_only_the_pinned_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "ChatGPT-darwin-arm64-26.930.61225.zip",
+            "lcu-0.11.0-darwin-arm64.tar.gz",
+            "cua-driver-rs-0.38.0-darwin-universal.tar.gz",
+            "cua-driver-rs-0.38.0-darwin-universal.tar.gz.part",
+        ] {
+            fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        prune_cache(dir.path(), "cua-driver-rs-0.38.0-darwin-universal.tar.gz");
+        let mut left: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "cua-driver-rs-0.38.0-darwin-universal.tar.gz",
+                "cua-driver-rs-0.38.0-darwin-universal.tar.gz.part"
+            ]
+        );
     }
 
     #[test]
@@ -1031,12 +1073,12 @@ mod tests {
     fn a_failure_quotes_the_scripts_reason() {
         let output = CommandOutput {
             status: 1,
-            stdout: "Installing ChatGPT\n".into(),
-            stderr: "noise\nerror: lcu setup failed\n".into(),
+            stdout: "Installing Cua Driver\n".into(),
+            stderr: "noise\nerror: cua-driver doctor reported a problem\n".into(),
         };
         assert_eq!(
             failure(&output),
-            "Computer use could not be installed in the computer: lcu setup failed"
+            "Computer use could not be installed in the computer: cua-driver doctor reported a problem"
         );
         let silent = CommandOutput {
             status: 1,
@@ -1192,10 +1234,10 @@ mod tests {
             let home = tempfile::tempdir().unwrap();
             let ok = |names: &str| zsh(&["safe-members"], names, home.path()).status.success();
             assert!(ok(
-                "ChatGPT.app/\nChatGPT.app/Contents/Info.plist\nlcu/bin/..x\n"
+                "CuaDriver.app/\nCuaDriver.app/Contents/Info.plist\ncua/bin/..x\n"
             ));
             assert!(!ok("/etc/passwd\n"));
-            assert!(!ok("ChatGPT.app/../../x\n"));
+            assert!(!ok("CuaDriver.app/../../x\n"));
             assert!(!ok("../x\n"));
             assert!(!ok("a/..\n"));
             assert!(!ok("..\n"));
@@ -1220,7 +1262,7 @@ mod tests {
             std::os::unix::fs::symlink("/nonexistent-target", root.join("sub/dangling")).unwrap();
             assert!(!check(&root));
             std::fs::remove_file(root.join("sub/dangling")).unwrap();
-            // LCU's `node` link points through `app`, which only exists after installation.
+            // A link may point at a file that only exists after installation.
             std::os::unix::fs::symlink("../app/node", root.join("sub/later")).unwrap();
             assert!(check(&root));
             std::os::unix::fs::symlink("../../missing", root.join("sub/escape")).unwrap();

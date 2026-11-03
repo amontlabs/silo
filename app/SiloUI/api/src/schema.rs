@@ -401,8 +401,6 @@ mod tests {
             ),
             approval_apply_reason: None,
             driver_version: Some("0.38.0".into()),
-            chatgpt_version: None,
-            lcu_version: None,
             agents: Some(vec!["agent-a".into()]),
             at: None,
         };
@@ -717,25 +715,26 @@ mod tests {
         use crate::methods::computer_use::ComputerUseState;
 
         let receipt = serde_json::json!({
-            "schemaVersion": 1, "state": "ready", "reason": "",
-            "chatgptVersion": "1.2026.101", "lcuVersion": "0.11.0",
+            "schemaVersion": 2, "state": "ready", "reason": "",
+            "driverVersion": "0.38.0",
             "approval": "ask", "at": "2026-10-14T08:15:00Z"
         });
         let state: ComputerUseState = serde_json::from_value(receipt).unwrap();
         let value = serde_json::to_value(state).unwrap();
-        assert_eq!(value["schemaVersion"], 1);
-        assert_eq!(value["chatgptVersion"], "1.2026.101");
+        assert_eq!(value["schemaVersion"], 2);
+        assert_eq!(value["driverVersion"], "0.38.0");
         assert_eq!(value["at"], "2026-10-14T08:15:00Z");
         assert_eq!(value["state"], "ready");
+        assert!(value.get("chatgptVersion").is_none() && value.get("lcuVersion").is_none());
 
         let before_receipt: ComputerUseState = serde_json::from_value(serde_json::json!({
-            "schemaVersion": null, "state": null, "chatgptVersion": null, "at": null
+            "schemaVersion": null, "state": null, "driverVersion": null, "at": null
         }))
         .unwrap();
         let before_receipt = serde_json::to_value(before_receipt).unwrap();
         assert!(before_receipt["schemaVersion"].is_null());
         assert!(before_receipt["state"].is_null());
-        assert!(before_receipt["chatgptVersion"].is_null());
+        assert!(before_receipt["driverVersion"].is_null());
         assert!(before_receipt["at"].is_null());
     }
 

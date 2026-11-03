@@ -1,9 +1,8 @@
 # Pinned ChatGPT app on each device
 
 > Superseded 2026-11-03. Linux computers now use Cua Driver baked into the guest image,
-> and Silo no longer downloads the ChatGPT Linux app. See the
-> [Cua Driver decision](../SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03). macOS computers
-> still use the ChatGPT app until a follow-up change. This file is kept as history and
+> macOS computers install Cua Driver, and Silo no longer downloads the ChatGPT app. See the
+> [Cua Driver decision](../SiloUI-COMPUTER-USE-PLAN.md#cua-driver-2026-11-03). This file is kept as history and
 > evidence; it describes the removed design.
 
 Implements section 4 of the [computer use plan](../SiloUI-COMPUTER-USE-PLAN.md).

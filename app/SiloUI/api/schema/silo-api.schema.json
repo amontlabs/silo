@@ -1747,22 +1747,8 @@
             "null"
           ]
         },
-        "chatgptVersion": {
-          "description": "macOS receipt field; Linux does not use it.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "driverVersion": {
-          "description": "The installed Cua Driver version on Linux.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "lcuVersion": {
-          "description": "macOS receipt field; Linux does not use it.",
+          "description": "The Cua Driver version installed in the computer.",
           "type": [
             "string",
             "null"

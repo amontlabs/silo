@@ -1,10 +1,9 @@
 # Built-in Linux desktop and computer use: plan
 
-Status: Linux computers use Cua Driver since 2026-11-03 (see the
+Status: Linux and macOS computers use Cua Driver since 2026-11-03 (see the
 [decision](#cua-driver-2026-11-03) below). The LCU and ChatGPT app design that this
 plan was written around (approved 2026-10-01, implemented and verified live 2026-10-02) is
-superseded on Linux and kept below as history and evidence; macOS computers still use it until
-a follow-up change. The [approval design](#approval-design-2026-10-02) still applies, with
+superseded and kept below as history and evidence. The [approval design](#approval-design-2026-10-02) still applies, with
 Cua Driver's entries in place of LCU's. This plan replaced the optional, per-computer desktop
 installation described in [Linux desktop](SiloUI-DESKTOP.md) for new computers, and replaced
 Luda.
@@ -52,8 +51,22 @@ What is implemented:
 - **Existing v4 computers.** Their recorded `/opt/silo/chatgpt` and `/opt/silo/lcu` mounts keep
   working with empty host folders; export strips both; the old downloads are deleted at startup
   when no computer is running.
-- **Not changed.** macOS computers keep LCU and the ChatGPT app; a follow-up moves them to
-  Cua Driver.
+- **macOS.** macOS computers use the same Cua Driver version (the universal
+  `cua-driver-rs-0.38.0-darwin-universal.tar.gz`, `guest/macos/cua-driver-lock.json`) instead of
+  the ChatGPT macOS app and LCU's macOS build. The guest script installs
+  `/Applications/CuaDriver.app` (SHA-256, `codesign --verify --deep --strict`, bundle
+  `com.trycua.driver`, team `YCK386LBJ7`), links `/usr/local/bin/cua-driver` to its executable,
+  writes the Accessibility and Screen Recording TCC rows for the app (the guest has System
+  Integrity Protection off), registers the same MCP server `cua-driver` and approval lines as
+  Linux, and reports readiness from `cua-driver doctor --json` and
+  `cua-driver permissions status --json`. The macOS API fields `chatgptVersion` and
+  `lcuVersion` are gone; the projection fills `driverVersion`. No LaunchAgent starts the daemon:
+  `cua-driver mcp` launches `CuaDriver.app` through LaunchServices, which keeps TCC attribution
+  on the app. Existing computers change over through the in-place "Updating Computer Use" path
+  because the computer-use fingerprint changes; the update deletes the ChatGPT app, LCU, their
+  TCC rows and registrations. Details: [macOS computers](SiloUI-MACOS-COMPUTERS.md#provisioning-for-computer-use).
+  Open until a live macOS run: whether the pre-seeded TCC rows and consent ledger let the
+  daemon capture the screen without a prompt, and whether the daemon starts from an SSH session.
 
 Open risks: Codex's sandbox reaching X11, GTK4 and VTE input through the driver, and whether
 Claude Code's permission rule for a hyphenated server name behaves as expected. Live tests are
