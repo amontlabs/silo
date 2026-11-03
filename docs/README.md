@@ -6,7 +6,7 @@ and `src-tauri/silod/`, the app's React in `src/` and Tauri shell in `src-tauri/
 and build tooling in `scripts/`. Start with the [repository README](../README.md)
 to embed the engine or install the app, [Using the Silo app](SiloUI-APP.md), or the
 [source-build guide](SiloUI-BUILD-FROM-SOURCE.md) to develop it with your own
-GitHub App. Planned work, with sizes and costs, is in the [roadmap](ROADMAP.md).
+GitHub App. Planned work is in the [roadmap](ROADMAP.md).
 
 This index has three parts: [current implementation](#current-implementation-and-operations),
 [current research and evidence](#current-research-and-design-evidence), and
