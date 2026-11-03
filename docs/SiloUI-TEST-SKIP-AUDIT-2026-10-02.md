@@ -43,7 +43,7 @@ point belongs to a live parent.
 | [`live_older_checkpoint_export_imports_and_cold_boots`](../app/SiloUI/src-tauri/engine/src/backup_controller.rs) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
 | [`live_built_in_computer_use_sets_up_and_survives_export_and_import`](../app/SiloUI/src-tauri/engine/src/backup_controller.rs) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
 | [`live_built_in_desktop_boots_repeatedly`](../app/SiloUI/src-tauri/engine/src/backup_controller.rs) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
-| [`live_download_of_the_pinned_arm64_package`](../app/SiloUI/src-tauri/engine/src/chatgpt_app/tests.rs) | Keep: external OpenAI download (about 453 MB) and package extraction. |
+| `live_download_of_the_pinned_arm64_package` (removed 2026-11-03) | Keep: external OpenAI download (about 453 MB) and package extraction. |
 | [`live_editor_transport`](../app/SiloUI/src-tauri/engine/src/editor.rs) | Keep: explicitly supplied running VM, isolated editor home and SSH/editor integration. |
 | [`github_authenticated_browser_workflow`](../app/SiloUI/src-tauri/engine/src/github_live_tests.rs) | Keep: authorized private GitHub repositories, account credentials and mutations. |
 | [`github_authenticated_native_workflow`](../app/SiloUI/src-tauri/engine/src/github_live_tests.rs) | Keep: authorized private GitHub repositories, account credentials and mutations. |
@@ -60,7 +60,7 @@ point belongs to a live parent.
 | [`github_authenticated_guest_workflow`](../app/SiloUI/src-tauri/engine/src/runtime_github_tests.rs) | Keep: authorized private GitHub repositories, account credentials and mutations. |
 | [`live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates`](../app/SiloUI/src-tauri/engine/src/secrets_runtime.rs) | Keep: VM boot, assigned secrets and supplied HTTPS endpoints. |
 | [`live_approval_switch_edits_only_the_installed_harnesses`](../app/SiloUI/src-tauri/engine/src/test_support/computer_use_live/approval.rs) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
-| [`live_lcu_drives_the_desktop_without_a_model`](../app/SiloUI/src-tauri/engine/src/test_support/computer_use_live/lcu.rs) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
+| `live_lcu_drives_the_desktop_without_a_model` (removed 2026-11-03) | Keep: real VM/hypervisor qualification; computer-use cases also need a published ChatGPT app and the appropriate guest image. |
 | [`crash_child`](../app/SiloUI/src-tauri/vendor/tauri-plugin-updater/src/atomic_install.rs) | Keep: subprocess helper selected by its ordinary parent test; it deliberately exits the process. |
 
 The host-cache parent is
