@@ -342,28 +342,6 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         silo_engine::desktop::dispatch(&paths, method, params)
     }
 
-    fn chatgpt_status(&self) -> Result<Value, String> {
-        let root = self.0.context.paths().app_data.join("chatgpt");
-        let status = silo_engine::chatgpt_app::local_status(&root)?;
-        silo_engine::chatgpt_app::to_value(status)
-    }
-
-    fn chatgpt_retry(&self) -> Result<Value, String> {
-        let root = self.0.context.paths().app_data.join("chatgpt");
-        let status = silo_engine::chatgpt_app::retry_now(
-            &root,
-            Arc::new(|status| {
-                if let Some(context) = silo_engine::context::current() {
-                    if let Ok(payload) = silo_engine::chatgpt_app::to_value(status) {
-                        context.publish(Event::new("chatgpt.status", payload), Audience::All);
-                    }
-                }
-            }),
-            Arc::new(|| {}),
-        )?;
-        silo_engine::chatgpt_app::to_value(status)
-    }
-
     fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),

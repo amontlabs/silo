@@ -93,8 +93,6 @@ async fn dispatch(
         }
         MethodName::PreparationStatus => preparation::status(context, params).await,
         MethodName::PreparationRetry => preparation::retry(context, params).await,
-        MethodName::PreparationChatgptStatus => preparation::chatgpt_status(context, params).await,
-        MethodName::PreparationChatgptRetry => preparation::chatgpt_retry(context, params).await,
         MethodName::DeviceDependencies => device::dependencies(context, params).await,
         MethodName::DeviceFacts => device::facts(context, params).await,
         _ => Err(DispatchError::unsupported(method_name(method))),

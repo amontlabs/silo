@@ -464,7 +464,7 @@ pub(crate) fn start_owner_desktop_job(
     let action = match params["action"].as_str() {
         Some(
             action @ ("start" | "stop" | "restart" | "restart-streamer" | "update-streamer"
-            | "setup-lcu" | "setup-computer-use" | "setup-agent-tools"),
+            | "setup-computer-use" | "setup-agent-tools"),
         ) => action.to_owned(),
         _ => return Err(DispatchError::internal("Unsupported desktop action.")),
     };

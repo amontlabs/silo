@@ -3471,7 +3471,9 @@ mod tests {
     fn desktop_setup_actions_have_time_to_install_over_remote_connection() {
         let _test_state = crate::test_support::global_state();
         assert_eq!(
-            request_timeout(&json!({"method":"desktop.action","params":{"action":"setup-computer-use"}})),
+            request_timeout(
+                &json!({"method":"desktop.action","params":{"action":"setup-computer-use"}})
+            ),
             Duration::from_secs(2100)
         );
         assert_eq!(

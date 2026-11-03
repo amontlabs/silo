@@ -1543,7 +1543,11 @@ mod tests {
         assert_eq!(lcu["state"], "running");
         assert_eq!(lcu["sessionState"], "running");
         assert_eq!(lcu["streamState"], "failed");
-        assert!(lcu.as_object().unwrap().keys().all(|key| !key.starts_with("lcu")));
+        assert!(lcu
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|key| !key.starts_with("lcu")));
         assert!(!lcu.to_string().contains("private"));
     }
 

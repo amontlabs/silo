@@ -16,9 +16,7 @@
 //! * empties the old download folders once no computer is running, to give the disk back.
 //!
 //! New computers never get these mounts.
-use crate::runtime::{
-    operation_gate::OperationGate, ProcessRunner, RuntimePaths, RuntimeRunner,
-};
+use crate::runtime::{operation_gate::OperationGate, ProcessRunner, RuntimePaths, RuntimeRunner};
 use serde_json::Value;
 use std::{
     fs,
@@ -166,9 +164,7 @@ pub(crate) fn strip_for_export(config: &mut Value) -> Result<(), String> {
         .iter()
         .any(|mount| is_legacy_mount(mount) && !read_only(mount))
     {
-        return Err(
-            "The computer mounts a Silo folder writable, so it cannot be exported.".into(),
-        );
+        return Err("The computer mounts a Silo folder writable, so it cannot be exported.".into());
     }
     mounts.retain(|mount| !is_legacy_mount(mount));
     Ok(())
@@ -182,12 +178,7 @@ pub(crate) fn strip_for_export(config: &mut Value) -> Result<(), String> {
 /// work boots a computer meanwhile. Returns whether it ran: `false` means it should be tried
 /// again at the next start.
 pub fn reclaim_disk(paths: &RuntimePaths, app_data: &Path) -> bool {
-    reclaim_disk_with(
-        &crate::runtime::OPERATIONS,
-        &ProcessRunner,
-        paths,
-        app_data,
-    )
+    reclaim_disk_with(&crate::runtime::OPERATIONS, &ProcessRunner, paths, app_data)
 }
 
 fn reclaim_disk_with(

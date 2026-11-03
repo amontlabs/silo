@@ -588,7 +588,10 @@ pub(crate) fn pinned() -> Result<Value, String> {
             .as_str()
             .is_some_and(|url| url.starts_with("https://"))
             && asset["sha256"].as_str().is_some_and(|sha256| {
-                sha256.len() == 64 && sha256.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                sha256.len() == 64
+                    && sha256
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
             })
             && asset["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
     });

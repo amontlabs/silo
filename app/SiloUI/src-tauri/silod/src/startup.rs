@@ -5,7 +5,7 @@
 //!   and the pre-upgrade backup's expiry timer.
 //! * `start_background` runs once the I/O runtime exists: it installs the exports controller
 //!   (which settles an interrupted operation's journal), drives a pending launch migration
-//!   (publishing `migration.changed`), starts the ChatGPT app worker, the engine timers
+//!   (publishing `migration.changed`), starts the computer-use pass, the engine timers
 //!   (95 A-26) and the launch pass.
 //! * The launch pass is `silo_engine::startup::install` over silod's `StartupServices`:
 //!   recoveries in order, the preparation worker, then start-at-launch for Linux and macOS
@@ -27,11 +27,7 @@ use silo_engine::{
 
 use crate::{
     context::SilodContext,
-    methods::{
-        checkpoints::preparation::{ready_hook, status_publisher},
-        computers::SilodRuntimeHost,
-        services::UpdateRecoveryOutcome,
-    },
+    methods::{computers::SilodRuntimeHost, services::UpdateRecoveryOutcome},
 };
 
 /// Pause before a restart after a successful launch migration, so its last
@@ -68,7 +64,7 @@ pub fn start_background(
     update_recovery: Arc<UpdateRecoveryOutcome>,
 ) {
     drive_launch_migration(context.clone(), exports.clone());
-    start_chatgpt(context.clone());
+    start_computer_use(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
     let services = Arc::new(SilodStartupServices::new(
@@ -130,48 +126,24 @@ fn run_launch_migration(
     }
 }
 
-// MARK: ChatGPT app
+// MARK: Computer use
 
-/// Registers the published ChatGPT app folder and prepares the app in the background, as the
-/// app's computer-use setup did: a status check, then a download unless it is ready.
-fn start_chatgpt(context: Arc<SilodContext>) {
-    let root = context.paths().app_data.join("chatgpt");
-    if let Err(error) = silo_engine::computer_use::register_published(&root) {
-        eprintln!(
-            "silod: the ChatGPT app folder is unavailable: {}",
-            error.message
-        );
-    }
+/// In the background: finishes approval changes saved but never applied before the last quit,
+/// and gives the disk back that the old ChatGPT and LCU downloads held.
+fn start_computer_use(context: Arc<SilodContext>) {
     let host: Arc<dyn RuntimeHost> = Arc::new(SilodRuntimeHost::for_engine(context.clone()));
+    let app_data = context.paths().app_data.clone();
     let spawned = std::thread::Builder::new()
-        .name("silod-chatgpt-start".into())
-        .spawn(move || chatgpt_start_pass(context, host, root));
+        .name("silod-computer-use-start".into())
+        .spawn(move || {
+            if let Ok(paths) = runtime::runtime_paths(host.as_ref()) {
+                silo_engine::legacy_mounts::reclaim_disk(&paths, &app_data);
+            }
+            reconcile_computer_use(host.as_ref());
+        });
     if let Err(error) = spawned {
-        eprintln!("silod: could not start the ChatGPT app preparation: {error}");
+        eprintln!("silod: could not start the computer-use pass: {error}");
     }
-}
-
-fn chatgpt_start_pass(context: Arc<SilodContext>, host: Arc<dyn RuntimeHost>, root: PathBuf) {
-    use silo_engine::chatgpt_app;
-    let engine: Arc<dyn EngineContext> = context;
-    let publisher = status_publisher(engine);
-    let status = chatgpt_app::refresh_status_blocking(&root, &publisher);
-    let idle_host = host.clone();
-    chatgpt_app::collect_unused(
-        root.clone(),
-        Arc::new(move || {
-            runtime::update_recovery::running_names(idle_host.as_ref())
-                .is_ok_and(|names| names.is_empty())
-        }),
-    );
-    if matches!(status, chatgpt_app::Status::Ready { .. }) {
-        // Finish approval changes saved but never applied before the last quit.
-        reconcile_computer_use(host.as_ref());
-        return;
-    }
-    // Let the engine finish starting first; this is not urgent.
-    std::thread::sleep(chatgpt_app::auto::START_DELAY);
-    chatgpt_app::ensure_in_background(root.clone(), publisher, ready_hook(host, root));
 }
 
 fn reconcile_computer_use(host: &dyn RuntimeHost) {
@@ -254,7 +226,7 @@ impl StartupServices for SilodStartupServices {
             if let Err(message) = runtime::image_cache::repair(&storage.join("cache")) {
                 eprintln!("Image cache repair: {message}");
             }
-            // The guest image import and the LCU download run on their own threads.
+            // The guest image import runs on its own thread.
             silo_engine::preparation::start_with_paths(paths);
         }
     }

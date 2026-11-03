@@ -57,8 +57,6 @@ fn main() {
             commands::desktop::read_desktop_state,
             commands::desktop::desktop_action,
             commands::desktop::set_computer_use_approval,
-            commands::chatgpt_app::chatgpt_app_status,
-            commands::chatgpt_app::chatgpt_app_retry,
             commands::preparation::read_preparation_status,
             commands::preparation::retry_preparation,
             commands::desktop_viewer::open_desktop,
@@ -210,7 +208,6 @@ fn main() {
             commands::runtime::read_operation_queue,
             commands::runtime::cancel_operation,
             commands::runtime::retry_computer_configuration,
-            commands::runtime::skip_computer_use_wait,
             commands::runtime::change_computer_configuration
         ])
         .setup(|app| {

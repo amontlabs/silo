@@ -9,9 +9,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    os::unix::{
-        fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-    },
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::Path,
     time::Duration,
 };
@@ -54,7 +52,6 @@ fn denied(why: &'static str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::PermissionDenied, why)
 }
 
-
 /// Restores owner access on directories so a tampered tree (for example modes
 /// changed to 0500) can still be deleted.
 pub(crate) fn make_tree_deletable(path: &Path) -> std::io::Result<()> {
@@ -67,6 +64,7 @@ pub(crate) fn make_tree_deletable(path: &Path) -> std::io::Result<()> {
         let _ = make_tree_deletable(&entry.path());
     }
     Ok(())
+}
 
 /// The length of an existing resumable download, 0 when there is none. Anything
 /// that is not a plain single-link file of ours (a planted symlink, a hard link
@@ -178,11 +176,8 @@ impl HttpDownloader {
         total: u64,
         progress: &mut dyn FnMut(u64),
     ) -> Result<(), Error> {
-        let disk = || {
-            Error::retry(
-                "Silo could not write the download. Check free disk space and retry.",
-            )
-        };
+        let disk =
+            || Error::retry("Silo could not write the download. Check free disk space and retry.");
         let mut have = safe_part_len(part).map_err(|_| disk())?;
         if total > 0 && have > total {
             fs::remove_file(part).map_err(|_| disk())?;
@@ -236,9 +231,7 @@ impl HttpDownloader {
             if written + count as u64 > limit {
                 drop(file);
                 let _ = fs::remove_file(part);
-                return Err(Error::retry(
-                    "The download was larger than expected.",
-                ));
+                return Err(Error::retry("The download was larger than expected."));
             }
             file.write_all(&buffer[..count]).map_err(|_| disk())?;
             written += count as u64;

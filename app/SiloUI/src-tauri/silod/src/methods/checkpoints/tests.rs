@@ -775,33 +775,19 @@ async fn preparation_status_and_retry_return_the_canonical_status() {
 }
 
 #[tokio::test]
-async fn chatgpt_status_is_canonical_and_a_remote_device_is_refused() {
+async fn preparation_status_is_canonical_and_a_remote_device_is_refused() {
     let fixture = fixture();
-    let status = call(&fixture, MethodName::PreparationChatgptStatus, json!({}))
+    let status = call(&fixture, MethodName::PreparationStatus, json!({}))
         .await
         .unwrap();
-    let _: silo_api::methods::preparation::ChatGptPreparationStatus =
+    let _: silo_api::methods::preparation::PreparationStatus =
         serde_json::from_value(status).unwrap();
-    for method in [
-        MethodName::PreparationChatgptStatus,
-        MethodName::PreparationChatgptRetry,
-    ] {
+    for method in [MethodName::PreparationStatus, MethodName::PreparationRetry] {
         assert_eq!(
             error_code(call(&fixture, method, json!({"deviceId": "other"})).await),
             ErrorCode::UnsupportedRemoteOperation
         );
     }
-}
-
-#[tokio::test]
-async fn the_chatgpt_publisher_sends_the_status_to_every_client_on_its_topic() {
-    let fixture = fixture();
-    let mut events = fixture.silod.subscribe(ClientId::new("test-client"));
-    let publisher = super::preparation::status_publisher(super::engine_context(&fixture.context));
-    publisher(silo_engine::chatgpt_app::Status::Verifying);
-    let event = events.recv().await.unwrap();
-    assert_eq!(event.name, "preparation.chatgpt.changed");
-    assert_eq!(event.payload, json!({"state": "verifying"}));
 }
 
 #[tokio::test]

@@ -1358,7 +1358,6 @@ fn defaults() -> Settings {
     Settings::default()
 }
 
-
 fn guest_status(state: &str, reason: Option<&str>) -> Value {
     json!({"schemaVersion":2,"state":state,"reason":reason,"driverVersion":"0.38.0",
         "agents":["claude-code"]})
@@ -2009,41 +2008,6 @@ fn a_stopped_computer_is_left_alone() {
         }
     }
     assert!(apply_with(test_gate(), Arc::new(Stopped), &paths, "dev", Trigger::Boot).is_none());
-}
-
-#[test]
-fn the_shared_folder_is_prepared_again_when_the_start_up_attempt_failed() {
-    let _state = crate::test_support::global_state();
-    reset_published_for_test();
-    set_test_published_dir(None);
-    let directory = tempfile::tempdir().unwrap();
-    // Start-up could not create the folders (a plain file is in the way).
-    let blocker = directory.path().join("blocked");
-    fs::write(&blocker, b"x").unwrap();
-    let root = blocker.join("chatgpt");
-    assert!(register_published(&root).is_err());
-    assert!(mount_args(&computer_configuration(true)).is_err());
-    // The cause goes away; neither a restart nor a preparation attempt has run yet:
-    // the next computer that needs the folder prepares it itself.
-    fs::remove_file(&blocker).unwrap();
-    let args = mount_args(&computer_configuration(true)).unwrap();
-    let dir = published_dir().expect("the folder is registered");
-    assert!(
-        dir.ends_with("chatgpt/published") && dir.is_dir(),
-        "{dir:?}"
-    );
-    assert_eq!(
-        args,
-        [
-            "-v",
-            &format!("{}:{GUEST_MOUNT}:ro,uid=0,gid=0", dir.display())
-        ]
-    );
-    // A preparation attempt registers it as well (the worker calls this every time).
-    reset_published_for_test();
-    let dir = register_published(&directory.path().join("chatgpt")).unwrap();
-    assert_eq!(published_dir(), Some(dir));
-    reset_published_for_test();
 }
 
 // ------------------------------------------------- review follow-ups

@@ -6860,9 +6860,7 @@ mod tests {
         assert!(!runtime::is_pending_restore(&target, target_name));
         let restored = inspect(&target, target_name).unwrap();
         eprintln!("target mounts: {}", restored.config["mounts"]);
-        assert!(!restored.config["mounts"]
-            .to_string()
-            .contains("/opt/silo/"));
+        assert!(!restored.config["mounts"].to_string().contains("/opt/silo/"));
         let status = wait_ready(&target, target_name);
         eprintln!("target status: {status}");
         assert_eq!(status["computerUse"]["state"], "ready", "{status}");

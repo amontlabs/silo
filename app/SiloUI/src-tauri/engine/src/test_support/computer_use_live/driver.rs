@@ -109,14 +109,20 @@ fn live_cua_driver_is_ready_in_the_desktop() {
 
     let version = fixture.exec_status(name, "/usr/local/bin/cua-driver --version");
     assert!(
-        version.contains(&format!("cua-driver {}", pinned["version"].as_str().unwrap())),
+        version.contains(&format!(
+            "cua-driver {}",
+            pinned["version"].as_str().unwrap()
+        )),
         "{version}"
     );
     fixture.wait_doctor(name, "driver");
     let mounts = fixture.exec_status(name, "grep -c ' /opt/silo/' /proc/mounts");
     assert!(mounts.starts_with('0'), "{mounts}");
-    let inspected = runtime::inspect_computer(&runtime::ProcessRunner, &fixture.paths, name).unwrap();
-    assert!(!inspected.config["mounts"].to_string().contains("/opt/silo/"));
+    let inspected =
+        runtime::inspect_computer(&runtime::ProcessRunner, &fixture.paths, name).unwrap();
+    assert!(!inspected.config["mounts"]
+        .to_string()
+        .contains("/opt/silo/"));
 
     // A registration for every installed agent carries the switches that keep the driver quiet.
     let receipt: Value = serde_json::from_str(
