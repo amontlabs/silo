@@ -6,7 +6,7 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 
 **Status.** Work in progress, MIT licensed, built by one person. The host is macOS on Apple Silicon today. On Linux, the `silo-engine` crate builds and passes its tests in CI; a Linux `silod` is the next milestone.
 
-[Why Silo](#why-silo) · [Threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Security policy](SECURITY.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
+[Why Silo](#why-silo) · [Threat model](docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Security policy](SECURITY.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
 
 ## Why Silo
 
@@ -27,7 +27,7 @@ Silo assumes the agent in a computer is hostile and has root there. It then limi
 - **A way back.** Checkpoint a computer before letting an agent loose, restore it, or fork a copy.
 - **A local engine, no Silo account.** The engine runs on your Mac. Apps drive it through one same-user socket.
 
-Each mechanism, with the code that implements it, is in the [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md).
+Each mechanism, with the code that implements it, is in the [threat model](docs/THREAT-MODEL.md).
 
 ### What Silo does not protect
 
@@ -41,7 +41,7 @@ Each mechanism, with the code that implements it, is in the [threat model](https
 - **macOS computers during setup.** Until setup completes, and in Recovery, a macOS computer uses Apple's NAT and can reach the Mac and the LAN.
 - **The guest itself.** The agent is root in its computer and can change anything there, including the tools Silo installed. Roll back with checkpoints.
 
-The [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) lists every limit, and the [eval results](docs/evals/README.md) say which ones were tested and how.
+The [threat model](docs/THREAT-MODEL.md) lists every limit, and the [eval results](docs/evals/README.md) say which ones were tested and how.
 
 ### How it compares
 
