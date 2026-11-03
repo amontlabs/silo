@@ -372,7 +372,7 @@ mod tests {
 
     #[tokio::test]
     async fn negotiates_and_exposes_capabilities_and_client_id() {
-        let stream = serve(handshake_reply(6), |_server| async {
+        let stream = serve(handshake_reply(7), |_server| async {
             tokio::time::sleep(Duration::from_millis(50)).await;
         })
         .await;
@@ -391,8 +391,8 @@ mod tests {
         ));
         let refusal = json!({"id": "handshake", "error": {
             "code": "incompatible_version", "message": "Update Silo.",
-            "diagnostics": {"engineProtocolRange": {"min": 7, "max": 8},
-                "clientProtocolRange": {"min": 6, "max": 6}, "engineAppVersion": "9"}}});
+            "diagnostics": {"engineProtocolRange": {"min": 8, "max": 9},
+                "clientProtocolRange": {"min": 7, "max": 7}, "engineAppVersion": "9"}}});
         let stream = serve(refusal, |_s| async {}).await;
         match establish(stream, options()).await {
             Err(ClientError::Remote(error)) => {
@@ -414,7 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn correlates_replies_by_id_with_events_interleaved_and_out_of_order() {
-        let stream = serve(handshake_reply(6), |mut server| async move {
+        let stream = serve(handshake_reply(7), |mut server| async move {
             let first: Value = read_frame(&mut server).await.unwrap().unwrap();
             let second: Value = read_frame(&mut server).await.unwrap().unwrap();
             write_frame(
@@ -453,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn sends_operation_admission_fields() {
-        let stream = serve(handshake_reply(6), |mut server| async move {
+        let stream = serve(handshake_reply(7), |mut server| async move {
             let request: Value = read_frame(&mut server).await.unwrap().unwrap();
             assert_eq!(request["operationId"], "op-1");
             assert_eq!(request["startWithinMs"], 500);
@@ -479,7 +479,7 @@ mod tests {
 
     #[tokio::test]
     async fn connection_loss_fails_pending_requests_and_ends_the_feed() {
-        let stream = serve(handshake_reply(6), |mut server| async move {
+        let stream = serve(handshake_reply(7), |mut server| async move {
             let _: Value = read_frame(&mut server).await.unwrap().unwrap();
             // Drop without replying.
         })
@@ -499,7 +499,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_frame_that_is_neither_event_nor_reply_ends_the_session() {
-        let stream = serve(handshake_reply(6), |mut server| async move {
+        let stream = serve(handshake_reply(7), |mut server| async move {
             let _: Value = read_frame(&mut server).await.unwrap().unwrap();
             write_frame(&mut server, &json!({"surprise": true}))
                 .await
@@ -522,7 +522,7 @@ mod tests {
         tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let _: Value = read_frame(&mut stream).await.unwrap().unwrap();
-            write_frame(&mut stream, &handshake_reply(6)).await.unwrap();
+            write_frame(&mut stream, &handshake_reply(7)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
         });
         let (client, _events) = Client::connect(&path, options()).await.unwrap();

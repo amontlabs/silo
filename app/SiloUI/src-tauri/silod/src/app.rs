@@ -314,8 +314,8 @@ mod channel_startup_tests {
             channel_identifier: identifier.clone(),
             engine_version: "0.1.0".to_owned(),
             engine_build: "test".to_owned(),
-            protocol_min: 6,
-            protocol_max: 6,
+            protocol_min: 7,
+            protocol_max: 7,
         };
         let channel = initialize_channel(&manifest).unwrap();
         let identity: EngineIdentity =
