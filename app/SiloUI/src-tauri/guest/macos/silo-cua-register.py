@@ -51,8 +51,15 @@ AGENTS = {'claude-code': 'claude', 'codex': 'codex'}
 SEARCH = [str(HOME / d) for d in ('.local/bin', '.bun/bin', '.cargo/bin', '.npm-global/bin')] + [
     '/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/bin']
 PRIVACY_ENV = {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}
-# What the earlier LCU setup left in an agent's configuration.
-LEGACY = re.compile(r'(?<![A-Za-z0-9])lcu(?![A-Za-z0-9])|mcp__lcu|/\.local/share/lcu|ChatGPT\.app', re.IGNORECASE)
+# What the earlier LCU setup left in an agent's configuration. Only what LCU itself wrote: its
+# MCP tools (`mcp__lcu`, `mcp__lcu__<tool>`) and commands under the paths the macOS setup
+# installed it at (`~/.local/share/lcu`, `~/.local/state/lcu`, `~/.local/bin/lcu`, the Hermes
+# plugin, the ChatGPT app). A user's own rule or hook that merely mentions "lcu" is kept.
+LEGACY = re.compile(r'(?<![A-Za-z0-9_])mcp__lcu(?:__[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-])'
+                    r'|/\.local/(?:share|state)/lcu(?=/|$|[\s"\':])'
+                    r'|/\.local/bin/lcu(?=$|[\s"\':])'
+                    r'|/\.hermes/plugins/lcu-cua(?=/|$|[\s"\':])'
+                    r'|/Applications/ChatGPT\.app(?=/|$|[\s"\':])')
 
 
 class Failure(Exception):

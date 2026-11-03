@@ -146,6 +146,31 @@ class RegisterTest(unittest.TestCase):
         self.assertNotIn('lcu', codex)
         self.assertEqual(sorted(tomllib.loads(codex)['mcp_servers']), ['cua-driver', 'keep'])
 
+    def test_removal_keeps_rules_and_hooks_that_merely_mention_lcu(self):
+        self.install('claude')
+        self.install('codex')
+        self.module.CLAUDE_SETTINGS.parent.mkdir(parents=True)
+        self.module.CLAUDE_SETTINGS.write_text(json.dumps({
+            'permissions': {'allow': ['mcp__lcutils', 'Read(~/lcu-notes/**)', 'mcp__lcu', 'mcp__lcu__host_only',
+                                      'mcp__lcutils__run', 'Bash(~/.local/bin/lcu-notes:*)']},
+            'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': 'cp ~/Library/Logs/silo.log ~/lcu-archive/'}]},
+                               {'hooks': [{'type': 'command', 'command': '/Users/silo/.local/share/lcu/current/bin/lcu hook'}]},
+                               {'hooks': [{'type': 'command', 'command': '/Users/silo/.local/bin/lcu hook'}]},
+                               {'hooks': [{'type': 'command', 'command': 'open /Applications/ChatGPT.app'}]}]}}))
+        self.module.CODEX_CONFIG.parent.mkdir(parents=True)
+        self.module.CODEX_CONFIG.write_text(
+            '[mcp_servers.lcutils]\ncommand = "lcutils"\n\n[mcp_servers.lcu]\ncommand = "lcu"\n\n'
+            '[hooks.archive]\ncommand = "tar -C ~/lcu-archive"\n\n[hooks.lcu]\ncommand = "~/.local/state/lcu/hook"\n')
+        self.apply('ask')
+        settings = json.loads(self.module.CLAUDE_SETTINGS.read_text())
+        self.assertEqual(settings['permissions']['allow'],
+                         ['mcp__lcutils', 'Read(~/lcu-notes/**)', 'mcp__lcutils__run', 'Bash(~/.local/bin/lcu-notes:*)'])
+        self.assertEqual([h['hooks'][0]['command'] for h in settings['hooks']['Stop']],
+                         ['cp ~/Library/Logs/silo.log ~/lcu-archive/'])
+        codex = tomllib.loads(self.module.CODEX_CONFIG.read_text())
+        self.assertEqual(sorted(codex['mcp_servers']), ['cua-driver', 'lcutils'])
+        self.assertEqual(sorted(codex['hooks']), ['archive'])
+
     def test_removal_does_not_create_files(self):
         self.module.remove_legacy()
         self.assertFalse(self.module.CLAUDE_STATE.exists() or self.module.CODEX_CONFIG.exists())
