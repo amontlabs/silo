@@ -219,8 +219,8 @@ routing, not the security boundary: **GitHub enforces the token's repositories a
 A guest that tricks the selector gets at most another token this computer already holds.
 
 Host push is a separate, user-confirmed path: the Mac fetches the committed objects from the guest
-over a private SSH transport, then pushes one confirmed commit to one branch with a token limited to
-`contents: write` on that single repository, revoked when the push ends
+over a private SSH transport, then pushes one confirmed commit to one branch. In OAuth mode the token is limited to
+`contents: write` on that single repository and revoked when the push ends
 ([`HOST_PUSH`, `github_tokens.rs#L77`](../app/SiloUI/src-tauri/engine/src/github_tokens.rs#L77);
 [`push_authorized`, `github.rs#L2439`](../app/SiloUI/src-tauri/engine/src/github.rs#L2439)). Git
 reads the token from an inherited pipe, never from arguments, environment or files
@@ -231,7 +231,9 @@ Limits:
 - **Personal access token mode has no repository scoping.** The proxy sends the personal token for
   every request to the GitHub hosts (`profile.version == 2`,
   [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L394)), so the agent
-  has the token's full permissions. The README says so.
+  has the token's full permissions. The README says so. Host push in this mode also uses the full
+  personal token, which is not narrowed or revoked
+  ([`github.rs#L2369`](../app/SiloUI/src-tauri/engine/src/github.rs#L2369)).
 - **Read is still read.** With a read grant the agent can read every granted repository, including
   private ones, and send their contents anywhere (boundary 2 does not stop it).
 - A write grant includes `workflows: write`: the agent can change GitHub Actions workflows in those
@@ -292,7 +294,8 @@ binary serves the socket, not who connects to it.
 | Surface | Control | Code |
 | --- | --- | --- |
 | Linux desktop viewer | Guest web content loads in a child webview that matches no Tauri capability; only the local `desktop-shell-*` webview has desktop permissions. The loopback desktop proxy checks Host and Origin, uses an HttpOnly cookie, strips client credentials, and reaches the guest through a Unix socket in a private directory. | [`capabilities/desktop-viewer.json`](../app/SiloUI/src-tauri/capabilities/desktop-viewer.json), [`desktop_viewer.rs`](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), [`desktop_proxy.rs`](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs) |
-| macOS screen | Native `VZVirtualMachineView`, no webview. | [docs/SiloUI-MACOS-COMPUTERS.md](SiloUI-MACOS-COMPUTERS.md) |
+| macOS screen, same Mac | Native `VZVirtualMachineView`, no webview. | [docs/SiloUI-MACOS-COMPUTERS.md](SiloUI-MACOS-COMPUTERS.md) |
+| macOS screen, another Mac | A noVNC page in a Tauri webview speaks RFB to the guest's Screen Sharing through a loopback WebSocket endpoint (random per-window token, Host and Origin checks, one connection, message size limit) spliced to the owner over the SSH bridge. The webview parses guest-controlled RFB data. | [`macos_display_gateway.rs`](../app/SiloUI/src-tauri/engine/src/macos_display_gateway.rs), [display path](SiloUI-MACOS-COMPUTERS.md#on-another-mac) |
 | Clipboard | The desktop viewer copies in either direction only on an explicit user action (shortcut, menu item or button). Engine clients can also read or write a macOS computer's clipboard on request. There is no background sync. | [`viewer_clipboard.rs`](../app/SiloUI/src-tauri/engine/src/viewer_clipboard.rs), [`macos_computers.rs`, `macos_clipboard_read`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs#L2489) |
 | Host push | Host Git uses a sanitized configuration and fixed executable; the guest supplies objects through standard protocols, not hooks or configuration. | [`host_push.rs`](../app/SiloUI/src-tauri/engine/src/host_push.rs), [`host_push_transport.rs`](../app/SiloUI/src-tauri/engine/src/host_push_transport.rs) |
 | Editor and terminal | The user's editor connects over SSH with no agent forwarding and a pinned guest host key; guest paths are URL-encoded and control characters refused. The editor's own remote trust model still applies. | [`editor.rs`](../app/SiloUI/src-tauri/engine/src/editor.rs) |
