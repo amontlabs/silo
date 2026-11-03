@@ -131,7 +131,7 @@ fn fixture_with(converted_backup: bool) -> Fixture {
         silod.clone(),
         RequestContext {
             client_id: "test-client".into(),
-            protocol: 6,
+            protocol: 7,
             client: None,
         },
     );

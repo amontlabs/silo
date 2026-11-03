@@ -1624,7 +1624,7 @@ mod tests {
                 self.engine.clone(),
                 RequestContext {
                     client_id: client.into(),
-                    protocol: 6,
+                    protocol: 7,
                     client: None,
                 },
             )

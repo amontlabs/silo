@@ -2450,7 +2450,7 @@ pub(crate) mod tests {
             fixture().context.clone(),
             RequestContext {
                 client_id: "access-test-client".to_owned(),
-                protocol: 6,
+                protocol: 7,
                 client: None,
             },
         )
@@ -3781,7 +3781,7 @@ pub(crate) mod tests {
         let subscribe = |params: Value| {
             let request = RequestContext {
                 client_id: "subscriber".to_owned(),
-                protocol: 6,
+                protocol: 7,
                 client: None,
             };
             registry.dispatch(MethodName::EventsSubscribe, params, engine.clone(), request)
