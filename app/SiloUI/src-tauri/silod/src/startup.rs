@@ -170,7 +170,6 @@ impl silo_engine::creation_inputs::Inputs for SilodCreationWait {
         silo_engine::preparation::ensure_image(&self.paths, &|_| {})
     }
 
-
     fn quitting(&self) -> bool {
         self.context.engine_state().shutting_down
     }

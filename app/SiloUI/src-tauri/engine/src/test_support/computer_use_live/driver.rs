@@ -142,7 +142,10 @@ fn doctor_failures_require_the_session_probes() {
         )
     };
     assert!(doctor_failures(&report("ok")).is_empty());
-    assert_eq!(doctor_failures(&report("warn")), ["display server: Some(String(\"warn\"))"]);
+    assert_eq!(
+        doctor_failures(&report("warn")),
+        ["display server: Some(String(\"warn\"))"]
+    );
     assert_eq!(doctor_failures("exec failed: no"), ["no exit status"]);
     assert_eq!(doctor_failures("{}\nEXIT:1").len(), 5);
 }

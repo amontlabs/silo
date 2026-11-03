@@ -128,7 +128,8 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
     let claude_json = || guest_file(&fixture, name, "/home/silo/.claude.json");
     let approve_line = "default_tools_approval_mode = \"approve\"";
 
-    let unconfigured = || codex().is_empty() && claude_json().is_empty() && claude_settings().is_empty();
+    let unconfigured =
+        || codex().is_empty() && claude_json().is_empty() && claude_settings().is_empty();
     let pending = || -> Value {
         let receipt = guest_file(&fixture, name, "/var/lib/silo-computer-use/receipt.json");
         serde_json::from_str::<Value>(&receipt).unwrap()["pending"].clone()
@@ -140,7 +141,11 @@ fn live_approval_switch_edits_only_the_installed_harnesses() {
     assert_eq!(pending(), serde_json::json!(["claude-code", "codex"]));
     let status = switch(Approval::Auto);
     assert_eq!(status["computerUse"]["agents"], serde_json::json!([]));
-    assert!(unconfigured(), "an agent that is not installed gets no entries: {}", codex());
+    assert!(
+        unconfigured(),
+        "an agent that is not installed gets no entries: {}",
+        codex()
+    );
     assert_eq!(pending(), serde_json::json!(["claude-code", "codex"]));
     switch(Approval::Ask);
     assert!(unconfigured(), "{}", codex());
