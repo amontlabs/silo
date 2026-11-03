@@ -3,6 +3,7 @@ name = "silo-host"
 version = "0.1.0"
 description = "Stateless host helpers shared by the Silo app and engine (channel names, applications, notifications, system integrations, terminal, shutdown, installer lock)"
 license = "MIT"
+repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 
