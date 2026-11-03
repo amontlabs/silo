@@ -2235,6 +2235,38 @@ fn fork_commit_adds_the_stopped_fork_and_its_assignments() {
 }
 
 #[test]
+fn a_fork_keeps_its_sources_legacy_mounts_for_its_first_start() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, fork) = fork_fixture(&directory);
+    let published = directory.path().join("published");
+    std::fs::create_dir(&published).unwrap();
+    let runner = LegacySource {
+        host: published.clone(),
+        state: Mutex::new("Running"),
+        recovery: Mutex::new(None),
+        calls: Mutex::new(Vec::new()),
+    };
+    fork_commit(&runner, &paths, &FakeAssignments::new(&[]), &fork, "branch").unwrap();
+    let child = read_metadata(&paths.metadata)
+        .unwrap()
+        .computers
+        .into_iter()
+        .find(|configuration| configuration.name() == "branch")
+        .unwrap();
+    // The source is deleted before the fork's first start: the child still has the mounts.
+    *runner.state.lock().unwrap() = "Removed";
+    let mounts = load(&paths, child.id()).unwrap().legacy_mounts;
+    assert_eq!(
+        crate::legacy_mounts::restore_args_for(&mounts),
+        [
+            "-v".to_owned(),
+            format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", published.display())
+        ]
+    );
+}
+
+#[test]
 fn a_failed_approval_copy_does_not_publish_the_fork_or_leave_its_record() {
     let _test_state = crate::test_support::global_state();
     use std::os::unix::fs::PermissionsExt;

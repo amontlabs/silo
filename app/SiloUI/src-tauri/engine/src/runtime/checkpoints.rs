@@ -1902,6 +1902,9 @@ fn fork_commit_with_metadata_writer(
         })?
         .clone();
     ensure_fork_name_available(&metadata, new_name)?;
+    let source_legacy_mounts = inspect_computer(runner, paths, source.name())
+        .ok()
+        .map(|inspected| crate::legacy_mounts::recorded(&inspected.config));
     snapshot_ready(
         runner,
         paths,
@@ -1924,7 +1927,11 @@ fn fork_commit_with_metadata_writer(
         state: fork.scope.clone(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
-    child_record.desired_environment = load(paths, source.id())?.desired_environment;
+    let source_record = load(paths, source.id())?;
+    child_record.desired_environment = source_record.desired_environment;
+    // A source from before Cua Driver recorded the read-only ChatGPT and LCU folders. Keep them
+    // with the child, so its first start passes them again even if the source is deleted first.
+    child_record.legacy_mounts = source_legacy_mounts.unwrap_or(source_record.legacy_mounts);
     save(paths, &child_id, &child_record)?;
     let mut copied_github = false;
     let mut copied_secrets = false;

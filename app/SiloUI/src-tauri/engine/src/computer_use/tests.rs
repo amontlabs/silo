@@ -366,6 +366,14 @@ fn the_guest_script_installs_the_helper_and_lock_before_running_the_command() {
         apply_command(Approval::Ask, false, true),
         "/usr/local/libexec/silo-computer-use apply --approval ask --boot"
     );
+    assert_eq!(
+        helper_command(Approval::Auto, false, true, true),
+        "/usr/local/libexec/silo-computer-use apply --approval auto --boot --creation"
+    );
+    assert_eq!(
+        helper_command(Approval::Ask, false, true, false),
+        apply_command(Approval::Ask, false, true)
+    );
     // The removed ordering machinery is never sent.
     for command in [
         apply_command(Approval::Auto, true, true),

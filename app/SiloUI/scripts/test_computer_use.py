@@ -337,6 +337,25 @@ class Driver(Guest):
         self.assertIn('attempt 4 of 5', log)
         self.assertIn('driver download attempt 1 failed', log)
 
+    def test_while_creating_the_download_gets_one_short_attempt(self):
+        self.curl_failures_left = 99
+        with mock.patch.object(cu, 'CREATION', True):
+            result = cu.apply('ask', boot=True)
+        self.assertEqual((result['state'], result['reason']), ('failed', 'driver-archive-unavailable'))
+        curl, = self.curls()
+        self.assertEqual(curl[curl.index('--max-time') + 1], str(cu.CREATION_DOWNLOAD_MAX_TIME))
+        self.assertEqual(self.sleeps, [])
+
+    def test_the_creation_flag_is_parsed(self):
+        with mock.patch.object(cu, 'apply', return_value={}) as apply, \
+                mock.patch.object(cu.os, 'geteuid', return_value=0), \
+                mock.patch('builtins.print'):
+            cu.main(['apply', '--approval', 'ask', '--boot', '--creation'])
+            self.assertTrue(cu.CREATION)
+            cu.main(['apply', '--approval', 'ask'])
+            self.assertFalse(cu.CREATION)
+        self.assertEqual(apply.call_count, 2)
+
     def test_the_download_uses_curls_own_retry_options(self):
         cu.apply('ask')
         curl, = self.curls()

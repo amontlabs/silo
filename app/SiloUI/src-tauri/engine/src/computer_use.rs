@@ -635,6 +635,17 @@ fn apply_command(mode: Approval, force: bool, boot: bool) -> String {
     command
 }
 
+/// `apply_command`, plus `--creation` for the boot that ends creating a computer: the host holds
+/// the device-wide operation gate then, so the helper makes one short download attempt and
+/// leaves a failure to the first start.
+fn helper_command(mode: Approval, force: bool, boot: bool, creation: bool) -> String {
+    let mut command = apply_command(mode, force, boot);
+    if creation {
+        command.push_str(" --creation");
+    }
+    command
+}
+
 /// What one helper run reported about the approval it was asked to apply.
 #[derive(Debug, PartialEq, Eq)]
 struct Report {
@@ -697,7 +708,7 @@ fn run_helper_with(
         runner,
         paths,
         name,
-        &guest_script(&apply_command(mode, force, boot)),
+        &guest_script(&helper_command(mode, force, boot, allow_boot)),
         APPLY_TIMEOUT,
         APPLY_GRACE,
         allow_boot,
