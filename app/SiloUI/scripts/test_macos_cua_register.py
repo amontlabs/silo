@@ -200,6 +200,9 @@ class ScriptSourceTest(unittest.TestCase):
             self.assertIn(needle, text.replace('$(pinned bundleIdentifier)', 'com.trycua.driver'))
         self.assertNotIn('lcu setup', text)
         self.assertNotIn('--runtime-only', text)
+        # Only LCU's own executables leave ~/.local/bin, never every name that starts with "lcu".
+        self.assertNotIn('bin/lcu*', text)
+        self.assertIn('legacy_executables', text)
 
     def test_the_lock_matches_the_facts_of_the_release(self):
         lock = json.loads(ZSH.with_name('cua-driver-lock.json').read_text())

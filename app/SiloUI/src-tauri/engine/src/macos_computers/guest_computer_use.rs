@@ -1244,6 +1244,51 @@ mod tests {
         }
 
         #[test]
+        fn only_lcus_own_executables_are_removed_from_the_bin_folder() {
+            let home = tempfile::tempdir().unwrap();
+            let bin = home.path().join(".local/bin");
+            let lcu = home.path().join(".local/share/lcu/current/bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::create_dir_all(&lcu).unwrap();
+            std::fs::write(lcu.join("lcu"), b"#!/bin/sh\n").unwrap();
+            std::fs::write(lcu.join("lcu-cua"), b"#!/bin/sh\n").unwrap();
+            // What LCU installed: its command, and links into its folder (absolute and relative).
+            std::os::unix::fs::symlink(lcu.join("lcu"), bin.join("lcu")).unwrap();
+            std::os::unix::fs::symlink("../share/lcu/current/bin/lcu-cua", bin.join("lcu-cua"))
+                .unwrap();
+            // What the user installed: commands that merely start with "lcu", and other links.
+            std::fs::write(bin.join("lcu-notes"), b"#!/bin/sh\n").unwrap();
+            std::fs::write(bin.join("lcutils"), b"#!/bin/sh\n").unwrap();
+            std::fs::write(home.path().join("tool"), b"#!/bin/sh\n").unwrap();
+            std::os::unix::fs::symlink(home.path().join("tool"), bin.join("lcu-tool")).unwrap();
+            std::os::unix::fs::symlink("/nonexistent/lcu", bin.join("lcu-dangling")).unwrap();
+            let output = zsh(&["legacy-executables"], "", home.path());
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let mut listed: Vec<String> = String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_owned)
+                .collect();
+            listed.sort();
+            assert_eq!(
+                listed,
+                vec![
+                    bin.join("lcu").to_str().unwrap().to_owned(),
+                    bin.join("lcu-cua").to_str().unwrap().to_owned()
+                ]
+            );
+            // Without LCU there is nothing to list.
+            std::fs::remove_file(bin.join("lcu")).unwrap();
+            std::fs::remove_file(bin.join("lcu-cua")).unwrap();
+            let output = zsh(&["legacy-executables"], "", home.path());
+            assert!(output.status.success() && output.stdout.is_empty());
+        }
+
+        #[test]
         fn links_must_stay_inside_the_extracted_folder() {
             let home = tempfile::tempdir().unwrap();
             let root = home.path().join("tree");

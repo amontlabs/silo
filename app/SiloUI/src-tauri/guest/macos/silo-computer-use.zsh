@@ -13,7 +13,8 @@
 #
 # `apply` steps:
 #   1. check that System Integrity Protection is off, and remove what the earlier ChatGPT app
-#      and LCU setup left (the app, LCU, their TCC rows, their LaunchAgent and registrations);
+#      and LCU setup left (the app, LCU's folders and its own links in ~/.local/bin, their TCC
+#      rows, their LaunchAgent and registrations);
 #   2. switch Cua Driver's telemetry and update check off (environment for this run, Cua Driver's
 #      own config for the daemon that LaunchServices starts, the user's zsh environment);
 #   3. install /Applications/CuaDriver.app from the staged archive when the pinned version is not
@@ -238,6 +239,23 @@ switch_privacy_off() {
 
 # MARK: Earlier ChatGPT app and LCU
 
+# LCU's own executables in ~/.local/bin: `lcu` itself and the links LCU made into its install
+# folder (~/.local/share/lcu). A user's own command that merely starts with "lcu", such as
+# `lcu-notes` or `lcutils`, and a link to anything else stay.
+legacy_executables() {
+  local entry target
+  for entry in "$HOME"/.local/bin/*(N); do
+    if [[ ${entry:t} == lcu ]]; then
+      print -r -- "$entry"
+    elif [[ -L $entry ]]; then
+      target=$(readlink "$entry") || continue
+      [[ $target != /* ]] && target=${entry:h}/$target
+      [[ ${target:a} == "$HOME"/.local/share/lcu/* ]] && print -r -- "$entry"
+    fi
+  done
+  return 0
+}
+
 # Removes the ChatGPT app, LCU, their TCC rows and ledger entries, registrations and the old
 # reconcile LaunchAgent from a computer set up before Cua Driver.
 remove_legacy() {
@@ -258,7 +276,9 @@ remove_legacy() {
   done
   # Registrations (Claude Code, Codex) are removed by silo-cua-register.py; the files LCU wrote
   # for its other agents go with its folders.
-  rm -rf "$HOME/.local/share/lcu" "$HOME/.local/state/lcu" "$HOME"/.local/bin/lcu*(N) "$HOME/.hermes/plugins/lcu-cua" ||
+  local -a executables
+  executables=("${(@f)$(legacy_executables)}")
+  rm -rf "$HOME/.local/share/lcu" "$HOME/.local/state/lcu" "$HOME/.hermes/plugins/lcu-cua" ${executables:#} ||
     fail "could not remove LCU"
   if [[ -e $LEGACY_APP ]]; then
     logged ${=SUDO} rm -rf "$LEGACY_APP" || fail "could not remove the ChatGPT app"
@@ -556,6 +576,9 @@ case $command in
     ;;
   links-inside)
     links_stay_inside "$1"
+    ;;
+  legacy-executables)
+    legacy_executables
     ;;
   sharing-grants)
     for entry in $SHARING_CLIENTS; do
