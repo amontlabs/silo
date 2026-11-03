@@ -1,7 +1,8 @@
 # Secrets
 
-Silo stores general secret values in the device credential store (macOS Keychain or
-Linux Secret Service). `secrets.json` contains names, immutable value references,
+Silo stores general secret values in the macOS Keychain, the only supported host today.
+The engine's credential store also builds against the Linux Secret Service, but no Linux
+host build ships yet and that backend is untested. `secrets.json` contains names, immutable value references,
 computer assignments, allowed hosts, pending updates, safe failures, and bounded activity
 history. Values are never returned in application snapshots. The editor sends a
 value only when adding or replacing one, then discards its draft on successful save.
@@ -146,7 +147,7 @@ Use disposable values and computers. Never use a real credential for an echo-ser
   edited domains without reentering the value, and removed it. A second check
   started dev through Silo, verified its placeholder, removed access live, and
   stopped dev again. Metadata had no plaintext value. Secrets was left empty.
-- Linux hardware and Secret Service behavior have not been exercised on this host.
+- Linux hosts are not supported today; the Secret Service backend has never been exercised.
 
 Run the opt-in runtime test with the signed bundled `msb` and library paths in
 `SILO_TEST_MSB` and `SILO_TEST_LIBKRUNFW`, with the explicit confirmation below:

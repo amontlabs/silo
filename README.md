@@ -1,20 +1,95 @@
 # Silo
 
-Computers for agents. Silo is an engine that runs sandboxed Linux and macOS virtual machines on Apple Silicon Macs, each with its own files, tools, desktop and computer use, and controls access to your repositories and credentials.
+Computers for agents. Silo is an embeddable engine that gives each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick, a desktop with computer use, and checkpoints to roll back to.
 
 Apps embed Silo through `silod`, a daemon they talk to over a local socket with a versioned JSON protocol. [Fjord](https://github.com/amontlabs/fjord) is built on it.
 
-[Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website and demo](https://silo.amontlabs.com)
+**Status.** Work in progress, MIT licensed, built by one person. The host is macOS on Apple Silicon today. On Linux, the `silo-engine` crate builds and passes its tests in CI; a Linux `silod` is the next milestone.
+
+[Why Silo](#why-silo) · [Threat model](docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
+
+## Why Silo
+
+### The problem
+
+Coding agents are prompt-injected through the channels they are meant to read: issues, pull request comments, web pages, dependencies. In [Comment and Control](https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/) (April 2026), text in pull request titles and issue comments made Claude Code, Gemini CLI and GitHub Copilot agents running in GitHub Actions dump their environment and post API keys and GitHub tokens back through GitHub itself, so an allowlist that permitted GitHub did not help ([CSA research note](https://labs.cloudsecurityalliance.org/research/csa-research-note-comment-control-github-prompt-injection-20/)). Separately, the UK AI Security Institute's [SandboxEscapeBench](https://www.aisi.gov.uk/blog/can-ai-agents-escape-their-sandboxes-a-benchmark-for-safely-measuring-container-breakout-capabilities) found that frontier models reliably escape common container misconfigurations, such as privileged containers, writable host mounts and exposed Docker sockets ([paper](https://arxiv.org/abs/2603.02277)).
+
+The sandboxes built into agent harnesses limit which files and hosts the agent's processes can touch. They do not change what the agent is authorised to do with the credentials it holds: a token that can push to every repository still can, from inside the sandbox.
+
+### What Silo does
+
+Silo assumes the agent in a computer is hostile and has root there. It then limits what that agent can reach and what it is authorised to do:
+
+- **A virtual machine per computer.** Linux computers are libkrun microVMs (through [MicroSandbox](https://github.com/superradcompany/microsandbox)); macOS computers run on Apple's Virtualization framework. Each has its own kernel and its own disk. No folder of yours is shared in; Linux guests see only the runtime's own control folder and Silo's read-only tool folders.
+- **Credentials the agent can use but not read.** Secret values stay in the Mac's Keychain. The guest gets a placeholder; the runtime on the Mac swaps in the real value only in HTTPS requests to that secret's allowed hosts, after verifying the server's identity. This is MicroSandbox's placeholder mechanism, which Silo configures and patches.
+- **GitHub access per computer and per repository, read-only by default.** Silo mints scoped child tokens on the Mac for the repositories you select; the guest never sees a GitHub token. Write access is a per-repository opt-in.
+- **No route to your Mac or your network.** Guests reach public internet addresses only: not the Mac's loopback, the LAN, a VPN, cloud metadata, or other computers. (macOS computers get this once their setup completes.)
+- **A way back.** Checkpoint a computer before letting an agent loose, restore it, or fork a copy.
+- **A local engine, no account.** Everything runs on your Mac. Apps drive it through one same-user socket.
+
+Each mechanism, with the code that implements it, is in the [threat model](docs/THREAT-MODEL.md).
+
+### What Silo does not protect
+
+- **Data the agent can read can leave.** There is no egress allowlist yet: a guest can send anything it can read to any public host, including through a host it is allowed to use. The [eval](docs/evals/README.md) shows a `/workspace` file posted to a public echo service.
+- **Credentials can be used.** A scoped secret or GitHub token works for the agent within its scope: it can spend credits or write to a repository you granted for changes.
+- **Allowed hosts that echo headers reveal secrets.** If an allowed host reflects the request back, the guest reads the real value. The eval reproduces this.
+- **Personal access tokens are not scoped.** In personal-token mode the agent gets the token's full permissions.
+- **Other processes on your Mac are trusted.** Any process running as your user can drive the engine socket; there is no per-client authentication or audit log yet. Same-user malware, hypervisor escapes and hostile apps that embed the engine are out of scope.
+- **macOS computers during setup.** Until setup completes, and in Recovery, a macOS computer uses Apple's NAT and can reach the Mac and the LAN.
+- **The guest itself.** The agent is root in its computer and can change anything there, including the tools Silo installed. Roll back with checkpoints.
+
+The [threat model](docs/THREAT-MODEL.md) lists every limit, and the [eval results](docs/evals/README.md) say which ones were tested and how.
+
+### How it compares
+
+Silo has no single feature that nobody else has, and it builds on MicroSandbox, whose placeholder secrets it uses. What it combines is per-repository GitHub authority, Linux and macOS guests, and an embeddable, local, MIT-licensed engine. Several tools below already have the per-host egress allowlist Silo lacks.
+
+| | Isolation | Runs on | Credentials in the sandbox | Outbound network | Desktop and computer use | macOS guests | License |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **Silo** | VM per computer (libkrun; Virtualization framework) | Apple Silicon Mac | Placeholders, swapped on the host for allowed HTTPS hosts; GitHub tokens minted per repository, read-only by default | Public addresses only; no allowlist yet | Yes (Cua Driver on Linux) | Yes | MIT |
+| **[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)** (`sbx`) | microVM per sandbox [^docker-iso] | macOS, Windows, Linux; Docker cloud | Sentinel, swapped by a host proxy [^docker-arch] | Deny by default, allowlist, org policy [^docker-def] | Not documented | No | Proprietary; local use free |
+| **[Cua](https://github.com/trycua/cua)** | VMs (Lume, Virtualization framework); gVisor or Docker containers for Linux sandboxes | Mac, Linux, Windows; own cloud (Cua Cloud ended 18 Oct 2026 [^cua-cloud]) | Keyvault releases signed-in sessions after approval; no proxy injection documented | NAT or bridged; no allowlist documented [^lume] | Yes, its core purpose | Yes | MIT core; some parts FSL-1.1-MIT |
+| **[srt](https://github.com/anthropic-experimental/sandbox-runtime)** | OS sandbox (Seatbelt; bubblewrap and seccomp), shared kernel | macOS, Linux; Windows alpha | Deny, or mask with a sentinel swapped on egress | Deny by default, domain allowlist; blocks loopback, link-local, metadata | Not documented | N/A (no VM) | Apache-2.0 |
+| **[microsandbox](https://github.com/superradcompany/microsandbox)** | microVM (libkrun) | macOS, Linux, Windows | Secrets bound to allowed hosts; its README says they never enter the VM | Per-sandbox host and port allowlist | Not in core | Not documented | Apache-2.0 |
+| **[E2B](https://e2b.dev/open-source)** | Firecracker microVM | Hosted; self-host or BYOC | Reference, swapped into headers by an egress proxy [^e2b-secret] | Open by default; allow and deny lists [^e2b-net] | Yes (E2B Desktop) [^e2b-desk] | Not documented | Apache-2.0 core; hosted service commercial |
+| **[Daytona](https://www.daytona.io/docs/en/isolation)** | Container, or VM with its own kernel | Hosted | Placeholder, swapped by an outbound proxy for allowed hosts | Firewall, allowlists; default depends on plan [^daytona-net] | Yes (VNC, computer use) [^daytona-vnc] | No | Hosted service proprietary; open-source repo no longer maintained [^daytona-repo] |
+| **[Apple container](https://github.com/apple/container)** | Lightweight VM per container | Apple silicon, macOS 26 | Not documented | No egress filter documented [^apple-tech] | Not documented | No | Apache-2.0 |
+
+Researched 2026-11-03 from each project's own documentation; corrections welcome in an issue.
+
+[^docker-iso]: [Docker Sandboxes isolation layers](https://docs.docker.com/ai/sandboxes/security/isolation/); hosts from [install](https://docs.docker.com/ai/sandboxes/install/).
+[^docker-arch]: [Docker Sandboxes architecture](https://docs.docker.com/ai/sandboxes/architecture/).
+[^docker-def]: [Docker Sandboxes default security posture](https://docs.docker.com/ai/sandboxes/security/defaults/).
+[^cua-cloud]: [Cua Cloud has ended](https://cua.ai/docs/cua-sdk/guides/cua-cloud-ended); providers in [self-hosted sandboxes](https://cua.ai/docs/cua/guide/get-started/self-hosted-sandboxes).
+[^lume]: [Lume CLI reference](https://cua.ai/docs/lume/reference/cli-reference).
+[^e2b-secret]: [E2B secret injection](https://docs.e2b.dev/secrets/inject).
+[^e2b-net]: [E2B internet access](https://docs.e2b.dev/network/internet-access).
+[^e2b-desk]: [E2B computer use](https://docs.e2b.dev/use-cases/computer-use).
+[^daytona-net]: [Daytona network limits](https://www.daytona.io/docs/en/network-limits).
+[^daytona-vnc]: [Daytona VNC access](https://www.daytona.io/docs/en/vnc-access).
+[^daytona-repo]: [daytonaio/daytona](https://github.com/daytonaio/daytona): "This repository is no longer maintained."
+[^apple-tech]: [Apple container technical overview](https://github.com/apple/container/blob/main/docs/technical-overview.md).
 
 ## What it does
 
 - **Run computers.** Create, start, stop, and monitor virtual machines, each with its own files, tools, and processes, sandboxed from the Mac. Linux computers run on [MicroSandbox](https://github.com/superradcompany/microsandbox); macOS computers run on Apple's Virtualization framework. See [macOS computers](docs/SiloUI-MACOS-COMPUTERS.md).
-- **Give agents a desktop.** New Linux computers have a desktop built in, with computer use for agents; Silo downloads ChatGPT for Linux from OpenAI and sets up computer use once the computer is ready. macOS computers are set up for computer use after installation. See the [computer-use plan](docs/SiloUI-COMPUTER-USE-PLAN.md).
+- **Give agents a desktop.** Linux computers have a desktop built in, with computer use through [Cua Driver](https://github.com/trycua/cua) (MIT), registered for the coding agents installed in the computer. macOS computers are set up for computer use after installation.
 - **Reach a computer's files and services.** Browse files, open terminals, connect development servers to local addresses, and enable SSH access per computer.
 - **Control GitHub access.** Connect through OAuth and select repositories for each computer, with read-only access by default, or use a [personal token](docs/SiloUI-GITHUB-PERSONAL-TOKENS.md), which grants the token's full permissions.
 - **Scope API credentials.** Store credentials in the Mac's Keychain and choose the computers and HTTPS domains that can use them. See [how secrets work](docs/SiloUI-SECRETS.md).
 - **Save and branch state.** Create checkpoints of a computer, restore it to an earlier checkpoint, or fork a new computer with a copy of its files.
 - **Move computers and troubleshoot.** Export a computer or checkpoint and import it as a new computer on this or another Mac. Search or export logs alongside activity history.
+
+## Platforms
+
+| | Today | Next |
+| --- | --- | --- |
+| Host | macOS 14+ on Apple Silicon: engine releases and the Silo app | Linux host: `silo-engine` builds and passes its tests in CI; `silod` for Linux (systemd user service) and Linux engine releases are the next milestone |
+| Guests | Linux (Ubuntu 24.04, arm64 on Apple Silicon) and macOS | Unchanged |
+| Intel Macs | Not supported | Not planned |
+
+Silo app releases up to v0.11.1 also shipped Linux `.deb` and AppImage packages. Those builds predate the engine and are frozen at v0.11.1: they get no further updates.
 
 ## How it fits together
 
@@ -47,11 +122,13 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, base Linux image, and Git tools are bundled. Silo downloads ChatGPT for Linux in the background for computer use. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, a Linux computer whose image does not include Cua Driver fetches its pinned, checksummed release archive (about 37 MB) once. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
 | macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
+
+The latest app release, v0.11.1, predates the engine and the Cua-based computer use described here: it still downloads ChatGPT for Linux (about 450 MB) from OpenAI in the background, without asking, for computer use. Build from source for the current code until the next release.
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 

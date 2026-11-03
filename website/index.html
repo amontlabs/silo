@@ -7,12 +7,12 @@
     <meta name="theme-color" content="#f7f7f4" />
     <meta
       name="description"
-      content="Run Linux computers locally or remotely, with a desktop and computer use. Available on macOS and Linux."
+      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
     />
     <meta property="og:title" content="Silo — Computers for your agents" />
     <meta
       property="og:description"
-      content="Run Linux computers locally or remotely, with a desktop and computer use. Available on macOS and Linux."
+      content="Give each AI agent its own Linux or macOS virtual machine, with only the repositories and credentials you pick. An open-source, embeddable engine for Apple Silicon Macs."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://silo.amontlabs.com/" />
@@ -108,7 +108,8 @@
         >
         <nav aria-label="Main navigation">
           <a href="#features">Features</a>
-          <a href="https://github.com/amontlabs/silo#start-working"
+          <a href="#why">Why Silo</a>
+          <a href="https://github.com/amontlabs/silo#silo-app"
             >How to use <span aria-hidden="true">↗</span></a
           >
           <a class="source-nav" href="https://github.com/amontlabs/silo"
@@ -155,10 +156,10 @@
           </div>
           <h1 id="hero-title">Computers for your agents.</h1>
           <p class="hero-description">
-            Run Linux computers locally or remotely,<br
+            Give each agent its own Linux or macOS computer,<br
               class="desktop-break"
             />
-            with a desktop and computer use.
+            with only the repositories and keys you pick.
           </p>
           <div class="hero-actions">
             <a class="button primary" href="#download"
@@ -172,14 +173,14 @@
               >View source</a
             >
           </div>
-          <p class="platform-note">Available for macOS and Linux</p>
+          <p class="platform-note">For Apple Silicon Macs · Linux host in progress</p>
         </section>
         <div class="principles joint">
           <div>
             <h2>Isolated</h2>
             <p>
-              Give your projects their own Linux computer, with the CPU, memory, and
-              storage you choose.
+              Each computer is its own virtual machine, with the CPU, memory, and
+              storage you choose. Nothing on your Mac is shared in.
             </p>
           </div>
           <div>
@@ -436,7 +437,7 @@
                   allow changes when you need them.
                 </p>
                 <a
-                  href="https://github.com/amontlabs/silo#github-secrets-and-backups"
+                  href="https://github.com/amontlabs/silo#what-it-does"
                   >About GitHub access <span aria-hidden="true">→</span></a
                 >
               </div>
@@ -508,6 +509,89 @@
             </article>
           </div>
         </section>
+        <section class="why section joint" id="why" aria-labelledby="why-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">WHY SILO</p>
+              <h2 id="why-title">Assume the agent is compromised.</h2>
+            </div>
+            <p>
+              Limit what it can reach and what it is<br class="desktop-break" />
+              allowed to do. Say plainly what that misses.
+            </p>
+          </div>
+          <div class="why-grid">
+            <article>
+              <h3>The problem</h3>
+              <p>
+                Agents are prompt-injected through what they read. In
+                <a href="https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/">Comment and Control</a>,
+                pull request titles and issue comments made coding agents in
+                GitHub Actions post their API keys and GitHub tokens back
+                through GitHub itself, so allowing GitHub was enough to leak
+                them. The UK AI Security Institute’s
+                <a href="https://www.aisi.gov.uk/blog/can-ai-agents-escape-their-sandboxes-a-benchmark-for-safely-measuring-container-breakout-capabilities">SandboxEscapeBench</a>
+                found frontier models reliably escape common container
+                misconfigurations.
+              </p>
+            </article>
+            <article>
+              <h3>What Silo does</h3>
+              <ul>
+                <li>A virtual machine per computer, with its own kernel and disk.</li>
+                <li>Credentials as placeholders, swapped in on the Mac only for allowed HTTPS hosts.</li>
+                <li>GitHub tokens minted per repository on the Mac, read-only by default.</li>
+                <li>Public internet only: no route to your Mac, your network, or other computers.</li>
+                <li>Checkpoints to roll back to.</li>
+              </ul>
+            </article>
+            <article>
+              <h3>What it does not protect</h3>
+              <ul>
+                <li>Data the agent can read can leave: there is no egress allowlist yet.</li>
+                <li>Scoped credentials can still be used, and hosts that echo headers reveal them.</li>
+                <li>Personal access tokens are not scoped.</li>
+                <li>Any process running as you can drive the engine.</li>
+                <li>The agent is root inside its own computer.</li>
+              </ul>
+            </article>
+          </div>
+          <div class="compare">
+            <div class="compare-scroll" tabindex="0" role="region" aria-labelledby="compare-title">
+              <table>
+                <caption id="compare-title">How it compares</caption>
+                <thead>
+                  <tr>
+                    <th scope="col"></th>
+                    <th scope="col">Isolation</th>
+                    <th scope="col">Credentials in the sandbox</th>
+                    <th scope="col">Outbound network</th>
+                    <th scope="col">macOS guests</th>
+                    <th scope="col">License</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><th scope="row">Silo</th><td>VM per computer</td><td>Placeholders; per-repository GitHub tokens</td><td>Public addresses only; no allowlist yet</td><td>Yes</td><td>MIT</td></tr>
+                  <tr><th scope="row">Docker Sandboxes</th><td>microVM</td><td>Sentinel, swapped by a host proxy</td><td>Deny by default, allowlist</td><td>No</td><td>Proprietary, free locally</td></tr>
+                  <tr><th scope="row">Cua</th><td>VMs (Lume); containers for Linux sandboxes</td><td>No proxy injection documented</td><td>No allowlist documented</td><td>Yes</td><td>MIT core</td></tr>
+                  <tr><th scope="row">srt</th><td>OS sandbox, shared kernel</td><td>Deny, or sentinel swapped on egress</td><td>Deny by default, allowlist</td><td>N/A</td><td>Apache-2.0</td></tr>
+                  <tr><th scope="row">microsandbox</th><td>microVM</td><td>Secrets bound to allowed hosts</td><td>Host and port allowlist</td><td>Not documented</td><td>Apache-2.0</td></tr>
+                  <tr><th scope="row">E2B</th><td>Firecracker microVM, hosted</td><td>Reference, swapped by an egress proxy</td><td>Open by default; allow and deny lists</td><td>Not documented</td><td>Apache-2.0 core</td></tr>
+                  <tr><th scope="row">Daytona</th><td>Container or VM, hosted</td><td>Placeholder, swapped by a proxy</td><td>Firewall and allowlists</td><td>No</td><td>Proprietary service</td></tr>
+                  <tr><th scope="row">Apple container</th><td>VM per container</td><td>Not documented</td><td>No filter documented</td><td>No</td><td>Apache-2.0</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="compare-note">
+              Silo builds on microsandbox and has no single feature nobody else
+              has; several tools above already filter egress. Researched
+              2026-11-03 from each project’s documentation.
+              <a href="https://github.com/amontlabs/silo#how-it-compares">Sources and full table <span aria-hidden="true">→</span></a>
+              <a href="https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md">Threat model <span aria-hidden="true">→</span></a>
+              <a href="https://github.com/amontlabs/silo/blob/main/docs/evals/README.md">Isolation evals <span aria-hidden="true">→</span></a>
+            </p>
+          </div>
+        </section>
         <section
           class="download-section section joint"
           id="download"
@@ -558,52 +642,23 @@
             <article class="download-card">
               <div class="os-heading">
                 <h3>Linux</h3>
-                <label class="architecture-label"
-                  ><span class="sr-only">Linux processor architecture</span
-                  ><select id="linux-architecture">
-                    <option value="x64">Intel / AMD (x64)</option>
-                    <option value="arm64">ARM64</option>
-                  </select></label
-                >
+                <span class="os-tag">In progress</span>
               </div>
               <p class="requirements">
-                Ubuntu 24.04-compatible · KVM required for local computers
+                Engine builds and passes its tests in CI · daemon next
               </p>
-              <a
-                id="linux-download"
-                class="button primary download-link"
-                href="https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-x64.deb"
-                ><svg class="icon" aria-hidden="true">
-                  <use href="#download-icon" /></svg
-                ><span>Download for Linux</span
-                ><span class="file-type">.deb</span></a
-              >
               <p class="install-note">
-                Install with your package manager. Enable Silo updates when
-                asked.
+                Linux guests run on every Mac today. A Linux host needs the
+                Linux engine daemon, which is the next milestone. Older Linux
+                app packages are frozen at v0.11.1 and get no updates.
               </p>
               <div class="linux-alternatives">
-                <a
-                  id="appimage-download"
-                  href="https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-x64.AppImage"
-                  >Download AppImage <span aria-hidden="true">↗</span></a
-                ><a href="https://github.com/amontlabs/silo/releases/latest"
-                  >All downloads <span aria-hidden="true">↗</span></a
+                <a href="https://github.com/amontlabs/silo#platforms"
+                  >Platform status <span aria-hidden="true">↗</span></a
+                ><a href="https://github.com/amontlabs/silo/releases/tag/v0.11.1"
+                  >v0.11.1 packages <span aria-hidden="true">↗</span></a
                 >
               </div>
-              <noscript
-                ><p>
-                  <a
-                    href="https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-arm64.deb"
-                    >Linux ARM64 .deb</a
-                  >
-                  ·
-                  <a
-                    href="https://github.com/amontlabs/silo/releases/latest/download/Silo-linux-arm64.AppImage"
-                    >ARM64 AppImage</a
-                  >
-                </p></noscript
-              >
             </article>
           </div>
         </section>
@@ -668,7 +723,7 @@
           <p>A space for your work.</p>
         </div>
         <nav aria-label="Footer navigation">
-          <a href="https://github.com/amontlabs/silo#start-working"
+          <a href="https://github.com/amontlabs/silo#silo-app"
             >How to use ↗</a
           ><a href="https://github.com/amontlabs/silo/releases">Releases ↗</a
           ><a href="https://github.com/amontlabs/silo/issues"
