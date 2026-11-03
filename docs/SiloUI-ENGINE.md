@@ -70,7 +70,13 @@ used to call the engine in-process forwards to the canonical `silod` method over
   `silo-ui` and `silo-engine` depend on.
 - **Packaging.** `scripts/embed_engine.py` embeds `Silo Engine.app` (the signed `silod`, its
   manifest and plist) under `Contents/Resources/SiloEngineDistribution/` and copies the agent plist
-  into `Contents/Library/LaunchAgents/`; `scripts/build_desktop.py` runs it before signing the app.
+  into `Contents/Library/LaunchAgents/`. `silod` resolves its tools from its own bundle, so the
+  engine also carries copies of the app's signed `msb`, `libkrunfw.5.dylib`, Git tools,
+  `silo-macos-gateway` and `silo-network-bootstrap` (`Contents/MacOS`, `Contents/Frameworks`) and
+  the `microsandbox/` and `git-support/` resources. `scripts/build_desktop.py` (both
+  `desktop:build` and `desktop:build:debug`) and `scripts/package-macos-release.py` sign the
+  tools, embed the engine, then re-seal the app. Fjord's embedded engine (from the engine release
+  tarball, which holds only `silod`) still lacks these tools.
   It also writes `SiloEngineCodeRequirement`, the signer requirement `silod` checks at run time, into the
   engine's `Info.plist` before signing ([engine releases](SiloUI-RELEASES.md#engine-releases)).
 

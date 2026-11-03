@@ -4,12 +4,13 @@ import json
 import base64
 import hashlib
 import plistlib
+import shutil
 import subprocess
 import tempfile
 import unittest
 
 from embed_engine import (
-    DISTRIBUTION, REQUIREMENT_KEY, SILOD, codesign_engine, embed_engine, engine_requirement, resolve_signing_identity,
+    DISTRIBUTION, ENGINE_FRAMEWORKS, ENGINE_RESOURCES, ENGINE_TOOLS, REQUIREMENT_KEY, SILOD, codesign_engine, embed_engine, engine_requirement, resolve_signing_identity,
     signing_identity,
 )
 from macos_release_signing import verify_engine_requirement
@@ -47,7 +48,22 @@ class EmbedEngineTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.bundle = self.root / 'Silo.app'
-        (self.bundle / 'Contents').mkdir(parents=True)
+        contents = self.bundle / 'Contents'
+        # What Tauri bundles in the app and silod needs beside itself.
+        for name in ENGINE_TOOLS:
+            (contents / 'MacOS').mkdir(parents=True, exist_ok=True)
+            (contents / 'MacOS' / name).write_bytes(f'tool {name}'.encode())
+            (contents / 'MacOS' / name).chmod(0o755)
+        (contents / 'Frameworks').mkdir()
+        (contents / 'Frameworks/libkrunfw.5.dylib').write_bytes(b'library')
+        (contents / 'Resources/microsandbox/licenses').mkdir(parents=True)
+        (contents / 'Resources/microsandbox/manifest.json').write_text('{}')
+        (contents / 'Resources/git-support/lfs-transfer').mkdir(parents=True)
+        (contents / 'Resources/git-support/manifest.json').write_text('{}')
+        (contents / 'Resources/git-support/lfs-transfer/git-lfs-transfer').write_bytes(b'lfs')
+        (contents / 'Resources/git-support/share').mkdir()
+        (contents / 'Resources/git-support/share/templates').symlink_to('../manifest.json')
+        (contents / 'Resources/THIRD-PARTY-NOTICES.md').write_text('notices')
         self.binary = self.root / 'silod'
         self.binary.write_bytes(b'#!/bin/sh\n')
         self.signed = []
@@ -74,6 +90,40 @@ class EmbedEngineTests(unittest.TestCase):
         # The engine's own copy keeps its relative BundleProgram.
         inner = plistlib.loads((engine / 'Contents/Library/LaunchAgents/org.silo.preview.engine.plist').read_bytes())
         self.assertEqual(inner['BundleProgram'], 'Contents/MacOS/silod')
+
+    def test_the_engine_carries_the_tools_library_and_resources_silod_runs_computers_with(self):
+        # silod resolves msb, Git, the gateway and bootstrap beside its executable, libkrunfw in
+        # ../Frameworks and the runtime and Git manifests in its Resources. Without them
+        # computers.list fails ("The bundled MicroSandbox executable is unavailable").
+        engine, _ = self.embed()
+        app, inner = self.bundle / 'Contents', engine / 'Contents'
+        for name in ENGINE_TOOLS:
+            self.assertEqual((inner / 'MacOS' / name).read_bytes(), (app / 'MacOS' / name).read_bytes())
+            self.assertTrue((inner / 'MacOS' / name).stat().st_mode & 0o111, name)
+        for name in ENGINE_FRAMEWORKS:
+            self.assertEqual((inner / 'Frameworks' / name).read_bytes(), (app / 'Frameworks' / name).read_bytes())
+        for name in ENGINE_RESOURCES:
+            self.assertTrue((inner / 'Resources' / name).exists(), name)
+        self.assertEqual((inner / 'Resources/git-support/lfs-transfer/git-lfs-transfer').read_bytes(), b'lfs')
+        self.assertTrue((inner / 'Resources/git-support/share/templates').is_symlink())
+        self.assertTrue((inner / 'Resources/microsandbox/licenses').is_dir())
+        # The engine is sealed only after everything is in place.
+        self.assertEqual(self.signed, [(engine, SILOD / 'macos/Entitlements.plist')])
+
+    def test_an_app_missing_an_engine_tool_is_refused_before_anything_is_written(self):
+        for relative in ('MacOS/msb', 'MacOS/silo-network-bootstrap', 'Frameworks/libkrunfw.5.dylib',
+                         'Resources/git-support'):
+            with self.subTest(relative=relative):
+                self.setUp()
+                path = self.bundle / 'Contents' / relative
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                with self.assertRaisesRegex(FileNotFoundError, relative):
+                    self.embed()
+                self.assertFalse((self.bundle / DISTRIBUTION).exists())
+                self.assertEqual(self.signed, [])
 
     def test_neither_channel_marks_the_engine_as_an_agent_app(self):
         # silod sets its own activation policy (accessory, regular while a VM window is open).

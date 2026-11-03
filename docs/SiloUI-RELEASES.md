@@ -215,7 +215,9 @@ npm --prefix app/SiloUI run desktop:build:debug
 
 Output: `app/SiloUI/src-tauri/target/debug/bundle/macos/Silo Dev.app`. Debug
 builds and `npm run desktop` use the separate Silo Dev channel
-(`org.silo.dev`); see [build channels](SiloUI-BUILD-CHANNELS.md).
+(`org.silo.dev`); see [build channels](SiloUI-BUILD-CHANNELS.md). The debug
+app embeds a debug `silod` (`Silo Engine Dev`) with copies of the app's tools,
+keeps Tauri's development signatures on them, and is re-sealed afterwards.
 For an optimized local app without installer or updater artifacts:
 
 ```sh
@@ -224,9 +226,14 @@ npm --prefix app/SiloUI run desktop:build
 
 Output: `app/SiloUI/src-tauri/target/release/bundle/macos/Silo.app`.
 These commands do not install or publish the app. On macOS, `desktop:build`
-wraps Tauri's app bundling with `sign_runtime` and `verify_bundle` from
-`scripts/macos_release_signing.py`. It retains hardened runtime and applies
-the existing exact-engine constraint to the VM helper. It forces app-only
+wraps Tauri's app bundling with `sign_helpers`, `embed_engine`, `seal_app`,
+`verify_bundle` and `verify_engine` from `scripts/macos_release_signing.py` and
+`scripts/embed_engine.py`. It retains hardened runtime and applies the existing
+exact-engine constraint to the VM helper. The helpers are signed before the
+engine is embedded, because `silod` runs computers from its own bundle: the
+engine carries copies of `msb`, `libkrunfw`, the Git tools, the network gateway
+and bootstrap, and the runtime and Git resources, and `verify_engine` checks
+each signed copy has the app's code hash. It forces app-only
 output and disables updater artifact creation, so no distribution certificate
 or updater signing key is needed. A signing or policy-verification failure
 fails the build. Plain `npx tauri build` bypasses this finalization and is not
@@ -236,8 +243,8 @@ The previous explicit `--bundles app --config '{"bundle":{"createUpdaterArtifact
 arguments remain supported.
 `--target aarch64-apple-darwin` and `CARGO_TARGET_DIR` are resolved through
 Cargo's output directory. Set `CARGO_TARGET_DIR` to an absolute separate path
-when the usual output bundle is running. Debug and `--no-bundle` builds and
-non-macOS targets retain their Tauri behavior. DMG/all bundle requests use the
+when the usual output bundle is running. `--no-bundle` builds and non-macOS
+targets retain their Tauri behavior. DMG/all bundle requests use the
 release workflow instead; generating an archive before helper finalization
 would package the wrong signature.
 

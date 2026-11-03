@@ -136,13 +136,13 @@ impl Launcher for BundleLauncher {
             }
             return Ok(());
         }
+        let missing = || {
+            LaunchError::new(format!(
+                "This build of {} does not include its engine. Reinstall {}.",
+                self.product, self.product
+            ))
+        };
         match self.service.status() {
-            ServiceStatus::NotFound => {
-                return Err(LaunchError::new(format!(
-                    "This build of {} does not include its engine. Reinstall {}.",
-                    self.product, self.product
-                )));
-            }
             ServiceStatus::RequiresApproval => {
                 self.service.open_login_items();
                 return Err(LaunchError {
@@ -156,27 +156,31 @@ impl Launcher for BundleLauncher {
             ServiceStatus::Enabled => {
                 // Registered but not listening: it may still be starting, or crashed.
             }
-            ServiceStatus::NotRegistered | ServiceStatus::Unknown => {
-                match self.service.register() {
-                    Ok(ServiceStatus::RequiresApproval) => {
-                        self.service.open_login_items();
-                        return Err(LaunchError {
+            // Service Management also reports an agent that was never registered as not found,
+            // so registering is what tells a missing plist apart from a first launch.
+            status @ (ServiceStatus::NotFound
+            | ServiceStatus::NotRegistered
+            | ServiceStatus::Unknown) => match self.service.register() {
+                Ok(ServiceStatus::NotFound) => return Err(missing()),
+                Err(_) if status == ServiceStatus::NotFound => return Err(missing()),
+                Ok(ServiceStatus::RequiresApproval) => {
+                    self.service.open_login_items();
+                    return Err(LaunchError {
                             message: format!(
                                 "Allow the {} engine in System Settings > General > Login Items, then reopen {}.",
                                 self.product, self.product
                             ),
                             requires_approval: true,
                         });
-                    }
-                    Ok(_) => {}
-                    Err(message) => {
-                        return Err(LaunchError::new(format!(
-                            "{} could not register its engine: {message}",
-                            self.product
-                        )));
-                    }
                 }
-            }
+                Ok(_) => {}
+                Err(message) => {
+                    return Err(LaunchError::new(format!(
+                        "{} could not register its engine: {message}",
+                        self.product
+                    )));
+                }
+            },
         }
         if self.wait_for_socket() {
             Ok(())
@@ -362,6 +366,19 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_reported_as_not_found_before_its_first_registration_is_registered() {
+        // A freshly built bundle's agent reads as not found until it is first registered.
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::NotFound);
+        service.listener_path = Some(directory.path().join("engine.sock"));
+        let service = Arc::new(service);
+        launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap();
+        assert_eq!(*service.registered.lock().unwrap(), 1);
+    }
+
+    #[test]
     fn approval_is_surfaced_and_opens_login_items() {
         let directory = tempfile::tempdir().unwrap();
         let mut service = FakeService::new(ServiceStatus::NotRegistered);
@@ -384,8 +401,18 @@ mod tests {
     #[test]
     fn a_missing_agent_and_a_failed_registration_are_explained() {
         let directory = tempfile::tempdir().unwrap();
-        let service = Arc::new(FakeService::new(ServiceStatus::NotFound));
-        let error = launcher(directory.path(), service, None)
+        let mut missing = FakeService::new(ServiceStatus::NotFound);
+        missing.register_error = Some("no such plist".into());
+        let missing = Arc::new(missing);
+        let error = launcher(directory.path(), missing.clone(), None)
+            .ensure_running()
+            .unwrap_err();
+        assert!(error.message.contains("does not include its engine"));
+        assert_eq!(*missing.registered.lock().unwrap(), 1);
+
+        let mut still_missing = FakeService::new(ServiceStatus::NotFound);
+        still_missing.after_register = ServiceStatus::NotFound;
+        let error = launcher(directory.path(), Arc::new(still_missing), None)
             .ensure_running()
             .unwrap_err();
         assert!(error.message.contains("does not include its engine"));

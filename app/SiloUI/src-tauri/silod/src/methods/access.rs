@@ -3300,10 +3300,10 @@ pub(crate) mod tests {
 
     fn push_journal() -> PathBuf {
         fixture();
-        local_paths()
-            .unwrap()
-            .home
-            .join("repository-push-operations.json")
+        let home = local_paths().unwrap().home;
+        // A test run alone reaches the journal before anything else creates the runtime home.
+        std::fs::create_dir_all(&home).unwrap();
+        home.join("repository-push-operations.json")
     }
 
     fn start_params(operation: &str, branch: &str) -> Value {
