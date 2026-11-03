@@ -21,9 +21,9 @@ allowed, and there is no per-host egress filter yet.
 
 | The agent in a computer can | The agent in a computer cannot (if the boundary holds) |
 | --- | --- |
-| Read and change everything in that computer, as root | Read or write the Mac's files, except two read-only folders lent to Linux computers and the runtime's own control folder at `/.msb` |
-| Connect to any public internet address, any port | Connect to the Mac's loopback, private-range (LAN, VPN) addresses, link-local or cloud-metadata addresses, or another computer (macOS computers: only once setup is complete) |
-| Use an assigned secret against that secret's allowed HTTPS hosts | Read the secret's value, or send it to any other host |
+| Read and change everything in that computer, as root | Read or write the Mac's files, except, on Linux computers, the runtime's own read-write control folder at `/.msb` and two read-only folders lent to computers with built-in computer use; macOS computers get no host folder |
+| Connect to any public internet address, any port (except UDP to port 443, which blocks QUIC) | Connect to the Mac's loopback, private-range (LAN, VPN) addresses, link-local or cloud-metadata addresses, or another computer (macOS computers: only once setup is complete) |
+| Use an assigned secret against that secret's allowed HTTPS hosts | Read the secret's value, or send it to a host outside the secret's allowed list (unless the user assigned `*`; see boundary 3) |
 | Read granted repositories; write only those granted for changes | Read the user's GitHub sign-in or any GitHub token; touch ungranted repositories (OAuth mode) |
 | Send the data it can read to any public host | Talk to the engine socket on the Mac |
 
@@ -32,7 +32,7 @@ allowed, and there is no per-host egress filter yet.
 **Primary attacker: a prompt-injected agent in a guest.** It controls every process in one computer
 and has root there: Silo's working account `silo` has passwordless `sudo`
 ([`working-account.py#L276`](../app/SiloUI/src-tauri/guest/working-account.py#L276), and the same
-for macOS computers in [`offline_setup.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs)).
+for macOS computers in [`offline_setup.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs#L935)).
 It can install software, change the guest's trust store, kernel parameters and network settings,
 and craft any packet, DNS query or HTTP request. It sees the placeholders for its secrets and the
 read-only folders lent to it. It knows how Silo works, because Silo is open source.
@@ -40,8 +40,9 @@ read-only folders lent to it. It knows how Silo works, because Silo is open sour
 **Secondary inputs it can shape**, which Silo's host side reads and must treat as untrusted:
 guest web content shown in the desktop viewer, file names and sizes in `/workspace`, Git
 repositories that the user pushes from the host, output relayed into logs, files the user downloads
-from the computer, exported computer archives that are later imported, and the HTTP request line,
-path and body of GitHub requests, which the proxy parses on the Mac to choose a token.
+from the computer, clipboard content copied out of a computer, the RFB stream of a macOS screen
+viewed from another Mac, the heartbeat and other files the guest writes into `/.msb`, exported computer archives that are later imported, and the SNI, HTTP request line,
+headers and body of GitHub requests, which the proxy parses on the Mac to choose a token.
 
 Not an attacker in this model: the user, apps the user installs on the Mac, and other processes
 running as the same macOS user (see [non-goals](#non-goals)).
@@ -83,19 +84,25 @@ default policy, the `Public` profile
 ([MicroSandbox `types.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/network/lib/model/policy/types.rs#L823)).
 The `--net-strict=true` flag
 ([`runtime/mod.rs#L6307`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6307)) only pins
-hostname-rule enforcement and has no effect while no hostname rule exists. The resulting
+hostname-rule enforcement and has no effect while no hostname rule exists. On checkpoint restore,
+Silo re-passes the same rules from the computer's recorded policy
+([`checkpoints.rs#L467`](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs#L467)). The resulting
 configuration, which exports compare against, is
 [`github-network-default.json`](../app/SiloUI/src-tauri/guest/github-network-default.json):
 
 - `default_egress: deny`, then allow DNS (port 53) to the gateway, and allow every protocol and port
-  to the `public` destination group.
+  to the `public` destination group. `default_ingress` is `allow`, but nothing reaches the guest
+  except through the published ports described below.
 - `public` is decided by destination IP. Loopback, RFC 1918, CGNAT `100.64.0.0/10`, IPv6 ULA,
   link-local, `169.254.169.254`, multicast, the gateway itself and unspecified addresses are not
-  public ([MicroSandbox `destination.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/network/lib/engine/policy/destination.rs)).
+  public, and everything else is, including reserved ranges such as `198.18.0.0/15` and
+  `240.0.0.0/4` ([MicroSandbox `destination.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/network/lib/engine/policy/destination.rs)).
 - DNS goes through the gateway, which forwards to the Mac's own resolvers (`nameservers: []`), with
-  `rebind_protection: true`. Rebind protection filters answers; it does not stop connecting by IP.
-  The guest can resolve LAN and VPN-internal names, and DNS queries themselves are an unfiltered
-  outbound channel.
+  `rebind_protection: true`. Rebind protection returns NXDOMAIN for any answer in a private or
+  reserved range, so LAN and VPN names that resolve to private addresses do not resolve; it does
+  not stop connecting by IP. Query names still reach the Mac's resolvers, including a VPN's
+  split-DNS resolvers, and DNS queries are an unfiltered outbound channel: the guest can also talk
+  directly to any public resolver.
 
 So the guest cannot open a connection to a service listening on the Mac's loopback or LAN address,
 to a router admin page, to a Tailscale peer, or to another computer's guest address.
@@ -109,7 +116,7 @@ and the child applies the `Public` profile when no other policy is given
 
 Limits of this boundary:
 
-- **No hostname or destination allowlist.** Any public host, any port, TCP and UDP. This is what
+- **No hostname or destination allowlist.** Any public host, any port, TCP and UDP (except UDP to port 443). This is what
   "no egress filter yet" means.
 - **macOS computers before setup completes use Apple NAT.** Until a macOS computer's setup,
   personalization and network bootstrap are complete, and when it boots into Recovery, it runs on
@@ -120,11 +127,14 @@ Limits of this boundary:
   but a user can start a computer whose setup failed.
 - The classification is by IP, with no notion of "the LAN" beyond the private ranges. A LAN host
   reachable by a global IPv6 address (SLAAC) or a non-RFC 1918 IPv4 address is "public" and
-  reachable, as is a service on the Mac's own public address, if it has one.
+  reachable, as is a service on the Mac's own public address, if it has one. The IPv6 case applies
+  to Linux computers only; macOS computers have no guest IPv6
+  ([`macos-gateway/src/network.rs#L158`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L158)).
 
 **Ingress** (into the guest) is opened only by the user: published ports bind `127.0.0.1` on the Mac
 ([`microsandbox-live-public-ports-0.7.6.patch`](../app/SiloUI/patches/microsandbox-live-public-ports-0.7.6.patch)),
-and opt-in SSH access binds `127.0.0.1` or one chosen interface, never a wildcard
+and opt-in SSH access binds `127.0.0.1`, plus one chosen interface address when the user picks
+one, never a wildcard
 ([`ssh_access.rs#L132`](../app/SiloUI/src-tauri/engine/src/ssh_access.rs#L132)). Any local process
 on the Mac can reach a published port. Every macOS computer behind its gateway also always
 publishes guest ports 22 (SSH) and 5900 (VNC) on Mac loopback at ephemeral ports, for Silo's own
@@ -140,15 +150,21 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
 
 - Each secret is passed to the runtime as `NAME:passthrough=*@host,...`
   ([`secrets_runtime.rs#L139`](../app/SiloUI/src-tauri/engine/src/secrets_runtime.rs#L139)), with
-  the value supplied by host environment reference, not inline. MicroSandbox's parser then sets
+  the value delivered to the runtime process on standard input (`MSB_SECRET_VALUES_STDIN`), never
+  in arguments, the configuration file or the host environment; the stored configuration holds
+  only an opaque source name `SILO_SECRET_<hash>`
+  ([`runtime/mod.rs#L1803`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
+  [`microsandbox-secret-values-stdin-0.7.6.patch`](../app/SiloUI/patches/microsandbox-secret-values-stdin-0.7.6.patch)). MicroSandbox's parser then sets
   substitution to **headers only** (no query, no body) and, on Linux computers, lets the unchanged
   placeholder go to any host, `passthrough=*` ([MicroSandbox `common.rs` `parse_secret`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/cli/lib/commands/common.rs#L2893)).
-- The real value is written only into requests whose verified TLS server identity matches one of
-  the secret's allowed hosts (`require_tls_identity: true`, checked by
-  [`secrets_runtime.rs`](../app/SiloUI/src-tauri/engine/src/secrets_runtime.rs) when it verifies the
-  runtime configuration). Plain HTTP never receives it.
-- Changing or removing a secret closes the computer's open proxy connections, so a connection made
-  under the old policy cannot keep using it (`until_policy_change` in
+- The real value is written only into intercepted TLS requests whose SNI and DNS-resolved
+  destination match one of the secret's allowed hosts, with the upstream certificate verified
+  (`require_tls_identity`, the runtime default, which
+  [`secrets_runtime.rs`](../app/SiloUI/src-tauri/engine/src/secrets_runtime.rs) confirms is not
+  disabled when it verifies the runtime configuration). Plain HTTP never receives it. A wildcard
+  allowed host such as `*.example.com` delivers the value to every matching subdomain.
+- Changing or removing a secret closes the computer's open TLS connections on port 443,
+  intercepted or relayed, so a connection made under the old policy cannot keep using it (`until_policy_change` in
   [`microsandbox-silo-network-0.7.6.patch#L1941`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L1941)).
 - macOS computers get the same secrets through their gateway child
   ([`macos-gateway/src/network.rs#L179`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L179)),
@@ -162,8 +178,9 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
 What the agent can still do with a secret: **use** it. Anything the allowed host lets that key do,
 the agent can do (spend credits, read the account, delete resources). And an allowed host that
 echoes request headers back gives the agent the value ("reflected-secret exfiltration", a
-[non-goal](#non-goals)). The `*` (any host) assignment exists, requires an explicit acknowledgement,
-and removes this boundary for that secret.
+[non-goal](#non-goals)). The `*` (any host) assignment exists, requires an explicit acknowledgement in the Secrets
+page (the engine API itself accepts `*`), removes this boundary for that secret, and puts every
+TLS connection of that computer under the interception CA.
 
 ### 4. TLS interception scope
 
@@ -172,20 +189,26 @@ computer's interception CA, which the guest trusts. Silo patches MicroSandbox so
 connections whose SNI matches a **current secret's allowed hosts** are intercepted; every other TLS
 connection is relayed with the server's own certificate
 ([`microsandbox-silo-network-0.7.6.patch#L1991`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L1991),
-with its test `intercepts_only_current_secret_destinations`). Interception is limited to port 443
-and blocks QUIC on intercepted destinations; the proxy verifies the upstream certificate
+with its test `intercepts_only_current_secret_destinations`). Interception is limited to port 443, and
+all UDP to port 443 (QUIC) is dropped for every destination, intercepted or not; the proxy verifies the upstream certificate
 (`intercepted_ports`, `block_quic_on_intercept`, `verify_upstream` in
 [`github-network-default.json`](../app/SiloUI/src-tauri/guest/github-network-default.json)).
+macOS gateways use the same settings by runtime default, and the gateway refuses an
+intercepted-port set without 443 ([`network.rs#L68`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L68)).
 
 Every Linux computer is created with the GitHub secret, so `github.com`, `api.github.com` and
 `uploads.github.com` are always intercepted. A macOS computer with a GitHub profile has
 `github.com` and `api.github.com` intercepted
-([`macos-gateway/src/network.rs#L193`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L194)).
+([`macos-gateway/src/network.rs#L194`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L194)).
 For macOS computers the CA is per computer: it is stored in the Mac's Keychain
 (`engine.credentials.status` lists "one proxy CA per macOS computer",
 [docs/SiloUI-ENGINE.md](SiloUI-ENGINE.md)) and written to a private temporary file for the gateway
 process while the computer runs
-([`macos-gateway/src/network.rs#L131`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L132)).
+([`macos-gateway/src/network.rs#L132`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L132)).
+
+Linux computers share one interception CA, generated by the runtime and kept as a `0600` file
+under the runtime home; it is not per computer and not in the Keychain. Only its certificate is
+written to the computer's `/.msb/tls/`.
 
 The CA's private key never enters the guest. The guest is root, so it can remove the CA or add its
 own; that only breaks its own connections.
@@ -203,24 +226,36 @@ child tokens through `POST /applications/{client_id}/token/scoped`
   New grants start with changes off
   ([`github-page.tsx#L51`](../app/SiloUI/src/features/application/pages/github-page.tsx#L51));
 - a **write** token only for repositories where the user allowed changes, with `contents`,
-  `issues`, `pull_requests`, `statuses` and `workflows` write and `actions` read
+  `issues`, `pull_requests`, `statuses` and `workflows` write, and `metadata`, `checks` and `actions`
+  read
   ([`COMPUTER_WRITE`, `github_tokens.rs#L66`](../app/SiloUI/src-tauri/engine/src/github_tokens.rs#L66)).
   Admin and secret-bearing permissions are never requested.
 
-These tokens are handed to the runtime as the `SILO_GITHUB` secret
-([`runtime/mod.rs#L6303`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6303)). The guest's
+On Linux computers these tokens are handed to the runtime as the `SILO_GITHUB` secret
+([`runtime/mod.rs#L6303`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6303)); on macOS
+computers the same profile goes to the gateway over its private control descriptor
+([`github.rs#L1305`](../app/SiloUI/src-tauri/engine/src/github.rs#L1305),
+[`macos-gateway/src/network.rs#L194`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L194)),
+which links the same patched proxy. The guest's
 `GH_TOKEN` is the placeholder `$MSB_SILO_GITHUB`
 ([`runtime/mod.rs#L6309`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6309)). For each
 request to the GitHub hosts (three on Linux computers, `github.com` and `api.github.com` on macOS
 computers) the patched proxy picks the owner and the read or write token
 ([`microsandbox-silo-network-0.7.6.patch#L385`](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L385));
-an unknown owner, a write without a write token, or an expired token is blocked. That selection is
+an unknown owner, a write without a write token, or an expired token is blocked. A request that
+names no owner uses the computer's only owner, or for reads the alphabetically first owner; such a
+write with several owners is blocked. For a GraphQL request with several owners and no
+`variables.owner`, the proxy itself runs bounded, read-only introspection probes with the owners'
+read tokens to find the owner, and never forwards their responses to the guest. Only HTTP/1.1 is
+routed to the GitHub hosts; HTTP/2 there is blocked. Substitution is header-only and needs an
+intercepted TLS connection. That selection is
 routing, not the security boundary: **GitHub enforces the token's repositories and permissions**.
-A guest that tricks the selector gets at most another token this computer already holds.
+A guest that tricks the selector gets at most a request sent with another token this computer
+already holds; it never sees a token.
 
 Host push is a separate, user-confirmed path: the Mac fetches the committed objects from the guest
 over a private SSH transport, then pushes one confirmed commit to one branch. In OAuth mode the token is limited to
-`contents: write` on that single repository and revoked when the push ends
+`metadata: read` and `contents: write` on that single repository and revoked when the push ends
 ([`HOST_PUSH`, `github_tokens.rs#L77`](../app/SiloUI/src-tauri/engine/src/github_tokens.rs#L77);
 [`push_authorized`, `github.rs#L2439`](../app/SiloUI/src-tauri/engine/src/github.rs#L2439)). Git
 reads the token from an inherited pipe, never from arguments, environment or files
@@ -245,7 +280,8 @@ Each Linux computer's `/workspace` is an owned disk image attached as a block de
 (`--mount-owned /workspace:kind=disk`,
 [`runtime/mod.rs#L6292`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
 filesystem is a separate disk. No host folder of the user's is shared into a computer. A Linux
-computer sees three host folders.
+computer sees one host folder, and a computer created with built-in computer use sees up to two
+more. macOS computers get none.
 
 The first is MicroSandbox's own per-computer runtime directory, mounted **read-write** at `/.msb`
 (virtiofs tag `msb_runtime`). It is a control channel: the host writes scripts and TLS
@@ -253,13 +289,18 @@ certificates into it, and the guest writes a heartbeat file that the host reads.
 serves it from a passthrough filesystem rooted at that directory, refuses a symlinked root, and
 caps guest writes at 16 MiB
 ([MicroSandbox `vm.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/runtime/lib/runner/vm.rs#L2014),
-[`protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs#L79)). An eval run on a Mac
+[`protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs#L81)). The same directory
+also holds MicroSandbox's per-computer checkpoint state (`root-disk.json`, `checkpoint-store/`,
+`restore-activation.json`, `runtime-boot-id`), which the host parses with size bounds and content
+hashes but which the guest can overwrite or delete. An eval run on a Mac
 found the share read-write from the guest and could not reach a host canary file through it.
 **This share has not had a security review.** The guest can change what the host later reads
 there, and any escape from the passthrough root would be a host file write.
 
-The other two are Silo-managed, **read-only** shares for built-in computer use: the downloaded ChatGPT for Linux package at `/opt/silo/chatgpt` and the verified LCU archive at
-`/opt/silo/lcu` ([`computer_use.rs#L663`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L663),
+The other two, present only on computers with built-in computer use, are Silo-managed
+**read-only** shares: the downloaded ChatGPT for Linux package at `/opt/silo/chatgpt` and, when Silo
+holds the verified LCU archive, that archive at `/opt/silo/lcu`. A checkpoint restore passes them
+again from host state ([`computer_use.rs#L664`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L664),
 [`#L708`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L708)).
 
 Host features read the disk only through the guest: directory listings run a bounded script in the
@@ -273,12 +314,15 @@ Imported Linux computer archives are parsed on the Mac: a zstd-compressed tar is
 caps on entry types, paths, entry count and size
 ([`backup.rs#L3552`](../app/SiloUI/src-tauri/engine/src/backup.rs#L3552)).
 
-Exception: **macOS computer disks are attached and mounted on the Mac** with `hdiutil` while Silo
-edits the Data volume, during first setup and when an exported macOS computer is imported
+Exception: **macOS computer disks are attached on the Mac** with `hdiutil`, and their Data volume
+is mounted with `diskutil` while Silo edits it, during first setup and when an exported macOS computer is imported
 ([`offline_setup.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs);
 import at [`macos_computers.rs#L3230`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs#L3230)).
 An imported archive from a computer an agent controlled is therefore parsed by the Mac's APFS
-driver. Import only archives you trust.
+driver. Silo also reads the imported account record (`dslocal/.../silo.plist`) and a fixed list of
+launch agents and receipts from that volume with the `plist` crate, under a size bound
+([`offline_setup.rs#L354`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs#L354)). Import only
+archives you trust.
 
 ### 7. The engine socket: same user only
 
@@ -292,9 +336,19 @@ process identity are not checked)
 
 That is the whole client check. **Any process running as the same user has the engine's full
 authority**: it can list, export or delete computers, change GitHub and secret assignments, and
-open the guest over SSH. There is no per-client identity and no audit log of which client asked
-for what. The guest is not such a process: the socket is on the Mac's filesystem, which the guest
-cannot see.
+open the guest over SSH. There is no authenticated client identity (the handshake's client name
+is self-declared) and no audit log of which client asked for what. The guest is not such a
+process: the socket is on the Mac's filesystem, which the guest cannot see.
+
+A second path exists for Connections. With **Allow connections from other devices** on, a paired
+device reaches this engine over the Mac's SSH server. Its key is installed with
+`restrict,command=` limited to the `silo-remote --remote-bridge` command
+([`remote.rs#L28`](../app/SiloUI/src-tauri/engine/src/remote.rs#L28)), which connects to
+`~/.silo/desktop-remote/control.sock` (`0600` in a `0700` directory, no peer-UID check;
+[`remote.rs#L2767`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2767)) and relays one request. The owner serves the
+methods in `OWNER_METHODS` for it ([`remote.rs#L364`](../app/SiloUI/src-tauri/engine/src/remote.rs#L364)), including
+delete, checkpoint restore, guest exec and file reads. A device that holds that key, or a
+same-user process that connects to `control.sock`, has that authority.
 
 At start, `silod` verifies its own bundle signature against `SiloEngineCodeRequirement`, and a
 production engine refuses to run without one
@@ -305,13 +359,14 @@ binary serves the socket, not who connects to it.
 
 | Surface | Control | Code |
 | --- | --- | --- |
-| Linux desktop viewer | Guest web content loads in a child webview that matches no Tauri capability; only the local `desktop-shell-*` webview has desktop permissions. The loopback desktop proxy checks Host and Origin, uses an HttpOnly cookie, strips client credentials, and reaches the guest through a Unix socket in a private directory. | [`capabilities/desktop-viewer.json`](../app/SiloUI/src-tauri/capabilities/desktop-viewer.json), [`desktop_viewer.rs`](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), [`desktop_proxy.rs`](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs) |
+| Linux desktop viewer | Guest web content loads in a child webview that matches no Tauri capability; only the local `desktop-shell-*` webview has desktop permissions. The loopback desktop proxy checks Host and Origin, uses an HttpOnly cookie, strips client credentials, and reaches the guest through a Unix socket in a private directory. The guest page answers bridge requests only on the proxy's reserved `/__silo/v1/` route with a single-use nonce. | [`capabilities/desktop-viewer.json`](../app/SiloUI/src-tauri/capabilities/desktop-viewer.json), [`desktop_viewer.rs`](../app/SiloUI/src-tauri/engine/src/desktop_viewer.rs), [`desktop_proxy.rs`](../app/SiloUI/src-tauri/engine/src/desktop_proxy.rs) |
 | macOS screen, same Mac | Native `VZVirtualMachineView`, no webview. | [docs/SiloUI-MACOS-COMPUTERS.md](SiloUI-MACOS-COMPUTERS.md) |
 | macOS screen, another Mac | A noVNC page in a Tauri webview speaks RFB to the guest's Screen Sharing through a loopback WebSocket endpoint (random per-window token, Host and Origin checks, one connection, message size limit) spliced to the owner over the SSH bridge. The webview parses guest-controlled RFB data. | [`macos_display_gateway.rs`](../app/SiloUI/src-tauri/engine/src/macos_display_gateway.rs), [display path](SiloUI-MACOS-COMPUTERS.md#on-another-mac) |
-| Clipboard | The desktop viewer copies in either direction only on an explicit user action (shortcut, menu item or button). Engine clients can also read or write a macOS computer's clipboard on request. There is no background sync. | [`viewer_clipboard.rs`](../app/SiloUI/src-tauri/engine/src/viewer_clipboard.rs), [`macos_computers.rs`, `macos_clipboard_read`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs#L2489) |
+| Clipboard | Inside the viewer, both directions run only on an explicit user action (shortcut, menu item or button). An engine client can trigger the same transfer for a Linux computer it is viewing (`clipboard.transfer`), and read or write a macOS computer's clipboard (`clipboard.read`, `clipboard.write`). There is no background sync. | [`viewer_clipboard.rs`](../app/SiloUI/src-tauri/engine/src/viewer_clipboard.rs), [`display.rs#L1009`](../app/SiloUI/src-tauri/silod/src/methods/display.rs#L1009), [`macos_computers.rs`, `macos_clipboard_read`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs#L2489) |
 | Host push | Host Git uses a sanitized configuration and fixed executable; the guest supplies objects through standard protocols, not hooks or configuration. | [`host_push.rs`](../app/SiloUI/src-tauri/engine/src/host_push.rs), [`host_push_transport.rs`](../app/SiloUI/src-tauri/engine/src/host_push_transport.rs) |
-| Editor and terminal | The user's editor connects over SSH with no agent forwarding and a pinned guest host key; guest paths are URL-encoded and control characters refused. The editor's own remote trust model still applies. | [`editor.rs`](../app/SiloUI/src-tauri/engine/src/editor.rs) |
-| Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin. | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
+| Editor and terminal | The user's editor, and a terminal for a computer on another device, connect over SSH with no agent forwarding (`ForwardAgent no`, `IdentityAgent none`), a per-computer `known_hosts` and `StrictHostKeyChecking yes`; guest paths are URL-encoded and control characters refused. A local terminal runs `msb exec --tty` through MicroSandbox's guest agent, not SSH. The editor's own remote trust model still applies. | [`editor.rs`](../app/SiloUI/src-tauri/engine/src/editor.rs), [`terminal.rs`](../app/SiloUI/src-tauri/engine/src/terminal.rs) |
+| Guest agent | In every Linux computer, MicroSandbox's `agentd` talks to the `msb` process on the Mac over virtio-serial (CBOR) for readiness, exec and heartbeats. Silo parses `msb exec` output (repository discovery, directory listings). Silo configures no virtio-vsock routes. | [`runtime/mod.rs`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), [MicroSandbox `protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs) |
+| Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin; a page there can still send cross-site requests to other loopback services ([`network.rs#L87`](../app/SiloUI/src-tauri/engine/src/network.rs#L87)). | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
 
 The 2026-10-02 security review checked these surfaces in source
 ([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
@@ -326,34 +381,54 @@ These follow from the design today, not from bugs:
 - **Credentials can be used, not just stolen.** A scoped secret or GitHub token works for the agent
   exactly as for the user, within its scope.
 - **Guest integrity.** The agent is root in the guest. Anything inside a computer, including tools
-  Silo installed there, can be changed by it. Roll back with checkpoints.
-- **Resource abuse.** CPU, memory and disk are capped per computer; outbound bandwidth and the
-  number of connections are not.
+  Silo installed there, can be changed by it. Roll back with a checkpoint taken before the
+  compromise; a restore replaces the disk, not what the agent already sent or did with its
+  credentials.
+- **Resource abuse.** CPU, memory and disk are capped per computer
+  ([`runtime/mod.rs#L6282`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6282),
+  [`engine.rs#L546`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L546)). Outbound bandwidth and the
+  number of connections are not: `max_connections` is null in
+  [`github-network-default.json`](../app/SiloUI/src-tauri/guest/github-network-default.json), no rate limiter is set,
+  and the macOS gateway runs the single-tenant profile
+  ([`network.rs#L209`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L209)). Host-side readers are bounded:
+  guest writes to `/.msb` at 16 MiB, relayed command output at 1 MiB
+  ([`runtime/mod.rs#L125`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L125)).
+- **Personal access token mode.** The agent's GitHub requests carry the whole token, unscoped
+  (boundary 5).
+- **macOS computers before setup completes.** They run on Apple NAT and can reach the Mac and the
+  LAN (boundary 2).
+- **Untrusted imported archives.** A macOS import mounts the guest's disk on the Mac; import only
+  archives you trust (boundary 6).
 
 ## Non-goals
 
 - **Malware running as the same user on the Mac.** It can already read the user's files, connect to
-  the engine socket (boundary 7) and drive the Keychain prompts the user approves. Silo does not
+  the engine socket (boundary 7), read any Keychain item the user has approved for it, and trigger
+its own Keychain prompts. Silo does not
   defend against it.
 - **Hypervisor and kernel 0-days.** A VM escape in libkrun, Hypervisor.framework,
   Virtualization.framework or macOS is out of scope; Silo tracks upstream fixes but adds no
   defence-in-depth layer today.
 - **Reflected-secret exfiltration.** If an allowed host returns the request's headers (debug echo
   endpoints, some error pages), the guest sees the real value. Restrict secrets to hosts you trust.
-- **Egress filtering.** There is no per-computer domain allowlist, default-deny mode or DNS log yet.
-  Planned as "per-computer egress policy" (ship list S13).
+- **Egress filtering.** The policy is default-deny with one allow rule for every public address.
+  There is no per-computer hostname or destination allowlist, no mode that blocks public
+  addresses, and no DNS query log yet; DNS queries go to the Mac's resolvers unfiltered. See
+  [planned changes](#planned-changes-that-will-change-this-document).
 - **Hostile apps that embed the engine.** An app that talks to `silod` is trusted with the same
   authority as Silo.app.
 
 ## Planned changes that will change this document
 
-- Per-computer egress policy (default-deny or allowlist, with DNS log).
+- Per-computer egress policy (block public addresses by default, or an allowlist, with a DNS log).
 - Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
   client, method and computer.
 - A Linux host daemon, which will need its own boundary review.
+- A security review of the read-write `/.msb` share (boundary 6).
 - A public, re-runnable isolation eval in `docs/evals/` whose results back each "cannot" above.
 
 Until the eval exists, the "cannot" column is supported by code reading, Silo's unit tests and
 the manual checks recorded in [docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md) and
-[docs/SiloUI-NETWORK-PLAN.md](SiloUI-NETWORK-PLAN.md), not by an adversarial test suite.
+[docs/SiloUI-NETWORK-PLAN.md](SiloUI-NETWORK-PLAN.md), not by an adversarial test suite. The `/.msb` eval result in boundary 6 is not yet recorded in the
+repository.
 
