@@ -215,6 +215,9 @@ def tcp_exchange(host: str, port: int, line: str, timeout: float = 3.0) -> Optio
 # Scenarios ----------------------------------------------------------------------------
 
 
+# Empty read-only folders that computers created before Cua Driver (2026-11-03) still mount.
+LEGACY_MOUNTS = ("/opt/silo/chatgpt", "/opt/silo/lcu")
+
 def scenario_host_files(ctx: Context, result: Result) -> None:
     scan = ctx.scan()
     hits = [hit for hit in scan["hits"] if hit["needle"] == "host-canary"]
@@ -227,26 +230,34 @@ def scenario_host_files(ctx: Context, result: Result) -> None:
         "hostSharedMounts": shared,
         "hits": hits,
     }
-    chatgpt = [m for m in scan["mounts"] if m["mountPoint"] == "/opt/silo/chatgpt"]
+    # Computers created before Cua Driver keep two empty read-only folders from the ChatGPT
+    # app and LCU; newer computers share nothing but /workspace.
+    legacy = [m for m in scan["mounts"] if m["mountPoint"] in LEGACY_MOUNTS]
     write_failed = None
-    if chatgpt:
-        attempt = ctx.guest_sh(ctx.computer_id, "touch /opt/silo/chatgpt/.silo-eval-write 2>&1; echo exit=$?")
-        write_failed = "exit=0" not in attempt.text()
-        result.evidence["chatgptMountWrite"] = attempt.text().strip()
-        if not write_failed:
-            ctx.guest_sh(ctx.computer_id, "rm -f /opt/silo/chatgpt/.silo-eval-write")
-    expected_mounts = {"/", "/opt/silo/chatgpt"}
+    writes = {}
+    for mount in legacy:
+        point = mount["mountPoint"]
+        attempt = ctx.guest_sh(ctx.computer_id, f"touch {point}/.silo-eval-write 2>&1; echo exit=$?")
+        writes[point] = attempt.text().strip()
+        if "exit=0" in attempt.text():
+            write_failed = False
+            ctx.guest_sh(ctx.computer_id, f"rm -f {point}/.silo-eval-write")
+        elif write_failed is None:
+            write_failed = True
+    if writes:
+        result.evidence["legacyMountWrites"] = writes
+    expected_mounts = {"/", *LEGACY_MOUNTS}
     unexpected = [m for m in shared if m["mountPoint"] not in expected_mounts]
     if unexpected:
-        result.notes.append("Host-shared mounts other than / and /opt/silo/chatgpt: " + ", ".join(m["mountPoint"] for m in unexpected))
+        result.notes.append("Unexpected host-shared mounts: " + ", ".join(m["mountPoint"] for m in unexpected))
     if scan["files"] < ctx.args.scan_min_files:
         result.set("inconclusive", f"The scan read only {scan['files']} files, too few to trust.")
     elif hits:
         result.set("fail", "The guest found the host canary at: " + ", ".join(h["path"] for h in hits))
     elif write_failed is False:
-        result.set("fail", "The guest wrote into the host's ChatGPT folder, which must be read-only.")
+        result.set("fail", "The guest wrote into a host folder from before Cua Driver, which must be read-only.")
     else:
-        detail = " The read-only ChatGPT mount refused a write." if chatgpt else ""
+        detail = " The read-only folders from before Cua Driver refused a write." if legacy else ""
         result.set("pass", f"The canary in the Mac's home folder and /tmp was not found in {scan['files']} guest files.{detail}")
 
 
@@ -627,7 +638,7 @@ def scenario_same_user_client(ctx: Context, result: Result) -> None:
 
 
 SCENARIOS = [
-    Scenario("host-files", "Guest reads the Mac's files", "VM boundary; only /workspace and a read-only ChatGPT folder are shared",
+    Scenario("host-files", "Guest reads the Mac's files", "VM boundary; only /workspace is shared (older computers also keep empty read-only Silo folders)",
              "pass", scenario_host_files),
     Scenario("host-network", "Guest reaches the Mac's loopback, LAN address or metadata address", "Network policy: egress to public addresses only, plus host DNS",
              "pass", scenario_host_network),
