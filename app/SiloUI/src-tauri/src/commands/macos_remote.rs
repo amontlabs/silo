@@ -1,7 +1,7 @@
 //! macOS computers on a connected device, through the computer methods with a `deviceId`.
 //! The local engine routes them to the device that hosts the virtual machines.
+use crate::commands::macos_computers::{change_resources, Action};
 use crate::engine_client::{
-    forwarding::not_found,
     params::{decode, target},
     Engine, EngineClient, EngineError,
 };
@@ -58,23 +58,23 @@ pub(crate) async fn create(
         .ok_or_else(|| EngineError::internal("The device did not return the new computer."))
 }
 
-/// Starts, stops, force stops, deletes or sets up a macOS computer on a connected device,
-/// and returns that device's macOS state afterwards.
+/// Starts, stops, force stops, deletes, sets up or changes the CPUs and memory of a macOS
+/// computer on a connected device, and returns that device's macOS state afterwards.
 pub(crate) async fn action(
     engine: &EngineClient,
     device_id: &str,
     computer_id: &str,
-    action: &str,
+    action: Action,
 ) -> Result<Value, EngineError> {
     let params = target(computer_id, Some(device_id));
     match action {
-        "start" => {
+        Action::Start => {
             engine.run_job(requests::computers_start(params)).await?;
         }
-        "stop" => {
+        Action::Stop => {
             engine.run_job(requests::computers_stop(params)).await?;
         }
-        "delete" => {
+        Action::Delete => {
             engine
                 .run_job(requests::computers_delete(ComputerDeleteParams {
                     computer_id: params.computer_id,
@@ -84,13 +84,27 @@ pub(crate) async fn action(
                 }))
                 .await?;
         }
-        "setup" => {
+        Action::Setup => {
             engine.run_job(requests::macos_setup_retry(params)).await?;
         }
-        "force-stop" => {
+        Action::ForceStop => {
             engine.call(requests::computers_force_stop(params)).await?;
         }
-        _ => return Err(not_found("Silo does not know that macOS computer action.")),
+        Action::ChangeResources {
+            cpus,
+            memory_gib,
+            expected,
+        } => {
+            change_resources(
+                engine,
+                computer_id,
+                Some(device_id),
+                cpus,
+                memory_gib,
+                expected,
+            )
+            .await?;
+        }
     }
     snapshot(engine, device_id).await
 }
@@ -118,17 +132,19 @@ pub(crate) async fn remote_macos_create(
     create(&engine, &device_id, request).await
 }
 
-/// Starts, stops, force stops, deletes or sets up a macOS computer on a connected device.
+/// Starts, stops, force stops, deletes, sets up or resizes a macOS computer on a connected
+/// device. `action` takes the same words and shape as `macos_computer_action`.
 #[tauri::command]
 pub(crate) async fn remote_macos_action(
     engine: Engine<'_>,
     window: Window,
     device_id: String,
     computer_id: String,
-    action: String,
+    action: Value,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    self::action(&engine, &device_id, &computer_id, &action).await
+    let action = decode(action, "macOS computer action")?;
+    self::action(&engine, &device_id, &computer_id, action).await
 }
 
 #[cfg(test)]
@@ -157,7 +173,8 @@ mod forwarding_tests {
             MethodName::ComputersStart
             | MethodName::ComputersStop
             | MethodName::ComputersDelete
-            | MethodName::MacosSetupRetry => Ok(json!({"jobId": "job:1"})),
+            | MethodName::MacosSetupRetry
+            | MethodName::ComputersConfigurationChange => Ok(json!({"jobId": "job:1"})),
             MethodName::OperationsJobGet => {
                 Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": null}}))
             }
@@ -195,8 +212,9 @@ mod forwarding_tests {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
         for name in ["start", "stop", "delete", "setup", "force-stop"] {
+            let parsed: Action = serde_json::from_value(json!(name)).unwrap();
             assert_eq!(
-                action(&engine, DEVICE, MAC, name).await.unwrap(),
+                action(&engine, DEVICE, MAC, parsed).await.unwrap(),
                 macos_state()
             );
         }
@@ -215,7 +233,52 @@ mod forwarding_tests {
                 method.name()
             );
         }
-        assert!(action(&engine, DEVICE, MAC, "explode").await.is_err());
+        assert!(decode::<Action>(json!("explode"), "macOS computer action").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_resource_change_is_sent_to_the_device_that_hosts_the_computer() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        // The shape the CPU and memory form sends, as `macos_computer_action` takes it.
+        let parsed = decode::<Action>(
+            json!({"change-resources": {"cpus": 6, "memoryGiB": 12,
+                "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64}}}),
+            "macOS computer action",
+        )
+        .unwrap();
+        assert_eq!(
+            action(&engine, DEVICE, MAC, parsed).await.unwrap(),
+            macos_state()
+        );
+        let sent = &fake.calls(MethodName::ComputersConfigurationChange)[0];
+        assert_eq!(sent["deviceId"], DEVICE);
+        assert_eq!(sent["change"]["kind"], "macosResources");
+        assert_eq!(sent["change"]["computerId"], MAC);
+        assert_eq!(
+            sent["change"]["expected"],
+            json!({"cpus": 4, "memoryGiB": 8, "diskGiB": 64})
+        );
+        assert_eq!(
+            (
+                sent["change"]["cpus"].clone(),
+                sent["change"]["memoryGiB"].clone()
+            ),
+            (json!(6), json!(12))
+        );
+        // The job is the owner's, so it is followed and acknowledged on that device.
+        for method in [
+            MethodName::OperationsJobGet,
+            MethodName::OperationsJobAcknowledge,
+        ] {
+            let calls = fake.calls(method);
+            assert!(!calls.is_empty(), "{}", method.name());
+            assert!(
+                calls.iter().all(|call| call["deviceId"] == DEVICE),
+                "{}: {calls:?}",
+                method.name()
+            );
+        }
     }
 
     #[tokio::test]

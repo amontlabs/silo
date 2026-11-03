@@ -501,7 +501,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Export, import and backup | Done for local computers: export of a computer from its row menu or of one checkpoint from its checkpoint list, import as a new computer (with new guest keys), and cleanup after an interrupted export. Not done: export of a remote computer, and importing a checkpoint into an existing computer |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
 | Shared folders | None. The framework offers a VirtioFS share |
-| Editing resources after creation | CPUs and memory: Edit CPU & memory while a local computer is stopped. A remote computer shows the same menu item, but the desktop command that forwards it accepts only lifecycle actions, so the change fails. Disk size cannot change. A new computer's disk is at least its template's |
+| Editing resources after creation | CPUs and memory: Edit CPU & memory while the computer is stopped, for local and remote computers. Disk size cannot change. A new computer's disk is at least its template's |
 | Status panel, tray, notifications, start with Silo | Start with Silo is done for local computers. Status panel, tray and notifications: none |
 | Linux devices and Intel Macs | Not possible: the framework runs macOS guests only on Apple Silicon |
 
