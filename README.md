@@ -6,7 +6,7 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 
 **Status.** Work in progress, MIT licensed, built by one person. The host is macOS on Apple Silicon today. On Linux, the `silo-engine` crate builds and passes its tests in CI; a Linux `silod` is the next milestone.
 
-[Why Silo](#why-silo) · [Threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) · [Isolation evals](https://github.com/amontlabs/silo/blob/main/docs/evals/README.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
+[Why Silo](#why-silo) · [Threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) · [Isolation evals](docs/evals/README.md) · [Security policy](SECURITY.md) · [Engine releases](https://github.com/amontlabs/silo/releases?q=engine-v&expanded=true) · [Documentation](docs/README.md) · [Silo app](#silo-app) · [Website](https://silo.amontlabs.com)
 
 ## Why Silo
 
@@ -31,7 +31,7 @@ Each mechanism, with the code that implements it, is in the [threat model](https
 
 ### What Silo does not protect
 
-- **Data the agent can read can leave.** There is no egress allowlist yet: a guest can send anything it can read to any public host, including through a host it is allowed to use. The [eval](https://github.com/amontlabs/silo/blob/main/docs/evals/README.md) shows a `/workspace` file posted to a public echo service.
+- **Data the agent can read can leave.** There is no egress allowlist yet: a guest can send anything it can read to any public host, including through a host it is allowed to use. The [eval](docs/evals/README.md) shows a `/workspace` file posted to a public echo service.
 - **Credentials can be used.** A scoped secret or GitHub token works for the agent within its scope: it can spend credits or write to a repository you granted for changes.
 - **Allowed hosts that echo headers reveal secrets.** If an allowed host reflects the request back, the guest reads the real value. The eval reproduces this.
 - **Personal access tokens are not scoped.** In personal-token mode the agent gets the token's full permissions.
@@ -39,7 +39,7 @@ Each mechanism, with the code that implements it, is in the [threat model](https
 - **macOS computers during setup.** Until setup completes, and in Recovery, a macOS computer uses Apple's NAT and can reach the Mac and the LAN.
 - **The guest itself.** The agent is root in its computer and can change anything there, including the tools Silo installed. Roll back with checkpoints.
 
-The [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) lists every limit, and the [eval results](https://github.com/amontlabs/silo/blob/main/docs/evals/README.md) say which ones were tested and how.
+The [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md) lists every limit, and the [eval results](docs/evals/README.md) say which ones were tested and how.
 
 ### How it compares
 
