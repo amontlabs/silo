@@ -49,7 +49,7 @@ Silo has no single feature that nobody else has, and it builds on MicroSandbox, 
 
 | | Isolation | Runs on | Credentials in the sandbox | Outbound network | Desktop and computer use | macOS guests | License |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Silo** | VM per computer (libkrun; Virtualization framework) | Apple Silicon Mac | Placeholders, swapped on the host for allowed HTTPS hosts; GitHub tokens minted per repository, read-only by default | Public addresses only; no allowlist yet | Yes (Linux: Cua Driver; macOS: ChatGPT app and LCU) | Yes | MIT |
+| **Silo** | VM per computer (libkrun; Virtualization framework) | Apple Silicon Mac | Placeholders, swapped on the host for allowed HTTPS hosts; GitHub tokens minted per repository, read-only by default | Public addresses only; no allowlist yet | Yes (Cua Driver, Linux and macOS) | Yes | MIT |
 | **[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)** (`sbx`) | microVM per sandbox [^docker-iso] | macOS, Windows, Linux; Docker cloud | Sentinel, swapped by a host proxy [^docker-arch] | Deny by default, allowlist; org policy is paid [^docker-def] | Not documented | No | Proprietary; local use free |
 | **[Cua](https://github.com/trycua/cua)** | VMs (Lume, QEMU) or microVMs (Firecracker, vz, Containerization); gVisor or runc containers [^cua-how] | Mac, Linux, Windows; own cloud (Cua Cloud ended 18 Oct 2026 [^cua-cloud]) | Plain env vars or temp files; Keyvault releases signed-in app sessions after approval; no proxy injection documented [^cua-secrets] | Open by default; IP and CIDR allow and deny lists on Linux runtimes, not yet on macOS VMs [^cua-egress] | Yes, its core purpose | Yes | MIT core; some parts FSL-1.1-MIT |
 | **[srt](https://github.com/anthropic-experimental/sandbox-runtime)** | OS sandbox (Seatbelt; bubblewrap and seccomp; WFP on Windows), shared kernel; beta | macOS, Linux; Windows alpha | Deny, or mask with a sentinel swapped on egress | Deny by default, domain allowlist; blocks loopback, link-local, metadata | Not documented | N/A (no VM) | Apache-2.0 |
@@ -82,7 +82,7 @@ Researched 2026-11-03 from each project's own documentation; corrections welcome
 ## What it does
 
 - **Run computers.** Create, start, stop, and monitor virtual machines, each with its own files, tools, and processes, sandboxed from the Mac. Linux computers run on [MicroSandbox](https://github.com/superradcompany/microsandbox); macOS computers run on Apple's Virtualization framework. See [macOS computers](docs/SiloUI-MACOS-COMPUTERS.md).
-- **Give agents a desktop.** Linux computers have a desktop built in, with computer use through [Cua Driver](https://github.com/trycua/cua) (MIT), registered with Claude Code and Codex when they are installed. macOS computers get computer use after installation through the ChatGPT macOS app, which Silo downloads from OpenAI, and LCU.
+- **Give agents a desktop.** Linux computers have a desktop built in, with computer use through [Cua Driver](https://github.com/trycua/cua) (MIT), registered with Claude Code and Codex when they are installed. macOS computers get the same Cua Driver after installation. See the [computer-use plan](docs/SiloUI-COMPUTER-USE-PLAN.md).
 - **Reach a computer's files and services.** Browse files, open terminals, connect development servers to local addresses, and enable SSH access per computer.
 - **Control GitHub access.** Connect through OAuth and select repositories for each computer, with read-only access by default, or use a [personal token](docs/SiloUI-GITHUB-PERSONAL-TOKENS.md), which grants the token's full permissions.
 - **Scope API credentials.** Store credentials in the Mac's Keychain and choose the computers and HTTPS domains that can use them. See [how secrets work](docs/SiloUI-SECRETS.md).
@@ -130,13 +130,13 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers download the ChatGPT macOS app from OpenAI. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers fetch Cua Driver's pinned, checksummed macOS archive the same way. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
 | macOS | Apple Silicon, macOS 15+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
 
-The latest app release, v0.11.1, predates the engine and the Cua-based Linux computer use described here: it downloads ChatGPT for Linux (453 MB, about 1.5 GB unpacked) from OpenAI in the background, without asking. Build from source for the current code until the next release.
+The latest app release, v0.11.1, predates the engine and the Cua-based computer use described here: it downloads ChatGPT for Linux (453 MB, about 1.5 GB unpacked) from OpenAI in the background, without asking. Build from source for the current code until the next release.
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 
