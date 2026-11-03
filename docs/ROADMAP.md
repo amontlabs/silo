@@ -1,25 +1,11 @@
 # Silo roadmap
 
-This is the work planned after the current release, in order, with a size and a cost for each
-milestone. It starts from what Silo does not do today, as stated in the threat model
-(`docs/THREAT-MODEL.md`) and measured by the isolation evals (`docs/evals/`), and says which
+This is the work planned after the current release, in order. It starts from what Silo does not
+do today, as stated in the threat model (`docs/THREAT-MODEL.md`) and measured by the isolation evals (`docs/evals/`), and says which
 milestone closes or narrows each gap.
 
-Last updated 2026-11-03. Silo is maintained by one developer; sizes are that person's working
-time. When a milestone lands, its section here is shortened to a line under [Done](#done) and the
-threat model and evals are updated in the same change.
-
-## How to read sizes and costs
-
-| Size | Working time |
-| --- | --- |
-| S | up to 1 week |
-| M | 2 to 3 weeks |
-| L | 4 to 6 weeks |
-
-**Cost** is cash that has to be spent beyond that time: services, hardware, fees and outside
-work. Amounts in euros. Where a figure is an estimate rather than a published price, it says so.
-Development time is valued separately in grant budgets, not here.
+Last updated 2026-11-03. When a milestone lands, its section here is shortened to a line under
+[Done](#done) and the threat model and evals are updated in the same change.
 
 **Order.** *Next* is work that needs no funding and starts now. *Funded* is work that starts once
 a grant or a paying pilot covers it, because it costs money or more time than can be given
@@ -27,27 +13,24 @@ unpaid.
 
 ## Summary
 
-| Milestone | Closes or narrows | Size | Cost | Order |
-| --- | --- | --- | --- | --- |
-| [1. Cua Driver for computer use](#1-cua-driver-for-computer-use) | ChatGPT-for-Linux download, two host shares in every Linux computer | M | none | In progress |
-| [2. Egress policy per computer](#2-egress-policy-per-computer) | Open egress, DNS as an unlogged channel | L | none | Next |
-| [3. Reflected-secret redaction](#3-reflected-secret-redaction) | Allowed host echoing a secret back | S | none | Next |
-| [4. Socket client identity and audit log](#4-socket-client-identity-and-audit-log) | Any same-user process drives the engine, no record of who did what | M | none | Next |
-| [5. Review of the `/.msb` runtime share](#5-review-of-the-msb-runtime-share) | Read-write host share with no security review | S | none | Next |
-| [6. Linux host daemon](#6-linux-host-daemon) | Engine embeddable on macOS only | L | none | Next |
-| [7. Protocol reference and examples](#7-protocol-reference-and-examples) | Embedding needs reading the source | S | none | Next |
-| [8. Project governance and docs cleanup](#8-project-governance-and-docs-cleanup) | No contribution or decision process | S | none | Next |
-| [9. Isolation evals in CI](#9-isolation-evals-in-ci) | Evals run by hand on one Mac | M | about €1,000 a year (estimate) | Funded |
-| [10. External security review](#10-external-security-review) | Every boundary checked only by its author | M (support) | €15,000 to €40,000 (estimate) | Funded |
-| [11. Signed and notarized releases](#11-signed-and-notarized-releases) | Unsigned app and engine, Gatekeeper override | S | €99 a year | Funded |
-| [12. Published crates and bindings](#12-published-crates-and-bindings) | Embedding outside Rust means generating types yourself | M | none | Funded |
-
-Total unfunded work (milestones 2 to 8): about 14 to 19 weeks. Funded work (9 to 12): about 7 to
-10 weeks plus the costs above.
+| Milestone | Closes or narrows | Order |
+| --- | --- | --- |
+| [1. Cua Driver for computer use](#1-cua-driver-for-computer-use) | ChatGPT-for-Linux download, two host shares in every Linux computer | In progress |
+| [2. Egress policy per computer](#2-egress-policy-per-computer) | Open egress, DNS as an unlogged channel | Next |
+| [3. Reflected-secret redaction](#3-reflected-secret-redaction) | Allowed host echoing a secret back | Next |
+| [4. Socket client identity and audit log](#4-socket-client-identity-and-audit-log) | Any same-user process drives the engine, no record of who did what | Next |
+| [5. Review of the `/.msb` runtime share](#5-review-of-the-msb-runtime-share) | Read-write host share with no security review | Next |
+| [6. Linux host daemon](#6-linux-host-daemon) | Engine embeddable on macOS only | Next |
+| [7. Protocol reference and examples](#7-protocol-reference-and-examples) | Embedding needs reading the source | Next |
+| [8. Project governance and docs cleanup](#8-project-governance-and-docs-cleanup) | No contribution or decision process | Next |
+| [9. Isolation evals in CI](#9-isolation-evals-in-ci) | Evals run by hand on one Mac | Funded |
+| [10. External security review](#10-external-security-review) | Every boundary checked only by its author | Funded |
+| [11. Signed and notarized releases](#11-signed-and-notarized-releases) | Unsigned app and engine, Gatekeeper override | Funded |
+| [12. Published crates and bindings](#12-published-crates-and-bindings) | Embedding outside Rust means generating types yourself | Funded |
 
 ## 1. Cua Driver for computer use
 
-**Status: in progress.** Size M. Cost none.
+**Status: in progress.**
 
 Linux computers today download ChatGPT for Linux from OpenAI (about 450 MB) and LCU, and mount
 both into the guest read-only at `/opt/silo/chatgpt` and `/opt/silo/lcu`. Silo is replacing them
@@ -66,8 +49,6 @@ Done when:
   ChatGPT mount.
 
 ## 2. Egress policy per computer
-
-Size L. Cost none.
 
 **Gap today.** A computer can open any connection to any public address, TCP or UDP, and DNS
 queries go out unfiltered through the host's resolvers. The `open-egress` eval posts a file from
@@ -94,8 +75,6 @@ threat model.
 
 ## 3. Reflected-secret redaction
 
-Size S. Cost none.
-
 **Gap today.** If a secret's allowed host returns request headers in its response (debug echo
 endpoints, some error pages), the guest reads the real value. The `secret-reflected` eval
 reproduces it.
@@ -108,8 +87,6 @@ Done when the `secret-reflected` eval passes and the threat model moves the case
 a boundary with its limit: a value the server transforms (encoded, split, hashed) is not caught.
 
 ## 4. Socket client identity and audit log
-
-Size M. Cost none.
 
 **Gap today.** `silod` checks only that a client runs as the same user. Any process of that user
 can create, export or delete computers, run commands as root in them, and change GitHub and secret
@@ -134,8 +111,6 @@ accidental use of the socket and makes every action attributable.
 
 ## 5. Review of the `/.msb` runtime share
 
-Size S. Cost none.
-
 **Gap today.** Every Linux computer sees MicroSandbox's own runtime directory read-write at
 `/.msb`. The host writes scripts and certificates there and reads a heartbeat file the guest
 writes. The eval could not reach a host canary through it, but the share has had no security
@@ -151,8 +126,6 @@ what the guest can write and why the host is safe reading it, backed by the new 
 external review (milestone 10) covers it again.
 
 ## 6. Linux host daemon
-
-Size L. Cost none.
 
 **Gap today.** `silo-engine` builds and passes its tests on Linux in CI, but `silod`, the daemon
 apps embed, ships for Apple Silicon Macs only.
@@ -175,16 +148,12 @@ Secret Service or file store).
 
 ## 7. Protocol reference and examples
 
-Size S. Cost none.
-
 A reference for every method, error, job and event, and the versioning policy (how protocol
 versions are negotiated, what counts as a breaking change). An `examples/` directory with a Rust
 program that creates, starts, runs a command in, and stops a computer, run in CI against the
 schema.
 
 ## 8. Project governance and docs cleanup
-
-Size S. Cost none.
 
 `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull request templates, and `GOVERNANCE.md`
 (who decides, how a second maintainer is added, how security reports are handled). Old reviews,
@@ -193,15 +162,12 @@ current documents.
 
 ## 9. Isolation evals in CI
 
-Size M. Cost about €1,000 a year (estimate: a rented Apple Silicon Mac for release runs, around
-€80 a month).
-
 **Gap today.** The evals run by hand on one Mac, and only the results of that run are published.
 GitHub's hosted macOS runners are virtual machines that cannot start nested VMs, so they cannot
 run a Silo computer.
 
 **Plan.** Run the full suite, including GitHub scope and cross-user socket scenarios, on a
-dedicated Mac for every release, and publish the results with the release. Once the Linux daemon
+dedicated Apple Silicon Mac (owned or rented) for every release, and publish the results with the release. Once the Linux daemon
 (milestone 6) exists, run the Linux-computer scenarios on every pull request on a KVM runner at no
 cost. Add scenarios for the egress policy, socket identity and `/.msb` as those milestones land.
 
@@ -209,25 +175,20 @@ Done when every release links its eval results and a failing boundary blocks the
 
 ## 10. External security review
 
-Size M of support work (scoping, answering questions, fixing findings). Cost €15,000 to €40,000
-(estimate for a two-to-four-week review by a specialist firm; to be replaced by real quotes).
-
-An independent review of the boundaries in the threat model, in this order: the network and secret
+An independent review by a specialist firm of the boundaries in the threat model, in this order: the network and secret
 proxy patches to MicroSandbox, the GitHub token minting and selection, the `/.msb` share and
 virtiofs, the engine socket, and import of exported computers. Findings and fixes are published
 with the report.
 
 ## 11. Signed and notarized releases
 
-Size S. Cost €99 a year (Apple Developer Program).
+Cost: Apple Developer Program membership, €99 a year.
 
 Sign the Silo app and `silod` with a Developer ID and notarize them, so first launch no longer
 needs **Open Anyway**. Sign engine archives so embedding apps can verify them: Apple signing for the
 macOS archive, and a published signature (for example Sigstore) for Linux archives.
 
 ## 12. Published crates and bindings
-
-Size M. Cost none.
 
 Publish `silo-api` and `silo-client` on crates.io under the versioning policy from milestone 7.
 Generate and publish Python and TypeScript clients from the JSON schema.
