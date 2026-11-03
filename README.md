@@ -14,18 +14,18 @@ Apps embed Silo through `silod`, a daemon they talk to over a local socket with 
 
 Coding agents are prompt-injected through the channels they are meant to read: issues, pull request comments, web pages, dependencies. In [Comment and Control](https://oddguan.com/blog/comment-and-control-prompt-injection-credential-theft-claude-code-gemini-cli-github-copilot/) (April 2026), text in pull request titles and issue comments made Claude Code, Gemini CLI and GitHub Copilot agents running in GitHub Actions leak API keys and GitHub tokens back through GitHub itself, as comments or commits; Copilot's egress allowlist permitted GitHub, so it did not help ([CSA research note](https://labs.cloudsecurityalliance.org/research/csa-research-note-comment-control-github-prompt-injection-20/)). Separately, the UK AI Security Institute's [SandboxEscapeBench](https://www.aisi.gov.uk/blog/can-ai-agents-escape-their-sandboxes-a-benchmark-for-safely-measuring-container-breakout-capabilities) found that frontier models reliably escape common container misconfigurations, such as privileged containers, writable host mounts and exposed Docker sockets ([paper](https://arxiv.org/abs/2603.02277)).
 
-The sandboxes built into agent harnesses limit which files and hosts the agent's processes can touch. They do not change what the agent is authorised to do with the credentials it holds: a token that can push to every repository still can, from inside the sandbox.
+The sandboxes built into agent harnesses limit which files and hosts the agent's processes can touch, and some, such as srt, also hide a secret's value. None narrows what a credential is authorised to do: a token that can push to every repository still can, from inside the sandbox.
 
 ### What Silo does
 
 Silo assumes the agent in a computer is hostile and has root there. It then limits what that agent can reach and what it is authorised to do:
 
-- **A virtual machine per computer.** Linux computers are libkrun microVMs (through [MicroSandbox](https://github.com/superradcompany/microsandbox)); macOS computers run on Apple's Virtualization framework. Each has its own kernel and its own disk. No folder of yours is shared in; Linux guests see only the runtime's own control folder and Silo's read-only tool folders.
-- **Credentials the agent can use but not read.** Secret values stay in the Mac's Keychain. The guest gets a placeholder; the runtime on the Mac swaps in the real value only in HTTPS requests to that secret's allowed hosts, after verifying the server's identity. This is MicroSandbox's placeholder mechanism, which Silo configures and patches.
-- **GitHub access per computer and per repository, read-only by default.** Silo mints scoped child tokens on the Mac for the repositories you select; the guest never sees a GitHub token. Write access is a per-repository opt-in.
-- **No route to your Mac or your network.** Guests reach public internet addresses only: not the Mac's loopback, the LAN, a VPN, cloud metadata, or other computers. (macOS computers get this once their setup completes.)
+- **A virtual machine per computer.** Linux computers are libkrun microVMs (through [MicroSandbox](https://github.com/superradcompany/microsandbox)); macOS computers run on Apple's Virtualization framework. Each has its own kernel and its own disk. No folder of yours is shared in. A Linux guest sees the runtime's own control folder (`/.msb`, read-write, not yet separately reviewed) and, on computers created before Cua Driver, two empty read-only tool folders.
+- **Credentials the agent can use but not read.** Secret values stay in the Mac's Keychain. The guest gets a placeholder; the runtime on the Mac swaps in the real value only in the headers of HTTPS requests to that secret's allowed hosts, after verifying the server's identity. An explicitly acknowledged "any host" assignment turns this off for that secret. This is MicroSandbox's placeholder mechanism, which Silo configures and patches.
+- **GitHub access per computer and per repository, read-only by default.** Silo mints scoped child tokens on the Mac for the repositories you select; the guest never sees a GitHub token. Write access is a per-repository opt-in. No eval run has covered GitHub yet.
+- **No route to your Mac or your network.** Guests reach public IP addresses only: not the Mac's loopback, private-range (LAN, VPN), link-local or cloud-metadata addresses, or other computers. DNS goes through the Mac's resolvers, so internal names resolve and DNS is an unfiltered channel, and a LAN host with a public address counts as public. macOS computers get this once their setup completes.
 - **A way back.** Checkpoint a computer before letting an agent loose, restore it, or fork a copy.
-- **A local engine, no account.** Everything runs on your Mac. Apps drive it through one same-user socket.
+- **A local engine, no Silo account.** The engine runs on your Mac. Apps drive it through one same-user socket.
 
 Each mechanism, with the code that implements it, is in the [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md).
 
@@ -34,8 +34,10 @@ Each mechanism, with the code that implements it, is in the [threat model](https
 - **Data the agent can read can leave.** There is no egress allowlist yet: a guest can send anything it can read to any public host, including through a host it is allowed to use. The [eval](docs/evals/README.md) shows a `/workspace` file posted to a public echo service.
 - **Credentials can be used.** A scoped secret or GitHub token works for the agent within its scope: it can spend credits or write to a repository you granted for changes.
 - **Allowed hosts that echo headers reveal secrets.** If an allowed host reflects the request back, the guest reads the real value. The eval reproduces this.
+- **Write grants reach CI.** A repository granted for changes includes `workflows: write`, so the agent can edit its Actions workflows and use whatever they can reach.
 - **Personal access tokens are not scoped.** In personal-token mode the agent gets the token's full permissions.
 - **Other processes on your Mac are trusted.** Any process running as your user can drive the engine socket; there is no per-client authentication or audit log yet. Same-user malware, hypervisor escapes and hostile apps that embed the engine are out of scope.
+- **Also out of scope.** Outbound bandwidth and connection counts are not capped. Imported macOS computer archives are mounted on the Mac, so import only archives you trust. Published ports are reachable by any local process. A VM escape gives the attacker your user account, because the runtime runs as you without the App Sandbox.
 - **macOS computers during setup.** Until setup completes, and in Recovery, a macOS computer uses Apple's NAT and can reach the Mac and the LAN.
 - **The guest itself.** The agent is root in its computer and can change anything there, including the tools Silo installed. Roll back with checkpoints.
 
@@ -43,15 +45,15 @@ The [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL
 
 ### How it compares
 
-Silo has no single feature that nobody else has, and it builds on MicroSandbox, whose placeholder secrets it uses. What it combines is per-repository GitHub authority, Linux and macOS guests, and an embeddable, local, MIT-licensed engine. Several tools below already have the per-host egress allowlist Silo lacks.
+Silo has no single feature that nobody else has, and it builds on MicroSandbox, whose placeholder secrets it uses. What it combines is per-repository GitHub authority, Linux and macOS guests, and an embeddable, local, MIT-licensed engine. Several tools below already have the egress allowlist Silo lacks.
 
 | | Isolation | Runs on | Credentials in the sandbox | Outbound network | Desktop and computer use | macOS guests | License |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Silo** | VM per computer (libkrun; Virtualization framework) | Apple Silicon Mac | Placeholders, swapped on the host for allowed HTTPS hosts; GitHub tokens minted per repository, read-only by default | Public addresses only; no allowlist yet | Yes (Cua Driver on Linux) | Yes | MIT |
-| **[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)** (`sbx`) | microVM per sandbox [^docker-iso] | macOS, Windows, Linux; Docker cloud | Sentinel, swapped by a host proxy [^docker-arch] | Deny by default, allowlist, org policy [^docker-def] | Not documented | No | Proprietary; local use free |
-| **[Cua](https://github.com/trycua/cua)** | VMs (Lume, Virtualization framework); gVisor or Docker containers for Linux sandboxes | Mac, Linux, Windows; own cloud (Cua Cloud ended 18 Oct 2026 [^cua-cloud]) | Keyvault releases signed-in sessions after approval; no proxy injection documented | NAT or bridged; no allowlist documented [^lume] | Yes, its core purpose | Yes | MIT core; some parts FSL-1.1-MIT |
-| **[srt](https://github.com/anthropic-experimental/sandbox-runtime)** | OS sandbox (Seatbelt; bubblewrap and seccomp), shared kernel | macOS, Linux; Windows alpha | Deny, or mask with a sentinel swapped on egress | Deny by default, domain allowlist; blocks loopback, link-local, metadata | Not documented | N/A (no VM) | Apache-2.0 |
-| **[microsandbox](https://github.com/superradcompany/microsandbox)** | microVM (libkrun) | macOS, Linux, Windows | Secrets bound to allowed hosts; its README says they never enter the VM | Per-sandbox host and port allowlist | Not in core | Not documented | Apache-2.0 |
+| **Silo** | VM per computer (libkrun; Virtualization framework) | Apple Silicon Mac | Placeholders, swapped on the host for allowed HTTPS hosts; GitHub tokens minted per repository, read-only by default | Public addresses only; no allowlist yet | Yes (Linux: Cua Driver; macOS: ChatGPT app and LCU) | Yes | MIT |
+| **[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)** (`sbx`) | microVM per sandbox [^docker-iso] | macOS, Windows, Linux; Docker cloud | Sentinel, swapped by a host proxy [^docker-arch] | Deny by default, allowlist; org policy is paid [^docker-def] | Not documented | No | Proprietary; local use free |
+| **[Cua](https://github.com/trycua/cua)** | VMs (Lume, QEMU) or microVMs (Firecracker, vz, Containerization); gVisor or runc containers [^cua-how] | Mac, Linux, Windows; own cloud (Cua Cloud ended 18 Oct 2026 [^cua-cloud]) | Plain env vars or temp files; Keyvault releases signed-in app sessions after approval; no proxy injection documented [^cua-secrets] | Open by default; IP and CIDR allow and deny lists on Linux runtimes, not yet on macOS VMs [^cua-egress] | Yes, its core purpose | Yes | MIT core; some parts FSL-1.1-MIT |
+| **[srt](https://github.com/anthropic-experimental/sandbox-runtime)** | OS sandbox (Seatbelt; bubblewrap and seccomp; WFP on Windows), shared kernel; beta | macOS, Linux; Windows alpha | Deny, or mask with a sentinel swapped on egress | Deny by default, domain allowlist; blocks loopback, link-local, metadata | Not documented | N/A (no VM) | Apache-2.0 |
+| **[microsandbox](https://github.com/superradcompany/microsandbox)** | microVM (libkrun) | macOS, Linux, Windows | Secrets bound to allowed hosts; its README says they never enter the VM | Public internet by default (private, host and metadata blocked); opt-in host and port allowlist [^msb-net] | Not built in; VNC desktop how-to | No (Linux guests) | Apache-2.0 |
 | **[E2B](https://e2b.dev/open-source)** | Firecracker microVM | Hosted; self-host or BYOC | Reference, swapped into headers by an egress proxy [^e2b-secret] | Open by default; allow and deny lists [^e2b-net] | Yes (E2B Desktop) [^e2b-desk] | Not documented | Apache-2.0 core; hosted service commercial |
 | **[Daytona](https://www.daytona.io/docs/en/isolation)** | Container, or VM with its own kernel | Hosted; own compute (opt-in) with Daytona's control plane [^daytona-byoc] | Placeholder, swapped by an outbound proxy for allowed hosts [^daytona-secrets] | Firewall, allowlists; default depends on tier [^daytona-net] | Yes (VNC, computer use) [^daytona-vnc] | Yes, on dedicated Macs (per-organization opt-in) [^daytona-macos] | Hosted service proprietary; open-source repo (AGPL-3.0) no longer maintained [^daytona-repo] |
 | **[Apple container](https://github.com/apple/container)** | Lightweight VM per container | Apple silicon, macOS 26 | Not documented | No egress filter documented [^apple-tech] | Not documented | No | Apache-2.0 |
@@ -62,7 +64,10 @@ Researched 2026-11-03 from each project's own documentation; corrections welcome
 [^docker-arch]: [Docker Sandboxes architecture](https://docs.docker.com/ai/sandboxes/architecture/).
 [^docker-def]: [Docker Sandboxes default security posture](https://docs.docker.com/ai/sandboxes/security/defaults/).
 [^cua-cloud]: [Cua Cloud has ended](https://cua.ai/docs/cua-sdk/guides/cua-cloud-ended); providers in [self-hosted sandboxes](https://cua.ai/docs/cua/guide/get-started/self-hosted-sandboxes).
-[^lume]: [Lume CLI reference](https://cua.ai/docs/lume/reference/cli-reference).
+[^cua-how]: [How Cua sandboxes work](https://cua.ai/docs/cua-sdk/concepts/how-sandboxes-work).
+[^cua-secrets]: [Cua sandbox secrets](https://cua.ai/docs/cua/guide/sandbox/secrets).
+[^cua-egress]: [Cua egress policy](https://cua.ai/docs/cua-sdk/guides/egress).
+[^msb-net]: [microsandbox networking](https://github.com/superradcompany/microsandbox/blob/main/docs/networking/overview.mdx).
 [^e2b-secret]: [E2B secret injection](https://docs.e2b.dev/secrets/inject).
 [^e2b-net]: [E2B internet access](https://docs.e2b.dev/network/internet-access).
 [^e2b-desk]: [E2B computer use](https://docs.e2b.dev/use-cases/computer-use).
@@ -77,7 +82,7 @@ Researched 2026-11-03 from each project's own documentation; corrections welcome
 ## What it does
 
 - **Run computers.** Create, start, stop, and monitor virtual machines, each with its own files, tools, and processes, sandboxed from the Mac. Linux computers run on [MicroSandbox](https://github.com/superradcompany/microsandbox); macOS computers run on Apple's Virtualization framework. See [macOS computers](docs/SiloUI-MACOS-COMPUTERS.md).
-- **Give agents a desktop.** Linux computers have a desktop built in, with computer use through [Cua Driver](https://github.com/trycua/cua) (MIT), registered for the coding agents installed in the computer. macOS computers are set up for computer use after installation.
+- **Give agents a desktop.** Linux computers have a desktop built in, with computer use through [Cua Driver](https://github.com/trycua/cua) (MIT), registered with Claude Code and Codex when they are installed. macOS computers get computer use after installation through the ChatGPT macOS app, which Silo downloads from OpenAI, and LCU.
 - **Reach a computer's files and services.** Browse files, open terminals, connect development servers to local addresses, and enable SSH access per computer.
 - **Control GitHub access.** Connect through OAuth and select repositories for each computer, with read-only access by default, or use a [personal token](docs/SiloUI-GITHUB-PERSONAL-TOKENS.md), which grants the token's full permissions.
 - **Scope API credentials.** Store credentials in the Mac's Keychain and choose the computers and HTTPS domains that can use them. See [how secrets work](docs/SiloUI-SECRETS.md).
@@ -125,13 +130,13 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, a Linux computer whose image does not include Cua Driver fetches its pinned, checksummed release archive (about 37 MB) once. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers download the ChatGPT macOS app from OpenAI. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
 | macOS | Apple Silicon, macOS 14+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
 
-The latest app release, v0.11.1, predates the engine and the Cua-based computer use described here: it still downloads ChatGPT for Linux (about 450 MB) from OpenAI in the background, without asking, for computer use. Build from source for the current code until the next release.
+The latest app release, v0.11.1, predates the engine and the Cua-based Linux computer use described here: it downloads ChatGPT for Linux (453 MB, about 1.5 GB unpacked) from OpenAI in the background, without asking. Build from source for the current code until the next release.
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 

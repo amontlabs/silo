@@ -180,7 +180,7 @@
             <h2>Isolated</h2>
             <p>
               Each computer is its own virtual machine, with the CPU, memory, and
-              storage you choose. Nothing on your Mac is shared in.
+              storage you choose. None of your folders is shared in.
             </p>
           </div>
           <div>
@@ -540,7 +540,7 @@
               <ul>
                 <li>A virtual machine per computer, with its own kernel and disk.</li>
                 <li>Credentials as placeholders, swapped in on the Mac only for allowed HTTPS hosts.</li>
-                <li>GitHub tokens minted per repository on the Mac, read-only by default.</li>
+                <li>GitHub tokens minted on the Mac for the repositories you pick, read-only by default.</li>
                 <li>Public internet only: no route to your Mac, your network, or other computers (macOS computers once their setup completes).</li>
                 <li>Checkpoints to roll back to.</li>
               </ul>
@@ -550,6 +550,7 @@
               <ul>
                 <li>Data the agent can read can leave: there is no egress allowlist yet.</li>
                 <li>Scoped credentials can still be used, and hosts that echo headers reveal them.</li>
+                <li>Write access to a repository includes its GitHub Actions workflows.</li>
                 <li>Personal access tokens are not scoped.</li>
                 <li>Any process running as you can drive the engine.</li>
                 <li>During setup and Recovery, macOS computers use Apple’s NAT and can reach your Mac and local network.</li>
@@ -574,9 +575,9 @@
                 <tbody>
                   <tr><th scope="row">Silo</th><td>VM per computer</td><td>Placeholders; per-repository GitHub tokens</td><td>Public addresses only; no allowlist yet</td><td>Yes</td><td>MIT</td></tr>
                   <tr><th scope="row">Docker Sandboxes</th><td>microVM</td><td>Sentinel, swapped by a host proxy</td><td>Deny by default, allowlist</td><td>No</td><td>Proprietary, free locally</td></tr>
-                  <tr><th scope="row">Cua</th><td>VMs (Lume); containers for Linux sandboxes</td><td>No proxy injection documented</td><td>No allowlist documented</td><td>Yes</td><td>MIT core</td></tr>
+                  <tr><th scope="row">Cua</th><td>VMs or microVMs; gVisor or runc containers</td><td>No proxy injection documented</td><td>IP allow and deny lists (Linux runtimes)</td><td>Yes</td><td>MIT core</td></tr>
                   <tr><th scope="row">srt</th><td>OS sandbox, shared kernel</td><td>Deny, or sentinel swapped on egress</td><td>Deny by default, allowlist</td><td>N/A</td><td>Apache-2.0</td></tr>
-                  <tr><th scope="row">microsandbox</th><td>microVM</td><td>Secrets bound to allowed hosts</td><td>Host and port allowlist</td><td>Not documented</td><td>Apache-2.0</td></tr>
+                  <tr><th scope="row">microsandbox</th><td>microVM</td><td>Secrets bound to allowed hosts</td><td>Public by default; opt-in allowlist</td><td>No</td><td>Apache-2.0</td></tr>
                   <tr><th scope="row">E2B</th><td>Firecracker microVM, hosted</td><td>Reference, swapped by an egress proxy</td><td>Open by default; allow and deny lists</td><td>Not documented</td><td>Apache-2.0 core</td></tr>
                   <tr><th scope="row">Daytona</th><td>Container or VM, hosted</td><td>Placeholder, swapped by a proxy</td><td>Firewall and allowlists</td><td>Yes, on request</td><td>Proprietary service</td></tr>
                   <tr><th scope="row">Apple container</th><td>VM per container</td><td>Not documented</td><td>No filter documented</td><td>No</td><td>Apache-2.0</td></tr>
@@ -649,7 +650,7 @@
                 Engine builds and passes its tests in CI · daemon next
               </p>
               <p class="install-note">
-                Linux guests run on every Mac today. A Linux host needs the
+                Linux guests run on every Apple Silicon Mac today. A Linux host needs the
                 Linux engine daemon, which is the next milestone. Older Linux
                 app packages are frozen at v0.11.1 and get no updates.
               </p>
