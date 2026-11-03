@@ -49,6 +49,9 @@ pub(crate) enum ServiceStatus {
 pub(crate) trait ServiceControl: Send + Sync {
     fn status(&self) -> ServiceStatus;
     fn register(&self) -> Result<ServiceStatus, String>;
+    fn unregister(&self) -> Result<(), String>;
+    /// Whether launchd has the agent's job: `None` when that cannot be told.
+    fn job_loaded(&self) -> Option<bool>;
     fn open_login_items(&self);
 }
 
@@ -117,6 +120,39 @@ impl BundleLauncher {
         }
         self.reachable()
     }
+
+    /// Turns the outcome of registering the agent, from `before`, into an error to show.
+    fn check_registration(
+        &self,
+        before: ServiceStatus,
+        result: Result<ServiceStatus, String>,
+    ) -> Result<(), LaunchError> {
+        let missing = || {
+            LaunchError::new(format!(
+                "This build of {} does not include its engine. Reinstall {}.",
+                self.product, self.product
+            ))
+        };
+        match result {
+            Ok(ServiceStatus::NotFound) => Err(missing()),
+            Err(_) if before == ServiceStatus::NotFound => Err(missing()),
+            Ok(ServiceStatus::RequiresApproval) => {
+                self.service.open_login_items();
+                Err(LaunchError {
+                    message: format!(
+                        "Allow the {} engine in System Settings > General > Login Items, then reopen {}.",
+                        self.product, self.product
+                    ),
+                    requires_approval: true,
+                })
+            }
+            Ok(_) => Ok(()),
+            Err(message) => Err(LaunchError::new(format!(
+                "{} could not register its engine: {message}",
+                self.product
+            ))),
+        }
+    }
 }
 
 impl Launcher for BundleLauncher {
@@ -136,12 +172,6 @@ impl Launcher for BundleLauncher {
             }
             return Ok(());
         }
-        let missing = || {
-            LaunchError::new(format!(
-                "This build of {} does not include its engine. Reinstall {}.",
-                self.product, self.product
-            ))
-        };
         match self.service.status() {
             ServiceStatus::RequiresApproval => {
                 self.service.open_login_items();
@@ -154,33 +184,25 @@ impl Launcher for BundleLauncher {
                 });
             }
             ServiceStatus::Enabled => {
-                // Registered but not listening: it may still be starting, or crashed.
+                // Registered but not listening: it may still be starting (a long data
+                // migration) or have crashed, and launchd starts it again either way, so
+                // wait. Service Management keeps reporting Enabled after launchd dropped
+                // the job, though (`launchctl bootout`, or a registration from another
+                // copy of the app), and then nothing would ever start it: register again.
+                // Only a job launchd reports missing is touched, never one still starting.
+                if self.service.job_loaded() == Some(false) {
+                    // Registering an Enabled agent is a no-op until it is unregistered.
+                    let _ = self.service.unregister();
+                    self.check_registration(ServiceStatus::Enabled, self.service.register())?;
+                }
             }
             // Service Management also reports an agent that was never registered as not found,
             // so registering is what tells a missing plist apart from a first launch.
             status @ (ServiceStatus::NotFound
             | ServiceStatus::NotRegistered
-            | ServiceStatus::Unknown) => match self.service.register() {
-                Ok(ServiceStatus::NotFound) => return Err(missing()),
-                Err(_) if status == ServiceStatus::NotFound => return Err(missing()),
-                Ok(ServiceStatus::RequiresApproval) => {
-                    self.service.open_login_items();
-                    return Err(LaunchError {
-                            message: format!(
-                                "Allow the {} engine in System Settings > General > Login Items, then reopen {}.",
-                                self.product, self.product
-                            ),
-                            requires_approval: true,
-                        });
-                }
-                Ok(_) => {}
-                Err(message) => {
-                    return Err(LaunchError::new(format!(
-                        "{} could not register its engine: {message}",
-                        self.product
-                    )));
-                }
-            },
+            | ServiceStatus::Unknown) => {
+                self.check_registration(status, self.service.register())?;
+            }
         }
         if self.wait_for_socket() {
             Ok(())
@@ -232,6 +254,29 @@ impl ServiceControl for SmAppService {
         Ok(Self::map(unsafe { service.status() }))
     }
 
+    fn unregister(&self) -> Result<(), String> {
+        unsafe { self.service().unregisterAndReturnError() }
+            .map_err(|error| error.localizedDescription().to_string())
+    }
+
+    fn job_loaded(&self) -> Option<bool> {
+        // The plist's Label is its file name without the extension (see embed_engine.py).
+        let label = self.plist_name.strip_suffix(".plist")?;
+        let target = format!("gui/{}/{label}", unsafe { libc::getuid() });
+        let status = std::process::Command::new("/bin/launchctl")
+            .args(["print", &target])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok()?;
+        // launchctl exits 113 ("Could not find service") for a job it does not have.
+        match status.code() {
+            Some(0) => Some(true),
+            Some(113) => Some(false),
+            _ => None,
+        }
+    }
+
     fn open_login_items(&self) {
         unsafe { objc2_service_management::SMAppService::openSystemSettingsLoginItems() };
     }
@@ -248,6 +293,14 @@ impl ServiceControl for UnsupportedService {
 
     fn register(&self) -> Result<ServiceStatus, String> {
         Err("The Silo engine runs on macOS only.".to_owned())
+    }
+
+    fn unregister(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn job_loaded(&self) -> Option<bool> {
+        None
     }
 
     fn open_login_items(&self) {}
@@ -273,6 +326,8 @@ mod tests {
         register_error: Option<String>,
         listener_path: Option<PathBuf>,
         listener: Mutex<Option<UnixListener>>,
+        unregistered: Mutex<u32>,
+        job_loaded: Option<bool>,
     }
 
     impl FakeService {
@@ -285,6 +340,8 @@ mod tests {
                 register_error: None,
                 listener_path: None,
                 listener: Mutex::new(None),
+                unregistered: Mutex::new(0),
+                job_loaded: None,
             }
         }
     }
@@ -305,6 +362,16 @@ mod tests {
             }
             *self.status.lock().unwrap() = self.after_register;
             Ok(self.after_register)
+        }
+
+        fn unregister(&self) -> Result<(), String> {
+            *self.unregistered.lock().unwrap() += 1;
+            *self.status.lock().unwrap() = ServiceStatus::NotRegistered;
+            Ok(())
+        }
+
+        fn job_loaded(&self) -> Option<bool> {
+            self.job_loaded
         }
 
         fn open_login_items(&self) {
@@ -435,6 +502,68 @@ mod tests {
             .unwrap_err();
         assert!(error.message.contains("did not start"));
         assert_eq!(*service.registered.lock().unwrap(), 0);
+        assert_eq!(*service.unregistered.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn an_enabled_agent_launchd_no_longer_has_is_registered_again() {
+        // After `launchctl bootout`, Service Management still reports Enabled and
+        // nothing would start the engine.
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(false);
+        service.listener_path = Some(directory.path().join("engine.sock"));
+        let service = Arc::new(service);
+        launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap();
+        assert_eq!(*service.unregistered.lock().unwrap(), 1);
+        assert_eq!(*service.registered.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_failed_registration_of_a_dropped_agent_is_explained() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(false);
+        service.register_error = Some("denied".into());
+        let error = launcher(directory.path(), Arc::new(service), None)
+            .ensure_running()
+            .unwrap_err();
+        assert!(error
+            .message
+            .contains("could not register its engine: denied"));
+    }
+
+    #[test]
+    fn a_slow_engine_launchd_still_has_is_awaited_not_registered_again() {
+        // A long data migration keeps the socket closed while the job runs: leave it be.
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(true);
+        let service = Arc::new(service);
+        let socket = directory.path().join("engine.sock");
+        let starting = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            UnixListener::bind(socket).unwrap()
+        });
+        launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap();
+        let _listener = starting.join().unwrap();
+        assert_eq!(*service.unregistered.lock().unwrap(), 0);
+        assert_eq!(*service.registered.lock().unwrap(), 0);
+
+        // Still not listening after the wait: report it, and still do not re-register.
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = FakeService::new(ServiceStatus::Enabled);
+        service.job_loaded = Some(true);
+        let service = Arc::new(service);
+        let error = launcher(directory.path(), service.clone(), None)
+            .ensure_running()
+            .unwrap_err();
+        assert!(error.message.contains("did not start"));
+        assert_eq!(*service.unregistered.lock().unwrap(), 0);
     }
 
     #[test]
