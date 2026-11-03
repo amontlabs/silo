@@ -130,13 +130,13 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, base Linux image, and Git tools are bundled. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers fetch Cua Driver's pinned, checksummed macOS archive the same way. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, and Git tools are bundled. The base Linux image (about 400 MB) downloads once in the background before your first computer, is checked against a pinned checksum, and is reused across updates. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers fetch Cua Driver's pinned, checksummed macOS archive (about 85 MB) the same way. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
 | macOS | Apple Silicon, macOS 15+ | [DMG](https://github.com/amontlabs/silo/releases/latest/download/Silo-macos-arm64.dmg) |
 
-The latest app release, v0.11.1, predates the engine and the Cua-based computer use described here: it downloads ChatGPT for Linux (453 MB, about 1.5 GB unpacked) from OpenAI in the background, without asking. Build from source for the current code until the next release.
+Releases before v0.12.0 downloaded ChatGPT for Linux from OpenAI for computer use; v0.12.0 replaced it with Cua Driver.
 
 **macOS:** open the DMG and drag Silo to Applications. The app is not notarized; first launch may require **System Settings → Privacy & Security → Open Anyway**.
 
