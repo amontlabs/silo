@@ -331,7 +331,7 @@ class PreinstalledImageDesktop(DesktopRecipe):
         self.env['PREINSTALLED_IMAGE'] = '1'
         marker = self.root / 'usr/local/share/silo/guest-image.json'
         marker.parent.mkdir(parents=True)
-        self.write_marker(capabilities=['desktop', 'accessibility', 'lcu-system-packages'])
+        self.write_marker(capabilities=['desktop', 'accessibility', 'cua-driver'])
         binary = self.root / 'usr/bin/selkies'
         binary.parent.mkdir(parents=True)
         binary.write_text('#!/bin/sh\n')

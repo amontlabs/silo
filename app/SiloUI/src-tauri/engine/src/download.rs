@@ -1,5 +1,5 @@
-//! Resumable HTTPS downloads and the file helpers around them, shared by the
-//! background preparation of the VM image and the guest-image import.
+//! Resumable HTTPS downloads and the file helpers around them, used by the background
+//! preparation of the VM image.
 //!
 //! The downloader resumes a partial file with a `Range` request, never follows a
 //! symlink at the download name, follows only HTTPS redirects and bounds how much
@@ -18,32 +18,6 @@ use std::{
 
 /// The most a download of unknown size may write.
 const UNKNOWN_SIZE_LIMIT: u64 = 1024 * 1024 * 1024;
-
-/// Guest architecture names, which equal the host architecture on this device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Arch {
-    Arm64,
-    Amd64,
-}
-
-impl Arch {
-    pub fn host() -> Result<Self, Error> {
-        match std::env::consts::ARCH {
-            "aarch64" => Ok(Self::Arm64),
-            "x86_64" => Ok(Self::Amd64),
-            _ => Err(Error::fatal(
-                "Silo's computers are only available for 64-bit Intel and Arm devices.",
-            )),
-        }
-    }
-
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Arm64 => "arm64",
-            Self::Amd64 => "amd64",
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {

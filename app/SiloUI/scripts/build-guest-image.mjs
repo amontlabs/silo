@@ -8,22 +8,22 @@ import { fileURLToPath } from "node:url"
 import { createGzip } from "node:zlib"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-/** The pinned LCU release archive for an image architecture, from the one lock that pins it. */
-export function lcuArchive(architecture) {
-  const lock = JSON.parse(readFileSync(resolve(root, "src-tauri/guest/lcu-lock.json"), "utf8"))
+/** The pinned Cua Driver release archive for an image architecture, from the one lock that pins it. */
+export function cuaDriverArchive(architecture) {
+  const lock = JSON.parse(readFileSync(resolve(root, "src-tauri/guest/cua-driver-lock.json"), "utf8"))
   const asset = lock.assets?.[architecture]
-  if (lock.schemaVersion !== 1 || !/^[0-9][0-9A-Za-z.]*$/.test(lock.version) || !asset
-    || !/^[0-9a-f]{64}$/.test(asset.sha256)
-    || !asset.url.startsWith(`https://github.com/amontlabs/lcu/releases/download/v${lock.version}/`)) {
-    throw new Error("The LCU lock is invalid")
+  if (lock.schemaVersion !== 1 || !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(lock.version) || !asset
+    || !/^[0-9a-f]{64}$/.test(asset.sha256) || !Number.isInteger(asset.bytes) || asset.bytes <= 0
+    || !asset.url.startsWith(`https://github.com/trycua/cua/releases/download/cua-driver-rs-v${lock.version}/`)) {
+    throw new Error("The Cua Driver lock is invalid")
   }
-  return { version: lock.version, url: asset.url, sha256: asset.sha256, name: asset.url.split("/").pop() }
+  return { version: lock.version, url: asset.url, sha256: asset.sha256, bytes: asset.bytes, name: asset.url.split("/").pop() }
 }
 
 export function verifyGuestImage(architecture, imageReference, { run = execFileSync } = {}) {
   if (!["arm64", "amd64"].includes(architecture)) throw new Error("Unsupported guest image architecture")
   const tools = readFileSync(resolve(root, "src-tauri/guest/verify-tools.sh"), "utf8")
-  const lcu = lcuArchive(architecture)
+  const driver = cuaDriverArchive(architecture)
   const check = `${tools}
 curl --version
 curl -fsS file:///etc/os-release -o /dev/null
@@ -33,12 +33,16 @@ test -x /usr/lib/openssh/sftp-server
 test -x /usr/bin/selkies || { echo "Guest image is missing the Selkies streamer" >&2; exit 1; }
 test -x /usr/bin/xfce4-session || { echo "Guest image is missing the Xfce session" >&2; exit 1; }
 python3 -c 'import json; m = json.load(open("/usr/local/share/silo/guest-image.json")); assert m["schemaVersion"] == 1 and m["version"] == "'${GUEST_IMAGE_VERSION}'" and {"desktop", "accessibility"} <= set(m["capabilities"]) and m["streamerVersion"] == "2.0.0"'
-python3 -c 'import json; m = json.load(open("/usr/local/share/silo/guest-image.json")); assert "lcu-archive" in m["capabilities"]'
-# The pinned LCU archive (guest/lcu-lock.json) is staged unextracted; LCU itself and any ChatGPT app are not in the image.
-echo '${lcu.sha256}  /usr/local/share/silo/lcu/${lcu.name}' | sha256sum --check --status || { echo "The staged LCU archive does not match guest/lcu-lock.json" >&2; exit 1; }
-test "$(ls /usr/local/share/silo/lcu | wc -l)" = 1 || { echo "Only the pinned LCU archive may be staged" >&2; exit 1; }
-test ! -e /opt/lcu && test ! -e /usr/lib/chatgpt && test ! -e /opt/silo || { echo "The image must not contain LCU or a ChatGPT app" >&2; exit 1; }
-test -s /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'x264' /usr/share/doc/silo-guest-third-party/NOTICES.md || { echo "The third-party notices are missing from the image" >&2; exit 1; }
+python3 -c 'import json; m = json.load(open("/usr/local/share/silo/guest-image.json")); assert "cua-driver" in m["capabilities"] and m["cuaDriverVersion"] == "${driver.version}"'
+# The pinned Cua Driver (guest/cua-driver-lock.json): only its binary is installed, it runs, links nothing missing and sends no telemetry.
+test "$(CUA_DRIVER_RS_TELEMETRY_ENABLED=0 /usr/local/bin/cua-driver --version)" = "cua-driver ${driver.version}" || { echo "The image's Cua Driver is not the pinned version" >&2; exit 1; }
+test "$(readlink -f /usr/local/bin/cua-driver)" = /usr/local/lib/silo/cua-driver/${driver.version}/cua-driver && test "$(ls /usr/local/lib/silo/cua-driver/${driver.version} | wc -l)" = 1 || { echo "Only the pinned cua-driver binary may be installed" >&2; exit 1; }
+! ldd /usr/local/bin/cua-driver | grep -q 'not found' || { echo "Cua Driver has unresolved libraries" >&2; exit 1; }
+grep -qx 'CUA_DRIVER_RS_TELEMETRY_ENABLED=0' /etc/environment && grep -qx 'CUA_DRIVER_RS_UPDATE_CHECK=false' /etc/environment || { echo "Cua Driver telemetry and update check must be off system-wide" >&2; exit 1; }
+test "$(sh -c '. /etc/profile.d/silo-cua-driver.sh; echo "$CUA_DRIVER_RS_TELEMETRY_ENABLED $CUA_DRIVER_RS_UPDATE_CHECK"')" = "0 false"
+test ! -e /opt/lcu && test ! -e /usr/lib/chatgpt && test ! -e /opt/silo && test ! -e /usr/local/share/silo/lcu || { echo "The image must not contain LCU or a ChatGPT app" >&2; exit 1; }
+test ! -e /usr/bin/ffmpeg && ! dpkg -s bubblewrap >/dev/null 2>&1 || { echo "The ChatGPT-only packages must not be installed" >&2; exit 1; }
+test -s /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'x264' /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'Cua Driver' /usr/share/doc/silo-guest-third-party/NOTICES.md && grep -q 'Permission is hereby granted' /usr/share/doc/silo-guest-third-party/NOTICES.md || { echo "The third-party notices are missing from the image" >&2; exit 1; }
 test -x /usr/local/libexec/silo-accessibility
 python3 -c 'import py_compile; py_compile.compile("/usr/local/libexec/silo-accessibility", cfile="/tmp/silo-accessibility.pyc", doraise=True)' || { echo "The accessibility poller does not compile" >&2; exit 1; }
 test -f /etc/xdg/autostart/silo-accessibility.desktop
@@ -63,7 +67,7 @@ sudo -n -u nobody sh -ec 'test "$(id -u)" != 0; /usr/lib/openssh/sftp-server -Q 
 }
 
 /** The recipe version. Increment it for every image update; published versions are never reused. */
-export const GUEST_IMAGE_VERSION = "ubuntu-24.04-v4"
+export const GUEST_IMAGE_VERSION = "ubuntu-24.04-v5"
 
 /**
  * Names derived from the recipe version and the publishing repository. The
@@ -75,7 +79,7 @@ export function guestImageMetadata(env = process.env) {
   const owner = repository?.split("/")[0]
   if (!owner || !/^[A-Za-z0-9-]+$/.test(owner)) throw new Error("Cannot determine the publishing GitHub owner.")
   const match = /^ubuntu-(\d+\.\d+)-(v\d+)$/.exec(GUEST_IMAGE_VERSION)
-  if (!match) throw new Error("Guest image versions look like ubuntu-24.04-v4.")
+  if (!match) throw new Error("Guest image versions look like ubuntu-24.04-v5.")
   return {
     version: GUEST_IMAGE_VERSION,
     // Container registries require lowercase repository names.

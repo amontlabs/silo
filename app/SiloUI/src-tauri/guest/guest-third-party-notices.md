@@ -58,6 +58,44 @@ https://github.com/amontlabs/silo/issues.
 The image also contains Ubuntu 24.04 packages (the exact list with versions is `/usr/local/share/silo-packages.txt`
 in the image), each under its own license; copyright files are in `/usr/share/doc/<package>/copyright` and the
 common license texts in `/usr/share/common-licenses/`. Source for each package is available through the Ubuntu
-archive and Launchpad (`apt source <package>=<version>`, https://launchpad.net/ubuntu/+source/). The image includes
-Ubuntu's `ffmpeg`, `libx264-164` and `libx265-199` in addition to the Selkies copies above. The same three-year
-written offer applies to these packages' source.
+archive and Launchpad (`apt source <package>=<version>`, https://launchpad.net/ubuntu/+source/). The same three-year
+written offer applies to these packages' source. Images before `ubuntu-24.04-v5` also contained Ubuntu's
+`ffmpeg`, `libx264-164` and `libx265-199`; v5 and later do not.
+
+# Silo guest image: Cua Driver
+
+Silo's guest images from `ubuntu-24.04-v5` on contain Cua Driver, installed at
+`/usr/local/lib/silo/cua-driver/<version>/cua-driver` and linked as `/usr/local/bin/cua-driver`. Computers
+created from an earlier image download the same pinned release once when computer use is set up
+(`app/SiloUI/src-tauri/guest/cua-driver-lock.json`). Only the `cua-driver` binary of the release archive is
+used. Cua Driver is MIT-licensed; its licence text follows. The optional `cua-perception` and `cua-som`
+extensions (AGPL-3.0) are not part of the image.
+
+- Project: https://github.com/trycua/cua
+- Release: https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.38.0
+- Linux ARM64 archive SHA-256: `80c9ae66bc7322052dd426c6133c96086b33894bf06c972bca8215384400b33d`
+- Linux x86-64 archive SHA-256: `31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd`
+
+```
+MIT License
+
+Copyright (c) 2025 Cua AI, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

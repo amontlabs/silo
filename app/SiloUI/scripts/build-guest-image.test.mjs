@@ -1,13 +1,13 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { gunzipSync } from "node:zlib"
 import { createHash } from "node:crypto"
 import test from "node:test"
-import { GUEST_IMAGE_VERSION, guestImageMetadata, lcuArchive, verifyGuestImage } from "./build-guest-image.mjs"
+import { GUEST_IMAGE_VERSION, guestImageMetadata, cuaDriverArchive, verifyGuestImage } from "./build-guest-image.mjs"
 
 test("metadata CLI works through a symlink to the script", async t => {
   const root = await mkdtemp(join(tmpdir(), "silo-guest-cli-link-"))
@@ -32,7 +32,7 @@ for (const saveExit of [1, 0, "write-error"]) {
     for (const directory of [scripts, guest, output, commands]) await mkdir(directory, { recursive: true })
     const script = join(scripts, "build-guest-image.mjs")
     await writeFile(script, await readFile(new URL("./build-guest-image.mjs", import.meta.url)))
-    await writeFile(join(guest, "lcu-lock.json"), await readFile(new URL("../src-tauri/guest/lcu-lock.json", import.meta.url)))
+    await writeFile(join(guest, "cua-driver-lock.json"), await readFile(new URL("../src-tauri/guest/cua-driver-lock.json", import.meta.url)))
     await writeFile(join(guest, "verify-tools.sh"), "true\n")
     await writeFile(join(root, "package.json"), '{"repository":{"url":"https://github.com/fixture/silo"}}')
     await writeFile(join(output, "image.tar.gz"), "previous verified archive")
@@ -123,7 +123,7 @@ test("the recipe matches the version and never leaves package files in a layer",
   assert.match(dockerfile, /gnome-text-editor/)
   // The runtime installer detects v4 by this marker; it must match the recipe version.
   assert.ok(dockerfile.includes(`"version":"${GUEST_IMAGE_VERSION}"`))
-  assert.match(dockerfile, /"capabilities":\["desktop","accessibility"/)
+  assert.match(dockerfile, /"capabilities":\["desktop","accessibility","cua-driver"\]/)
   assert.ok(dockerfile.includes("/usr/local/share/silo/guest-image.json"))
   assert.doesNotMatch(dockerfile.replace(/^#.*$/gm, ""), /openai|oaistatic|chatgpt/i)
   const ignore = readFileSync(new URL("../guest-image/Dockerfile.dockerignore", import.meta.url), "utf8")
@@ -139,7 +139,7 @@ test("the image ships the third-party notices that THIRD-PARTY-NOTICES.md repeat
   const notices = readFileSync(new URL("../src-tauri/guest/guest-third-party-notices.md", import.meta.url), "utf8")
   const bundled = readFileSync(new URL("../THIRD-PARTY-NOTICES.md", import.meta.url), "utf8")
   assert.ok(bundled.includes(notices.trim()), "THIRD-PARTY-NOTICES.md must contain the guest notices verbatim")
-  for (const required of ["x264", "x265", "n8.1", "guest-ubuntu-24.04-v4-source", "written offer"]) {
+  for (const required of ["x264", "x265", "n8.1", "guest-ubuntu-24.04-v4-source", "written offer", "Cua Driver", "Permission is hereby granted"]) {
     assert.ok(notices.toLowerCase().includes(required.toLowerCase()), required)
   }
 })
@@ -148,36 +148,53 @@ test("the release attaches every guest input the image build consumes", () => {
   const dockerfile = readFileSync(new URL("../guest-image/Dockerfile", import.meta.url), "utf8")
   const workflow = readFileSync(new URL("../../../.github/workflows/guest-image.yml", import.meta.url), "utf8")
   const inputs = new Set([...dockerfile.replace(/^#.*$/gm, "").matchAll(/source=src-tauri\/guest\/([A-Za-z0-9._-]+)/g)].map((match) => match[1]))
-  assert.ok(inputs.has("lcu-lock.json"))
+  assert.ok(inputs.has("cua-driver-lock.json"))
   for (const input of inputs) {
     assert.ok(workflow.includes(`cp app/SiloUI/src-tauri/guest/${input} guest-release/${input}`), input)
   }
 })
 
-test("the pinned LCU archive is staged from one lock, hash-checked, and never installed in the image", () => {
+test("the pinned Cua Driver is installed from one lock, hash-checked, binary only, telemetry off", () => {
   const dockerfile = readFileSync(new URL("../guest-image/Dockerfile", import.meta.url), "utf8")
   const code = dockerfile.replace(/^#.*$/gm, "")
-  assert.doesNotMatch(dockerfile, /TODO\(LCU\)/)
-  assert.match(code, /source=src-tauri\/guest\/lcu-lock\.json,target=\/mnt\/lcu-lock\.json/)
-  assert.match(code, /echo "\$lcu_sha256  \$lcu_archive" \| sha256sum --check --status/)
-  assert.ok(code.includes("/usr/local/share/silo/lcu"))
-  assert.match(code, /"capabilities":\["desktop","accessibility","lcu-system-packages","lcu-archive"\]/)
-  // The archive is staged, not extracted or installed; the lock is read, never copied into a layer.
-  assert.doesNotMatch(code, /install\.sh|tar -x|COPY .*lcu/)
+  assert.match(code, /source=src-tauri\/guest\/cua-driver-lock\.json,target=\/mnt\/cua-driver-lock\.json/)
+  assert.match(code, /echo "\$cua_sha256  \/tmp\/cua-driver\.tar\.gz" \| sha256sum --check --status/)
+  assert.match(code, /stat -c %s \/tmp\/cua-driver\.tar\.gz/)
+  // Only the binary is extracted, to the versioned directory behind the /usr/local/bin link.
+  assert.match(code, /tar -xzf \/tmp\/cua-driver\.tar\.gz -C "\/usr\/local\/lib\/silo\/cua-driver\/\$cua_version" --no-same-owner cua-driver/)
+  assert.match(code, /ln -sf "\/usr\/local\/lib\/silo\/cua-driver\/\$cua_version\/cua-driver" \/usr\/local\/bin\/cua-driver/)
+  assert.match(code, /CUA_DRIVER_RS_TELEMETRY_ENABLED=0/)
+  assert.match(code, /CUA_DRIVER_RS_UPDATE_CHECK=false/)
+  assert.match(code, /\/etc\/profile\.d\/silo-cua-driver\.sh/)
+  assert.match(code, /"capabilities":\["desktop","accessibility","cua-driver"\],"streamerVersion":"2\.0\.0","cuaDriverVersion":/)
+  assert.doesNotMatch(code, /lcu|bubblewrap|ffmpeg|mesa-vulkan/i)
+  // The lock is read, never copied into a layer.
+  assert.doesNotMatch(code, /COPY .*cua-driver/)
   const ignore = readFileSync(new URL("../guest-image/Dockerfile.dockerignore", import.meta.url), "utf8")
-  assert.ok(ignore.includes("!src-tauri/guest/lcu-lock.json"))
-  // One edit bumps LCU: the lock names both architectures, and the app lock agrees on the version.
-  const lock = JSON.parse(readFileSync(new URL("../src-tauri/guest/lcu-lock.json", import.meta.url), "utf8"))
-  const appLock = JSON.parse(readFileSync(new URL("../src-tauri/guest/chatgpt-app-lock.json", import.meta.url), "utf8"))
-  assert.equal(appLock.lcuVersion, lock.version)
+  assert.ok(ignore.includes("!src-tauri/guest/cua-driver-lock.json"))
+  assert.doesNotMatch(ignore, /lcu/)
+  // Every library the binary links is installed explicitly (ldd of Cua Driver 0.38.0).
+  for (const library of ["libx11-6", "libxi6", "libxkbcommon0", "libxcb1", "libxext6", "libxau6", "libxdmcp6", "libbsd0", "libmd0", "libxtst6"]) {
+    assert.ok(code.includes(library), library)
+  }
+  // One edit bumps Cua Driver: the lock names both architectures.
+  const lock = JSON.parse(readFileSync(new URL("../src-tauri/guest/cua-driver-lock.json", import.meta.url), "utf8"))
+  assert.deepEqual(Object.keys(lock).sort(), ["assets", "schemaVersion", "source", "version"])
   assert.deepEqual(Object.keys(lock.assets).sort(), ["amd64", "arm64"])
   for (const architecture of ["arm64", "amd64"]) {
-    const archive = lcuArchive(architecture)
+    const archive = cuaDriverArchive(architecture)
     assert.equal(archive.version, lock.version)
-    assert.match(archive.name, new RegExp(`^lcu-${lock.version.replaceAll(".", "\\.")}-linux-(arm64|x64)\\.tar\\.gz$`))
+    assert.match(archive.name, new RegExp(`^cua-driver-rs-${lock.version.replaceAll(".", "\\.")}-linux-(arm64|x86_64)-binary\\.tar\\.gz$`))
     assert.match(archive.sha256, /^[0-9a-f]{64}$/)
+    assert.ok(archive.bytes > 0)
   }
-  assert.throws(() => lcuArchive("riscv64"), /LCU lock/)
+  assert.throws(() => cuaDriverArchive("riscv64"), /Cua Driver lock/)
+})
+
+test("no Linux guest file refers to the removed LCU or ChatGPT downloads", () => {
+  for (const removed of ["lcu-lock.json", "lcu-legacy-lock.json", "chatgpt-app-lock.json", "setup-lcu.py"]) {
+    assert.equal(existsSync(new URL(`../src-tauri/guest/${removed}`, import.meta.url)), false, removed)
+  }
 })
 
 test("offline image validation rejects unsupported platforms before invoking Docker", () => {
@@ -217,7 +234,9 @@ for (const [name, mutation] of [
   ["invalid accessibility poller", "echo 'def (' > /usr/local/libexec/silo-accessibility"],
   ["autostart entry naming a missing program", "sed -i 's#^Exec=.*#Exec=/usr/local/libexec/missing#' /etc/xdg/autostart/silo-accessibility.desktop"],
   ["leftover package file", "touch /var/cache/selkies.deb"],
-  ["tampered staged LCU archive", "echo x >> /usr/local/share/silo/lcu/*.tar.gz"],
+  ["a different Cua Driver binary", "echo x >> /usr/local/lib/silo/cua-driver/*/cua-driver"],
+  ["an extra file beside Cua Driver", "touch /usr/local/lib/silo/cua-driver/*/libcua_driver_sdk.so"],
+  ["telemetry on system-wide", "sed -i /TELEMETRY/d /etc/environment"],
   ["LCU installed in the image", "mkdir -p /opt/lcu"],
 ]) {
   test(`offline image check rejects ${name}`, { skip: !image }, () => {

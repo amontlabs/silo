@@ -112,7 +112,7 @@ DOWNLOAD_BACKOFF = (5, 10, 20, 40)
 DOWNLOAD_MAX_TIME = 240
 DOWNLOAD_BUDGET = 420
 ARCHITECTURES = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64', 'amd64': 'amd64'}
-# Programs that detect the driver being up in the session probe `doctor` labels that must be ok.
+# The `doctor` probes that must be ok before the driver can drive windows in the session.
 DOCTOR_REQUIRED = ('display server', 'X11 connection', 'AT-SPI')
 
 
@@ -444,8 +444,13 @@ def session_env(proc=Path('/proc'), strict=False):
                 continue
             if uid is not None and entry.stat().st_uid != uid:
                 continue
-            raw = (entry / 'environ').read_bytes()
-        except OSError:
+            try:
+                raw = (entry / 'environ').read_bytes()
+            except PermissionError:
+                # A root without CAP_SYS_PTRACE (a container) reads it as the owner instead.
+                raw = subprocess.run(['runuser', '-u', USER, '--', 'cat', str(entry / 'environ')],
+                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
             continue
         for item in raw.split(b'\0'):
             key, _, value = item.decode('utf-8', 'replace').partition('=')
@@ -851,10 +856,6 @@ def desktop_session():
         return None
     value = state.get('sessionState', state.get('state')) if isinstance(state, dict) else None
     return value if isinstance(value, str) else None
-
-
-def session_running():
-    return desktop_session() == 'running'
 
 
 def desktop_autostart():

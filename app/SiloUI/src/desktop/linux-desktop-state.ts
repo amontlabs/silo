@@ -18,7 +18,7 @@ export const computerUseSchema = z.object({
   approvalApply: z.enum(["applied", "pending", "failed", "partial", "unknown"]).catch("unknown"),
   // Why it failed or only partly worked, in words for the user.
   approvalApplyReason: z.string().nullish().catch(null),
-  // The Cua Driver version in a Linux computer. macOS computers still report the ChatGPT and LCU versions.
+  // The Cua Driver version in the computer.
   driverVersion: z.string().nullish().catch(null),
   agents: z.array(z.string()).nullish().catch(null),
 })

@@ -1374,28 +1374,11 @@ fn running_child_matches(
             })
 }
 
-/// A built-in computer must have the read-only computer-use mount, whichever recovery path
-/// accepts it. Returns before any state changes, so the pending restore is preserved.
-fn require_mount(
-    observed: &InspectedSandbox,
-    configuration: &ComputerConfiguration,
-) -> Result<(), RuntimeError> {
-    if crate::computer_use::mount_present(&observed.config, configuration) {
-        Ok(())
-    } else {
-        Err(error(
-            "The restored computer does not have the read-only computer-use folder. It was preserved for inspection; the pending restore is unchanged.",
-        ))
-    }
-}
-
 pub(super) fn start_pending(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     configuration: &ComputerConfiguration,
 ) -> Result<(), RuntimeError> {
-    // Before any state changes: a computer that needs the mount cannot restore without it.
-    let mounts = crate::computer_use::mount_args(configuration)?;
     let mut record = load(paths, configuration.id())?;
     let lineage_group = ensure_snapshot_group(paths, configuration.id(), configuration.name())?;
     record.snapshot_group = Some(lineage_group.clone());
@@ -1502,8 +1485,6 @@ pub(super) fn start_pending(
             &material,
             &policy,
         ) {
-            // Accepting the running computer must not skip the mount check a fresh restore gets.
-            require_mount(&observed, configuration)?;
             record.pending_checkpoint_restore = None;
             record.checkpoint_operation = None;
             record.restore_attempted = false;
@@ -1534,9 +1515,6 @@ pub(super) fn start_pending(
             ));
         }
         if record.restore_attempt_ran {
-            // Checked before any recovery state is cleared: without the mount the
-            // attempt would start without computer use and the record could not show why.
-            require_mount(&observed, configuration)?;
             // The attempt already ran and may hold changes; recreating it from the
             // checkpoint would silently discard them. Keep it as the computer and start it
             // like any other; only an explicit, confirmed action (such as Delete) discards it.
@@ -1625,8 +1603,17 @@ pub(super) fn start_pending(
         ]);
     }
     args.extend(network_args);
-    // A snapshot never carries host mounts: pass the computer-use mount again.
-    args.extend(mounts);
+    // A snapshot never carries host mounts. Computers created before Cua Driver recorded the
+    // read-only ChatGPT and LCU folders; a checkpoint of one is restored with them again.
+    if crate::computer_use::is_built_in(configuration) {
+        for computer in [pending.source_computer.as_str(), configuration.name()] {
+            let mounts = crate::legacy_mounts::restore_args(runner, paths, computer);
+            if !mounts.is_empty() {
+                args.extend(mounts);
+                break;
+            }
+        }
+    }
     let restored = runner.run(paths, &args, Duration::from_secs(900));
     // A completed restore resumed the computer; after a failure, a running, paused or crashed computer
     // shows it ran as well. Checked even after a cancel.
@@ -1637,8 +1624,7 @@ pub(super) fn start_pending(
         .is_ok_and(|computer| matches!(computer.status.as_str(), "Running" | "Paused" | "Crashed"));
     let result = restored
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
-        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy)
-            && crate::computer_use::mount_present(&observed.config, configuration) {
+        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
             Ok(observed)
         } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) });
     match result {

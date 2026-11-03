@@ -1902,8 +1902,9 @@ fn backup_at_paths(
         let mut inspected = inspect(paths, name)?;
         runtime::ensure_managed(&inspected).map_err(|error| error.to_string())?;
         canonicalize_backup_runtime(&mut inspected.config)?;
-        // The computer-use mount is host-specific and rebuilt on import; `builtIn` carries it.
-        crate::computer_use::strip_mount_for_export(&mut inspected.config)?;
+        // Legacy computer-use mounts name host folders and mean nothing on another device; the
+        // imported computer gets none.
+        crate::legacy_mounts::strip_for_export(&mut inspected.config)?;
         backup_volumes(configuration, &mut inspected)?;
         // A checkpoint export reuses the checkpoint's immutable member from its
         // lineage group; a state export captures the computer's current disk.
@@ -5854,7 +5855,7 @@ mod tests {
         let mut inspected = inspect(&paths, name).unwrap();
         // Prepare the runtime configuration exactly as `backup_work` does.
         canonicalize_backup_runtime(&mut inspected.config).unwrap();
-        crate::computer_use::strip_mount_for_export(&mut inspected.config).unwrap();
+        crate::legacy_mounts::strip_for_export(&mut inspected.config).unwrap();
         let second_computer =
             runtime::create_disposable_test_computer(&paths, second_name).unwrap();
         assert_eq!(inspect(&paths, second_name).unwrap().status, "Stopped");
@@ -5870,7 +5871,7 @@ mod tests {
         run(&["stop", second_name]);
         let mut second_inspected = inspect(&paths, second_name).unwrap();
         canonicalize_backup_runtime(&mut second_inspected.config).unwrap();
-        crate::computer_use::strip_mount_for_export(&mut second_inspected.config).unwrap();
+        crate::legacy_mounts::strip_for_export(&mut second_inspected.config).unwrap();
         let make_controller = |paths: &runtime::RuntimePaths| Controller {
             host: None,
             history_path: paths.metadata.with_file_name("backup-history.json"),
@@ -6603,36 +6604,19 @@ mod tests {
         eprintln!("Verified an older checkpoint export imports and cold-boots.");
     }
 
-    /// Copies a directory tree, as a copy-on-write clone where the file system supports it.
-    /// macOS `cp -c` clones; GNU `cp` has no `-c`, so Linux asks for `--reflink=auto`.
-    fn clone_tree(from: &Path, to: &Path) -> bool {
-        let mut copy = std::process::Command::new("cp");
-        if cfg!(target_os = "macos") {
-            copy.arg("-cR");
-        } else {
-            copy.args(["--reflink=auto", "-R"]);
-        }
-        copy.arg(from)
-            .arg(to)
-            .status()
-            .is_ok_and(|status| status.success())
-    }
-
     /// Built-in computer use against the real runtime, through the production export and
-    /// import paths. A computer from the v4 image gets the read-only ChatGPT folder and sets
-    /// itself up; its approval is switched to `auto`; it is exported (`backup_at_paths`,
-    /// the code behind the export command) from one runtime home and imported
-    /// (`restore_at_paths`, the import command's code) into a separate home with a
-    /// separate published folder. The target must refuse to start without its own
-    /// folder, keep `builtIn`, mount its own folder read-only when it has one, and end
-    /// with the target's approval policy (`ask`) effective in the guest, not the `auto`
-    /// the exported disk carried. Needs the v4 image artifacts (`SILO_TEST_GUEST_IMAGE`:
-    /// a directory with manifest.json and image.tar.gz), a published ChatGPT folder
-    /// (`SILO_TEST_PUBLISHED`, `<root>/published` of a prepared app), a signed msb
-    /// (`SILO_TEST_MSB`, `SILO_TEST_LIBKRUNFW`) and `SILO_LIVE_TEST_CONFIRM`. Uses only
-    /// disposable /tmp homes and `e2e-*` computers.
+    /// import paths. A computer from the v4 image sets Cua Driver up by itself (the guest
+    /// downloads the pinned archive); its approval is switched to `auto`; it is exported
+    /// (`backup_at_paths`, the code behind the export command) from one runtime home and
+    /// imported (`restore_at_paths`, the import command's code) into a separate home. The
+    /// target must keep `builtIn`, mount nothing from the host, and end with the target's
+    /// approval policy (`ask`) effective in the guest, not the `auto` the exported disk
+    /// carried. Needs the v4 image artifacts (`SILO_TEST_GUEST_IMAGE`: a directory with
+    /// manifest.json and image.tar.gz), a signed msb (`SILO_TEST_MSB`,
+    /// `SILO_TEST_LIBKRUNFW`), network access for the driver download and
+    /// `SILO_LIVE_TEST_CONFIRM`. Uses only disposable /tmp homes and `e2e-*` computers.
     #[test]
-    #[ignore = "requires the v4 guest image, a published ChatGPT app and hardware virtualization"]
+    #[ignore = "requires the v4 guest image, network access and hardware virtualization"]
     fn live_built_in_computer_use_sets_up_and_survives_export_and_import() {
         crate::test_support::live::require_confirmation();
         let _test_state = crate::test_support::global_state();
@@ -6643,31 +6627,7 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let guest_image = PathBuf::from(std::env::var("SILO_TEST_GUEST_IMAGE").unwrap());
-        // Two devices: each has its own runtime home, metadata and published folder.
-        let source_published = crate::chatgpt_app::ensure_published_dir(
-            PathBuf::from(std::env::var("SILO_TEST_PUBLISHED").unwrap())
-                .parent()
-                .unwrap(),
-        )
-        .unwrap();
-        let target_root = directory.path().join("target-chatgpt");
-        fs::create_dir_all(&target_root).unwrap();
-        let target_published = crate::chatgpt_app::ensure_published_dir(&target_root).unwrap();
-        assert_ne!(source_published, target_published);
-        let version = crate::chatgpt_app::Lock::bundled()
-            .unwrap()
-            .directory_name(crate::chatgpt_app::DebArch::host().unwrap());
-        assert!(
-            clone_tree(
-                &source_published.join(&version),
-                &target_published.join(&version)
-            ),
-            "could not clone the published app tree"
-        );
-        crate::chatgpt_app::set_test_cache(Some(crate::chatgpt_app::Status::Ready {
-            path: source_published.join(&version),
-            version: "26.928.31416".into(),
-        }));
+        // Two devices: each has its own runtime home and metadata.
         let executable = PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap());
         let library = PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").unwrap());
         let make = |name: &str| runtime::RuntimePaths {
@@ -6799,8 +6759,7 @@ mod tests {
             .unwrap()
         };
 
-        // 1. The source device: a new v4 computer is built in, mounts its folder, sets itself up.
-        crate::computer_use::set_test_published_dir(Some(source_published.clone()));
+        // 1. The source device: a new v4 computer is built in and sets itself up.
         let configuration =
             runtime::create_disposable_desktop_computer(&source, source_name).unwrap();
         assert!(
@@ -6808,15 +6767,14 @@ mod tests {
             "{configuration:?}"
         );
         let inspected = inspect(&source, source_name).unwrap();
-        assert!(crate::computer_use::mount_present(
-            &inspected.config,
-            &configuration
-        ));
+        assert!(!inspected.config["mounts"]
+            .to_string()
+            .contains("/opt/silo/"));
         runtime::start_disposable_test_computer(&source, source_name).unwrap();
         let status = wait_ready(&source, source_name);
         eprintln!("source status: {status}");
         assert_eq!(status["computerUse"]["state"], "ready");
-        assert_eq!(status["computerUse"]["compatibility"], "tested");
+        assert!(status["computerUse"]["driverVersion"].is_string());
 
         // 2. The user switches the source to auto approval; the guest applies it.
         if let Some(apply) = crate::computer_use::apply_approval_with(
@@ -6897,56 +6855,19 @@ mod tests {
         );
         assert_ne!(imported.id(), configuration.id());
 
-        // 5. A target without its published folder refuses to start the import, and
-        // the pending restore survives for a later Start.
-        crate::computer_use::set_test_published_dir(None);
-        let refused = runtime::start_disposable_test_import(&target, target_name)
-            .unwrap_err()
-            .to_string();
-        eprintln!("start without a folder: {refused}");
-        assert!(refused.contains("shared ChatGPT folder"), "{refused}");
-        assert!(runtime::is_pending_restore(&target, target_name));
-
-        // 6. With the target's own folder, Start re-passes and verifies the mount.
-        crate::computer_use::set_test_published_dir(Some(target_published.clone()));
+        // 5. The import starts with no host folder to provide, and mounts none.
         runtime::start_disposable_test_import(&target, target_name).unwrap();
         assert!(!runtime::is_pending_restore(&target, target_name));
         let restored = inspect(&target, target_name).unwrap();
         eprintln!("target mounts: {}", restored.config["mounts"]);
-        assert!(crate::computer_use::mount_present(
-            &restored.config,
-            &imported
-        ));
-        let mount_host = restored.config["mounts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|mount| mount["guest"] == "/opt/silo/chatgpt")
-            .map(|mount| mount["host"].as_str().unwrap().to_owned())
-            .unwrap();
-        assert_eq!(
-            fs::canonicalize(&mount_host).unwrap(),
-            fs::canonicalize(&target_published).unwrap(),
-            "the target mounted another folder"
-        );
-        assert_ne!(
-            fs::canonicalize(&mount_host).unwrap(),
-            fs::canonicalize(&source_published).unwrap()
-        );
+        assert!(!restored.config["mounts"]
+            .to_string()
+            .contains("/opt/silo/"));
         let status = wait_ready(&target, target_name);
         eprintln!("target status: {status}");
         assert_eq!(status["computerUse"]["state"], "ready", "{status}");
-        let report = exec(
-            &target,
-            target_name,
-            "root",
-            "grep ' /opt/silo/chatgpt ' /proc/mounts; touch /opt/silo/chatgpt/x 2>&1 | head -1",
-        )
-        .unwrap();
-        eprintln!("target guest mount:\n{report}");
-        assert!(report.contains("ro,"), "{report}");
 
-        // 7. The effective approval is the target's policy, not what the disk carried.
+        // 6. The effective approval is the target's policy, not what the disk carried.
         // The boot's apply records its result a moment after the state turns ready.
         let started = std::time::Instant::now();
         while crate::computer_use::settings(&target, imported.id())
@@ -6975,8 +6896,6 @@ mod tests {
             &["stop".into(), target_name.into()],
             Duration::from_secs(120),
         );
-        crate::computer_use::set_test_published_dir(None);
-        crate::chatgpt_app::set_test_cache(None);
     }
 
     /// Boots one built-in computer repeatedly through the real Start path: a fresh computer, then
@@ -6985,7 +6904,7 @@ mod tests {
     /// running and computer use ready, and a failure prints the guest's state. Same
     /// inputs as the export and import test above.
     #[test]
-    #[ignore = "requires the v4 guest image, a published ChatGPT app and hardware virtualization"]
+    #[ignore = "requires the v4 guest image, network access and hardware virtualization"]
     fn live_built_in_desktop_boots_repeatedly() {
         crate::test_support::live::require_confirmation();
         let _test_state = crate::test_support::global_state();
@@ -6999,29 +6918,6 @@ mod tests {
             .tempdir_in(crate::test_support::live::temp_root())
             .unwrap();
         let guest_image = PathBuf::from(std::env::var("SILO_TEST_GUEST_IMAGE").unwrap());
-        let source_published = crate::chatgpt_app::ensure_published_dir(
-            PathBuf::from(std::env::var("SILO_TEST_PUBLISHED").unwrap())
-                .parent()
-                .unwrap(),
-        )
-        .unwrap();
-        let target_root = directory.path().join("target-chatgpt");
-        fs::create_dir_all(&target_root).unwrap();
-        let target_published = crate::chatgpt_app::ensure_published_dir(&target_root).unwrap();
-        let version = crate::chatgpt_app::Lock::bundled()
-            .unwrap()
-            .directory_name(crate::chatgpt_app::DebArch::host().unwrap());
-        assert!(
-            clone_tree(
-                &source_published.join(&version),
-                &target_published.join(&version)
-            ),
-            "could not clone the published app tree"
-        );
-        crate::chatgpt_app::set_test_cache(Some(crate::chatgpt_app::Status::Ready {
-            path: source_published.join(&version),
-            version: "26.928.31416".into(),
-        }));
         let executable = PathBuf::from(std::env::var("SILO_TEST_MSB").unwrap());
         let library = PathBuf::from(std::env::var("SILO_TEST_LIBKRUNFW").unwrap());
         let make = |name: &str| runtime::RuntimePaths {
@@ -7174,7 +7070,6 @@ mod tests {
         };
         let mut failures = Vec::new();
         let mut boots = 0;
-        crate::computer_use::set_test_published_dir(Some(source_published.clone()));
         let source_name = "e2e-boot-source";
         let configuration =
             runtime::create_disposable_desktop_computer(&source, source_name).unwrap();
@@ -7215,7 +7110,6 @@ mod tests {
             )
             .unwrap();
         }
-        crate::computer_use::set_test_published_dir(Some(target_published.clone()));
         let mut targets = Vec::new();
         for round in 1..=rounds {
             let target_name = format!("e2e-boot-imp{round}");
@@ -7251,8 +7145,6 @@ mod tests {
             failures.len()
         );
         drop(targets);
-        crate::computer_use::set_test_published_dir(None);
-        crate::chatgpt_app::set_test_cache(None);
         assert!(failures.is_empty(), "boots failed: {failures:?}");
     }
 }

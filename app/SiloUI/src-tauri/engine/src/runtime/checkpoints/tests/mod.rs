@@ -580,60 +580,34 @@ fn pending_import(paths: &RuntimePaths) {
 }
 
 #[test]
-fn restoring_a_built_in_computer_passes_the_computer_use_mount_again() {
+fn restoring_a_built_in_computer_adds_no_host_mount() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    let published = directory.path().join("published");
-    std::fs::create_dir(&published).unwrap();
-    // Empty on purpose: the ChatGPT app may still be downloading.
-    assert_eq!(std::fs::read_dir(&published).unwrap().count(), 0);
-    crate::computer_use::set_test_published_dir(Some(published.clone()));
     pending_import(&paths);
     let runner = RestoreProbe(Mutex::new(Vec::new()));
     assert!(start_pending(&runner, &paths, &built_in_computer()).is_err());
     let calls = runner.0.lock().unwrap();
     let restore = calls.iter().find(|args| args[0] == "restore").unwrap();
-    let mount = format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", published.display());
-    assert!(
-        restore
-            .windows(2)
-            .any(|pair| pair == ["-v", mount.as_str()]),
-        "{restore:?}"
-    );
-    crate::computer_use::set_test_published_dir(None);
-}
-
-#[test]
-fn restoring_a_computer_without_built_in_computer_use_adds_no_mount() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = paths(&directory);
-    crate::computer_use::set_test_published_dir(Some(directory.path().to_path_buf()));
-    pending_import(&paths);
-    let runner = RestoreProbe(Mutex::new(Vec::new()));
-    assert!(start_pending(&runner, &paths, &computer_configuration()).is_err());
-    let calls = runner.0.lock().unwrap();
-    let restore = calls.iter().find(|args| args[0] == "restore").unwrap();
     assert!(!restore
         .iter()
         .any(|arg| arg == "-v" || arg.contains("/opt/silo")));
-    crate::computer_use::set_test_published_dir(None);
 }
 
-const ATTEMPT: &str = "6b79cf8f-70b3-4d2f-93d1-3b8b7a7c0001";
-
-/// A runtime where the rejected restore left a stopped, already-run attempt with
-/// the computer's labels but without the computer-use mount.
-struct RejectedRestore(Mutex<Vec<Vec<String>>>);
-impl RuntimeRunner for RejectedRestore {
+/// A runtime whose source computer still records the read-only folders that computers from
+/// before Cua Driver mounted; the restore itself fails.
+struct LegacySource {
+    host: PathBuf,
+    calls: Mutex<Vec<Vec<String>>>,
+}
+impl RuntimeRunner for LegacySource {
     fn run(
         &self,
         _paths: &RuntimePaths,
         args: &[String],
         _timeout: Duration,
     ) -> Result<CommandOutput, RuntimeError> {
-        self.0.lock().unwrap().push(args.to_vec());
+        self.calls.lock().unwrap().push(args.to_vec());
         let stdout = match args.first().map(String::as_str) {
             Some("snapshot") => serde_json::json!([{
                 "group":"silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
@@ -641,14 +615,18 @@ impl RuntimeRunner for RejectedRestore {
                 "scope":"disk", "availability":"ready"
             }])
             .to_string(),
-            Some("list") => serde_json::json!([{"name":"dev"}]).to_string(),
-            Some("inspect") => serde_json::json!({"name":"dev","status":"Stopped","config":{
-                "labels":{"silo.managed":"true","silo.machine-id":ID,
-                    "silo.restore-attempt":ATTEMPT},
-                "mounts":[{"type":"Owned","guest":"/workspace"}],
-            }})
-            .to_string(),
-            _ => panic!("a retry without the mount must not change the computer: {args:?}"),
+            Some("list") => "[]".into(),
+            Some("restore") => return Err(error("synthetic restore failure")),
+            Some("inspect") if args[1] == "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9" => {
+                serde_json::json!({"name":args[1],"status":"Stopped","config":{"mounts":[
+                    {"type":"Owned","guest":"/workspace"},
+                    {"type":"Bind","host":self.host,"guest":"/opt/silo/chatgpt",
+                        "options":{"readonly":true}},
+                ]}})
+                .to_string()
+            }
+            Some("inspect") => return Err(error("computer not found")),
+            _ => panic!("unexpected command: {args:?}"),
         };
         Ok(CommandOutput {
             stdout,
@@ -658,54 +636,42 @@ impl RuntimeRunner for RejectedRestore {
 }
 
 #[test]
-fn retrying_a_rejected_restore_still_requires_the_computer_use_mount() {
+fn restoring_from_a_computer_with_legacy_mounts_passes_them_again() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
     let published = directory.path().join("published");
     std::fs::create_dir(&published).unwrap();
-    crate::computer_use::set_test_published_dir(Some(published));
     pending_import(&paths);
-    let mut record = load(&paths, ID).unwrap();
-    record.restore_attempted = true;
-    record.restore_attempt_ran = true;
-    record.restore_attempt_id = Some(ATTEMPT.into());
-    save(&paths, ID, &record).unwrap();
-    let runner = RejectedRestore(Mutex::new(Vec::new()));
-    let failure = start_pending(&runner, &paths, &built_in_computer())
-        .unwrap_err()
-        .to_string();
-    assert!(failure.contains("computer-use folder"), "{failure}");
-    // No command changed the computer, and the recovery state survives for the next Retry.
-    assert!(runner
-        .0
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|args| matches!(args[0].as_str(), "snapshot" | "list" | "inspect")));
-    let kept = load(&paths, ID).unwrap();
-    assert!(kept.pending_checkpoint_restore.is_some());
-    assert!(kept.restore_attempted && kept.restore_attempt_ran);
-    assert_eq!(kept.restore_attempt_id.as_deref(), Some(ATTEMPT));
-    crate::computer_use::set_test_published_dir(None);
+    let runner = LegacySource {
+        host: published.clone(),
+        calls: Mutex::new(Vec::new()),
+    };
+    assert!(start_pending(&runner, &paths, &built_in_computer()).is_err());
+    let calls = runner.calls.lock().unwrap();
+    let restore = calls.iter().find(|args| args[0] == "restore").unwrap();
+    let mount = format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", published.display());
+    assert!(
+        restore
+            .windows(2)
+            .any(|pair| pair == ["-v", mount.as_str()]),
+        "{restore:?}"
+    );
 }
 
 #[test]
-fn a_built_in_computer_cannot_restore_without_the_shared_folder() {
+fn restoring_a_computer_without_built_in_computer_use_adds_no_mount() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = paths(&directory);
-    crate::computer_use::set_test_published_dir(None);
     pending_import(&paths);
     let runner = RestoreProbe(Mutex::new(Vec::new()));
-    let failure = start_pending(&runner, &paths, &built_in_computer()).unwrap_err();
-    assert!(failure.to_string().contains("shared ChatGPT folder"));
-    // Nothing ran and the pending restore is untouched.
-    assert!(runner.0.lock().unwrap().is_empty());
-    assert!(load(&paths, ID)
-        .unwrap()
-        .pending_checkpoint_restore
-        .is_some());
+    assert!(start_pending(&runner, &paths, &computer_configuration()).is_err());
+    let calls = runner.0.lock().unwrap();
+    let restore = calls.iter().find(|args| args[0] == "restore").unwrap();
+    assert!(!restore
+        .iter()
+        .any(|arg| arg == "-v" || arg.contains("/opt/silo")));
 }
 
 #[test]

@@ -28,7 +28,7 @@ export function ComputerUsePanel({ approval }: { approval: ComputerUseApprovalCo
     <ListRow
       icon={<ListRowIcon aria-hidden="true"><Monitor className="size-3.5" /></ListRowIcon>}
       title={<span id={labelId}>Allow without asking</span>}
-      detail={<span title={APPROVAL_HINT}>{APPROVAL_HINT}{computerUse.driverVersion ? ` Cua Driver ${computerUse.driverVersion}.` : ""}</span>}
+      detail={<span title={computerUse.driverVersion ? `${APPROVAL_HINT} Cua Driver ${computerUse.driverVersion}.` : APPROVAL_HINT}>{APPROVAL_HINT}</span>}
       actions={<ComputerUseApprovalSwitch approval={approval} labelledBy={labelId} />}
     />
     {setupFailed && <Problem message="Computer use setup failed." title={computerUse.reason} actionLabel="Try again" onAction={approval.setup}

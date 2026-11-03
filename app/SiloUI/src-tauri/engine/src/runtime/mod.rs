@@ -1519,7 +1519,7 @@ fn run_msb_process(
     ensure_runtime_files(paths)?;
     if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
         if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
-            crate::computer_use::repair_lcu_mount_before_start(paths, computer);
+            crate::legacy_mounts::restore_missing_before_start(paths, computer);
         }
     }
     let mut secret_revision = None;
@@ -3956,8 +3956,6 @@ fn computer_progress(
         ("computer-use-setup", _) => "Setting up the desktop and computer use.".into(),
         ("computer-use-pending", _) => "Computer use will finish setting up at first start.".into(),
         ("computer-image-wait", _) => "Waiting for the VM image…".into(),
-        ("chatgpt-app-wait", _) => "Waiting for ChatGPT for Linux…".into(),
-        ("chatgpt-app-download", _) => "Downloading ChatGPT for Linux…".into(),
         ("computer-configuration", _) => format!("{computer} configured."),
         ("computer-verification", 0) => format!("Verifying {computer}…"),
         ("computer-verification", _) => format!("{computer} verified."),
@@ -4017,22 +4015,9 @@ fn publish_creation_wait_with_context(
     request_id: &str,
     step: &crate::creation_inputs::Step,
 ) {
-    use crate::creation_inputs::{ChatGpt, Step};
+    use crate::creation_inputs::Step;
     let event = match step {
         Step::Image => computer_progress(request_id, "computer-image-wait", "", 0),
-        Step::ChatGpt(ChatGpt::Downloading { received, total }) => {
-            let mut event = computer_progress(request_id, "chatgpt-app-download", "", 0);
-            event.downloaded_bytes = Some(*received);
-            event.total_bytes = Some(*total).filter(|total| *total > 0);
-            event
-        }
-        Step::ChatGpt(ChatGpt::Failed { reason }) => {
-            let mut event = computer_progress(request_id, "chatgpt-app-failed", "", 0);
-            event.level = "warning".into();
-            event.message = reason.chars().take(300).collect();
-            event
-        }
-        Step::ChatGpt(_) => computer_progress(request_id, "chatgpt-app-wait", "", 0),
     };
     publish_configuration_progress(context, serde_json::to_value(event).unwrap_or(Value::Null));
 }
@@ -4062,16 +4047,8 @@ fn creation_needs(
             continue;
         }
         needs.computers.push(configuration.id().to_owned());
-        if crate::computer_use::is_built_in(configuration) {
-            needs.computer_use.push(configuration.id().to_owned());
-        }
     }
     needs
-}
-
-/// "Finish without computer use" from the creation toast while it waits for ChatGPT for Linux.
-pub fn skip_computer_use_wait_request(request_id: String) {
-    crate::creation_inputs::skip(&request_id);
 }
 
 fn activity_timestamp() -> u64 {
@@ -5005,8 +4982,8 @@ pub fn change_computer_configuration_with_host_and_job(
     let deleted = change.deleted_ids();
     let result = (|| {
         let paths = runtime_paths(host)?;
-        // The image import and the ChatGPT download are waited for before the gate: holding
-        // the device-wide gate for minutes would stall every lifecycle operation and Quit.
+        // The image import is waited for before the gate: holding the device-wide gate for
+        // minutes would stall every lifecycle operation and Quit.
         let needs = read_metadata(&paths.metadata)
             .ok()
             .and_then(|mut request| {
@@ -6231,8 +6208,6 @@ fn create_computer_with_progress(
         runtime_storage_gib,
         desktop,
     } = configuration;
-    // Needed before anything is claimed or created: a computer without its mount never gets it.
-    let mounts = crate::computer_use::mount_args(configuration)?;
     configuration_recovery::claim(paths, configuration)?;
     progress("computer-disk-preparation", name, 0);
     let preflight = (|| {
@@ -6272,7 +6247,7 @@ fn create_computer_with_progress(
     preflight?;
     progress("computer-image-preparation", name, 0);
     let image = runner.prepare_guest_image(paths)?;
-    let mut args: Vec<String> = vec![
+    let args: Vec<String> = vec![
         "create".into(),
         image,
         "--pull".into(),
@@ -6313,13 +6288,6 @@ fn create_computer_with_progress(
         "--quiet".into(),
         "--progress-json".into(),
     ];
-    // Built-in computer use: the device's ChatGPT app folder, read-only. A snapshot
-    // never carries host mounts, so every restore passes this again (see checkpoints).
-    let before_start = args
-        .iter()
-        .position(|arg| arg == "--no-start")
-        .unwrap_or(args.len());
-    args.splice(before_start..before_start, mounts);
     progress("computer-runtime-preparation", name, 0);
     if let Err(error) = runner.run(paths, &args, MUTATION_TIMEOUT) {
         return Err(with_cleanup_error(
@@ -6354,16 +6322,13 @@ fn create_computer_with_progress(
         progress("desktop-installation", name, 1);
     }
     crate::computer_use::start_with(paths, id, crate::computer_use::initial_approval());
-    // A skipped setup is consumed even for a computer without computer use.
-    let without_computer_use = crate::creation_inputs::take_without_computer_use(id);
     if crate::computer_use::is_built_in(configuration) {
         progress("computer-use-setup", name, 0);
-        let finished = !without_computer_use
-            && crate::computer_use::finish_in_creation(runner, paths, id, name)
-                .map_err(|reason| {
-                    eprintln!("Computer use was not set up while creating {name}: {reason}")
-                })
-                .is_ok();
+        let finished = crate::computer_use::finish_in_creation(runner, paths, id, name)
+            .map_err(|reason| {
+                eprintln!("Computer use was not set up while creating {name}: {reason}")
+            })
+            .is_ok();
         // The first start applies it, as it does for any apply that did not finish.
         if !finished {
             progress("computer-use-pending", name, 0);
@@ -7007,18 +6972,11 @@ mod tests {
 
     #[test]
     fn creation_wait_progress_targets_only_the_main_client() {
-        use crate::creation_inputs::{ChatGpt, Step};
+        use crate::creation_inputs::Step;
         use silo_engine::context::{test_support::RecordingContext, Audience, ClientId};
 
         let context = RecordingContext::default();
-        publish_creation_wait_with_context(
-            &context,
-            "request",
-            &Step::ChatGpt(ChatGpt::Downloading {
-                received: 5,
-                total: 10,
-            }),
-        );
+        publish_creation_wait_with_context(&context, "request", &Step::Image);
 
         let published = context.published();
         assert_eq!(published.len(), 2);
@@ -11606,15 +11564,10 @@ exit 9
     }
 
     #[test]
-    fn creating_a_built_in_computer_mounts_the_published_app_folder_read_only() {
+    fn creating_a_built_in_computer_adds_no_host_mount() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
-        let published = directory.path().join("published");
-        fs::create_dir(&published).unwrap();
-        // Empty on purpose: the ChatGPT app may still be downloading.
-        assert_eq!(fs::read_dir(&published).unwrap().count(), 0);
-        crate::computer_use::set_test_published_dir(Some(published.clone()));
         let runner = StubRunner::successful_json(vec![
             json!([]),
             json!(1),
@@ -11630,14 +11583,12 @@ exit 9
             applied_report(),
         ]);
         create_computer(&runner, &paths, &built_in_computer()).unwrap();
-        crate::computer_use::set_test_published_dir(None);
         let calls = runner.calls.lock().unwrap();
-        let mount = format!("{}:/opt/silo/chatgpt:ro,uid=0,gid=0", published.display());
         let create = &calls[3];
-        let position = create.iter().position(|arg| arg == "-v").unwrap();
-        assert_eq!(create[position + 1], mount);
-        assert_eq!(create.iter().filter(|arg| *arg == "-v").count(), 1);
-        assert!(position < create.iter().position(|arg| arg == "--no-start").unwrap());
+        // Cua Driver lives in the guest image: nothing is shared from the host.
+        assert!(!create
+            .iter()
+            .any(|arg| arg == "-v" || arg.contains("/opt/silo")));
         // The workspace disk is still the only owned mount.
         assert!(create
             .windows(2)
@@ -11651,9 +11602,6 @@ exit 9
         for mode in [Approval::Ask, Approval::Auto] {
             let directory = tempfile::tempdir().unwrap();
             let paths = paths(&directory);
-            let published = directory.path().join("published");
-            fs::create_dir(&published).unwrap();
-            crate::computer_use::set_test_published_dir(Some(published));
             let runner = StubRunner::successful_json(vec![
                 json!([]),
                 json!(1),
@@ -11672,7 +11620,6 @@ exit 9
             crate::computer_use::with_initial_approval(mode, || {
                 create_computer(&runner, &paths, &configuration).unwrap()
             });
-            crate::computer_use::set_test_published_dir(None);
             let settings = crate::computer_use::settings(&paths, configuration.id());
             assert_eq!(settings.approval, mode);
             // Creation applies the mode itself, in the one boot that has the desktop up.
@@ -11689,13 +11636,10 @@ exit 9
     }
 
     #[test]
-    fn creation_without_the_computer_use_apply_finishes_with_a_warning_and_no_boot() {
+    fn creation_finishes_with_a_warning_when_the_computer_use_apply_fails() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
-        let published = directory.path().join("published");
-        fs::create_dir(&published).unwrap();
-        crate::computer_use::set_test_published_dir(Some(published));
         let runner = StubRunner::successful_json(vec![
             json!([]),
             json!(1),
@@ -11708,32 +11652,29 @@ exit 9
             json!(1),
             json!(null),
             inspect(&paths, "Stopped"),
+            json!({"state": "failed", "apply": {"approval": "ask", "outcome": "failed", "reason": "doctor-failed"}}),
         ]);
         let configuration = built_in_computer();
-        crate::creation_inputs::exclude_computer_use(&[configuration.id().to_owned()]);
         let events = Mutex::new(Vec::new());
         create_computer_with_progress(&runner, &paths, &configuration, &|step, _, _| {
             events.lock().unwrap().push(step.to_owned())
         })
         .unwrap();
-        crate::computer_use::set_test_published_dir(None);
-        let calls = runner.calls.lock().unwrap();
-        assert!(!calls
-            .last()
-            .unwrap()
-            .iter()
-            .any(|arg| arg.contains("silo-computer-use")));
+        // The first start applies it again, as it does for any apply that did not finish.
         assert_eq!(
             events.lock().unwrap().last().map(String::as_str),
             Some("computer-use-pending")
         );
-        assert!(!crate::creation_inputs::take_without_computer_use(
-            configuration.id()
-        ));
+        assert_eq!(
+            crate::computer_use::settings(&paths, configuration.id())
+                .last
+                .map(|attempt| attempt.outcome),
+            Some(crate::computer_use::Outcome::Failed)
+        );
     }
 
     #[test]
-    fn creating_a_computer_needs_the_image_and_the_app_only_when_it_is_new_and_built_in() {
+    fn creating_a_computer_needs_the_image_only_when_it_is_new() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
@@ -11747,15 +11688,8 @@ exit 9
             computers,
         };
         write_metadata(&paths.metadata, &request(Vec::new())).unwrap();
-        // A v3 image has no built-in desktop: the image is needed, the app is not.
         let needs = creation_needs(&paths, request(vec![plain.clone()]));
         assert_eq!(needs.computers, [plain.id().to_owned()]);
-        assert!(needs.computer_use.is_empty());
-        {
-            let _v4 = guest_image::pin_test_version("ubuntu-24.04-v4");
-            let needs = creation_needs(&paths, request(vec![plain.clone()]));
-            assert_eq!(needs.computer_use, [plain.id().to_owned()]);
-        }
         // An existing computer is never waited for.
         write_metadata(&paths.metadata, &request(vec![plain.clone()])).unwrap();
         assert!(creation_needs(&paths, request(vec![plain])).is_empty());
@@ -11766,7 +11700,6 @@ exit 9
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
-        crate::computer_use::set_test_published_dir(Some(directory.path().to_path_buf()));
         let runner = StubRunner::successful_json(vec![
             json!([]),
             json!(1),
@@ -11777,24 +11710,10 @@ exit 9
             inspect_owned_workspace(&paths, "Stopped"),
         ]);
         create_computer(&runner, &paths, &computer()).unwrap();
-        crate::computer_use::set_test_published_dir(None);
         let calls = runner.calls.lock().unwrap();
         assert!(!calls[3]
             .iter()
             .any(|arg| arg == "-v" || arg.contains("/opt/silo")));
-    }
-
-    #[test]
-    fn a_built_in_computer_is_not_created_without_the_shared_folder() {
-        let _test_state = crate::test_support::global_state();
-        let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        crate::computer_use::set_test_published_dir(None);
-        let runner = StubRunner::successful_json(vec![]);
-        let error = create_computer(&runner, &paths, &built_in_computer()).unwrap_err();
-        assert!(error.to_string().contains("shared ChatGPT folder"));
-        // Refused before the runtime was asked anything or anything was claimed.
-        assert!(runner.calls.lock().unwrap().is_empty());
     }
 
     #[test]

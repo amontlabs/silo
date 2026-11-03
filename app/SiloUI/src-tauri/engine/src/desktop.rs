@@ -261,43 +261,9 @@ fn installer_script(action: &str) -> String {
     script
 }
 
-fn lcu_setup_script() -> String {
-    let mut script = String::from(
-        "set -eu\nlcu_stage=$(mktemp -d /tmp/silo-lcu.XXXXXXXX)\ntrap 'rm -rf \"$lcu_stage\"' EXIT\n",
-    );
-    for (filename, source, delimiter) in [
-        (
-            "setup-lcu.py",
-            include_str!("../../guest/setup-lcu.py"),
-            "SILO_LCU_SETUP_EOF",
-        ),
-        (
-            "lcu-lock.json",
-            include_str!("../../guest/lcu-legacy-lock.json"),
-            "SILO_LCU_LOCK_EOF",
-        ),
-    ] {
-        script.push_str(&format!(
-            "cat > \"$lcu_stage/{filename}\" <<'{delimiter}'\n{source}\n{delimiter}\n"
-        ));
-    }
-    script.push_str(
-        r#"lcu_status=$(python3 "$lcu_stage/setup-lcu.py" status)
-if printf '%s\n' "$lcu_status" | python3 -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("status") == "needs-runtime" else 1)'; then printf '%s\n' "$lcu_status"; exit 0; fi
-install -d -m 0755 /usr/local/libexec /usr/local/share/silo
-install -m 0755 "$lcu_stage/setup-lcu.py" /usr/local/libexec/silo-setup-lcu.py
-install -m 0644 "$lcu_stage/lcu-lock.json" /usr/local/share/silo/lcu-lock.json
-python3 /usr/local/libexec/silo-setup-lcu.py setup
-"#,
-    );
-    script
-}
-
 fn action_script(action: &str) -> String {
     if action == "setup-agent-tools" {
         crate::agent_tools::setup_script()
-    } else if action == "setup-lcu" {
-        lcu_setup_script()
     } else if action == "update-streamer" {
         installer_script(action)
     } else {
@@ -308,7 +274,7 @@ fn action_script(action: &str) -> String {
 fn action_timeout(action: &str) -> Duration {
     if matches!(
         action,
-        "update-streamer" | "setup-lcu" | "setup-computer-use" | "setup-agent-tools"
+        "update-streamer" | "setup-computer-use" | "setup-agent-tools"
     ) {
         Duration::from_secs(1800)
     } else if action == "restart-streamer" {
@@ -434,7 +400,7 @@ fn status_with(
     let settings = crate::desktop::configuration(configuration);
     let built_in = crate::computer_use::is_built_in(configuration);
     let fallback = |state: &str| {
-        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "updateAvailable":false, "streamerVersion":null, "lcuState":null, "lcuReason":null, "lcuVersion":null, "lcuAppVersion":null, "lcuRuntimeVersion":null, "lcuAgents":null, "lcuReadiness":null, "agentTools":null});
+        let mut value = json!({"installed": settings.is_some(), "state":state, "autoStart":settings.is_some_and(|s| s.start_with_computer), "backend":null, "sessionState":"stopped", "streamState":"stopped", "updateRequired":false, "updateAvailable":false, "streamerVersion":null, "agentTools":null});
         // A stopped computer still reports its approval mode and the last versions it had.
         if let Some(computer_use) =
             crate::computer_use::desktop_state(paths, configuration, false, None)
@@ -568,48 +534,11 @@ fn public_status(value: Value) -> Result<Value, String> {
                 .iter()
                 .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
     });
-    let lcu_state = value["lcuState"].as_str().filter(|state| {
-        matches!(
-            *state,
-            "needs-runtime"
-                | "not-installed"
-                | "repair-required"
-                | "failed"
-                | "installing"
-                | "ready"
-        )
-    });
-    let lcu_reason = value["lcuReason"].as_str().filter(|reason| {
-        matches!(
-            *reason,
-            "chatgpt-app-required"
-                | "invalid-receipt"
-                | "unsupported-receipt"
-                | "managed-runtime-missing"
-                | "setup-failed"
-        )
-    });
-    let lcu_version = safe_version(value["lcuVersion"].as_str());
-    let lcu_app_version = safe_version(value["lcuAppVersion"].as_str());
-    let lcu_runtime_version = safe_lcu_runtime_version(value["lcuRuntimeVersion"].as_str());
-    let lcu_agents = value["lcuAgents"].as_array().map(|agents| {
-        agents
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|agent| matches!(*agent, "pi" | "codex" | "claude-code"))
-            .collect::<Vec<_>>()
-    });
-    let lcu_readiness = value["lcuReadiness"]
-        .as_str()
-        .filter(|readiness| matches!(*readiness, "ready" | "unverified" | "failed"));
     Ok(
         json!({"installed":installed,"state":state,"autoStart":auto_start,
         "version":safe_version(value["version"].as_str()),"user":safe_user(value["user"].as_str()),
         "display":safe_display(value["display"].as_str()),
-        "lcuState":lcu_state,
-        "lcuReason":lcu_reason, "lcuVersion":lcu_version,
-        "lcuAppVersion":lcu_app_version, "lcuRuntimeVersion":lcu_runtime_version,
-        "lcuAgents":lcu_agents, "lcuReadiness":lcu_readiness, "backend":backend,
+        "backend":backend,
         "sessionState":session_state, "streamState":stream_state,
         "updateRequired":update_required, "updateAvailable":update_available && !update_required,
         "streamerVersion":streamer_version}),
@@ -649,29 +578,6 @@ fn safe_version(value: Option<&str>) -> Option<&str> {
             && version
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b".+~:-_".contains(&byte))
-    })
-}
-
-fn safe_lcu_runtime_version(value: Option<&str>) -> Option<&str> {
-    value.filter(|runtime| {
-        if runtime.len() > 64 {
-            return false;
-        }
-        let Some((version, build)) = runtime.split_once('/') else {
-            return false;
-        };
-        let components = version.split('.').collect::<Vec<_>>();
-        let build = build.as_bytes();
-        components.len() == 3
-            && components.iter().all(|component| {
-                !component.is_empty() && component.bytes().all(|byte| byte.is_ascii_digit())
-            })
-            && build.len() == 27
-            && build[..14].iter().all(u8::is_ascii_digit)
-            && build[14] == b'-'
-            && build[15..]
-                .iter()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
     })
 }
 
@@ -838,7 +744,6 @@ pub fn local_for_job(
                 | "restart"
                 | "restart-streamer"
                 | "update-streamer"
-                | "setup-lcu"
                 | "setup-computer-use"
                 | "setup-agent-tools"
         ) {
@@ -854,9 +759,6 @@ pub fn local_for_job(
                 "Computer use is built into computers created with the current guest image. Create a new computer to use it."
                     .into(),
             );
-        }
-        if action == "setup-lcu" && crate::computer_use::is_built_in(&configuration) {
-            return Err("This computer sets up computer use itself.".into());
         }
         let inspected = match runtime::observe_computer(&runtime::ProcessRunner, &paths, computer)
             .map_err(|e| e.to_string())?
@@ -1560,24 +1462,6 @@ mod tests {
     }
 
     #[test]
-    fn lcu_setup_is_explicit_staged_and_never_starts_computer() {
-        let _test_state = crate::test_support::global_state();
-        let setup = action_script("setup-lcu");
-        assert!(setup.contains("lcu-lock.json"));
-        assert!(setup.contains("/usr/local/share/silo/lcu-lock.json"));
-        assert!(setup.contains("/usr/local/libexec/silo-setup-lcu.py setup"));
-        assert!(setup.contains("setup-lcu.py\" status"));
-        assert!(setup.contains("needs-runtime"));
-        assert!(
-            setup.find("lcu_status=$(python3").unwrap() < setup.find("install -m 0644").unwrap()
-        );
-        assert!(!setup.contains("SILO_DESKTOP_LCU_LOCK_SOURCE"));
-        assert_eq!(action_timeout("setup-lcu"), Duration::from_secs(1800));
-        assert!(!action_starts_computer("setup-lcu"));
-        assert!(action_starts_computer("start"));
-    }
-
-    #[test]
     fn long_desktop_actions_are_not_flagged_before_their_guest_timeout() {
         let _test_state = crate::test_support::global_state();
         for action in [
@@ -1586,7 +1470,7 @@ mod tests {
             "restart",
             "restart-streamer",
             "update-streamer",
-            "setup-lcu",
+            "setup-computer-use",
         ] {
             assert!(
                 action_expected_duration(action) > action_timeout(action),
@@ -1633,7 +1517,7 @@ mod tests {
         let old =
             public_status(json!({"installed":true,"autoStart":false,"state":"stopped"})).unwrap();
         assert_eq!(old["backend"], "kasm");
-        assert!(old["lcuState"].is_null());
+        assert!(old.get("lcuState").is_none());
         let split = public_status(json!({
             "installed":true,"autoStart":true,"state":"failed",
             "backend":"selkies","sessionState":"running","streamState":"failed",
@@ -1646,43 +1530,21 @@ mod tests {
         assert_eq!(split["updateRequired"], true);
         assert_eq!(split["streamerVersion"], "2.0.0");
         assert!(!split.to_string().contains("private"));
+        // Fields of the earlier LCU-based desktop state are ignored.
         let lcu = public_status(json!({
             "installed":true,"autoStart":true,"state":"running",
             "sessionState":"running","streamState":"failed",
             "lcuState":"ready","lcuVersion":"0.4.0",
             "lcuAppVersion":"26.924.22138",
-            "lcuRuntimeVersion":"0.0.24/20260924074400-f52ea85e2a98",
-            "lcuAgents":["pi","codex","claude-code","unexpected"],
-            "lcuReadiness":"ready","lcuReason":"invalid-receipt",
+            "lcuAgents":["pi","codex","claude-code"],
             "appPath":"/private/app","password":"private"
         }))
         .unwrap();
         assert_eq!(lcu["state"], "running");
         assert_eq!(lcu["sessionState"], "running");
         assert_eq!(lcu["streamState"], "failed");
-        assert_eq!(lcu["lcuState"], "ready");
-        assert_eq!(lcu["lcuAppVersion"], "26.924.22138");
-        assert_eq!(
-            lcu["lcuRuntimeVersion"],
-            "0.0.24/20260924074400-f52ea85e2a98"
-        );
-        assert_eq!(lcu["lcuAgents"], json!(["pi", "codex", "claude-code"]));
-        assert!(!lcu.to_string().contains("/private/app"));
+        assert!(lcu.as_object().unwrap().keys().all(|key| !key.starts_with("lcu")));
         assert!(!lcu.to_string().contains("private"));
-        let unsafe_runtime = public_status(json!({
-            "installed":true,"autoStart":true,"state":"running",
-            "lcuRuntimeVersion":"../../private/runtime"
-        }))
-        .unwrap();
-        assert!(unsafe_runtime["lcuRuntimeVersion"].is_null());
-        let prerequisite = public_status(json!({
-            "installed":true,"autoStart":true,"state":"running",
-            "lcuState":"needs-runtime","lcuReason":"chatgpt-app-required"
-        }))
-        .unwrap();
-        assert_eq!(prerequisite["state"], "running");
-        assert_eq!(prerequisite["lcuState"], "needs-runtime");
-        assert_eq!(prerequisite["lcuReason"], "chatgpt-app-required");
     }
 
     struct ConnectionRunner {
@@ -2014,9 +1876,7 @@ mod tests {
             json!({"installed":true,"state":"computer-stopped","autoStart":false,
                    "backend":null,"sessionState":"stopped","streamState":"stopped",
                    "updateRequired":false,"updateAvailable":false,"streamerVersion":null,
-                   "lcuState":null,"lcuReason":null,"lcuVersion":null,
-                   "lcuAppVersion":null,"lcuRuntimeVersion":null,
-                   "lcuAgents":null,"lcuReadiness":null,"agentTools":null})
+                   "agentTools":null})
         );
         runner.assert_finished();
     }
@@ -2239,7 +2099,7 @@ mod tests {
         let guest_output = format!(
             "{}\n{}\n",
             json!({"installed":true,"state":"running","autoStart":true,"sessionState":"running","streamState":"running","backend":"selkies"}),
-            json!({"state":"ready","reason":null,"compatibility":"untested","warning":"Not tested.","appVersion":"26.928.31416","runtimeVersion":null,"lcuVersion":"0.8.0","agents":["codex"],"approval":"ask","mount":"ok"})
+            json!({"schemaVersion":2,"state":"ready","reason":null,"driverVersion":"0.38.0","agents":["codex"],"approval":"ask","approvalOutcome":"applied","pending":[],"verifiedAt":1})
         ) + "{\"backend\":\"selkies\",\"recipeVersion\":2}\n";
         let runner = ScriptedRunner::new([
             inspect(
@@ -2267,18 +2127,13 @@ mod tests {
                 guest_output,
             ),
         ]);
-        crate::chatgpt_app::set_test_cache(Some(crate::chatgpt_app::Status::Ready {
-            path: "/x".into(),
-            version: "26.928.31416".into(),
-        }));
         let status = status_with(&runner, &paths(dir.path()), &configuration).unwrap();
-        crate::chatgpt_app::set_test_cache(None);
         assert_eq!(status["state"], "running");
         let computer_use = &status["computerUse"];
         assert_eq!(computer_use["state"], "ready");
-        assert_eq!(computer_use["compatibility"], "untested");
-        assert_eq!(computer_use["warning"], "Not tested.");
-        assert_eq!(computer_use["lcuVersion"], "0.8.0");
+        assert_eq!(computer_use["driverVersion"], "0.38.0");
+        assert!(computer_use.get("compatibility").is_none());
+        assert!(computer_use.get("lcuVersion").is_none());
         assert_eq!(computer_use["agents"], json!(["codex"]));
         assert_eq!(computer_use["approval"], "ask");
         runner.assert_finished();

@@ -95,9 +95,9 @@ jobs:
           cp app/SiloUI/src-tauri/guest/setup-github.sh guest-release/setup-github.sh
           cp app/SiloUI/src-tauri/guest/silo-accessibility.py guest-release/silo-accessibility.py
           cp app/SiloUI/src-tauri/guest/desktop-streamer-lock.json guest-release/desktop-streamer-lock.json
-          cp app/SiloUI/src-tauri/guest/lcu-lock.json guest-release/lcu-lock.json
+          cp app/SiloUI/src-tauri/guest/cua-driver-lock.json guest-release/cua-driver-lock.json
           cp app/SiloUI/src-tauri/guest/desktop-packages.txt guest-release/desktop-packages.txt
           cp app/SiloUI/src-tauri/guest/guest-third-party-notices.md guest-release/guest-third-party-notices.md
           printf '%s\n' "$GITHUB_SHA" > guest-release/source-commit.txt
           (cd guest-release && sha256sum image-*.tar.gz > SHA256SUMS)
-          gh release create "$RELEASE_TAG" guest-release/* --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "Ubuntu 24.04 with curl, Git, Git LFS, gh, sudo, Python, OpenSSH SFTP server, an Xfce desktop with the Selkies streamer, Linux computer-use system libraries and Silo integration. Working-account creation is offline. Exact bundled archives, package inventories and image config digests are attached. Standard OCI images: $IMAGE. No credentials or user data." --latest=false
+          gh release create "$RELEASE_TAG" guest-release/* --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --notes "Ubuntu 24.04 with curl, Git, Git LFS, gh, sudo, Python, OpenSSH SFTP server, an Xfce desktop with the Selkies streamer, Cua Driver for Linux computer use and Silo integration. Working-account creation is offline. Exact bundled archives, package inventories and image config digests are attached. Standard OCI images: $IMAGE. No credentials or user data." --latest=false

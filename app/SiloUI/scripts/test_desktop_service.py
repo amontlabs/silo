@@ -999,55 +999,11 @@ class DesktopLifecycle(unittest.TestCase):
         self.assertEqual(large.read_bytes(), b'b' * (256 * 1024))
         self.assertEqual(target.read_bytes(), original)
 
-    def test_lcu_status_requires_the_official_runtime_before_receipt_state(self):
-        service.write(service.STATE / 'lcu.json', {
-            'schemaVersion': 1, 'status': 'ready', 'version': '0.4.0',
-            'appVersion': '1.0.0', 'runtimeVersion': '0.4.0',
-            'agents': ['pi', 'codex'], 'readiness': 'ready',
-        })
-        with patch.object(service, 'LCU_APP', self.root / 'missing-chatgpt'), \
-             patch.object(service, 'LCU_RECEIPT', service.STATE / 'lcu.json'), \
-             patch.object(service.subprocess, 'run', side_effect=AssertionError('must stay passive')):
-            result = service.lcu_status()
-        self.assertEqual(result['lcuState'], 'needs-runtime')
-        self.assertEqual(result['lcuReason'], 'chatgpt-app-required')
-        self.assertEqual(result['lcuReadiness'], 'unverified')
-        self.assertIsNone(result['lcuVersion'])
+    def test_status_reports_no_computer_use_fields(self):
+        result = self.command('status')
+        self.assertEqual([key for key in result if key.lower().startswith('lcu')], [])
+        self.assertFalse(hasattr(service, 'lcu_status'))
 
-    def test_lcu_ready_projection_filters_agents_and_private_receipt_fields(self):
-        app = self.root / 'usr/lib/chatgpt'
-        app.mkdir(parents=True)
-        prefix = self.root / 'opt/lcu'
-        release = prefix / 'releases/0.4.0'
-        (release / 'bin').mkdir(parents=True)
-        runtime = release / 'bin/lcu'
-        runtime.write_text('#!/bin/sh\n')
-        runtime.chmod(0o755)
-        (release / 'app').mkdir()
-        prefix.mkdir(parents=True, exist_ok=True)
-        (prefix / 'current').symlink_to(release)
-        receipt_path = self.root / 'lcu.json'
-        receipt_path.write_text(json.dumps({
-            'schemaVersion': 1, 'status': 'ready', 'version': '0.4.0',
-            'appVersion': '26.924.22138',
-            'runtimeVersion': '0.0.24/20260924074400-f52ea85e2a98',
-            'agents': ['pi', 'codex', 'unknown'], 'readiness': 'ready',
-            'appPath': '/private/path/must-not-escape',
-        }))
-        receipt = SimpleNamespace(
-            lstat=lambda: SimpleNamespace(st_uid=0, st_mode=receipt_path.lstat().st_mode),
-            read_text=receipt_path.read_text,
-        )
-        with patch.object(service, 'LCU_APP', app), \
-             patch.object(service, 'LCU_PREFIX', prefix), \
-             patch.object(service, 'LCU_RECEIPT', receipt), \
-             patch.object(service.subprocess, 'run', side_effect=AssertionError('must stay passive')):
-            result = service.lcu_status()
-        self.assertEqual(result['lcuState'], 'ready')
-        self.assertEqual(result['lcuAgents'], ['codex', 'pi'])
-        self.assertEqual(result['lcuAppVersion'], '26.924.22138')
-        self.assertEqual(result['lcuRuntimeVersion'], '0.0.24/20260924074400-f52ea85e2a98')
-        self.assertNotIn('appPath', result)
     def test_status_ignores_a_previous_luda_installation(self):
         service.write(service.STATE / 'luda.json', {'state': 'ready', 'version': '0.3.4'})
         result = self.command('status')
