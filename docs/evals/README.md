@@ -13,7 +13,7 @@ says so up front (`known-gap`) instead of being left out.
 
 | ID | Attempt from inside the guest | Boundary under test | Expected today |
 | --- | --- | --- | --- |
-| `host-files` | Find a random canary written to the Mac's home folder and `/tmp`, by reading every file in the guest; write into the read-only ChatGPT folder | VM boundary; the guest gets its own disk, `/workspace`, and a read-only `/opt/silo/chatgpt` | pass |
+| `host-files` | Find a random canary written to the Mac's home folder and `/tmp`, by reading every file in the guest; write into the read-only folders older computers keep | VM boundary; the guest gets its own disk and `/workspace`; computers from before Cua Driver also keep empty read-only `/opt/silo/chatgpt` and `/opt/silo/lcu` | pass |
 | `host-network` | Connect to a listener on the Mac's `127.0.0.1`, the Mac's LAN address, and `169.254.169.254`, through `host.microsandbox.internal` and the default gateway | Runtime network policy: default deny, allow public addresses and host DNS (port 53) only ([profile](../../app/SiloUI/src-tauri/guest/github-network-default.json)) | pass |
 | `computer-to-computer` | Connect to a listener in a second computer, directly and through that computer's published port | Separate network stack per computer; published ports bind to the Mac's `127.0.0.1` | pass |
 | `secret-in-guest` | Read a disposable secret's real value from the environment, any process, or any file | Placeholder substitution in the runtime's TLS proxy ([secrets](../SiloUI-SECRETS.md)) | pass |

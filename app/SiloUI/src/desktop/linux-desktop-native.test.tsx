@@ -272,10 +272,10 @@ it("attaches once the stream becomes ready", async () => {
   } finally { vi.useRealTimers() }
 })
 
-it("keeps the desktop usable when the guest reports a failed or unknown diagnostic", async () => {
+it("keeps the desktop usable when the guest reports a failed or malformed computer use diagnostic", async () => {
   invoke.mockImplementation(async command => command === "read_desktop_state" ? {
     installed: true, autoStart: true, state: "running", backend: "selkies", sessionState: "running", streamState: "running",
-    lcuState: "failed", lcuReadiness: "failed", lcuReason: 42,
+    computerUse: { state: "failed", reason: 42, driverVersion: 7 },
   } : undefined)
   render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
   expect(await screen.findByLabelText("Linux desktop display")).toBeVisible()
@@ -350,48 +350,6 @@ it("keeps a healthy stopped legacy desktop startable and makes migration optiona
   await user.click(screen.getByRole("button", { name: "Start desktop" }))
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("desktop_action", { computer: "dev", action: "start" }))
   expect(invoke.mock.calls.some(([command, args]) => command === "desktop_action" && args?.action === "update-streamer")).toBe(false)
-})
-
-it("keeps a running desktop healthy when the LCU runtime prerequisite is missing", async () => {
-  invoke.mockImplementation(async command => command === "read_desktop_state" ? {
-    installed: true, autoStart: true, state: "running", backend: "selkies",
-    sessionState: "running", streamState: "running", lcuState: "needs-runtime",
-    lcuReason: "chatgpt-app-required",
-  } : undefined)
-  render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
-  expect(await screen.findByLabelText("Linux desktop display")).toBeVisible()
-  expect(await screen.findByText(/LCU requires the official ChatGPT app/)).toBeVisible()
-  expect(screen.getByRole("button", { name: "Set up LCU" })).toBeEnabled()
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("desktop_viewer_attach", expect.objectContaining({ computer: "dev" })))
-  expect(invoke.mock.calls.some(([command]) => command === "desktop_action")).toBe(false)
-})
-
-it("runs explicit LCU setup in a live session even when its display stream failed", async () => {
-  invoke.mockImplementation(async (command, args) => {
-    if (command === "read_desktop_state") return {
-      installed: true, autoStart: true, state: "failed", backend: "selkies",
-      sessionState: "running", streamState: "failed", lcuState: "not-installed",
-    }
-    if (command === "desktop_action" && args?.action === "setup-lcu") return {
-      installed: true, autoStart: true, state: "failed", backend: "selkies",
-      sessionState: "running", streamState: "failed", lcuState: "needs-runtime",
-      lcuReason: "chatgpt-app-required",
-    }
-    return undefined
-  })
-  const user = userEvent.setup()
-  render(<NativeLinuxDesktopViewer computer="dev" name="dev" />)
-  expect(await screen.findByLabelText("Linux desktop display")).toBeVisible()
-  expect(await screen.findByRole("button", { name: "Set up LCU" })).toBeEnabled()
-  // A failed stream cannot be attached; the session stays usable for setup.
-  const attachmentCount = 0
-  await user.click(screen.getByRole("button", { name: "Set up LCU" }))
-  expect(await screen.findByText(/LCU requires the official ChatGPT app/)).toBeVisible()
-  expect(invoke).toHaveBeenCalledWith("desktop_action", { computer: "dev", action: "setup-lcu" })
-  expect(screen.getByLabelText("Linux desktop display")).toBeVisible()
-  expect(invoke.mock.calls.filter(([command]) => command === "desktop_viewer_attach")).toHaveLength(attachmentCount)
-  expect(invoke.mock.calls.some(([command, action]) => command === "desktop_action" &&
-    ["restart", "restart-streamer", "start"].includes(action?.action))).toBe(false)
 })
 
 it("pauses viewer health polling when hidden and refreshes once on return", async () => {

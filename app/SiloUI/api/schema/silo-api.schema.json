@@ -573,110 +573,6 @@
       ],
       "type": "object"
     },
-    "ChatGptPreparationStatus": {
-      "oneOf": [
-        {
-          "properties": {
-            "state": {
-              "const": "idle",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "receivedBytes": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "state": {
-              "const": "downloading",
-              "type": "string"
-            },
-            "totalBytes": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "state",
-            "receivedBytes",
-            "totalBytes"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "state": {
-              "const": "verifying",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "state": {
-              "const": "extracting",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "state": {
-              "const": "ready",
-              "type": "string"
-            },
-            "version": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "path",
-            "version"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "retryable": {
-              "type": "boolean"
-            },
-            "state": {
-              "const": "failed",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "reason",
-            "retryable"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Checkpoint": {
       "description": "The common checkpoint view returned by Linux and macOS computers.",
       "properties": {
@@ -1620,23 +1516,6 @@
       ],
       "type": "object"
     },
-    "ComputerCreationSkipWaitParams": {
-      "properties": {
-        "deviceId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "requestId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "requestId"
-      ],
-      "type": "object"
-    },
     "ComputerDeleteParams": {
       "properties": {
         "computerId": {
@@ -1804,24 +1683,9 @@
       ],
       "type": "string"
     },
-    "ComputerUseCause": {
-      "enum": [
-        "app-download"
-      ],
-      "type": "string"
-    },
-    "ComputerUseCompatibility": {
-      "enum": [
-        "tested",
-        "untested",
-        "unknown"
-      ],
-      "type": "string"
-    },
     "ComputerUseInstallState": {
       "enum": [
         "unavailable",
-        "preparing",
         "installing",
         "ready",
         "failed"
@@ -1837,12 +1701,6 @@
           },
           "type": [
             "array",
-            "null"
-          ]
-        },
-        "appVersion": {
-          "type": [
-            "string",
             "null"
           ]
         },
@@ -1889,46 +1747,28 @@
             "null"
           ]
         },
-        "cause": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ComputerUseCause"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "chatgptVersion": {
-          "description": "macOS receipt field; Linux projections use `appVersion` instead.",
+          "description": "macOS receipt field; Linux does not use it.",
           "type": [
             "string",
             "null"
           ]
         },
-        "compatibility": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ComputerUseCompatibility"
-            },
-            {
-              "type": "null"
-            }
+        "driverVersion": {
+          "description": "The installed Cua Driver version on Linux.",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "lcuVersion": {
+          "description": "macOS receipt field; Linux does not use it.",
           "type": [
             "string",
             "null"
           ]
         },
         "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "runtimeVersion": {
           "type": [
             "string",
             "null"
@@ -1954,12 +1794,6 @@
             }
           ],
           "description": "Nullable before the macOS guest receipt has been read."
-        },
-        "warning": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "type": "object"
@@ -3411,36 +3245,6 @@
             },
             "payload": {
               "$ref": "#/$defs/PreparationStatus"
-            },
-            "seq": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "subscription": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "event",
-            "subscription",
-            "deviceId",
-            "seq",
-            "payload"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "deviceId": {
-              "type": "string"
-            },
-            "event": {
-              "const": "preparation.chatgpt.changed",
-              "type": "string"
-            },
-            "payload": {
-              "$ref": "#/$defs/ChatGptPreparationStatus"
             },
             "seq": {
               "format": "uint64",
@@ -6767,7 +6571,6 @@
         "computers.configuration.read",
         "computers.configuration.retry",
         "computers.create",
-        "computers.creation.skipComputerUseWait",
         "computers.delete",
         "computers.dismissError",
         "computers.forceStop",
@@ -6872,8 +6675,6 @@
         "operations.job.acknowledge",
         "operations.job.get",
         "operations.list",
-        "preparation.chatgpt.retry",
-        "preparation.chatgpt.status",
         "preparation.retry",
         "preparation.status",
         "push.dismiss",
@@ -7167,22 +6968,6 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerCreateParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "computers.creation.skipComputerUseWait",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/$defs/ComputerCreationSkipWaitParams"
             }
           },
           "required": [
@@ -8858,38 +8643,6 @@
         {
           "properties": {
             "method": {
-              "const": "preparation.chatgpt.retry",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/$defs/DeviceParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "preparation.chatgpt.status",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/$defs/DeviceParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
               "const": "preparation.retry",
               "type": "string"
             },
@@ -9542,22 +9295,6 @@
             },
             "result": {
               "$ref": "#/$defs/ComputerCreateResult"
-            }
-          },
-          "required": [
-            "method",
-            "result"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "computers.creation.skipComputerUseWait",
-              "type": "string"
-            },
-            "result": {
-              "type": "null"
             }
           },
           "required": [
@@ -11254,38 +10991,6 @@
         {
           "properties": {
             "method": {
-              "const": "preparation.chatgpt.retry",
-              "type": "string"
-            },
-            "result": {
-              "$ref": "#/$defs/ChatGptPreparationStatus"
-            }
-          },
-          "required": [
-            "method",
-            "result"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "const": "preparation.chatgpt.status",
-              "type": "string"
-            },
-            "result": {
-              "$ref": "#/$defs/ChatGptPreparationStatus"
-            }
-          },
-          "required": [
-            "method",
-            "result"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
               "const": "preparation.retry",
               "type": "string"
             },
@@ -12444,14 +12149,10 @@
       "properties": {
         "image": {
           "$ref": "#/$defs/PreparationTask"
-        },
-        "lcu": {
-          "$ref": "#/$defs/PreparationTask"
         }
       },
       "required": [
-        "image",
-        "lcu"
+        "image"
       ],
       "type": "object"
     },
@@ -14360,12 +14061,6 @@
       "resultType": "computers::ComputerCreateResult"
     },
     {
-      "kind": "command",
-      "name": "computers.creation.skipComputerUseWait",
-      "paramsType": "computers::ComputerCreationSkipWaitParams",
-      "resultType": "()"
-    },
-    {
       "kind": "job",
       "name": "computers.delete",
       "paramsType": "computers::ComputerDeleteParams",
@@ -14988,18 +14683,6 @@
       "name": "operations.list",
       "paramsType": "operations::OperationsListParams",
       "resultType": "operations::OperationQueue"
-    },
-    {
-      "kind": "command",
-      "name": "preparation.chatgpt.retry",
-      "paramsType": "preparation::ChatGptPreparationRetryParams",
-      "resultType": "preparation::ChatGptPreparationStatus"
-    },
-    {
-      "kind": "query",
-      "name": "preparation.chatgpt.status",
-      "paramsType": "preparation::ChatGptPreparationStatusParams",
-      "resultType": "preparation::ChatGptPreparationStatus"
     },
     {
       "kind": "command",

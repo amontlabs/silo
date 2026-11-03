@@ -125,7 +125,7 @@ async fn a_macos_transfer_answers_with_its_job_while_it_waits_for_the_computers_
     session
         .request(
             "engine.handshake",
-            json!({"protocol": {"min": 6, "max": 6},
+            json!({"protocol": {"min": 7, "max": 7},
                    "client": {"name": "transfers-test", "version": "1.0"}}),
         )
         .await;

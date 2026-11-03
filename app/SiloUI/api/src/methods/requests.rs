@@ -128,13 +128,6 @@ pub fn computers_create(params: computers::ComputerCreateParams) -> Request<kind
     Request::new(MethodParams::ComputersCreate(params))
 }
 
-/// `computers.creation.skipComputerUseWait`
-pub fn computers_creation_skip_computer_use_wait(
-    params: computers::ComputerCreationSkipWaitParams,
-) -> Request<kind::Command> {
-    Request::new(MethodParams::ComputersCreationSkipComputerUseWait(params))
-}
-
 /// `computers.delete`
 pub fn computers_delete(params: computers::ComputerDeleteParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersDelete(params))
@@ -695,20 +688,6 @@ pub fn operations_job_get(params: operations::GetJobParams) -> Request<kind::Que
 /// `operations.list`
 pub fn operations_list(params: operations::OperationsListParams) -> Request<kind::Query> {
     Request::new(MethodParams::OperationsList(params))
-}
-
-/// `preparation.chatgpt.retry`
-pub fn preparation_chatgpt_retry(
-    params: preparation::ChatGptPreparationRetryParams,
-) -> Request<kind::Command> {
-    Request::new(MethodParams::PreparationChatgptRetry(params))
-}
-
-/// `preparation.chatgpt.status`
-pub fn preparation_chatgpt_status(
-    params: preparation::ChatGptPreparationStatusParams,
-) -> Request<kind::Query> {
-    Request::new(MethodParams::PreparationChatgptStatus(params))
 }
 
 /// `preparation.retry`

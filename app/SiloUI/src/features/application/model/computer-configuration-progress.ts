@@ -13,29 +13,9 @@ export interface ComputerConfigurationProgress {
 }
 
 /** Steps with no measurable progress inside them: the bar stays indeterminate. */
-const UNMEASURED_STEPS = new Set(["computer-image-import", "computer-image-wait", "chatgpt-app-wait", "chatgpt-app-failed"])
+const UNMEASURED_STEPS = new Set(["computer-image-import", "computer-image-wait"])
 
 const IMAGE_IMPORT_STEP = "Preparing the computer image (first time only, about a minute)"
-
-/** "Downloading ChatGPT for Linux · 62%", without the percentage until the size is known. */
-function chatGptDownloadText(event: SiloProgressEvent): string {
-  const percent = event.totalBytes && event.downloadedBytes !== undefined
-    ? Math.min(100, Math.floor((event.downloadedBytes / event.totalBytes) * 100))
-    : null
-  return percent === null ? "Downloading ChatGPT for Linux" : `Downloading ChatGPT for Linux · ${percent}%`
-}
-
-/** Whether the creation is stuck on a ChatGPT for Linux failure it can retry or finish without. */
-export function chatGptFailure(operation: ComputerConfigurationOperation): string | null {
-  const latest = operation.progressEvents.findLast(event => event.safeForDisplay)
-  return latest?.step === "chatgpt-app-failed" ? latest.message : null
-}
-
-/** Whether the creation is waiting for ChatGPT for Linux (downloading, or failed), so it can be finished without it. */
-export function waitingForChatGpt(operation: ComputerConfigurationOperation): boolean {
-  const step = operation.progressEvents.findLast(event => event.safeForDisplay)?.step
-  return step === "chatgpt-app-wait" || step === "chatgpt-app-download" || step === "chatgpt-app-failed"
-}
 
 /** Whether creation ended with computer use left for the first start. */
 export function computerUsePending(operation: ComputerConfigurationOperation): boolean {
@@ -55,9 +35,6 @@ export function configurationStepText(event: SiloProgressEvent | undefined): str
     case "computer-image-preparation": return "Checking the computer image"
     case "computer-image-import": return IMAGE_IMPORT_STEP
     case "computer-image-wait": return "Waiting for the computer image"
-    case "chatgpt-app-wait": return "Waiting for ChatGPT for Linux"
-    case "chatgpt-app-download": return chatGptDownloadText(event)
-    case "chatgpt-app-failed": return event.message ? `ChatGPT for Linux failed: ${event.message}` : "ChatGPT for Linux download failed"
     case "computer-use-setup":
     case "computer-use-pending": return "Setting up the desktop and computer use"
     case "computer-runtime-preparation":
@@ -85,9 +62,6 @@ function creationStage(step: string | undefined, fraction: number | undefined, d
   const finishing = desktop ? 5 : 4
   switch (step) {
     case "computer-image-wait":
-    case "chatgpt-app-wait":
-    case "chatgpt-app-download":
-    case "chatgpt-app-failed":
     case "computer-image-preparation":
     case "computer-image-import": return 1
     case "computer-runtime-preparation":
@@ -122,11 +96,9 @@ export function describeConfiguration(operation: ComputerConfigurationOperation,
       ? deleting.length === 1 ? `Deleting ${committedNames.get(deleting[0])}` : `Deleting ${deleting.length} computers`
       : "Saving computer settings"
   let progress: number | null = null
-  if (kind === "creating" && creating.length === 1 && latest?.step === "chatgpt-app-download" && latest.totalBytes && latest.downloadedBytes !== undefined) {
-    progress = Math.min(1, latest.downloadedBytes / latest.totalBytes)
-  } else if (kind === "creating" && creating.length === 1 && !UNMEASURED_STEPS.has(latest?.step ?? "")) {
+  if (kind === "creating" && creating.length === 1 && !UNMEASURED_STEPS.has(latest?.step ?? "")) {
     // The backend adds the built-in desktop to new computers on a v4 image, so it can be absent from the request.
-    const desktop = (creating[0].desktop) || operation.progressEvents.some(event => event.step === "desktop-installation" || event.step?.startsWith("chatgpt-app-") || event.step === "computer-use-setup")
+    const desktop = (creating[0].desktop) || operation.progressEvents.some(event => event.step === "desktop-installation" || event.step === "computer-use-setup")
     const total = desktop ? 6 : 4
     progress = Math.max(0.04, Math.min(creationStage(latest?.step, latest?.fraction, Boolean(desktop)), total - 1) / total)
   }

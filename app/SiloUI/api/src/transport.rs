@@ -54,9 +54,10 @@ pub struct IncompatibleVersionDiagnostics {
     pub client_app_version: Option<String>,
 }
 
-/// The first canonical multiplexed engine protocol. Legacy bridge protocol v5
-/// is retired and is not accepted by `engine.sock`.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// The engine protocol. 6 was the first canonical multiplexed protocol; 7 removes the
+/// ChatGPT app and LCU methods and fields. Legacy bridge protocol v5 is retired and is not
+/// accepted by `engine.sock`.
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Client information is diagnostic metadata, not an authorization identity.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]

@@ -30,7 +30,6 @@ pub type ComputerLaunchResult = LaunchStatus;
 pub type ComputerDismissErrorParams = ComputerTargetParams;
 pub type ComputerForceStopParams = ComputerTargetParams;
 pub type ComputerLifecycleParams = ComputerTargetParams;
-wire_struct! { ComputerCreationSkipWaitParams { request_id: String, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String> } }
 pub type ComputerDeleteResult = ApplicationSource;
 wire_struct! { ComputerConfigurationRetryParams { #[serde(default, skip_serializing_if = "Option::is_none")] request_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] retry_computer_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String> } }
 wire_struct! { ComputerCreateResult { job_id: crate::jobs::JobId, #[serde(default, skip_serializing_if = "Option::is_none")] computer: Option<MacosComputer> } }

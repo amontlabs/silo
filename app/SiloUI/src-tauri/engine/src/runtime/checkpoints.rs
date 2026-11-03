@@ -102,6 +102,11 @@ pub(super) struct Record {
     desired_environment: Vec<Environment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     restore_journal: Option<RestoreJournal>,
+    /// The read-only ChatGPT and LCU mounts the original recorded when an in-place restore
+    /// began. The original is removed before the checkpoint is restored, so they cannot be
+    /// read from it then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    legacy_mounts: Vec<Value>,
     pub(super) pending_checkpoint_restore: Option<PendingRestore>,
     pub(super) checkpoint_operation: Option<Operation>,
 }
@@ -1374,28 +1379,11 @@ fn running_child_matches(
             })
 }
 
-/// A built-in computer must have the read-only computer-use mount, whichever recovery path
-/// accepts it. Returns before any state changes, so the pending restore is preserved.
-fn require_mount(
-    observed: &InspectedSandbox,
-    configuration: &ComputerConfiguration,
-) -> Result<(), RuntimeError> {
-    if crate::computer_use::mount_present(&observed.config, configuration) {
-        Ok(())
-    } else {
-        Err(error(
-            "The restored computer does not have the read-only computer-use folder. It was preserved for inspection; the pending restore is unchanged.",
-        ))
-    }
-}
-
 pub(super) fn start_pending(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     configuration: &ComputerConfiguration,
 ) -> Result<(), RuntimeError> {
-    // Before any state changes: a computer that needs the mount cannot restore without it.
-    let mounts = crate::computer_use::mount_args(configuration)?;
     let mut record = load(paths, configuration.id())?;
     let lineage_group = ensure_snapshot_group(paths, configuration.id(), configuration.name())?;
     record.snapshot_group = Some(lineage_group.clone());
@@ -1502,8 +1490,6 @@ pub(super) fn start_pending(
             &material,
             &policy,
         ) {
-            // Accepting the running computer must not skip the mount check a fresh restore gets.
-            require_mount(&observed, configuration)?;
             record.pending_checkpoint_restore = None;
             record.checkpoint_operation = None;
             record.restore_attempted = false;
@@ -1534,9 +1520,6 @@ pub(super) fn start_pending(
             ));
         }
         if record.restore_attempt_ran {
-            // Checked before any recovery state is cleared: without the mount the
-            // attempt would start without computer use and the record could not show why.
-            require_mount(&observed, configuration)?;
             // The attempt already ran and may hold changes; recreating it from the
             // checkpoint would silently discard them. Keep it as the computer and start it
             // like any other; only an explicit, confirmed action (such as Delete) discards it.
@@ -1564,6 +1547,23 @@ pub(super) fn start_pending(
             STOP_TIMEOUT,
         )?;
     }
+    // A snapshot never carries host mounts. Computers created before Cua Driver recorded the
+    // read-only ChatGPT and LCU folders; a checkpoint of one is restored with them again. An
+    // in-place restore recorded them before the original was removed and a fork took them from
+    // its source; otherwise the computer itself, when it still exists, says. Prepared before the
+    // attempt is recorded, so a folder that cannot be given back leaves the restore pending.
+    let legacy_mounts = if crate::computer_use::is_built_in(configuration) {
+        let mounts = if record.legacy_mounts.is_empty() {
+            inspect_computer(runner, paths, configuration.name())
+                .map(|inspected| crate::legacy_mounts::recorded(&inspected.config))
+                .unwrap_or_default()
+        } else {
+            record.legacy_mounts.clone()
+        };
+        crate::legacy_mounts::restore_args_for(&mounts).map_err(|message| error(&message))?
+    } else {
+        Vec::new()
+    };
     record.restore_attempted = true;
     let attempt_id = uuid::Uuid::new_v4().to_string();
     record.restore_attempt_id = Some(attempt_id.clone());
@@ -1625,8 +1625,7 @@ pub(super) fn start_pending(
         ]);
     }
     args.extend(network_args);
-    // A snapshot never carries host mounts: pass the computer-use mount again.
-    args.extend(mounts);
+    args.extend(legacy_mounts);
     let restored = runner.run(paths, &args, Duration::from_secs(900));
     // A completed restore resumed the computer; after a failure, a running, paused or crashed computer
     // shows it ran as well. Checked even after a cancel.
@@ -1637,8 +1636,7 @@ pub(super) fn start_pending(
         .is_ok_and(|computer| matches!(computer.status.as_str(), "Running" | "Paused" | "Crashed"));
     let result = restored
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
-        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy)
-            && crate::computer_use::mount_present(&observed.config, configuration) {
+        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
             Ok(observed)
         } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) });
     match result {
@@ -1904,6 +1902,12 @@ fn fork_commit_with_metadata_writer(
         })?
         .clone();
     ensure_fork_name_available(&metadata, new_name)?;
+    // A source whose configuration the runtime could not read records nothing; the source's own
+    // record still may.
+    let source_legacy_mounts = inspect_computer(runner, paths, source.name())
+        .ok()
+        .map(|inspected| crate::legacy_mounts::recorded(&inspected.config))
+        .filter(|mounts| !mounts.is_empty());
     snapshot_ready(
         runner,
         paths,
@@ -1926,7 +1930,11 @@ fn fork_commit_with_metadata_writer(
         state: fork.scope.clone(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
-    child_record.desired_environment = load(paths, source.id())?.desired_environment;
+    let source_record = load(paths, source.id())?;
+    child_record.desired_environment = source_record.desired_environment;
+    // A source from before Cua Driver recorded the read-only ChatGPT and LCU folders. Keep them
+    // with the child, so its first start passes them again even if the source is deleted first.
+    child_record.legacy_mounts = source_legacy_mounts.unwrap_or(source_record.legacy_mounts);
     save(paths, &child_id, &child_record)?;
     let mut copied_github = false;
     let mut copied_secrets = false;
@@ -2335,6 +2343,7 @@ fn restore_steps(
             kind: "manual".into(),
         };
         record.desired_network_policy = Some(policy);
+        record.legacy_mounts = crate::legacy_mounts::recorded(&inspected.config);
         record.restore_journal = Some(RestoreJournal {
             target_checkpoint_id: checkpoint_id.into(),
             recovery_checkpoint: recovery,

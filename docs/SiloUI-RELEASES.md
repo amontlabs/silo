@@ -494,13 +494,12 @@ guest computers on Mac hosts remain supported.
 - Built-in computer use qualified on an Apple Silicon Mac using the supported
   Mac host app and Linux guest image. Run the opt-in live tests
   `backup_controller::tests::live_built_in_computer_use_sets_up_and_survives_export_and_import`
-  and `live_built_in_desktop_boots_repeatedly` with the v4 guest image, a
-  published ChatGPT app and the packaged `msb`; see
-  [ChatGPT app](SiloUI-CHATGPT-APP.md#integration-2026-10-02) for the inputs
+  and `live_built_in_desktop_boots_repeatedly` with a guest image and the
+  packaged `msb`; see [Rust test support](SiloUI-RUST-TEST-SUPPORT.md) for the inputs
   and `SILO_LIVE_TEST_CONFIRM=disposable-test-fixtures`. Then confirm on the Mac
   host with throwaway `e2e-*` computers: a fresh boot, a stop and start, a
-  checkpoint restore, an export and import, and LCU readiness (`computerUse` is
-  `ready` and `lcu doctor` passes) after each. Record the device, app version,
+  checkpoint restore, an export and import, and Cua Driver readiness (`computerUse` is
+  `ready` and `cua-driver doctor` passes) after each. Record the device, driver version,
   commands and results with the release evidence.
 - No public-release claim until these checks have real evidence. Unit/build
   success does not substitute for clean installation or computer execution.
@@ -823,7 +822,7 @@ exit, and checks that `waitpid` reports no unreaped child.
 ### Disk-space diagnostic units
 
 Low-space messages for update installation, computer image preparation, and
-ChatGPT app downloads express their existing binary byte calculations as MiB.
+(formerly) ChatGPT app downloads express their existing binary byte calculations as MiB.
 [NIST's binary-prefix definitions](https://physics.nist.gov/cuu/Units/binary.html)
 distinguish one MiB (1,048,576 bytes) from one MB (1,000,000 bytes). The previous MB
 label understated the represented byte amount. Update preflight regressions cover

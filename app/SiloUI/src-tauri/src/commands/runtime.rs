@@ -16,8 +16,7 @@ use silo_api::methods::{
     common::EmptyParams,
     computers::{
         ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
-        ComputerCreationSkipWaitParams, ComputerIdentitiesParams, ComputerIdentity,
-        ComputerShellParams,
+        ComputerIdentitiesParams, ComputerIdentity, ComputerShellParams,
     },
     kind,
     operations::{CancelJobParams, OperationsListParams},
@@ -271,23 +270,6 @@ pub(crate) async fn read_setup_activity(engine: Engine<'_>) -> Result<Value, Str
     engine
         .call(requests::activity_setup_read(device(None)))
         .await
-        .map_err(String::from)
-}
-
-#[tauri::command]
-pub(crate) async fn skip_computer_use_wait(
-    engine: Engine<'_>,
-    request_id: String,
-) -> Result<(), String> {
-    engine
-        .call(requests::computers_creation_skip_computer_use_wait(
-            ComputerCreationSkipWaitParams {
-                request_id,
-                device_id: None,
-            },
-        ))
-        .await
-        .map(drop)
         .map_err(String::from)
 }
 

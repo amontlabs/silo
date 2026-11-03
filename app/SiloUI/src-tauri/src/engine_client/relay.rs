@@ -58,7 +58,6 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
         }
         "updates.changed" => vec![("silo://update-state", payload)],
         "preparation.changed" => vec![("silo://preparation-status", payload)],
-        "preparation.chatgpt.changed" => vec![("chatgpt-app-status", payload)],
         "notifications.notice" => vec![("silo://notice", payload)],
         "operations.job.progress" => progress_events(&payload),
         _ => Vec::new(),

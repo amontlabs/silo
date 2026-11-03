@@ -5,7 +5,7 @@
 use super::*;
 use std::io::{BufRead, BufReader};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy)]
 enum Step {
@@ -122,7 +122,7 @@ fn serve(body: Vec<u8>, script: Vec<Step>) -> Server {
         }
     });
     Server {
-        url: format!("http://{address}/pkg.deb"),
+        url: format!("http://{address}/pkg.bin"),
         ranges,
         user_agents,
     }
@@ -159,7 +159,7 @@ fn a_plain_download_writes_the_whole_body() {
 }
 
 #[test]
-fn chatgpt_download_advertises_the_host_silo_version() {
+fn download_advertises_the_host_silo_version() {
     let body = payload();
     let server = serve(body.clone(), vec![Step::Serve]);
     let dir = tempfile::tempdir().unwrap();
@@ -283,7 +283,7 @@ fn a_larger_body_than_pinned_is_discarded() {
 }
 
 #[test]
-fn a_missing_package_is_fatal_and_a_server_error_is_retried() {
+fn a_missing_file_is_fatal_and_a_server_error_is_retried() {
     let dir = tempfile::tempdir().unwrap();
     let part = dir.path().join("p.part");
     let missing = serve(payload(), vec![Step::Status(404)]);

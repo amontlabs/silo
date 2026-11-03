@@ -28,9 +28,6 @@ SELF = '/usr/local/bin/silo-desktop'
 LOG = Path('/var/log/silo-desktop.log')
 WORKING_ACCOUNT = Path('/var/lib/silo/working-account.json')
 SELKIES_EXECUTABLE = Path('/usr/bin/selkies')
-LCU_RECEIPT = STATE / 'lcu.json'
-LCU_APP = Path('/usr/lib/chatgpt')
-LCU_PREFIX = Path('/opt/lcu')
 TMP = Path('/tmp')
 DISPLAY_LOCK = TMP / '.X1-lock'
 DISPLAY_SOCKET_DIR = TMP / '.X11-unix'
@@ -402,84 +399,6 @@ def remove_stale_display_artifacts():
         return True
     except (FileNotFoundError, PermissionError, OSError, ValueError, UnicodeError):
         return False
-
-
-def lcu_status():
-    """Project only the installed LCU receipt and required runtime paths."""
-    result = dict(lcuState=None, lcuReason=None, lcuVersion=None,
-                  lcuAppVersion=None, lcuRuntimeVersion=None,
-                  lcuAgents=None, lcuReadiness=None)
-
-    def project(receipt, state, reason=None, readiness=None):
-        result.update(lcuState=state, lcuReason=reason,
-                      lcuVersion=safe_lcu_version(receipt.get('version')),
-                      lcuAppVersion=safe_lcu_version(receipt.get('appVersion')),
-                      lcuRuntimeVersion=safe_lcu_runtime_version(receipt.get('runtimeVersion')),
-                      lcuAgents=sorted({agent for agent in receipt.get('agents', [])
-                                        if agent in ('pi', 'codex', 'claude-code')})
-                      if isinstance(receipt.get('agents'), list) else None,
-                      lcuReadiness=readiness)
-
-    try:
-        app_info = LCU_APP.lstat()
-        official_app = stat.S_ISDIR(app_info.st_mode) and not stat.S_ISLNK(app_info.st_mode)
-    except OSError:
-        official_app = False
-    if not official_app:
-        project({}, 'needs-runtime', 'chatgpt-app-required', 'unverified')
-        return result
-
-    try:
-        info = LCU_RECEIPT.lstat()
-    except FileNotFoundError:
-        project({}, 'not-installed', readiness='unverified')
-        return result
-    except OSError:
-        project({}, 'repair-required', 'invalid-receipt', 'failed')
-        return result
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022):
-        project({}, 'repair-required', 'invalid-receipt', 'failed')
-        return result
-    try:
-        receipt = json.loads(LCU_RECEIPT.read_text())
-    except (OSError, ValueError):
-        project({}, 'repair-required', 'invalid-receipt', 'failed')
-        return result
-    if not isinstance(receipt, dict) or receipt.get('schemaVersion') != 1:
-        project({}, 'repair-required', 'unsupported-receipt', 'failed')
-        return result
-    if receipt.get('status') == 'failed':
-        reason = receipt.get('reason')
-        if reason not in ('chatgpt-app-required', 'invalid-receipt', 'unsupported-receipt',
-                          'managed-runtime-missing', 'setup-failed'):
-            reason = 'setup-failed'
-        project(receipt, 'failed', reason, 'failed')
-        return result
-    if receipt.get('status') == 'installing':
-        project(receipt, 'installing', readiness='unverified')
-        return result
-    current = LCU_PREFIX / 'current'
-    runtime = current / 'bin/lcu'
-    managed_app = current / 'app'
-    if (receipt.get('status') != 'ready' or not current.is_symlink() or
-            not runtime.is_file() or not os.access(runtime, os.X_OK) or
-            not managed_app.is_dir()):
-        project(receipt, 'repair-required', 'managed-runtime-missing', 'failed')
-        return result
-    readiness = receipt.get('readiness')
-    if readiness not in ('ready', 'unverified', 'failed'):
-        readiness = 'unverified'
-    project(receipt, 'ready', readiness=readiness)
-    return result
-
-
-def safe_lcu_version(value):
-    return value if isinstance(value, str) and len(value) <= 64 and re.fullmatch(r'[0-9A-Za-z.+_-]+', value) else None
-
-
-def safe_lcu_runtime_version(value):
-    return value if isinstance(value, str) and len(value) <= 64 and re.fullmatch(
-        r'[0-9]+\.[0-9]+\.[0-9]+/[0-9]{14}-[0-9a-f]{12}', value) else None
 
 
 def selkies_http_ready():
@@ -1073,7 +992,10 @@ def supervise_selkies():
                                DISPLAY=':1', XAUTHORITY=str(RUN / 'user/Xauthority'),
                                XDG_RUNTIME_DIR=str(RUN / 'user'), XDG_CURRENT_DESKTOP='XFCE',
                                PULSE_RUNTIME_PATH=str(RUN / 'user/pulse'),
-                               PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}')
+                               PULSE_SERVER=f'unix:{RUN / "user/pulse/native"}',
+                               # Cua Driver's telemetry and update check stay off for anything
+                               # started from the desktop (terminals, agents).
+                               CUA_DRIVER_RS_TELEMETRY_ENABLED='0', CUA_DRIVER_RS_UPDATE_CHECK='false')
             try:
                 reset_desktop_density(account)
             except Exception as error:
@@ -1187,8 +1109,7 @@ def status():
                 autoStart=config['autoStart'], port=6901, user=USER, display=':1',
                 backend=backend, streamerVersion=streamer_version,
                 sessionState=session_state, streamState=stream_state,
-                updateRequired=update_required, updateAvailable=update_available,
-                **lcu_status())
+                updateRequired=update_required, updateAvailable=update_available)
 
 
 def start():

@@ -76,7 +76,7 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
             "id": "handshake-1",
             "method": "engine.handshake",
             "params": {
-                "protocol": { "min": 6, "max": 6 },
+                "protocol": { "min": 7, "max": 7 },
                 "client": { "name": "integration-test", "version": "1.0" }
             }
         }),
@@ -94,7 +94,7 @@ async fn temporary_socket_accepts_a_p1_handshake_and_state_request() {
         ResponseEnvelope::Success { id, result }
             if id == "handshake-1"
                 && result["deviceId"] == "fixture-device"
-                && result["protocol"] == 6
+                && result["protocol"] == 7
                 && result["clientId"].as_str().is_some()
                 && result["capabilities"].as_array().is_some_and(|capabilities| {
                     [

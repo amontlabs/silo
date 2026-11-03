@@ -1,4 +1,4 @@
-//! Image, LCU, and ChatGPT application preparation contracts.
+//! Guest image preparation contracts.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,16 +6,12 @@ use super::common::DeviceParams;
 
 pub type PreparationStatusParams = DeviceParams;
 pub type PreparationRetryParams = DeviceParams;
-pub type ChatGptPreparationStatusParams = DeviceParams;
-pub type ChatGptPreparationRetryParams = DeviceParams;
 pub type PreparationRetryResult = PreparationStatus;
-pub type ChatGptPreparationResult = ChatGptPreparationStatus;
 
 wire_struct! {
     #[doc = "Mirrors `app/SiloUI/src-tauri/engine/src/preparation.rs::PreparationStatus`."]
     PreparationStatus {
         image: PreparationTask,
-        lcu: PreparationTask,
     }
 }
 
@@ -35,28 +31,4 @@ pub enum PreparationTaskState {
     Running,
     Ready,
     Failed,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
-#[serde(
-    tag = "state",
-    rename_all = "lowercase",
-    rename_all_fields = "camelCase"
-)]
-pub enum ChatGptPreparationStatus {
-    Idle,
-    Downloading {
-        received_bytes: u64,
-        total_bytes: u64,
-    },
-    Verifying,
-    Extracting,
-    Ready {
-        path: String,
-        version: String,
-    },
-    Failed {
-        reason: String,
-        retryable: bool,
-    },
 }

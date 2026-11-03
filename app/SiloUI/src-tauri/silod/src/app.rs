@@ -202,7 +202,7 @@ fn run_appkit(
         })
         .map_err(|error| format!("Could not start the I/O runtime: {error}"))?;
 
-    // Launch migration, ChatGPT app, engine timers and the launch pass (05 §7).
+    // Launch migration, computer-use pass, engine timers and the launch pass (05 §7).
     crate::startup::start_background(context.clone(), exports, update_recovery);
 
     // The delegate keeps the process alive when the last VM window closes and sends every
@@ -314,8 +314,8 @@ mod channel_startup_tests {
             channel_identifier: identifier.clone(),
             engine_version: "0.1.0".to_owned(),
             engine_build: "test".to_owned(),
-            protocol_min: 6,
-            protocol_max: 6,
+            protocol_min: 7,
+            protocol_max: 7,
         };
         let channel = initialize_channel(&manifest).unwrap();
         let identity: EngineIdentity =
