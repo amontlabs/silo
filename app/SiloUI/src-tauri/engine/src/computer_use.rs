@@ -636,8 +636,8 @@ fn apply_command(mode: Approval, force: bool, boot: bool) -> String {
 }
 
 /// `apply_command`, plus `--creation` for the boot that ends creating a computer: the host holds
-/// the device-wide operation gate then, so the helper makes one short download attempt and
-/// leaves a failure to the first start.
+/// the device-wide operation gate then, so the helper never downloads the driver. Without it in
+/// the image, setup is left to the first start, whose apply runs in the background.
 fn helper_command(mode: Approval, force: bool, boot: bool, creation: bool) -> String {
     let mut command = apply_command(mode, force, boot);
     if creation {

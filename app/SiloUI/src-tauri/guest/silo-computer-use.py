@@ -185,8 +185,8 @@ DOWNLOAD_BACKOFF = (5, 10, 20, 40)
 DOWNLOAD_MAX_TIME = 240
 DOWNLOAD_BUDGET = 420
 # While a computer is being created the host holds the device-wide operation gate, so the
-# download gets one short attempt; a failure is left to the first start, which retries fully.
-CREATION_DOWNLOAD_MAX_TIME = 90
+# helper never downloads then: without the driver in the image, setup is left to the first
+# start, whose apply runs in the background and retries fully.
 CREATION = False
 ARCHITECTURES = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64', 'amd64': 'amd64'}
 # The `doctor` probes that must be ok before the driver can drive windows in the session.
@@ -385,8 +385,11 @@ def download(url, target):
     Only a failure to fetch is retried here: the caller verifies the hash and never retries
     a mismatch. Raises `driver-archive-unavailable` once the attempts or the time run out.
     """
-    attempts = 1 if CREATION else len(DOWNLOAD_BACKOFF) + 1
-    max_time = CREATION_DOWNLOAD_MAX_TIME if CREATION else DOWNLOAD_MAX_TIME
+    if CREATION:
+        log('not downloading the Cua Driver archive while the computer is being created')
+        raise Failure('driver-archive-unavailable', 'left to the first start')
+    attempts = len(DOWNLOAD_BACKOFF) + 1
+    max_time = DOWNLOAD_MAX_TIME
     deadline = time.monotonic() + DOWNLOAD_BUDGET
     for attempt in range(1, attempts + 1):
         log(f'downloading the Cua Driver archive (attempt {attempt} of {attempts})')
@@ -1139,7 +1142,7 @@ def main(argv=None):
     apply_parser.add_argument('--force', action='store_true')
     apply_parser.add_argument('--boot', action='store_true')
     apply_parser.add_argument('--creation', action='store_true',
-                              help='one short download attempt (the host holds its operation gate)')
+                              help='never download (the host holds its operation gate)')
     args = parser.parse_args(argv)
     global CREATION
     CREATION = getattr(args, 'creation', False)

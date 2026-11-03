@@ -290,8 +290,11 @@ error. They use temporary paths without running a computer.
   is no download wait and no "Finish without computer use". After the desktop configuration
   boot, creation runs the apply once more in a deliberate temporary boot with the desktop
   session up ("Setting up the desktop and computer use", approval mode, then the usual stop).
-  If that fails the computer is still created and the Created toast says computer use
-  finishes at first start; the boot apply retries as always.
+  That apply passes `--creation`: the device-wide gate is held, so the helper never downloads
+  the driver then. With a v5 image the driver is already there; on v4 the apply reports
+  `driver-archive-unavailable` and the first start's background apply downloads it. If the
+  creation apply fails for any reason the computer is still created and the Created toast says
+  computer use finishes at first start; the boot apply retries as always.
 - **After every boot** (`prepare_booted`, so start and restore) Silo pushes
   `/usr/local/libexec/silo-computer-use`, `/var/lib/silo-computer-use/pinned.json`
   (the Cua Driver lock) and runs `silo-computer-use apply --boot --approval <mode>` to

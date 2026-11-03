@@ -337,14 +337,18 @@ class Driver(Guest):
         self.assertIn('attempt 4 of 5', log)
         self.assertIn('driver download attempt 1 failed', log)
 
-    def test_while_creating_the_download_gets_one_short_attempt(self):
-        self.curl_failures_left = 99
+    def test_while_creating_nothing_is_downloaded(self):
         with mock.patch.object(cu, 'CREATION', True):
             result = cu.apply('ask', boot=True)
         self.assertEqual((result['state'], result['reason']), ('failed', 'driver-archive-unavailable'))
-        curl, = self.curls()
-        self.assertEqual(curl[curl.index('--max-time') + 1], str(cu.CREATION_DOWNLOAD_MAX_TIME))
+        self.assertEqual(self.curls(), [])
         self.assertEqual(self.sleeps, [])
+
+    def test_while_creating_the_image_driver_is_used(self):
+        self.install_image_driver()
+        with mock.patch.object(cu, 'CREATION', True):
+            self.assertEqual(cu.apply('ask', boot=True)['state'], 'ready')
+        self.assertEqual(self.curls(), [])
 
     def test_the_creation_flag_is_parsed(self):
         with mock.patch.object(cu, 'apply', return_value={}) as apply, \
