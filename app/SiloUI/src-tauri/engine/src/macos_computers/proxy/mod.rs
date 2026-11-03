@@ -18,6 +18,17 @@ pub(super) use bootstrap::{
     sync_guest_placeholders, verify_guest_ready,
 };
 
+/// Stand-in on hosts without macOS computers: provisioning never reaches it there, because
+/// installing the computer is already refused.
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub(super) fn stage_guest_bootstrap(
+    _app: &super::MacosContext,
+    _record: &super::store::Record,
+    _layout: &super::store::Layout,
+) -> Result<(), String> {
+    Err(super::NOT_SUPPORTED.into())
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub(super) use supervisor::{
     apply_github_profile, apply_github_profile_state, apply_secrets, generate_ca,
