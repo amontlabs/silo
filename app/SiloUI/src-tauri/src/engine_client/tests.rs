@@ -124,6 +124,34 @@ async fn a_job_is_awaited_through_its_outcome_and_then_acknowledged() {
 }
 
 #[tokio::test]
+async fn a_job_on_another_device_is_followed_and_acknowledged_on_that_device() {
+    const OWNER: &str = "00000000-0000-4000-8000-0000000000d1";
+    let fake = FakeEngine::start(|method, _params| match method {
+        MethodName::ComputersStart => ok(json!({"jobId": "job:7"})),
+        MethodName::OperationsJobGet => {
+            ok(json!({"jobId": "job:7", "state": "finished", "outcome": {"result": null}}))
+        }
+        _ => ok(json!({"subscription": "sub"})),
+    });
+    let (client, _sink) = connected_client(&fake).await;
+    client
+        .run_job(requests::computers_start(ComputerTargetParams {
+            computer_id: "c".into(),
+            device_id: Some(OWNER.into()),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.calls(MethodName::OperationsJobGet),
+        vec![json!({"jobId": "job:7", "deviceId": OWNER})]
+    );
+    assert_eq!(
+        fake.calls(MethodName::OperationsJobAcknowledge),
+        vec![json!({"jobId": "job:7", "deviceId": OWNER})]
+    );
+}
+
+#[tokio::test]
 async fn a_failed_job_surfaces_its_typed_error_and_a_chunked_outcome_is_reassembled() {
     let fake = FakeEngine::start(|method, params| match method {
         MethodName::CheckpointsRestore => ok(json!({"jobId": "job:1"})),

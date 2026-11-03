@@ -445,18 +445,21 @@ impl EngineClient {
     /// Starts a job method and waits for its terminal outcome, then acknowledges it.
     /// Losing the connection while waiting never invents a failure: the job continues in
     /// the engine, so the wait resumes on the next connection.
+    /// Starts a job and waits for its outcome. A request that names another device is
+    /// that device's job, so its `jobId` is followed there, by `(deviceId, jobId)`.
     pub(crate) async fn run_job(&self, request: Request<kind::Job>) -> Result<Value, EngineError> {
+        let device = job_device(&request);
         let started = self.call(request).await?;
         let job_id = started
             .get("jobId")
             .and_then(Value::as_str)
             .ok_or_else(|| EngineError::internal("The engine did not accept the job."))?
             .to_owned();
-        self.wait_job(&job_id).await
+        self.wait_job_with(&job_id, device.as_deref(), false).await
     }
 
     pub(crate) async fn wait_job(&self, job_id: &str) -> Result<Value, EngineError> {
-        self.wait_job_with(job_id, false).await
+        self.wait_job_with(job_id, None, false).await
     }
 
     /// Like `run_job` for a method after which the engine itself may exit (a shutdown): an
@@ -465,16 +468,22 @@ impl EngineClient {
         &self,
         request: Request<kind::Job>,
     ) -> Result<Value, EngineError> {
+        let device = job_device(&request);
         let started = self.call(request).await?;
         let job_id = started
             .get("jobId")
             .and_then(Value::as_str)
             .ok_or_else(|| EngineError::internal("The engine did not accept the job."))?
             .to_owned();
-        self.wait_job_with(&job_id, true).await
+        self.wait_job_with(&job_id, device.as_deref(), true).await
     }
 
-    async fn wait_job_with(&self, job_id: &str, exit_is_done: bool) -> Result<Value, EngineError> {
+    async fn wait_job_with(
+        &self,
+        job_id: &str,
+        device: Option<&str>,
+        exit_is_done: bool,
+    ) -> Result<Value, EngineError> {
         loop {
             let wake = self.finished.notified();
             tokio::pin!(wake);
@@ -484,13 +493,13 @@ impl EngineClient {
             } else {
                 CONNECT_PATIENCE
             };
-            match self.job_outcome(job_id, patience).await {
+            match self.job_outcome(job_id, device, patience).await {
                 Ok(Some(outcome)) => {
                     // The outcome is presented to the caller; the engine may now drop it.
                     let _ = self
                         .call(requests::operations_job_acknowledge(AcknowledgeJobParams {
                             job_id: params::job_id(job_id)?,
-                            device_id: None,
+                            device_id: device.map(str::to_owned),
                         }))
                         .await;
                     return outcome;
@@ -514,6 +523,7 @@ impl EngineClient {
     async fn job_outcome(
         &self,
         job_id: &str,
+        device: Option<&str>,
         patience: Duration,
     ) -> Result<Option<Result<Value, EngineError>>, EngineError> {
         let mut text = String::new();
@@ -523,7 +533,7 @@ impl EngineClient {
                 .call_patiently(
                     requests::operations_job_get(GetJobParams {
                         job_id: params::job_id(job_id)?,
-                        device_id: None,
+                        device_id: device.map(str::to_owned),
                         offset_bytes: offset,
                     }),
                     RequestOptions::default(),
@@ -564,6 +574,16 @@ impl EngineClient {
 /// Sends `request` on a connection that is not yet shared (the supervisor's own).
 async fn send<K: Kind>(client: &Client, request: &Request<K>) -> Result<Value, ClientError> {
     client.request(request.name(), request.params_value()).await
+}
+
+/// The device a job request names, when it is not this engine: its owner holds the job.
+fn job_device(request: &Request<kind::Job>) -> Option<String> {
+    request
+        .params_value()
+        .get("deviceId")
+        .and_then(Value::as_str)
+        .filter(|device| *device != "local")
+        .map(str::to_owned)
 }
 
 fn outcome_result(outcome: &Value) -> Result<Value, EngineError> {

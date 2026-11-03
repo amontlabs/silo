@@ -266,6 +266,19 @@ mod forwarding_tests {
             ),
             (json!(6), json!(12))
         );
+        // The job is the owner's, so it is followed and acknowledged on that device.
+        for method in [
+            MethodName::OperationsJobGet,
+            MethodName::OperationsJobAcknowledge,
+        ] {
+            let calls = fake.calls(method);
+            assert!(!calls.is_empty(), "{}", method.name());
+            assert!(
+                calls.iter().all(|call| call["deviceId"] == DEVICE),
+                "{}: {calls:?}",
+                method.name()
+            );
+        }
     }
 
     #[tokio::test]
