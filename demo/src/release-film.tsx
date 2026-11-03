@@ -221,7 +221,7 @@ function PreviewScene() {
 
 function Closing() {
   const f = useCurrentFrame();
-  return <Frame light label="AVAILABLE FOR macOS + LINUX" note="OPEN SOURCE · MIT LICENSE">
+  return <Frame light label="AVAILABLE FOR APPLE SILICON MACS" note="OPEN SOURCE · MIT LICENSE">
     <div className="r-close-lockup" style={copyStyle(f, 5)}><Brand large /></div>
     <div className="r-close-title" style={copyStyle(f, 15)}>Give your agents<br/><em>a space of their own.</em></div>
     <div className="r-close-cta" style={copyStyle(f, 32)}><span>silo.amontlabs.com</span><ArrowRight size={35} strokeWidth={1.5} /></div>
