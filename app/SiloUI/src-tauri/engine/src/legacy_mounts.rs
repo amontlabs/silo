@@ -118,22 +118,6 @@ pub(crate) fn restore_missing_before_start(paths: &RuntimePaths, computer: &str)
     restore_missing(&inspected.config, &roots());
 }
 
-/// The `msb restore` arguments that mount again what `source_computer` recorded, which is
-/// nothing for a computer created since Cua Driver. A snapshot never carries host mounts, so a
-/// restore or fork of a computer that had these must pass them again to keep its guest
-/// consistent. Best effort: a source that cannot be read adds nothing.
-pub(crate) fn restore_args(
-    runner: &dyn RuntimeRunner,
-    paths: &RuntimePaths,
-    source_computer: &str,
-) -> Vec<String> {
-    let Ok(inspected) = crate::runtime::inspect_computer(runner, paths, source_computer) else {
-        return Vec::new();
-    };
-    restore_missing(&inspected.config, &roots());
-    mount_args(&inspected.config)
-}
-
 /// The legacy mounts `config` records, kept for a restore after the computer is removed.
 pub(crate) fn recorded(config: &Value) -> Vec<Value> {
     config
@@ -146,34 +130,46 @@ pub(crate) fn recorded(config: &Value) -> Vec<Value> {
         .collect()
 }
 
-/// The `msb restore` arguments for mounts kept by [`recorded`], recreating missing sources as
-/// [`restore_args`] does.
-pub(crate) fn restore_args_for(mounts: &[Value]) -> Vec<String> {
+/// The `msb restore` arguments for mounts kept by [`recorded`], recreating missing sources
+/// first. A snapshot never carries host mounts, so a restore or fork of a computer that had
+/// these must pass them again to keep its guest consistent. An error names a mount whose host
+/// folder could not be given back: restoring without it would resume a guest that lost a
+/// folder it had.
+pub(crate) fn restore_args_for(mounts: &[Value]) -> Result<Vec<String>, String> {
     if mounts.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let config = serde_json::json!({ "mounts": mounts });
     restore_missing(&config, &roots());
     mount_args(&config)
 }
 
-/// `-v host:guest:ro,uid=0,gid=0` for each read-only legacy mount of `config` whose source
-/// exists. `uid=0,gid=0` pins the guest owner as the original mount did.
-fn mount_args(config: &Value) -> Vec<String> {
+/// `-v host:guest:ro,uid=0,gid=0` for each legacy mount of `config`. `uid=0,gid=0` pins the
+/// guest owner as the original mount did. A writable one, or one whose source is missing, is
+/// an error.
+fn mount_args(config: &Value) -> Result<Vec<String>, String> {
     let Some(mounts) = config.get("mounts").and_then(Value::as_array) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    mounts
-        .iter()
-        .filter(|mount| is_legacy_mount(mount) && read_only(mount))
-        .filter_map(|mount| {
-            let host = mount.get("host").and_then(Value::as_str)?;
-            let guest = mount.get("guest").and_then(Value::as_str)?;
-            fs::symlink_metadata(host).ok()?;
-            Some(["-v".to_owned(), format!("{host}:{guest}:ro,uid=0,gid=0")])
-        })
-        .flatten()
-        .collect()
+    let mut args = Vec::new();
+    for mount in mounts.iter().filter(|mount| is_legacy_mount(mount)) {
+        let host = mount.get("host").and_then(Value::as_str);
+        let guest = mount.get("guest").and_then(Value::as_str);
+        match (host, guest) {
+            (Some(host), Some(guest))
+                if read_only(mount) && fs::symlink_metadata(host).is_ok() =>
+            {
+                args.extend(["-v".to_owned(), format!("{host}:{guest}:ro,uid=0,gid=0")]);
+            }
+            _ => {
+                return Err(format!(
+                    "Silo could not prepare the folder this computer mounts at {}. The checkpoint was kept; try again.",
+                    guest.unwrap_or("a Silo folder")
+                ))
+            }
+        }
+    }
+    Ok(args)
 }
 
 /// Removes the legacy mounts from a configuration about to be exported. Their host paths mean

@@ -1547,6 +1547,23 @@ pub(super) fn start_pending(
             STOP_TIMEOUT,
         )?;
     }
+    // A snapshot never carries host mounts. Computers created before Cua Driver recorded the
+    // read-only ChatGPT and LCU folders; a checkpoint of one is restored with them again. An
+    // in-place restore recorded them before the original was removed and a fork took them from
+    // its source; otherwise the computer itself, when it still exists, says. Prepared before the
+    // attempt is recorded, so a folder that cannot be given back leaves the restore pending.
+    let legacy_mounts = if crate::computer_use::is_built_in(configuration) {
+        let mounts = if record.legacy_mounts.is_empty() {
+            inspect_computer(runner, paths, configuration.name())
+                .map(|inspected| crate::legacy_mounts::recorded(&inspected.config))
+                .unwrap_or_default()
+        } else {
+            record.legacy_mounts.clone()
+        };
+        crate::legacy_mounts::restore_args_for(&mounts).map_err(|message| error(&message))?
+    } else {
+        Vec::new()
+    };
     record.restore_attempted = true;
     let attempt_id = uuid::Uuid::new_v4().to_string();
     record.restore_attempt_id = Some(attempt_id.clone());
@@ -1608,24 +1625,7 @@ pub(super) fn start_pending(
         ]);
     }
     args.extend(network_args);
-    // A snapshot never carries host mounts. Computers created before Cua Driver recorded the
-    // read-only ChatGPT and LCU folders; a checkpoint of one is restored with them again.
-    // An in-place restore recorded them before the original was removed; a fork reads them
-    // from its source.
-    if crate::computer_use::is_built_in(configuration) {
-        let recorded = crate::legacy_mounts::restore_args_for(&record.legacy_mounts);
-        if !recorded.is_empty() {
-            args.extend(recorded);
-        } else {
-            for computer in [pending.source_computer.as_str(), configuration.name()] {
-                let mounts = crate::legacy_mounts::restore_args(runner, paths, computer);
-                if !mounts.is_empty() {
-                    args.extend(mounts);
-                    break;
-                }
-            }
-        }
-    }
+    args.extend(legacy_mounts);
     let restored = runner.run(paths, &args, Duration::from_secs(900));
     // A completed restore resumed the computer; after a failure, a running, paused or crashed computer
     // shows it ran as well. Checked even after a cancel.
@@ -1902,9 +1902,12 @@ fn fork_commit_with_metadata_writer(
         })?
         .clone();
     ensure_fork_name_available(&metadata, new_name)?;
+    // A source whose configuration the runtime could not read records nothing; the source's own
+    // record still may.
     let source_legacy_mounts = inspect_computer(runner, paths, source.name())
         .ok()
-        .map(|inspected| crate::legacy_mounts::recorded(&inspected.config));
+        .map(|inspected| crate::legacy_mounts::recorded(&inspected.config))
+        .filter(|mounts| !mounts.is_empty());
     snapshot_ready(
         runner,
         paths,
