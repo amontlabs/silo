@@ -327,11 +327,12 @@ Mac-hosted engine and runtime tests.
 
 Every workflow pins third-party actions to a full commit SHA with the release
 version as a comment (`scripts/test_workflow_pins.py` enforces it).
-`.github/dependabot.yml` proposes updated SHAs in one weekly pull request. It
-also groups npm (app, website, demo) and Cargo updates into at most three
-weekly pull requests per ecosystem: minor and patch, major, and security. Tauri minor upgrades, noVNC, the
-vendored updater plugin and the microsandbox crates stay manual (see the comments
-in that file).
+`.github/dependabot.yml` proposes updated SHAs in one weekly pull request. npm
+(app, website, demo) and Cargo version updates arrive in two weekly grouped pull
+requests per ecosystem, one for minor and patch updates and one for majors.
+Security fixes arrive as advisories appear, grouped per ecosystem. Tauri minor
+upgrades, noVNC, the vendored updater plugin and the microsandbox crates stay
+manual (see the comments in that file).
 
 Native tests require the configuration described above. Frontend fixtures and
 unit tests do not prove installed-app behavior, live computer health, or two-device
