@@ -269,28 +269,22 @@ async fn exec_output_keeps_raw_bytes() {
 }
 
 #[tokio::test]
-async fn fork_with_a_secret_or_quiet_recipe_is_refused_before_any_job() {
+async fn fork_sends_named_secrets_and_the_recipe_quiet_lists() {
     let (engine, _) = engine_with(&["main"]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let secret = ForkArgs {
+    let args = ForkArgs {
         source: "main".into(),
         secrets: vec!["github".into()],
+        recipe: Some(
+            silo_cli::config::parse_recipe("quiet: [poller]\nscrub: [/root/.bot.env]\n").unwrap(),
+        ),
         ..ForkArgs::default()
     };
-    let error = ops::fork(&connected, &secret, None, &ignore)
-        .await
-        .unwrap_err();
-    assert!(error.message.contains("--secret"));
-    let quiet = ForkArgs {
-        source: "main".into(),
-        recipe: Some(silo_cli::config::parse_recipe("scrub: [/x]\n").unwrap()),
-        ..ForkArgs::default()
-    };
-    let error = ops::fork(&connected, &quiet, None, &ignore)
-        .await
-        .unwrap_err();
-    assert!(error.message.contains("quiet"));
-    assert!(engine.calls("checkpoints.fork").is_empty());
+    ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    let sent = &engine.calls("checkpoints.fork")[0];
+    assert_eq!(sent["secrets"], json!(["github"]));
+    assert_eq!(sent["quiet"]["stop"], json!(["poller"]));
+    assert_eq!(sent["quiet"]["scrub"], json!(["/root/.bot.env"]));
 }
 
 #[tokio::test]
@@ -315,8 +309,11 @@ async fn the_command_line_finds_the_project_recipe() {
         "main",
     ])
     .unwrap();
-    let error = run(cli, &nested).await.unwrap_err();
-    assert!(error.message.contains("quiet"), "{}", error.message);
+    run(cli, &nested).await.unwrap();
+    assert_eq!(
+        engine.calls("checkpoints.fork")[0]["quiet"]["stop"],
+        json!(["poller"])
+    );
 
     std::fs::write(project.path().join(".silo/recipe.yaml"), "bogus: 1\n").unwrap();
     let cli = <Cli as clap::Parser>::try_parse_from([

@@ -76,10 +76,9 @@ agents:
 ```
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
-`--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The
-engine's fork parameters do not carry secrets or the quiet list yet, so `--secret` and a
-recipe with `quiet:` or `scrub:` are refused with an error; `ops::apply_fork_extras` is
-where they are attached once the engine takes them.
+`--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
+gets the named secrets (`github` gives read-only GitHub access) and the recipe's `quiet:` and
+`scrub:` lists; with neither, the fork gets none of the credentials Silo manages.
 
 ## MCP setup
 

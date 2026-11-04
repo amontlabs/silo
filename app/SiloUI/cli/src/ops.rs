@@ -161,19 +161,17 @@ pub fn fork_extras(recipe: Option<&Recipe>, secrets: &[String]) -> ForkExtras {
 /// Puts the extras onto the engine's fork parameters. The parameters carry no secrets or
 /// quiet fields yet, so anything that would be dropped is refused instead.
 pub fn apply_fork_extras(
-    _params: &mut CheckpointForkParams,
+    params: &mut CheckpointForkParams,
     extras: &ForkExtras,
 ) -> Result<(), CliError> {
-    if !extras.secrets.is_empty() {
-        return Err(CliError::new(
-            "Forks cannot be given secrets yet: this engine has no way to pass --secret.",
-        ));
-    }
-    if extras.quiet.is_some() {
-        return Err(CliError::new(
-            "Forks cannot apply the recipe's quiet: and scrub: lists yet: this engine has no way to pass them.",
-        ));
-    }
+    params.secrets = extras.secrets.clone();
+    params.quiet = extras
+        .quiet
+        .as_ref()
+        .map(|quiet| silo_api::methods::checkpoints::QuietSpec {
+            stop: quiet.stop.clone(),
+            scrub: quiet.scrub.clone(),
+        });
     Ok(())
 }
 
@@ -212,6 +210,8 @@ pub async fn fork(
         device_id: None,
         checkpoint_id: args.checkpoint.clone(),
         new_name: name.clone(),
+        secrets: Vec::new(),
+        quiet: None,
     };
     apply_fork_extras(
         &mut params,
@@ -493,26 +493,29 @@ mod tests {
     }
 
     #[test]
-    fn fork_extras_are_refused_until_the_engine_takes_them() {
+    fn fork_extras_reach_the_fork_parameters() {
         let mut params = CheckpointForkParams {
             computer_id: "c".into(),
             device_id: None,
             checkpoint_id: None,
             new_name: "n".into(),
+            secrets: Vec::new(),
+            quiet: None,
         };
-        assert!(apply_fork_extras(&mut params, &ForkExtras::default()).is_ok());
-        let secret = fork_extras(None, &["github".to_owned()]);
-        assert!(apply_fork_extras(&mut params, &secret)
-            .unwrap_err()
-            .message
-            .contains("--secret"));
-        let recipe = crate::config::parse_recipe("quiet: [a]\n").unwrap();
-        assert!(
-            apply_fork_extras(&mut params, &fork_extras(Some(&recipe), &[]))
-                .unwrap_err()
-                .message
-                .contains("quiet")
-        );
+        apply_fork_extras(&mut params, &ForkExtras::default()).unwrap();
+        assert!(params.secrets.is_empty());
+        assert!(params.quiet.is_none());
+        let recipe =
+            crate::config::parse_recipe("quiet: [poller]\nscrub: [/root/.bot.env]\n").unwrap();
+        apply_fork_extras(
+            &mut params,
+            &fork_extras(Some(&recipe), &["github".to_owned()]),
+        )
+        .unwrap();
+        assert_eq!(params.secrets, ["github"]);
+        let quiet = params.quiet.unwrap();
+        assert_eq!(quiet.stop, ["poller"]);
+        assert_eq!(quiet.scrub, ["/root/.bot.env"]);
     }
 
     #[test]
