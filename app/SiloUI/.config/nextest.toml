@@ -1,0 +1,4 @@
+# CI runs every test to the end and prints failures again at the end of the run.
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
