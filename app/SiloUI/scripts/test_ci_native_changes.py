@@ -48,8 +48,19 @@ class NativeChangeTests(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertIsNone(reference.search(text))
 
+    def test_no_tracked_symlink_points_into_skippable_trees(self):
+        entries = subprocess.check_output(['git', 'ls-files', '-s'], cwd=ROOT, text=True).splitlines()
+        for entry in entries:
+            mode, _, _, name = entry.split(None, 3)
+            if mode == '120000':
+                with self.subTest(link=name):
+                    target = (ROOT / name).resolve().relative_to(ROOT.resolve()).as_posix()
+                    self.assertFalse(changes.skippable(target) and not changes.skippable(name))
+
     def test_main_pushes_and_workflow_wiring_always_run_native_jobs(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        # Without --no-renames, a file moved into a skippable tree lists only its new path.
+        self.assertIn('git diff --name-only --no-renames HEAD^1 HEAD', workflow)
         self.assertIn('if [ "$EVENT" != pull_request ]; then\n            echo native=true', workflow)
         for job in ('rust', 'engine-linux'):
             body = re.search(r'(?ms)^  ' + job + r':\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
