@@ -11,8 +11,10 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request supersedes its older run. Pushes to main each
+# get their own group, so a merge no longer waits for the previous main run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -198,9 +200,22 @@ jobs:
           import { fetchStream } from "./scripts/build-input.mjs";
           const targetTriple = execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
           await stageGitRuntime({ appRoot: process.cwd(), targetTriple, fetchStream })'
+      # nextest runs each test in its own process, so tests that serialize on
+      # process-wide state in one libtest binary run in parallel. The download is
+      # pinned to the release asset digest.
+      - name: Install cargo-nextest
+        env:
+          NEXTEST_VERSION: 0.9.149
+          NEXTEST_ASSET: x86_64-unknown-linux-gnu
+          NEXTEST_SHA256: 32d1d8c0567b7a80bee2bad8bb09125c846da96bc009b2de11ec08557290c770
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
+          echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
+          cargo nextest --version
       - name: Run engine tests
         timeout-minutes: 30
-        run: cargo test -p silo-engine --locked
+        run: cargo nextest run -p silo-engine --locked --profile ci
 
   rust:
     name: Rust tests
@@ -260,9 +275,22 @@ jobs:
         with:
           runner: macos-15
           target: aarch64-apple-darwin
-      # Process-wide state is isolated inside the suite; use default test threads.
+      # nextest runs each test in its own process, so tests that serialize on
+      # process-wide state in one libtest binary run in parallel. The download is
+      # pinned to the release asset digest.
+      - name: Install cargo-nextest
+        env:
+          NEXTEST_VERSION: 0.9.149
+          NEXTEST_ASSET: universal-apple-darwin
+          NEXTEST_SHA256: 47b9941765a9ff94e304a3fe5444ac1c7593da655525b8b69f8f2b31a9217507
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nextest.tar.gz" "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-$NEXTEST_ASSET.tar.gz"
+          echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
+          cargo nextest --version
+      # The workspace has no doctests, which nextest does not run.
       - name: Run Rust tests
         timeout-minutes: 30
-        run: cargo test --manifest-path Cargo.toml --workspace --locked
+        run: cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci
       - name: Test patched updater transport and atomic installation
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib

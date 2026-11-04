@@ -1,0 +1,15 @@
+# CI runs every test to the end and prints failures again at the end of the run.
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
+
+# The SSH listener tests pick a free port, release it and bind it again later,
+# and assert that a dropped listener refuses connections. Under libtest the
+# shared isolation guard kept them apart; here one test group keeps them from
+# reusing each other's freed ports.
+[test-groups]
+ssh-listener-ports = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(silo-engine) and test(/^ssh_access::/)'
+test-group = 'ssh-listener-ports'
