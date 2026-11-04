@@ -327,6 +327,26 @@ fn runtime_busy(failure: &RuntimeError) -> bool {
     client_deadline_expired(failure) || matches!(failure, RuntimeError::TimedOut { .. })
 }
 
+/// Whether msb's control client found no control endpoint for the computer. While a merge
+/// runs the runtime can leave its endpoint unavailable for a stretch, so the client reports
+/// `transport I/O failed (NotFound)` instead of timing out; a runtime that is gone for good
+/// reports the same, which is why the caller also asks whether the computer is still alive.
+fn control_endpoint_missing(failure: &RuntimeError) -> bool {
+    matches!(
+        failure,
+        RuntimeError::Failed { detail, .. }
+            if detail.to_lowercase().contains("transport i/o failed (notfound)")
+    )
+}
+
+/// Whether `msb inspect` still lists the computer as a live runtime; it answers from the
+/// store rather than from the busy runtime.
+fn still_alive(runner: &dyn RuntimeRunner, paths: &RuntimePaths, computer: &str) -> bool {
+    inspect_computer(runner, paths, computer).is_ok_and(|inspected| {
+        !matches!(inspected.status.as_str(), "Stopped" | "Crashed" | "Created")
+    })
+}
+
 fn pause(duration: Duration) {
     if !cfg!(test) {
         std::thread::sleep(duration);
@@ -354,6 +374,17 @@ fn wait_for_compaction(
                 }));
             }
             Err(PlanError::Run(failure)) if runtime_busy(&failure) => {
+                if started.elapsed() >= COMPACT_TIMEOUT {
+                    return Err(format!(
+                        "{computer} was still merging layers after {} minutes.",
+                        COMPACT_TIMEOUT.as_secs() / 60
+                    ));
+                }
+                pause(COMPACT_POLL);
+            }
+            Err(PlanError::Run(failure))
+                if control_endpoint_missing(&failure) && still_alive(runner, paths, computer) =>
+            {
                 if started.elapsed() >= COMPACT_TIMEOUT {
                     return Err(format!(
                         "{computer} was still merging layers after {} minutes.",

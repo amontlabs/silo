@@ -2775,7 +2775,16 @@ impl RuntimeRunner for Store {
                             SlowCompaction::Busy(left, merged) => {
                                 *slow = SlowCompaction::Busy(left - 1, merged);
                                 if let Some(text) = self.poll_failure {
-                                    return Err(RuntimeError::Unavailable(text.into()));
+                                    // msb reports a client-side failure as a failed command.
+                                    return Err(if text.starts_with("control client error") {
+                                        RuntimeError::Failed {
+                                            operation: "modify".into(),
+                                            exit_code: Some(1),
+                                            detail: text.into(),
+                                        }
+                                    } else {
+                                        RuntimeError::Unavailable(text.into())
+                                    });
                                 }
                                 return Err(RuntimeError::Failed {
                                     operation: "modify".into(),
@@ -5139,6 +5148,23 @@ fn a_poll_that_reports_a_paused_computer_ends_the_wait_with_the_restart_hint() {
         .error
         .unwrap();
     assert!(message.contains("Restart dev"), "{message}");
+}
+
+#[test]
+fn a_missing_control_endpoint_while_the_computer_runs_is_a_merge_still_running() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    // Observed with msb 0.7.6: after the client's 30 s deadline, polls of a runtime that is
+    // still merging fail with the missing endpoint, not with the deadline.
+    store.poll_failure =
+        Some("control client error: transport I/O failed (NotFound) (delivery: NotSent)");
+    let store = store.slow_compaction(5, 4);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(!store.removals().is_empty());
+    assert!(load(&paths, ID).unwrap().checkpoint_operation.is_none());
 }
 
 #[test]

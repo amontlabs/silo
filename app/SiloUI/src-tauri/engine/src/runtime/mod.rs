@@ -3213,16 +3213,17 @@ fn read_application_snapshot(
     const MAX_ATTEMPTS: usize = 2;
     const RETRY_DELAY: Duration = Duration::from_millis(100);
     for attempt in 0..MAX_ATTEMPTS {
-        // Configuration recovery is durable work in progress. Keep its immediate
-        // code distinct from transient lock contention below.
+        // A live configuration change (create, edit, delete) holds a durable journal while
+        // it runs, so the committed state is mid-change: serve the last settled rows rather
+        // than reading it.
         if configuration_recovery::pending(paths)? {
-            return Err(BridgeError::updating());
+            return last_settled_or_updating(paths);
         }
         match read_application_snapshot_once(runner, paths, gate) {
             Ok(source) => return Ok(source),
             Err(error) if error.code == ErrorCode::UpdateInProgress => {
                 if configuration_recovery::pending(paths)? {
-                    return Err(BridgeError::updating());
+                    return last_settled_or_updating(paths);
                 }
                 if let Some(source) = read_last_settled_snapshot(paths) {
                     return source.map_err(BridgeError::from);
@@ -3240,6 +3241,15 @@ fn read_application_snapshot(
         }
     }
     unreachable!("at least one application snapshot attempt is required")
+}
+
+/// The last published rows while a configuration change is running; `update_in_progress`
+/// only for an inventory that never published a reading.
+fn last_settled_or_updating(paths: &RuntimePaths) -> Result<ApplicationSource, BridgeError> {
+    match read_last_settled_snapshot(paths) {
+        Some(source) => source.map_err(BridgeError::from),
+        None => Err(BridgeError::updating()),
+    }
 }
 
 /// The saved computers with no runtime reading, every one marked `settling`.
@@ -11473,6 +11483,37 @@ exit 9
             ErrorCode::UpdateInProgress,
         );
         assert!(runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_state_read_during_a_live_configuration_change_serves_the_last_settled_rows() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let configuration = request(vec![computer(), second_computer()]);
+        write_metadata(&paths.metadata, &configuration).unwrap();
+        let gate = leaked_gate();
+        remember_settled(
+            &paths,
+            &read_application_snapshot(
+                &two_computer_reading(&paths, "Running", "Stopped"),
+                &paths,
+                gate,
+            )
+            .unwrap()
+            .computers,
+        );
+        configuration_recovery::begin(&paths, &configuration).unwrap();
+        // A create, edit or delete holds the journal for as long as it runs.
+        let _attempt = configuration_recovery::attempt();
+        assert!(configuration_recovery::pending(&paths).unwrap());
+        // The runner would fail if the read touched it.
+        let during = published(
+            &read_application_snapshot(&StubRunner::successful_json(vec![]), &paths, gate).unwrap(),
+        );
+        assert_eq!(during["computers"].as_array().unwrap().len(), 2);
+        assert_eq!(row(&during, "dev")["state"], "running");
+        assert_eq!(row(&during, "dev")["settling"], true);
     }
 
     #[test]

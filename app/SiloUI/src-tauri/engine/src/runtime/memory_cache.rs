@@ -26,6 +26,10 @@ fn referenced_manifests(snapshots: &Path) -> io::Result<HashSet<String>> {
     };
     for group in groups {
         let group = group?;
+        // `.groups.lock` and any other plain file sit beside the group directories.
+        if !group.file_type()?.is_dir() {
+            continue;
+        }
         let members = match fs::read_dir(group.path()) {
             Ok(members) => members,
             Err(failure) if failure.kind() == io::ErrorKind::NotFound => continue,
@@ -33,6 +37,10 @@ fn referenced_manifests(snapshots: &Path) -> io::Result<HashSet<String>> {
         };
         for member in members {
             let member = member?;
+            // A group holds `group.json` and `.group.lock` beside its member directories.
+            if !member.file_type()?.is_dir() {
+                continue;
+            }
             let bytes = match fs::read(member.path().join("checkpoint").join("checkpoint.json")) {
                 Ok(bytes) => bytes,
                 // Nothing to name: a disk snapshot, or a member removed meanwhile.
@@ -188,6 +196,19 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn plain_files_beside_group_and_member_directories_do_not_stop_the_pass() {
+        let (_directory, paths) = fixture();
+        let snapshots = paths.home.join("snapshots");
+        fs::write(snapshots.join(".groups.lock"), b"").unwrap();
+        fs::write(snapshots.join("dev").join("group.json"), b"{}").unwrap();
+        fs::write(snapshots.join("dev").join(".group.lock"), b"").unwrap();
+
+        assert_eq!(prune(&paths), 1);
+
+        assert_eq!(files(&paths), [format!("{KEPT}-16384.ram")]);
     }
 
     #[test]
