@@ -2933,7 +2933,7 @@ pub fn read_application_state_sync(
     // Only visible device-wide work (computer configuration) can add or remove
     // computers; work on one computer settles only that computer's row, and hidden housekeeping
     // never affects the read.
-    let ticket = settled_ticket(&paths);
+    let ticket = observation_ticket();
     let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)?;
     // Expired-log cleanup runs in the background, at most hourly per stopped computer, so a
     // state read never waits for it or re-inspects every stopped computer.
@@ -5232,8 +5232,9 @@ fn keep_runtime_fields(computer: &mut ApplicationComputer, previous: &Applicatio
 /// mutex, so a reader never sees an inventory marked complete without its rows.
 #[derive(Default)]
 struct SettledInventory {
-    /// Publications accepted so far; a read only publishes if none landed since it started.
-    sequence: u64,
+    /// The observation ticket of the newest read published; an older observation never
+    /// replaces it.
+    published: u64,
     /// True once a publication covered every computer, so the rows are the full membership.
     complete: bool,
     /// Each computer's last settled, fresh reading (after enrichment), by stable id. A
@@ -5258,25 +5259,27 @@ fn last_settled(paths: &RuntimePaths) -> HashMap<String, ApplicationComputer> {
         .unwrap_or_default()
 }
 
-/// The publication count to pass to `remember_settled_since` before starting a read.
-fn settled_ticket(paths: &RuntimePaths) -> u64 {
-    settled_readings()
-        .get(&paths.metadata)
-        .map_or(0, |inventory| inventory.sequence)
+static OBSERVATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A ticket for one read, taken before it observes anything. Tickets only grow, so
+/// publishing in ticket order leaves the newest observation in the cache whatever order
+/// the reads finish in.
+fn observation_ticket() -> u64 {
+    OBSERVATIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
 }
 
 /// Remember the fresh, settled computer rows of a published source, and forget removed computers.
 fn remember_settled(paths: &RuntimePaths, computers: &[ApplicationComputer]) {
-    remember_settled_since(paths, u64::MAX, computers);
+    remember_settled_since(paths, observation_ticket(), computers);
 }
 
-/// Like `remember_settled`, but ignored when another publication landed after `ticket`: an
-/// older read must not replace a newer membership. A computer without a fresh reading keeps
+/// Like `remember_settled`, but ignored when a read with a newer `ticket` already published:
+/// an older observation must not replace a newer membership. A computer without a fresh reading keeps
 /// its earlier row; the inventory counts as complete only when every computer has a row.
 fn remember_settled_since(paths: &RuntimePaths, ticket: u64, computers: &[ApplicationComputer]) {
     let mut readings = settled_readings();
     let inventory = readings.entry(paths.metadata.clone()).or_default();
-    if inventory.sequence > ticket {
+    if ticket <= inventory.published {
         return;
     }
     let present: HashSet<&str> = computers
@@ -5292,7 +5295,7 @@ fn remember_settled_since(paths: &RuntimePaths, ticket: u64, computers: &[Applic
         }
     }
     inventory.complete = present.iter().all(|id| inventory.rows.contains_key(*id));
-    inventory.sequence += 1;
+    inventory.published = ticket;
 }
 
 /// The state a change returns once it has succeeded. It is enriched like a normal read
@@ -5303,7 +5306,7 @@ pub fn application_state_response(
     host: &dyn RuntimeHost,
     paths: &RuntimePaths,
 ) -> Result<ApplicationSource, RuntimeError> {
-    let ticket = settled_ticket(paths);
+    let ticket = observation_ticket();
     let mut source = state_after_change(&ProcessRunner, paths, &OPERATIONS)?;
     enrich_application_state(host, paths, &mut source, Repositories::LastKnown);
     remember_settled_since(paths, ticket, &source.computers);
@@ -10536,7 +10539,7 @@ exit 9
         let both = two_settled_rows(&paths);
         remember_settled(&paths, &both[..1]);
         // A read starts while the second computer is being created...
-        let ticket = settled_ticket(&paths);
+        let ticket = observation_ticket();
         // ...the job publishes both computers before that read publishes.
         remember_settled(&paths, &both);
         remember_settled_since(&paths, ticket, &both[..1]);
@@ -10544,11 +10547,37 @@ exit 9
         // A cached fallback is never remembered.
         let source = read_last_settled_snapshot(&paths).unwrap().unwrap();
         assert!(source.from_cache);
-        let before = settled_ticket(&paths);
+        let published = || settled_readings()[&paths.metadata].published;
+        let before = published();
         if !source.from_cache {
-            remember_settled_since(&paths, before, &source.computers);
+            remember_settled_since(&paths, observation_ticket(), &source.computers);
         }
-        assert_eq!(settled_ticket(&paths), before);
+        assert_eq!(published(), before);
+    }
+
+    #[test]
+    fn publication_order_follows_observation_order_not_completion_order() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let both = two_settled_rows(&paths);
+        // Older observation of [A] finishes first: the newer [A, B] still publishes.
+        let older = observation_ticket();
+        let newer = observation_ticket();
+        remember_settled_since(&paths, older, &both[..1]);
+        remember_settled_since(&paths, newer, &both);
+        assert_eq!(last_settled(&paths).len(), 2);
+        // Newer observation finishes first: the older one cannot replace it.
+        let older = observation_ticket();
+        let newer = observation_ticket();
+        remember_settled_since(&paths, newer, &both);
+        remember_settled_since(&paths, older, &both[..1]);
+        assert_eq!(last_settled(&paths).len(), 2);
     }
 
     #[test]
