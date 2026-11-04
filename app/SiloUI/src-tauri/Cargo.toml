@@ -52,7 +52,7 @@ gtk = "0.18"
 objc2-virtualization = "0.3.2"
 
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 libc = "0.2"
 tauri = { version = "2.11.3", features = ["test"] }
 toml = "1.1"
