@@ -113,6 +113,8 @@ mod tests {
 
     #[test]
     fn a_macos_computer_the_inventory_does_not_hold_is_reported_as_gone() {
+        // These reach the process-wide macOS registry, which other tests seed.
+        let _state = crate::test_support::global_state();
         // The target was found on disk, but this engine's live inventory has no such computer
         // (it was never loaded here), so the adapters answer with their own words.
         let directory = tempfile::tempdir().unwrap();
@@ -128,6 +130,8 @@ mod tests {
 
     #[test]
     fn editor_paths_outside_the_macos_workspace_are_refused_before_anything_is_written() {
+        // These reach the process-wide macOS registry, which other tests seed.
+        let _state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::macos_target(directory.path());
         let context = context(directory.path());
