@@ -86,6 +86,9 @@ class ReleaseCacheTests(unittest.TestCase):
         runtime = 'app/SiloUI/src-tauri/target/runtime-cache/'
         allowed = [runtime + 'v0.7.6/patched-builds/key/msb',
                    runtime + 'v0.7.6/patched-builds/key/msb.sha256',
+                   # microsandbox-runtime.mjs reuses msb only with a verified gateway beside it.
+                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway',
+                   runtime + 'v0.7.6/patched-builds/key/silo-macos-gateway.sha256',
                    runtime + 'v0.7.6/microsandbox-09df3d4b9d832adaede1fb9a198cfc660bfab8cd.tar.gz',
                    runtime + 'v0.7.6/agentd-aarch64',
                    runtime + 'v0.7.6/libkrunfw-darwin-aarch64.dylib',
