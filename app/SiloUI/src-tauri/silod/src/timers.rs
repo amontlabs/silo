@@ -205,7 +205,16 @@ impl Upkeep for SilodUpkeep {
 
 /// Starts the engine timers. Call once, after the context and the secrets runtime are installed.
 pub fn start(context: Arc<SilodContext>) -> Timers {
-    Timers::start(Arc::new(SilodUpkeep::new(context)), Schedule::ENGINE)
+    let upkeep = SilodUpkeep::new(context);
+    let host = upkeep.host();
+    let _ = std::thread::Builder::new()
+        .name("silod-warm-inventory".into())
+        .spawn(move || {
+            if let Err(error) = silo_engine::runtime::warm_settled_inventory(&host) {
+                eprintln!("silod: initial computer read skipped: {error}");
+            }
+        });
+    Timers::start(Arc::new(upkeep), Schedule::ENGINE)
 }
 
 #[cfg(test)]

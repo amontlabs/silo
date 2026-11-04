@@ -685,7 +685,8 @@
     "CheckpointKind": {
       "enum": [
         "manual",
-        "automatic"
+        "automatic",
+        "before-keep"
       ],
       "type": "string"
     },
@@ -12828,6 +12829,11 @@
           "type": "boolean"
         },
         "automaticCheckpointRetentionCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "beforeKeepCheckpointRetentionCount": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"

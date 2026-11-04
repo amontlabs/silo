@@ -10,7 +10,8 @@ pub struct Entry {
     pub id: String,
     /// Creation time in milliseconds since the Unix epoch.
     pub created_at_ms: i128,
-    /// Policy kind `automatic`. Manual and before-restore records are never candidates.
+    /// The record is of the kind being trimmed (`automatic` or `before-keep`). Every other
+    /// record, including before-restore ones, is never a candidate.
     pub automatic: bool,
 }
 

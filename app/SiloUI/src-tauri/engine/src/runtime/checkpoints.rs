@@ -7,6 +7,8 @@ pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
 #[path = "checkpoints/native.rs"]
 mod native;
+#[path = "checkpoints/reclaim.rs"]
+mod reclaim;
 #[cfg(test)]
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
@@ -23,13 +25,16 @@ pub(super) struct Checkpoint {
     pub(super) created_at: u64,
     pub(super) scope: String,
     pub(super) reason: String,
-    /// Policy origin, `manual` or `automatic`. Records from before the field existed are
-    /// rewritten once by the launch upgrade (`upgrade_records`); nothing else accepts them.
+    /// Policy origin: `manual`, `automatic` or `before-keep`. Records from before the field
+    /// existed are rewritten once by the launch upgrade (`upgrade_records`); nothing else
+    /// accepts them.
     pub(super) kind: String,
 }
 
 /// The layout of `checkpoints/<computer id>.json`. Version 1 had no checkpoint `kind`.
-const RECORD_VERSION: u8 = 2;
+/// Version 2 knew `manual` and `automatic`; version 3 adds `before-keep`, which an engine
+/// reading version 2 would reject, so the version marks the boundary.
+const RECORD_VERSION: u8 = 3;
 
 impl Checkpoint {
     fn native_id(&self) -> &str {
@@ -205,7 +210,10 @@ fn validate(record: &Record) -> Result<(), RuntimeError> {
                     .is_some_and(|native_id| !valid_native_id(native_id))
                 || !matches!(checkpoint.scope.as_str(), "full" | "disk")
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
-                || !matches!(checkpoint.kind.as_str(), "manual" | "automatic")
+                || !matches!(
+                    checkpoint.kind.as_str(),
+                    "manual" | "automatic" | "before-keep"
+                )
         })
         || !unique_checkpoint_ids(&record.checkpoints)
         || record
@@ -832,11 +840,11 @@ pub fn create(paths: &RuntimePaths, computer_id: &str, name: &str) -> Result<(),
     result.map_err(|error| error.to_string())
 }
 
-/// The one-time launch upgrade of `<storage>/checkpoints/<computer id>.json` from layout 1
-/// to layout 2: every checkpoint record gains `kind: "manual"` (it was made before automatic
-/// checkpoints existed) and keeps its reason, native identity, dates and journals. A file
-/// that is not a layout-1 record is left exactly as it is, so a damaged history stays
-/// protected and a converted one is not rewritten. Returns how many files were converted.
+/// The one-time launch upgrade of `<storage>/checkpoints/<computer id>.json` to the current
+/// layout. From layout 1 every checkpoint record gains `kind: "manual"` (it was made before
+/// automatic checkpoints existed); layout 2 only changes its version. Reasons, native
+/// identities, dates and journals are kept. A file in neither layout is left exactly as it
+/// is, so a damaged history stays protected and a converted one is not rewritten. Returns how many files were converted.
 pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
     let directory = storage.join("checkpoints");
     let entries = match fs::read_dir(&directory) {
@@ -863,7 +871,7 @@ pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
         let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
             continue;
         };
-        if value.get("version") != Some(&Value::from(1)) {
+        if !matches!(value.get("version"), Some(version) if *version == 1 || *version == 2) {
             continue;
         }
         let mark = |checkpoint: Option<&mut Value>| {
@@ -913,12 +921,15 @@ pub fn has_computer(paths: &RuntimePaths, computer_id: &str) -> bool {
 
 /// Captures a Linux checkpoint as one durable, cancellable job operation and returns the
 /// exact record it committed. An automatic capture is refused while the setting is off,
-/// both before it queues (the caller) and once the queue admits it (here).
+/// both before it queues (the caller) and once the queue admits it (here). Trimming older
+/// records is a separate pass, [`reclaim_after_capture_for_job`], that the caller runs once
+/// this job has returned its result.
+#[allow(clippy::too_many_arguments)]
 pub fn create_for_job(
     paths: &RuntimePaths,
     computer_id: &str,
     name: &str,
-    automatic: bool,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -946,10 +957,15 @@ pub fn create_for_job(
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
     shutdown::ensure_accepting_operations()?;
-    if automatic && retention()? == 0 {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    if kind == CheckpointKind::Automatic && retention()? == 0 {
         return Err(crate::checkpoints::AUTOMATIC_OFF.into());
     }
-    let policy_kind = if automatic { "automatic" } else { "manual" };
+    let policy_kind = match kind {
+        CheckpointKind::Manual => "manual",
+        CheckpointKind::Automatic => "automatic",
+        CheckpointKind::BeforeKeep => "before-keep",
+    };
     let checkpoint = capture_with_kind(
         &ProcessRunner,
         paths,
@@ -959,19 +975,46 @@ pub fn create_for_job(
         policy_kind,
     )
     .map_err(|error| error.to_string())?;
-    // The capture's computer lane is released before retention asks for the device lane.
     drop(guard);
-    if automatic {
-        prune_automatic_with(
-            &OPERATIONS,
-            &ProcessRunner,
-            paths,
-            computer_id,
-            retention,
-            job_id,
-        );
-    }
     Ok(api_checkpoint(checkpoint))
+}
+
+/// The retention pass that follows an automatic or before-keep capture. It is its own job
+/// on the computer's lane, so the capture's result never waits for the merge. A manual
+/// capture has nothing to trim.
+pub fn reclaim_after_capture_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
+    retention: &dyn Fn() -> Result<u32, String>,
+    before_keep_retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    let (policy_kind, activity, count): (_, _, &dyn Fn() -> Result<u32, String>) = match kind {
+        CheckpointKind::Automatic => (
+            "automatic",
+            "Removing an older automatic checkpoint",
+            retention,
+        ),
+        CheckpointKind::BeforeKeep => (
+            "before-keep",
+            "Removing an older before-keep checkpoint",
+            before_keep_retention,
+        ),
+        CheckpointKind::Manual => return Ok(()),
+    };
+    shutdown::ensure_accepting_operations()?;
+    trim_kind_with(
+        &OPERATIONS,
+        &ProcessRunner,
+        paths,
+        computer_id,
+        policy_kind,
+        activity,
+        count,
+        job_id,
+    )
 }
 
 fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Checkpoint {
@@ -992,19 +1035,17 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
         } else {
             CheckpointReason::Manual
         },
-        kind: if checkpoint.kind == "automatic" {
-            CheckpointKind::Automatic
-        } else {
-            CheckpointKind::Manual
+        kind: match checkpoint.kind.as_str() {
+            "automatic" => CheckpointKind::Automatic,
+            "before-keep" => CheckpointKind::BeforeKeep,
+            _ => CheckpointKind::Manual,
         },
         size_bytes: None,
     }
 }
 
-/// Removes this computer's automatic checkpoints beyond the newest N, oldest first, through
-/// ordinary safe deletion. It never touches manual or before-restore records. The count is
-/// read again once each deletion is admitted so turning the setting off stops later deletions, and a
-/// checkpoint something still needs is kept (visible with its `deleteBlocker`).
+/// Removes this computer's automatic checkpoints beyond the newest N and returns their disk.
+/// It never touches other kinds. See [`trim_kind_with`].
 fn prune_automatic_with(
     gate: &super::operation_gate::OperationGate,
     runner: &dyn RuntimeRunner,
@@ -1013,59 +1054,105 @@ fn prune_automatic_with(
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
 ) {
+    trim_kind_with(
+        gate,
+        runner,
+        paths,
+        computer_id,
+        "automatic",
+        "Removing an older automatic checkpoint",
+        retention,
+        job_id,
+    )
+    .unwrap_or_else(|failure| eprintln!("Silo kept older automatic checkpoints: {failure}"));
+}
+
+/// Removes this computer's before-keep checkpoints beyond the newest N. A count of zero
+/// keeps them all.
+fn prune_before_keep_with(
+    gate: &super::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
+    trim_kind_with(
+        gate,
+        runner,
+        paths,
+        computer_id,
+        "before-keep",
+        "Removing an older before-keep checkpoint",
+        retention,
+        job_id,
+    )
+    .unwrap_or_else(|failure| eprintln!("Silo kept older before-keep checkpoints: {failure}"));
+}
+
+/// Removes this computer's checkpoints of `kind` beyond the newest N and returns their
+/// disk (see [`reclaim`]). The count is read again once the computer's lane admits the work,
+/// so turning the setting off while it queued stops it. A checkpoint something still needs
+/// is kept (visible with its `deleteBlocker`); a failed merge removes nothing and is
+/// recorded in the computer's checkpoint operation.
+#[allow(clippy::too_many_arguments)]
+fn trim_kind_with(
+    gate: &super::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    kind: &str,
+    activity: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
     use super::operation_gate::{OperationKind, Scope};
 
-    let entries_of = |record: &Record| -> Vec<crate::checkpoints::retention::Entry> {
-        record
+    let candidates_of = |count: u32| -> Option<Vec<String>> {
+        let record = load(paths, computer_id).ok()?;
+        let entries: Vec<_> = record
             .checkpoints
             .iter()
             .map(|checkpoint| crate::checkpoints::retention::Entry {
                 id: checkpoint.id.clone(),
                 created_at_ms: i128::from(checkpoint.created_at),
-                automatic: checkpoint.kind == "automatic",
+                automatic: checkpoint.kind == kind,
             })
-            .collect()
+            .collect();
+        Some(crate::checkpoints::retention::plan(&entries, count).candidates)
     };
-    let Ok(count) = retention() else { return };
-    if count == 0 {
-        return;
+    let count = retention()?;
+    if count == 0 || candidates_of(count).is_none_or(|candidates| candidates.is_empty()) {
+        return Ok(());
     }
-    let Ok(record) = load(paths, computer_id) else {
-        return;
+    let computer = computer_configuration(paths, computer_id)
+        .map_err(|failure| failure.to_string())?
+        .name()
+        .to_owned();
+    let _guard = gate
+        .kind(OperationKind::CheckpointDelete)
+        .acquire_for_job(
+            Scope::Computer {
+                id: computer_id.to_owned(),
+            },
+            Some(computer),
+            activity,
+            None,
+            job_id,
+            None,
+        )
+        .map_err(|failure| failure.to_string())?;
+    // The plan is made again once the queue admits this work: the setting and the history
+    // may have changed while it waited.
+    let current = retention()?;
+    if current == 0 {
+        return Ok(());
+    }
+    let Some(candidates) = candidates_of(current).filter(|candidates| !candidates.is_empty())
+    else {
+        return Ok(());
     };
-    for candidate in crate::checkpoints::retention::plan(&entries_of(&record), count).candidates {
-        let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
-            Scope::Device,
-            None,
-            "Removing an older automatic checkpoint",
-            None,
-            job_id.clone(),
-            None,
-        ) else {
-            return;
-        };
-        // The plan is made again once the queue admits this deletion: the setting and the
-        // history may have changed while it waited, and only a candidate that the current
-        // count still drops is deleted.
-        let Ok(current) = retention() else { return };
-        if current == 0 {
-            return;
-        }
-        let Ok(record) = load(paths, computer_id) else {
-            return;
-        };
-        if !crate::checkpoints::retention::plan(&entries_of(&record), current)
-            .candidates
-            .contains(&candidate)
-        {
-            continue;
-        }
-        if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
-            // Dependencies and in-progress recovery defer retention. Never force-delete a
-            // checkpoint the runtime says something still needs.
-            eprintln!("Silo kept an older automatic checkpoint: {error}");
-        }
-    }
+    reclaim::reclaim(runner, paths, computer_id, &candidates)
 }
 
 thread_local! {
@@ -1927,7 +2014,9 @@ fn fork_commit_with_metadata_writer(
     child_record.pending_checkpoint_restore = Some(PendingRestore {
         checkpoint_id: fork.member.clone(),
         source_computer: fork.snapshot_group.clone(),
-        state: fork.scope.clone(),
+        // A fork is a new computer that boots from the checkpoint's disks. A full checkpoint
+        // is restored disk-only, so the fork never resumes the source's memory.
+        state: "disk".into(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
     let source_record = load(paths, source.id())?;
@@ -3039,7 +3128,8 @@ fn deletion(
 }
 
 /// Delete one checkpoint: remove its native member unless something still needs it,
-/// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force.
+/// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force. Only
+/// retention ([`reclaim`]) forces removal, after merging the layers.
 fn delete_checkpoint_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -3067,9 +3157,10 @@ fn delete_checkpoint_with(
     {
         Deletion::EntryOnly => {}
         Deletion::Remove(member) => {
-            if let Some((_, failure)) = native::execute(runner, paths, &survey.inventory, &[member])
-                .into_iter()
-                .next()
+            if let Some((_, failure)) =
+                native::execute(runner, paths, &survey.inventory, &[member], false)
+                    .into_iter()
+                    .next()
             {
                 return Err(error(&format!(
                     "The checkpoint could not be deleted; it was kept. {}",
@@ -3348,7 +3439,19 @@ fn save_cleanup(paths: &RuntimePaths, members: &[native::Member]) -> Result<(), 
         .map_err(|_| error("Checkpoint cleanup journal could not be synced."))
 }
 
+/// Finishes the removals queued by earlier deletions, then drops the memory cache files
+/// that no stored checkpoint names any more (a fork or restore that resumed memory leaves
+/// one behind).
 fn retry_deleted_snapshots(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+) -> Result<(), RuntimeError> {
+    let outcome = retry_queued_snapshots(runner, paths);
+    memory_cache::prune(paths);
+    outcome
+}
+
+fn retry_queued_snapshots(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
 ) -> Result<(), RuntimeError> {
@@ -3372,7 +3475,7 @@ fn retry_deleted_snapshots(
         &survey.uses,
         &survey.positions,
     );
-    let failures = native::execute(runner, paths, &survey.inventory, &plan.remove);
+    let failures = native::execute(runner, paths, &survey.inventory, &plan.remove, false);
     let removed: HashSet<&str> = plan
         .remove
         .iter()
@@ -3432,7 +3535,49 @@ pub(crate) fn remove_deleted_snapshots(
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
     }
+    remove_empty_group_directory(runner, paths, group);
     Ok(())
+}
+
+/// MicroSandbox leaves `snapshots/<group>` with its lock and metadata files after the last
+/// member of a group is removed. Remove that empty shell once nothing lists the group;
+/// anything else in the directory keeps it. A failure is logged only.
+fn remove_empty_group_directory(runner: &dyn RuntimeRunner, paths: &RuntimePaths, group: &str) {
+    if !valid_snapshot_group(group) {
+        return;
+    }
+    let directory = paths.home.join("snapshots").join(group);
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return;
+    };
+    let names: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .collect();
+    if names
+        .iter()
+        .any(|name| name != ".group.lock" && name != "group.json")
+    {
+        return;
+    }
+    let Ok(inventory) = native::inventory(runner, paths) else {
+        return;
+    };
+    if inventory
+        .iter()
+        .any(|member| member.group.as_deref() == Some(group))
+    {
+        return;
+    }
+    for name in names {
+        if let Err(failure) = fs::remove_file(directory.join(name)) {
+            eprintln!("An empty checkpoint group was kept: {failure}");
+            return;
+        }
+    }
+    if let Err(failure) = fs::remove_dir(&directory) {
+        eprintln!("An empty checkpoint group was kept: {failure}");
+    }
 }
 
 /// Remove the member a failed capture may have published, unless something already
@@ -3474,7 +3619,7 @@ pub fn discard_failed_capture(
         );
         !plan.remove.is_empty()
             && plan.kept.is_empty()
-            && native::execute(runner, paths, &survey.inventory, &plan.remove).is_empty()
+            && native::execute(runner, paths, &survey.inventory, &plan.remove, false).is_empty()
     })
 }
 

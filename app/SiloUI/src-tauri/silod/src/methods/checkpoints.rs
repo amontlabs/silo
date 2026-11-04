@@ -158,6 +158,7 @@ pub(super) fn macos_context(context: &HandlerContext) -> MacosContext {
 /// engine's settings each time it is asked.
 pub(super) fn service(context: &HandlerContext) -> Service {
     let engine = engine_context(context);
+    let before_keep_engine = engine.clone();
     Service::new(
         context.silod_context().runtime_host(),
         macos_context(context),
@@ -165,6 +166,11 @@ pub(super) fn service(context: &HandlerContext) -> Service {
             silo_engine::settings::automatic_checkpoint_retention_count_for(engine.as_ref())
         }),
     )
+    .with_before_keep_retention(Arc::new(move || {
+        silo_engine::settings::before_keep_checkpoint_retention_count_for(
+            before_keep_engine.as_ref(),
+        )
+    }))
 }
 
 fn job_started(

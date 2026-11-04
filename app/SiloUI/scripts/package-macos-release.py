@@ -5,7 +5,8 @@ from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
-from embed_engine import embed_engine
+from embed_engine import SIGNING_IDENTITY_ENV, embed_engine
+from macos_notarization import Release
 from macos_release_signing import seal_app, sign_helpers, verify_bundle, verify_engine
 from channel_names import channel_names
 
@@ -45,11 +46,31 @@ def main():
     # The tools get their final signatures first, so the engine carries the same signed copies.
     # The nested engine is then signed with the virtualization entitlement, and seal_app
     # re-seals the outer bundle without --deep, which keeps the nested signatures.
-    sign_helpers(app)
-    embed_engine(app, args.engine.resolve(), identifier=identifier, build=args.engine_build or engine_build())
-    seal_app(app)
-    verify_bundle(app)
+    release = Release.from_environ()
+    identity = release.identity
+    # The engine is signed with the same identity; a Developer ID identity also makes silod
+    # require that team as its signer (embed_engine.engine_requirement).
+    engine_environ = {**os.environ, SIGNING_IDENTITY_ENV: identity} if identity != '-' else os.environ
+    try:
+        package(app, output, archive, dmg, args, key, identifier, release, engine_environ)
+    finally:
+        release.cleanup()
+    print(f'Created verified release assets in {output}')
+
+
+def package(app, output, archive, dmg, args, key, identifier, release, engine_environ):
+    identity = release.identity
+    bundle_name = app.name
+    product_name = app.stem
+    sign_helpers(app, identity)
+    embed_engine(app, args.engine.resolve(), identifier=identifier, build=args.engine_build or engine_build(),
+                 environ=engine_environ)
+    seal_app(app, identity=identity)
+    verify_bundle(app, identity)
     verify_engine(app, identifier)
+    # The ticket is stapled to the app before it is archived, so the archive and the image carry it.
+    with tempfile.TemporaryDirectory(prefix='silo-notarize-') as temporary:
+        release.notarize_app(app, temporary)
     # Python tarfile does not insert Apple's resource-fork sidecar entries.
     with tarfile.open(archive, 'w:gz') as tar:
         tar.add(app, arcname=bundle_name)
@@ -81,7 +102,7 @@ def main():
         (stage / 'Applications').symlink_to('/Applications')
         subprocess.run(['hdiutil', 'create', '-volname', product_name, '-srcfolder', str(stage),
                         '-format', 'UDZO', str(dmg)], check=True)
-    print(f'Created verified release assets in {output}')
+    release.notarize_dmg(dmg)
 
 
 if __name__ == '__main__':

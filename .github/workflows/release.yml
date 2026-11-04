@@ -9,6 +9,10 @@ on:
         description: Create versioned draft after all builds pass (requires vVERSION tag)
         type: boolean
         default: false
+      dry_run:
+        description: Artifact-only build that runs the Developer ID signing and notarization steps as printed stubs, without Apple credentials
+        type: boolean
+        default: false
       allow_stable:
         description: Owner-approved draft of version 1.0.0 or later
         type: boolean
@@ -37,6 +41,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       draft: ${{ steps.release.outputs.draft }}
+      signing: ${{ steps.release.outputs.signing }}
       source-ref: ${{ steps.source.outputs.ref }}
       runtime-macos: ${{ steps.runtime-macos.outputs.cache-hit }}
     steps:
@@ -85,6 +90,7 @@ jobs:
           RELEASE_REF: ${{ github.ref }}
           BENCHMARK_SCHEDULE: ${{ inputs.benchmark_schedule }}
           ALLOW_STABLE: ${{ inputs.allow_stable }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           version=$(python3 app/SiloUI/scripts/validate-release-version.py)
@@ -113,6 +119,18 @@ jobs:
               fi
             done
           fi
+          if [[ "$CREATE_DRAFT" == true && "${DRY_RUN:-}" == true ]]; then
+            echo '::error::A dry run is artifact-only; it cannot create a draft.'
+            exit 1
+          fi
+          # Drafts are signed with the Developer ID certificate and notarized; a dry run never is.
+          signing=adhoc
+          if [[ "$CREATE_DRAFT" == true ]]; then
+            signing=developer-id
+          elif [[ "${DRY_RUN:-}" == true ]]; then
+            signing=dry-run
+          fi
+          echo "signing=$signing" >> "$GITHUB_OUTPUT"
           echo "draft=$CREATE_DRAFT" >> "$GITHUB_OUTPUT"
 
   macos-minimum-constraints:
@@ -178,6 +196,7 @@ jobs:
       bundles: ${{ matrix.bundles }}
       asset: ${{ matrix.asset }}
       draft: ${{ needs.validate.outputs.draft == 'true' }}
+      signing: ${{ needs.validate.outputs.signing }}
       runtime-cache-hit: ${{ needs.validate.outputs[matrix.cache-output] == 'true' }}
       benchmark-schedule: ${{ inputs.benchmark_schedule || 'parallel' }}
     secrets:
@@ -186,6 +205,13 @@ jobs:
       SILO_GITHUB_CLIENT_SECRET: ${{ secrets.SILO_GITHUB_CLIENT_SECRET }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_DEVELOPER_ID_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_IDENTITY }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
 
   draft:
     if: needs.validate.outputs.draft == 'true'

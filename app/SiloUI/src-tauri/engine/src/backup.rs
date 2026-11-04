@@ -771,19 +771,41 @@ impl<R: MsbRunner> BackupService<R> {
                     capture_intent(source, None)?;
                 }
                 let payload_path = stage.path().join(format!("{index}.msb"));
-                self.require_success_with(
-                    "Writing computer disks to the export file",
-                    &[
+                let save_arguments = |with_parents: bool| -> Vec<String> {
+                    let mut arguments = vec![
                         "snapshot".into(),
                         "save".into(),
                         snapshot.to_string_lossy().into_owned(),
                         payload_path.to_string_lossy().into_owned(),
-                        "--with-parents".into(),
-                        "--with-image".into(),
-                    ],
+                    ];
+                    if with_parents {
+                        arguments.push("--with-parents".into());
+                    }
+                    arguments.push("--with-image".into());
+                    arguments
+                };
+                match self.require_success_with(
+                    "Writing computer disks to the export file",
+                    &save_arguments(true),
                     data_timeout,
                     cancellation,
-                )?;
+                ) {
+                    // Checkpoint retention removes old ancestors. A snapshot holds its own
+                    // complete layers, so the archive is written without the missing lineage.
+                    Err(BackupError::CommandFailed { detail, .. })
+                        if detail.contains("not in local index") =>
+                    {
+                        self.require_success_with(
+                            "Writing computer disks to the export file",
+                            &save_arguments(false),
+                            data_timeout,
+                            cancellation,
+                        )?;
+                    }
+                    other => {
+                        other?;
+                    }
+                }
                 Ok::<_, BackupError>(payload_path)
             })();
             let payload_path = capture_result?;
@@ -4317,6 +4339,7 @@ mod tests {
         timeouts: Mutex<Vec<(Vec<String>, Duration)>>,
         fail_load: AtomicBool,
         fail_save: AtomicBool,
+        ancestor_missing: AtomicBool,
         fail_import_verify: AtomicBool,
         cancel_during_load: AtomicBool,
         invalid_import_head: AtomicBool,
@@ -4378,7 +4401,19 @@ mod tests {
                     self.removed.lock().unwrap().push((*selector).to_owned());
                     Ok(success())
                 }
-                ["snapshot", "save", _, output, "--with-parents", "--with-image"] => {
+                ["snapshot", "save", _, output, "--with-parents", "--with-image"]
+                | ["snapshot", "save", _, output, "--with-image"] => {
+                    if arguments
+                        .iter()
+                        .any(|argument| argument == "--with-parents")
+                        && self.ancestor_missing.load(Ordering::Acquire)
+                    {
+                        return Ok(CommandOutput {
+                            status: ExitStatus::from_raw(1 << 8),
+                            stderr: "parent snap_gone not in local index; ship it alongside or re-save with --with-parents".into(),
+                            ..success()
+                        });
+                    }
                     if self.fail_save.load(Ordering::Acquire) {
                         return Ok(CommandOutput {
                             status: ExitStatus::from_raw(1 << 8),
@@ -5127,6 +5162,35 @@ mod tests {
         assert!(calls
             .iter()
             .any(|args| args.ends_with(&["--with-parents".into(), "--with-image".into()])));
+    }
+
+    #[test]
+    fn an_export_whose_ancestors_were_removed_saves_the_capture_alone_and_loads() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("dev.silo-backup");
+        let runner = FakeRunner::default();
+        runner.ancestor_missing.store(true, Ordering::Release);
+        let service = service(&temp, runner);
+        create_one(&service, destination.clone(), false).unwrap();
+        {
+            let calls = service.runner.calls.lock().unwrap();
+            let saves: Vec<_> = calls
+                .iter()
+                .filter(|args| args.get(1).map(String::as_str) == Some("save"))
+                .collect();
+            assert_eq!(saves.len(), 2);
+            assert!(saves[0].contains(&"--with-parents".to_owned()));
+            assert!(!saves[1].contains(&"--with-parents".to_owned()));
+        }
+        // The fallback archive passes the same verification an import starts with.
+        let package = read_and_verify_package(
+            &destination,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::VerifyAll,
+        )
+        .unwrap();
+        assert_eq!(package.manifest.computers.len(), 1);
     }
 
     #[test]
