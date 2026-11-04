@@ -278,6 +278,44 @@ name and host keys, the network files and the trust of the fork's proxy CA, and 
 account its SecureToken back (`fork_first_boot.rs`). A fork waiting for that Start can't be
 checkpointed. If the checkpoint needs developer tools or a computer-use update, the setup
 still uses one boot of its own, over the temporary NAT, and the Start is a second boot.
+A source disk without the network configuration file to take over also gets the boot of its
+own. The first Start saves its result on the computer's current record (`firstBoot`,
+`inheritedAccess` and its account-token note only), since other operations can change the
+record during a boot that takes minutes, and Stop interrupts its waits for the guest.
+The source's copied password and key are deleted as soon as the offline setup ends.
+Retry setup leaves a fork that is waiting for its first Start to that Start: its key
+does not exist before it.
+
+**Quiet forks.** `checkpoints.fork` takes `secrets` and a `quiet` recipe, and a fork made
+without a checkpoint name forks the computer's current state: it takes a checkpoint named
+"Fork point" of the source first (an automatic one, under the same Fork operation) and
+copies that.
+
+- Secrets and GitHub: a fork gets no Silo-managed secret or GitHub assignment. `secrets`
+  names the ones to copy from the source; `github` is read-only GitHub access (the same
+  copy as Linux, refused for a personal token). A name the source does not have fails the
+  fork before anything is created.
+- Scheduled work, on the stopped disk in the mount used for the rekey (`quiet.rs`), so none
+  of it runs at the fork's boot: LaunchAgents and LaunchDaemons that are not Apple's
+  (`com.apple.`) or Silo's (`com.silo.`, `org.silo.`) by their label, in `/Library` and each
+  user's `Library`; user crontabs (`/var/at/tabs`) and at jobs; the user's periodic scripts
+  (`/usr/local/etc/periodic/*`, `/etc/{daily,weekly,monthly}.local`). They are moved, not
+  deleted, to `/Library/Application Support/Silo/Quieted/` under their original path, and the
+  fork's record lists them in `quiet.parked`.
+- `scrub` paths are deleted on the same mount. The rules are Linux's: absolute, at least two
+  levels, no `..`, no walking through a link (a link at the end is removed itself). They
+  must be on the Data volume (`/System`, `/bin` and most of `/usr` are not), `*` and `?`
+  match within one path part, and `[` is refused. The account's home, Silo's files and the
+  account database are never scrubbed.
+- `stop` names (launchd labels or process names) run in the first Start, first, over the
+  password login: `launchctl disable` and `bootout` in the system and user domains, then
+  `pkill -x`. Login items and apps that start at the automatic login still start before
+  that, since the login comes before the first SSH connection. The new machine identifier is
+  made when the files are cloned and the host and computer names are set in that Start.
+- The record's `quiet` holds `scheduledJobsDisabled`, `newIdentity`, `stop`, `scrub`,
+  `secrets`, `parked` and `applied`, which is true once the Start has finished.
+
+Not yet run against a live guest.
 
 The old script changed the password with `dscl . -passwd` over standard input; with no
 terminal that command printed `New Password:` and `Permission denied`, and the script

@@ -416,6 +416,7 @@ pub(super) fn refreshes(app_data: &Path, record: &Record) -> bool {
     record.installed
         && record.setup_complete()
         && !record.inherited_access
+        && !record.first_boot
         && !record.computer_use_stale()
         && list(app_data).iter().any(|template| {
             template.name == name

@@ -296,8 +296,8 @@ impl Service {
         }
     }
 
-    /// `checkpoints.fork`. Linux forks the computer's current state when no checkpoint is
-    /// named; macOS always needs one.
+    /// `checkpoints.fork`. Both platforms fork the computer's current state, by taking a
+    /// checkpoint of it, when no checkpoint is named.
     pub fn start_fork(
         &self,
         computer_id: &str,
@@ -306,21 +306,14 @@ impl Service {
         options: ForkOptions,
     ) -> Result<JobId, Failure> {
         match self.platform(computer_id)? {
-            Platform::Macos => {
-                let checkpoint_id = checkpoint_id.ok_or_else(|| {
-                    Failure::new(
-                        ErrorCode::Internal,
-                        "Choose the checkpoint to fork. macOS computers cannot fork their current state.",
-                    )
-                })?;
-                macos_computers::start_macos_checkpoint_fork_job(
-                    self.macos.clone(),
-                    computer_id.to_owned(),
-                    checkpoint_id.to_owned(),
-                    new_name.to_owned(),
-                )
-                .map_err(Failure::from_message)
-            }
+            Platform::Macos => macos_computers::start_macos_checkpoint_fork_job(
+                self.macos.clone(),
+                computer_id.to_owned(),
+                checkpoint_id.map(str::to_owned),
+                new_name.to_owned(),
+                options,
+            )
+            .map_err(Failure::from_message),
             Platform::Linux => {
                 let computer_id = computer_id.to_owned();
                 let checkpoint_id = checkpoint_id.map(str::to_owned);
@@ -587,7 +580,7 @@ fn finish_linux_job(
 }
 
 /// GitHub and secret assignments follow a fork on this device.
-struct EngineForkAssignments;
+pub(crate) struct EngineForkAssignments;
 
 impl runtime::checkpoints::ForkAssignments for EngineForkAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {

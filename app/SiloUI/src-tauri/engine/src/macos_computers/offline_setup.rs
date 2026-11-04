@@ -71,22 +71,47 @@ pub(super) fn run_import_rekey(disk: &Path, account: &GuestAccount) -> Result<()
     patched.and(closed)
 }
 
+/// What the offline setup of a fork did beyond its credentials.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct ForkRekey {
+    /// The network configuration was written. False when the source disk has no bootstrap
+    /// configuration to replace, so the fork needs a boot of its own to stage it.
+    pub bootstrap_staged: bool,
+    /// Guest paths of the scheduled work that was moved aside (see `quiet`).
+    pub parked: Vec<String>,
+}
+
 /// Gives a fork its own credentials on the stopped computer's disk before its first start:
 /// a new password hash and automatic login, no login keychain (it is sealed with the
 /// source's password), and none of the source's SSH keys. The key, names and host keys are
-/// set by `fork_finalization_script` in the same boot that checks the result.
+/// set by `fork_finalization_script` in the same boot that checks the result. With `scrub`,
+/// the source's scheduled work is moved aside and the paths are deleted in the same mount.
 pub(super) fn run_fork_rekey(
     disk: &Path,
     account: &GuestAccount,
     bootstrap_config: Option<&[u8]>,
-) -> Result<(), String> {
+    scrub: Option<&[String]>,
+) -> Result<ForkRekey, String> {
     let mut attached = Attached::attach(disk)?;
     let patched = attached.mount_data_volume().and_then(|mount| {
         rekey_fork_data_volume(&mount, account)?;
-        bootstrap_config.map_or(Ok(()), |config| write_bootstrap_config(&mount, config))
+        let bootstrap_staged = match bootstrap_config {
+            Some(config) => write_bootstrap_config(&mount, config)?,
+            None => true,
+        };
+        let parked = match scrub {
+            Some(scrub) => super::quiet::apply_offline(&mount, scrub)?.parked,
+            None => Vec::new(),
+        };
+        Ok(ForkRekey {
+            bootstrap_staged,
+            parked,
+        })
     });
     let closed = attached.close();
-    patched.and(closed)
+    let rekeyed = patched?;
+    closed?;
+    Ok(rekeyed)
 }
 
 // MARK: Disk
@@ -437,10 +462,16 @@ const BOOTSTRAP_CONFIG: &str = "Library/Application Support/Silo/NetworkBootstra
 
 /// Replaces the source's network bootstrap configuration in place, so the file keeps the
 /// owner the guest requires of it and the fork's first boot already has its own address
-/// behind its gateway.
-fn write_bootstrap_config(root: &Path, config: &[u8]) -> Result<(), String> {
-    let path = validate_import_data_path(root, Path::new(BOOTSTRAP_CONFIG), false)?;
-    write_file(&path, config, 0o644, true)
+/// behind its gateway. Returns false, writing nothing, when the source has none.
+fn write_bootstrap_config(root: &Path, config: &[u8]) -> Result<bool, String> {
+    let relative = Path::new(BOOTSTRAP_CONFIG);
+    let path = validate_import_data_path(root, relative, true)?;
+    if fs::symlink_metadata(&path).is_err() {
+        return Ok(false);
+    }
+    let path = validate_import_data_path(root, relative, false)?;
+    write_file(&path, config, 0o644, true)?;
+    Ok(true)
 }
 
 /// Removes what is in the account's `Library/Keychains`. macOS makes a new login keychain
@@ -1926,12 +1957,12 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"source config").unwrap();
         let inode = fs::metadata(&path).unwrap().ino();
-        write_bootstrap_config(root.path(), b"fork config").unwrap();
+        assert!(write_bootstrap_config(root.path(), b"fork config").unwrap());
         assert_eq!(fs::read(&path).unwrap(), b"fork config");
         assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
         // A source without a bootstrap has nothing to take over, and nothing is created.
         let bare = volume();
-        assert!(write_bootstrap_config(bare.path(), b"x").is_err());
+        assert!(!write_bootstrap_config(bare.path(), b"x").unwrap());
         assert!(!bare.path().join(BOOTSTRAP_CONFIG).exists());
     }
 
