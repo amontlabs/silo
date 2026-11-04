@@ -48,6 +48,16 @@ pub(super) fn developer_tools_pending(record: &Record, version: &str) -> bool {
     !record.setup.developer_tools || developer_tools_outdated(record, version)
 }
 
+/// Whether a fork has nothing to do in its guest but what its first start does, so its
+/// setup needs no boot.
+pub(super) fn fork_needs_no_guest_work(record: &Record, developer_tools_version: &str) -> bool {
+    !developer_tools_pending(record, developer_tools_version)
+        && record.setup.computer_use
+        && record.setup.clipboard
+        && record.setup.roots
+        && !record.computer_use_stale()
+}
+
 /// Runs every unfinished step for `record`, saving progress after each.
 pub(super) fn run(
     app: &MacosContext,
@@ -146,6 +156,9 @@ impl Provision<'_> {
         if record.setup.needs_personalizing {
             if record.imported {
                 self.personalize_import(record)?;
+            } else if record.inherited_access && fork_needs_no_guest_work(record, &developer_tools_version)
+            {
+                self.personalize_fork_offline(record)?;
             } else if record.inherited_access {
                 self.personalize_fork(record)?;
                 running = true;
@@ -437,6 +450,33 @@ impl Provision<'_> {
         shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
     }
 
+    /// Personalizes a fork without starting it. Its password, automatic login and keychain are
+    /// changed on the stopped disk, and its gateway address and proxy CA are allocated and
+    /// written to the network configuration the guest reads at boot. The fork's first Start is
+    /// its only boot: it installs the key, name, host keys and trust over the new password
+    /// (see `fork_first_boot`).
+    fn personalize_fork_offline(&self, record: &mut Record) -> Result<(), Stop> {
+        let data = app_data(self.app)?;
+        let _space = match self.reservation.take() {
+            Some(held) => held,
+            None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
+        };
+        let own = guest_access::ensure_account(self.layout)?;
+        if let Some(log) = &self.log {
+            log.hide(&own.password);
+        }
+        self.say("Personalizing the computer")?;
+        let config = super::proxy::prepare_fork_bootstrap(self.app, record, self.layout)?;
+        offline_setup::ensure_detached(&self.layout.disk())?;
+        offline_setup::run_fork_rekey(&self.layout.disk(), &own, Some(&config))?;
+        self.check()?;
+        record.first_boot = true;
+        self.mark(record, |setup| {
+            setup.needs_personalizing = false;
+            setup.proxy_bootstrap = true;
+        })
+    }
+
     /// Gives a fork its own password, key, name, host keys and keychain without a boot of
     /// its own: the password hash, automatic login and keychain are changed on the stopped
     /// disk, and the one boot that follows logs in with that password to install the key,
@@ -454,7 +494,7 @@ impl Provision<'_> {
         }
         self.say("Personalizing the computer")?;
         offline_setup::ensure_detached(&self.layout.disk())?;
-        offline_setup::run_fork_rekey(&self.layout.disk(), &own)?;
+        offline_setup::run_fork_rekey(&self.layout.disk(), &own, None)?;
         self.check()?;
         self.say("Starting macOS")?;
         boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
@@ -1215,6 +1255,42 @@ mod tests {
         assert!(!script.contains("dscl"));
         assert!(!script.contains("Library/Keychains"));
         assert!(offline_setup::import_finalization_script("k", "n").contains("Library/Keychains"));
+    }
+
+    #[test]
+    fn a_fork_needs_a_boot_during_setup_only_when_its_guest_has_work() {
+        let version = developer_tools::version();
+        let mut fork = finished_record();
+        fork.inherited_access = true;
+        fork.setup.needs_personalizing = true;
+        fork.developer_tools_version = Some(version.clone());
+        fork.computer_use_version = Some(super::super::templates::computer_use_version());
+        fork.computer_use_approval = Some(crate::computer_use::initial_approval());
+        fork.computer_use_version = Some(super::super::templates::computer_use_version_for(
+            crate::computer_use::initial_approval(),
+        ));
+        assert!(fork_needs_no_guest_work(&fork, &version));
+        // The checkpoint lacked developer tools, or the folders were never made.
+        let mut tools = fork.clone();
+        tools.setup.developer_tools = false;
+        assert!(!fork_needs_no_guest_work(&tools, &version));
+        let mut roots = fork.clone();
+        roots.setup.roots = false;
+        assert!(!fork_needs_no_guest_work(&roots, &version));
+        assert!(!fork_needs_no_guest_work(&fork, "another-version"));
+    }
+
+    #[test]
+    fn a_fork_waiting_for_its_first_start_cannot_be_checkpointed() {
+        use super::super::checkpoints::OperationKind::Capture;
+        let mut fork = finished_record();
+        fork.setup.proxy_bootstrap = true;
+        fork.first_boot = true;
+        assert!(store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture)
+            .is_err());
+        fork.first_boot = false;
+        assert!(store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture)
+            .is_ok());
     }
 
     #[test]

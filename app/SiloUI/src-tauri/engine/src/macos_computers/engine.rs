@@ -966,6 +966,9 @@ pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Res
     super::proxy::require_guest_bootstrap(record, layout)?;
     let boot_started = time::OffsetDateTime::now_utc();
     start_machine(app, record, layout, &Boot::Normal)?;
+    if record.first_boot {
+        super::fork_first_boot::complete(app, record, layout)?;
+    }
     let policy = reconcile_start_policy(record)?;
     // The guest reconfigures its network while it boots: connections made before its readiness
     // receipt are dropped, so the receipt comes first and the placeholders after.

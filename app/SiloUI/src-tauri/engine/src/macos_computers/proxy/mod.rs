@@ -14,14 +14,32 @@ mod bootstrap;
 // These narrow hooks are consumed by the parallel provisioning and launch-migration owners.
 #[allow(unused_imports)]
 pub(super) use bootstrap::{
-    migrate_legacy_guest_bootstrap, require_guest_bootstrap, stage_guest_bootstrap,
-    sync_guest_placeholders, verify_guest_ready,
+    install_on_running_guest, migrate_legacy_guest_bootstrap, prepare_fork_bootstrap,
+    require_guest_bootstrap, stage_guest_bootstrap, sync_guest_placeholders, verify_guest_ready,
 };
 
 /// Stand-in on hosts without macOS computers: provisioning never reaches it there, because
 /// installing the computer is already refused.
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub(super) fn stage_guest_bootstrap(
+    _app: &super::MacosContext,
+    _record: &super::store::Record,
+    _layout: &super::store::Layout,
+) -> Result<(), String> {
+    Err(super::NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub(super) fn prepare_fork_bootstrap(
+    _app: &super::MacosContext,
+    _record: &super::store::Record,
+    _layout: &super::store::Layout,
+) -> Result<Vec<u8>, String> {
+    Err(super::NOT_SUPPORTED.into())
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub(super) fn install_on_running_guest(
     _app: &super::MacosContext,
     _record: &super::store::Record,
     _layout: &super::store::Layout,

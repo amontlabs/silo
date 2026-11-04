@@ -75,11 +75,16 @@ pub(super) fn run_import_rekey(disk: &Path, account: &GuestAccount) -> Result<()
 /// a new password hash and automatic login, no login keychain (it is sealed with the
 /// source's password), and none of the source's SSH keys. The key, names and host keys are
 /// set by `fork_finalization_script` in the same boot that checks the result.
-pub(super) fn run_fork_rekey(disk: &Path, account: &GuestAccount) -> Result<(), String> {
+pub(super) fn run_fork_rekey(
+    disk: &Path,
+    account: &GuestAccount,
+    bootstrap_config: Option<&[u8]>,
+) -> Result<(), String> {
     let mut attached = Attached::attach(disk)?;
-    let patched = attached
-        .mount_data_volume()
-        .and_then(|mount| rekey_fork_data_volume(&mount, account));
+    let patched = attached.mount_data_volume().and_then(|mount| {
+        rekey_fork_data_volume(&mount, account)?;
+        bootstrap_config.map_or(Ok(()), |config| write_bootstrap_config(&mount, config))
+    });
     let closed = attached.close();
     patched.and(closed)
 }
@@ -425,6 +430,17 @@ fn rekey_fork_data_volume(root: &Path, account: &GuestAccount) -> Result<(), Str
     remove_import_managed_file(root, "Users/silo/.ssh/authorized_keys")?;
     clear_login_keychain(root)?;
     enable_ssh(root)
+}
+
+/// Where the guest's network bootstrap reads its configuration.
+const BOOTSTRAP_CONFIG: &str = "Library/Application Support/Silo/NetworkBootstrap/config.json";
+
+/// Replaces the source's network bootstrap configuration in place, so the file keeps the
+/// owner the guest requires of it and the fork's first boot already has its own address
+/// behind its gateway.
+fn write_bootstrap_config(root: &Path, config: &[u8]) -> Result<(), String> {
+    let path = validate_import_data_path(root, Path::new(BOOTSTRAP_CONFIG), false)?;
+    write_file(&path, config, 0o644, true)
 }
 
 /// Removes what is in the account's `Library/Keychains`. macOS makes a new login keychain
@@ -1900,6 +1916,23 @@ mod tests {
         let disabled = read_plist(&root.path().join(LAUNCHD_DISABLED)).unwrap();
         assert_eq!(disabled["com.openssh.sshd"].as_boolean(), Some(false));
         assert!(disabled.get("com.apple.screensharing").is_none());
+    }
+
+    #[test]
+    fn the_fork_network_configuration_replaces_the_sources_in_place() {
+        use std::os::unix::fs::MetadataExt;
+        let root = volume();
+        let path = root.path().join(BOOTSTRAP_CONFIG);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"source config").unwrap();
+        let inode = fs::metadata(&path).unwrap().ino();
+        write_bootstrap_config(root.path(), b"fork config").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"fork config");
+        assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
+        // A source without a bootstrap has nothing to take over, and nothing is created.
+        let bare = volume();
+        assert!(write_bootstrap_config(bare.path(), b"x").is_err());
+        assert!(!bare.path().join(BOOTSTRAP_CONFIG).exists());
     }
 
     #[test]

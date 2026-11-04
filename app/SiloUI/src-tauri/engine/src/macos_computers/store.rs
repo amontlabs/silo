@@ -167,6 +167,10 @@ pub(super) struct Record {
     /// cannot keep it and the engine cannot restore it. Informational only.
     #[serde(default)]
     pub secure_token_missing: bool,
+    /// A fork whose disk was rekeyed and staged while stopped: its first start still installs
+    /// its key, name and trust over its password login before handing the computer over.
+    #[serde(default)]
+    pub first_boot: bool,
 }
 
 impl Record {
@@ -332,6 +336,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         inherited_access: false,
         imported: false,
         secure_token_missing: false,
+        first_boot: false,
     }
 }
 
@@ -404,7 +409,7 @@ pub(super) fn checkpoint_allowed(
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if !record.setup_complete() {
+    if !record.setup_complete() || record.first_boot {
         return Err(super::checkpoints::NOT_READY.into());
     }
     match state {

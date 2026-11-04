@@ -136,6 +136,88 @@ pub(in crate::macos_computers_engine) fn stage_guest_bootstrap(
     write_identity(layout, &identity)
 }
 
+/// Allocates a fork's gateway address and proxy CA and saves its bootstrap identity, so the
+/// fork can boot behind its gateway at once. Returns the network configuration the guest
+/// reads at boot; its CA and trust files are installed over its first login.
+pub(in crate::macos_computers_engine) fn prepare_fork_bootstrap(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<Vec<u8>, String> {
+    let routes = proxy_address::host_ipv4_routes()?;
+    let address = proxy_address::load_or_allocate(layout, &routes)?;
+    let ca = proxy_ca::get_or_create(&record.id, || super::generate_ca(app))?;
+    let identity = expected_identity(record, address, &ca)?;
+    match read_identity(layout)? {
+        Some(saved) if saved == identity => {}
+        Some(_) => {
+            return Err(
+                "The saved macOS proxy network identity differs from its Keychain CA or guest address."
+                    .into(),
+            );
+        }
+        None => write_identity(layout, &identity)?,
+    }
+    guest_config_json(record, &address, &identity)
+}
+
+/// Installs the network files and the proxy CA's trust in a running fork that already boots
+/// behind its gateway, then restarts the guest's bootstrap with them.
+pub(in crate::macos_computers_engine) fn install_on_running_guest(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+) -> Result<(), String> {
+    let address = proxy_address::load_existing(layout, &proxy_address::host_ipv4_routes()?)?;
+    let ca = proxy_ca::get_existing(&record.id)?
+        .ok_or_else(|| "The macOS proxy CA is missing. Retry computer setup.".to_owned())?;
+    let identity = expected_identity(record, address, &ca)?;
+    if read_identity(layout)?.as_ref() != Some(&identity) {
+        return Err("The macOS proxy bootstrap identity is missing or has changed.".into());
+    }
+    let placeholder_names = host_placeholder_names(&record.name)?;
+    install_guest_files(
+        app,
+        record,
+        layout,
+        &address,
+        &ca,
+        &identity,
+        &placeholder_names,
+    )?;
+    let output = guest_access::run(
+        layout,
+        record,
+        "sudo -n /bin/launchctl bootstrap system /Library/LaunchDaemons/com.silo.network-bootstrap.plist",
+        None,
+        SSH_COMMAND_TIMEOUT,
+    )?;
+    if output.status != 0 {
+        return Err("Could not start the guest network bootstrap.".into());
+    }
+    Ok(())
+}
+
+fn guest_config_json(
+    record: &Record,
+    address: &ProxyAddress,
+    identity: &BootstrapIdentity,
+) -> Result<Vec<u8>, String> {
+    let config = GuestConfig {
+        version: BOOTSTRAP_VERSION,
+        computer_id: &record.id,
+        expected_mac: &record.mac_address,
+        address: address.guest(),
+        prefix_length: 30,
+        router: address.host(),
+        dns_server: address.host(),
+        ca_fingerprint: &identity.ca_fingerprint,
+        probe_url: PROBE_URL,
+    };
+    serde_json::to_vec_pretty(&config)
+        .map_err(|_| "Cannot encode macOS proxy bootstrap configuration.".to_owned())
+}
+
 /// Stops the NAT bootstrap guest after its script ran. A guest that was staged is asked to
 /// shut down first and only force-stopped when it does not release the machine in time; one
 /// whose script failed is force-stopped at once. Fails when the machine is still held.
@@ -648,17 +730,7 @@ fn install_guest_files(
         SSH_COMMAND_TIMEOUT,
     )?;
 
-    let config = GuestConfig {
-        version: BOOTSTRAP_VERSION,
-        computer_id: &record.id,
-        expected_mac: &record.mac_address,
-        address: address.guest(),
-        prefix_length: 30,
-        router: address.host(),
-        dns_server: address.host(),
-        ca_fingerprint: &identity.ca_fingerprint,
-        probe_url: PROBE_URL,
-    };
+    let config = guest_config_json(record, address, identity)?;
     let temporary = Builder::new()
         .prefix("proxy-network-bootstrap-")
         .tempdir_in(&layout.dir)
@@ -674,11 +746,7 @@ fn install_guest_files(
     let placeholders_path = temporary.path().join("placeholders.zsh");
     let names_path = temporary.path().join("placeholder-names.txt");
     let retired_path = temporary.path().join("retired-names.txt");
-    write_private(
-        &config_path,
-        &serde_json::to_vec_pretty(&config)
-            .map_err(|_| "Cannot encode macOS proxy bootstrap configuration.".to_owned())?,
-    )?;
+    write_private(&config_path, &config)?;
     write_private(&ca_path, ca.certificate_pem().as_bytes())?;
     write_private(&trust_probe_path, trust_probe.as_bytes())?;
     write_private(

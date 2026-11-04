@@ -22,6 +22,8 @@ mod engine;
 mod engine;
 #[path = "macos_computers/files.rs"]
 pub(crate) mod files;
+#[path = "macos_computers/fork_first_boot.rs"]
+mod fork_first_boot;
 #[path = "macos_computers/guest_access.rs"]
 mod guest_access;
 #[path = "macos_computers/guest_clipboard.rs"]
@@ -6198,8 +6200,8 @@ fn copy_for_fork(
 }
 
 /// What a fork's setup still has to do. The disk is the checkpoint's, so the developer tools
-/// it had are kept with their version and are not installed again; the personalization, the
-/// workspace folders and the network and trust are the fork's own.
+/// it had are kept with their version and are not installed again, and so are the workspace
+/// folders; the personalization and the network and trust are the fork's own.
 fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
     record.developer_tools_version = checkpoint.developer_tools_version.clone();
     record.setup = store::SetupProgress {
@@ -6208,7 +6210,7 @@ fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
         developer_tools: checkpoint.developer_tools,
         computer_use: true,
         clipboard: true,
-        roots: false,
+        roots: true,
         needs_personalizing: true,
         proxy_bootstrap: false,
     };
