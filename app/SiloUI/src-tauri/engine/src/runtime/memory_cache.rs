@@ -27,7 +27,7 @@ fn referenced_manifests(snapshots: &Path) -> io::Result<HashSet<String>> {
     for group in groups {
         let group = group?;
         // `.groups.lock` and any other plain file sit beside the group directories.
-        if !group.file_type()?.is_dir() {
+        if group.path().metadata()?.is_file() {
             continue;
         }
         let members = match fs::read_dir(group.path()) {
@@ -38,7 +38,7 @@ fn referenced_manifests(snapshots: &Path) -> io::Result<HashSet<String>> {
         for member in members {
             let member = member?;
             // A group holds `group.json` and `.group.lock` beside its member directories.
-            if !member.file_type()?.is_dir() {
+            if member.path().metadata()?.is_file() {
                 continue;
             }
             let bytes = match fs::read(member.path().join("checkpoint").join("checkpoint.json")) {

@@ -339,12 +339,10 @@ fn control_endpoint_missing(failure: &RuntimeError) -> bool {
     )
 }
 
-/// Whether `msb inspect` still lists the computer as a live runtime; it answers from the
-/// store rather than from the busy runtime.
+/// Whether `msb inspect` lists the computer as running; it answers from the store rather
+/// than from the busy runtime. Any other status ends the wait.
 fn still_alive(runner: &dyn RuntimeRunner, paths: &RuntimePaths, computer: &str) -> bool {
-    inspect_computer(runner, paths, computer).is_ok_and(|inspected| {
-        !matches!(inspected.status.as_str(), "Stopped" | "Crashed" | "Created")
-    })
+    inspect_computer(runner, paths, computer).is_ok_and(|inspected| inspected.status == "Running")
 }
 
 fn pause(duration: Duration) {
