@@ -11,3 +11,22 @@ updates:
     groups:
       github-actions:
         patterns: ['*']
+  # npm and Cargo updates are grouped to one weekly pull request per ecosystem;
+  # security updates still open on their own.
+  - package-ecosystem: npm
+    directories:
+      - '/app/SiloUI'
+      - '/website'
+      - '/demo'
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ['*']
+  - package-ecosystem: cargo
+    directory: '/app/SiloUI'
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ['*']
