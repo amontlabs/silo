@@ -47,7 +47,7 @@ for legacy guests and repairs.
 ### Published v3 account evidence
 
 The [v3 image is public](https://github.com/0xpolarzero/silo/releases/tag/guest-ubuntu-24.04-v3).
-The [current image lock](../app/SiloUI/guest-image/image-lock.json) now pins v4;
+The [current image lock](../app/SiloUI/guest-image/image-lock.json) now pins v5;
 these v3 results qualify the earlier account-provisioning image.
 [Publication run 35546417121](https://github.com/0xpolarzero/silo/actions/runs/35546417121)
 built source `a9827c263df3daee28959b2c2073d85c6f980e9d`. Earlier offline

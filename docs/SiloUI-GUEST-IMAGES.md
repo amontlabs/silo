@@ -13,9 +13,11 @@ there is no version picker or arbitrary-image compatibility promise in this chan
 
 ## Publication and app builds
 
-The public standard container package is
-`ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4`, with `-arm64` and `-amd64` tags (v3 remains published).
-The matching [versioned release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4)
+The current standard container package is
+`ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5`, with `-arm64` and `-amd64` tags; v3 and v4 remain
+published at `ghcr.io/0xpolarzero/silo-guest`. The app does not pull from GHCR: it downloads the
+release archives below. The matching
+[versioned release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v5)
 contains compressed Docker-save archives, package inventories in JSON manifests,
 SHA256SUMS, the recipe, setup script and source commit. The image itself retains
 Ubuntu's package copyright files under `/usr/share/doc`.
@@ -81,7 +83,7 @@ and [implementation](https://github.com/docker/setup-qemu-action/blob/9901266195
 confirm the default is mutable and installation uses privileged containers.
 
 `app/SiloUI/guest-image/image-lock.json` pins the release URL (the repository's
-`guest-ubuntu-24.04-v4` release in `amontlabs/silo`), and for each architecture the exact release
+`guest-ubuntu-24.04-v5` release in `amontlabs/silo`), and for each architecture the exact release
 archive SHA-256, length, uncompressed archive length, image reference and Docker config digest.
 The lock is the single source of truth: the app embeds it at build time
 (`include_str!` in `src-tauri/src/guest_image.rs`) and downloads
@@ -129,7 +131,7 @@ computers; restored backups also retain their guest systems.
 ## Guest image v3 publication
 
 This records the earlier v3 publication and account verification. The
-[current lock](../app/SiloUI/guest-image/image-lock.json) pins v4, described below.
+[current lock](../app/SiloUI/guest-image/image-lock.json) pins v5, described below.
 The v3 recipe added `sudo`, `python3` and `openssh-sftp-server`. Account setup
 uses these tools locally and refuses an image missing them. New computer creation
 must not download or repair packages to establish the working account. At v3
@@ -165,8 +167,7 @@ The GUI was not launched, and Linux/KVM execution remains untested.
 `GUEST_IMAGE_VERSION` is `ubuntu-24.04-v4`. v4 is published as the
 [`guest-ubuntu-24.04-v4` release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v4),
 built from source commit `aae2ed939339cb559d81915b4e8df8a150cb8a90` (its
-`source-commit.txt`), and `guest-image/image-lock.json` pins it: both manifests are
-copied into the lock, and new computers use the image with the built-in desktop.
+`source-commit.txt`). The lock pinned it until v5.
 Compressed archives are 414,843,188 bytes (ARM64) and 423,476,714 bytes (x86-64).
 That release predates attaching `src-tauri/guest/lcu-lock.json`, which the v4 image
 build consumed; the publication workflow attached it for releases between v4 and v5. v5
@@ -262,14 +263,18 @@ pixelflux without its GPL codecs (`PIXELFLUX_ENABLE_GPL=0`; needs Silo-built whe
 4:4:4). When bumping `desktop-streamer-lock.json`, update the notice table and the source mirror
 in the same change.
 
-## Guest image v5 recipe (unpublished)
+## Guest image v5 recipe (published)
 
 `GUEST_IMAGE_VERSION` in `scripts/build-guest-image.mjs` and the recipe in
-`guest-image/Dockerfile` are `ubuntu-24.04-v5`. v5 is not published: `guest-image/image-lock.json`
-still pins v4, so new computers use v4. On a v4 computer the guest helper downloads the pinned
-Cua Driver archive once and verifies it (see
-[built-in computer use](SiloUI-DESKTOP.md#built-in-computer-use)). Once v5 is published and the
-lock points at it, new computers have the driver from the start.
+`guest-image/Dockerfile` are `ubuntu-24.04-v5`. v5 is published as the
+[`guest-ubuntu-24.04-v5` release](https://github.com/amontlabs/silo/releases/tag/guest-ubuntu-24.04-v5),
+built from source commit `52a10af71002c9ac23e0f08d1b0b416b82cd61ff` (its `source-commit.txt`), and
+`guest-image/image-lock.json` pins it: both manifests are copied into the lock, so new computers
+have Cua Driver from the start. Compressed archives are 352,275,811 bytes (ARM64) and 361,611,981
+bytes (x86-64). Selkies is the same 2.0.0 package as in v4, so the
+`guest-ubuntu-24.04-v4-source` mirror remains its corresponding source. On a computer created
+from v4 the guest helper downloads the pinned Cua Driver archive once and verifies it (see
+[built-in computer use](SiloUI-DESKTOP.md#built-in-computer-use)).
 
 v5 changes the v4 recipe in these ways:
 
@@ -294,14 +299,15 @@ v5 changes the v4 recipe in these ways:
   them and that the removed `lcu-lock.json`, `lcu-legacy-lock.json`, `chatgpt-app-lock.json` and
   `setup-lcu.py` are not part of the build.
 
-### Publishing v5 (owner step)
+### Publishing a guest image
 
 1. Build the image locally and check it: `npm --prefix app/SiloUI run guest:image:build`, then
    start a computer from it and run `cua-driver doctor --json` in the desktop session.
-2. Run the `guest-image` workflow for `ubuntu-24.04-v5` and approve the `guest-image-publish`
-   environment. The workflow attaches `cua-driver-lock.json` and `silo-cua-driver-mcp` to the
-   release (`guest-ubuntu-24.04-v5`). Never reuse a published tag.
-3. Check that the GHCR package is public and pulls anonymously.
+2. Push `main` to a `publish-guest-<version>` branch (the environment deploys only from those)
+   and approve the `guest-image-publish` environment on the run it starts. The workflow attaches
+   `cua-driver-lock.json` and `silo-cua-driver-mcp` to the release. Never reuse a published tag.
+3. Check that the GHCR package is public and pulls anonymously. A package that is new under an
+   owner starts private; change it under the package's settings.
 4. Copy the release manifests into `guest-image/image-lock.json` (release URL, per-architecture
    archive hash, size and config digest) in a separate change, and run
    `npm --prefix app/SiloUI run test:release`.
