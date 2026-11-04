@@ -38,12 +38,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: app/SiloUI/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Install exact runtime Rust toolchain
@@ -78,7 +78,7 @@ jobs:
         run: |
           python3 scripts/dependency-cache-benchmark.py pack --cache-dir "$RUNNER_TEMP/dependency-cache" --archive "$RUNNER_TEMP/dependency-cache.tar.gz" --report "$RUNNER_TEMP/archive.json" >> "$GITHUB_OUTPUT"
           echo "artifact-name=dependency-cache-$RUNTIME_TARGET-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.archive.outputs.artifact-name }}
           path: |
@@ -89,7 +89,7 @@ jobs:
           retention-days: 7
       - name: Retain public producer metrics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-control-${{ inputs.target }}
           path: |
@@ -122,12 +122,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: app/SiloUI/package-lock.json
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Install exact runtime Rust toolchain
@@ -153,7 +153,7 @@ jobs:
           python3 scripts/dependency-cache-benchmark.py context --target "$RUNTIME_TARGET" --report "$RUNNER_TEMP/context.json"
       - name: Start transfer-inclusive measurement
         run: python3 scripts/dependency-cache-benchmark.py mark --report "$RUNNER_TEMP/transfer-start.json"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.producer.outputs.artifact-name }}
           path: ${{ runner.temp }}/dependency-transfer
@@ -168,7 +168,7 @@ jobs:
         run: python3 scripts/dependency-cache-benchmark.py summarize --target "$RUNTIME_TARGET" --control "$RUNNER_TEMP/dependency-transfer/control.json" --consumer "$RUNNER_TEMP/consumer.json" --restore-report "$RUNNER_TEMP/restore.json" --report "$RUNNER_TEMP/summary.json"
       - name: Retain public comparison evidence only
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-result-${{ inputs.target }}
           path: |
