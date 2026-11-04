@@ -104,7 +104,8 @@ jobs:
     needs: runtime
     if: ${{ !cancelled() && inputs.benchmark-schedule != 'sequential' && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 30
+    # Headroom: runtime:prepare took about 20 minutes on macos-15 when the cache was stale.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: app/SiloUI
