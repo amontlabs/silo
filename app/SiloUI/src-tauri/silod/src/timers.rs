@@ -188,6 +188,7 @@ impl Upkeep for SilodUpkeep {
             let _ = silo_engine::network::repair_published_ports(&paths);
         }
         let _ = silo_engine::macos_computers::repair_published_ports(&host.macos_context());
+        crate::methods::access::refresh_url_routes();
     }
 
     fn probe_devices(&self) {

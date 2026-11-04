@@ -326,6 +326,9 @@ pub(crate) fn computer_removed(paths: &RuntimePaths, computer: &str) -> Result<(
     let mut config = read_config(paths)?;
     let before = config.mappings.len();
     config.mappings.retain(|m| m.computer != computer);
+    if let Some(proxy) = crate::url_proxy::shared() {
+        proxy.forget_computer(computer);
+    }
     if config.mappings.len() != before {
         write_config(paths, &config)?;
     }
