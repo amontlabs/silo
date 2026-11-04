@@ -74,6 +74,21 @@ class CargoCoverageTests(unittest.TestCase):
                     self.assertIn(name, selected, 'dependency unit tests are not run by root cargo test')
 
 
+class NextestCoverageTests(unittest.TestCase):
+    def test_nextest_profile_exists_and_no_doctests_are_skipped(self):
+        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        config = tomllib.loads((APP / '.config/nextest.toml').read_text())
+        for profile in re.findall(r'cargo nextest run .*--profile (\S+)', workflow):
+            self.assertIn(profile, config['profile'])
+        # nextest does not run doctests; add a `cargo test --doc` step before adding one.
+        tracked = subprocess.check_output(['git', 'ls-files', 'app/SiloUI/*.rs'], cwd=ROOT, text=True).splitlines()
+        for name in tracked:
+            if '/vendor/' in name:
+                continue
+            with self.subTest(file=name):
+                self.assertNotRegex((ROOT / name).read_text(errors='replace'), r'(?m)^\s*//[/!]\s*```')
+
+
 class PlatformCoverageTests(unittest.TestCase):
     def test_ci_runs_host_rust_and_signing_suites_on_macos(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()

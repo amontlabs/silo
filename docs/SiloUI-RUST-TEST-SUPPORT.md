@@ -52,7 +52,7 @@ when their helpers still reach global shutdown admission or caches. The remainin
 serial group consists of tests whose helpers reach that process-wide state;
 `test_support::global_state()` call sites identify its current membership.
 This conservative isolation permits concurrency within each owning test and
-serializes the guarded tests inside the full parallel suite. CI runs the suites with
+serializes the guarded tests inside the full parallel suite. CI runs the workspace suites with
 [cargo-nextest](https://nexte.st/docs/design/how-it-works/), which gives each test its own
 process, so the guard has nothing to serialize there. Ordinary local checks use `cargo test --locked`
 with Cargo's default test thread count. Opt-in live checks retain their documented
