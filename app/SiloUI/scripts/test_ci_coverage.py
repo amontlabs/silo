@@ -59,7 +59,7 @@ class CargoCoverageTests(unittest.TestCase):
         package_manifest = tomllib.loads((APP / 'src-tauri/Cargo.toml').read_text())
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         selected = set()
-        for command in re.findall(r'(?m)^ +(?:- )?run: (cargo (?:test|nextest run) .+)$', workflow):
+        for command in re.findall(r'(?m)^ +(?:- )?(?:run: )?(cargo (?:test|nextest run) .+)$', workflow):
             arguments = shlex.split(command)
             self.assertIn('--locked', arguments)
             if '-p' in arguments:

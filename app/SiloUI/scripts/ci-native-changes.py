@@ -10,10 +10,17 @@ import sys
 # Top-level trees that only the website, demo films and documentation use.
 SKIPPABLE_PREFIXES = ('website/', 'demo/', 'docs/', 'artifacts/', 'assets/')
 
+# Frontend sources. Rust tests read only these two locations inside them.
+FRONTEND_PREFIX = 'app/SiloUI/src/'
+FRONTEND_READ_BY_RUST = ('app/SiloUI/src/test/contracts/',
+                         'app/SiloUI/src/features/application/model/reserved-secret-names.json')
+
 
 def skippable(path):
     if path.startswith(SKIPPABLE_PREFIXES):
         return True
+    if path.startswith(FRONTEND_PREFIX):
+        return not path.startswith(FRONTEND_READ_BY_RUST)
     # Top-level Markdown only: Markdown inside app/ can be read by tests.
     return '/' not in path and path.endswith('.md')
 
