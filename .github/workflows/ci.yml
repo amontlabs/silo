@@ -16,6 +16,34 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Pull requests that touch only the website, demo films or documentation
+  # skip the native jobs below, which hold a macOS runner for about half an
+  # hour. A skipped job still satisfies the required check. Pushes to main and
+  # any failure here run every job.
+  changes:
+    name: Detect native changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.native.outputs.native }}
+    steps:
+      # A pull request checks out its merge commit, whose first parent is the base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Check whether Rust code can read the changed paths
+        id: native
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo native=true >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed-paths.txt"
+          python3 app/SiloUI/scripts/ci-native-changes.py < "$RUNNER_TEMP/changed-paths.txt" | tee -a "$GITHUB_OUTPUT"
+
   # The frontend unit suite dominates this workflow, so it runs as three
   # parallel shards. Vitest assigns every file to exactly one shard.
   frontend-tests:
@@ -125,6 +153,9 @@ jobs:
   # stubbed there and their host-only tests are ignored.
   engine-linux:
     name: Engine tests (Linux)
+    needs: changes
+    # Fails open: an empty output from a failed detection still runs the tests.
+    if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
@@ -157,6 +188,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: app/SiloUI
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Restore the pinned Git download
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -177,6 +209,9 @@ jobs:
 
   rust:
     name: Rust tests
+    needs: changes
+    # Fails open: an empty output from a failed detection still runs the tests.
+    if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
@@ -215,9 +250,12 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_macos_release.py'
       - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      # The Cargo workspace root is app/SiloUI, so its build output is
+      # app/SiloUI/target; src-tauri/target holds only the runtime cache.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: app/SiloUI/src-tauri
+          workspaces: app/SiloUI -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       # Restores the patched MicroSandbox build that warm-release-caches.yml
       # saves from main, instead of compiling it on every run.
