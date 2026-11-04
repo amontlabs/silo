@@ -331,6 +331,8 @@ pub(crate) async fn fork_macos_checkpoint(
             device_id: None,
             checkpoint_id: Some(checkpoint_id),
             new_name,
+            secrets: Vec::new(),
+            quiet: None,
         }),
     )
     .await
@@ -514,6 +516,8 @@ mod forwarding_tests {
                 device_id: None,
                 checkpoint_id: Some("c".into()),
                 new_name: "n".into(),
+                secrets: Vec::new(),
+                quiet: None,
             }),
         )
         .await
