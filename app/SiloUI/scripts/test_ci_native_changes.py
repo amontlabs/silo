@@ -39,29 +39,41 @@ class NativeChangeTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SCRIPT)], input='', capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout, 'native=true\n')
 
-    def test_skippable_trees_are_not_read_by_rust_code(self):
-        tracked = subprocess.check_output(['git', 'ls-files', 'app/SiloUI/*.rs', 'app/SiloUI/**/build.rs'],
-                                          cwd=ROOT, text=True).splitlines()
-        reference = re.compile(r'(?:\.\./){2,}(?:' + '|'.join(p.rstrip('/') for p in changes.SKIPPABLE_PREFIXES) + r')/')
+    def test_skippable_trees_are_not_read_by_native_builds(self):
+        # Rust sources, Cargo manifests and Tauri configuration name build inputs by relative path.
+        tracked = subprocess.check_output(['git', 'ls-files', 'app/SiloUI/*.rs', 'app/SiloUI/*Cargo.toml',
+                                           'app/SiloUI/*tauri*.json'], cwd=ROOT, text=True).splitlines()
+        trees = '|'.join(p.rstrip('/') for p in changes.SKIPPABLE_PREFIXES)
         for name in tracked:
+            if '/vendor/' in name:
+                continue
+            depth = name.count('/')  # '../' steps from the file's directory to the repository root
+            reference = re.compile(r'(?:\.\./){' + str(depth) + r'}(?:(?:' + trees + r')(?:/|")|[^/"]+\.md")')
             text = (ROOT / name).read_text(errors='replace')
             with self.subTest(file=name):
                 self.assertIsNone(reference.search(text))
+                # Path-building chains such as .join("..").join("docs") are not resolvable by regex.
+                self.assertNotRegex(text, r'join\("(?:' + trees + r')"\)')
 
     def test_no_tracked_symlink_points_into_skippable_trees(self):
         entries = subprocess.check_output(['git', 'ls-files', '-s'], cwd=ROOT, text=True).splitlines()
+        root = ROOT.resolve()
         for entry in entries:
             mode, _, _, name = entry.split(None, 3)
-            if mode == '120000':
-                with self.subTest(link=name):
-                    target = (ROOT / name).resolve().relative_to(ROOT.resolve()).as_posix()
-                    self.assertFalse(changes.skippable(target) and not changes.skippable(name))
+            if mode != '120000' or changes.skippable(name):
+                continue
+            with self.subTest(link=name):
+                target = (ROOT / name).resolve()
+                self.assertTrue(target.is_relative_to(root), 'symlink leaves the repository')
+                relative = target.relative_to(root).as_posix()
+                self.assertFalse(changes.skippable(relative) or changes.skippable(relative + '/'))
 
     def test_main_pushes_and_workflow_wiring_always_run_native_jobs(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        detect = re.search(r'(?ms)^  changes:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
+        self.assertIn("if: github.event_name == 'pull_request'", detect)
         # Without --no-renames, a file moved into a skippable tree lists only its new path.
-        self.assertIn('git diff --name-only --no-renames HEAD^1 HEAD', workflow)
-        self.assertIn('if [ "$EVENT" != pull_request ]; then\n            echo native=true', workflow)
+        self.assertIn('git -c core.quotePath=false diff --name-only --no-renames HEAD^1 HEAD', detect)
         for job in ('rust', 'engine-linux'):
             body = re.search(r'(?ms)^  ' + job + r':\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow)[1]
             with self.subTest(job=job):
