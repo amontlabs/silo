@@ -48,35 +48,66 @@ def policy_files(app, directory):
     return entitlements, constraint
 
 
-def sign_helper(helper, entitlements, constraint):
-    command('codesign', '--force', '--sign', '-', '--options', 'runtime',
+def timestamp(identity):
+    """A Developer ID signature needs Apple's trusted timestamp; an ad hoc one cannot have it."""
+    return [] if identity == '-' else ['--timestamp']
+
+
+def sign_helper(helper, entitlements, constraint, identity='-'):
+    command('codesign', '--force', '--sign', identity, *timestamp(identity), '--options', 'runtime',
             '--preserve-metadata=identifier,runtime', '--entitlements', entitlements,
             '--enforce-constraint-validity', '--library-constraint', constraint, helper)
 
 
-def sign_helpers(app):
+MACH_O_MAGIC = {bytes.fromhex(h) for h in ('feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca')}
+# Signed on their own below (helpers with constraints) or by `seal_app` (the main executable).
+SIGNED_SEPARATELY = ('msb', 'silo-macos-gateway', 'silo-network-bootstrap', 'silo-ui')
+
+
+def is_mach_o(path):
+    if path.is_symlink() or not path.is_file():
+        return False
+    with path.open('rb') as handle:
+        return handle.read(4) in MACH_O_MAGIC
+
+
+def sign_other_code(app, identity):
+    """Signs every other Mach-O file (the Git tools, libraries) with the release identity. Tauri
+    signed them ad hoc, which Apple's notary service rejects. Entitlements and flags carry over."""
+    for path in sorted((Path(app) / 'Contents').rglob('*')):
+        if path.parent.name == 'MacOS' and path.name in SIGNED_SEPARATELY or not is_mach_o(path):
+            continue
+        command('codesign', '--force', '--sign', identity, *timestamp(identity), '--options', 'runtime',
+                '--preserve-metadata=identifier,entitlements', path)
+
+
+def sign_helpers(app, identity='-'):
     """Gives the app's VM helper, gateway and bootstrap their final signatures. Run it before
-    `embed_engine`, which copies them into the engine and seals it."""
+    `embed_engine`, which copies them into the engine and seals it. A release identity first
+    signs every other binary, so the library's final hash is the one the helper's constraint names."""
+    if identity != '-':
+        sign_other_code(app, identity)
     with tempfile.TemporaryDirectory(prefix='silo-sign-') as temporary:
         entitlements, constraint = policy_files(app, Path(temporary))
         gateway_entitlements = Path(temporary) / 'gateway.plist'
         gateway_entitlements.write_bytes(plistlib.dumps(GATEWAY_ENTITLEMENTS))
-        sign_helper(app / 'Contents/MacOS/msb', entitlements, constraint)
+        sign_helper(app / 'Contents/MacOS/msb', entitlements, constraint, identity)
         sign_helper(
             app / 'Contents/MacOS/silo-macos-gateway',
             gateway_entitlements,
             constraint,
+            identity,
         )
-        command('codesign', '--force', '--sign', '-', '--options', 'runtime',
+        command('codesign', '--force', '--sign', identity, *timestamp(identity), '--options', 'runtime',
                 '--preserve-metadata=identifier,runtime',
                 app / 'Contents/MacOS/silo-network-bootstrap')
 
 
-def seal_app(app, *, hardened=True):
+def seal_app(app, *, hardened=True, identity='-'):
     """Re-seals the outer bundle without re-signing its nested code (the engine and the tools).
     `hardened=False` keeps a development bundle as Tauri signed it, without hardened runtime."""
     options = ['--options', 'runtime'] if hardened else []
-    command('codesign', '--force', '--sign', '-', *options,
+    command('codesign', '--force', '--sign', identity, *timestamp(identity), *options,
             '--entitlements', Path(__file__).resolve().parent.parent / 'src-tauri/Entitlements.plist', app)
 
 
@@ -127,7 +158,7 @@ def verify_engine(app, identifier):
         raise RuntimeError('The LaunchAgent plist must point at the embedded engine.')
 
 
-def verify_bundle(app):
+def verify_bundle(app, identity='-'):
     command('codesign', '--verify', '--deep', '--strict', app)
     for name in TOOLS:
         executable = app / 'Contents/MacOS' / name
@@ -166,6 +197,6 @@ def verify_bundle(app):
             helper = app / 'Contents/MacOS' / name
             expected = directory / name
             shutil.copy2(helper, expected)
-            sign_helper(expected, allowed, constraint)
+            sign_helper(expected, allowed, constraint, identity)
             if code_hash(expected) != code_hash(helper):
                 raise RuntimeError(f'{name} is missing the exact bundled-engine library constraint.')
