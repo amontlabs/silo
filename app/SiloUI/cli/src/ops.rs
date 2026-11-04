@@ -159,8 +159,23 @@ pub fn fork_extras(recipe: Option<&Recipe>, secrets: &[String]) -> ForkExtras {
 }
 
 /// Puts the extras onto the engine's fork parameters. The parameters carry no secrets or
-/// quiet fields yet, so this leaves them unchanged until the engine contract has them.
-pub fn apply_fork_extras(_params: &mut CheckpointForkParams, _extras: &ForkExtras) {}
+/// quiet fields yet, so anything that would be dropped is refused instead.
+pub fn apply_fork_extras(
+    _params: &mut CheckpointForkParams,
+    extras: &ForkExtras,
+) -> Result<(), CliError> {
+    if !extras.secrets.is_empty() {
+        return Err(CliError::new(
+            "Forks cannot be given secrets yet: this engine has no way to pass --secret.",
+        ));
+    }
+    if extras.quiet.is_some() {
+        return Err(CliError::new(
+            "Forks cannot apply the recipe's quiet: and scrub: lists yet: this engine has no way to pass them.",
+        ));
+    }
+    Ok(())
+}
 
 /// `<source>-<short id>`, the name a fork gets when none is given.
 pub fn default_fork_name(source: &str, short_id: &str) -> String {
@@ -201,7 +216,7 @@ pub async fn fork(
     apply_fork_extras(
         &mut params,
         &fork_extras(args.recipe.as_ref(), &args.secrets),
-    );
+    )?;
     engine
         .run_job(
             &format!("Forking {} into {name}", source.name),
@@ -251,6 +266,9 @@ pub async fn drop_computer(
     Ok(json!({ "dropped": computer.name }))
 }
 
+/// The longest command `guest.exec` accepts; longer work needs a streaming path.
+pub const MAX_EXEC_SECS: u64 = 180;
+
 #[derive(Clone, Debug)]
 pub struct ExecArgs {
     pub computer: String,
@@ -259,9 +277,75 @@ pub struct ExecArgs {
     pub timeout_secs: u64,
 }
 
-pub async fn exec(engine: &Engine, args: &ExecArgs) -> Result<Value, CliError> {
+/// A finished command with its output as the bytes the computer wrote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecOutput {
+    pub exit_code: Option<i32>,
+    pub signal: Option<String>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
+impl ExecOutput {
+    /// The process exit code: the command's own, or 128 plus the signal that ended it.
+    pub fn process_exit_code(&self) -> i32 {
+        exit_code_for(self.exit_code, self.signal.as_deref())
+    }
+
+    /// JSON with the output as text; bytes that are not UTF-8 are replaced.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "exitCode": self.exit_code,
+            "signal": self.signal,
+            "stdout": String::from_utf8_lossy(&self.stdout),
+            "stderr": String::from_utf8_lossy(&self.stderr),
+        })
+    }
+}
+
+/// An exit code for a command that ended normally (`code`) or by a signal (`KILL`, `SIGTERM`
+/// or a number): 128 plus the signal number.
+pub fn exit_code_for(code: Option<i32>, signal: Option<&str>) -> i32 {
+    if let Some(code) = code {
+        return code;
+    }
+    let Some(signal) = signal else {
+        return 1;
+    };
+    let name = signal.trim().to_ascii_uppercase();
+    let name = name.strip_prefix("SIG").unwrap_or(&name);
+    let number = match name {
+        "HUP" => 1,
+        "INT" => 2,
+        "QUIT" => 3,
+        "ILL" => 4,
+        "TRAP" => 5,
+        "ABRT" => 6,
+        "BUS" => 7,
+        "FPE" => 8,
+        "KILL" => 9,
+        "USR1" => 10,
+        "SEGV" => 11,
+        "USR2" => 12,
+        "PIPE" => 13,
+        "ALRM" => 14,
+        "TERM" => 15,
+        other => match other.parse::<i32>() {
+            Ok(number) if (1..=64).contains(&number) => number,
+            _ => return 1,
+        },
+    };
+    128 + number
+}
+
+pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, CliError> {
     if args.argv.is_empty() {
         return Err(CliError::new("Give a command to run after --."));
+    }
+    if args.timeout_secs == 0 || args.timeout_secs > MAX_EXEC_SECS {
+        return Err(CliError::new(format!(
+            "The timeout must be 1 to {MAX_EXEC_SECS} seconds; the engine does not run longer commands yet."
+        )));
     }
     let computer = engine.computer(&args.computer).await?;
     let reply = engine
@@ -273,7 +357,7 @@ pub async fn exec(engine: &Engine, args: &ExecArgs) -> Result<Value, CliError> {
             env: None,
             as_user: None,
             stdin: None,
-            timeout_ms: args.timeout_secs.saturating_mul(1000),
+            timeout_ms: args.timeout_secs * 1000,
             max_output_bytes: None,
         }))
         .await?;
@@ -289,12 +373,41 @@ pub async fn exec(engine: &Engine, args: &ExecArgs) -> Result<Value, CliError> {
             })
             .unwrap_or_default()
     };
-    Ok(json!({
-        "exitCode": reply.get("exitCode").cloned().unwrap_or(Value::Null),
-        "signal": reply.get("signal").cloned().unwrap_or(Value::Null),
-        "stdout": String::from_utf8_lossy(&bytes("stdout")),
-        "stderr": String::from_utf8_lossy(&bytes("stderr")),
-    }))
+    Ok(ExecOutput {
+        exit_code: reply
+            .get("exitCode")
+            .and_then(Value::as_i64)
+            .map(|code| code as i32),
+        signal: reply
+            .get("signal")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        stdout: bytes("stdout"),
+        stderr: bytes("stderr"),
+    })
+}
+
+pub async fn exec(engine: &Engine, args: &ExecArgs) -> Result<Value, CliError> {
+    Ok(exec_raw(engine, args).await?.to_json())
+}
+
+/// Waits for a job that is already running, by id.
+pub async fn job(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<Value, CliError> {
+    silo_api::JobId::new(id).map_err(|_| CliError::new(format!("{id} is not a job id.")))?;
+    engine
+        .wait_job(id, &format!("Waiting for {id}"), progress)
+        .await
+}
+
+/// The recipe a fork uses: the explicit file, else the project's `.silo/recipe.yaml`.
+pub fn resolve_recipe(
+    explicit: Option<&std::path::Path>,
+    project: &crate::config::Project,
+) -> Result<Option<Recipe>, CliError> {
+    match explicit {
+        Some(path) => crate::config::load_recipe(path).map(Some),
+        None => project.load_recipe(),
+    }
 }
 
 pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
@@ -365,6 +478,58 @@ mod tests {
         assert_eq!(fork_extras(None, &[]), ForkExtras::default());
         let empty = parse_recipe("keep: { restart: [web] }\n").unwrap();
         assert_eq!(fork_extras(Some(&empty), &[]).quiet, None);
+    }
+
+    #[test]
+    fn signals_map_to_shell_exit_codes() {
+        assert_eq!(exit_code_for(Some(3), Some("KILL")), 3);
+        assert_eq!(exit_code_for(None, Some("KILL")), 137);
+        assert_eq!(exit_code_for(None, Some("SIGINT")), 130);
+        assert_eq!(exit_code_for(None, Some("term")), 143);
+        assert_eq!(exit_code_for(None, Some("12")), 140);
+        assert_eq!(exit_code_for(None, Some("PIPE")), 141);
+        assert_eq!(exit_code_for(None, Some("???")), 1);
+        assert_eq!(exit_code_for(None, None), 1);
+    }
+
+    #[test]
+    fn fork_extras_are_refused_until_the_engine_takes_them() {
+        let mut params = CheckpointForkParams {
+            computer_id: "c".into(),
+            device_id: None,
+            checkpoint_id: None,
+            new_name: "n".into(),
+        };
+        assert!(apply_fork_extras(&mut params, &ForkExtras::default()).is_ok());
+        let secret = fork_extras(None, &["github".to_owned()]);
+        assert!(apply_fork_extras(&mut params, &secret)
+            .unwrap_err()
+            .message
+            .contains("--secret"));
+        let recipe = crate::config::parse_recipe("quiet: [a]\n").unwrap();
+        assert!(
+            apply_fork_extras(&mut params, &fork_extras(Some(&recipe), &[]))
+                .unwrap_err()
+                .message
+                .contains("quiet")
+        );
+    }
+
+    #[test]
+    fn the_recipe_comes_from_the_file_or_the_project() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".silo")).unwrap();
+        std::fs::write(root.path().join(".silo/recipe.yaml"), "quiet: [p]\n").unwrap();
+        let project = crate::config::Project::discover(root.path());
+        assert_eq!(
+            resolve_recipe(None, &project).unwrap().unwrap().quiet,
+            ["p"]
+        );
+        let none = crate::config::Project::default();
+        assert_eq!(resolve_recipe(None, &none).unwrap(), None);
+        std::fs::write(root.path().join(".silo/recipe.yaml"), "bogus: 1\n").unwrap();
+        let project = crate::config::Project::discover(root.path());
+        assert!(resolve_recipe(None, &project).is_err());
     }
 
     #[test]

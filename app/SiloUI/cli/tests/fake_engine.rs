@@ -4,7 +4,10 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use serde_json::{json, Value};
@@ -17,6 +20,8 @@ pub struct FakeEngine {
     pub socket: PathBuf,
     _directory: tempfile::TempDir,
     requests: Arc<Mutex<Vec<(String, Value)>>>,
+    accepted: Arc<AtomicUsize>,
+    open: Arc<AtomicUsize>,
 }
 
 impl FakeEngine {
@@ -29,19 +34,38 @@ impl FakeEngine {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let handler: Arc<Mutex<Handler>> = Arc::new(Mutex::new(Box::new(handler)));
         let log = requests.clone();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let open = Arc::new(AtomicUsize::new(0));
+        let (counted, live) = (accepted.clone(), open.clone());
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     return;
                 };
-                tokio::spawn(serve(stream, handler.clone(), log.clone()));
+                counted.fetch_add(1, Ordering::SeqCst);
+                live.fetch_add(1, Ordering::SeqCst);
+                let (handler, log, live) = (handler.clone(), log.clone(), live.clone());
+                tokio::spawn(async move {
+                    serve(stream, handler, log).await;
+                    live.fetch_sub(1, Ordering::SeqCst);
+                });
             }
         });
         Self {
             socket,
             _directory: directory,
             requests,
+            accepted,
+            open,
         }
+    }
+
+    pub fn accepted(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
+    }
+
+    pub fn open(&self) -> usize {
+        self.open.load(Ordering::SeqCst)
     }
 
     pub fn calls(&self, method: &str) -> Vec<Value> {
@@ -76,6 +100,9 @@ async fn serve(
         let params = request["params"].clone();
         log.lock().unwrap().push((method.clone(), params.clone()));
         let result = (handler.lock().unwrap())(&method, &params);
+        if matches!(&result, Err(("__drop", _))) {
+            return;
+        }
         let reply = match result {
             Ok(result) => json!({"id": request["id"], "result": result}),
             Err((code, message)) => {

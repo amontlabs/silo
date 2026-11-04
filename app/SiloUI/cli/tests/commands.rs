@@ -174,13 +174,27 @@ async fn the_command_line_passes_the_exit_code_through() {
     let (engine, _) = engine_with(&["main"]);
     let socket = engine.socket.to_str().unwrap();
     let cli = <Cli as clap::Parser>::try_parse_from([
-        "silo", "--socket", socket, "exec", "main", "--", "false",
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "exec",
+        "main",
+        "--",
+        "false",
     ])
     .unwrap();
     assert_eq!(run(cli, Path::new("/")).await.unwrap(), 3);
 
-    let cli = <Cli as clap::Parser>::try_parse_from(["silo", "--socket", socket, "drop", "main"])
-        .unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "drop",
+        "main",
+    ])
+    .unwrap();
     assert!(run(cli, Path::new("/")).await.is_err());
 }
 
@@ -207,4 +221,186 @@ async fn a_missing_engine_says_how_to_recover() {
         .err()
         .unwrap();
     assert!(error.message.contains("Open Silo"));
+}
+
+#[tokio::test]
+async fn exec_rejects_timeouts_above_the_engine_cap() {
+    let (engine, _) = engine_with(&["main"]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    for timeout_secs in [0, ops::MAX_EXEC_SECS + 1] {
+        let args = ops::ExecArgs {
+            computer: "main".into(),
+            argv: vec!["sleep".into(), "1".into()],
+            cwd: None,
+            timeout_secs,
+        };
+        let error = ops::exec(&connected, &args).await.unwrap_err();
+        assert!(error.message.contains("180"), "{}", error.message);
+    }
+    assert!(engine.calls("guest.exec").is_empty());
+    let args = ops::ExecArgs {
+        computer: "main".into(),
+        argv: vec!["true".into()],
+        cwd: None,
+        timeout_secs: ops::MAX_EXEC_SECS,
+    };
+    ops::exec(&connected, &args).await.unwrap();
+    assert_eq!(engine.calls("guest.exec")[0]["timeoutMs"], 180_000);
+}
+
+#[tokio::test]
+async fn exec_output_keeps_raw_bytes() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "guest.exec" => Ok(json!({"exitCode": null, "signal": "KILL",
+            "stdout": [255, 104], "stderr": []})),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::ExecArgs {
+        computer: "main".into(),
+        argv: vec!["x".into()],
+        cwd: None,
+        timeout_secs: 5,
+    };
+    let output = ops::exec_raw(&connected, &args).await.unwrap();
+    assert_eq!(output.stdout, [255, 104]);
+    assert_eq!(output.process_exit_code(), 137);
+}
+
+#[tokio::test]
+async fn fork_with_a_secret_or_quiet_recipe_is_refused_before_any_job() {
+    let (engine, _) = engine_with(&["main"]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let secret = ForkArgs {
+        source: "main".into(),
+        secrets: vec!["github".into()],
+        ..ForkArgs::default()
+    };
+    let error = ops::fork(&connected, &secret, None, &ignore)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("--secret"));
+    let quiet = ForkArgs {
+        source: "main".into(),
+        recipe: Some(silo_cli::config::parse_recipe("scrub: [/x]\n").unwrap()),
+        ..ForkArgs::default()
+    };
+    let error = ops::fork(&connected, &quiet, None, &ignore)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("quiet"));
+    assert!(engine.calls("checkpoints.fork").is_empty());
+}
+
+#[tokio::test]
+async fn the_command_line_finds_the_project_recipe() {
+    let (engine, _) = engine_with(&["main"]);
+    let socket = engine.socket.to_str().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".silo")).unwrap();
+    std::fs::write(
+        project.path().join(".silo/recipe.yaml"),
+        "quiet: [poller]\n",
+    )
+    .unwrap();
+    let nested = project.path().join("src");
+    std::fs::create_dir_all(&nested).unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "fork",
+        "main",
+    ])
+    .unwrap();
+    let error = run(cli, &nested).await.unwrap_err();
+    assert!(error.message.contains("quiet"), "{}", error.message);
+
+    std::fs::write(project.path().join(".silo/recipe.yaml"), "bogus: 1\n").unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "fork",
+        "main",
+    ])
+    .unwrap();
+    let error = run(cli, &nested).await.unwrap_err();
+    assert!(error.message.contains("bogus"), "{}", error.message);
+}
+
+#[tokio::test]
+async fn the_command_line_refuses_a_socket_outside_its_home() {
+    let (engine, _) = engine_with(&["main"]);
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from(["silo", "--socket", socket, "list"]).unwrap();
+    let error = run(cli, Path::new("/")).await.unwrap_err();
+    assert!(error.message.contains("--allow-other-channel"));
+    assert_eq!(engine.accepted(), 0);
+}
+
+#[tokio::test]
+async fn losing_the_connection_names_the_job_and_how_to_reattach() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        "computers.stop" => Ok(json!({"jobId": "job:7"})),
+        "operations.job.get" => Err(("__drop", String::new())),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let error = ops::stop(&connected, "main", &ignore).await.unwrap_err();
+    assert!(error.message.contains("job:7"), "{}", error.message);
+    assert!(
+        error.message.contains("silo job job:7"),
+        "{}",
+        error.message
+    );
+    assert_eq!(connected.last_job().as_deref(), Some("job:7"));
+}
+
+#[tokio::test]
+async fn silo_job_waits_for_a_running_job() {
+    let (engine, _) = engine_with(&["main"]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let result = ops::job(&connected, "job:1", &ignore).await.unwrap();
+    assert_eq!(result["checkpoint"]["id"], "cp9");
+    assert!(ops::job(&connected, "nope", &ignore).await.is_err());
+}
+
+#[tokio::test]
+async fn an_acknowledgement_failure_is_reported() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "operations.job.get" => Ok(finished(json!({"ok": true}))),
+        "operations.job.acknowledge" => Err(("internal", "no such job".into())),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let notes = Mutex::new(Vec::<String>::new());
+    let record = |line: &str| notes.lock().unwrap().push(line.to_owned());
+    let result = ops::job(&connected, "job:1", &record).await.unwrap();
+    assert_eq!(result["ok"], true);
+    assert!(notes
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line.contains("could not acknowledge")));
+}
+
+#[tokio::test]
+async fn dropping_the_engine_closes_the_connection() {
+    let (engine, _) = engine_with(&["main"]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::list(&connected).await.unwrap();
+    assert_eq!(engine.open(), 1);
+    drop(connected);
+    for _ in 0..50 {
+        if engine.open() == 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(engine.open(), 0);
 }

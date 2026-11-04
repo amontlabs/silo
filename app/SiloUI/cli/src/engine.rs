@@ -4,6 +4,7 @@
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -51,20 +52,69 @@ pub fn resolve_socket(
     .unwrap_or_else(|| channel.engine_socket(home))
 }
 
-pub fn default_socket(flag: Option<PathBuf>) -> Result<PathBuf, CliError> {
+/// Refuses a socket outside the build channel's home. A development build never talks to the
+/// production home, even when `allow_other` is set.
+pub fn check_socket(
+    socket: &Path,
+    home: &Path,
+    channel: channel::Channel,
+    allow_other: bool,
+) -> Result<(), CliError> {
+    let inside = |directory: PathBuf| {
+        socket.starts_with(&directory)
+            && !socket
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+    };
+    if inside(channel.state_dir(home)) {
+        return Ok(());
+    }
+    if channel.is_development()
+        && (inside(channel::Channel::Production.state_dir(home))
+            || socket.starts_with(channel::Channel::Production.state_dir(home)))
+    {
+        return Err(CliError::new(format!(
+            "{} belongs to the production Silo; this development build never uses it.",
+            socket.display()
+        )));
+    }
+    if allow_other {
+        return Ok(());
+    }
+    Err(CliError::new(format!(
+        "{} is not under {}. Pass --allow-other-channel to use it anyway.",
+        socket.display(),
+        channel.state_dir(home).display()
+    )))
+}
+
+pub fn default_socket(flag: Option<PathBuf>, allow_other: bool) -> Result<PathBuf, CliError> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .ok_or_else(|| CliError::new("HOME is not set."))?;
-    Ok(resolve_socket(
-        flag,
-        std::env::var_os("SILO_SOCKET"),
-        &home,
-        build_channel(),
-    ))
+    let channel = build_channel();
+    let socket = resolve_socket(flag, std::env::var_os("SILO_SOCKET"), &home, channel);
+    check_socket(&socket, &home, channel, allow_other)?;
+    Ok(socket)
 }
 
+/// A connection to the engine. Clones share it; it closes when the last clone is dropped.
+#[derive(Clone)]
 pub struct Engine {
     client: Client,
+    last_job: Arc<Mutex<Option<String>>>,
+    _closer: Arc<Closer>,
+}
+
+struct Closer(Client);
+
+impl Drop for Closer {
+    fn drop(&mut self) {
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let client = self.0.clone();
+            runtime.spawn(async move { client.close().await });
+        }
+    }
 }
 
 /// A computer as `computers.list` reports it, reduced to what the commands show.
@@ -178,7 +228,25 @@ impl Engine {
         })?;
         // The commands read replies only; the event feed is dropped.
         drop(events);
-        Ok(Self { client })
+        Ok(Self {
+            _closer: Arc::new(Closer(client.clone())),
+            client,
+            last_job: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
+    }
+
+    /// The job this connection most recently started.
+    pub fn last_job(&self) -> Option<String> {
+        self.last_job.lock().unwrap().clone()
+    }
+
+    /// What to tell someone whose wait ended before the job did.
+    pub fn reattach_hint(job_id: &str) -> String {
+        format!("The job {job_id} keeps running in the engine. Re-attach with `silo job {job_id}`.")
     }
 
     pub async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
@@ -216,20 +284,43 @@ impl Engine {
             .and_then(Value::as_str)
             .ok_or_else(|| CliError::new("The engine did not accept the job."))?
             .to_owned();
+        self.wait_job(&job_id, label, progress).await
+    }
+
+    /// Waits for a job already started (here or by another client) and acknowledges it.
+    pub async fn wait_job(
+        &self,
+        job_id: &str,
+        label: &str,
+        progress: Progress<'_>,
+    ) -> Result<Value, CliError> {
+        *self.last_job.lock().unwrap() = Some(job_id.to_owned());
         let begun = Instant::now();
         let mut last_note = begun;
         progress(&format!("{label}..."));
         loop {
-            let reply = self.job(&job_id, None).await?;
+            let reply = match self.job(job_id, None).await {
+                Ok(reply) => reply,
+                Err(error) if self.is_closed() => {
+                    return Err(CliError::new(format!(
+                        "{error} {}",
+                        Self::reattach_hint(job_id)
+                    )))
+                }
+                Err(error) => return Err(error),
+            };
             if reply.get("state").and_then(Value::as_str) == Some("finished") {
-                let outcome = self.finished_outcome(&job_id, reply).await?;
-                let _ = self
+                let outcome = self.finished_outcome(job_id, reply).await?;
+                let acknowledged = self
                     .call(requests::operations_job_acknowledge(AcknowledgeJobParams {
-                        job_id: silo_api::JobId::new(&job_id)
+                        job_id: silo_api::JobId::new(job_id)
                             .map_err(|_| CliError::new("The engine sent an invalid job id."))?,
                         device_id: None,
                     }))
                     .await;
+                if let Err(error) = acknowledged {
+                    progress(&format!("warning: could not acknowledge {job_id}: {error}"));
+                }
                 return outcome_result(&outcome);
             }
             if last_note.elapsed() >= PROGRESS_EVERY {
@@ -323,6 +414,25 @@ mod tests {
             ),
             Path::new("/h/.silo-dev/engine.sock")
         );
+    }
+
+    #[test]
+    fn sockets_outside_the_channel_home_need_the_flag() {
+        use channel::Channel::{Development, Production};
+        let home = Path::new("/h");
+        let own = Path::new("/h/.silo-dev/engine.sock");
+        let prod = Path::new("/h/.silo/engine.sock");
+        let other = Path::new("/tmp/x/engine.sock");
+        assert!(check_socket(own, home, Development, false).is_ok());
+        assert!(check_socket(prod, home, Production, false).is_ok());
+        assert!(check_socket(other, home, Development, false).is_err());
+        assert!(check_socket(other, home, Development, true).is_ok());
+        assert!(check_socket(prod, home, Development, false).is_err());
+        assert!(check_socket(prod, home, Development, true).is_err());
+        assert!(check_socket(own, home, Production, true).is_ok());
+        assert!(check_socket(own, home, Production, false).is_err());
+        let sneaky = Path::new("/h/.silo-dev/../.silo/engine.sock");
+        assert!(check_socket(sneaky, home, Development, false).is_err());
     }
 
     #[test]

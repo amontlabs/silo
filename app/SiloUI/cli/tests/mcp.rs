@@ -90,6 +90,17 @@ async fn initialize_list_and_call_round_trip() {
     let listed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(listed["computers"][0]["name"], "main");
 
+    for id in 10..14 {
+        exchange(
+            &mut write,
+            &mut read,
+            json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+                   "params": {"name": "list", "arguments": {}}}),
+        )
+        .await;
+    }
+    assert_eq!(engine.accepted(), 1, "the server opens one connection");
+
     let failed = exchange(
         &mut write,
         &mut read,

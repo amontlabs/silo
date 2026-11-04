@@ -1,7 +1,7 @@
 //! `silo mcp`: the commands as MCP tools over stdio. Every tool makes the same engine calls
 //! as its command and answers with the same JSON as `--json`.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    config::{load_recipe, Project},
+    config::Project,
     engine::Engine,
     error::CliError,
     ops::{self, ExecArgs, ForkArgs},
@@ -21,6 +21,7 @@ use crate::{
 pub struct SiloMcp {
     socket: PathBuf,
     working_directory: PathBuf,
+    engine: Arc<tokio::sync::Mutex<Option<Engine>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -53,7 +54,7 @@ pub struct ExecParams {
     pub command: Vec<String>,
     /// Working directory in the computer.
     pub cwd: Option<String>,
-    /// Seconds before the command is stopped (default 600).
+    /// Seconds before the command is stopped (default and maximum 180).
     pub timeout_secs: Option<u64>,
 }
 
@@ -80,12 +81,20 @@ impl SiloMcp {
         Self {
             socket,
             working_directory,
+            engine: Arc::new(tokio::sync::Mutex::new(None)),
             tool_router: Self::tool_router(),
         }
     }
 
+    /// The one connection this server keeps, opened again when it has ended.
     async fn engine(&self) -> Result<Engine, CliError> {
-        Engine::connect(&self.socket).await
+        let mut held = self.engine.lock().await;
+        if let Some(engine) = held.as_ref().filter(|engine| !engine.is_closed()) {
+            return Ok(engine.clone());
+        }
+        let engine = Engine::connect(&self.socket).await?;
+        *held = Some(engine.clone());
+        Ok(engine)
     }
 
     #[tool(description = "List computers and their state.")]
@@ -107,11 +116,11 @@ impl SiloMcp {
             async {
                 let project = Project::discover(&self.working_directory);
                 let settings = project.load_settings()?;
-                let recipe = params
+                let explicit = params
                     .recipe_file
                     .as_deref()
-                    .map(|path| load_recipe(&self.working_directory.join(path)))
-                    .transpose()?;
+                    .map(|path| self.working_directory.join(path));
+                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
                 let args = ForkArgs {
                     source: params.source,
                     name: params.name,
@@ -136,7 +145,9 @@ impl SiloMcp {
         )
     }
 
-    #[tool(description = "Run a command in a computer. Returns exitCode, stdout and stderr.")]
+    #[tool(
+        description = "Run a command in a computer (at most 180 seconds). Returns exitCode, signal, stdout and stderr as text; bytes that are not UTF-8 are replaced."
+    )]
     async fn exec(&self, Parameters(params): Parameters<ExecParams>) -> Result<String, String> {
         show(
             async {
@@ -144,7 +155,7 @@ impl SiloMcp {
                     computer: params.computer,
                     argv: params.command,
                     cwd: params.cwd,
-                    timeout_secs: params.timeout_secs.unwrap_or(600),
+                    timeout_secs: params.timeout_secs.unwrap_or(ops::MAX_EXEC_SECS),
                 };
                 ops::exec(&self.engine().await?, &args).await
             }

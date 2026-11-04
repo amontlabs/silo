@@ -19,7 +19,13 @@ Gaps: none known. Jobs are awaited by polling `operations.job.get`, as the app d
 
 In order: `--socket PATH`, `SILO_SOCKET`, then the build channel's own
 `~/.silo/engine.sock` (a debug build uses `~/.silo-dev/engine.sock`, like the app).
-If nothing listens, the command asks you to open Silo.
+A socket outside the build's own home is refused unless `--allow-other-channel` is given;
+a debug build never uses `~/.silo`, even with the flag. If nothing listens, the command
+asks you to open Silo.
+
+If a wait ends before its job does (connection lost, Ctrl-C), the job id is printed and
+`silo job <id>` waits for it again. `exec` accepts at most 180 seconds (the engine's
+limit) and returns the command's exit code, or 128 plus the signal number.
 
 ## Commands
 
@@ -37,6 +43,7 @@ the engine's message.
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
+| `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
 
 ## Project files
@@ -69,9 +76,10 @@ agents:
 ```
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
-`quiet:` and `scrub:` from `--recipe-file`. The engine's fork parameters do not carry
-secrets or the quiet list yet; `ops::apply_fork_extras` is where they are attached once
-they do.
+`--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The
+engine's fork parameters do not carry secrets or the quiet list yet, so `--secret` and a
+recipe with `quiet:` or `scrub:` are refused with an error; `ops::apply_fork_extras` is
+where they are attached once the engine takes them.
 
 ## MCP setup
 

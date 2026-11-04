@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 
 use crate::{
-    config::{load_recipe, Project},
+    config::{Project, Recipe, Settings},
     engine::{default_socket, Engine},
     error::CliError,
     ops::{self, CreateArgs, ExecArgs, ForkArgs, Platform},
@@ -29,6 +29,9 @@ pub struct Cli {
     /// Print JSON instead of text.
     #[arg(long, global = true)]
     pub json: bool,
+    /// Use a socket outside this build's own home (never the production home from a debug build).
+    #[arg(long, global = true)]
+    pub allow_other_channel: bool,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -55,6 +58,8 @@ pub enum Command {
     Checkpoint(CheckpointCommand),
     /// List a computer's checkpoints.
     Checkpoints { computer: String },
+    /// Wait for a job that is already running, by id.
+    Job { id: String },
     /// Serve the MCP tools on stdio.
     Mcp,
 }
@@ -108,8 +113,8 @@ pub struct ExecCommand {
     /// Working directory in the computer.
     #[arg(long)]
     pub cwd: Option<String>,
-    /// Seconds before the command is stopped.
-    #[arg(long, default_value_t = 600)]
+    /// Seconds before the command is stopped (at most 180).
+    #[arg(long, default_value_t = ops::MAX_EXEC_SECS)]
     pub timeout: u64,
     #[arg(last = true, required = true, value_name = "COMMAND")]
     pub command: Vec<String>,
@@ -142,30 +147,45 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 
 /// Runs one command and returns the process exit code.
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
+    let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
-        let socket = default_socket(cli.socket)?;
         crate::mcp::serve(socket, working_directory.to_owned()).await?;
         return Ok(0);
     }
     let project = Project::discover(working_directory);
-    let socket = default_socket(cli.socket.clone())?;
-    // Everything below needs only the settings and recipe, read before connecting so a bad
-    // file is reported without the engine.
+    // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings()?;
     let recipe = match &cli.command {
-        Command::Fork(fork) => fork.recipe_file.as_deref().map(load_recipe).transpose()?,
+        Command::Fork(fork) => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
-    let progress = &stderr_progress;
     let json = cli.json;
-    match cli.command {
-        Command::List => emit(json, &ops::list(&engine).await?, render::list),
-        Command::Status { computer } => emit(
-            json,
-            &ops::status(&engine, &computer).await?,
-            render::status,
-        ),
+    tokio::select! {
+        result = dispatch(&engine, cli.command, json, settings, recipe) => result,
+        _ = tokio::signal::ctrl_c() => {
+            match engine.last_job() {
+                Some(job) => eprintln!("Interrupted. {}", Engine::reattach_hint(&job)),
+                None => eprintln!("Interrupted."),
+            }
+            Ok(130)
+        }
+    }
+}
+
+async fn dispatch(
+    engine: &Engine,
+    command: Command,
+    json: bool,
+    settings: Option<Settings>,
+    recipe: Option<Recipe>,
+) -> Result<i32, CliError> {
+    let progress = &stderr_progress;
+    match command {
+        Command::List => emit(json, &ops::list(engine).await?, render::list),
+        Command::Status { computer } => {
+            emit(json, &ops::status(engine, &computer).await?, render::status)
+        }
         Command::Create(create) => {
             let args = CreateArgs {
                 name: create.name,
@@ -178,15 +198,15 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
                 memory_gib: create.memory,
                 disk_gib: create.disk,
             };
-            let value = ops::create(&engine, &args, progress).await?;
+            let value = ops::create(engine, &args, progress).await?;
             emit(json, &value, |v| render::computer_line("Created", v));
         }
         Command::Start { computer } => {
-            let value = ops::start(&engine, &computer, progress).await?;
+            let value = ops::start(engine, &computer, progress).await?;
             emit(json, &value, |v| render::computer_line("Started", v));
         }
         Command::Stop { computer } => {
-            let value = ops::stop(&engine, &computer, progress).await?;
+            let value = ops::stop(engine, &computer, progress).await?;
             emit(json, &value, |v| render::computer_line("Stopped", v));
         }
         Command::Fork(fork) => {
@@ -197,11 +217,11 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
                 secrets: fork.secrets,
                 recipe,
             };
-            let value = ops::fork(&engine, &args, settings.as_ref(), progress).await?;
+            let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
             emit(json, &value, |v| render::computer_line("Forked", v));
         }
         Command::Drop(drop) => {
-            let value = ops::drop_computer(&engine, &drop.computer, drop.force, progress).await?;
+            let value = ops::drop_computer(engine, &drop.computer, drop.force, progress).await?;
             emit(json, &value, |v| {
                 format!("Dropped {}", v["dropped"].as_str().unwrap_or_default())
             });
@@ -213,8 +233,8 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
                 cwd: exec.cwd,
                 timeout_secs: exec.timeout,
             };
-            let value = ops::exec(&engine, &args).await?;
-            return Ok(print_exec(json, &value));
+            let output = ops::exec_raw(engine, &args).await?;
+            return Ok(print_exec(json, &output));
         }
         Command::Checkpoint(checkpoint) => {
             let kind = checkpoint
@@ -223,7 +243,7 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
                 .map(ops::parse_checkpoint_kind)
                 .transpose()?;
             let value = ops::checkpoint(
-                &engine,
+                engine,
                 &checkpoint.computer,
                 checkpoint.name.as_deref(),
                 kind,
@@ -240,36 +260,33 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         }
         Command::Checkpoints { computer } => emit(
             json,
-            &ops::checkpoints(&engine, &computer).await?,
+            &ops::checkpoints(engine, &computer).await?,
             render::checkpoints,
         ),
+        Command::Job { id } => {
+            let value = ops::job(engine, &id, progress).await?;
+            emit(json, &value, |v| {
+                serde_json::to_string_pretty(v).unwrap_or_default()
+            });
+        }
         Command::Mcp => unreachable!("handled above"),
     }
     Ok(0)
 }
 
-/// Prints an exec result and returns the command's own exit code.
-fn print_exec(json: bool, value: &Value) -> i32 {
-    let code = value["exitCode"]
-        .as_i64()
-        .map(|code| code as i32)
-        .unwrap_or_else(|| {
-            if value["signal"].is_null() {
-                1
-            } else {
-                128 + 15
-            }
-        });
+/// Prints an exec result and returns the process exit code. The text mode writes the
+/// output bytes as they are; `--json` carries them as text with invalid UTF-8 replaced.
+fn print_exec(json: bool, output: &ops::ExecOutput) -> i32 {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(value).unwrap_or_default()
+            serde_json::to_string_pretty(&output.to_json()).unwrap_or_default()
         );
     } else {
-        let _ = std::io::stdout().write_all(value["stdout"].as_str().unwrap_or("").as_bytes());
-        let _ = std::io::stderr().write_all(value["stderr"].as_str().unwrap_or("").as_bytes());
+        let _ = std::io::stdout().write_all(&output.stdout);
+        let _ = std::io::stderr().write_all(&output.stderr);
     }
-    code
+    output.process_exit_code()
 }
 
 #[cfg(test)]
