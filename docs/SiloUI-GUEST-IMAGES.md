@@ -83,7 +83,7 @@ and [implementation](https://github.com/docker/setup-qemu-action/blob/9901266195
 confirm the default is mutable and installation uses privileged containers.
 
 `app/SiloUI/guest-image/image-lock.json` pins the release URL (the repository's
-`guest-ubuntu-24.04-v4` release in `amontlabs/silo`), and for each architecture the exact release
+`guest-ubuntu-24.04-v5` release in `amontlabs/silo`), and for each architecture the exact release
 archive SHA-256, length, uncompressed archive length, image reference and Docker config digest.
 The lock is the single source of truth: the app embeds it at build time
 (`include_str!` in `src-tauri/src/guest_image.rs`) and downloads
