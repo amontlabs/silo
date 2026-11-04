@@ -966,7 +966,7 @@ mod tests {
         upgrade_layouts(fixture.engine.as_ref(), &ready).unwrap();
         let converted: Value =
             serde_json::from_slice(&std::fs::read(&linux_file).unwrap()).unwrap();
-        assert_eq!(converted["version"], 2);
+        assert_eq!(converted["version"], 3);
         assert_eq!(converted["checkpoints"][0]["kind"], "manual");
         // And running it again changes nothing.
         let settled = std::fs::read(&linux_file).unwrap();

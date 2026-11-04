@@ -6246,7 +6246,6 @@ fn create_computer_with_progress(
     })();
     preflight?;
     progress("computer-image-preparation", name, 0);
-    let image_in_use = guest_image::hold_in_use();
     let image = runner.prepare_guest_image(paths)?;
     let args: Vec<String> = vec![
         "create".into(),
@@ -6290,9 +6289,7 @@ fn create_computer_with_progress(
         "--progress-json".into(),
     ];
     progress("computer-runtime-preparation", name, 0);
-    let created = runner.run(paths, &args, MUTATION_TIMEOUT);
-    drop(image_in_use);
-    if let Err(error) = created {
+    if let Err(error) = runner.run(paths, &args, MUTATION_TIMEOUT) {
         return Err(with_cleanup_error(
             error,
             cleanup_failed_create(runner, paths, name, id),
@@ -11149,7 +11146,7 @@ exit 9
         // For example, written by a newer Silo before a downgrade.
         fs::write(
             directory.join(format!("{}.json", configuration.id())),
-            json!({"version": 3, "checkpoints": []}).to_string(),
+            json!({"version": 4, "checkpoints": []}).to_string(),
         )
         .unwrap();
     }
@@ -13318,7 +13315,7 @@ exit 9
             };
             write_metadata(&paths.metadata, &previous).unwrap();
             let runner = StubRunner::successful_json(if removing {
-                vec![other_inspect.clone(), other_inspect, json!(null), json!(null)]
+                vec![other_inspect.clone(), other_inspect, json!(null)]
             } else {
                 vec![
                     json!([]),
@@ -13606,7 +13603,7 @@ exit 9
         let directory = paths.metadata.with_file_name("checkpoints");
         fs::create_dir_all(&directory).unwrap();
         let mut record = json!({
-            "version": 2,
+            "version": 3,
             "checkpoints": [],
             "snapshotGroup": "dev",
             "pendingCheckpointRestore": {"checkpointId": "c000000000000000000000000000000", "sourceComputer": "dev", "state": "full"},

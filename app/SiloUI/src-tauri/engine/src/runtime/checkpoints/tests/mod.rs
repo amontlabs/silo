@@ -2634,15 +2634,6 @@ impl Store {
             .map(|member| member.1.clone())
             .collect()
     }
-    fn calls_matching(&self, verb: &str) -> Vec<Vec<String>> {
-        self.calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|call| call[0] == verb)
-            .cloned()
-            .collect()
-    }
     fn removals(&self) -> Vec<String> {
         self.calls
             .lock()
@@ -3286,13 +3277,117 @@ fn deleting_a_computer_removes_members_only_it_used_and_keeps_what_a_fork_builds
         ]
     );
     assert_eq!(store.names(), [A, C]);
-    assert_eq!(
-        store.calls_matching("image"),
-        [vec!["image", "prune", "--yes", "--quiet"]],
-        "unused image data is pruned once, after the removals"
-    );
-    let calls = store.calls.lock().unwrap().clone();
-    assert_eq!(calls.last().unwrap()[0], "image");
+}
+
+/// `dev` is deleted: its configuration is gone and the group directory holds `files`.
+fn deleted_dev_with_group_files(
+    directory: &tempfile::TempDir,
+    files: &[&str],
+) -> (RuntimePaths, std::path::PathBuf) {
+    let paths = delete_fixture(directory, vec![entry(A, "Base", "manual")], None);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: Vec::new(),
+        },
+    )
+    .unwrap();
+    let group = paths.home.join("snapshots").join("dev");
+    fs::create_dir_all(&group).unwrap();
+    for name in files {
+        fs::write(group.join(name), "").unwrap();
+    }
+    (paths, group)
+}
+
+#[test]
+fn deleting_a_computer_removes_the_empty_snapshot_group_directory() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
+    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None);
+
+    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
+
+    assert!(store.names().is_empty());
+    assert!(!group.exists());
+}
+
+#[test]
+fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, group) =
+        deleted_dev_with_group_files(&directory, &[".group.lock", "group.json", "extra"]);
+    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None);
+    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
+    assert!(group.exists(), "an unknown file keeps the directory");
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
+    // A member another computer still needs stays, and so does its group.
+    let store = Store::new(Vec::new())
+        .with("dev", A, "snap_a", None)
+        .with("dev", "silo-backup-0-1-2", "snap_x", None);
+    store.members.lock().unwrap().retain(|member| member.1 == A);
+    save(
+        &paths,
+        FORK_ID,
+        &Record {
+            snapshot_group: Some("dev".into()),
+            pending_checkpoint_restore: Some(PendingRestore {
+                checkpoint_id: A.into(),
+                source_computer: "dev".into(),
+                state: "full".into(),
+            }),
+            ..Record::default()
+        },
+    )
+    .unwrap();
+    let mut forked = computer_configuration();
+    forked.id = FORK_ID.into();
+    forked.name = "branch".into();
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![forked],
+        },
+    )
+    .unwrap();
+    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
+    assert_eq!(store.names(), [A]);
+    assert!(group.exists(), "a group with a member the fork needs is kept");
+}
+
+#[test]
+fn the_launch_upgrade_moves_a_layout_two_history_to_layout_three() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let storage = directory.path();
+    fs::create_dir_all(storage.join("checkpoints")).unwrap();
+    let file = storage.join("checkpoints").join(format!("{ID}.json"));
+    let mut record = Record::default();
+    record.snapshot_group = Some("dev".into());
+    record.checkpoints = vec![entry(A, "Mine", "manual"), automatic_entry(B, 5)];
+    record.version = 2;
+    fs::write(&file, serde_json::to_vec(&record).unwrap()).unwrap();
+
+    assert_eq!(upgrade_records(storage).unwrap(), 1);
+
+    let upgraded: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(upgraded["version"], 3);
+    assert_eq!(upgraded["checkpoints"][1]["kind"], "automatic");
+    assert_eq!(upgrade_records(storage).unwrap(), 0, "a layout-three file is left alone");
+    let mut with_before_keep = Record::default();
+    with_before_keep
+        .checkpoints
+        .push(before_keep_entry(&native_id(1), 5));
+    with_before_keep.version = RECORD_VERSION;
+    validate(&with_before_keep).unwrap();
+    with_before_keep.version = 2;
+    assert!(validate(&with_before_keep).is_err(), "an old layout is refused");
 }
 
 #[test]
@@ -4256,23 +4351,6 @@ fn before_keep_entry(id: &str, created_at: u64) -> Checkpoint {
     }
 }
 
-/// Delegates to a store except that pruning image data fails.
-struct PruneFails<'a>(&'a Store);
-impl RuntimeRunner for PruneFails<'_> {
-    fn run(
-        &self,
-        paths: &RuntimePaths,
-        args: &[String],
-        timeout: Duration,
-    ) -> Result<CommandOutput, RuntimeError> {
-        if args.first().map(String::as_str) == Some("image") {
-            self.0.calls.lock().unwrap().push(args.to_vec());
-            return Err(RuntimeError::Unavailable("disk busy".into()));
-        }
-        self.0.run(paths, args, timeout)
-    }
-}
-
 fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32) {
     let gate = super::super::operation_gate::OperationGate::new();
     prune_before_keep_with(
@@ -4285,152 +4363,8 @@ fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32)
     );
 }
 
-/// A runner for a creation that, when the runtime is asked to create the computer, requests
-/// an image prune the way a concurrent deletion would.
-struct PruneDuringCreate<'a> {
-    store: &'a Store,
-    paths: &'a RuntimePaths,
-    prunes_seen_during_create: Mutex<Option<usize>>,
-}
-impl RuntimeRunner for PruneDuringCreate<'_> {
-    fn prepare_guest_image(&self, _: &RuntimePaths) -> Result<String, RuntimeError> {
-        Ok("silo-guest:test".into())
-    }
-    fn run(
-        &self,
-        paths: &RuntimePaths,
-        args: &[String],
-        timeout: Duration,
-    ) -> Result<CommandOutput, RuntimeError> {
-        match args.first().map(String::as_str) {
-            Some("--silo-github-protocol" | "--silo-working-account-protocol") => {
-                return Ok(CommandOutput {
-                    stdout: "1".into(),
-                    stderr: String::new(),
-                })
-            }
-            Some("create") => {
-                prune_unused_images(self.store, self.paths);
-                *self.prunes_seen_during_create.lock().unwrap() =
-                    Some(self.store.calls_matching("image").len());
-                return Err(RuntimeError::Unavailable("create stopped".into()));
-            }
-            _ => {}
-        }
-        self.store.run(paths, args, timeout)
-    }
-}
-
 #[test]
-fn an_image_prune_requested_during_a_creation_waits_for_its_create_to_return() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = delete_fixture(&directory, Vec::new(), None);
-    let store = Store::new(Vec::new());
-    let runner = PruneDuringCreate {
-        store: &store,
-        paths: &paths,
-        prunes_seen_during_create: Mutex::new(None),
-    };
-    let mut configuration = computer_configuration();
-    configuration.name = "fresh".into();
-    configuration.id = "00000000-0000-4000-8000-0000000000aa".into();
-
-    super::super::create_computer(&runner, &paths, &configuration).unwrap_err();
-
-    assert_eq!(
-        *runner.prunes_seen_during_create.lock().unwrap(),
-        Some(0),
-        "no prune ran while the creation held the image"
-    );
-    prune_unused_images(&store, &paths);
-    assert_eq!(
-        store.calls_matching("image").len(),
-        1,
-        "the same prune runs once the creation is over"
-    );
-}
-
-#[test]
-fn deleting_a_checkpoint_prunes_unused_images_after_the_removal() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = delete_fixture(&directory, vec![entry(A, "Selected", "manual")], None);
-    let store = Store::new(vec![("dev", None)]).with("dev", A, "snap_a", None);
-
-    delete_checkpoint_with(&store, &paths, ID, A).unwrap();
-
-    let calls = store.calls.lock().unwrap().clone();
-    let removed = calls.iter().position(|call| call[1] == "remove").unwrap();
-    let pruned = calls
-        .iter()
-        .position(|call| call == &["image", "prune", "--yes", "--quiet"])
-        .expect("image data is pruned");
-    assert!(removed < pruned);
-    assert!(load(&paths, ID).unwrap().checkpoints.is_empty());
-}
-
-#[test]
-fn a_prune_failure_does_not_fail_the_deletion() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = delete_fixture(&directory, vec![entry(A, "Selected", "manual")], None);
-    let store = Store::new(vec![("dev", None)]).with("dev", A, "snap_a", None);
-
-    delete_checkpoint_with(&PruneFails(&store), &paths, ID, A).unwrap();
-
-    assert!(store.names().is_empty());
-    assert!(load(&paths, ID).unwrap().checkpoints.is_empty());
-    assert_eq!(store.calls_matching("image").len(), 1);
-}
-
-#[test]
-fn nothing_is_pruned_when_no_computer_is_configured() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = delete_fixture(&directory, Vec::new(), None);
-    let store = Store::new(Vec::new());
-
-    prune_unused_images(&store, &paths);
-    assert_eq!(store.calls_matching("image").len(), 1);
-
-    write_metadata(
-        &paths.metadata,
-        &ComputerConfigurationRequest {
-            schema_version: 1,
-            computers: Vec::new(),
-        },
-    )
-    .unwrap();
-    prune_unused_images(&store, &paths);
-    assert_eq!(
-        store.calls_matching("image").len(),
-        1,
-        "the pinned VM image would be dropped with no computer using it"
-    );
-}
-
-#[test]
-fn a_kept_checkpoint_is_not_followed_by_a_prune() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = delete_fixture(
-        &directory,
-        vec![entry(B, "Later", "manual"), entry(A, "Base", "manual")],
-        None,
-    );
-    let store = Store::new(vec![("dev", None)])
-        .with("dev", A, "snap_a", None)
-        .with("dev", B, "snap_b", Some("snap_a"));
-
-    delete_checkpoint_with(&store, &paths, ID, A).unwrap_err();
-
-    assert_eq!(store.names(), [A, B]);
-    assert!(store.calls_matching("image").is_empty());
-}
-
-#[test]
-fn before_keep_retention_removes_a_chain_leaf_to_root_and_prunes_once() {
+fn before_keep_retention_removes_a_chain_leaf_to_root() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let mut entries: Vec<Checkpoint> = (1..=3)
@@ -4463,7 +4397,6 @@ fn before_keep_retention_removes_a_chain_leaf_to_root_and_prunes_once() {
         .unwrap()
         .iter()
         .any(|call| call.iter().any(|arg| arg == "--force")));
-    assert_eq!(store.calls_matching("image").len(), 1);
     let left: Vec<_> = load(&paths, ID)
         .unwrap()
         .checkpoints
@@ -4492,7 +4425,6 @@ fn before_keep_retention_keeps_a_base_a_retained_checkpoint_builds_on() {
     assert!(store.removals().is_empty());
     assert_eq!(store.names().len(), 3);
     assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
-    assert!(store.calls_matching("image").is_empty());
 }
 
 #[test]

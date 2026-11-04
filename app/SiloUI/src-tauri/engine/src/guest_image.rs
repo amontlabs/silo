@@ -13,31 +13,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) static IMPORT_LOCK: Mutex<()> = Mutex::new(());
-/// Held shared by an operation that relies on the pinned image being cached from its
-/// `prepare` until the runtime call that makes a computer use it; held exclusively, only
-/// by trying, while unused image data is pruned.
-static IMAGE_IN_USE: std::sync::RwLock<()> = std::sync::RwLock::new(());
-
-/// Marks the cached image as needed. Create the guard before `prepare` and drop it once
-/// the runtime has recorded the computer's use of the image.
-pub(crate) fn hold_in_use() -> std::sync::RwLockReadGuard<'static, ()> {
-    IMAGE_IN_USE
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Runs `prune` unless an operation holds the image; returns whether it ran.
-pub(crate) fn exclusively(prune: impl FnOnce()) -> bool {
-    let guard = match IMAGE_IN_USE.try_write() {
-        Ok(guard) => guard,
-        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
-        Err(std::sync::TryLockError::WouldBlock) => return false,
-    };
-    prune();
-    drop(guard);
-    true
-}
+static IMPORT_LOCK: Mutex<()> = Mutex::new(());
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const LOCK: &str = include_str!("../../../guest-image/image-lock.json");

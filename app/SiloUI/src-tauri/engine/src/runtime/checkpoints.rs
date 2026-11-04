@@ -11,7 +11,6 @@ mod native;
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
 pub use native::{plan as native_removal_plan, Member as NativeMember};
-use native::prune_unused_images;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -24,13 +23,16 @@ pub(super) struct Checkpoint {
     pub(super) created_at: u64,
     pub(super) scope: String,
     pub(super) reason: String,
-    /// Policy origin, `manual` or `automatic`. Records from before the field existed are
-    /// rewritten once by the launch upgrade (`upgrade_records`); nothing else accepts them.
+    /// Policy origin: `manual`, `automatic` or `before-keep`. Records from before the field
+    /// existed are rewritten once by the launch upgrade (`upgrade_records`); nothing else
+    /// accepts them.
     pub(super) kind: String,
 }
 
 /// The layout of `checkpoints/<computer id>.json`. Version 1 had no checkpoint `kind`.
-const RECORD_VERSION: u8 = 2;
+/// Version 2 knew `manual` and `automatic`; version 3 adds `before-keep`, which an engine
+/// reading version 2 would reject, so the version marks the boundary.
+const RECORD_VERSION: u8 = 3;
 
 impl Checkpoint {
     fn native_id(&self) -> &str {
@@ -836,11 +838,11 @@ pub fn create(paths: &RuntimePaths, computer_id: &str, name: &str) -> Result<(),
     result.map_err(|error| error.to_string())
 }
 
-/// The one-time launch upgrade of `<storage>/checkpoints/<computer id>.json` from layout 1
-/// to layout 2: every checkpoint record gains `kind: "manual"` (it was made before automatic
-/// checkpoints existed) and keeps its reason, native identity, dates and journals. A file
-/// that is not a layout-1 record is left exactly as it is, so a damaged history stays
-/// protected and a converted one is not rewritten. Returns how many files were converted.
+/// The one-time launch upgrade of `<storage>/checkpoints/<computer id>.json` to the current
+/// layout. From layout 1 every checkpoint record gains `kind: "manual"` (it was made before
+/// automatic checkpoints existed); layout 2 only changes its version. Reasons, native
+/// identities, dates and journals are kept. A file in neither layout is left exactly as it
+/// is, so a damaged history stays protected and a converted one is not rewritten. Returns how many files were converted.
 pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
     let directory = storage.join("checkpoints");
     let entries = match fs::read_dir(&directory) {
@@ -867,7 +869,7 @@ pub fn upgrade_records(storage: &Path) -> Result<usize, String> {
         let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
             continue;
         };
-        if value.get("version") != Some(&Value::from(1)) {
+        if !matches!(value.get("version"), Some(version) if *version == 1 || *version == 2) {
             continue;
         }
         let mark = |checkpoint: Option<&mut Value>| {
@@ -1071,7 +1073,7 @@ fn prune_before_keep_with(
 /// its leaf down to its root without `--force`. The count is read again once each deletion is
 /// admitted so turning the setting off stops later deletions, and a checkpoint something still
 /// needs is kept (visible with its `deleteBlocker`). A failed deletion is logged and the rest
-/// still run; unused image data is pruned once at the end.
+/// still run.
 #[allow(clippy::too_many_arguments)]
 fn trim_kind_with(
     gate: &super::operation_gate::OperationGate,
@@ -1106,7 +1108,6 @@ fn trim_kind_with(
     let mut candidates =
         crate::checkpoints::retention::plan(&entries_of(&record), count).candidates;
     candidates.reverse();
-    let mut removed_any = false;
     for candidate in candidates {
         let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
             Scope::Device,
@@ -1134,15 +1135,11 @@ fn trim_kind_with(
         {
             continue;
         }
-        match delete_checkpoint_core(runner, paths, computer_id, &candidate) {
-            Ok(()) => removed_any = true,
-            // Dependencies and in-progress recovery defer retention. Never force-delete a
-            // checkpoint the runtime says something still needs.
-            Err(error) => eprintln!("Silo kept an older {kind} checkpoint: {error}"),
+        // Dependencies and in-progress recovery defer retention. Never force-delete a
+        // checkpoint the runtime says something still needs.
+        if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
+            eprintln!("Silo kept an older {kind} checkpoint: {error}");
         }
-    }
-    if removed_any {
-        prune_unused_images(runner, paths);
     }
 }
 
@@ -3116,21 +3113,9 @@ fn deletion(
     Ok(Deletion::Remove(member.clone()))
 }
 
-/// Delete one checkpoint, then give back the disk its removal released.
-fn delete_checkpoint_with(
-    runner: &dyn RuntimeRunner,
-    paths: &RuntimePaths,
-    computer_id: &str,
-    checkpoint_id: &str,
-) -> Result<(), RuntimeError> {
-    delete_checkpoint_core(runner, paths, computer_id, checkpoint_id)?;
-    prune_unused_images(runner, paths);
-    Ok(())
-}
-
 /// Delete one checkpoint: remove its native member unless something still needs it,
 /// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force.
-fn delete_checkpoint_core(
+fn delete_checkpoint_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
@@ -3502,7 +3487,6 @@ pub(crate) fn remove_deleted_snapshots(
         if let Err(failure) = retry_deleted_snapshots(runner, paths) {
             eprintln!("Previously deleted checkpoint data was kept: {failure}");
         }
-        prune_unused_images(runner, paths);
         return Ok(());
     }
     let group = record.snapshot_group.as_deref().unwrap_or(computer);
@@ -3523,8 +3507,49 @@ pub(crate) fn remove_deleted_snapshots(
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
     }
-    prune_unused_images(runner, paths);
+    remove_empty_group_directory(runner, paths, group);
     Ok(())
+}
+
+/// MicroSandbox leaves `snapshots/<group>` with its lock and metadata files after the last
+/// member of a group is removed. Remove that empty shell once nothing lists the group;
+/// anything else in the directory keeps it. A failure is logged only.
+fn remove_empty_group_directory(runner: &dyn RuntimeRunner, paths: &RuntimePaths, group: &str) {
+    if !valid_snapshot_group(group) {
+        return;
+    }
+    let directory = paths.home.join("snapshots").join(group);
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return;
+    };
+    let names: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .collect();
+    if names
+        .iter()
+        .any(|name| name != ".group.lock" && name != "group.json")
+    {
+        return;
+    }
+    let Ok(inventory) = native::inventory(runner, paths) else {
+        return;
+    };
+    if inventory
+        .iter()
+        .any(|member| member.group.as_deref() == Some(group))
+    {
+        return;
+    }
+    for name in names {
+        if let Err(failure) = fs::remove_file(directory.join(name)) {
+            eprintln!("An empty checkpoint group was kept: {failure}");
+            return;
+        }
+    }
+    if let Err(failure) = fs::remove_dir(&directory) {
+        eprintln!("An empty checkpoint group was kept: {failure}");
+    }
 }
 
 /// Remove the member a failed capture may have published, unless something already
