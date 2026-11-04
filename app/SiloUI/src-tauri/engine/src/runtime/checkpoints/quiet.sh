@@ -4,11 +4,11 @@ case $token in ''|*[!0-9a-f-]*) exit 1;; esac
 quiet=/var/lib/silo-quiet
 mkdir -p "$quiet/disabled" || exit 1
 
-if [ -s "$quiet/machine-id" ]; then
-  new=$(cat "$quiet/machine-id") || exit 1
+if [ -s "$quiet/$token.machine-id" ]; then
+  new=$(cat "$quiet/$token.machine-id") || exit 1
 else
   new=$(tr -d - < /proc/sys/kernel/random/uuid) || exit 1
-  printf '%s\n' "$new" > "$quiet/machine-id" || exit 1
+  printf '%s\n' "$new" > "$quiet/$token.machine-id" || exit 1
 fi
 printf '%s\n' "$new" > /etc/machine-id || exit 1
 if [ -e /var/lib/dbus/machine-id ] || [ -L /var/lib/dbus/machine-id ]; then
@@ -16,10 +16,10 @@ if [ -e /var/lib/dbus/machine-id ] || [ -L /var/lib/dbus/machine-id ]; then
   printf '%s\n' "$new" > /var/lib/dbus/machine-id || exit 1
 fi
 
-if [ ! -e "$quiet/old-hostname" ]; then
-  { cat /etc/hostname 2>/dev/null || hostname; } > "$quiet/old-hostname" || exit 1
+if [ ! -e "$quiet/$token.old-hostname" ]; then
+  { cat /etc/hostname 2>/dev/null || hostname; } > "$quiet/$token.old-hostname" || exit 1
 fi
-old=$(head -n 1 "$quiet/old-hostname")
+old=$(head -n 1 "$quiet/$token.old-hostname")
 hostname "$host" || exit 1
 printf '%s\n' "$host" > /etc/hostname || exit 1
 if [ -f /etc/hosts ]; then
