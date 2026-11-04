@@ -11,8 +11,11 @@ updates:
     groups:
       github-actions:
         patterns: ['*']
-  # npm and Cargo updates are grouped to one weekly pull request per ecosystem;
-  # security updates still open on their own.
+  # npm and Cargo minor and patch updates are grouped into weekly pull requests;
+  # major and security updates open on their own. Tauri stays on manual minor
+  # upgrades because its CLI rejects JS and Rust packages on different minors.
+  # The artifacts/ film projects and src-tauri/macos-gateway are left out on
+  # purpose: they are pinned to the recordings and the bundled runtime.
   - package-ecosystem: npm
     directories:
       - '/app/SiloUI'
@@ -22,11 +25,23 @@ updates:
       interval: weekly
     groups:
       npm:
-        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '@tauri-apps/*'
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      # THIRD-PARTY-NOTICES.md names the bundled noVNC release as its MPL-2.0 source.
+      - dependency-name: '@novnc/novnc'
   - package-ecosystem: cargo
     directory: '/app/SiloUI'
     schedule:
       interval: weekly
     groups:
       cargo:
-        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: 'tauri*'
+        update-types: [version-update:semver-minor, version-update:semver-major]
+      # Pinned to the vendored, Silo-patched copy under src-tauri/vendor.
+      - dependency-name: 'tauri-plugin-updater'
+      # Must match runtime-inputs.json and the microsandbox patch set.
+      - dependency-name: 'microsandbox-*'

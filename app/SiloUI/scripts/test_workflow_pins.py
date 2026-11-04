@@ -56,6 +56,17 @@ class WorkflowPinTests(unittest.TestCase):
         for directory in ['/'] + [f'/.github/actions/{path.name}' for path in GITHUB.glob('actions/*')]:
             self.assertIn(f"'{directory}'", config)
 
+    def test_dependabot_package_directories_exist(self):
+        config = (GITHUB / 'dependabot.yml').read_text()
+        directories = re.findall(r"(?m)^ +(?:- |directory: )'(/[^']*)'$", config)
+        self.assertIn('/app/SiloUI', directories)
+        for directory in directories:
+            with self.subTest(directory=directory):
+                self.assertTrue((GITHUB.parent / directory.lstrip('/')).is_dir())
+        for ecosystem, manifest in [('npm', 'package-lock.json'), ('cargo', 'Cargo.lock')]:
+            self.assertIn(f'package-ecosystem: {ecosystem}', config)
+            self.assertTrue((GITHUB.parent / 'app/SiloUI' / manifest).is_file())
+
 
 class WorkflowConcurrencyTests(unittest.TestCase):
     def test_ci_supersedes_only_the_same_pull_request(self):
